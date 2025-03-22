@@ -50,7 +50,7 @@ This mod also relies on the ollama4j project. https://github.com/amithkoujalgi/o
 
 # Current bugs in this version :
 
-1. The removeArmor command still doesn't work (yet).
+No bugs in the current version!
 
 
 # Download links
