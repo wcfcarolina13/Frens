@@ -1,7 +1,6 @@
 plugins {
-	id 'fabric-loom' version '1.7-SNAPSHOT'
+	id 'fabric-loom' version "${loom_version}"
 	id 'maven-publish'
-
 	id 'com.github.johnrengelman.shadow' version '7.1.2'
 }
 
@@ -13,15 +12,9 @@ base {
 }
 
 repositories {
-	// Add repositories to retrieve artifacts from in here.
-	// You should only use this when depending on other mods because
-	// Loom adds the essential maven repositories to download Minecraft and libraries from automatically.
-	// See https://docs.gradle.org/current/userguide/declaring_repositories.html
-	// for more information about repositories.
 	mavenCentral()
 	maven { url 'https://jitpack.io' }
 	maven { url 'https://maven.wispforest.io/releases/' }
-
 	flatDir {
 		dirs "./lib"
 	}
@@ -31,35 +24,69 @@ fabricApi {
 	configureDataGeneration()
 }
 
+loom {
+	runs {
+		client {
+			ideConfigGenerated true
+			runDir "run"
+		}
+	}
+}
+
 dependencies {
-	// To change the versions see the gradle.properties file
+	// Core Minecraft/Fabric
 	minecraft "com.mojang:minecraft:${project.minecraft_version}"
 	mappings "net.fabricmc:yarn:${project.yarn_mappings}:v2"
 	modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
-
-	// Fabric API. This is technically optional, but you probably want it anyway.
 	modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_version}"
 	modImplementation 'com.github.gnembon:fabric-carpet:1.4.141'
+
+	// Core application dependencies
 	implementation 'com.github.amithkoujalgi:ollama4j:1.0.77'
 	implementation 'com.github.FasterXML:jackson-core:jackson-core-2.17.2'
 	implementation 'com.github.FasterXML:jackson-databind:jackson-databind-2.17.2'
 	implementation 'com.github.FasterXML:jackson-datatype-jsr310:jackson-datatype-jsr310-2.8.4'
 	implementation 'com.github.FasterXML:jackson-annotations:jackson-annotations-2.17.2'
-	implementation group: 'org.xerial', name: 'sqlite-jdbc', version: '3.46.0.1'
+	implementation "org.xerial:sqlite-jdbc:3.50.2.0"
+	implementation 'org.apache.commons:commons-math3:3.6.1'
+	// https://mvnrepository.com/artifact/org.apache.commons/commons-compress
+	implementation 'org.apache.commons:commons-compress:1.28.0'
+	implementation 'org.jsoup:jsoup:1.21.1'
+
+	// DJL dependencies
+	implementation "ai.djl:api:0.33.0"
+	implementation "ai.djl.huggingface:tokenizers:0.33.0"
+	implementation "ai.djl.pytorch:pytorch-engine:0.33.0"
+	implementation "ai.djl.pytorch:pytorch-native-cpu:2.5.1"
+	implementation "ai.djl.pytorch:pytorch-model-zoo:0.33.0"
+
+	// OpenNLP ONLY - No Stanford CoreNLP!
+	implementation 'org.apache.opennlp:opennlp-tools:2.5.5'
+
+	// OWO lib
 	annotationProcessor modImplementation("io.wispforest:owo-lib:${project.owo_version}")
 
+	// Include statements for runtime
 	include "com.github.amithkoujalgi:ollama4j:1.0.77"
 	include "io.wispforest:owo-sentinel:${project.owo_version}"
 	include "com.github.FasterXML:jackson-databind:jackson-databind-2.17.2"
 	include "com.github.FasterXML:jackson-core:jackson-core-2.17.2"
 	include "com.github.FasterXML:jackson-datatype-jsr310:jackson-datatype-jsr310-2.8.4"
 	include "com.github.FasterXML:jackson-annotations:jackson-annotations-2.17.2"
-	include "org.xerial:sqlite-jdbc:3.46.0.1"
+	include "org.xerial:sqlite-jdbc:3.50.2.0"
+	include 'org.apache.commons:commons-math3:3.6.1'
+	include "org.apache.commons:commons-compress:1.28.0"
+	include 'org.jsoup:jsoup:1.21.1'
+	include "ai.djl:api:0.33.0"
+	include "ai.djl.huggingface:tokenizers:0.33.0"
+	include "ai.djl.pytorch:pytorch-engine:0.33.0"
+	include "ai.djl.pytorch:pytorch-native-cpu:2.5.1"
+	include "ai.djl.pytorch:pytorch-model-zoo:0.33.0"
+	include 'org.apache.opennlp:opennlp-tools:2.5.5'
 
 	dependencies {
 		implementation fileTree(dir: 'libs', include: ['*.jar'])
 	}
-
 }
 
 shadowJar {
@@ -67,35 +94,27 @@ shadowJar {
 		include(dependency('com.fasterxml.jackson.core:jackson-databind'))
 		include(dependency("io.wispforest:owo-sentinel:0.12.6+1.20.3"))
 		include(dependency("com.github.amithkoujalgi:ollama4j:1.0.77"))
-
 	}
 	relocate 'com.fasterxml.jackson', 'net.shasankp000.relocated.com.fasterxml.jackson'
 	relocate 'io.wispforest:owo-sentinel', 'net.shasankp000.relocated.io.wispforest:owo-sentinel'
 	relocate 'com.github.amithkoujalgi', 'net.shasankp000.relocated:com.github.amithkoujalgi'
 }
 
-
 processResources {
 	inputs.property "version", project.version
-
 	filesMatching("fabric.mod.json") {
 		expand "version": project.version
 	}
 }
 
 tasks.withType(JavaCompile).configureEach {
-		it.options.release = 17
+	it.options.release = 17
 }
 
 java {
-	// Loom will automatically attach sourcesJar to a RemapSourcesJar task and to the "build" task
-	// if it is present.
-	// If you remove this line, sources will not be generated.
 	withSourcesJar()
-
 	sourceCompatibility = JavaVersion.VERSION_17
 	targetCompatibility = JavaVersion.VERSION_17
-
 }
 
 jar {
@@ -104,10 +123,6 @@ jar {
 	}
 }
 
-
-
-
-// configure the maven publication
 publishing {
 	publications {
 		create("mavenJava", MavenPublication) {
@@ -115,12 +130,20 @@ publishing {
 			from components.java
 		}
 	}
-
-	// See https://docs.gradle.org/current/userguide/publishing_maven.html for information on how to set up publishing.
 	repositories {
 		// Add repositories to publish to here.
-		// Notice: This block does NOT have the same function as the block in the top level.
-		// The repositories here will be used for publishing your artifact, not for
-		// retrieving dependencies.
+	}
+}
+
+// Minimal JVM configuration - no complex XML parsing needed
+tasks.withType(JavaExec).configureEach {
+	if (name.contains("run")) {
+		// Basic module access for Java 17+
+		jvmArgs += "--add-opens=java.base/java.lang=ALL-UNNAMED"
+		jvmArgs += "--add-opens=java.base/java.lang.reflect=ALL-UNNAMED"
+
+		// Performance
+		jvmArgs += "-Xmx4G"
+		jvmArgs += "-Xms2G"
 	}
 }

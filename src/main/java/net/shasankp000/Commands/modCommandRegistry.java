@@ -6,9 +6,7 @@ import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
-import net.fabricmc.api.EnvType;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
-import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.command.argument.BlockPosArgumentType;
 import net.minecraft.command.argument.EntityArgumentType;
 import net.minecraft.entity.attribute.EntityAttributes;
@@ -18,6 +16,7 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.command.CommandManager;
 import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.network.ServerPlayerEntity;
+import net.minecraft.server.world.ServerWorld;
 import net.minecraft.text.Text;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
@@ -32,11 +31,17 @@ import net.shasankp000.Entity.AutoFaceEntity;
 import net.shasankp000.Entity.RayCasting;
 import net.shasankp000.Entity.RespawnHandler;
 import net.shasankp000.Entity.createFakePlayer;
+import net.shasankp000.FilingSystem.LLMClientFactory;
 import net.shasankp000.GameAI.BotEventHandler;
 import net.shasankp000.OllamaClient.ollamaClient;
+import net.shasankp000.PathFinding.ChartPathToBlock;
+import net.shasankp000.PathFinding.PathFinder;
+import net.shasankp000.PathFinding.PathTracer;
+import net.shasankp000.PathFinding.Segment;
 import net.shasankp000.PlayerUtils.*;
+import net.shasankp000.ServiceLLMClients.LLMClient;
+import net.shasankp000.ServiceLLMClients.LLMServiceHandler;
 import net.shasankp000.WorldUitls.isFoodItem;
-import net.shasankp000.Exception.ollamaNotReachableException;
 import org.jetbrains.annotations.NotNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -49,13 +54,14 @@ import java.util.concurrent.TimeUnit;
 
 import static net.shasankp000.PathFinding.PathFinder.*;
 import static net.minecraft.server.command.CommandManager.literal;
-import static net.shasankp000.PathFinding.PathTracer.tracePath;
 import net.shasankp000.PacketHandler.InputPacketHandler;
 
 public class modCommandRegistry {
 
     private static final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
     public static boolean isTrainingMode = false;
+    public static String botName = "";
+    public static final Logger LOGGER = LoggerFactory.getLogger("mod-command-registry");
 
     public record BotMovementTask(MinecraftServer server, ServerCommandSource botSource,
                                    String botName) implements Runnable {
@@ -83,7 +89,8 @@ public class modCommandRegistry {
         }
     }
 
-    public static final Logger LOGGER = LoggerFactory.getLogger("ai-player");
+
+
 
     public static void register() {
         CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> dispatcher.register(
@@ -128,7 +135,9 @@ public class modCommandRegistry {
                         .then(literal("go_to")
                                 .then(CommandManager.argument("bot", EntityArgumentType.player())
                                         .then(CommandManager.argument("pos", BlockPosArgumentType.blockPos())
-                                                .executes(context -> { botGo(context); return 1; })
+                                                .then(CommandManager.argument("sprint", StringArgumentType.string())
+                                                        .executes(context -> { botGo(context); return 1; })
+                                                )
                                         )
                                 )
                         )
@@ -137,11 +146,7 @@ public class modCommandRegistry {
                                         .then(CommandManager.argument("message", StringArgumentType.greedyString())
                                                 .executes(context -> {
 
-                                                if (FabricLoader.getInstance().getEnvironmentType().equals(EnvType.CLIENT)) {
-
                                                     ollamaClient.execute(context);
-
-                                                }
 
                                                      return 1;
 
@@ -160,7 +165,7 @@ public class modCommandRegistry {
                                         })
                                 )
                         )
-                        .then(literal("detect_blocks")
+                        .then(literal("get_block_map")
                                 .then(CommandManager.argument("bot", EntityArgumentType.player())
                                         .then(CommandManager.argument("vertical", IntegerArgumentType.integer())
                                                 .then(CommandManager.argument("horizontal", IntegerArgumentType.integer())
@@ -179,6 +184,129 @@ public class modCommandRegistry {
 
                                 )
 
+                        )
+
+                        .then(literal("detect_blocks")
+                                .then(CommandManager.argument("bot", EntityArgumentType.player())
+                                        .then(CommandManager.argument("block_type", StringArgumentType.string())
+                                                .executes(context -> {
+
+                                                    ServerPlayerEntity bot = EntityArgumentType.getPlayer(context, "bot");
+                                                    String blockType = StringArgumentType.getString(context, "block_type");
+
+                                                    BlockPos outPutPos = blockDetectionUnit.detectBlocks(bot, blockType);
+
+                                                    LOGGER.info("Detected Block: {} at x={}, y={}, z={}", blockType, outPutPos.getX(), outPutPos.getY(), outPutPos.getZ());
+                                                    blockDetectionUnit.setIsBlockDetectionActive(false);
+
+                                                    return 1;
+                                                })
+                                        )
+                                )
+                        )
+
+                        .then(literal("turn")
+                                .then(CommandManager.argument("bot", EntityArgumentType.player())
+                                        .then(CommandManager.argument("direction", StringArgumentType.string())
+                                                .executes(context -> {
+
+                                                    ServerPlayerEntity bot = EntityArgumentType.getPlayer(context, "bot");
+                                                    MinecraftServer server = bot.getServer();
+                                                    assert server != null;
+                                                    String direction = StringArgumentType.getString(context, "direction");
+
+                                                    switch (direction) {
+                                                        case "left", "right", "back" -> {
+                                                            turnTool.turn(bot.getCommandSource(), direction);
+
+                                                            LOGGER.info("Now facing {} which is in {} in {} axis", direction, bot.getFacing().getName(), bot.getFacing().getAxis().asString());
+                                                        }
+                                                        default -> {
+                                                            server.execute(() -> {
+                                                                ChatUtils.sendChatMessages(bot.getCommandSource(), "Invalid parameters! Accepted parameters: left, right, back only!");
+                                                            });
+                                                        }
+                                                    }
+
+                                                    return 1;
+                                                })
+                                        )
+                                )
+                        )
+
+
+                        .then(literal("chart_path_to_block")
+                                .then(CommandManager.argument("bot", EntityArgumentType.player())
+                                        .then(CommandManager.argument("block_type", StringArgumentType.string())
+                                                .then(CommandManager.argument("x", IntegerArgumentType.integer())
+                                                        .then(CommandManager.argument("y", IntegerArgumentType.integer())
+                                                                .then(CommandManager.argument("z", IntegerArgumentType.integer())
+                                                                        .executes(context -> {
+
+                                                                            ServerPlayerEntity bot = EntityArgumentType.getPlayer(context, "bot");
+                                                                            MinecraftServer server = bot.getServer();
+                                                                            assert server != null;
+                                                                            String blockType = StringArgumentType.getString(context, "block_type");
+                                                                            int x = IntegerArgumentType.getInteger(context, "x");
+                                                                            int y = IntegerArgumentType.getInteger(context, "y");
+                                                                            int z = IntegerArgumentType.getInteger(context, "z");
+
+                                                                            BlockPos targetPos = new BlockPos(x, y, z);
+
+                                                                            ChartPathToBlock.chart(bot, targetPos, blockType);
+
+                                                                            return 1;
+                                                                        })
+                                                                )
+                                                        )
+                                                )
+                                        )
+                                )
+                        )
+
+                        .then(literal("reset_autoface")
+                                .then(CommandManager.argument("bot", EntityArgumentType.player())
+                                        .executes(context -> {
+
+                                            ServerPlayerEntity bot = EntityArgumentType.getPlayer(context, "bot");
+                                            MinecraftServer server = bot.getServer();
+                                            assert server != null;
+                                            blockDetectionUnit.setIsBlockDetectionActive(false);
+                                            PathTracer.flushAllMovementTasks();
+                                            AutoFaceEntity.setBotExecutingTask(false);
+                                            AutoFaceEntity.isBotMoving = false;
+
+                                            server.execute(() -> {
+                                                ChatUtils.sendChatMessages(bot.getCommandSource(), "Autoface module reset complete.");
+                                            });
+
+                                            return 1;
+                                        })
+
+                                )
+                        )
+
+                        .then(literal("mine_block")
+                                .then(CommandManager.argument("bot", EntityArgumentType.player())
+                                        .then(CommandManager.argument("block_type", StringArgumentType.string())
+                                                .then(CommandManager.argument("x", IntegerArgumentType.integer())
+                                                        .then(CommandManager.argument("y", IntegerArgumentType.integer())
+                                                                .then(CommandManager.argument("z", IntegerArgumentType.integer())
+                                                                        .executes(context -> {
+
+                                                                            ServerPlayerEntity bot = EntityArgumentType.getPlayer(context, "bot");
+                                                                            int x = IntegerArgumentType.getInteger(context, "x");
+                                                                            int y = IntegerArgumentType.getInteger(context, "y");
+                                                                            int z = IntegerArgumentType.getInteger(context, "z");
+                                                                            MiningTool.mineBlock(bot, new BlockPos(x, y, z));
+                                                                            
+                                                                            return 1;
+                                                                        })
+                                                                )
+                                                        )
+                                                )
+                                        )
+                                )
                         )
 
 
@@ -304,12 +432,13 @@ public class modCommandRegistry {
 
                                                                     ServerPlayerEntity bot = EntityArgumentType.getPlayer(context, "bot");
                                                                     ServerCommandSource botSource = bot.getCommandSource().withSilent().withMaxLevel(4);
+                                                                    MinecraftServer server = botSource.getServer();
 
                                                                     int lavaRange = IntegerArgumentType.getInteger(context, "lavaRange");     // Range to check for lava blocks
                                                                     int cliffRange = IntegerArgumentType.getInteger(context, "cliffRange");     // Forward range to check for cliffs
                                                                     int cliffDepth = IntegerArgumentType.getInteger(context, "cliffDepth");    // Downward range to check for solid blocks
 
-                                                                    new Thread(() -> {
+                                                                    server.execute(() -> {
                                                                         // Putting this part in a thread so that it doesn't hang the game.
 
                                                                         double dangerDistance = DangerZoneDetector.detectDangerZone(bot, lavaRange, cliffRange, cliffDepth);
@@ -322,7 +451,7 @@ public class modCommandRegistry {
                                                                             ChatUtils.sendChatMessages(botSource, "No danger nearby");
                                                                         }
 
-                                                                    }).start();
+                                                                    });
 
                                                                     return 1;
                                                                 })
@@ -514,6 +643,20 @@ public class modCommandRegistry {
                                     return 1;
                                 })
                         )
+
+                        .then(literal("stopAllMovementTasks")
+                                .executes(context -> {
+
+                                    MinecraftServer server = context.getSource().getServer(); // gets the minecraft server
+                                    ServerCommandSource serverSource = server.getCommandSource();
+                                    PathTracer.flushAllMovementTasks();
+
+                                    ChatUtils.sendChatMessages(serverSource, "Flushed all movement tasks");
+
+                                    return 1;
+
+                                })
+                        )
         ));
     }
 
@@ -531,7 +674,7 @@ public class modCommandRegistry {
 
         GameMode mode = GameMode.SURVIVAL;
 
-        String botName = StringArgumentType.getString(context, "bot_name");
+        botName = StringArgumentType.getString(context, "bot_name");
 
         ServerCommandSource serverSource = server.getCommandSource();
 
@@ -604,28 +747,85 @@ public class modCommandRegistry {
 
                 System.out.println("Set bot's username to " + botName);
 
-                ChatUtils.sendChatMessages(serverSource, "Please wait while " + botName + " connects to the language model.");
+                String llmProvider = System.getProperty("aiplayer.llmMode", "ollama");
 
-                ollamaClient.initializeOllamaClient();
+                switch (llmProvider) {
+                    case "openai", "gpt", "google", "gemini", "anthropic", "claude", "xAI", "xai", "grok":
+                        LLMClient llmClient = LLMClientFactory.createClient(llmProvider);
+                        assert llmClient != null;
 
-                new Thread(() -> {
-                    while (!ollamaClient.isInitialized) {
-                        try {
-                            Thread.sleep(500L); // Check every 500ms
-                        } catch (InterruptedException e) {
-                            LOGGER.error("Ollama client initialization interrupted.");
-                            Thread.currentThread().interrupt();
-                            break;
-                        }
-                    }
+                        ChatUtils.sendChatMessages(serverSource, "Please wait while " + botName + " connects to " + llmClient.getProvider() + "'s servers.");
+                        LLMServiceHandler.sendInitialResponse(bot.getCommandSource(), llmClient);
 
-                    //initialization succeeded, continue:
-                    ollamaClient.sendInitialResponse(bot.getCommandSource().withSilent().withMaxLevel(4));
-                    AutoFaceEntity.startAutoFace(bot);
+                        new Thread(() -> {
+                            while (!LLMServiceHandler.isInitialized) {
+                                try {
+                                    Thread.sleep(500L); // Check every 500ms
+                                } catch (InterruptedException e) {
+                                    LOGGER.error("Ollama client initialization interrupted.");
+                                    Thread.currentThread().interrupt();
+                                    break;
+                                }
+                            }
 
-                    Thread.currentThread().interrupt(); // close this thread.
+                            //initialization succeeded, continue:
+                            AutoFaceEntity.startAutoFace(bot);
 
-                }).start();
+                            Thread.currentThread().interrupt(); // close this thread.
+
+                        }).start();
+
+
+                    case "ollama":
+                        ChatUtils.sendChatMessages(serverSource, "Please wait while " + botName + " connects to the language model.");
+                        ollamaClient.initializeOllamaClient();
+
+                        new Thread(() -> {
+                            while (!ollamaClient.isInitialized) {
+                                try {
+                                    Thread.sleep(500L); // Check every 500ms
+                                } catch (InterruptedException e) {
+                                    LOGGER.error("Ollama client initialization interrupted.");
+                                    Thread.currentThread().interrupt();
+                                    break;
+                                }
+                            }
+
+                            //initialization succeeded, continue:
+                            ollamaClient.sendInitialResponse(bot.getCommandSource().withSilent().withMaxLevel(4));
+                            AutoFaceEntity.startAutoFace(bot);
+
+                            Thread.currentThread().interrupt(); // close this thread.
+
+                        }).start();
+
+                    default:
+                        LOGGER.warn("Unsupported provider detected. Defaulting to Ollama client");
+                        ChatUtils.sendChatMessages(serverSource, "Warning! Unsupported provider detected. Defaulting to Ollama client");
+                        ChatUtils.sendChatMessages(serverSource, "Please wait while " + botName + " connects to the language model.");
+                        ollamaClient.initializeOllamaClient();
+
+                        new Thread(() -> {
+                            while (!ollamaClient.isInitialized) {
+                                try {
+                                    Thread.sleep(500L); // Check every 500ms
+                                } catch (InterruptedException e) {
+                                    LOGGER.error("Ollama client initialization interrupted.");
+                                    Thread.currentThread().interrupt();
+                                    break;
+                                }
+                            }
+
+                            //initialization succeeded, continue:
+                            ollamaClient.sendInitialResponse(bot.getCommandSource().withSilent().withMaxLevel(4));
+                            AutoFaceEntity.startAutoFace(bot);
+
+                            Thread.currentThread().interrupt(); // close this thread.
+
+                        }).start();
+
+                }
+
             }
 
 
@@ -785,55 +985,68 @@ public class modCommandRegistry {
     }
 
     private static void botGo(CommandContext<ServerCommandSource> context) {
-
-        // A work in progress.
-
         MinecraftServer server = context.getSource().getServer();
-
         BlockPos position = BlockPosArgumentType.getBlockPos(context, "pos");
+        String sprintFlag = StringArgumentType.getString(context, "sprint");
+
+        boolean sprint;
+
+        if (sprintFlag.equalsIgnoreCase("true")) {
+            sprint = true;
+        }
+        else if (sprintFlag.equalsIgnoreCase("false")) {
+            sprint = false;
+        }
+        else {
+            sprint = false;
+            ChatUtils.sendChatMessages(server.getCommandSource(), "Wrong argument! Command is as follows: /bot go_to <botName> <xyz> <true/false (case insensitive)>");
+        }
 
         int x_distance = position.getX();
-
         int y_distance = position.getY();
-
         int z_distance = position.getZ();
 
+        ServerWorld world = server.getOverworld();
+
         ServerPlayerEntity bot = null;
-        try {bot = EntityArgumentType.getPlayer(context, "bot");} catch (CommandSyntaxException ignored) {}
+        try {
+            bot = EntityArgumentType.getPlayer(context, "bot");
+        } catch (CommandSyntaxException ignored) {}
 
         if (bot == null) {
-
             context.getSource().sendMessage(Text.of("The requested bot could not be found on the server!"));
             server.sendMessage(Text.literal("Error! Bot not found!"));
             LOGGER.error("The requested bot could not be found on the server!");
-
+            return;  // stop here if no bot
         }
 
-        else {
-            String botName = bot.getName().getLiteralString();
+        String botName = bot.getName().getLiteralString();
+        ServerCommandSource botSource = bot.getCommandSource().withLevel(2).withSilent().withMaxLevel(4);
 
-            ServerCommandSource botSource = bot.getCommandSource().withLevel(2).withSilent().withMaxLevel(4);
+        server.sendMessage(Text.literal("Finding the shortest path to the target, please wait patiently if the game seems hung"));
 
-            server.sendMessage(Text.literal("Finding the shortest path to the target, please wait patiently if the game seems hung"));
-            // Calculate path
-            ServerPlayerEntity finalBot = bot;
-            new Thread(() -> {
+        ServerPlayerEntity finalBot = bot;
 
-                List<BlockPos> path = calculatePath(finalBot.getBlockPos(), new BlockPos(x_distance, y_distance , z_distance));
+        server.execute(() -> {
+            // ✅ Calculate the path (PathNode version)
+            List<PathFinder.PathNode> rawPath = PathFinder.calculatePath(finalBot.getBlockPos(), new BlockPos(x_distance, y_distance, z_distance), world);
 
-                path = simplifyPath(path);
+            // ✅ Simplify + filter
+            List<PathFinder.PathNode> finalPath = PathFinder.simplifyPath(rawPath, world);
 
-                LOGGER.info("{}", path);
+            LOGGER.info("Path output: {}", finalPath);
 
-                tracePath(server, botSource, botName, path);
+            Queue<Segment> segments = convertPathToSegments(finalPath, sprint);
+
+            LOGGER.info("Generated segments: {}", segments);
 
 
-            }).start();
+            // ✅ Trace the path — your tracePath now expects PathNode
+            PathTracer.tracePath(server, botSource, botName, segments, sprint);
 
-
-        }
-
+        });
     }
+
 
 
 

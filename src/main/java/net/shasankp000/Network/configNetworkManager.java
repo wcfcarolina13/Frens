@@ -11,9 +11,13 @@ import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.shasankp000.AIPlayer;
 import net.shasankp000.ChatUtils.ChatUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 
 public class configNetworkManager {
+
+    public static final Logger LOGGER = LoggerFactory.getLogger("ConfigNetworkMan");
 
     // Called on the server side: sends a packet to the specified player.
     public static void sendOpenConfigPacket(ServerPlayerEntity player) {
@@ -34,9 +38,21 @@ public class configNetworkManager {
         ClientPlayNetworking.send(payload);
     }
 
-    // On the server side: register a receiver for the save config packet.
+    // Called on the client side to send updated config data.
+    public static void sendSaveAPIPacket(String provider, String key) {
+        PacketByteBuf serviceProvider = PacketByteBufs.create();
+        serviceProvider.writeString(provider);
+
+        PacketByteBuf apiKey = PacketByteBufs.create();
+        apiKey.writeString(key);
+        SaveAPIKeyPayload payload = new SaveAPIKeyPayload(provider, key);
+        ClientPlayNetworking.send(payload);
+    }
+
+
+    // On the server side: register a receiver for the model name save config packet.
     @SuppressWarnings("resource")
-    public static void registerServerSaveReceiver(MinecraftServer server) {
+    public static void registerServerModelNameSaveReceiver(MinecraftServer server) {
         ServerPlayNetworking.registerGlobalReceiver(SaveConfigPayload.ID, (payload, context) -> {
             // Retrieve the configuration data from the payload
             String newConfigData = payload.configData();
@@ -53,8 +69,40 @@ public class configNetworkManager {
         });
     }
 
+    // On the server side: register a single receiver for all API key save packets.
+    public static void registerServerAPIKeySaveReceiver(MinecraftServer server) {
+        ServerPlayNetworking.registerGlobalReceiver(SaveAPIKeyPayload.ID, (payload, context) -> {
+            String provider = payload.provider();
+            String newKey = payload.key();
 
-
+            // Run the config update on the server thread
+            context.server().execute(() -> {
+                switch (provider) {
+                    case "openai":
+                        AIPlayer.CONFIG.openAIKey(newKey);
+                        break;
+                    case "gemini":
+                        AIPlayer.CONFIG.geminiKey(newKey);
+                        break;
+                    case "claude":
+                        AIPlayer.CONFIG.claudeKey(newKey);
+                        break;
+                    case "grok":
+                        AIPlayer.CONFIG.grokKey(newKey);
+                        break;
+                    case "ollama":
+                        LOGGER.error("Error! Ollama is not supported in this mode!");
+                        return;
+                    default:
+                        LOGGER.error("Error! Unsupported provider!");
+                        return;
+                }
+                AIPlayer.CONFIG.save();
+                ServerCommandSource serverCommandSource = server.getCommandSource().withSilent().withMaxLevel(4);
+                ChatUtils.sendChatMessages(serverCommandSource, "API Key for " + provider + " saved successfully!");
+            });
+        });
+    }
 
 
 }

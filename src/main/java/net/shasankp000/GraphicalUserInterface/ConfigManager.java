@@ -6,22 +6,20 @@ import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.widget.ButtonWidget;
 import net.minecraft.client.toast.SystemToast;
 import net.minecraft.text.Text;
-import net.shasankp000.Exception.ollamaNotReachableException;
 import net.shasankp000.AIPlayer;
 import net.shasankp000.FilingSystem.AIPlayerConfigModel;
 import net.shasankp000.GraphicalUserInterface.Widgets.DropdownMenuWidget;
-import net.shasankp000.FilingSystem.getLanguageModels;
 import net.shasankp000.Network.configNetworkManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 
-import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 
 public class ConfigManager extends Screen {
 
-        public static final Logger LOGGER = LoggerFactory.getLogger("ai-player");
+        public static final Logger LOGGER = LoggerFactory.getLogger("ConfigMan");
         public Screen parent;
         private DropdownMenuWidget dropdownMenuWidget;
         public AIPlayerConfigModel aiPlayerConfigModel = new AIPlayerConfigModel();
@@ -34,13 +32,7 @@ public class ConfigManager extends Screen {
         @Override
         protected void init() {
             
-            List<String> modelList = new ArrayList<>();
-
-            try {
-                modelList = getLanguageModels.get();
-            } catch (ollamaNotReachableException e) {
-                LOGGER.error("{}", e.getMessage());
-            }
+            List<String> modelList = AIPlayer.CONFIG.modelList();
 
 
             DropdownMenuWidget dropdownMenuWidget = new DropdownMenuWidget(100, 40, 200, 20, Text.of("List of available models"), modelList);
@@ -63,16 +55,30 @@ public class ConfigManager extends Screen {
                         }
 
             }
-            ).dimensions(this.width - 150, 200, 120, 20).build();
+            ).dimensions(this.width - 140, 200, 120, 20).build();
 
-            // x, y, width, height
-            // It's recommended to use the fixed height of 20 to prevent rendering issues with the button
-            // textures.
+            ButtonWidget reasoningButton = ButtonWidget.builder(
+                    Text.of("Show Reasoning Log"),
+                    (btn) -> Objects.requireNonNull(this.client).setScreen(new ReasoningLogScreen(this))
+            ).dimensions(this.width - 280, 200, 120, 20).build();
+            this.addDrawableChild(reasoningButton);
+
+            // API Keys Button (Corrected)
+            ButtonWidget apiKeysButton = ButtonWidget.builder(
+                    Text.of("API Keys"),
+                    (btn) -> Objects.requireNonNull(this.client).setScreen(new APIKeysScreen(Text.of("API Keys"), this))
+            ).dimensions(this.width - 420, 200, 120, 20).build(); // Use a different y-coordinate
+            this.addDrawableChild(apiKeysButton); // Add it to the list of drawable children
+
+            this.addDrawableChild(buttonWidget2);
+            this.addDrawableChild(dropdownMenuWidget);
+            this.addDrawableChild(buttonWidget3);
 
 
             this.addDrawableChild(buttonWidget2);
             this.addDrawableChild(dropdownMenuWidget);
             this.addDrawableChild(buttonWidget3);
+
 
         }
 

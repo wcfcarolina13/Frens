@@ -3,141 +3,199 @@ package net.shasankp000.Database;
 import net.fabricmc.loader.api.FabricLoader;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.sqlite.SQLiteConfig;
 
 import java.io.File;
+import java.io.IOException;
+import java.nio.file.Path;
 import java.sql.*;
+import java.util.ArrayList;
 import java.util.List;
-import java.util.stream.Collectors;
+import java.util.Locale;
 
 public class SQLiteDB {
 
-    private static final Logger logger = LoggerFactory.getLogger(SQLiteDB.class);
-    public static boolean dbExists = false;
-    public static boolean dbEmpty = false;
+    private static final Logger logger = LoggerFactory.getLogger("ai-player");
+
+    private static final String DB_URL = "jdbc:sqlite:" +
+            FabricLoader.getInstance().getGameDir().resolve("sqlite_databases/memory_agent.db").toAbsolutePath();
 
     public static void createDB() {
-
-        String gameDir = FabricLoader.getInstance().getGameDir().toString();
-
-        File dbDir = new File(gameDir + "/sqlite_databases");
-        if (!dbDir.exists()) {
-            if(dbDir.mkdirs()) {
-                System.out.println("Database directory created.");
-            }
-        }
-        else{
-            System.out.println("Database directory already exists, ignoring...");
+        File dbDir = FabricLoader.getInstance().getGameDir().resolve("sqlite_databases").toFile();
+        if (!dbDir.exists() && dbDir.mkdirs()) {
+            logger.info("✅ Database directory created: {}", dbDir);
         }
 
-        String dbUrl = "jdbc:sqlite:" + gameDir + "/sqlite_databases/memory_agent.db";
+        // Configure SQLite to allow extensions
+        SQLiteConfig config = new SQLiteConfig();
+        config.enableLoadExtension(true);
 
-        System.out.println("Connecting to database at: " + dbUrl);
-        try (Connection connection = DriverManager.getConnection(dbUrl);
-             Statement statement = connection.createStatement()) {
+        try (Connection conn = DriverManager.getConnection(DB_URL, config.toProperties())) {
+            Path extPath = VectorExtensionHelper.ensureSqliteVecPresent();
+            VectorExtensionHelper.loadSqliteVecExtension(conn, extPath);
 
-            if (connection.isValid(30)) {
-
-                System.out.println("Connection to database valid.");
-
+            String osName = System.getProperty("os.name").toLowerCase(Locale.ENGLISH);
+            if (!osName.contains("win")) {
+                logger.info("✅ Detected Linux/MacOS — using sqlite-vss native extension");
+                Path extPath2 = VectorExtensionHelper.ensureSqliteVssPresent();
+                VectorExtensionHelper.loadSqliteVssExtension(conn, extPath2);
+            } else {
+                logger.info("✅ Detected Windows — using fallback cosine_distance UDF");
+                VectorExtensionHelper.registerCosineDistanceIfNeeded(conn);
             }
 
-            if (connection != null) {
-                System.out.println("Connection to SQLite has been established.");
+            try (Statement stmt = conn.createStatement()) {
+                stmt.execute("PRAGMA foreign_keys = ON;");
+                stmt.execute("PRAGMA journal_mode = WAL;");
+
+                String createTable = """
+                    CREATE TABLE IF NOT EXISTS memories (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        type TEXT NOT NULL,
+                        timestamp TEXT DEFAULT CURRENT_TIMESTAMP,
+                        prompt TEXT,
+                        response TEXT,
+                        embedding VECTOR
+                    );
+                """;
+                stmt.executeUpdate(createTable);
+                logger.info("✅ Memory table created.");
+            }
+        } catch (SQLException e) {
+            logger.error("❌ DB creation failed: SQLState={}, ErrorCode={}, Message={}",
+                    e.getSQLState(), e.getErrorCode(), e.getMessage(), e);
+            throw new RuntimeException(e);
+        } catch (IOException e) {
+            logger.error("❌ Extension setup failed: {}", e.getMessage(), e);
+            throw new RuntimeException(e);
+        }
+    }
+
+    public static void storeMemory(String type, String prompt, String response, List<Double> embedding) {
+        String sql = """
+            INSERT INTO memories (type, prompt, response, embedding)
+            VALUES (?, ?, ?, ?);
+        """;
+
+        SQLiteConfig config = new SQLiteConfig();
+        config.enableLoadExtension(true);
+
+        try (Connection conn = DriverManager.getConnection(DB_URL, config.toProperties());
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+
+            pstmt.setString(1, type);
+            pstmt.setString(2, prompt);
+            pstmt.setString(3, response);
+            pstmt.setString(4, vectorToLiteral(embedding));
+
+            pstmt.executeUpdate();
+            logger.info("📝 Memory stored with vector embedding.");
+        } catch (SQLException e) {
+            logger.error("❌ Failed to store memory: SQLState={}, ErrorCode={}, Message={}",
+                    e.getSQLState(), e.getErrorCode(), e.getMessage());
+        }
+    }
+
+    public static List<Memory> findRelevantMemories(List<Double> queryEmbedding, String typeFilter, int topK) {
+        logger.info("Query embedding size: {}", queryEmbedding.size());
+
+
+        List<Memory> results = new ArrayList<>();
+        String sql = """
+            SELECT id, type, timestamp, prompt, response,
+                   1 - cosine_distance(embedding, ?) AS similarity
+            FROM memories
+            WHERE type = ?
+            ORDER BY similarity DESC
+            LIMIT ?;
+        """;
+
+        SQLiteConfig config = new SQLiteConfig();
+        config.enableLoadExtension(true);
+
+        try (Connection conn = DriverManager.getConnection(DB_URL, config.toProperties())) {
+
+            // ✅ Register fallback cosine_distance BEFORE prepareStatement
+            String osName = System.getProperty("os.name").toLowerCase(Locale.ENGLISH);
+            if (osName.contains("win")) {
+                VectorExtensionHelper.registerCosineDistanceIfNeeded(conn);
             }
 
-            // Check if the table exists
-            String checkTableQuery = "SELECT name FROM sqlite_master WHERE type='table' AND name='conversations'";
-            ResultSet tableResultSet = statement.executeQuery(checkTableQuery);
+            try (PreparedStatement pstmt = conn.prepareStatement(sql)) {
+                pstmt.setString(1, vectorToLiteral(queryEmbedding));
+                pstmt.setString(2, typeFilter);
+                pstmt.setInt(3, topK);
 
-            if (!tableResultSet.next()) {
-                // Table does not exist, create table
-                String createTableQuery1 = "CREATE TABLE conversations (" +
-                        "id INTEGER PRIMARY KEY AUTOINCREMENT, " +
-                        "timestamp DATETIME DEFAULT CURRENT_TIMESTAMP, " +
-                        "prompt TEXT NOT NULL, " +
-                        "response TEXT NOT NULL, " +
-                        "prompt_embedding BLOB, " +
-                        "response_embedding BLOB" +
-                        ")";
-
-                String createTableQuery2 = "CREATE TABLE events (" +
-                        "id INTEGER PRIMARY KEY AUTOINCREMENT, " +
-                        "timestamp DATETIME DEFAULT CURRENT_TIMESTAMP, " +
-                        "event TEXT NOT NULL, " +
-                        "event_context TEXT NOT NULL, " +
-                        "event_result TEXT NOT NULL, " +
-                        "event_embedding BLOB, " +
-                        "event_context_embedding BLOB, " +
-                        "event_result_embedding BLOB" +
-                        ")"; // Removed the extra comma here
-
-                statement.executeUpdate(createTableQuery1);
-                statement.executeUpdate(createTableQuery2);
-                System.out.println("Setting up memory database...done.");
-
-                dbExists = true;
-                dbEmpty = true;
+                ResultSet rs = pstmt.executeQuery();
+                while (rs.next()) {
+                    results.add(new Memory(
+                            rs.getInt("id"),
+                            rs.getString("type"),
+                            rs.getString("timestamp"),
+                            rs.getString("prompt"),
+                            rs.getString("response"),
+                            rs.getDouble("similarity")
+                    ));
+                }
             }
-
 
         } catch (SQLException e) {
-            logger.error("Caught SQLException: {}", (Object) e.getStackTrace());
-        }
-    }
-
-    public static void storeConversationWithEmbedding(String DB_URL,String prompt, String response, List<Double> prompt_embedding, List<Double> response_embedding) throws SQLException {
-        String promptEmbeddingString = prompt_embedding.stream()
-                .map(String::valueOf)
-                .collect(Collectors.joining(","));
-
-        String responseEmbeddingString = response_embedding.stream()
-                .map(String::valueOf)
-                .collect(Collectors.joining(","));
-
-        try (Connection connection = DriverManager.getConnection(DB_URL);
-             PreparedStatement pstmt = connection.prepareStatement(
-                     "INSERT INTO conversations (prompt, response, prompt_embedding, response_embedding) VALUES (?, ?, ?, ?)")) {
-            pstmt.setString(1, prompt);
-            pstmt.setString(2, response);
-            pstmt.setString(3, promptEmbeddingString);
-            pstmt.setString(4, responseEmbeddingString);
-            pstmt.executeUpdate();
-            System.out.println("SYSTEM: Conversation saved to database.");
-
-            dbEmpty = false;
-        }
-    }
-
-
-    public static void storeEventWithEmbedding(String DB_URL,String event, String event_context, String event_result ,List<Double> event_embedding, List<Double> event_context_embedding, List<Double> event_result_embedding) throws SQLException {
-
-        String eventEmbeddingString = event_embedding.stream()
-                .map(String::valueOf)
-                .collect(Collectors.joining(","));
-
-        String eventContextEmbeddingString = event_context_embedding.stream()
-                .map(String::valueOf)
-                .collect(Collectors.joining(","));
-
-        String eventResultEmbeddingString = event_result_embedding.stream()
-                .map(String::valueOf)
-                .collect(Collectors.joining(","));
-
-        try (Connection connection = DriverManager.getConnection(DB_URL);
-             PreparedStatement pstmt = connection.prepareStatement(
-                     "INSERT INTO events (event, event_context, event_result, event_embedding, event_context_embedding, event_result_embedding) VALUES (?, ?, ?, ?, ?, ?)")) {
-            pstmt.setString(1, event);
-            pstmt.setString(2, event_context);
-            pstmt.setString(3, event_result);
-            pstmt.setString(4, eventEmbeddingString);
-            pstmt.setString(5, eventContextEmbeddingString);
-            pstmt.setString(6, eventResultEmbeddingString);
-            pstmt.executeUpdate();
-            System.out.println("SYSTEM: Event data saved to database.");
-
-            dbEmpty = false;
+            logger.error("❌ Vector search failed: SQLState={}, ErrorCode={}, Message={}",
+                    e.getSQLState(), e.getErrorCode(), e.getMessage());
         }
 
+        return results;
     }
+
+    public static List<SQLiteDB.Memory> fetchInitialResponse() {
+        List<SQLiteDB.Memory> results = new ArrayList<>();
+        String sql = """
+            SELECT id, type, timestamp, prompt, response, 0.0 AS similarity
+            FROM memories
+            WHERE type = 'conversation'
+            ORDER BY id ASC
+            LIMIT 1;
+        """;
+
+        try (Connection conn = DriverManager.getConnection(DB_URL);
+             Statement stmt = conn.createStatement();
+             ResultSet rs = stmt.executeQuery(sql)) {
+
+            while (rs.next()) {
+                results.add(new SQLiteDB.Memory(
+                        rs.getInt("id"),
+                        rs.getString("type"),
+                        rs.getString("timestamp"),
+                        rs.getString("prompt"),
+                        rs.getString("response"),
+                        0.0
+                ));
+            }
+        } catch (SQLException e) {
+            logger.error("Caught exception while fetching initial response: {}", e.getMessage());
+            throw new RuntimeException(e);
+        }
+
+        return results;
+    }
+
+    private static String vectorToLiteral(List<Double> vec) {
+        StringBuilder sb = new StringBuilder("[");
+        for (int i = 0; i < vec.size(); i++) {
+            sb.append(vec.get(i));
+            if (i < vec.size() - 1) sb.append(",");
+        }
+        sb.append("]");
+        return sb.toString();
+    }
+
+    public record Memory(
+            int id,
+            String type,
+            String timestamp,
+            String prompt,
+            String response,
+            double similarity
+    ) {}
 
 }

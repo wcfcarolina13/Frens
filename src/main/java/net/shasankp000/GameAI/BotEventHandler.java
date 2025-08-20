@@ -484,7 +484,7 @@ public class BotEventHandler {
     }
 
 
-    private static State createInitialState(ServerPlayerEntity bot) {
+    public static State createInitialState(ServerPlayerEntity bot) {
         List<ItemStack> hotBarItems = hotBarUtils.getHotbarItems(bot);
         ItemStack selectedItemStack = hotBarUtils.getSelectedHotbarItemStack(bot);
 

@@ -22,6 +22,7 @@ public class helperMethods {
     private static final OllamaAPI ollamaAPI = new OllamaAPI("http://localhost:11434/");
     public static final Logger LOGGER = LoggerFactory.getLogger("ai-player");
 
+
     public static boolean isRecentTimestamp(String timestamp, String currentDateTime) {
         LocalDateTime conversationTime = LocalDateTime.parse(timestamp, formatter2);
         LocalDateTime currentTime = LocalDateTime.parse(currentDateTime, formatter1);
@@ -30,10 +31,10 @@ public class helperMethods {
         return conversationTime.isAfter(currentTime.minusHours(1));
     }
 
-    public static double findMaxSimilarityConversations(Set<RAGImplementation.Conversation> conversationSet) {
+    public static double findMaxSimilarityConversations(Set<OldRAGImplementation.Conversation> conversationSet) {
         double maxSimilarity = Double.MIN_VALUE;
 
-        for (RAGImplementation.Conversation conversation : conversationSet) {
+        for (OldRAGImplementation.Conversation conversation : conversationSet) {
             if (conversation.similarity > maxSimilarity) {
                 maxSimilarity = conversation.similarity;
             }
@@ -42,10 +43,10 @@ public class helperMethods {
         return maxSimilarity;
     }
 
-    public static double findMaxSimilarityEvents(Set<RAGImplementation.Event> eventSet) {
+    public static double findMaxSimilarityEvents(Set<OldRAGImplementation.Event> eventSet) {
         double maxSimilarity = Double.MIN_VALUE;
 
-        for (RAGImplementation.Event event : eventSet) {
+        for (OldRAGImplementation.Event event : eventSet) {
             if (event.similarity > maxSimilarity) {
                 maxSimilarity = event.similarity;
             }
@@ -69,7 +70,7 @@ public class helperMethods {
     }
 
     public static List<String> createQueries(String prompt) {
-
+        ollamaAPI.setRequestTimeoutSeconds(600);
         String query_msg = "You are a first-principles reasoning search query AI agent. Your task is to generate a list of queries to search an embeddings database for relevant data. The output must be a valid Python list of strings in JSON format. Here are a few examples of input strings you may receive:\n" +
                 """
                  "How can I build an automatic farm in Minecraft?",
@@ -85,6 +86,8 @@ public class helperMethods {
                 "[\"What are the steps to build an automatic farm in Minecraft?\", \"What resources were listed for creating an enchantment table?\", \"What mining strategy was discussed on yyyy/mm/dd hh:mm:ss?\", \"Where did the bot go to recently?\", \"What ores did the bot mine recently?\"]\n" +
 
                 "Please remember that it is absolutely crucial that you generate queries relevant to the user prompts. When dealing with responses that contain coordinates or three sets of numbers, keep the numbers exactly as they are in your queries, DO NOT ALTER THEM" +
+
+                 "Return 3 variations of the same query if possible, separated by line breaks.\n" +
 
                 "The output must be a single Python list of strings in JSON format, with no additional explanations or syntax errors. The queries must be directly related to the user's input. If you receive a date or timestamp, format it as 'yyyy/mm/dd hh:mm:ss'. Do not generate anything other than the list.";
 
@@ -238,7 +241,7 @@ public class helperMethods {
 //    }
 
     public static String classify_queries(List<String> QueryList, String prompt) {
-
+        ollamaAPI.setRequestTimeoutSeconds(600);
         String tableType;
 
         String sys_prompt = """
@@ -312,7 +315,7 @@ public class helperMethods {
 
 
     public static boolean classify_events(String DateTime, String prompt, String retrieved_context) {
-
+        ollamaAPI.setRequestTimeoutSeconds(600);
         boolean isRelevant = false;
 
         String sys_prompt = """

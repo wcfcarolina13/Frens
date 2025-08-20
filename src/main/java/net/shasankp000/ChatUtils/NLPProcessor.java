@@ -1,22 +1,564 @@
 package net.shasankp000.ChatUtils;
 
-import com.google.gson.JsonSyntaxException;
+import ai.djl.modality.Classifications;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.amithkoujalgi.ollama4j.core.OllamaAPI;
-import io.github.amithkoujalgi.ollama4j.core.exceptions.OllamaBaseException;
-import io.github.amithkoujalgi.ollama4j.core.models.chat.OllamaChatMessageRole;
-import io.github.amithkoujalgi.ollama4j.core.models.chat.OllamaChatRequestBuilder;
-import io.github.amithkoujalgi.ollama4j.core.models.chat.OllamaChatRequestModel;
-import io.github.amithkoujalgi.ollama4j.core.models.chat.OllamaChatResult;
+import io.github.amithkoujalgi.ollama4j.core.models.chat.*;
+
+import net.fabricmc.loader.api.FabricLoader;
+import net.shasankp000.AIPlayer;
+import net.shasankp000.ChatUtils.CART.CartClassifier;
+import net.shasankp000.ChatUtils.DecisionResolver.DecisionResolver;
+import net.shasankp000.ChatUtils.LIDSNetModel.LIDSNetModelManager;
+import net.shasankp000.ChatUtils.PreProcessing.NLPModelSetup;
+import net.shasankp000.ChatUtils.PreProcessing.OpenNLPProcessor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.IOException;
+import java.io.*;
+import java.net.MalformedURLException;
+import java.net.URL;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
+import java.security.MessageDigest;
+import java.util.*;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
 
 public class NLPProcessor {
 
-    private static final Logger logger = LoggerFactory.getLogger("ai-player");
-    private static final String host = "http://localhost:11434/";
-    private static final OllamaAPI ollamaAPI = new OllamaAPI(host);
+    private static final Logger LOGGER = LoggerFactory.getLogger("NLPProcessor");
+    private static final OllamaAPI ollamaAPI = new OllamaAPI("http://localhost:11434/");
+    private static final String bertModelURL = "https://github.com/shasankp000/AI-Player/releases/download/v1.0.5-release-1.20.6-NLP-asset/distilbert-finetuned-intent-torchscript.zip";
+    private static final String bertModelExpectedHash = "2356cecf61ee2bbea5cea406253b67aeee6ad21ce74dada64e8be730cc016bdf";
+    private static final String cartZipURL = "https://github.com/shasankp000/AI-Player/releases/download/v1.0.5-release-1.20.6-NLP-asset/cart.zip";
+    private static final String cartExpectedHash = "1b8e0cc8c5fdb1bdb579b9f916c735929e82ab492a3c3cd13d0a254e765f7d22";
+    private static final String LIDSNetModelURL = "https://github.com/shasankp000/AI-Player/releases/download/v1.0.5-release-1.20.6-NLP-asset/LIDSNet_torchscript.zip";
+    private static final String LIDSNetExpectedHash = "ad93089b9bfa735d472ab828942541d0d80203dbfd42a3a5bc303a8bc12158e8";
+    private static String selectedLM = AIPlayer.CONFIG.selectedLanguageModel();
+    private static Map<String, String> checkSumFileNameMap = getcheckSumFileNameMap();
+
+    public enum Intent {
+        REQUEST_ACTION,
+        ASK_INFORMATION,
+        GENERAL_CONVERSATION,
+        UNSPECIFIED
+    }
+
+
+
+    public static void ensureLocalNLPModel() {
+        Path configDir = FabricLoader.getInstance().getConfigDir();
+        Path modelDir = configDir.resolve("ai-player/NLPModels");
+        Path torchZipFile = modelDir.resolve("distilbert-finetuned-intent-torchscript.zip");
+        Path torchModelDir = modelDir.resolve("distilbert-finetuned-intent-torchscript/");
+        Path LidsNetModelDir = modelDir.resolve("LIDSNet_torchscript/");
+        Path LidsNETZipFile = modelDir.resolve("LIDSNet_torchscript.zip");
+        Path cartZipFile = modelDir.resolve("cart.zip");
+        Path cartDir = modelDir.resolve("cart_files");
+        Path openNlpModelsDir = modelDir.resolve("OpenNLPModels");
+
+        int maxRetries = 2;
+
+        int currentRetry = 0;
+
+        try {
+            if (!Files.exists(modelDir)) {
+                Files.createDirectories(modelDir);
+                LOGGER.info("✅ Created NLP model directory: {}", modelDir);
+            }
+
+            // download fine-tuned BERT file.
+
+            if (!Files.exists(torchModelDir)) {
+                LOGGER.info("📥 BERT NLP model not found — downloading for first-time setup...");
+
+                try (InputStream in = new URL(bertModelURL).openStream()) {
+                    Files.copy(in, torchZipFile, StandardCopyOption.REPLACE_EXISTING);
+                }
+
+                // Validate file integrity
+                String hash = sha256Hex(torchZipFile);
+
+                if (!hash.equalsIgnoreCase(bertModelExpectedHash)) {
+
+                    while (currentRetry<=maxRetries) {
+                        currentRetry+=1;
+
+                        LOGGER.warn("⚠️ BERT NLP model hash mismatch! Re-downloading....");
+
+                        Files.deleteIfExists(torchZipFile);
+
+                        try (InputStream in = new URL(bertModelURL).openStream()) {
+                            Files.copy(in, torchZipFile, StandardCopyOption.REPLACE_EXISTING);
+                        }
+
+                        LOGGER.info("✅ BERT NLP model re-downloaded to {}", torchZipFile);
+
+                        if (!hash.equalsIgnoreCase(bertModelExpectedHash)) {
+                            continue;
+                        }
+                        else {
+                            break;
+                        }
+                    }
+
+                    if (currentRetry == maxRetries) {
+                        LOGGER.error("Error! Max retries reached and NLP models are still not downloaded. Please check your internet connection or contact developer.");
+                        throw new IOException("Max retries reached for BERT model and checksum still mismatch");
+                    }
+
+
+                }
+                else {
+                    LOGGER.info("✅ BERT NLP model file at 100% integrity.");
+                }
+
+                currentRetry = 0; // reset to zero
+
+                LOGGER.info("✅ BERT NLP model downloaded to {}", torchZipFile);
+            }
+            else {
+
+                LOGGER.info("BERT model files already exist! Skipping download....");
+            }
+
+            // download CART zip file
+
+            if (!Files.exists(cartDir)) {
+                LOGGER.info("📥 CART NLP model not found — downloading for first-time setup...");
+
+                try (InputStream in = new URL(cartZipURL).openStream()) {
+                    Files.copy(in, cartZipFile, StandardCopyOption.REPLACE_EXISTING);
+                }
+
+                LOGGER.info("✅ CART NLP model downloaded to {}", cartZipFile);
+
+
+                // Validate file integrity
+                String hash = sha256Hex(cartZipFile);
+
+                if (!hash.equalsIgnoreCase(cartExpectedHash)) {
+
+                    while (currentRetry <= maxRetries) {
+                        currentRetry += 1;
+
+                        LOGGER.warn("⚠️ CART NLP model hash mismatch! Re-downloading....");
+
+                        Files.deleteIfExists(cartZipFile);
+
+                        try (InputStream in = new URL(cartZipURL).openStream()) {
+                            Files.copy(in, cartZipFile, StandardCopyOption.REPLACE_EXISTING);
+                        }
+
+                        LOGGER.info("✅ CART NLP model re-downloaded to {}", cartZipFile);
+
+                        if (!hash.equalsIgnoreCase(cartExpectedHash)) {
+                            continue;
+                        } else {
+                            break;
+                        }
+                    }
+
+                    if (currentRetry == maxRetries) {
+                        LOGGER.error("Error! Max retries reached and NLP models are still not downloaded. Please check your internet connection or contact developer.");
+                        throw new IOException("Max retries reached for CART model and checksum still mismatch");
+                    }
+
+
+                } else {
+                    LOGGER.info("✅ CART NLP model file at 100% integrity.");
+                }
+            }
+            else {
+                LOGGER.info("CART files already exist! Skipping download....");
+            }
+
+            // download OpenNLP Models
+
+            if (!Files.exists(openNlpModelsDir)) {
+                LOGGER.info("📥 OpenNLP models not found — downloading for first-time setup...");
+                Files.createDirectories(openNlpModelsDir);
+                LOGGER.info("✅ Created NLP model directory: {}", openNlpModelsDir);
+
+                for (Map.Entry<String, String> entry : checkSumFileNameMap.entrySet()) {
+                    String modelURL = entry.getKey();
+                    String expectedSha512 = entry.getValue();
+
+                    try {
+                        URL url = new URL(modelURL);
+                        String fileName = Paths.get(url.getPath()).getFileName().toString();
+
+                        Path targetFilePath = openNlpModelsDir.resolve(fileName);
+
+                        LOGGER.info("Attempting to download and verify: {}", modelURL);
+                        NLPModelSetup.ensureModelDownloaded(targetFilePath, modelURL, expectedSha512);
+
+                    } catch (MalformedURLException e) {
+                        LOGGER.error("Invalid URL for model: {} - {}", modelURL, e.getMessage());
+                    } catch (IOException e) {
+                        LOGGER.error("Failed to download or verify model from {}: {}", modelURL, e.getMessage());
+                    } catch (Exception e) {
+                        LOGGER.error("An unexpected error occurred for model {}: {}", modelURL, e.getMessage());
+                    }
+                }
+
+                LOGGER.info("All OpenNLP model downloads and verifications done to {}", openNlpModelsDir);
+            }
+            else {
+                LOGGER.info("OpenNLP model files already exist! Skipping download....");
+            }
+
+            // download LIDSNet
+
+            if (!Files.exists(LidsNetModelDir)) {
+                LOGGER.info("📥 LIDSNet NLP model not found — downloading for first-time setup...");
+
+                try (InputStream in = new URL(LIDSNetModelURL).openStream()) {
+                    Files.copy(in, LidsNETZipFile, StandardCopyOption.REPLACE_EXISTING);
+                }
+
+                // Validate file integrity
+                String hash = sha256Hex(LidsNETZipFile);
+
+                if (!hash.equalsIgnoreCase(LIDSNetExpectedHash)) {
+
+                    while (currentRetry<=maxRetries) {
+                        currentRetry+=1;
+
+                        LOGGER.warn("⚠️ LIDSNet NLP model hash mismatch! Re-downloading....");
+
+                        Files.deleteIfExists(LidsNETZipFile);
+
+                        try (InputStream in = new URL(LIDSNetModelURL).openStream()) {
+                            Files.copy(in, LidsNETZipFile, StandardCopyOption.REPLACE_EXISTING);
+                        }
+
+                        LOGGER.info("✅ LIDSNet NLP model re-downloaded to {}", LidsNETZipFile);
+
+                        if (!hash.equalsIgnoreCase(LIDSNetExpectedHash)) {
+                            continue;
+                        }
+                        else {
+                            break;
+                        }
+                    }
+
+                    if (currentRetry == maxRetries) {
+                        LOGGER.error("Error! Max retries reached and NLP models are still not downloaded. Please check your internet connection or contact developer.");
+                        throw new IOException("Max retries reached for LIDSNet model and checksum still mismatch");
+                    }
+
+
+                }
+                else {
+                    LOGGER.info("✅ LIDSNet NLP model file at 100% integrity.");
+                }
+
+                currentRetry = 0; // reset to zero
+
+                LOGGER.info("✅ LIDSNet NLP model downloaded to {}", torchZipFile);
+            }
+            else {
+                LOGGER.info("LIDSNet model files already exist! Skipping download....");
+            }
+
+
+            // extract BERT TorchScript-model zip file
+
+            if (Files.exists(torchZipFile)) {
+                // extract only if the zip file exists
+                System.out.println("Extracting distilBERT PyTorch[TorchScript] model...");
+                try (ZipInputStream zis = new ZipInputStream(new FileInputStream(torchZipFile.toFile()))) {
+                    ZipEntry entry;
+                    while ((entry = zis.getNextEntry()) != null) {
+                        Path filePath = modelDir.resolve(entry.getName());
+                        if (entry.isDirectory()) {
+                            Files.createDirectories(filePath);
+                        } else {
+                            Files.createDirectories(filePath.getParent());
+                            Files.copy(zis, filePath, StandardCopyOption.REPLACE_EXISTING);
+                        }
+                    }
+                }
+            }
+
+            else {
+                LOGGER.warn("Error, file {} doesn't exist for extraction! Ignore if already extracted previously.", torchZipFile);
+            }
+
+            // extract CART zip file
+
+            if (Files.exists(cartZipFile)) {
+                System.out.println("Extracting CART files...");
+                try (ZipInputStream zis = new ZipInputStream(new FileInputStream(cartZipFile.toFile()))) {
+                    ZipEntry entry;
+                    while ((entry = zis.getNextEntry()) != null) {
+                        Path filePath = cartDir.resolve(entry.getName());
+                        if (entry.isDirectory()) {
+                            Files.createDirectories(filePath);
+                        } else {
+                            Files.createDirectories(filePath.getParent());
+                            Files.copy(zis, filePath, StandardCopyOption.REPLACE_EXISTING);
+                        }
+                    }
+                }
+            }
+            else {
+                LOGGER.warn("Error, file {} doesn't exist for extraction! Ignore if already extracted previously.", cartZipFile);
+            }
+
+            // extract LIDSNet zip file
+
+            if (Files.exists(LidsNETZipFile)) {
+                System.out.println("Extracting LIDSNet PyTorch[TorchScript] model... ");
+                try (ZipInputStream zis = new ZipInputStream(new FileInputStream(LidsNETZipFile.toFile()))) {
+                    ZipEntry entry;
+                    while ((entry = zis.getNextEntry()) != null) {
+                        Path filePath = LidsNetModelDir.resolve(entry.getName());
+                        if (entry.isDirectory()) {
+                            Files.createDirectories(filePath);
+                        } else {
+                            Files.createDirectories(filePath.getParent());
+                            Files.copy(zis, filePath, StandardCopyOption.REPLACE_EXISTING);
+                        }
+                    }
+                }
+            }
+            else {
+                LOGGER.warn("Error, file {} doesn't exist for extraction! Ignore if already extracted previously.", cartZipFile);
+            }
+
+
+
+            // Delete zip after extraction
+            Files.deleteIfExists(torchZipFile);
+            Files.deleteIfExists(cartZipFile);
+            Files.deleteIfExists(LidsNETZipFile);
+
+
+
+
+        } catch (IOException e) {
+            LOGGER.error("❌ Failed to ensure NLP model: {}", e.getMessage(), e);
+        }
+    }
+
+    private static Map<String, String> getcheckSumFileNameMap() {
+        Map<String, String> checkSumFileNameMap = new HashMap<>();
+
+        // *** IMPORTANT: Replace these URLs with the direct download links from Apache's official models page. ***
+        // *** Also, double-check that the checksums are exactly what's provided on that page for the direct links. ***
+
+        checkSumFileNameMap.put("https://dlcdn.apache.org/opennlp/models/ud-models-1.3/opennlp-en-ud-ewt-sentence-1.3-2.5.4.bin", "fed5d53ea87bf66afeb08c084f89ca9b95a96de0920dca40487b2ab9972ee6b7ef211e477db480b7253431de079fd66dfd14329cd7d19ad1f565155eb0cf5191");
+        checkSumFileNameMap.put("https://dlcdn.apache.org/opennlp/models/ud-models-1.3/opennlp-en-ud-ewt-tokens-1.3-2.5.4.bin", "147d1cdcb89ca5d9bd0ead8fddf2cc14ae543a9151803fe56b3c1fa152b986605e34fb6dda4819c68aa22fc9bffa6bfab14f916b7d0bf4892d452686af34778a");
+        checkSumFileNameMap.put("https://dlcdn.apache.org/opennlp/models/ud-models-1.3/opennlp-en-ud-ewt-lemmas-1.3-2.5.4.bin", "ee81553985908ac25c50fbd8f2ca4222cb42a18845f063c792a1b43639181b70ce20d57b8736a1604367f5e8c59aef55f8463e04004840cbc88abb7123fd9e7f");
+        checkSumFileNameMap.put("https://dlcdn.apache.org/opennlp/models/ud-models-1.3/opennlp-en-ud-ewt-pos-1.3-2.5.4.bin", "fca85b38d996b7c422401054feedeb0f748cbc03856893cb27670da5d207315ec9af0c0f818c3107a741a2effca2499b5097ac0b46edf4a5ac10bf77a351ac3e");
+        return checkSumFileNameMap;
+    }
+
+    // Helper: SHA-256 hash of file contents
+    private static String sha256Hex(Path file) throws IOException {
+        try (InputStream fis = Files.newInputStream(file)) {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] buf = new byte[8192];
+            int n;
+            while ((n = fis.read(buf)) > 0) {
+                digest.update(buf, 0, n);
+            }
+            byte[] hashBytes = digest.digest();
+            StringBuilder sb = new StringBuilder();
+            for (byte b : hashBytes) {
+                sb.append(String.format("%02x", b));
+            }
+            return sb.toString();
+        } catch (Exception e) {
+            throw new IOException("Failed to calculate hash: " + e.getMessage(), e);
+        }
+    }
+
+
+
+
+    // -------------------------------
+    // Primary local prediction entry
+    // -------------------------------
+
+    public static Intent getIntention(String userPrompt) {
+        Path configDir = FabricLoader.getInstance().getConfigDir();
+        Path modelDir = configDir.resolve("ai-player/NLPModels");
+        Path cartDir = modelDir.resolve("cart_files");
+        Path vocabFilePath = cartDir.resolve("cart_vectorizer_vocab.json");
+        Path labelsFilePath = cartDir.resolve("cart_class_labels.json");
+        Path treeFilePath = cartDir.resolve("cart_tree.json");
+        Path openNlpModelsDir = modelDir.resolve("OpenNLPModels");
+        Path LidsNetModelDir = modelDir.resolve("LIDSNet_torchscript/");
+
+        double bertClassificationConfidence = 0;
+        double cartClassificationConfidence = 0;
+        double LIDSNetClassificationConfidence = 0;
+
+        CartClassifier cartClassifier = null;
+
+        try {
+            File vocabFile = vocabFilePath.toFile();
+            File labelFile = labelsFilePath.toFile();
+            File treeFile = treeFilePath.toFile();
+
+            cartClassifier = new CartClassifier(treeFile, labelFile, vocabFile);
+        } catch (IOException e) {
+            LOGGER.error("Error initializing CART classifier! {}", e.getMessage());
+        }
+
+
+        String bertLabel = null;
+        String cartLabel = null;
+        String LIDSNetLabel = null;
+        String decision = null;
+
+        try {
+            Classifications intent = AIPlayer.modelManager.predict(userPrompt);
+            if (intent != null) {
+                bertLabel = intent.best().getClassName();
+                bertClassificationConfidence = intent.best().getProbability();
+
+                LOGGER.info("BERT predicted: {} with confidence: {}", bertLabel, bertClassificationConfidence);
+            }
+        } catch (Exception e) {
+            LOGGER.error("Error predicting intent using BERT: {}", e.getMessage());
+        }
+
+        try {
+            if (cartClassifier != null) {
+                CartClassifier.ClassificationResult result = cartClassifier.classify(userPrompt);
+                cartLabel = result.label;
+                cartClassificationConfidence = result.confidence;
+
+                LOGGER.info("CART predicted: {} with confidence: {}", cartLabel, cartClassificationConfidence);
+            }
+            else {
+                throw new Exception("CART classifier is null!");
+            }
+
+        } catch (Exception e) {
+            LOGGER.error("Error predicting intent using CART: {}", e.getMessage());
+        }
+
+        try {
+
+            // --- 1. Load Feature Map JSON ---
+            ObjectMapper mapper = new ObjectMapper();
+            Path actualLidsNetModelDir = LidsNetModelDir.resolve("LIDSNet_torchscript/");
+            JsonNode root = mapper.readTree(new File(actualLidsNetModelDir.resolve("lidsnet_feature_map.json").toString()));
+
+            // Class label index map
+            TreeMap<Integer, String> classIdxMap = new TreeMap<>();
+            root.get("idx2label").fields().forEachRemaining(entry ->
+                    classIdxMap.put(Integer.parseInt(entry.getKey()), entry.getValue().asText())
+            );
+            List<String> classNames = new ArrayList<>(classIdxMap.values());
+
+            // Feature names
+            List<String> featureNames = new ArrayList<>();
+            root.get("features").forEach(f -> featureNames.add(f.asText()));
+
+            // --- 2. Initialize NLP processor ---
+            OpenNLPProcessor openNLP = new OpenNLPProcessor(openNlpModelsDir.toString());
+
+            // --- 3. Analyze user input ---
+            List<OpenNLPProcessor.TokenInfo> tokens = openNLP.analyze(userPrompt);
+
+            // --- 4. Build symbolic feature set ---
+            Set<String> presentFeatures = new HashSet<>();
+            for (OpenNLPProcessor.TokenInfo token : tokens) {
+                presentFeatures.add("POS=" + token.posTag);
+                presentFeatures.add("lemma=" + token.lemma);
+            }
+
+            // --- 5. Construct input vector ---
+            float[] inputVector = new float[featureNames.size()];
+            for (int i = 0; i < featureNames.size(); i++) {
+                inputVector[i] = presentFeatures.contains(featureNames.get(i)) ? 1.0f : 0.0f;
+            }
+
+            // --- 6. Classify ---
+            LIDSNetModelManager lidsNet = LIDSNetModelManager.getInstance(actualLidsNetModelDir);
+            lidsNet.loadModel(classNames);
+            LIDSNetModelManager.PredictionResult pred = lidsNet.predictWithConfidence(inputVector, classNames);
+
+            // --- 7. Output
+            System.out.printf("[LIDSNet Classifier] Sentence: \"%s\"\nPredicted intent: %s (Confidence: %.2f%%)\n",
+                    userPrompt, pred.getClassName(), pred.getConfidencePercentage());
+
+            LIDSNetLabel = pred.getClassName();
+            LIDSNetClassificationConfidence = pred.getConfidencePercentage();
+
+
+        }
+        catch (Exception e) {
+            LOGGER.error("Error while running inference: {}", e.getMessage());
+        }
+
+
+
+        try {
+            DecisionResolver resolver = new DecisionResolver();
+            decision = resolver.resolveIntent(
+                    // Player message
+                    userPrompt,
+                    // BERT model
+                    bertLabel, bertClassificationConfidence,
+                    // Main CART
+                    cartLabel, cartClassificationConfidence,
+                    // LIDSNet
+                    LIDSNetLabel, LIDSNetClassificationConfidence
+            );
+        } catch (Exception e) {
+            LOGGER.error("Error while resolving the final decision: {}", e.getMessage());
+        }
+
+        return Intent.valueOf(decision);
+
+    }
+
+
+
+    // -------------------------------
+    // Fallback LLM method
+    // -------------------------------
+    public static Intent getIntentionFromLLM(String userPrompt) {
+        ollamaAPI.setRequestTimeoutSeconds(600);
+        String systemPrompt = buildPrompt();
+
+        try {
+            OllamaChatRequestModel requestModel = OllamaChatRequestBuilder.getInstance(selectedLM)
+                    .withMessage(OllamaChatMessageRole.SYSTEM, systemPrompt)
+                    .withMessage(OllamaChatMessageRole.USER, userPrompt)
+                    .build();
+
+            OllamaChatResult chatResult = ollamaAPI.chat(requestModel);
+            String response = chatResult.getResponse().trim();
+            response = stripThinkTags(response);
+
+            if (response.equalsIgnoreCase("REQUEST_ACTION") || response.contains("REQUEST_ACTION")) {
+                return Intent.REQUEST_ACTION;
+            } else if (response.equalsIgnoreCase("ASK_INFORMATION") || response.contains("ASK_INFORMATION")) {
+                return Intent.ASK_INFORMATION;
+            } else if (response.equalsIgnoreCase("GENERAL_CONVERSATION") || response.contains("GENERAL_CONVERSATION")) {
+                return Intent.GENERAL_CONVERSATION;
+            }
+        } catch (Exception e) {
+            LOGGER.error("LLM fallback failed: {}", e.getMessage(), e);
+        }
+        return Intent.UNSPECIFIED;
+    }
+
+    private static String stripThinkTags(String input) {
+        return input.replaceAll("(?s)<think>.*?</think>", "").trim();
+    }
 
     private static String buildPrompt() {
         return "You are a first-principles reasoning function caller AI agent that takes a question/user prompt from a minecraft player and finds the intention of the question/prompt  Here are some example prompts that you may receive:\n" +
@@ -195,56 +737,4 @@ public class NLPProcessor {
 
     }
 
-    public static Intent getIntention(String userPrompt) {
-
-        ollamaAPI.setRequestTimeoutSeconds(600);
-
-        OllamaChatRequestBuilder builder = OllamaChatRequestBuilder.getInstance("llama3.2:latest"); // LLAMA2 is surprisingly much less error-prone compared to phi3.
-
-        String systemPrompt = buildPrompt();
-        String response;
-
-        Intent intent = Intent.UNSPECIFIED; // unspecified intention by default.
-
-        try {
-
-
-            OllamaChatRequestModel requestModel = builder
-                    .withMessage(OllamaChatMessageRole.SYSTEM, systemPrompt)
-                    .withMessage(OllamaChatMessageRole.USER, userPrompt)
-                    .build();
-
-            OllamaChatResult chatResult = ollamaAPI.chat(requestModel);
-            response = chatResult.getResponse();
-
-            if (response.equalsIgnoreCase("REQUEST_ACTION") || response.contains("REQUEST_ACTION")) {
-
-                intent = Intent.REQUEST_ACTION;
-            }
-
-            else if (response.equalsIgnoreCase("ASK_INFORMATION") || response.contains("ASK_INFORMATION")) {
-
-                intent = Intent.ASK_INFORMATION;
-            }
-
-            else if (response.equalsIgnoreCase("GENERAL_CONVERSATION") || response.contains("GENERAL_CONVERSATION")) {
-
-                intent = Intent.GENERAL_CONVERSATION;
-            }
-
-
-        } catch (OllamaBaseException | IOException | InterruptedException | JsonSyntaxException e) {
-            logger.error("{}", (Object) e.getStackTrace());
-        }
-
-        return intent;
-    }
-
-
-    public enum Intent {
-        REQUEST_ACTION,
-        ASK_INFORMATION,
-        GENERAL_CONVERSATION,
-        UNSPECIFIED
-    }
 }

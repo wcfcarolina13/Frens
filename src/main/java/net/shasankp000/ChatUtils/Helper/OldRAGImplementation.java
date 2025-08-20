@@ -16,19 +16,20 @@ import io.github.amithkoujalgi.ollama4j.core.models.chat.OllamaChatResult;
 import io.github.amithkoujalgi.ollama4j.core.types.OllamaModelType;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.server.command.ServerCommandSource;
-import net.shasankp000.ChatUtils.ChatUtils;
-import net.shasankp000.Database.SQLiteDB;
+import net.shasankp000.Database.OldSQLiteDB;
+import net.shasankp000.OllamaClient.ollamaClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import static net.shasankp000.ChatUtils.Helper.helperMethods.*;
 import static net.shasankp000.ChatUtils.Helper.helperMethods.classify_events;
 
-public class RAGImplementation {
+public class OldRAGImplementation {
     private static final Logger logger = LoggerFactory.getLogger("ai-player");
     private static final String gameDir = FabricLoader.getInstance().getGameDir().toString();
     private static final String host = "http://localhost:11434";
     private static final OllamaAPI ollamaAPI = new OllamaAPI(host);
+    private static final String DB_URL = "jdbc:sqlite:" + "./sqlite_databases/" + "memory_agent.db";
 
     public static class Conversation {
         // DS for the SQL return type.
@@ -131,6 +132,27 @@ public class RAGImplementation {
         return events.subList(0, Math.min(topN, events.size()));
     }
 
+    public static String formatConversation(Conversation c) {
+        return """
+    ID: %d
+    Timestamp: %s
+    Prompt: %s
+    Response: %s
+    Similarity: %.3f
+    """.formatted(c.id, c.timestamp, c.prompt, c.response, c.similarity);
+    }
+
+    public static String formatEvent(Event e) {
+        return """
+    ID: %d
+    Timestamp: %s
+    Event: %s
+    Event Context: %s
+    Event Result: %s
+    Similarity: %.3f
+    """.formatted(e.id, e.timestamp, e.event, e.event_context, e.event_result, e.similarity);
+    }
+
 
 
     // Cosine similarity where if the angle between two vectors overlap, they are similar (angle = 0)
@@ -210,6 +232,28 @@ public class RAGImplementation {
         return conversations;
     }
 
+    private static List<Conversation> getTopConversations(List<Double> queryEmbedding, List<Conversation> all, int k) {
+        for (Conversation c : all) {
+            double pSim = calculateCosineSimilarity(queryEmbedding, c.promptEmbedding);
+            double rSim = calculateCosineSimilarity(queryEmbedding, c.responseEmbedding);
+            c.similarity = (pSim + rSim) / 2.0;
+        }
+        all.sort((a, b) -> Double.compare(b.similarity, a.similarity));
+        return all.subList(0, Math.min(k, all.size()));
+    }
+
+    private static List<Event> getTopEvents(List<Double> queryEmbedding, List<Event> all, int k) {
+        for (Event e : all) {
+            double eSim = calculateCosineSimilarity(queryEmbedding, e.eventEmbedding);
+            double ctxSim = calculateCosineSimilarity(queryEmbedding, e.eventContextEmbedding);
+            double resSim = calculateCosineSimilarity(queryEmbedding, e.eventResultEmbedding);
+            e.similarity = (eSim + ctxSim + resSim) / 3.0;
+        }
+        all.sort((a, b) -> Double.compare(b.similarity, a.similarity));
+        return all.subList(0, Math.min(k, all.size()));
+    }
+
+
     private static String buildSystemPrompt() {
         return """
                 
@@ -286,6 +330,25 @@ public class RAGImplementation {
 
     }
 
+    private static String buildContext(List<Conversation> conversations, List<Event> events, double threshold) {
+        StringBuilder ctx = new StringBuilder();
+        for (Conversation c : conversations) {
+            if (c.similarity >= threshold) {
+                ctx.append(formatConversation(c)).append("\n");
+            }
+        }
+        for (Event e : events) {
+            if (e.similarity >= threshold) {
+                ctx.append(formatEvent(e)).append("\n");
+            }
+        }
+        if (ctx.isEmpty()) {
+            return "No relevant data found from database. Analyze current user input and answer accordingly.";
+        }
+        return ctx.toString();
+    }
+
+
     private static String recall(String dateTime, String playerMessage) throws SQLException {
 
         ollamaAPI.setRequestTimeoutSeconds(600);
@@ -305,7 +368,7 @@ public class RAGImplementation {
         if(tableType.equalsIgnoreCase("conversation") || tableType.startsWith("Conversation") || tableType.startsWith("conversation") || tableType.contains("conversation") || tableType.contains("Conversation")) {
 
 
-            List<RAGImplementation.Conversation> conversationList = RAGImplementation.fetchConversations();
+            List<OldRAGImplementation.Conversation> conversationList = OldRAGImplementation.fetchConversations();
             Set<Conversation> relevantConversationSet = new HashSet<>();
 
             List<Double> embedding;
@@ -313,7 +376,7 @@ public class RAGImplementation {
             for (String query : queryList) {
                 try {
                     embedding = ollamaAPI.generateEmbeddings(OllamaModelType.NOMIC_EMBED_TEXT, query);
-                    List<RAGImplementation.Conversation> relevantConversations = RAGImplementation.findRelevantConversations(embedding, conversationList, 2);
+                    List<OldRAGImplementation.Conversation> relevantConversations = OldRAGImplementation.findRelevantConversations(embedding, conversationList, 2);
                     relevantConversationSet.addAll(relevantConversations);
                 } catch (IOException | InterruptedException | OllamaBaseException e) {
                     LOGGER.error("Caught new exception in fetching relevant conversations: {}", (Object) e.getStackTrace());
@@ -326,7 +389,7 @@ public class RAGImplementation {
 
             double maxSimilarity = findMaxSimilarityConversations(relevantConversationSet);
 
-            for (RAGImplementation.Conversation conversation : relevantConversationSet) {
+            for (OldRAGImplementation.Conversation conversation : relevantConversationSet) {
                 boolean isRecent = isRecentTimestamp(conversation.timestamp, dateTime);
                 boolean isHighSimilarity = isHighSimilarity(conversation.similarity, maxSimilarity);
 
@@ -360,8 +423,8 @@ public class RAGImplementation {
         }
 
         else {
-            List<RAGImplementation.Event> eventList = RAGImplementation.fetchEvents();
-            Set<RAGImplementation.Event> relevantEventSet = new HashSet<>();
+            List<OldRAGImplementation.Event> eventList = OldRAGImplementation.fetchEvents();
+            Set<OldRAGImplementation.Event> relevantEventSet = new HashSet<>();
 
             List<Double> embedding;
 
@@ -370,7 +433,7 @@ public class RAGImplementation {
 
                 try {
                     embedding = ollamaAPI.generateEmbeddings(OllamaModelType.NOMIC_EMBED_TEXT, query);
-                    List<RAGImplementation.Event> relevantEvents = RAGImplementation.findRelevantEvents(embedding, eventList, 2);
+                    List<OldRAGImplementation.Event> relevantEvents = OldRAGImplementation.findRelevantEvents(embedding, eventList, 2);
                     relevantEventSet.addAll(relevantEvents);
                 } catch (IOException | InterruptedException | OllamaBaseException e) {
                     LOGGER.error("Caught new exception in fetching relevant events: {}", (Object) e.getStackTrace());
@@ -382,7 +445,7 @@ public class RAGImplementation {
 
             double maxSimilarity = findMaxSimilarityEvents(relevantEventSet);
 
-            for (RAGImplementation.Event event : relevantEventSet) {
+            for (OldRAGImplementation.Event event : relevantEventSet) {
                 boolean isRecent = isRecentTimestamp(event.timestamp, dateTime);
                 boolean isHighSimilarity = isHighSimilarity(event.similarity, maxSimilarity);
 
@@ -418,52 +481,50 @@ public class RAGImplementation {
     }
 
 
-    public static void runRagTask(String dateTime, String PlayerMessage, ServerCommandSource botSource) {
-
-        String relevantContext = "";
-
-        String DB_URL = "jdbc:sqlite:" + "./sqlite_databases/" + "memory_agent.db";
+    public static void runRagTask(String dateTime, String playerMessage, ServerCommandSource botSource) {
+        logger.info("⚡ Starting faster RAG task...");
 
         try {
-            relevantContext = recall(dateTime, PlayerMessage);
-        } catch (SQLException e) {
-            logger.error("SQL Exception occurred: {}", e.getMessage() );
-        }
+            // 1️⃣ Embed once
+            List<Double> promptEmbedding = ollamaAPI.generateEmbeddings(OllamaModelType.NOMIC_EMBED_TEXT, playerMessage);
 
-        String systemPrompt = buildSystemPrompt();
+            // 2️⃣ Fetch from DB
+            List<Conversation> allConversations = fetchConversations();
+            List<Event> allEvents = fetchEvents();
 
-        OllamaChatRequestBuilder builder = OllamaChatRequestBuilder.getInstance("llama3.2:latest");
+            // 3️⃣ Rank top
+            List<Conversation> topConvs = getTopConversations(promptEmbedding, allConversations, 3);
+            List<Event> topEvents = getTopEvents(promptEmbedding, allEvents, 3);
 
-        OllamaChatRequestModel chatRequestModel = builder
-                .withMessage(OllamaChatMessageRole.SYSTEM, systemPrompt)
-                .withMessage(OllamaChatMessageRole.USER, "User prompt: " + PlayerMessage)
-                .withMessage(OllamaChatMessageRole.USER, "Context data from database: " + relevantContext)
-                .withMessage(OllamaChatMessageRole.USER, "Current date and time: " + dateTime)
-                .build();
+            // 4️⃣ Compose context
+            String context = buildContext(topConvs, topEvents, 0.6);
 
-        OllamaChatResult chatResult = null;
-        String response;
+            logger.info("📚 Final recall context: \n{}", context);
 
-        try {
+            // 5️⃣ One LLM call
+            OllamaChatRequestModel chatRequestModel = OllamaChatRequestBuilder.getInstance("qwen3:8b")
+                    .withMessage(OllamaChatMessageRole.SYSTEM, buildSystemPrompt())
+                    .withMessage(OllamaChatMessageRole.USER, "User prompt: " + playerMessage)
+                    .withMessage(OllamaChatMessageRole.USER, "Context data: " + context)
+                    .withMessage(OllamaChatMessageRole.USER, "Current date and time: " + dateTime)
+                    .build();
 
-             chatResult = ollamaAPI.chat(chatRequestModel);
-             response = chatResult.getResponse();
+            OllamaChatResult chatResult = ollamaAPI.chat(chatRequestModel);
+            String response = chatResult.getResponse().trim();
 
-            ChatUtils.sendChatMessages(botSource, response);
+            ollamaClient.processLLMOutput(response, botSource.getName(), botSource);
 
-
-            List<Double> promptEmbedding = ollamaAPI.generateEmbeddings(OllamaModelType.NOMIC_EMBED_TEXT, PlayerMessage);
+            // 6️⃣ Save new conversation
             List<Double> responseEmbedding = ollamaAPI.generateEmbeddings(OllamaModelType.NOMIC_EMBED_TEXT, response);
+            OldSQLiteDB.storeConversationWithEmbedding(DB_URL, playerMessage, response, promptEmbedding, responseEmbedding);
 
-            SQLiteDB.storeConversationWithEmbedding(DB_URL, PlayerMessage, response, promptEmbedding, responseEmbedding);
+            logger.info("✅ RAG finished successfully.");
 
-
-        } catch (OllamaBaseException | IOException | InterruptedException | SQLException e) {
-            LOGGER.error("Caught new exception while running RAG task: {}", e.getMessage());
-            throw new RuntimeException(e);
+        } catch (Exception e) {
+            logger.error("❌ RAG task failed: {}", e.getMessage(), e);
         }
-
     }
+
 
 
 

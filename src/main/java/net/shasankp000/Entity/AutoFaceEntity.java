@@ -1,6 +1,3 @@
-// There is a small bug in this code when the bot is killed off, and then it's respawned.
-// Can't identify where the problem stems from, yet.
-
 package net.shasankp000.Entity;
 
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
@@ -9,15 +6,18 @@ import net.minecraft.entity.mob.HostileEntity;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.util.math.Box;
+import net.shasankp000.ChatUtils.ChatUtils;
 import net.shasankp000.Database.QTable;
 import net.shasankp000.GameAI.BotEventHandler;
 import net.shasankp000.GameAI.RLAgent;
 import net.shasankp000.Commands.modCommandRegistry;
 import net.shasankp000.Database.QTableStorage;
 import net.shasankp000.PlayerUtils.BlockDistanceLimitedSearch;
+import net.shasankp000.PlayerUtils.blockDetectionUnit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import net.shasankp000.DangerZoneDetector.DangerZoneDetector;
+import net.shasankp000.PathFinding.PathTracer;
 
 import java.io.IOException;
 import java.util.Comparator;
@@ -36,6 +36,7 @@ public class AutoFaceEntity {
     private static final int INTERVAL_SECONDS = 1; // Interval in seconds to check for nearby entities
     private static final ExecutorService executor3 = Executors.newSingleThreadExecutor();
     public static boolean botBusy;
+    private static boolean botExecutingTask;
     public static boolean hostileEntityInFront;
     public static boolean isHandlerTriggered;
     private static boolean isWorldTickListenerActive = true; // Flag to control execution
@@ -46,6 +47,14 @@ public class AutoFaceEntity {
     private static final Map<ServerPlayerEntity, ScheduledExecutorService> botExecutors = new HashMap<>();
     private static ServerPlayerEntity Bot = null;
     public static boolean isBotMoving = false;
+
+    public static void setBotExecutingTask(boolean value) {
+        botExecutingTask = value;
+    }
+
+    public static boolean isBotExecutingTask() {
+        return botExecutingTask;
+    }
 
     public static void startAutoFace(ServerPlayerEntity bot) {
         // Stop any existing executor for this bot
@@ -103,6 +112,8 @@ public class AutoFaceEntity {
         botExecutor.scheduleAtFixedRate(() -> {
             // Run detection and facing logic
 
+//            System.out.println("Is bot moving: " + PathTracer.getBotMovementStatus() + " " + isBotMoving);
+
             if (server != null && server.isRunning() && bot.isAlive()) {
 
                 // Detect all entities within the bounding box
@@ -128,14 +139,6 @@ public class AutoFaceEntity {
 
                     System.out.println("Hostile entity detected!");
 
-                    if (isBotMoving) {
-                        System.out.println("Bot is moving, skipping facing the closest entity");
-                    }
-                    else {
-                        FaceClosestEntity.faceClosestEntity(bot, AutoFaceEntity.hostileEntities);
-                    }
-
-
                     // Find the closest hostile entity
                     Entity closestHostile = hostileEntities.stream()
                             .min(Comparator.comparingDouble(e -> e.squaredDistanceTo(bot.getPos())))
@@ -143,44 +146,66 @@ public class AutoFaceEntity {
 
                     double distanceToHostileEntity = Math.sqrt(closestHostile.squaredDistanceTo(bot.getPos()));
 
-                    // Log details of the detected hostile entity
-                    System.out.println("Closest hostile entity: " + closestHostile.getName().getString()
-                            + " at distance: " + distanceToHostileEntity);
+                    if ((PathTracer.BotSegmentManager.getBotMovementStatus() || isBotMoving) || blockDetectionUnit.getBlockDetectionStatus() || isBotExecutingTask()) {
+                        System.out.println("Bot is busy, skipping facing the closest entity");
 
-                    botBusy = true; // Set the bot as busy if hostile entities are in range
-                    hostileEntityInFront = true;
+                        if (distanceToHostileEntity <= 10.0) {
+                            isBotMoving = false;
+                            setBotExecutingTask(false);
+                            ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withMaxLevel(4), "Terminating all current tasks due to threat detections");
 
-                    // Trigger the handler
-                    if (isHandlerTriggered) {
-                        System.out.println("isHandlerTriggered: " + isHandlerTriggered);
-                        System.out.println("Handler already triggered. Skipping.");
-                    } else {
-                        System.out.println("Triggering handler for hostile entity.");
-                        isHandlerTriggered = true;
 
-                        BotEventHandler eventHandler = new BotEventHandler(server, bot);
+                            FaceClosestEntity.faceClosestEntity(bot, AutoFaceEntity.hostileEntities);
 
-                        if (modCommandRegistry.isTrainingMode) {
 
-                            try {
-                                eventHandler.detectAndReact(finalRlAgent, distanceToHostileEntity, qTable);
-                            } catch (IOException e) {
-                                System.out.println("Exception occurred in startAutoFace: " + e.getMessage());
-                                throw new RuntimeException(e);
+
+                            // Log details of the detected hostile entity
+                            System.out.println("Closest hostile entity: " + closestHostile.getName().getString()
+                                    + " at distance: " + distanceToHostileEntity);
+
+                            botBusy = true; // Set the bot as busy if hostile entities are in range
+                            hostileEntityInFront = true;
+
+                            // Trigger the handler
+                            if (isHandlerTriggered) {
+                                System.out.println("isHandlerTriggered: " + isHandlerTriggered);
+                                System.out.println("Handler already triggered. Skipping.");
+                            } else {
+                                System.out.println("Triggering handler for hostile entity.");
+                                isHandlerTriggered = true;
+
+                                BotEventHandler eventHandler = new BotEventHandler(server, bot);
+
+                                if (modCommandRegistry.isTrainingMode) {
+
+                                    try {
+                                        eventHandler.detectAndReact(finalRlAgent, distanceToHostileEntity, qTable);
+                                    } catch (IOException e) {
+                                        System.out.println("Exception occurred in startAutoFace: " + e.getMessage());
+                                        throw new RuntimeException(e);
+
+                                    }
+                                }
+                                else {
+
+                                    eventHandler.detectAndReactPlayMode(finalRlAgent, qTable);
+
+                                }
 
                             }
                         }
-                        else {
-
-                            eventHandler.detectAndReactPlayMode(finalRlAgent, qTable);
-
-                        }
 
                     }
+
+
                 }
                 else if ((DangerZoneDetector.detectDangerZone(bot, 10, 10 , 10) <= 5 && DangerZoneDetector.detectDangerZone(bot, 10, 10 , 10)!= 0) || hasSculkNearby)  {
 
                     System.out.println("Triggering handler for danger zone case");
+                    isBotMoving = false;
+                    setBotExecutingTask(false);
+
+
 
                     botBusy = true;
 
@@ -206,6 +231,16 @@ public class AutoFaceEntity {
                         System.out.println(e.getStackTrace());
                     }
 
+                    // first check if bot is moving, and if so, then stop moving.
+                    // the hope is that the bot will stop moving ahead of time since the danger zone detector has a wide range.
+
+                    if (PathTracer.BotSegmentManager.getBotMovementStatus() || isBotMoving || isBotExecutingTask()) {
+                        System.out.println("Stopping movement since danger zone is detected.");
+                        ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withMaxLevel(4), "Terminating all current tasks due to threat detections");
+                        server.getCommandManager().executeWithPrefix(bot.getCommandSource(), "/player " + bot.getName().getString() + " stop");
+                    }
+
+
                     if (modCommandRegistry.isTrainingMode) {
 
                         try {
@@ -225,11 +260,18 @@ public class AutoFaceEntity {
                 }
 
                 else {
-                    botBusy = false; // Clear the flag if no hostile entities are in front
 
-                    hostileEntityInFront = false;
+                    if ((PathTracer.BotSegmentManager.getBotMovementStatus() || isBotMoving) || blockDetectionUnit.getBlockDetectionStatus() || isBotExecutingTask()) {
+                        System.out.println("Bot is busy, skipping facing the closest entity");
+                    }
 
-                    FaceClosestEntity.faceClosestEntity(bot, nearbyEntities);
+                    else {
+                        botBusy = false; // Clear the flag if no hostile entities are in front
+
+                        hostileEntityInFront = false;
+
+                        FaceClosestEntity.faceClosestEntity(bot, nearbyEntities);
+                    }
 
                 }
 

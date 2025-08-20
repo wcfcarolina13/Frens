@@ -4,6 +4,9 @@ import net.minecraft.block.Block;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.util.math.BlockPos;
 
+import java.util.LinkedHashMap;
+import java.util.Map;
+
 /**
  * Represents an internal 3D map of the blocks surrounding the bot.
  * The map is centered on the bot's current position.
@@ -97,5 +100,33 @@ public class InternalMap {
             System.out.println();
         }
     }
+
+    public Map<String, String> summarizeSurroundings() {
+        Map<String, String> summary = new LinkedHashMap<>();
+
+        // Relative positions in cardinal directions
+        int[][] directionOffsets = {
+                {0, 0, -1},  // north
+                {1, 0, 0},   // east
+                {0, 0, 1},   // south
+                {-1, 0, 0},  // west
+                {0, 1, 0},   // above
+                {0, -1, 0}   // below
+        };
+        String[] directionNames = {"north", "east", "south", "west", "up", "down"};
+
+        for (int i = 0; i < directionOffsets.length; i++) {
+            int dx = directionOffsets[i][0];
+            int dy = directionOffsets[i][1];
+            int dz = directionOffsets[i][2];
+
+            Block block = getBlockAt(dx, dy, dz);
+            String name = block != null ? block.getTranslationKey().replace("block.minecraft.", "") : "unknown";
+            summary.put(directionNames[i], name);
+        }
+
+        return summary;
+    }
+
 
 }
