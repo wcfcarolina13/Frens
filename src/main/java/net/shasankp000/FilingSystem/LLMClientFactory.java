@@ -12,32 +12,32 @@
         public static LLMClient createClient(String mode) {
             return switch (mode) {
                 case "openai", "gpt" -> {
-                    if (AIPlayer.CONFIG.openAIKey().isEmpty()) {
+                    if (AIPlayer.CONFIG.getOpenAIKey().isEmpty()) {
                         LOGGER.error("OpenAI API key not set in config!");
                         yield null;
                     }
-                    yield new OpenAIClient(AIPlayer.CONFIG.openAIKey(), AIPlayer.CONFIG.selectedLanguageModel());
+                    yield new OpenAIClient(AIPlayer.CONFIG.getOpenAIKey(), AIPlayer.CONFIG.getSelectedLanguageModel());
                 }
                 case "anthropic", "claude" -> {
-                    if (AIPlayer.CONFIG.claudeKey().isEmpty()) {
+                    if (AIPlayer.CONFIG.getClaudeKey().isEmpty()) {
                         LOGGER.error("Claude API key not set in config!");
                         yield null;
                     }
-                    yield new AnthropicClient(AIPlayer.CONFIG.claudeKey(), AIPlayer.CONFIG.selectedLanguageModel());
+                    yield new AnthropicClient(AIPlayer.CONFIG.getClaudeKey(), AIPlayer.CONFIG.getSelectedLanguageModel());
                 }
                 case "google", "gemini" -> {
-                    if (AIPlayer.CONFIG.geminiKey().isEmpty()) {
+                    if (AIPlayer.CONFIG.getGeminiKey().isEmpty()) {
                         LOGGER.error("Gemini API key not set in config!");
                         yield null;
                     }
-                    yield new GeminiClient(AIPlayer.CONFIG.geminiKey(), AIPlayer.CONFIG.selectedLanguageModel());
+                    yield new GeminiClient(AIPlayer.CONFIG.getGeminiKey(), AIPlayer.CONFIG.getSelectedLanguageModel());
                 }
                 case "xAI", "xai", "grok" -> {
-                    if (AIPlayer.CONFIG.grokKey().isEmpty()) {
+                    if (AIPlayer.CONFIG.getGrokKey().isEmpty()) {
                         LOGGER.error("Grok API key not set in config!");
                         yield null;
                     }
-                    yield new GrokClient(AIPlayer.CONFIG.grokKey(), AIPlayer.CONFIG.selectedLanguageModel());
+                    yield new GrokClient(AIPlayer.CONFIG.getGrokKey(), AIPlayer.CONFIG.getSelectedLanguageModel());
                 }
                 default -> {
                     LOGGER.info("Defaulting to Ollama client");

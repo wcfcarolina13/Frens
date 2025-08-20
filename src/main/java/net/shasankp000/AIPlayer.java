@@ -14,12 +14,13 @@ import net.shasankp000.ChatUtils.NLPProcessor;
 import net.shasankp000.Commands.configCommand;
 import net.shasankp000.Commands.modCommandRegistry;
 import net.shasankp000.Database.SQLiteDB;
+import net.shasankp000.FilingSystem.ManualConfig;
 import net.shasankp000.GameAI.BotEventHandler;
 
 import net.shasankp000.Database.QTableStorage;
 import net.shasankp000.Entity.AutoFaceEntity;
-import net.shasankp000.FilingSystem.AIPlayerConfig;
 import net.shasankp000.Network.OpenConfigPayload;
+import net.shasankp000.Network.SaveAPIKeyPayload;
 import net.shasankp000.Network.SaveConfigPayload;
 import net.shasankp000.Network.configNetworkManager;
 import net.shasankp000.WebSearch.AISearchConfig;
@@ -33,7 +34,7 @@ import java.util.concurrent.CompletableFuture;
 public class AIPlayer implements ModInitializer {
 
     public static final Logger LOGGER = LoggerFactory.getLogger("ai-player");
-	public static final AIPlayerConfig CONFIG = AIPlayerConfig.createAndLoad(); // initialize the config.
+	public static final ManualConfig CONFIG = ManualConfig.load();
 	public static MinecraftServer serverInstance = null; // default for now
 	public static BertModelManager modelManager;
 	public static boolean loadedBERTModelIntoMemory = false;
@@ -46,10 +47,25 @@ public class AIPlayer implements ModInitializer {
 
 		LOGGER.debug("Running on environment type: {}", FabricLoader.getInstance().getEnvironmentType());
 
+		String llmProvider = System.getProperty("aiplayer.llmMode", "ollama");
+
+		System.out.println("Using provider: " + llmProvider);
+
+		// Debug: Print ALL system properties to see what's available
+		System.out.println("=== ALL SYSTEM PROPERTIES ===");
+		System.getProperties().forEach((key, value) -> {
+			if (key.toString().contains("aiplayer") || key.toString().contains("llm")) {
+				System.out.println(key + " = " + value);
+			}
+		});
+		System.out.println("=== END DEBUG ===");
+
+
         // registering the packets on the global entrypoint to recognise them
 
 		PayloadTypeRegistry.playC2S().register(SaveConfigPayload.ID, SaveConfigPayload.CODEC);
 		PayloadTypeRegistry.playS2C().register(OpenConfigPayload.ID, OpenConfigPayload.CODEC);
+		PayloadTypeRegistry.playC2S().register(SaveAPIKeyPayload.ID, SaveAPIKeyPayload.CODEC);
 
 
 		modCommandRegistry.register();
@@ -77,6 +93,7 @@ public class AIPlayer implements ModInitializer {
 		// Inside AIPlayer.onInitialize()
 		ServerLifecycleEvents.SERVER_STARTED.register(server -> {
 			configNetworkManager.registerServerModelNameSaveReceiver(server);
+			configNetworkManager.registerServerAPIKeySaveReceiver(server);
 			serverInstance = server;
 			LOGGER.info("Server instance stored!");
 

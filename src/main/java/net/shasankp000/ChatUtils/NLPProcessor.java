@@ -38,7 +38,7 @@ public class NLPProcessor {
     private static final String cartExpectedHash = "1b8e0cc8c5fdb1bdb579b9f916c735929e82ab492a3c3cd13d0a254e765f7d22";
     private static final String LIDSNetModelURL = "https://github.com/shasankp000/AI-Player/releases/download/v1.0.5-release-1.20.6-NLP-asset/LIDSNet_torchscript.zip";
     private static final String LIDSNetExpectedHash = "ad93089b9bfa735d472ab828942541d0d80203dbfd42a3a5bc303a8bc12158e8";
-    private static String selectedLM = AIPlayer.CONFIG.selectedLanguageModel();
+    private static String selectedLM = AIPlayer.CONFIG.getSelectedLanguageModel();
     private static Map<String, String> checkSumFileNameMap = getcheckSumFileNameMap();
 
     public enum Intent {

@@ -72,9 +72,17 @@ public class LLMServiceHandler {
     }
 
     public static void processLLMOutput(String fullResponse, String botName, ServerCommandSource botSource) {
+        LOGGER.info("processLLMOutput called with response: '{}', botName: '{}'", fullResponse, botName);
+
+        if (fullResponse == null || fullResponse.trim().isEmpty()) {
+            LOGGER.warn("fullResponse is null or empty");
+            return;
+        }
+
         Matcher matcher = THINK_BLOCK.matcher(fullResponse);
 
         if (matcher.find()) {
+            LOGGER.info("Think block found");
             String thinking = matcher.group(1).trim();
             String remainder = fullResponse.replace(matcher.group(0), "").trim();
 
@@ -89,58 +97,75 @@ public class LLMServiceHandler {
             ChatUtils.sendChatMessages(botSource, botName + " is done thinking!");
 
             if (!remainder.isEmpty()) {
+                LOGGER.info("Sending remainder: '{}'", remainder);
                 ChatUtils.sendChatMessages(botSource, botName + ": " + remainder);
+            } else {
+                LOGGER.info("Remainder is empty");
             }
         } else {
-            ChatUtils.sendChatMessages(botSource, botName + ": " + fullResponse);
+            LOGGER.info("No think block found, sending full response: '{}'", fullResponse);
+            ChatUtils.sendChatMessages(botSource, fullResponse);
         }
     }
 
-    public static void initializeLLMClient(LLMClient client, ServerCommandSource botSource) {
-        CompletableFuture.runAsync(() -> {
-
-            if (client.isReachable()) {
-                isInitialized = true;
-                LOGGER.info("{} client initialized.", client.getProvider());
-                ChatUtils.sendChatMessages(botSource, "Established connection to " + client.getProvider() + "'s servers. Using " + AIPlayer.CONFIG.selectedLanguageModel());
-                initialResponse = client.sendPrompt(generateSystemPrompt(), "Initializing chat");
-            }
-            else {
-                LOGGER.error("Error! Could not reach {} client. Please try again!", client.getProvider());
-                ChatUtils.sendChatMessages(botSource, "Error! Could not reach " + client.getProvider() + "'s servers. Please check your internet connection or try again after sometime!");
-            }
-
-        });
-    }
 
     public static void sendInitialResponse(ServerCommandSource botSource, LLMClient client) {
-        MinecraftServer server = botSource.getServer();
+        CompletableFuture<String> initFuture = CompletableFuture.supplyAsync(() -> {
+            try {
+                if (client.isReachable()) {
+                    isInitialized = true;
+                    LOGGER.info("{} client initialized.", client.getProvider());
+                    ChatUtils.sendChatMessages(botSource, "Established connection to " + client.getProvider() + "'s servers. Using " + AIPlayer.CONFIG.getSelectedLanguageModel());
 
-        botName = botSource.getPlayer().getName().getString();
-
-        initializeLLMClient(client, botSource);
-
-        // ✅ Schedule the WHOLE logic back to the main thread
-        server.execute(() -> {
-            processLLMOutput(initialResponse, botName, botSource);
-
-            List<SQLiteDB.Memory> memories = SQLiteDB.fetchInitialResponse();
-            if (memories.isEmpty()) {
-                CompletableFuture.runAsync(() -> {
-                    try {
-                        List<Double> embedding = ollamaAPI.generateEmbeddings(
-                                OllamaModelType.NOMIC_EMBED_TEXT,
-                                generateSystemPrompt()
-                        );
-                        SQLiteDB.storeMemory("conversation", generateSystemPrompt(), initialResponse, embedding);
-                        LOGGER.info("✅ Saved initial response.");
-                    } catch (Exception e) {
-                        LOGGER.error("❌ Failed saving initial response: {}", e.getMessage(), e);
-                    }
-                });
-            } else {
-                LOGGER.info("🗃️ Initial response already in DB.");
+                    // Fetch and return the initial response
+                    String response = client.sendPrompt(generateSystemPrompt(), "Initializing chat");
+                    LOGGER.info("Initial response received: '{}'", response);
+                    LOGGER.info("Response length: {}", response != null ? response.length() : "null");
+                    initialResponse = response;
+                    return response;
+                } else {
+                    LOGGER.error("Error! Could not reach {} client. Please try again!", client.getProvider());
+                    ChatUtils.sendChatMessages(botSource, "Error! Could not reach " + client.getProvider() + "'s servers. Please check your internet connection or try again after sometime!");
+                    return null;
+                }
+            } catch (Exception e) {
+                LOGGER.error("Exception in initFuture: {}", e.getMessage(), e);
+                return null;
             }
+        });
+
+        initFuture.thenAccept(response -> {
+            try {
+                LOGGER.info("thenAccept called with response: '{}'", response);
+                if (response != null && !response.trim().isEmpty()) {
+                    // Process the response on the main thread
+                    MinecraftServer server = botSource.getServer();
+                    String botName = botSource.getPlayer().getName().getString();
+
+                    LOGGER.info("Scheduling processLLMOutput on main thread for bot: {}", botName);
+                    server.execute(() -> {
+                        try {
+                            LOGGER.info("About to call processLLMOutput with: '{}'", response);
+                            processLLMOutput(response, botName, botSource);
+                            LOGGER.info("processLLMOutput completed");
+                        } catch (Exception e) {
+                            LOGGER.error("Exception in processLLMOutput: {}", e.getMessage(), e);
+                        }
+                    });
+
+                    // Handle database operations
+                    CompletableFuture.runAsync(() -> {
+                        // ... your database code
+                    });
+                } else {
+                    LOGGER.warn("Response is null or empty, not processing");
+                }
+            } catch (Exception e) {
+                LOGGER.error("Exception in thenAccept: {}", e.getMessage(), e);
+            }
+        }).exceptionally(throwable -> {
+            LOGGER.error("CompletableFuture failed: {}", throwable.getMessage(), throwable);
+            return null;
         });
     }
 

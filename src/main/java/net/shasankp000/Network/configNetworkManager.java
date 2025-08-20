@@ -61,10 +61,10 @@ public class configNetworkManager {
 
             // Run the config update on the server thread
             context.server().execute(() -> {
-                AIPlayer.CONFIG.selectedLanguageModel(newConfigData);
+                AIPlayer.CONFIG.setSelectedLanguageModel(newConfigData);
                 AIPlayer.CONFIG.save();
                 ServerCommandSource serverCommandSource = server.getCommandSource().withSilent().withMaxLevel(4);
-                ChatUtils.sendChatMessages(serverCommandSource, "Config saved to server successfully!");
+                ChatUtils.sendSystemMessage(serverCommandSource, "Config saved to server successfully!");
             });
         });
     }
@@ -79,16 +79,16 @@ public class configNetworkManager {
             context.server().execute(() -> {
                 switch (provider) {
                     case "openai":
-                        AIPlayer.CONFIG.openAIKey(newKey);
+                        AIPlayer.CONFIG.setOpenAIKey(newKey);
                         break;
                     case "gemini":
-                        AIPlayer.CONFIG.geminiKey(newKey);
+                        AIPlayer.CONFIG.setGeminiKey(newKey);
                         break;
                     case "claude":
-                        AIPlayer.CONFIG.claudeKey(newKey);
+                        AIPlayer.CONFIG.setClaudeKey(newKey);
                         break;
                     case "grok":
-                        AIPlayer.CONFIG.grokKey(newKey);
+                        AIPlayer.CONFIG.setGrokKey(newKey);
                         break;
                     case "ollama":
                         LOGGER.error("Error! Ollama is not supported in this mode!");
@@ -99,7 +99,7 @@ public class configNetworkManager {
                 }
                 AIPlayer.CONFIG.save();
                 ServerCommandSource serverCommandSource = server.getCommandSource().withSilent().withMaxLevel(4);
-                ChatUtils.sendChatMessages(serverCommandSource, "API Key for " + provider + " saved successfully!");
+                ChatUtils.sendSystemMessage(serverCommandSource, "API Key for " + provider + " saved successfully!");
             });
         });
     }

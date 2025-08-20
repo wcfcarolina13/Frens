@@ -72,7 +72,7 @@ public class ollamaClient {
         ServerCommandSource botSource = Objects.requireNonNull(server.getPlayerManager().getPlayer(botName))
                 .getCommandSource().withSilent().withMaxLevel(4);
 
-        String formatter = ChatUtils.chooseFormatterRandom();
+        String formatter = ChatUtils.getRandomColorCode();
 
         server.execute(() -> {
             server.getCommandManager().executeWithPrefix(playerSource, "/say " + formatter + message);
@@ -164,7 +164,7 @@ public class ollamaClient {
         }
 
         ollamaAPI.setRequestTimeoutSeconds(90);
-        String selectedLM = AIPlayer.CONFIG.selectedLanguageModel();
+        String selectedLM = AIPlayer.CONFIG.getSelectedLanguageModel();
         LOGGER.info("Connecting to Ollama using model: {}", selectedLM);
 
         CompletableFuture.runAsync(() -> {

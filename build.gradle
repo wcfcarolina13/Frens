@@ -63,12 +63,9 @@ dependencies {
 	// OpenNLP ONLY - No Stanford CoreNLP!
 	implementation 'org.apache.opennlp:opennlp-tools:2.5.5'
 
-	// OWO lib
-	annotationProcessor modImplementation("io.wispforest:owo-lib:${project.owo_version}")
 
 	// Include statements for runtime
 	include "com.github.amithkoujalgi:ollama4j:1.0.77"
-	include "io.wispforest:owo-sentinel:${project.owo_version}"
 	include "com.github.FasterXML:jackson-databind:jackson-databind-2.17.2"
 	include "com.github.FasterXML:jackson-core:jackson-core-2.17.2"
 	include "com.github.FasterXML:jackson-datatype-jsr310:jackson-datatype-jsr310-2.8.4"
@@ -145,5 +142,9 @@ tasks.withType(JavaExec).configureEach {
 		// Performance
 		jvmArgs += "-Xmx4G"
 		jvmArgs += "-Xms2G"
+		jvmArgs += "-Daiplayer.llmMode=gemini"
 	}
 }
+
+
+

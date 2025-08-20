@@ -15,6 +15,7 @@ import net.fabricmc.loader.api.FabricLoader;
 import net.shasankp000.ChatUtils.ChatContextManager;
 import net.shasankp000.ChatUtils.ClarificationState;
 import net.shasankp000.FilingSystem.LLMClientFactory;
+import net.shasankp000.FilingSystem.ManualConfig;
 import net.shasankp000.Network.OpenConfigPayload;
 import net.shasankp000.OllamaClient.ollamaClient;
 import net.shasankp000.ServiceLLMClients.*;
@@ -25,8 +26,6 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.Set;
-import java.util.HashSet;
 import java.util.UUID;
 
 public class AIPlayerClient implements ClientModInitializer {
@@ -35,7 +34,7 @@ public class AIPlayerClient implements ClientModInitializer {
     private static final Path BOT_PROFILE_PATH = Paths.get(gameDir + "/config/settings.json5");
     private static JsonObject botProfiles;
     public static final Logger LOGGER = LoggerFactory.getLogger("ai-player-client");
-
+    public static final ManualConfig CONFIG = ManualConfig.load();
 
 
     static {
@@ -104,6 +103,11 @@ public class AIPlayerClient implements ClientModInitializer {
 
         LOGGER.debug("Running on environment type: {}", FabricLoader.getInstance().getEnvironmentType());
 
+        String llmProvider = System.getProperty("aiplayer.llmMode", "ollama");
+
+        LOGGER.debug("Using provider: {}", llmProvider);
+
+
         ClientPlayNetworking.registerGlobalReceiver(OpenConfigPayload.ID, (client, handler) -> {
             net.minecraft.client.gui.screen.Screen currentScreen = net.minecraft.client.MinecraftClient.getInstance().currentScreen;
             net.minecraft.client.MinecraftClient.getInstance().setScreen(
@@ -119,7 +123,7 @@ public class AIPlayerClient implements ClientModInitializer {
             String rawMessage = message.getString();
             UUID playerUUID = sender != null ? sender.getId() : null;
 
-            String llmProvider = System.getProperty("aiplayer.llmMode", "ollama");
+
 
             System.out.println("Raw message: " + rawMessage);
 
@@ -207,7 +211,6 @@ public class AIPlayerClient implements ClientModInitializer {
             MinecraftClient client = MinecraftClient.getInstance();
 
             System.out.println("Outgoing message: " + message);
-            String llmProvider = System.getProperty("aiplayer.llmMode", "ollama");
 
             UUID playerUUID = net.minecraft.client.MinecraftClient.getInstance().player.getUuid();
 

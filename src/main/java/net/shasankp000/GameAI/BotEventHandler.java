@@ -18,6 +18,7 @@ import net.shasankp000.Entity.AutoFaceEntity;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.shasankp000.Entity.FaceClosestEntity;
+import net.shasankp000.LauncherDetection.LauncherEnvironment;
 import net.shasankp000.PlayerUtils.*;
 import net.shasankp000.WorldUitls.GetTime;
 import net.shasankp000.Entity.EntityDetails;
@@ -35,8 +36,7 @@ public class BotEventHandler {
     public static final Logger LOGGER = LoggerFactory.getLogger("ai-player");
     private static MinecraftServer server = null;
     public static ServerPlayerEntity bot = null;
-    private static final String gameDir = FabricLoader.getInstance().getGameDir().toString();
-    public static final String qTableDir = gameDir + "/qtable_storage/";
+    public static final String qTableDir = LauncherEnvironment.getStorageDirectory("qtable_storage");
     private static final Object monitorLock = new Object();
     private static boolean isExecuting = false;
     private static final double DEFAULT_RISK_APPETITE = 0.5; // Default value upon respawn

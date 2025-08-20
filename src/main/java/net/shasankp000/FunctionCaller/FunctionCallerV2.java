@@ -67,7 +67,7 @@ public class FunctionCallerV2 {
     private static final Map<String, String> sharedState = new ConcurrentHashMap<>();
     private static UUID playerUUID;
     private static final Pattern THINK_BLOCK = Pattern.compile("<think>([\\s\\S]*?)</think>", Pattern.DOTALL);
-    private static String selectedLM = AIPlayer.CONFIG.selectedLanguageModel();
+    private static String selectedLM = AIPlayer.CONFIG.getSelectedLanguageModel();
 
     public FunctionCallerV2(ServerCommandSource botSource) {
 

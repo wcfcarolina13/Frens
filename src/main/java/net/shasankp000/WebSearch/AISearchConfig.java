@@ -16,8 +16,8 @@ public class AISearchConfig {
     public static String PREFERRED_PROVIDER = "gemini";
 
     static {
-        if (!AIPlayer.CONFIG.geminiKey().isEmpty()) {
-            GEMINI_API_KEY = AIPlayer.CONFIG.geminiKey(); // using the same api key for web search purposes as well.
+        if (!AIPlayer.CONFIG.getGeminiKey().isEmpty()) {
+            GEMINI_API_KEY = AIPlayer.CONFIG.getGeminiKey(); // using the same api key for web search purposes as well.
         }
 
         loadConfig();

@@ -66,7 +66,7 @@ public class DecisionResolver {
                 lidsNetPred, lidsNetConf
         );
 
-        String selectedLM = AIPlayer.CONFIG.selectedLanguageModel();
+        String selectedLM = AIPlayer.CONFIG.getSelectedLanguageModel();
 
         OllamaChatRequestModel requestModel = OllamaChatRequestBuilder.getInstance(selectedLM)
                 .withMessage(OllamaChatMessageRole.USER, prompt)

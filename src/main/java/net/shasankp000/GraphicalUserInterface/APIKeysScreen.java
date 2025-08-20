@@ -32,31 +32,36 @@ public class APIKeysScreen extends Screen {
         int startY = this.height / 4 + 10;
         int fieldWidth = 300;
         int fieldHeight = 20;
-        int labelWidth = 100; // New variable for label width
-        int startX = this.width / 2 - (fieldWidth / 2) + labelWidth; // New starting X for text fields
+        int labelWidth = 100;
+        int startX = this.width / 2 - (fieldWidth / 2) + labelWidth;
         int buttonWidth = 100;
+        int maxApiKeyLength = 256; // Generous baseline for all API key providers
 
         // OpenAI Key Field
         this.openAIKeyField = new TextFieldWidget(this.textRenderer, startX, startY, fieldWidth, fieldHeight, Text.empty());
-        this.openAIKeyField.setText(AIPlayer.CONFIG.openAIKey());
+        this.openAIKeyField.setMaxLength(maxApiKeyLength);
+        this.openAIKeyField.setText(AIPlayer.CONFIG.getOpenAIKey());
         this.addDrawableChild(this.openAIKeyField);
         this.addSelectableChild(this.openAIKeyField);
 
         // Claude Key Field
         this.claudeKeyField = new TextFieldWidget(this.textRenderer, startX, startY + 30, fieldWidth, fieldHeight, Text.empty());
-        this.claudeKeyField.setText(AIPlayer.CONFIG.claudeKey());
+        this.claudeKeyField.setMaxLength(maxApiKeyLength);
+        this.claudeKeyField.setText(AIPlayer.CONFIG.getClaudeKey());
         this.addDrawableChild(this.claudeKeyField);
         this.addSelectableChild(this.claudeKeyField);
 
         // Gemini Key Field
         this.geminiKeyField = new TextFieldWidget(this.textRenderer, startX, startY + 60, fieldWidth, fieldHeight, Text.empty());
-        this.geminiKeyField.setText(AIPlayer.CONFIG.geminiKey());
+        this.geminiKeyField.setMaxLength(maxApiKeyLength);
+        this.geminiKeyField.setText(AIPlayer.CONFIG.getGeminiKey());
         this.addDrawableChild(this.geminiKeyField);
         this.addSelectableChild(this.geminiKeyField);
 
         // Grok Key Field
         this.grokKeyField = new TextFieldWidget(this.textRenderer, startX, startY + 90, fieldWidth, fieldHeight, Text.empty());
-        this.grokKeyField.setText(AIPlayer.CONFIG.grokKey());
+        this.grokKeyField.setMaxLength(maxApiKeyLength);
+        this.grokKeyField.setText(AIPlayer.CONFIG.getGrokKey());
         this.addDrawableChild(this.grokKeyField);
         this.addSelectableChild(this.grokKeyField);
 
@@ -99,10 +104,10 @@ public class APIKeysScreen extends Screen {
 
     private void saveToFile() {
         // 1. Save all API keys to the client's config. This should always happen.
-        AIPlayer.CONFIG.openAIKey(this.openAIKeyField.getText());
-        AIPlayer.CONFIG.claudeKey(this.claudeKeyField.getText());
-        AIPlayer.CONFIG.geminiKey(this.geminiKeyField.getText());
-        AIPlayer.CONFIG.grokKey(this.grokKeyField.getText());
+        AIPlayer.CONFIG.setOpenAIKey(this.openAIKeyField.getText());
+        AIPlayer.CONFIG.setClaudeKey(this.claudeKeyField.getText());
+        AIPlayer.CONFIG.setGeminiKey(this.geminiKeyField.getText());
+        AIPlayer.CONFIG.setGrokKey(this.grokKeyField.getText());
 
         // 2. Only save the config file once, after all values have been updated.
         AIPlayer.CONFIG.save();
@@ -113,19 +118,19 @@ public class APIKeysScreen extends Screen {
         switch (llmMode) {
             case "openai":
                 configNetworkManager.sendSaveAPIPacket(llmMode, this.openAIKeyField.getText());
-                break;
+                return;
             case "gemini":
                 configNetworkManager.sendSaveAPIPacket(llmMode, this.geminiKeyField.getText());
-                break;
+                return;
             case "claude":
                 configNetworkManager.sendSaveAPIPacket(llmMode, this.claudeKeyField.getText());
-                break;
+                return;
             case "grok":
                 configNetworkManager.sendSaveAPIPacket(llmMode, this.grokKeyField.getText());
-                break;
+                return;
             case "ollama":
                 LOGGER.info("No API key packet sent for Ollama mode.");
-                break;
+                return;
             default:
                 LOGGER.warn("Unsupported LLM mode: " + llmMode);
                 break;

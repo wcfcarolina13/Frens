@@ -33,7 +33,7 @@ public class WebSearchTool {
             .connectTimeout(Duration.ofSeconds(15))
             .build();
     private static final OllamaAPI ollamaAPI = new OllamaAPI("http://localhost:11434/");
-    private static String selectedLM = AIPlayer.CONFIG.selectedLanguageModel();
+    private static String selectedLM = AIPlayer.CONFIG.getSelectedLanguageModel();
 
     private static final Path CACHE_DIR = Paths.get("web_cache");
 

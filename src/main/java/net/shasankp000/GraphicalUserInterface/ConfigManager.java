@@ -4,132 +4,195 @@ package net.shasankp000.GraphicalUserInterface;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.widget.ButtonWidget;
+import net.minecraft.client.gui.widget.TextFieldWidget;
 import net.minecraft.client.toast.SystemToast;
 import net.minecraft.text.Text;
 import net.shasankp000.AIPlayer;
-import net.shasankp000.FilingSystem.AIPlayerConfigModel;
 import net.shasankp000.GraphicalUserInterface.Widgets.DropdownMenuWidget;
 import net.shasankp000.Network.configNetworkManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 
+import java.util.stream.Collectors;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
 public class ConfigManager extends Screen {
+    public static final Logger LOGGER = LoggerFactory.getLogger("ConfigMan");
+    public Screen parent;
+    private DropdownMenuWidget dropdownMenuWidget;
+    private TextFieldWidget searchField;
+    private List<String> allModels;
+    private List<String> filteredModels;
 
-        public static final Logger LOGGER = LoggerFactory.getLogger("ConfigMan");
-        public Screen parent;
-        private DropdownMenuWidget dropdownMenuWidget;
-        public AIPlayerConfigModel aiPlayerConfigModel = new AIPlayerConfigModel();
-
-        public ConfigManager(Text title, Screen parent) {
-            super(title);
-            this.parent = parent;
-        }
-
-        @Override
-        protected void init() {
-            
-            List<String> modelList = AIPlayer.CONFIG.modelList();
-
-
-            DropdownMenuWidget dropdownMenuWidget = new DropdownMenuWidget(100, 40, 200, 20, Text.of("List of available models"), modelList);
-            this.dropdownMenuWidget = dropdownMenuWidget;
-            this.addSelectableChild(dropdownMenuWidget);
-
-
-            ButtonWidget buttonWidget2 = ButtonWidget.builder(Text.of("Close"), (btn1) -> {
-                        this.close();
-                    }
-            ).dimensions(this.width - 120, 40, 120, 20).build();
-
-            ButtonWidget buttonWidget3 = ButtonWidget.builder(Text.of("Save"), (btn1) -> {
-
-                        this.saveToFile();
-
-                        if (this.client != null) {
-                            this.client.getToastManager().add(
-                            SystemToast.create(this.client, SystemToast.Type.NARRATOR_TOGGLE, Text.of("Settings saved!"), Text.of("Saved settings.")));
-                        }
-
-            }
-            ).dimensions(this.width - 140, 200, 120, 20).build();
-
-            ButtonWidget reasoningButton = ButtonWidget.builder(
-                    Text.of("Show Reasoning Log"),
-                    (btn) -> Objects.requireNonNull(this.client).setScreen(new ReasoningLogScreen(this))
-            ).dimensions(this.width - 280, 200, 120, 20).build();
-            this.addDrawableChild(reasoningButton);
-
-            // API Keys Button (Corrected)
-            ButtonWidget apiKeysButton = ButtonWidget.builder(
-                    Text.of("API Keys"),
-                    (btn) -> Objects.requireNonNull(this.client).setScreen(new APIKeysScreen(Text.of("API Keys"), this))
-            ).dimensions(this.width - 420, 200, 120, 20).build(); // Use a different y-coordinate
-            this.addDrawableChild(apiKeysButton); // Add it to the list of drawable children
-
-            this.addDrawableChild(buttonWidget2);
-            this.addDrawableChild(dropdownMenuWidget);
-            this.addDrawableChild(buttonWidget3);
-
-
-            this.addDrawableChild(buttonWidget2);
-            this.addDrawableChild(dropdownMenuWidget);
-            this.addDrawableChild(buttonWidget3);
-
-
-        }
-
-        @Override
-        public void render(DrawContext context, int mouseX, int mouseY, float delta) {
-            super.render(context, mouseX, mouseY, delta);
-
-            // Minecraft doesn't have a "label" widget, so we'll have to draw our own text.
-            // We'll subtract the font height from the Y position to make the text appear above the button.
-            // Subtracting an extra 10 pixels will give the text some padding.
-            // textRenderer, text, x, y, color, hasShadow
-
-            int yellow = 0xFFFFFF00;
-            int white = 0xFFFFFFFF;
-            int green = 0xFF00FF00;
-            int red = 0xFFFF0000;
-
-            context.drawText(this.textRenderer, "AI-Player Mod configuration Menu v1.0.4-beta-1",95, 20 - this.textRenderer.fontHeight - 10, white, true);
-            context.drawText(this.textRenderer, "Select Language Model",5, this.dropdownMenuWidget.getY() + 5, yellow, true);
-            context.drawText(this.textRenderer, "Currently selected language model: " + AIPlayer.CONFIG.selectedLanguageModel(),100, this.dropdownMenuWidget.getY() + 30, green, true);
-            context.drawText(this.textRenderer, "No need to restart the game after changing/selecting a language model!",20, this.dropdownMenuWidget.getY() + 60, red, true);
-        }
-
-        @Override
-        public void close() {
-            if (this.client != null) {
-                this.client.setScreen(this.parent);
-            }
-        }
-
-        private void saveToFile() {
-
-            String modelName = this.dropdownMenuWidget.getSelectedOption();
-
-            System.out.println(modelName);
-
-            aiPlayerConfigModel.setSelectedLanguageModel(modelName);
-
-            AIPlayer.CONFIG.selectedLanguageModel(modelName);
-            AIPlayer.CONFIG.save(); // save to client first
-
-            configNetworkManager.sendSaveConfigPacket(modelName); // send save packet to server
-
-            close();
-
-            assert this.client != null;
-            this.client.setScreen(new ConfigManager(Text.empty(), this.parent));
-
-        }
-
+    public ConfigManager(Text title, Screen parent) {
+        super(title);
+        this.parent = parent;
     }
 
+    @Override
+    protected void init() {
+
+        // added this line so that the models will load immediately after the API key has been entered and saved into the json.
+        AIPlayer.CONFIG.updateModels();
+
+        allModels = AIPlayer.CONFIG.getModelList();
+        filteredModels = new ArrayList<>(allModels);
+
+        // Calculate positions
+        int centerX = this.width / 2;
+        int topMargin = 50;
+        int fieldWidth = 300;
+        int fieldHeight = 20;
+        int buttonWidth = 100;
+        int spacing = 30;
+
+        // Search field - centered and properly positioned
+        searchField = new TextFieldWidget(this.textRenderer, centerX - fieldWidth / 2, topMargin, fieldWidth, fieldHeight, Text.of("Search models..."));
+        searchField.setMaxLength(256);
+        searchField.setPlaceholder(Text.of("Search models..."));
+        searchField.setChangedListener(this::onSearchChanged);
+        this.addDrawableChild(searchField);
+        this.addSelectableChild(searchField);
+
+        // Dropdown - centered below search field
+        int dropdownY = topMargin + spacing + 10; // Extra space for label
+
+        dropdownMenuWidget = new DropdownMenuWidget(centerX - fieldWidth / 2, dropdownY, fieldWidth, fieldHeight, Text.of("List of available models"), filteredModels);
+        this.dropdownMenuWidget = dropdownMenuWidget;
+        this.addSelectableChild(dropdownMenuWidget);
+
+        // Bottom buttons - evenly spaced at bottom
+        int buttonY = this.height - 40;
+        int buttonSpacing = buttonWidth + 20;
+        int totalButtonWidth = buttonSpacing * 4 - 20; // 4 buttons with spacing
+        int buttonsStartX = centerX - totalButtonWidth / 2;
+
+        // API Keys Button
+        ButtonWidget apiKeysButton = ButtonWidget.builder(
+                Text.of("API Keys"),
+                (btn) -> Objects.requireNonNull(this.client).setScreen(new APIKeysScreen(Text.of("API Keys"), this))
+        ).dimensions(buttonsStartX, buttonY, buttonWidth, fieldHeight).build();
+        this.addDrawableChild(apiKeysButton);
+
+        // Reasoning Log Button
+        ButtonWidget reasoningButton = ButtonWidget.builder(
+                Text.of("Reasoning Log"),
+                (btn) -> Objects.requireNonNull(this.client).setScreen(new ReasoningLogScreen(this))
+        ).dimensions(buttonsStartX + buttonSpacing, buttonY, buttonWidth, fieldHeight).build();
+        this.addDrawableChild(reasoningButton);
+
+        // Save Button
+        ButtonWidget saveButton = ButtonWidget.builder(Text.of("Save"), (btn1) -> {
+            this.saveToFile();
+            if (this.client != null) {
+                this.client.getToastManager().add(
+                        SystemToast.create(this.client, SystemToast.Type.NARRATOR_TOGGLE,
+                                Text.of("Settings saved!"), Text.of("Saved settings.")));
+            }
+        }).dimensions(buttonsStartX + buttonSpacing * 2, buttonY, buttonWidth, fieldHeight).build();
+        this.addDrawableChild(saveButton);
+
+        // Close Button
+        ButtonWidget closeButton = ButtonWidget.builder(Text.of("Close"), (btn1) -> this.close())
+                .dimensions(buttonsStartX + buttonSpacing * 3, buttonY, buttonWidth, fieldHeight).build();
+        this.addDrawableChild(closeButton);
+
+        // Add dropdown to drawable children
+        this.addDrawableChild(dropdownMenuWidget);
+    }
+
+    @Override
+    public void render(DrawContext context, int mouseX, int mouseY, float delta) {
+        // Render background with slight transparency
+        this.renderBackground(context, mouseX, mouseY, delta);
+        super.render(context, mouseX, mouseY, delta);
+
+        // Color scheme
+        int titleColor = 0xFFFFFFFF;    // White
+        int labelColor = 0xFFFFD700;    // Gold
+        int infoColor = 0xFF00FF00;     // Green
+        int counterColor = 0xFFADD8E6;  // Light blue
+        int hintColor = 0xFFFFB6C1;     // Light pink
+
+        int centerX = this.width / 2;
+
+        // Title - centered
+        String title = "AI-Player Mod Configuration Menu v1.0.5.1-release+1.20.6-bugfix";
+        int titleWidth = this.textRenderer.getWidth(title);
+        context.drawText(this.textRenderer, title, centerX - titleWidth / 2, 20, titleColor, true);
+
+        // Search label - above search field
+        context.drawText(this.textRenderer, "Search Models:", centerX - 150, searchField.getY() - 15, labelColor, true);
+
+        // Model selection label - above dropdown
+        context.drawText(this.textRenderer, "Select Language Model:", centerX - 150, dropdownMenuWidget.getY() - 15, labelColor, true);
+
+        // Current selection info - below dropdown
+        String currentModel = AIPlayer.CONFIG.getSelectedLanguageModel();
+        String currentText = "Currently selected: " + (currentModel != null ? currentModel : "None");
+        context.drawText(this.textRenderer, currentText, centerX - 150, dropdownMenuWidget.getY() + 30, infoColor, true);
+
+        // Model count info - below current selection
+        String countText = "Showing " + filteredModels.size() + " of " + allModels.size() + " models";
+        context.drawText(this.textRenderer, countText, centerX - 150, dropdownMenuWidget.getY() + 45, counterColor, true);
+
+        // Help text at bottom
+        String helpText = "Search to filter models • Select a model and click Save";
+        int helpWidth = this.textRenderer.getWidth(helpText);
+        context.drawText(this.textRenderer, helpText, centerX - helpWidth / 2, this.height - 65, hintColor, true);
+    }
+
+    private void onSearchChanged(String searchText) {
+        // Filter models based on search text
+        if (searchText.trim().isEmpty()) {
+            filteredModels = new ArrayList<>(allModels);
+        } else {
+            filteredModels = allModels.stream()
+                    .filter(model -> model.toLowerCase().contains(searchText.toLowerCase().trim()))
+                    .collect(Collectors.toList());
+        }
+
+        // Update dropdown with filtered models
+        // You'll need to add this method to your DropdownMenuWidget
+        dropdownMenuWidget.updateOptions(filteredModels);
+    }
+
+    private void saveToFile() {
+        String modelName = this.dropdownMenuWidget.getSelectedOption();
+
+        if (modelName == null || modelName.trim().isEmpty()) {
+            LOGGER.warn("No model selected or model name is empty. Skipping save.");
+
+            if (this.client != null) {
+                this.client.getToastManager().add(
+                        SystemToast.create(this.client, SystemToast.Type.NARRATOR_TOGGLE,
+                                Text.of("Error"), Text.of("Please select a model first!")));
+            }
+            return;
+        }
+
+        System.out.println("Selected model: " + modelName);
+
+        AIPlayer.CONFIG.setSelectedLanguageModel(modelName);
+        AIPlayer.CONFIG.setSelectedLanguageModel(modelName);
+        AIPlayer.CONFIG.save();
+
+        configNetworkManager.sendSaveConfigPacket(modelName);
+
+        close();
+        assert this.client != null;
+        this.client.setScreen(new ConfigManager(Text.empty(), this.parent));
+    }
+
+    @Override
+    public void close() {
+        if (this.client != null) {
+            this.client.setScreen(this.parent);
+        }
+    }
+}
 
 

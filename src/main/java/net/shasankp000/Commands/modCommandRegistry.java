@@ -342,7 +342,7 @@ public class modCommandRegistry {
                                                             InputPacketHandler.manualPacketSprint(context);
                                                             break;
                                                         default:
-                                                            ChatUtils.sendChatMessages(serverSource, "This key is not registered.");
+                                                            ChatUtils.sendSystemMessage(serverSource, "This key is not registered.");
                                                             break;
                                                     }
 
@@ -388,7 +388,7 @@ public class modCommandRegistry {
                                                                     break;
 
                                                                 default:
-                                                                    ChatUtils.sendChatMessages(serverSource, "Invalid direction.");
+                                                                    ChatUtils.sendSystemMessage(serverSource, "Invalid direction.");
                                                                     break;
                                                             }
 
@@ -414,7 +414,7 @@ public class modCommandRegistry {
 
                                                     InputPacketHandler.manualPacketReleaseMovementKey(context);
 
-                                                    ChatUtils.sendChatMessages(serverSource, "Released all movement keys for bot: " + botName);
+                                                    ChatUtils.sendSystemMessage(serverSource, "Released all movement keys for bot: " + botName);
 
                                                     return 1;
                                                 })
@@ -634,11 +634,11 @@ public class modCommandRegistry {
                                     MinecraftServer server = context.getSource().getServer(); // gets the minecraft server
                                     ServerCommandSource serverSource = server.getCommandSource();
 
-                                    ChatUtils.sendChatMessages(serverSource, "Exporting Q-table to JSON. Please wait.... ");
+                                    ChatUtils.sendSystemMessage(serverSource, "Exporting Q-table to JSON. Please wait.... ");
 
                                     QTableExporter.exportQTable(BotEventHandler.qTableDir + "/qtable.bin", BotEventHandler.qTableDir + "./fullQTable.json");
 
-                                    ChatUtils.sendChatMessages(serverSource, "Q-table has been successfully exported to a json file at: " + BotEventHandler.qTableDir + "./fullQTable.json" );
+                                    ChatUtils.sendSystemMessage(serverSource, "Q-table has been successfully exported to a json file at: " + BotEventHandler.qTableDir + "./fullQTable.json" );
 
                                     return 1;
                                 })
@@ -651,7 +651,7 @@ public class modCommandRegistry {
                                     ServerCommandSource serverSource = server.getCommandSource();
                                     PathTracer.flushAllMovementTasks();
 
-                                    ChatUtils.sendChatMessages(serverSource, "Flushed all movement tasks");
+                                    ChatUtils.sendSystemMessage(serverSource, "Flushed all movement tasks");
 
                                     return 1;
 
@@ -709,7 +709,7 @@ public class modCommandRegistry {
             }
 
             else {
-                ChatUtils.sendChatMessages(serverSource, "Error: " + botName + " cannot be spawned");
+                ChatUtils.sendSystemMessage(serverSource, "Error: " + botName + " cannot be spawned");
             }
 
             // don't initialize ollama client.
@@ -749,12 +749,14 @@ public class modCommandRegistry {
 
                 String llmProvider = System.getProperty("aiplayer.llmMode", "ollama");
 
+                System.out.println("Using provider");
+
                 switch (llmProvider) {
                     case "openai", "gpt", "google", "gemini", "anthropic", "claude", "xAI", "xai", "grok":
                         LLMClient llmClient = LLMClientFactory.createClient(llmProvider);
                         assert llmClient != null;
 
-                        ChatUtils.sendChatMessages(serverSource, "Please wait while " + botName + " connects to " + llmClient.getProvider() + "'s servers.");
+                        ChatUtils.sendSystemMessage(serverSource, "Please wait while " + botName + " connects to " + llmClient.getProvider() + "'s servers.");
                         LLMServiceHandler.sendInitialResponse(bot.getCommandSource(), llmClient);
 
                         new Thread(() -> {
@@ -775,9 +777,10 @@ public class modCommandRegistry {
 
                         }).start();
 
+                        break;
 
                     case "ollama":
-                        ChatUtils.sendChatMessages(serverSource, "Please wait while " + botName + " connects to the language model.");
+                        ChatUtils.sendSystemMessage(serverSource, "Please wait while " + botName + " connects to the language model.");
                         ollamaClient.initializeOllamaClient();
 
                         new Thread(() -> {
@@ -798,11 +801,13 @@ public class modCommandRegistry {
                             Thread.currentThread().interrupt(); // close this thread.
 
                         }).start();
+
+                        break;
 
                     default:
                         LOGGER.warn("Unsupported provider detected. Defaulting to Ollama client");
-                        ChatUtils.sendChatMessages(serverSource, "Warning! Unsupported provider detected. Defaulting to Ollama client");
-                        ChatUtils.sendChatMessages(serverSource, "Please wait while " + botName + " connects to the language model.");
+                        ChatUtils.sendSystemMessage(serverSource, "Warning! Unsupported provider detected. Defaulting to Ollama client");
+                        ChatUtils.sendSystemMessage(serverSource, "Please wait while " + botName + " connects to the language model.");
                         ollamaClient.initializeOllamaClient();
 
                         new Thread(() -> {
@@ -823,6 +828,8 @@ public class modCommandRegistry {
                             Thread.currentThread().interrupt(); // close this thread.
 
                         }).start();
+
+                        break;
 
                 }
 
@@ -830,13 +837,13 @@ public class modCommandRegistry {
 
 
             else {
-                ChatUtils.sendChatMessages(serverSource, "Error: " + botName + " cannot be spawned");
+                ChatUtils.sendSystemMessage(serverSource, "Error: " + botName + " cannot be spawned");
             }
 
         }
         else {
-            ChatUtils.sendChatMessages(serverSource, "Invalid spawn mode!");
-            ChatUtils.sendChatMessages(serverSource, "Usage: /bot spawn <your bot's name> <spawnMode: training or play>");
+            ChatUtils.sendSystemMessage(serverSource, "Invalid spawn mode!");
+            ChatUtils.sendSystemMessage(serverSource, "Usage: /bot spawn <your bot's name> <spawnMode: training or play>");
         }
 
 

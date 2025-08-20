@@ -11,9 +11,9 @@ public class ConfigJsonUtil {
 
     public static String configToJson() {
         // Retrieve config values from the generated CONFIG
-        List<String> modelList = AIPlayer.CONFIG.modelList();
-        String selectedLanguageModel = AIPlayer.CONFIG.selectedLanguageModel();
-        Map<String, String> botGameProfile = AIPlayer.CONFIG.BotGameProfile();
+        List<String> modelList = AIPlayer.CONFIG.getModelList();
+        String selectedLanguageModel = AIPlayer.CONFIG.getSelectedLanguageModel();
+        Map<String, String> botGameProfile = AIPlayer.CONFIG.getBotGameProfile();
 
         // Build JSON using Gson's JsonObject and JsonArray
         JsonObject root = new JsonObject();

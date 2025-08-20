@@ -71,7 +71,7 @@ public class AutoFaceEntity {
 
         // Load Q-table from storage
         try {
-            qTable = QTableStorage.load(BotEventHandler.qTableDir + "/qtable.bin");
+            qTable = QTableStorage.loadQTable();
             System.out.println("Loaded Q-table from storage.");
 
         } catch (Exception e) {

@@ -10,6 +10,7 @@ import net.minecraft.client.gui.widget.ClickableWidget;
 import net.minecraft.text.Text;
 
 
+import java.util.ArrayList;
 import java.util.List;
 
 public class DropdownMenuWidget extends ClickableWidget {
@@ -70,6 +71,11 @@ public class DropdownMenuWidget extends ClickableWidget {
         return;
     }
 
+    public void updateOptions(List<String> newOptions) {
+        this.options = new ArrayList<>(newOptions);
+        this.selectedIndex = -1; // Reset selection when options change
+        this.isOpen = false; // Close dropdown when updating
+    }
 
     public String getSelectedOption() {
         return selectedIndex >= 0 ? options.get(selectedIndex) : null;

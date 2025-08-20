@@ -37,7 +37,6 @@ import java.net.URL;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 
-import net.shasankp000.FilingSystem.AIPlayerConfigModel;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import net.shasankp000.AIPlayer;
@@ -63,7 +62,6 @@ public class createFakePlayer extends ServerPlayerEntity {
         UserCache.setUseRemote(false);
         GameProfile gameProfile;
         boolean useMojangAuth = server.isDedicated() && server.isOnlineMode();
-        AIPlayerConfigModel aiPlayerConfigModel = new AIPlayerConfigModel();
 
         try {
             gameProfile = useMojangAuth ? server.getUserCache().findByName(username).orElse(null) : null;
@@ -72,7 +70,7 @@ public class createFakePlayer extends ServerPlayerEntity {
             UserCache.setUseRemote(useMojangAuth);
         }
 
-        Map<String, String> existingBotProfile = AIPlayer.CONFIG.BotGameProfile();
+        Map<String, String> existingBotProfile = AIPlayer.CONFIG.getBotGameProfile();
 
         if (gameProfile == null) {
 
@@ -86,7 +84,7 @@ public class createFakePlayer extends ServerPlayerEntity {
                 System.out.println("New GameProfile: " + gameProfile);
 
                 try {
-                    aiPlayerConfigModel.setBotGameProfile(botProfile);
+                    AIPlayer.CONFIG.setBotGameProfile(botProfile);
 
                     // Save the data to config as strings
                     Map<String, String> currentBotProfile = new HashMap<>();
@@ -94,7 +92,7 @@ public class createFakePlayer extends ServerPlayerEntity {
                         currentBotProfile.put(entry.getKey(), entry.getValue());
                     }
 
-                    AIPlayer.CONFIG.BotGameProfile(currentBotProfile);
+                    AIPlayer.CONFIG.setBotGameProfile(currentBotProfile);
                     AIPlayer.CONFIG.save();
                     System.out.println("Saved data to config");
 
