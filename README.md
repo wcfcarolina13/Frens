@@ -25,7 +25,6 @@ https://github.com/shasankp000/AI-Tricks
 
 I am open to suggestions/improvements, if any. (Obviously there will be improvements from my own end).
 
-  
 ---
 
 # Project description
@@ -47,12 +46,6 @@ This mod relies on the internal code of the Carpet mod, please star the reposito
 This mod also relies on the ollama4j project. https://github.com/amithkoujalgi/ollama4j
 
 ---
-
-# Current bugs in this version :
-
-No bugs in the current version!
-
-
 # Download links
 
 1. From this github page, just download from the releases section or follow the steps in usage section to build and test.
@@ -63,19 +56,131 @@ No bugs in the current version!
 
 # Progress: 75%
 
-The 1.20.6 port is out now!
+---
+# Current stage of the mod
+
+Since the new semester in my college has started this month, I am gonna be under really heavy pressure, since I have to study 11 subjects in total (Machine learning, Linear Algebra, Physics, CyberSecurity, and a lot more lol). Don't worry though I won't stop working on this project, it's just that the updates will be quite slower.
+
+It's understandable if y'all leave by then or give up on this project, so, I won't mind. :))
+
+Thank you all from the core of my heart for the support so far. I never imagined we would come this far.
+
+Latest Update: 21/8/2025 at 04:08 AM IST (Indian Standard Time)
 
 
+Please have patience while waiting for updates. Since I am the only guy working on this project, it does take me time to address all the issues/add in new features.
 
 ---
 
-# Upcoming changes.
+# Changelog v1.0.5.1-release+1.20.6-bugfix
 
-1. Introduce goal based reinforcement learning.
-2. Switch to Deep-Q learning instead of traditonal q-learning (TLDR: use a neural network instead of a table)
-3. Create custom movement code for the bot for precise movement instead of carpet's server sided movement code.
-4. Give the bot a sense of it's surroundings in more detail (like how we can see blocks around us in game) so that it can take more precise decisions. Right now it has knowledge of what blocks are around it, but it doesn't know how those blocks are placed around it, in what order/shape. I intend to fix that. 
-5. Implement human consciousness level reasoning??? (to some degree maybe) (BIG MAYBE)
+I realized that many of the commitments made in the previous announcement were too ambitious to implement in a single update. To keep development smooth, this release is the **first part** of a two-part update.  
+
+This update focuses on **core system rewrites** and **better AI decision-making**, laying the foundation for the next wave of features.  
+
+Also support for versions below 1.20.6 has been dropped due to codebase changes that I simply can't handle migrating by myself. However others are free to port to lower versions.
+
+Upcoming second part will have the update in 1.20.6 as the final update for 1.20.6 and also will have a new update to directly 1.21.6 where hence the future versions will continue onwards.
+
+---
+
+## What's New in 1.0.5.1
+
+### Revamped NLP System  
+- Fully redesigned Natural Language Processing (NLP) — no more *"I couldn’t understand you."*  
+- This is a **new and experimental system** I’ve been designing and rigorously testing over the last month.  
+- Results are promising, but not yet up to my personal standards — expect further refinements in future updates.  
+
+### Rewritten RAG & Database System (with Web Search)  
+- New Retrieval-Augmented Generation (RAG) system integrated with a database and **web search**.  
+- The AI now provides **accurate factual information about Minecraft**, drastically reducing hallucinations.  
+- Supported search providers:  
+  - Gemini API  
+  - Serper API  
+  - Brave Search API (in development, will push this to the next patch instead) 
+
+### Meta-Decision Layer  
+- Added a **task chaining system**:  
+  - You give a high-level instruction → the bot automatically breaks it into smaller tasks → executes step by step.  
+
+#### Current Supported Tasks:  
+- Go to a location  
+- Go to a location and mine resources  
+- Detect nearby blocks & entities  
+- Report stats (health, oxygen, hunger, etc.)  
+
+### API Integrations  
+AI Player now supports multiple LLM providers (configurable via API keys):  
+- **OpenAI**  
+- **Anthropic Claude**  
+- **Google Gemini**  
+- **xAI Grok**  
+
+### Web Search Tool
+
+If you select the Gemini Search as the web search tool for the LLM, it will use the API key you have set as your LLM provider in the settings.json5 file automatically.
+
+For https://serper.dev/ search, get an api key from serper.dev and then navigate to the config folder in game, open the `ai_search_config.json` and put the key:
+
+![Web search json file contents](https://cdn.modrinth.com/data/cached_images/b3dbb07a9e166d4d0860d490d8d5d938e4e6cd50.png)
+
+*(Note: I couldn’t test all of these myself except the Gemini API since API keys are costly, but the integrations are ready.)*  
+
+---
+# Bugfixes
+
+- Fixed bug where JVM arguments were not being read.
+- Removed owo-lib. AI-Player now uses an in-house config system.
+- Fixed API keys saving issues.
+- Added a new Launcher Detection System. Since Modrinth launcher was conflicting by it's own variables path system so the QTable was not being loaded. Supports: Vanilla MC Launcher, Modrinth App, MultiMC, Prism Launcher, Curseforge launcher, ATLauncher, and even unknown launchers which would be unsupported by default, assuming they follow the vanilla mc launcher's path schemes.
+- Revamped the Config Manager UI with a responsive UI along with a search option for providers with a lot of models (like gemini).
+
+![Config Manager New UI with search options and responsive UI](https://cdn.modrinth.com/data/cached_images/e5ab3e3d23978a96312c6528fd27f996d279adcc_0.webp)
+
+---
+
+## Development Notes  
+- While this update may look small on the surface, designing the systems, writing the code, and debugging took **a huge amount of time**.  
+- On top of this, I’ve picked up more freelance contracts and need to focus on my final-year project.  
+- Updates will continue — just at a slower pace.  
+
+---
+
+## Coming Soon in Part 2  
+
+Here’s what’s planned for the **next patch**:  
+
+- **Combat & Survival Enhancements**  
+  - Bot uses weapons (including ranged) to fend off mobs.  
+  - Reflex module upgrades.  
+  - More natural world interactions (e.g., sleeping at night).  
+
+- **Improved Path Tracer**  
+  - Smarter navigation through **water and complex terrain**.  
+
+- **Self-Goal Assignment System**  
+  - Bot assigns itself goals like a real player.  
+  - Will initiate conversations with players and move autonomously.  
+
+- **Mood System** *(design phase)*  
+  - Adds emotional context and varied behavior.  
+
+- **Player2 Integration**  
+  - Highly requested — this will be the first major feature of the second update.  
+
+---
+
+# Upcoming changes (some of them might be seen in the second patch).
+
+1. Switch to Deep-Q learning instead of traditonal q-learning (TLDR: use a neural network instead of a table)
+2. Create custom movement code for the bot for precise movement instead of carpet's server sided movement code.
+3. Implement human consciousness level reasoning??? (to some degree maybe) (BIG MAYBE)
+
+---
+
+# Current bugs in this version :
+
+I can proudly say that all bugs in this current version, has been for good, squashed.
 
 ---
 ## Some video footage of this version
