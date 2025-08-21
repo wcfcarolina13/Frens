@@ -61,16 +61,10 @@ No bugs in the current version!
 
 ---
 
-# Progress: 71%
+# Progress: 75%
 
 The 1.20.6 port is out now!
 
-# Changelog v1.0.4-release+1.20.6
-
-- Updated codebase for 1.20.6 compatibility.
-- Optimized codebase by removing redundant codes and unused imports.
-
-(previous version 1.0.4-beta-1 fixed server sided compatibility fully)
 
 
 ---
