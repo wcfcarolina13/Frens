@@ -15,7 +15,7 @@ import java.util.Objects;
 public class ChartPathToBlock {
 
     public static String chart(ServerPlayerEntity bot, BlockPos targetBlockPos, String blockType) {
-        ServerCommandSource botSource = bot.getCommandSource();
+        ServerCommandSource botSource = bot.getCommandSource().withSilent().withMaxLevel(4);
         MinecraftServer server = bot.getServer();
         String botName = bot.getName().getString();
 

@@ -29,12 +29,11 @@ public class LLMServiceHandler {
     private static final ExecutorService BOT_TASK_POOL = Executors.newCachedThreadPool();
     private static final Pattern THINK_BLOCK = Pattern.compile("<think>([\\s\\S]*?)</think>");
     public static String initialResponse = "";
-    public static String botName = "";
     private static final String host = "http://localhost:11434";
     public static final OllamaAPI ollamaAPI = new OllamaAPI(host);
     public static boolean isInitialized = false;
 
-    private static String generateSystemPrompt() {
+    private static String generateSystemPrompt(String botName) {
 
         return
                 "You are a Minecraft player named " + botName + " who is connected to Minecraft using a mod. You exist within the Minecraft world and can interact with the player and the environment just like any other player in the game. Your job is to engage in conversations with the player, respond to their questions, offer help, and provide information about the game. Address the player directly and appropriately, responding to their name or as 'Player' if their name is not known. Do not refer to the player as " + botName + ", only address yourself as " + botName + " Keep your responses relevant to Minecraft and make sure to stay in character as a helpful and knowledgeable assistant within the game."
@@ -110,6 +109,9 @@ public class LLMServiceHandler {
 
 
     public static void sendInitialResponse(ServerCommandSource botSource, LLMClient client) {
+        MinecraftServer server = botSource.getServer();
+        String botName = botSource.getPlayer().getName().getString();
+
         CompletableFuture<String> initFuture = CompletableFuture.supplyAsync(() -> {
             try {
                 if (client.isReachable()) {
@@ -118,7 +120,7 @@ public class LLMServiceHandler {
                     ChatUtils.sendChatMessages(botSource, "Established connection to " + client.getProvider() + "'s servers. Using " + AIPlayer.CONFIG.getSelectedLanguageModel());
 
                     // Fetch and return the initial response
-                    String response = client.sendPrompt(generateSystemPrompt(), "Initializing chat");
+                    String response = client.sendPrompt(generateSystemPrompt(botName), "Initializing chat");
                     LOGGER.info("Initial response received: '{}'", response);
                     LOGGER.info("Response length: {}", response != null ? response.length() : "null");
                     initialResponse = response;
@@ -139,8 +141,6 @@ public class LLMServiceHandler {
                 LOGGER.info("thenAccept called with response: '{}'", response);
                 if (response != null && !response.trim().isEmpty()) {
                     // Process the response on the main thread
-                    MinecraftServer server = botSource.getServer();
-                    String botName = botSource.getPlayer().getName().getString();
 
                     LOGGER.info("Scheduling processLLMOutput on main thread for bot: {}", botName);
                     server.execute(() -> {
@@ -184,7 +184,7 @@ public class LLMServiceHandler {
             LOGGER.error("Bot {} not online.", botName);
             return;
         }
-        ServerCommandSource botSource = bot.getCommandSource();
+        ServerCommandSource botSource = bot.getCommandSource().withSilent().withMaxLevel(4);
 
         server.execute(() -> {
             Thread.currentThread().setName("LLM-Chat-Worker");
@@ -226,7 +226,7 @@ public class LLMServiceHandler {
                     Thread.currentThread().setName("LLM-Function-Caller-Worker");
                     LOGGER.info("🧵 Started FunctionCallerV2 worker thread");
                     new FunctionCallerV2(botSource, playerUUID);
-                    FunctionCallerV2.run(message);
+                    FunctionCallerV2.run(message, client);
                     LOGGER.info("✅ Finished FunctionCallerV2 worker thread");
                 });
             }

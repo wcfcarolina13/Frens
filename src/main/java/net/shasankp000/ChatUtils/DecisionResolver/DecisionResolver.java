@@ -8,6 +8,9 @@ import io.github.amithkoujalgi.ollama4j.core.models.chat.OllamaChatRequestBuilde
 import io.github.amithkoujalgi.ollama4j.core.models.chat.OllamaChatRequestModel;
 import io.github.amithkoujalgi.ollama4j.core.models.chat.OllamaChatResult;
 import net.shasankp000.AIPlayer;
+import net.shasankp000.FilingSystem.LLMClientFactory;
+import net.shasankp000.ServiceLLMClients.LLMClient;
+import net.shasankp000.ServiceLLMClients.LLMServiceHandler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -68,14 +71,41 @@ public class DecisionResolver {
 
         String selectedLM = AIPlayer.CONFIG.getSelectedLanguageModel();
 
-        OllamaChatRequestModel requestModel = OllamaChatRequestBuilder.getInstance(selectedLM)
-                .withMessage(OllamaChatMessageRole.USER, prompt)
-                .build();
+        String llmProvider = System.getProperty("aiplayer.llmMode", "ollama");
+
+        String answer = "";
+
+        switch (llmProvider) {
+            case "openai", "claude", "grok", "gemini":
+                LLMClient llmClient = LLMClientFactory.createClient(llmProvider);
+                if (llmClient!=null) {
+                    if (llmClient.isReachable()) {
+                        answer = llmClient.sendPrompt("Analyze the user prompt thoroughly and answer only as directed in the user prompt. Do not deviate from the expected output pattern as stated in the user prompt.", prompt);
+                    }
+                    else {
+                        LOGGER.error("Error! {} client is not reachable. Please check your internet connection or try again later", llmClient.getProvider());
+                    }
+                }
+                else {
+                    LOGGER.error("Error! {} client is null!", llmProvider);
+                }
+                break;
+            case "ollama":
+                OllamaChatRequestModel requestModel = OllamaChatRequestBuilder.getInstance(selectedLM)
+                        .withMessage(OllamaChatMessageRole.USER, prompt)
+                        .build();
 
 
-        OllamaChatResult response = ollamaAPI.chat(requestModel);
+                OllamaChatResult response = ollamaAPI.chat(requestModel);
 
-        String answer = response.getResponse().trim();
+                answer = response.getResponse().trim();
+
+                break;
+
+            default:
+                LOGGER.warn("Unsupported provider detected.");
+                return "UNSPECIFIED";
+        }
 
         answer = processLLMOutput(answer);
 

@@ -217,13 +217,13 @@ public class modCommandRegistry {
 
                                                     switch (direction) {
                                                         case "left", "right", "back" -> {
-                                                            turnTool.turn(bot.getCommandSource(), direction);
+                                                            turnTool.turn(bot.getCommandSource().withSilent().withMaxLevel(4), direction);
 
                                                             LOGGER.info("Now facing {} which is in {} in {} axis", direction, bot.getFacing().getName(), bot.getFacing().getAxis().asString());
                                                         }
                                                         default -> {
                                                             server.execute(() -> {
-                                                                ChatUtils.sendChatMessages(bot.getCommandSource(), "Invalid parameters! Accepted parameters: left, right, back only!");
+                                                                ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withMaxLevel(4), "Invalid parameters! Accepted parameters: left, right, back only!");
                                                             });
                                                         }
                                                     }
@@ -277,7 +277,7 @@ public class modCommandRegistry {
                                             AutoFaceEntity.isBotMoving = false;
 
                                             server.execute(() -> {
-                                                ChatUtils.sendChatMessages(bot.getCommandSource(), "Autoface module reset complete.");
+                                                ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withMaxLevel(4), "Autoface module reset complete.");
                                             });
 
                                             return 1;
@@ -757,7 +757,7 @@ public class modCommandRegistry {
                         assert llmClient != null;
 
                         ChatUtils.sendSystemMessage(serverSource, "Please wait while " + botName + " connects to " + llmClient.getProvider() + "'s servers.");
-                        LLMServiceHandler.sendInitialResponse(bot.getCommandSource(), llmClient);
+                        LLMServiceHandler.sendInitialResponse(bot.getCommandSource().withSilent().withMaxLevel(4), llmClient);
 
                         new Thread(() -> {
                             while (!LLMServiceHandler.isInitialized) {

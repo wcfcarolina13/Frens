@@ -237,7 +237,7 @@ public class AutoFaceEntity {
                     if (PathTracer.BotSegmentManager.getBotMovementStatus() || isBotMoving || isBotExecutingTask()) {
                         System.out.println("Stopping movement since danger zone is detected.");
                         ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withMaxLevel(4), "Terminating all current tasks due to threat detections");
-                        server.getCommandManager().executeWithPrefix(bot.getCommandSource(), "/player " + bot.getName().getString() + " stop");
+                        server.getCommandManager().executeWithPrefix(bot.getCommandSource().withSilent().withMaxLevel(4), "/player " + bot.getName().getString() + " stop");
                     }
 
 

@@ -51,7 +51,7 @@ public class ollamaClient {
             LOGGER.error("Bot {} not online.", botName);
             return;
         }
-        ServerCommandSource botSource = bot.getCommandSource();
+        ServerCommandSource botSource = bot.getCommandSource().withSilent().withMaxLevel(4);
 
         server.execute(() -> {
             try {

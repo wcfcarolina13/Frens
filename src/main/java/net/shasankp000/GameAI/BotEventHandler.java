@@ -104,7 +104,7 @@ public class BotEventHandler {
             int timeofDay = GetTime.getTimeOfWorld(bot);
             String time = (timeofDay >= 12000 && timeofDay < 24000) ? "night" : "day";
 
-            World world = bot.getCommandSource().getWorld();
+            World world = bot.getCommandSource().withSilent().withMaxLevel(4).getWorld();
             RegistryKey<World> dimType = world.getRegistryKey();
             String dimension = dimType.getValue().toString();
 

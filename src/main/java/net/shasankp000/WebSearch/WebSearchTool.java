@@ -10,6 +10,7 @@ import io.github.amithkoujalgi.ollama4j.core.models.chat.OllamaChatRequestBuilde
 import io.github.amithkoujalgi.ollama4j.core.models.chat.OllamaChatRequestModel;
 import io.github.amithkoujalgi.ollama4j.core.models.chat.OllamaChatResult;
 import net.shasankp000.AIPlayer;
+import net.shasankp000.FilingSystem.LLMClientFactory;
 import net.shasankp000.ServiceLLMClients.LLMClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -34,12 +35,13 @@ public class WebSearchTool {
             .build();
     private static final OllamaAPI ollamaAPI = new OllamaAPI("http://localhost:11434/");
     private static String selectedLM = AIPlayer.CONFIG.getSelectedLanguageModel();
-
+    private static String llmMode = System.getProperty("aiplayer.llmMode", "ollama");
     private static final Path CACHE_DIR = Paths.get("web_cache");
 
     static {
         try {
             Files.createDirectories(CACHE_DIR);
+
         } catch (Exception e) {
             logger.error("❌ Could not create cache directory: {}", e.getMessage());
         }
@@ -73,7 +75,7 @@ public class WebSearchTool {
 
     private static String geminiSearch(String query) {
         try {
-            String apiKey = AISearchConfig.GEMINI_API_KEY;
+            String apiKey = AIPlayer.CONFIG.getGeminiKey();
             if (apiKey.isBlank()) return "❌ Gemini API key is missing.";
 
             String url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=" + apiKey;
@@ -145,7 +147,6 @@ public class WebSearchTool {
     }
 
     private static String createQuery(String prompt) {
-        ollamaAPI.setRequestTimeoutSeconds(120);
         String query_msg = "You are a first-principles reasoning search query AI agent. Your task is to a query which will be used to search the web on the topic of the prompt. The output must be a single, valid, properly formed, query. Here are a few examples of input strings you may receive:\n" +
                 """
                  "How can I build an automatic farm in Minecraft?",
@@ -177,24 +178,51 @@ public class WebSearchTool {
 
         queryConvo.add(queryMap1);
 
-        OllamaChatRequestBuilder builder = OllamaChatRequestBuilder.getInstance(selectedLM);
-        OllamaChatRequestModel requestModel1 = builder
-                .withMessage(OllamaChatMessageRole.SYSTEM, queryConvo.toString())
-                .withMessage(OllamaChatMessageRole.USER, prompt)
-                .build();
-
         String response = "";
 
-        try {
-            OllamaChatResult chatResult1 = ollamaAPI.chat(requestModel1);
+        switch (llmMode) {
+            case "openai", "gemini", "claude", "grok":
+                LLMClient client = LLMClientFactory.createClient(llmMode);
 
-            response = chatResult1.getResponse();
-            System.out.println("Generated query: " + response);
+                if (client != null)  {
+                    if (client.isReachable()) {
+                        response = client.sendPrompt(query_msg, prompt);
+                    }
+                    else {
+                        logger.error("Error! {} client is not reachable. Please check your internet connection or try again later", client.getProvider());
+                    }
+                }
+                else {
+                    logger.error("Error! {} client is null!", llmMode);
+                }
+                break;
 
-        } catch (OllamaBaseException | IOException | InterruptedException e) {
-            logger.error("Caught exception while creating queries: {} ", (Object) e.getStackTrace());
-            System.out.println(response);
-            throw new RuntimeException(e);
+            case "ollama":
+                ollamaAPI.setRequestTimeoutSeconds(120);
+
+                OllamaChatRequestBuilder builder = OllamaChatRequestBuilder.getInstance(selectedLM);
+                OllamaChatRequestModel requestModel1 = builder
+                        .withMessage(OllamaChatMessageRole.SYSTEM, queryConvo.toString())
+                        .withMessage(OllamaChatMessageRole.USER, prompt)
+                        .build();
+
+
+
+                try {
+                    OllamaChatResult chatResult1 = ollamaAPI.chat(requestModel1);
+
+                    response = chatResult1.getResponse();
+                    System.out.println("Generated query: " + response);
+
+                } catch (OllamaBaseException | IOException | InterruptedException e) {
+                    logger.error("Caught exception while creating queries: {} ", (Object) e.getStackTrace());
+                    System.out.println(response);
+                    throw new RuntimeException(e);
+                }
+
+            default:
+                logger.warn("Unsupported provider detected.");
+                return "Unsupported LLM provider used. Queries could not be generated.";
         }
 
         return response;

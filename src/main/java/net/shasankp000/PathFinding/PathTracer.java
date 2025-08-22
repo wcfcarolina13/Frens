@@ -12,9 +12,11 @@ import org.slf4j.LoggerFactory;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 public class PathTracer {
     public static final Logger LOGGER = LoggerFactory.getLogger("ai-player");
@@ -34,6 +36,10 @@ public class PathTracer {
         private static boolean isMoving = false;
         private static Segment currentSegment = null; // Track current segment
 
+        // ✅ Add completion tracking
+        private static CompletableFuture<String> pathCompletionFuture = null;
+        private static final AtomicReference<String> finalResult = new AtomicReference<>("");
+
         public static boolean getBotMovementStatus() {
             return isMoving;
         }
@@ -48,7 +54,23 @@ public class PathTracer {
             jobQueue.clear();
             isMoving = false;
             currentSegment = null;
+
+            // ✅ Reset completion tracking
+            if (pathCompletionFuture != null && !pathCompletionFuture.isDone()) {
+                pathCompletionFuture.complete("Path cleared");
+            }
+            pathCompletionFuture = null;
+            finalResult.set("");
+
             LOGGER.info("Job queue flushed.");
+        }
+
+        // ✅ Add method to get completion future
+        public static CompletableFuture<String> getPathCompletionFuture() {
+            if (pathCompletionFuture == null) {
+                pathCompletionFuture = new CompletableFuture<>();
+            }
+            return pathCompletionFuture;
         }
 
         public void addSegmentJob(Segment segment) {
@@ -56,6 +78,11 @@ public class PathTracer {
         }
 
         public void startProcessing() {
+            // ✅ Initialize completion future if not already done
+            if (pathCompletionFuture == null) {
+                pathCompletionFuture = new CompletableFuture<>();
+            }
+
             if (!jobQueue.isEmpty()) {
                 currentSegment = jobQueue.poll();
                 executeSegment(currentSegment);
@@ -69,7 +96,14 @@ public class PathTracer {
                     server.getCommandManager().executeWithPrefix(botSource, "/player " + botName + " unsprint");
                 }
 
-                LOGGER.info("No more segments to process.");
+                // ✅ Complete the path and set final result
+                String result = tracePathOutput(botSource);
+                finalResult.set(result);
+                if (pathCompletionFuture != null && !pathCompletionFuture.isDone()) {
+                    pathCompletionFuture.complete(result);
+                }
+
+                LOGGER.info("No more segments to process. Final result: {}", result);
             }
         }
 
@@ -130,6 +164,12 @@ public class PathTracer {
             ServerPlayerEntity player = botSource.getPlayer();
             if (player == null) {
                 LOGGER.error("Player is null, cannot continue pathfinding");
+                // ✅ Complete with error
+                String errorResult = "Player not found";
+                finalResult.set(errorResult);
+                if (pathCompletionFuture != null && !pathCompletionFuture.isDone()) {
+                    pathCompletionFuture.complete(errorResult);
+                }
                 return;
             }
 
@@ -142,18 +182,25 @@ public class PathTracer {
 
             // Check if we've reached the segment target with improved tolerance
             if (hasReachedTarget(currentPos, completedSegment.end(), completedSegment)) {
-                LOGGER.info("✓ Reached segment target: {}", completedSegment.end());
+                LOGGER.info("✅ Reached segment target: {}", completedSegment.end());
                 retries = 0;
                 isMoving = false;
-                startProcessing();
+                startProcessing(); // This will either start next segment or complete the path
                 return;
             }
 
             // Check if we're close to the final destination and can stop
             if (isCloseToFinalDestination(currentPos, finalDestination)) {
-                LOGGER.info("✓ Bot is close enough to final destination: {}", finalDestination);
+                LOGGER.info("✅ Bot is close enough to final destination: {}", finalDestination);
                 flushAllMovementTasks();
                 isMoving = false;
+
+                // ✅ Complete with success
+                String result = tracePathOutput(botSource);
+                finalResult.set(result);
+                if (pathCompletionFuture != null && !pathCompletionFuture.isDone()) {
+                    pathCompletionFuture.complete(result);
+                }
                 return;
             }
 
@@ -176,6 +223,13 @@ public class PathTracer {
                     LOGGER.error("Re-pathfinding failed! Stopping bot.");
                     flushAllMovementTasks();
                     isMoving = false;
+
+                    // ✅ Complete with failure
+                    String failureResult = "Re-pathfinding failed";
+                    finalResult.set(failureResult);
+                    if (pathCompletionFuture != null && !pathCompletionFuture.isDone()) {
+                        pathCompletionFuture.complete(failureResult);
+                    }
                     return;
                 }
 
@@ -196,6 +250,13 @@ public class PathTracer {
                 LOGGER.warn("Max retries exceeded. Stopping pathfinding.");
                 flushAllMovementTasks();
                 isMoving = false;
+
+                // ✅ Complete with retry failure
+                String retryFailureResult = "Max retries exceeded";
+                finalResult.set(retryFailureResult);
+                if (pathCompletionFuture != null && !pathCompletionFuture.isDone()) {
+                    pathCompletionFuture.complete(retryFailureResult);
+                }
             }
         }
 
@@ -225,7 +286,7 @@ public class PathTracer {
 
                 // Check if we're at this segment's start or end
                 if (isPositionMatch(currentPos, segment.start()) || isPositionMatch(currentPos, segment.end())) {
-                    LOGGER.info("✓ Bot advanced to segment {}: {}", i, segment);
+                    LOGGER.info("✅ Bot advanced to segment {}: {}", i, segment);
 
                     // Clear old segments up to this point
                     clearJobs();
@@ -249,11 +310,18 @@ public class PathTracer {
                     Math.abs(pos1.getZ() - pos2.getZ()) <= 1;
         }
 
+        // ✅ Updated to return proper format for parsing
         public static String tracePathOutput(ServerCommandSource botSource) {
-            ServerPlayerEntity bot = botSource.getPlayer();
-            BlockPos currentPos = Objects.requireNonNull(bot).getBlockPos();
+            if (botSource == null || botSource.getPlayer() == null) {
+                return "Bot not found";
+            }
 
-            return "Bot reached x:" + currentPos.getX() + " y:" + currentPos.getY() + " z:" + currentPos.getZ();
+            ServerPlayerEntity bot = botSource.getPlayer();
+            BlockPos currentPos = bot.getBlockPos();
+
+            // Return in the format expected by parseOutputValues
+            return String.format("Bot moved to position - x: %d y: %d z: %d",
+                    currentPos.getX(), currentPos.getY(), currentPos.getZ());
         }
 
         // Improved target reaching detection
@@ -338,16 +406,34 @@ public class PathTracer {
         }
     }
 
-    public static void tracePath(MinecraftServer server, ServerCommandSource botSource, String botName, Queue<Segment> segments, boolean sprint) {
+    // ✅ Updated to return CompletableFuture for proper async handling
+    public static CompletableFuture<String> tracePath(MinecraftServer server, ServerCommandSource botSource, String botName, Queue<Segment> segments, boolean sprint) {
         shouldSprint = sprint;
         segmentQueue = new LinkedList<>(segments); // Create a copy
+
+        // Clear any existing completion future
+        BotSegmentManager.clearJobs();
+
+        // Create the manager and initialize the completion future FIRST
+        BotSegmentManager manager = new BotSegmentManager(server, botSource, botName);
+        CompletableFuture<String> completionFuture = BotSegmentManager.getPathCompletionFuture();
+
+        // Start the path execution in a separate thread
         new Thread(() -> {
-            BotSegmentManager manager = new BotSegmentManager(server, botSource, botName);
-            BotSegmentManager.clearJobs();
-            segments.forEach(manager::addSegmentJob);
-            manager.startProcessing();
+            try {
+                segments.forEach(manager::addSegmentJob);
+                manager.startProcessing();
+            } catch (Exception e) {
+                LOGGER.error("Error starting path processing: ", e);
+                if (!completionFuture.isDone()) {
+                    completionFuture.complete("Path processing failed: " + e.getMessage());
+                }
+            }
         }).start();
+
+        return completionFuture;
     }
+
 
     public static void flushAllMovementTasks() {
         segmentQueue.clear();

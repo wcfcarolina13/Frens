@@ -16,12 +16,14 @@ import net.shasankp000.ChatUtils.ChatContextManager;
 import net.shasankp000.ChatUtils.ClarificationState;
 import net.shasankp000.FilingSystem.LLMClientFactory;
 import net.shasankp000.FilingSystem.ManualConfig;
+import net.shasankp000.LauncherDetection.LauncherEnvironment;
 import net.shasankp000.Network.OpenConfigPayload;
 import net.shasankp000.OllamaClient.ollamaClient;
 import net.shasankp000.ServiceLLMClients.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -30,8 +32,7 @@ import java.util.UUID;
 
 public class AIPlayerClient implements ClientModInitializer {
     private static final Gson GSON = new Gson();
-    private static final String gameDir = FabricLoader.getInstance().getGameDir().toString();
-    private static final Path BOT_PROFILE_PATH = Paths.get(gameDir + "/config/settings.json5");
+    private static final Path BOT_PROFILE_PATH = Paths.get(LauncherEnvironment.getStorageDirectory("config") + File.separator + "settings.json5");
     private static JsonObject botProfiles;
     public static final Logger LOGGER = LoggerFactory.getLogger("ai-player-client");
     public static final ManualConfig CONFIG = ManualConfig.load();
@@ -49,7 +50,7 @@ public class AIPlayerClient implements ClientModInitializer {
 
     private static String getBotNameIfMentioned(String message) {
         String[] words = message.split("\\s+");
-        JsonObject profiles = botProfiles.getAsJsonObject("BotGameProfile");
+        JsonObject profiles = botProfiles.getAsJsonObject("botGameProfile");
         for (String word : words) {
             String cleaned = word.replaceAll("[^a-zA-Z0-9]", "").toLowerCase();
             for (String botName : profiles.keySet()) {
@@ -66,7 +67,7 @@ public class AIPlayerClient implements ClientModInitializer {
     private static boolean isMessageFromBot(String rawMessage) {
         if (botProfiles == null) return false;
 
-        JsonObject profiles = botProfiles.getAsJsonObject("BotGameProfile");
+        JsonObject profiles = botProfiles.getAsJsonObject("botGameProfile");
         if (profiles == null) return false;
 
         for (String botName : profiles.keySet()) {
@@ -82,7 +83,7 @@ public class AIPlayerClient implements ClientModInitializer {
         if (botProfiles == null) return false;
 
         if (rawMessage.startsWith("[Server]")) {
-            JsonObject profiles = botProfiles.getAsJsonObject("BotGameProfile");
+            JsonObject profiles = botProfiles.getAsJsonObject("botGameProfile");
             if (profiles == null) return false;
 
             for (String botName : profiles.keySet()) {
@@ -185,17 +186,17 @@ public class AIPlayerClient implements ClientModInitializer {
                                         SystemToast.create(client, SystemToast.Type.CHUNK_LOAD_FAILURE, Text.of("LLM Client factory error."), Text.of("Error! Returned client is null! Cannot proceed!"))
                                 );
                             }
-
+                            break;
                         case "ollama":
                             ollamaClient.runFromChat(botName, combinedContext, playerUUID);
-
+                            break;
                         default:
                             LOGGER.warn("Unsupported provider detected. Defaulting to Ollama client");
                             client.getToastManager().add(
                                     SystemToast.create(client, SystemToast.Type.NARRATOR_TOGGLE, Text.of("Invalid LLM Client."), Text.of("Unsupported provider detected. Defaulting to Ollama client"))
                             );
                             ollamaClient.runFromChat(botName, combinedContext, playerUUID);
-
+                            break;
                     }
 
                 }
@@ -256,9 +257,11 @@ public class AIPlayerClient implements ClientModInitializer {
                                     SystemToast.create(client, SystemToast.Type.CHUNK_LOAD_FAILURE, Text.of("LLM Client factory error."), Text.of("Error! Returned client is null! Cannot proceed!"))
                             );
                         }
+                        break;
 
                     case "ollama":
                         ollamaClient.runFromChat(botName, message, playerUUID);
+                        break;
 
                     default:
                         LOGGER.warn("Unsupported provider detected. Defaulting to Ollama client");
@@ -266,6 +269,7 @@ public class AIPlayerClient implements ClientModInitializer {
                                 SystemToast.create(client, SystemToast.Type.NARRATOR_TOGGLE, Text.of("Invalid LLM Client."), Text.of("Unsupported provider detected. Defaulting to Ollama client"))
                         );
                         ollamaClient.runFromChat(botName, message, playerUUID);
+                        break;
 
                 }
 

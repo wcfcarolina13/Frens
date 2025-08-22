@@ -163,8 +163,23 @@ public class ToolRegistry {
                             sharedState.put("bot.healthLevel", s);
                         }
                     }
-            )
+            ),
 
+            new Tool(
+                "webSearch",
+                    """
+                    Searches the web for the input query via an automatically pre-configured provider. Meant to be used as a standalone method and not in a pipeline.
+                    """,
+                    List.of(
+                            new Tool.Parameter("Query", "You need to understand the user's input and put in a search query accordingly in here.")
+                    ),
+                    Set.of("webSearchQuery.result"),
+                    ((sharedState, paramMap, searchResult) -> {
+                        if (searchResult instanceof String result) {
+                            sharedState.put("webSearchQuery", result);
+                        }
+                    })
+            )
     );
 
 }

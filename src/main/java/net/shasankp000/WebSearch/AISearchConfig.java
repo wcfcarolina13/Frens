@@ -17,7 +17,7 @@ public class AISearchConfig {
 
     static {
         if (!AIPlayer.CONFIG.getGeminiKey().isEmpty()) {
-            GEMINI_API_KEY = AIPlayer.CONFIG.getGeminiKey(); // using the same api key for web search purposes as well.
+            GEMINI_API_KEY = AIPlayer.CONFIG .getGeminiKey(); // using the same api key for web search purposes as well.
         }
 
         loadConfig();

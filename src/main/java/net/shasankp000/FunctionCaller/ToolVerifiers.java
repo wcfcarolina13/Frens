@@ -1,102 +1,110 @@
 package net.shasankp000.FunctionCaller;
 
+import net.minecraft.server.network.ServerPlayerEntity;
+import net.minecraft.util.math.BlockPos;
+
+import java.util.HashMap;
 import java.util.Map;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
-
-
+/**
+ * State-based verifier class. Verifies tool outputs by checking sharedState directly,
+ * without parsing strings. Each verifier is a lambda that takes params, sharedState, and bot entity.
+ */
 public class ToolVerifiers {
 
-    /** goTo: compares final position vs. input coordinates */
-    public static boolean verifyGoTo(Map<String, String> params, String output) {
-        try {
-            Pattern pattern = Pattern.compile("x:(-?\\d+)\\s+y:(-?\\d+)\\s+z:(-?\\d+)");
-            Matcher matcher = pattern.matcher(output);
-            if (!matcher.find()) return false;
+    // Result class for verifiers: success flag + extracted/calculated data
+    public static class VerificationResult {
+        public final boolean success;
+        public final Map<String, Object> data;
 
-            double outX = Double.parseDouble(matcher.group(1));
-            double outY = Double.parseDouble(matcher.group(2));
-            double outZ = Double.parseDouble(matcher.group(3));
-
-            double targetX = Double.parseDouble(params.getOrDefault("x", "0"));
-            double targetY = Double.parseDouble(params.getOrDefault("y", "0"));
-            double targetZ = Double.parseDouble(params.getOrDefault("z", "0"));
-
-            double distSq = Math.pow(outX - targetX, 2)
-                    + Math.pow(outY - targetY, 2)
-                    + Math.pow(outZ - targetZ, 2);
-
-            return distSq <= 9.0; // 3 block tolerance
-        } catch (Exception e) {
-            return false;
+        public VerificationResult(boolean success, Map<String, Object> data) {
+            this.success = success;
+            this.data = data != null ? data : new HashMap<>();
         }
     }
 
-    /** detectBlocks: output contains detected block coordinates */
-    public static boolean verifyDetectBlocks(Map<String, String> params, String output) {
-        try {
-            Pattern pattern = Pattern.compile("found at (\\-?\\d+)\\s+(\\-?\\d+)\\s+(\\-?\\d+)", Pattern.CASE_INSENSITIVE);
-            Matcher matcher = pattern.matcher(output.toLowerCase());
-
-            return matcher.find();
-        } catch (Exception e) {
-            return false;
-        }
+    // Functional interface for verifiers
+    @FunctionalInterface
+    public interface StateVerifier {
+        VerificationResult verify(Map<String, String> params, Map<String, Object> sharedState, ServerPlayerEntity bot);
     }
 
-    /** turn: output must contain the direction input */
-    public static boolean verifyTurn(Map<String, String> params, String output) {
-        String expected = params.getOrDefault("direction", "").toLowerCase();
-        return output.toLowerCase().contains("facing " + expected);
-    }
+    // Registry of verifiers per function (extend as needed)
+    public static final Map<String, StateVerifier> VERIFIER_REGISTRY = Map.of(
+            "goTo", (params, state, bot) -> {
+                Object xObj = state.get("botPosition.x");
+                Object yObj = state.get("botPosition.y");
+                Object zObj = state.get("botPosition.z");
+                if (!(xObj instanceof Number) || !(yObj instanceof Number) || !(zObj instanceof Number)) {
+                    return new VerificationResult(false, Map.of("error", "Missing or invalid position in state"));
+                }
 
-    /** mineBlock: check for success indicators */
-    public static boolean verifyMineBlock(Map<String, String> params, String output) {
-        String lower = output.toLowerCase();
-        return lower.contains("success")
-                || lower.contains("mined")
-                || lower.contains("complete")
-                || lower.contains("done");
-    }
+                double actualX = ((Number) xObj).doubleValue();
+                double actualY = ((Number) yObj).doubleValue();
+                double actualZ = ((Number) zObj).doubleValue();
 
-    /** getOxygenLevel: extract integer from output */
-    public static boolean verifyGetOxygenLevel(Map<String, String> params, String output) {
-        return verifySimpleIntMetric(output, "oxygen");
-    }
+                double targetX = Double.parseDouble(params.getOrDefault("x", "0"));
+                double targetY = Double.parseDouble(params.getOrDefault("y", "0"));
+                double targetZ = Double.parseDouble(params.getOrDefault("z", "0"));
 
-    /** getHungerLevel: extract integer from output */
-    public static boolean verifyGetHungerLevel(Map<String, String> params, String output) {
-        return verifySimpleIntMetric(output, "hunger");
-    }
+                double distSq = Math.pow(actualX - targetX, 2) + Math.pow(actualY - targetY, 2) + Math.pow(actualZ - targetZ, 2);
+                boolean success = distSq <= 16.0;  // Tolerance for ~4 blocks, accounting for overshoot
 
-    /** getHealthLevel: extract float from output */
-    public static boolean verifyGetHealthLevel(Map<String, String> params, String output) {
-        try {
-            Pattern pattern = Pattern.compile("([0-9]+(\\.[0-9]+)?)");
-            Matcher matcher = pattern.matcher(output);
-            if (matcher.find()) {
-                double val = Double.parseDouble(matcher.group(1));
-                return val >= 0;
+                // Optional cross-check with bot's actual position
+                if (bot != null) {
+                    BlockPos botPos = bot.getBlockPos();
+                    double botDistSq = Math.pow(botPos.getX() - targetX, 2) + Math.pow(botPos.getY() - targetY, 2) + Math.pow(botPos.getZ() - targetZ, 2);
+                    success = success && botDistSq <= 16.0;
+                }
+
+                Map<String, Object> data = new HashMap<>();
+                data.put("actual", Map.of("x", actualX, "y", actualY, "z", actualZ));
+                data.put("distSq", distSq);
+                return new VerificationResult(success, data);
+            },
+            "detectBlocks", (params, state, bot) -> {
+                Object x = state.get("lastDetectedBlock.x");
+                Object y = state.get("lastDetectedBlock.y");
+                Object z = state.get("lastDetectedBlock.z");
+                boolean success = x != null && y != null && z != null;
+                Map<String, Object> data = success ? Map.of("coords", Map.of("x", x, "y", y, "z", z)) : null;
+                return new VerificationResult(success, data);
+            },
+            "turn", (params, state, bot) -> {
+                String actualDirection = (String) state.get("facing.direction");
+                String expected = params.getOrDefault("direction", "").toLowerCase();
+                boolean success = actualDirection != null && actualDirection.toLowerCase().contains(expected);
+                return new VerificationResult(success, Map.of("actualDirection", actualDirection != null ? actualDirection : "unknown"));
+            },
+            "mineBlock", (params, state, bot) -> {
+                String status = (String) state.get("lastMineStatus");
+                boolean success = status != null && status.equalsIgnoreCase("success");
+                return new VerificationResult(success, Map.of("status", status != null ? status : "unknown"));
+            },
+            "getOxygenLevel", (params, state, bot) -> {
+                Object levelObj = state.get("bot.oxygenLevel");  // Based on your original code
+                if (!(levelObj instanceof Number)) return new VerificationResult(false, Map.of("error", "Missing or invalid oxygen level"));
+                double level = ((Number) levelObj).doubleValue();
+                boolean success = level >= 0;
+                // Optional cross-check with bot
+                if (bot != null) success = success && bot.getAir() >= 0;
+                return new VerificationResult(success, Map.of("level", level));
+            },
+            "getHungerLevel", (params, state, bot) -> {
+                Object levelObj = state.get("bot.hungerLevel");
+                if (!(levelObj instanceof Number)) return new VerificationResult(false, Map.of("error", "Missing or invalid hunger level"));
+                double level = ((Number) levelObj).doubleValue();
+                boolean success = level >= 0;
+                if (bot != null) success = success && bot.getHungerManager().getFoodLevel() >= 0;
+                return new VerificationResult(success, Map.of("level", level));
+            },
+            "getHealthLevel", (params, state, bot) -> {
+                Object levelObj = state.get("bot.healthLevel");
+                if (!(levelObj instanceof Number)) return new VerificationResult(false, Map.of("error", "Missing or invalid health level"));
+                double level = ((Number) levelObj).doubleValue();
+                boolean success = level >= 0;
+                if (bot != null) success = success && bot.getHealth() >= 0;
+                return new VerificationResult(success, Map.of("level", level));
             }
-        } catch (Exception e) {
-            return false;
-        }
-        return false;
-    }
-
-    /** Utility: shared integer stat extraction */
-    private static boolean verifySimpleIntMetric(String output, String keyword) {
-        try {
-            Pattern pattern = Pattern.compile(keyword + ".*?(\\d+)", Pattern.CASE_INSENSITIVE);
-            Matcher matcher = pattern.matcher(output);
-            if (matcher.find()) {
-                int val = Integer.parseInt(matcher.group(1));
-                return val >= 0;
-            }
-        } catch (Exception e) {
-            return false;
-        }
-        return false;
-    }
+    );
 }
