@@ -159,10 +159,11 @@ Here’s what’s planned for the **next patch**:
 - **Combat & Survival Enhancements**  
   - Bot uses weapons (including ranged) to fend off mobs.  
   - Reflex module upgrades.  
-  - More natural world interactions (e.g., sleeping at night).  
+  - More natural world interactions (e.g., sleeping at night).
+  - A more lightweight but more powerful logic engine that will replace the current LLM based reasoning for the Meta-Decision Layer  
 
 - **Improved Path Tracer**  
-  - Smarter navigation through **water and complex terrain**.  
+  - Smarter navigation through **water and complex terrain**. Abilities such as bridging upwards with blocks.
 
 - **Self-Goal Assignment System**  
   - Bot assigns itself goals like a real player.  
