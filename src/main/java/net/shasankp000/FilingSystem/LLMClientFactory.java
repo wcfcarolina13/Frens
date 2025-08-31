@@ -39,6 +39,17 @@
                     }
                     yield new GrokClient(AIPlayer.CONFIG.getGrokKey(), AIPlayer.CONFIG.getSelectedLanguageModel());
                 }
+                case "custom" -> {
+                    if (AIPlayer.CONFIG.getCustomApiKey().isEmpty()) {
+                        LOGGER.error("Custom API key not set in config!");
+                        yield null;
+                    }
+                    if (AIPlayer.CONFIG.getCustomApiUrl().isEmpty()) {
+                        LOGGER.error("Custom API URL not set in config!");
+                        yield null;
+                    }
+                    yield new GenericOpenAIClient(AIPlayer.CONFIG.getCustomApiKey(), AIPlayer.CONFIG.getSelectedLanguageModel(), AIPlayer.CONFIG.getCustomApiUrl());
+                }
                 default -> {
                     LOGGER.info("Defaulting to Ollama client");
                     yield null;

@@ -94,6 +94,7 @@ public class AIPlayer implements ModInitializer {
 		ServerLifecycleEvents.SERVER_STARTED.register(server -> {
 			configNetworkManager.registerServerModelNameSaveReceiver(server);
 			configNetworkManager.registerServerAPIKeySaveReceiver(server);
+			configNetworkManager.registerServerCustomProviderSaveReceiver(server);
 			serverInstance = server;
 			LOGGER.info("Server instance stored!");
 
