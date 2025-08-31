@@ -22,6 +22,7 @@ import net.shasankp000.Entity.AutoFaceEntity;
 import net.shasankp000.Network.OpenConfigPayload;
 import net.shasankp000.Network.SaveAPIKeyPayload;
 import net.shasankp000.Network.SaveConfigPayload;
+import net.shasankp000.Network.SaveCustomProviderPayload;
 import net.shasankp000.Network.configNetworkManager;
 import net.shasankp000.WebSearch.AISearchConfig;
 import org.slf4j.Logger;
@@ -66,6 +67,7 @@ public class AIPlayer implements ModInitializer {
 		PayloadTypeRegistry.playC2S().register(SaveConfigPayload.ID, SaveConfigPayload.CODEC);
 		PayloadTypeRegistry.playS2C().register(OpenConfigPayload.ID, OpenConfigPayload.CODEC);
 		PayloadTypeRegistry.playC2S().register(SaveAPIKeyPayload.ID, SaveAPIKeyPayload.CODEC);
+		PayloadTypeRegistry.playC2S().register(SaveCustomProviderPayload.ID, SaveCustomProviderPayload.CODEC);
 
 
 		modCommandRegistry.register();

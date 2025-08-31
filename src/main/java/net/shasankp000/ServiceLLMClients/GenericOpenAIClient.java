@@ -28,7 +28,11 @@ public class GenericOpenAIClient implements LLMClient {
         this.apiKey = apiKey;
         this.modelName = modelName;
         // Ensure baseUrl ends with "/" but doesn't have double slashes
-        this.baseUrl = baseUrl.endsWith("/") ? baseUrl : baseUrl + "/";
+        if (baseUrl == null || baseUrl.trim().isEmpty()) {
+            throw new IllegalArgumentException("Base URL cannot be null or empty");
+        }
+        String trimmedUrl = baseUrl.trim();
+        this.baseUrl = trimmedUrl.endsWith("/") ? trimmedUrl : trimmedUrl + "/";
         this.client = HttpClient.newHttpClient();
     }
 

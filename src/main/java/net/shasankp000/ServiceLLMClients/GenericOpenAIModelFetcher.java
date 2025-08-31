@@ -23,7 +23,11 @@ public class GenericOpenAIModelFetcher implements ModelFetcher {
     public GenericOpenAIModelFetcher(String baseUrl) {
         this.client = HttpClient.newHttpClient();
         // Ensure baseUrl ends with "/" but doesn't have double slashes
-        this.baseUrl = baseUrl.endsWith("/") ? baseUrl : baseUrl + "/";
+        if (baseUrl == null || baseUrl.trim().isEmpty()) {
+            throw new IllegalArgumentException("Base URL cannot be null or empty");
+        }
+        String trimmedUrl = baseUrl.trim();
+        this.baseUrl = trimmedUrl.endsWith("/") ? trimmedUrl : trimmedUrl + "/";
     }
 
     @Override
