@@ -7,7 +7,7 @@ import net.minecraft.network.packet.CustomPayload;
 import net.minecraft.util.Identifier;
 
 public record SaveAPIKeyPayload(String provider, String key) implements CustomPayload {
-    public static final Identifier ID_IDENTIFIER = new Identifier("ai-player", "save_api_key");
+    public static final Identifier ID_IDENTIFIER = Identifier.of("ai-player", "save_api_key");
     public static final CustomPayload.Id<SaveAPIKeyPayload> ID = new CustomPayload.Id<>(ID_IDENTIFIER);
 
 

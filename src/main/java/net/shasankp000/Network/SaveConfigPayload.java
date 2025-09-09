@@ -7,7 +7,7 @@ import net.minecraft.util.Identifier;
 
 
 public record SaveConfigPayload(String configData) implements CustomPayload {
-    public static final Identifier ID_IDENTIFIER = new Identifier("ai-player", "save_config");
+    public static final Identifier ID_IDENTIFIER = Identifier.of("ai-player", "save_config");
     public static final CustomPayload.Id<SaveConfigPayload> ID = new CustomPayload.Id<>(ID_IDENTIFIER);
 
 
