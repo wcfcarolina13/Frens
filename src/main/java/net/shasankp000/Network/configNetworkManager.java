@@ -49,6 +49,12 @@ public class configNetworkManager {
         ClientPlayNetworking.send(payload);
     }
 
+    // Called on the client side to send custom provider settings (both API key and URL).
+    public static void sendSaveCustomProviderPacket(String apiKey, String apiUrl) {
+        SaveCustomProviderPayload payload = new SaveCustomProviderPayload(apiKey, apiUrl);
+        ClientPlayNetworking.send(payload);
+    }
+
 
     // On the server side: register a receiver for the model name save config packet.
     @SuppressWarnings("resource")
@@ -90,6 +96,9 @@ public class configNetworkManager {
                     case "grok":
                         AIPlayer.CONFIG.setGrokKey(newKey);
                         break;
+                    case "custom":
+                        AIPlayer.CONFIG.setCustomApiKey(newKey);
+                        break;
                     case "ollama":
                         LOGGER.error("Error! Ollama is not supported in this mode!");
                         return;
@@ -100,6 +109,23 @@ public class configNetworkManager {
                 AIPlayer.CONFIG.save();
                 ServerCommandSource serverCommandSource = server.getCommandSource().withSilent().withMaxLevel(4);
                 ChatUtils.sendSystemMessage(serverCommandSource, "API Key for " + provider + " saved successfully!");
+            });
+        });
+    }
+
+    // On the server side: register a receiver for custom provider settings.
+    public static void registerServerCustomProviderSaveReceiver(MinecraftServer server) {
+        ServerPlayNetworking.registerGlobalReceiver(SaveCustomProviderPayload.ID, (payload, context) -> {
+            String newApiKey = payload.apiKey();
+            String newApiUrl = payload.apiUrl();
+
+            // Run the config update on the server thread
+            context.server().execute(() -> {
+                AIPlayer.CONFIG.setCustomApiKey(newApiKey);
+                AIPlayer.CONFIG.setCustomApiUrl(newApiUrl);
+                AIPlayer.CONFIG.save();
+                ServerCommandSource serverCommandSource = server.getCommandSource().withSilent().withMaxLevel(4);
+                ChatUtils.sendSystemMessage(serverCommandSource, "Custom provider settings saved successfully!");
             });
         });
     }

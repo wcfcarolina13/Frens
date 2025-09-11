@@ -43,6 +43,8 @@ public class ManualConfig {
     private String claudeKey = "";
     private String geminiKey = "";
     private String grokKey = "";
+    private String customApiKey = "";
+    private String customApiUrl = "";
     private Map<String, String> botGameProfile = new HashMap<>();
 
     /**
@@ -105,6 +107,15 @@ public class ManualConfig {
                 case "grok":
                     modelFetcher = new GrokModelFetcher();
                      apiKey = this.grokKey;
+                    break;
+                case "custom":
+                    if (!this.customApiUrl.isEmpty()) {
+                        modelFetcher = new GenericOpenAIModelFetcher(this.customApiUrl);
+                        apiKey = this.customApiKey;
+                    } else {
+                        LOGGER.error("Custom provider selected but no API URL configured");
+                        return;
+                    }
                     break;
                 default:
                     LOGGER.error("Unsupported provider: {}", llmMode);
@@ -208,6 +219,22 @@ public class ManualConfig {
 
     public void setGrokKey(String grokKey) {
         this.grokKey = grokKey != null ? grokKey.trim() : "";
+    }
+
+    public String getCustomApiKey() {
+        return customApiKey;
+    }
+
+    public void setCustomApiKey(String customApiKey) {
+        this.customApiKey = customApiKey != null ? customApiKey.trim() : "";
+    }
+
+    public String getCustomApiUrl() {
+        return customApiUrl;
+    }
+
+    public void setCustomApiUrl(String customApiUrl) {
+        this.customApiUrl = customApiUrl != null ? customApiUrl.trim() : "";
     }
 
     public List<String> getModelList() {
