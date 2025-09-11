@@ -71,6 +71,12 @@ Latest Update: 21/8/2025 at 04:08 AM IST (Indian Standard Time)
 Please have patience while waiting for updates. Since I am the only guy working on this project, it does take me time to address all the issues/add in new features.
 
 ---
+# Changelog v1.0.5.2-release+1.21.1
+
+Thanks to https://github.com/arichornlover AI Player has now been updated to version 1.21.1
+
+---
+
 # Changelog v1.0.5.1-release+1.20.6-bugfix-2
 
 - Fixed a lot of bugs that got overlooked in the previous testing phase.
