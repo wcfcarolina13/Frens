@@ -6,7 +6,7 @@ import net.minecraft.network.packet.CustomPayload;
 import net.minecraft.util.Identifier;
 
 public record SaveCustomProviderPayload(String apiKey, String apiUrl) implements CustomPayload {
-    public static final Identifier ID_IDENTIFIER = new Identifier("ai-player", "save_custom_provider");
+    public static final Identifier ID_IDENTIFIER = Identifier.of("ai-player", "save_custom_provider");
     public static final CustomPayload.Id<SaveCustomProviderPayload> ID = new CustomPayload.Id<>(ID_IDENTIFIER);
 
     // Define a string codec with a max length (adjust 32767 as needed)
