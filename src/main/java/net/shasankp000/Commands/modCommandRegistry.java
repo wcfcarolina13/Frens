@@ -1,7 +1,5 @@
 package net.shasankp000.Commands;
 
-
-
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.context.CommandContext;
@@ -63,18 +61,6 @@ public class modCommandRegistry {
     public static String botName = "";
     public static final Logger LOGGER = LoggerFactory.getLogger("mod-command-registry");
 
-    public record BotMovementTask(MinecraftServer server, ServerCommandSource botSource,
-                                   String botName) implements Runnable {
-
-        @Override
-            public void run() {
-
-                stopMoving(server, botSource, botName);
-
-                LOGGER.info("{} has stopped walking!", botName);
-
-            }
-        }
 
     public record BotStopTask(MinecraftServer server, ServerCommandSource botSource,
                                   String botName) implements Runnable {
@@ -88,8 +74,6 @@ public class modCommandRegistry {
 
         }
     }
-
-
 
 
     public static void register() {
