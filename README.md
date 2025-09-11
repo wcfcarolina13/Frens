@@ -54,7 +54,7 @@ This mod also relies on the ollama4j project. https://github.com/amithkoujalgi/o
 
 ---
 
-# Progress: 75%
+# Progress: 75.5%
 
 ---
 # Current stage of the mod
@@ -73,7 +73,65 @@ Please have patience while waiting for updates. Since I am the only guy working 
 ---
 # Changelog v1.0.5.2-release+1.21.1
 
+**Important: Earlier proposed second part features will be added in the next patch and this new update marks the end of support for 1.20.6 and below.**
+
 Thanks to https://github.com/arichornlover AI Player has now been updated to version 1.21.1
+
+This minor update of AI player updates the mod to version 1.21.1 and also brings support for other custom API providers.
+
+## Custom OpenAI-Compatible Provider Support
+
+This feature allows you to use alternative AI providers that are compatible with the OpenAI API standard, such as OpenRouter, TogetherAI, Perplexity, and others.
+
+## How to Use
+
+### 1. Enable Custom Provider Mode
+
+Set the system property(JVM argument) when launching the game:
+```
+-Daiplayer.llmMode=custom
+```
+
+### 2. Configure API Settings
+
+0. Firstly, delete the existing settings.json5 in the config folder (save any api keys elsewhere for the meantime)
+1. Open the in-game API Keys configuration screen (`/configMan`) and then click the API Keys button.
+2. Set the following fields:
+    - **Custom API URL**: The base URL of your provider (e.g., `https://openrouter.ai/api/v1`)
+    - **Custom API Key**: Your API key for the provider
+3. Hit save. In case you don't see the list of models immediately hit the "Refresh Models" button once or twice.
+4. If you still don't see the list of models, close the config manager, type `/configMan` again and you should see the list of models available.
+5. ollama is still required to be open in the background because of the embedding model being used, but I will separate this entirely in the next mini patch, by adding an embedding api endpoint from the providers, and also upgrading to the `embedddinggemma` model from `nomic-embed-text`
+
+### 3. Select a Model
+
+The system will automatically fetch available models from your provider's `/models` endpoint and display them in the model selection interface.
+
+## Supported Providers
+
+Any provider that implements the OpenAI API standard should work. Some examples:
+
+- **OpenRouter**: `https://openrouter.ai/api/v1`
+- **TogetherAI**: `https://api.together.xyz/v1`
+- **Perplexity**: `https://api.perplexity.ai/`
+- **Groq**: `https://api.groq.com/openai/v1`
+- **Local LM Studio**: `http://localhost:1234/v1`
+
+## API Compatibility
+
+The custom provider implementation uses the following OpenAI API endpoints:
+
+- `GET /models` - For fetching available models
+- `POST /chat/completions` - For sending chat completion requests
+
+Your provider must support these endpoints with the same request/response format as OpenAI's API.
+
+## Troubleshooting
+
+- **"Custom provider selected but no API URL configured"**: Make sure you've set the Custom API URL field
+- **"Custom API key not set in config!"**: Make sure you've set the Custom API Key field
+- **Empty model list**: Check that your API key is valid and the URL is correct
+- **Connection errors**: Verify that the provider URL is accessible and supports the OpenAI API format
 
 ---
 
