@@ -160,7 +160,7 @@ public class ManualConfig {
     public static ManualConfig load() {
         File file = new File(FILE_PATH);
         // Ensure the directory for the file exists before attempting to write.
-        if (file.getParentFile() != null) {
+        if (!file.getParentFile().exists()) {
             file.getParentFile().mkdirs();
         }
 
