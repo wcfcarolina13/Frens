@@ -127,6 +127,19 @@ AI Player now supports multiple LLM providers (configurable via API keys):
 - **Anthropic Claude**  
 - **Google Gemini**  
 - **xAI Grok**  
+- **Custom OpenAI-Compatible Providers** (e.g., OpenRouter, TogetherAI, Perplexity)
+
+#### Using Custom Providers
+
+To use a custom OpenAI-compatible provider:
+
+1. **Set the provider mode**: Add `-Daiplayer.llmMode=custom` to your JVM arguments
+2. **Configure in-game**: Open the API Keys screen and set:
+   - Custom API URL (e.g., `https://openrouter.ai/api/v1`)
+   - Custom API Key (your provider's API key)
+3. **Select model**: Choose from the available models fetched from your provider
+
+See [CUSTOM_PROVIDERS.md](CUSTOM_PROVIDERS.md) for detailed instructions and supported providers.  
 
 ### Web Search Tool
 

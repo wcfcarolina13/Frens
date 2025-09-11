@@ -18,6 +18,8 @@ public class APIKeysScreen extends Screen {
     private TextFieldWidget claudeKeyField;
     private TextFieldWidget geminiKeyField;
     private TextFieldWidget grokKeyField;
+    private TextFieldWidget customApiKeyField;
+    private TextFieldWidget customApiUrlField;
     public static final Logger LOGGER = LoggerFactory.getLogger("ConfigAPIKeysMan");
 
     public APIKeysScreen(Text title, Screen parent) {
@@ -65,6 +67,20 @@ public class APIKeysScreen extends Screen {
         this.addDrawableChild(this.grokKeyField);
         this.addSelectableChild(this.grokKeyField);
 
+        // Custom API URL Field
+        this.customApiUrlField = new TextFieldWidget(this.textRenderer, startX, startY + 120, fieldWidth, fieldHeight, Text.empty());
+        this.customApiUrlField.setMaxLength(512); // URLs can be longer than API keys
+        this.customApiUrlField.setText(AIPlayer.CONFIG.getCustomApiUrl());
+        this.addDrawableChild(this.customApiUrlField);
+        this.addSelectableChild(this.customApiUrlField);
+
+        // Custom API Key Field
+        this.customApiKeyField = new TextFieldWidget(this.textRenderer, startX, startY + 150, fieldWidth, fieldHeight, Text.empty());
+        this.customApiKeyField.setMaxLength(maxApiKeyLength);
+        this.customApiKeyField.setText(AIPlayer.CONFIG.getCustomApiKey());
+        this.addDrawableChild(this.customApiKeyField);
+        this.addSelectableChild(this.customApiKeyField);
+
         // Save Button
         ButtonWidget saveButton = ButtonWidget.builder(Text.of("Save"), (btn) -> {
             this.saveToFile();
@@ -73,7 +89,7 @@ public class APIKeysScreen extends Screen {
                 this.client.getToastManager().add(
                         SystemToast.create(this.client, SystemToast.Type.NARRATOR_TOGGLE, Text.of("API Keys Saved!"), Text.of("Your API keys have been saved.")));
             }
-        }).dimensions(this.width / 2 - buttonWidth - 10, this.height - 40, buttonWidth, fieldHeight).build();
+        }).dimensions(this.width / 2 - buttonWidth - 10, startY + 190, buttonWidth, fieldHeight).build();
         this.addDrawableChild(saveButton);
 
         // Done Button
@@ -81,7 +97,7 @@ public class APIKeysScreen extends Screen {
             // Close the current screen and return to the parent
             assert this.client != null;
             this.client.setScreen(this.parent);
-        }).dimensions(this.width / 2 + 10, this.height - 40, buttonWidth, fieldHeight).build();
+        }).dimensions(this.width / 2 + 10, startY + 190, buttonWidth, fieldHeight).build();
         this.addDrawableChild(doneButton);
     }
 
@@ -99,6 +115,8 @@ public class APIKeysScreen extends Screen {
         context.drawText(this.textRenderer, "Claude API Key:", labelX, startY + spacing + 5, 0xFFFFFFFF, true);
         context.drawText(this.textRenderer, "Gemini API Key:", labelX, startY + (spacing * 2) + 5, 0xFFFFFFFF, true);
         context.drawText(this.textRenderer, "Grok API Key:", labelX, startY + (spacing * 3) + 5, 0xFFFFFFFF, true);
+        context.drawText(this.textRenderer, "Custom API URL:", labelX, startY + (spacing * 4) + 5, 0xFFFFFFFF, true);
+        context.drawText(this.textRenderer, "Custom API Key:", labelX, startY + (spacing * 5) + 5, 0xFFFFFFFF, true);
     }
 
 
@@ -108,6 +126,8 @@ public class APIKeysScreen extends Screen {
         AIPlayer.CONFIG.setClaudeKey(this.claudeKeyField.getText());
         AIPlayer.CONFIG.setGeminiKey(this.geminiKeyField.getText());
         AIPlayer.CONFIG.setGrokKey(this.grokKeyField.getText());
+        AIPlayer.CONFIG.setCustomApiKey(this.customApiKeyField.getText());
+        AIPlayer.CONFIG.setCustomApiUrl(this.customApiUrlField.getText());
 
         // 2. Only save the config file once, after all values have been updated.
         AIPlayer.CONFIG.save();
@@ -127,6 +147,9 @@ public class APIKeysScreen extends Screen {
                 return;
             case "grok":
                 configNetworkManager.sendSaveAPIPacket(llmMode, this.grokKeyField.getText());
+                return;
+            case "custom":
+                configNetworkManager.sendSaveCustomProviderPacket(this.customApiKeyField.getText(), this.customApiUrlField.getText());
                 return;
             case "ollama":
                 LOGGER.info("No API key packet sent for Ollama mode.");

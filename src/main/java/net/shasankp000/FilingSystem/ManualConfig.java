@@ -4,11 +4,7 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.reflect.TypeToken;
 import net.shasankp000.Exception.ollamaNotReachableException;
-import net.shasankp000.ServiceLLMClients.ModelFetcher;
-import net.shasankp000.ServiceLLMClients.OpenAIModelFetcher;
-import net.shasankp000.ServiceLLMClients.ClaudeModelFetcher;
-import net.shasankp000.ServiceLLMClients.GeminiModelFetcher;
-import net.shasankp000.ServiceLLMClients.GrokModelFetcher;
+import net.shasankp000.ServiceLLMClients.*;
 import net.shasankp000.LauncherDetection.LauncherEnvironment;
 
 import org.slf4j.Logger;
@@ -43,6 +39,8 @@ public class ManualConfig {
     private String claudeKey = "";
     private String geminiKey = "";
     private String grokKey = "";
+    private String customApiKey = "";
+    private String customApiUrl = "";
     private Map<String, String> botGameProfile = new HashMap<>();
 
     /**
@@ -69,66 +67,93 @@ public class ManualConfig {
     public void updateModels() {
         // Run the network operation on a separate thread to prevent freezing.
         CompletableFuture.runAsync(() -> {
-            List<String> fetchedModels = new ArrayList<>();
-            ModelFetcher modelFetcher = null;
+            try {
+                List<String> fetchedModels = new ArrayList<>();
+                ModelFetcher modelFetcher = null;
+                String apiKey = "";
 
-
-            String apiKey = "";
-
-            switch (llmMode) {
-                case "ollama":
-                    try {
-                        LOGGER.info("Using ollama");
-                        fetchedModels = getLanguageModels.get();
-                        this.modelList = fetchedModels;
-                        LOGGER.info("Fetched models: {}", this.modelList);
-                        this.save();
+                switch (llmMode) {
+                    case "ollama":
+                        try {
+                            LOGGER.info("Using ollama");
+                            fetchedModels = getLanguageModels.get();
+                            this.modelList = fetchedModels;
+                            LOGGER.info("Fetched models: {}", this.modelList);
+                            this.save();
+                            return;
+                        } catch (ollamaNotReachableException e) {
+                            LOGGER.error("Ollama is not reachable: {}", e.getMessage());
+                            fetchedModels.add("Ollama is not reachable!");
+                        }
+                        break;
+                    case "openai":
+                        modelFetcher = new OpenAIModelFetcher();
+                        apiKey = this.openAIKey;
+                        break;
+                    case "claude":
+                        modelFetcher = new ClaudeModelFetcher();
+                        apiKey = this.claudeKey;
+                        break;
+                    case "gemini":
+                        modelFetcher = new GeminiModelFetcher();
+                        apiKey = this.geminiKey;
+                        break;
+                    case "grok":
+                        modelFetcher = new GrokModelFetcher();
+                        apiKey = this.grokKey;
+                        break;
+                    case "custom":
+                        if (!this.customApiUrl.isEmpty()) {
+                            modelFetcher = new GenericOpenAIModelFetcher(this.customApiUrl);
+                            apiKey = this.customApiKey;
+                        } else {
+                            LOGGER.error("Custom provider selected but no API URL configured");
+                            return;
+                        }
+                        break;
+                    default:
+                        LOGGER.error("Unsupported provider: {}", llmMode);
                         return;
-                    } catch (ollamaNotReachableException e) {
-                        LOGGER.error("Ollama is not reachable: {}", e.getMessage());
-                        fetchedModels.add("Ollama is not reachable!");
-                    }
-                    break;
-                case "openai":
-                    modelFetcher = new OpenAIModelFetcher();
-                     apiKey = this.openAIKey;
-                    break;
-                case "claude":
-                    modelFetcher = new ClaudeModelFetcher();
-                     apiKey = this.claudeKey;
-                    break;
-                case "gemini":
-                    LOGGER.info("Using Gemini");
-                    modelFetcher = new GeminiModelFetcher();
-                     apiKey = this.geminiKey;
-                    break;
-                case "grok":
-                    modelFetcher = new GrokModelFetcher();
-                     apiKey = this.grokKey;
-                    break;
-                default:
-                    LOGGER.error("Unsupported provider: {}", llmMode);
-                    return;
-            }
+                }
 
-            if (modelFetcher != null) {
-                if(apiKey.isEmpty()) {
-                    // in the event that a user removes their api key but still have a service based provider set.
-                    fetchedModels = new ArrayList<>();
-                    selectedLanguageModel="No models available. Please enter an API key";
+                if (llmMode.equals("ollama")) {
+                    // ollama is handled above, so we just skip API key check.
+                    LOGGER.info("Skipping API key check for ollama");
+                    this.modelList = fetchedModels;
+                    LOGGER.info("ollama modelList: {}", this.modelList);
+                    this.save();
                 }
                 else {
-                    fetchedModels = modelFetcher.fetchModels(apiKey);
-                    if (selectedLanguageModel.equals("No models available. Please enter an API key")) {
-                        selectedLanguageModel="";
+                    if (modelFetcher != null) {
+                        if(apiKey.isEmpty()) {
+                            // in the event that a user removes their api key but still have a service based provider set.
+                            fetchedModels = new ArrayList<>();
+                            selectedLanguageModel="No models available. Please enter an API key";
+                        }
+                        else {
+                            try {
+                                fetchedModels = modelFetcher.fetchModels(apiKey);
+                                LOGGER.info("Retrieved models {} for provider: {}", fetchedModels , llmMode);
+                                if (selectedLanguageModel != null && selectedLanguageModel.equals("No models available. Please enter an API key")) {
+                                    selectedLanguageModel="";
+                                }
+                            } catch (Exception e) {
+                                LOGGER.error("Error fetching models: {}", e.getMessage(), e);
+                                fetchedModels = new ArrayList<>();
+                            }
+                        }
                     }
+                    this.modelList = fetchedModels;
+                    LOGGER.debug("this.modelList: {}", this.modelList);
+                    LOGGER.info("modelList: {}", this.modelList);
+                    this.save();
                 }
-
+            } catch (Exception e) {
+                LOGGER.error("Exception in updateModels: {}", e.getMessage(), e);
+                this.modelList = new ArrayList<>();
+                this.save();
             }
 
-            this.modelList = fetchedModels;
-            LOGGER.info("modelList: {}", this.modelList);
-            this.save();
         });
     }
 
@@ -153,7 +178,7 @@ public class ManualConfig {
     public static ManualConfig load() {
         File file = new File(FILE_PATH);
         // Ensure the directory for the file exists before attempting to write.
-        if (file.getParentFile() != null) {
+        if (!file.getParentFile().exists()) {
             file.getParentFile().mkdirs();
         }
 
@@ -169,11 +194,27 @@ public class ManualConfig {
             Type type = new TypeToken<ManualConfig>(){}.getType();
             ManualConfig loadedConfig = gson.fromJson(reader, type);
             // After loading, ensure the model list is updated.
-            loadedConfig.updateModels();
+            String currentProvider = System.getProperty("aiplayer.llmMode", "ollama");
+            loadedConfig.checkAndUpdateProvider(currentProvider);
             return loadedConfig;
         } catch (IOException e) {
             LOGGER.error("Failed to load config file. Using default config.", e);
             return new ManualConfig();
+        }
+    }
+
+    /**
+     * Checks if the provider has changed, and if so, updates llmMode, clears modelList, and fetches new models.
+     * @param newProvider The newly selected provider (llmMode)
+     */
+    public void checkAndUpdateProvider(String newProvider) {
+        if (!this.llmMode.equals(newProvider)) {
+            LOGGER.info("Provider changed from {} to {}. Invalidating modelList and updating config.", this.llmMode, newProvider);
+            this.llmMode = newProvider;
+            this.modelList = new ArrayList<>();
+            this.selectedLanguageModel = null;
+            this.save();
+            this.updateModels();
         }
     }
 
@@ -208,6 +249,22 @@ public class ManualConfig {
 
     public void setGrokKey(String grokKey) {
         this.grokKey = grokKey != null ? grokKey.trim() : "";
+    }
+
+    public String getCustomApiKey() {
+        return customApiKey;
+    }
+
+    public void setCustomApiKey(String customApiKey) {
+        this.customApiKey = customApiKey != null ? customApiKey.trim() : "";
+    }
+
+    public String getCustomApiUrl() {
+        return customApiUrl;
+    }
+
+    public void setCustomApiUrl(String customApiUrl) {
+        this.customApiUrl = customApiUrl != null ? customApiUrl.trim() : "";
     }
 
     public List<String> getModelList() {
