@@ -4,6 +4,9 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -19,6 +22,7 @@ public class GenericOpenAIModelFetcher implements ModelFetcher {
 
     private final HttpClient client;
     private final String baseUrl;
+    private static final Logger LOGGER = LoggerFactory.getLogger("GenericOpenAIModelFetcher");
 
     public GenericOpenAIModelFetcher(String baseUrl) {
         this.client = HttpClient.newHttpClient();
@@ -47,6 +51,11 @@ public class GenericOpenAIModelFetcher implements ModelFetcher {
             HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
 
             if (response.statusCode() == 200) {
+
+                LOGGER.info("Request url: {}", request.uri());
+                LOGGER.info("Response code: {}", response.statusCode());
+
+
                 JsonObject jsonResponse = JsonParser.parseString(response.body()).getAsJsonObject();
                 JsonArray models = jsonResponse.getAsJsonArray("data");
 
@@ -58,10 +67,18 @@ public class GenericOpenAIModelFetcher implements ModelFetcher {
                     // Generic providers might have different naming conventions
                     modelList.add(modelId);
                 }
+
+                LOGGER.info("Fetched {} models from Generic OpenAI API", modelList.size());
+                LOGGER.info("Models: \n {}", modelList);
+
             }
+
+            else {
+                LOGGER.error("Failed to fetch models. HTTP Status: {}. Response: {}", response.statusCode(), response.body());
+            }
+
         } catch (Exception e) {
-            e.printStackTrace();
-            // Handle exceptions (e.g., network error, invalid key)
+            LOGGER.error("Error fetching models from Generic OpenAI API: {}", e.getMessage());
         }
 
         return modelList;

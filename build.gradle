@@ -142,6 +142,5 @@ tasks.withType(JavaExec).configureEach {
 		// Performance
 		jvmArgs += "-Xmx4G"
 		jvmArgs += "-Xms2G"
-		jvmArgs += "-Daiplayer.llmMode=gemini"
 	}
 }

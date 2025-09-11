@@ -1,6 +1,8 @@
 package net.shasankp000.GraphicalUserInterface;
 
 
+import net.fabricmc.api.EnvType;
+import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.widget.ButtonWidget;
@@ -8,6 +10,7 @@ import net.minecraft.client.gui.widget.TextFieldWidget;
 import net.minecraft.client.toast.SystemToast;
 import net.minecraft.text.Text;
 import net.shasankp000.AIPlayer;
+import net.shasankp000.AIPlayerClient;
 import net.shasankp000.GraphicalUserInterface.Widgets.DropdownMenuWidget;
 import net.shasankp000.Network.configNetworkManager;
 import org.slf4j.Logger;
@@ -36,9 +39,21 @@ public class ConfigManager extends Screen {
     protected void init() {
 
         // added this line so that the models will load immediately after the API key has been entered and saved into the json.
+        LOGGER.info("Refreshing model list from provider...");
         AIPlayer.CONFIG.updateModels();
 
-        allModels = AIPlayer.CONFIG.getModelList();
+        if (FabricLoader.getInstance().getEnvironmentType().equals(EnvType.CLIENT)) {
+            AIPlayerClient.CONFIG.updateModels();
+        }
+
+
+        if (FabricLoader.getInstance().getEnvironmentType().equals(EnvType.CLIENT)) {
+            allModels = AIPlayerClient.CONFIG.getModelList();
+        }
+        else {
+            allModels = AIPlayer.CONFIG.getModelList();
+        }
+        LOGGER.info("Fetched {} models from provider on frontend.", allModels.size());
         filteredModels = new ArrayList<>(allModels);
 
         // Calculate positions
@@ -67,7 +82,7 @@ public class ConfigManager extends Screen {
         // Bottom buttons - evenly spaced at bottom
         int buttonY = this.height - 40;
         int buttonSpacing = buttonWidth + 20;
-        int totalButtonWidth = buttonSpacing * 4 - 20; // 4 buttons with spacing
+        int totalButtonWidth = buttonSpacing * 5 - 20; // 5 buttons with spacing (added reload button)
         int buttonsStartX = centerX - totalButtonWidth / 2;
 
         // API Keys Button
@@ -84,6 +99,13 @@ public class ConfigManager extends Screen {
         ).dimensions(buttonsStartX + buttonSpacing, buttonY, buttonWidth, fieldHeight).build();
         this.addDrawableChild(reasoningButton);
 
+        // Reload Models Button
+        ButtonWidget reloadButton = ButtonWidget.builder(
+                Text.of("Refresh Models"),
+                (btn) -> this.reloadModels()
+        ).dimensions(buttonsStartX + buttonSpacing * 2, buttonY, buttonWidth, fieldHeight).build();
+        this.addDrawableChild(reloadButton);
+
         // Save Button
         ButtonWidget saveButton = ButtonWidget.builder(Text.of("Save"), (btn1) -> {
             this.saveToFile();
@@ -92,16 +114,35 @@ public class ConfigManager extends Screen {
                         SystemToast.create(this.client, SystemToast.Type.NARRATOR_TOGGLE,
                                 Text.of("Settings saved!"), Text.of("Saved settings.")));
             }
-        }).dimensions(buttonsStartX + buttonSpacing * 2, buttonY, buttonWidth, fieldHeight).build();
+        }).dimensions(buttonsStartX + buttonSpacing * 3, buttonY, buttonWidth, fieldHeight).build();
         this.addDrawableChild(saveButton);
 
         // Close Button
         ButtonWidget closeButton = ButtonWidget.builder(Text.of("Close"), (btn1) -> this.close())
-                .dimensions(buttonsStartX + buttonSpacing * 3, buttonY, buttonWidth, fieldHeight).build();
+                .dimensions(buttonsStartX + buttonSpacing * 4, buttonY, buttonWidth, fieldHeight).build();
         this.addDrawableChild(closeButton);
 
         // Add dropdown to drawable children
         this.addDrawableChild(dropdownMenuWidget);
+    }
+
+    private void reloadModels() {
+        LOGGER.info("Reloading model list from provider...");
+
+        // Refresh the local model lists
+        LOGGER.info("Reloaded {} models from provider on frontend.", allModels.size());
+        filteredModels = new ArrayList<>(allModels);
+
+        // Update the dropdown with the new models
+        dropdownMenuWidget.updateOptions(filteredModels);
+
+        // Show a toast notification
+        if (this.client != null) {
+            this.client.getToastManager().add(
+                    SystemToast.create(this.client, SystemToast.Type.NARRATOR_TOGGLE,
+                            Text.of("Models Reloaded"),
+                            Text.of("Found " + allModels.size() + " models")));
+        }
     }
 
     @Override
@@ -120,7 +161,7 @@ public class ConfigManager extends Screen {
         int centerX = this.width / 2;
 
         // Title - centered
-        String title = "AI-Player Mod Configuration Menu v1.0.5.1-release+1.20.6-bugfix";
+        String title = "AI-Player Mod Configuration Menu v1.0.5.2-release+1.21.1";
         int titleWidth = this.textRenderer.getWidth(title);
         context.drawText(this.textRenderer, title, centerX - titleWidth / 2, 20, titleColor, true);
 
@@ -193,6 +234,7 @@ public class ConfigManager extends Screen {
             this.client.setScreen(this.parent);
         }
     }
-}
 
+
+}
 
