@@ -39,7 +39,7 @@ dependencies {
 	mappings "net.fabricmc:yarn:${project.yarn_mappings}:v2"
 	modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
 	modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_version}"
-	modImplementation 'com.github.gnembon:fabric-carpet:1.4.141'
+	modImplementation 'com.github.gnembon:fabric-carpet:1.4.147'
 
 	// Core application dependencies
 	implementation 'com.github.amithkoujalgi:ollama4j:1.0.77'
@@ -145,6 +145,3 @@ tasks.withType(JavaExec).configureEach {
 		jvmArgs += "-Daiplayer.llmMode=gemini"
 	}
 }
-
-
-
