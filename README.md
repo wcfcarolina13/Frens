@@ -19,11 +19,7 @@ Just know that I won't ever give up on this project.
 ---
 # Also, THIS!
 
-If anyone is interested on the underlying algorithms I am working on for increased **intelligence** for the minecraft bot, feel free to check out this repository: 
-
-https://github.com/shasankp000/AI-Tricks
-
-I am open to suggestions/improvements, if any. (Obviously there will be improvements from my own end).
+Website repo: https://github.com/shasankp000/AI-Player-Website
 
 ---
 
