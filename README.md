@@ -19,6 +19,8 @@ Just know that I won't ever give up on this project.
 ---
 # Also, THIS!
 
+NLP pipeline training in-depth information : https://github.com/shasankp000/NLP_2.0_pipeline
+
 Website repo: https://github.com/shasankp000/AI-Player-Website
 
 ---
