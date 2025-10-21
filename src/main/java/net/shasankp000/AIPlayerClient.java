@@ -32,8 +32,16 @@ import java.util.UUID;
 
 public class AIPlayerClient implements ClientModInitializer {
     private static final Gson GSON = new Gson();
-    private static final Path BOT_PROFILE_PATH = Paths.get(LauncherEnvironment.getStorageDirectory("config") + File.separator + "settings.json5");
-    private static JsonObject botProfiles;
+private static Path botProfilePath = null;
+
+private static Path getBotProfilePath() {
+    if (botProfilePath == null) {
+        botProfilePath = Paths.get(
+            LauncherEnvironment.getStorageDirectory("config") + File.separator + "settings.json5"
+        );
+    }
+    return botProfilePath;
+}    private static JsonObject botProfiles;
     public static final Logger LOGGER = LoggerFactory.getLogger("ai-player-client");
     public static final ManualConfig CONFIG = ManualConfig.load();
 
