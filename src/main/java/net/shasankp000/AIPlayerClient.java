@@ -48,7 +48,7 @@ private static Path getBotProfilePath() {
 
     static {
         try {
-            botProfiles = GSON.fromJson(Files.newBufferedReader(BOT_PROFILE_PATH), JsonObject.class);
+            botProfiles = GSON.fromJson(Files.newBufferedReader(getBotProfilePath()), JsonObject.class);
         } catch (IOException e) {
             System.out.println("Bot profiles not found yet — continuing with no bots registered.");
             botProfiles = null; // Explicitly fallback to safe null
