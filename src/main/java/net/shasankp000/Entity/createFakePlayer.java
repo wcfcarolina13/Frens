@@ -1,8 +1,5 @@
 package net.shasankp000.Entity;
 
-import carpet.CarpetSettings;
-import carpet.patches.FakeClientConnection;
-import carpet.utils.Messenger;
 import com.google.gson.Gson;
 import com.mojang.authlib.GameProfile;
 import net.minecraft.block.BlockState;
@@ -42,6 +39,7 @@ import java.util.concurrent.CompletableFuture;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import net.shasankp000.AIPlayer;
+import net.shasankp000.network.FakeClientConnection;
 
 // Same as carpet's code for spawning fake players, only difference is that it will work even if the command executor is in offline mode
 
@@ -174,7 +172,7 @@ public class createFakePlayer extends ServerPlayerEntity {
 
     public void kill()
     {
-        kill(Messenger.s("Killed"));
+        kill(Text.literal("Killed"));
     }
 
     public void kill(Text reason)
@@ -243,7 +241,7 @@ public class createFakePlayer extends ServerPlayerEntity {
 
     @Override
     public boolean allowsServerListing() {
-        return CarpetSettings.allowListingFakePlayers;
+        return true;
     }
 
     @Override
