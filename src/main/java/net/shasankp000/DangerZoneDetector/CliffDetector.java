@@ -19,8 +19,8 @@ public class CliffDetector {
      * @return Distance to the cliff if detected, or Double.MAX_VALUE if no cliff is found.
      */
     public static double detectCliffWithBoundingBox(ServerPlayerEntity source, int range, int depth) {
-        Vec3d botPos = source.getPos();
-        World world = source.getWorld();
+        Vec3d botPos = source.getEntityPos();
+        World world = source.getEntityWorld();
 
         // Get the direction the bot is facing
         Vec3d facingDirection = source.getRotationVec(1.0F).normalize();
@@ -60,4 +60,3 @@ public class CliffDetector {
         return Double.MAX_VALUE;
     }
 }
-

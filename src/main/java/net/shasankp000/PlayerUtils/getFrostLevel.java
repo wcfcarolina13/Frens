@@ -10,7 +10,7 @@ public class getFrostLevel {
     // Method to calculate the bot's frost level
     public static int calculateFrostLevel(PlayerEntity bot) {
         BlockPos botPosition = bot.getBlockPos();
-        BlockState blockState = bot.getWorld().getBlockState(botPosition);
+        BlockState blockState = bot.getEntityWorld().getBlockState(botPosition);
 
         // Start with a base frost level of 0
         int frostLevel = 0;
@@ -21,7 +21,7 @@ public class getFrostLevel {
         }
 
         // Check for cold biomes (e.g., Snowy Tundra, Frozen Ocean)
-        if (bot.getWorld().getBiome(botPosition).value().getTemperature() < 0.15f) {
+        if (bot.getEntityWorld().getBiome(botPosition).value().getTemperature() < 0.15f) {
                 frostLevel += 2; // Assign a moderate frost level for cold biomes
         }
 

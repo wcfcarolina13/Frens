@@ -1,6 +1,5 @@
 package net.shasankp000.PathFinding;
 
-import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.util.math.BlockPos;
@@ -17,7 +16,6 @@ public class ChartPathToBlock {
 
     public static String chart(ServerPlayerEntity bot, BlockPos targetBlockPos, String blockType) {
         ServerCommandSource botSource = bot.getCommandSource().withSilent().withMaxLevel(4);
-        MinecraftServer server = bot.getServer();
         String botName = bot.getName().getString();
 
 

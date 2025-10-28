@@ -147,7 +147,7 @@ public class InputPacketHandler {
     }
 
     /**
-     * Makes the bot start sneaking by sending a "PRESS_SHIFT_KEY" packet to the server.
+     * Makes the bot start sneaking by toggling its sneaking state on the server.
      *
      * @param context The command context containing the server and bot information.
      */
@@ -167,25 +167,12 @@ public class InputPacketHandler {
             return;
         }
 
-        try {
-
-            // Get the bot's network handler (which implements ServerPlayPacketListener)
-            ServerPlayNetworkHandler networkHandler = bot.networkHandler;
-
-            // Create a packet to simulate pressing the sneak key
-            ClientCommandC2SPacket packet = new ClientCommandC2SPacket(bot, ClientCommandC2SPacket.Mode.PRESS_SHIFT_KEY);
-
-            // Send the packet to the server
-            networkHandler.onClientCommand(packet);
-
-            context.getSource().sendMessage(Text.of("Sneak action performed for bot: " + bot.getName().getString()));
-        } catch (Exception e) {
-            LOGGER.error("Caught exception while sending sneak packet: {}", e.getMessage());
-        }
+        bot.setSneaking(true);
+        context.getSource().sendMessage(Text.of("Sneak action performed for bot: " + bot.getName().getString()));
     }
 
     /**
-     * Makes the bot stop sneaking by sending a "RELEASE_SHIFT_KEY" packet to the server.
+     * Makes the bot stop sneaking by toggling its sneaking state off on the server.
      *
      * @param context The command context containing the server and bot information.
      */
@@ -205,20 +192,8 @@ public class InputPacketHandler {
             return;
         }
 
-        try {
-            // Get the bot's network handler (which implements ServerPlayPacketListener)
-            ServerPlayNetworkHandler networkHandler = bot.networkHandler;
-
-            // Create a packet to simulate releasing the sneak key
-            ClientCommandC2SPacket packet = new ClientCommandC2SPacket(bot, ClientCommandC2SPacket.Mode.RELEASE_SHIFT_KEY);
-
-            // Send the packet to the server
-            networkHandler.onClientCommand(packet);
-
-            context.getSource().sendMessage(Text.of("Sneak action performed for bot: " + bot.getName().getString()));
-        } catch (Exception e) {
-            LOGGER.error("Caught exception while sending unSneak packet: {}", e.getMessage());
-        }
+        bot.setSneaking(false);
+        context.getSource().sendMessage(Text.of("Un-sneak action performed for bot: " + bot.getName().getString()));
     }
 
     /**

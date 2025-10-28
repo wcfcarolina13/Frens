@@ -196,15 +196,14 @@ public class modCommandRegistry {
                                                 .executes(context -> {
 
                                                     ServerPlayerEntity bot = EntityArgumentType.getPlayer(context, "bot");
-                                                    MinecraftServer server = bot.getServer();
-                                                    assert server != null;
+                                                    MinecraftServer server = bot.getCommandSource().getServer();
                                                     String direction = StringArgumentType.getString(context, "direction");
 
                                                     switch (direction) {
                                                         case "left", "right", "back" -> {
                                                             turnTool.turn(bot.getCommandSource().withSilent().withMaxLevel(4), direction);
 
-                                                            LOGGER.info("Now facing {} which is in {} in {} axis", direction, bot.getFacing().getName(), bot.getFacing().getAxis().asString());
+                                                            LOGGER.info("Now facing {} which is in {} in {} axis", direction, bot.getFacing().getId(), bot.getFacing().getAxis().getId());
                                                         }
                                                         default -> {
                                                             server.execute(() -> {
@@ -229,8 +228,7 @@ public class modCommandRegistry {
                                                                         .executes(context -> {
 
                                                                             ServerPlayerEntity bot = EntityArgumentType.getPlayer(context, "bot");
-                                                                            MinecraftServer server = bot.getServer();
-                                                                            assert server != null;
+                                                                            MinecraftServer server = bot.getCommandSource().getServer();
                                                                             String blockType = StringArgumentType.getString(context, "block_type");
                                                                             int x = IntegerArgumentType.getInteger(context, "x");
                                                                             int y = IntegerArgumentType.getInteger(context, "y");
@@ -254,8 +252,7 @@ public class modCommandRegistry {
                                         .executes(context -> {
 
                                             ServerPlayerEntity bot = EntityArgumentType.getPlayer(context, "bot");
-                                            MinecraftServer server = bot.getServer();
-                                            assert server != null;
+                                            MinecraftServer server = bot.getCommandSource().getServer();
                                             blockDetectionUnit.setIsBlockDetectionActive(false);
                                             PathTracer.flushAllMovementTasks();
                                             AutoFaceEntity.setBotExecutingTask(false);
@@ -685,7 +682,7 @@ public class modCommandRegistry {
 
             if (bot!=null) {
 
-                Objects.requireNonNull(bot.getAttributeInstance(EntityAttributes.GENERIC_KNOCKBACK_RESISTANCE)).setBaseValue(0.0);
+                Objects.requireNonNull(bot.getAttributeInstance(EntityAttributes.KNOCKBACK_RESISTANCE)).setBaseValue(0.0);
 
                 RespawnHandler.registerRespawnListener(bot);
 
@@ -722,7 +719,7 @@ public class modCommandRegistry {
 
             if (bot!=null) {
 
-                Objects.requireNonNull(bot.getAttributeInstance(EntityAttributes.GENERIC_KNOCKBACK_RESISTANCE)).setBaseValue(0.0);
+                Objects.requireNonNull(bot.getAttributeInstance(EntityAttributes.KNOCKBACK_RESISTANCE)).setBaseValue(0.0);
 
                 System.out.println("Registering respawn listener....");
 
@@ -881,7 +878,7 @@ public class modCommandRegistry {
 
             BlockPos currentPosition = bot.getBlockPos();
             BlockPos newPosition = currentPosition.add(1, 0, 0); // Move one block forward
-            bot.teleport(bot.getServerWorld(), newPosition.getX(), newPosition.getY(), newPosition.getZ(), Set.of(), bot.getYaw(), bot.getPitch());
+            bot.teleport(bot.getEntityWorld(), newPosition.getX(), newPosition.getY(), newPosition.getZ(), Set.of(), bot.getYaw(), bot.getPitch(), true);
 
             LOGGER.info("Teleported {} 1 positive block ahead", botName);
 

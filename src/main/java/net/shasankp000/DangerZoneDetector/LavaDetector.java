@@ -53,7 +53,7 @@ public class LavaDetector {
         Vec3d start = source.getCameraPosVec(1.0F); // Starting point of the ray
         Vec3d end = start.add(direction.multiply(reach)); // End point of the ray
 
-        BlockHitResult blockHit = source.getWorld().raycast(new RaycastContext(
+        BlockHitResult blockHit = source.getEntityWorld().raycast(new RaycastContext(
                 start,
                 end,
                 RaycastContext.ShapeType.OUTLINE,
@@ -62,7 +62,7 @@ public class LavaDetector {
         ));
 
         // Check if the block hit is lava
-        if (blockHit != null && source.getWorld().getBlockState(blockHit.getBlockPos()).isOf(Blocks.LAVA)) {
+        if (blockHit != null && source.getEntityWorld().getBlockState(blockHit.getBlockPos()).isOf(Blocks.LAVA)) {
             return start.distanceTo(blockHit.getPos());
         }
 
@@ -77,7 +77,7 @@ public class LavaDetector {
      * @return Distance to the nearest lava block, or Double.MAX_VALUE if none found.
      */
     public static double detectNearestLavaWithBoundingBox(ServerPlayerEntity source, int range) {
-        World world = source.getWorld();
+        World world = source.getEntityWorld();
 
         // Define a bounding box around the bot
         Box boundingBox = source.getBoundingBox().expand(range, range, range);
@@ -93,7 +93,7 @@ public class LavaDetector {
 
                     // Check if the block is a lava source or flowing lava
                     if (world.getBlockState(mutable).isOf(Blocks.LAVA)) {
-                        double distance = source.getPos().distanceTo(Vec3d.ofCenter(mutable));
+                        double distance = source.getEntityPos().distanceTo(Vec3d.ofCenter(mutable));
                         if (distance < nearestDistance) {
                             nearestDistance = distance;
                         }

@@ -27,7 +27,7 @@ public class MiningTool {
                 LookController.faceBlock(bot, targetBlockPos);
 
                 // Step 2: Select best tool
-                BlockState blockState = bot.getWorld().getBlockState(targetBlockPos);
+                BlockState blockState = bot.getEntityWorld().getBlockState(targetBlockPos);
                 ItemStack bestTool = ToolSelector.selectBestToolForBlock(bot, blockState);
 
                 // Step 3: Switch to that tool
@@ -35,7 +35,7 @@ public class MiningTool {
 
                 // Step 4: Start mining loop
                 ScheduledFuture<?> task = miningExecutor.scheduleAtFixedRate(() -> {
-                    BlockState currentState = bot.getWorld().getBlockState(targetBlockPos);
+                    BlockState currentState = bot.getEntityWorld().getBlockState(targetBlockPos);
 
                     if (currentState.isAir()) {
                         System.out.println("✅ Mining complete!");
@@ -72,12 +72,11 @@ public class MiningTool {
     private static void switchToTool(ServerPlayerEntity bot, ItemStack tool) {
         for (int i = 0; i < 9; i++) {
             if (bot.getInventory().getStack(i) == tool) {
-                bot.getInventory().selectedSlot = i;
+                bot.getInventory().setSelectedSlot(i);
                 break;
             }
         }
     }
 
 }
-
 

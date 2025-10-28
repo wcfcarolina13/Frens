@@ -5,6 +5,7 @@ package net.shasankp000.GraphicalUserInterface.Widgets;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.font.TextRenderer;
 import net.minecraft.client.gui.DrawContext;
+import net.minecraft.client.gui.Click;
 import net.minecraft.client.gui.screen.narration.NarrationMessageBuilder;
 import net.minecraft.client.gui.widget.ClickableWidget;
 import net.minecraft.text.Text;
@@ -46,14 +47,15 @@ public class DropdownMenuWidget extends ClickableWidget {
     }
 
     @Override
-    public boolean mouseClicked(double mouseX, double mouseY, int button) {
-        if (this.isHovered()) {
+    public boolean mouseClicked(Click click, boolean isInside) {
+        if (isInside) {
             isOpen = !isOpen;
             return true;
         }
         if (isOpen) {
             for (int i = 0; i < options.size(); i++) {
                 int optionY = this.getY() + this.height * (i + 1);
+                double mouseY = click.y();
                 if (mouseY >= optionY && mouseY < optionY + this.height) {
                     selectedIndex = i;
                     setMessage(Text.of(options.get(i)));

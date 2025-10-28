@@ -33,14 +33,13 @@ public class armorUtils {
 
             // Equip the armor if it's better than what's currently equipped
             if (!bestArmor.isEmpty() && (equippedArmor.isEmpty() || isBetterArmor(bestArmor, equippedArmor, slot))) {
-                bot.equipStack(slot, bestArmor);
+                ItemStack stackToEquip = bestArmor.copy();
+                bot.equipStack(slot, stackToEquip);
                 inventory.removeOne(bestArmor); // Remove the equipped armor from inventory
-                System.out.println("Equipped " + bestArmor.getName().getString() + " in slot " + slot.getName());
+                System.out.println("Equipped " + stackToEquip.getName().getString() + " in slot " + slot.getName());
 
                 // Add this update to the list for notifying clients
-                equipmentUpdates.add(new Pair<>(slot, bestArmor)); // Use com.mojang.datafixers.util.Pair
-
-                bot.getInventory().armor.set(slot.getEntitySlotId(), bestArmor.copy()); // update the armor slots data for the server for the bot.
+                equipmentUpdates.add(new Pair<>(slot, stackToEquip)); // Use com.mojang.datafixers.util.Pair
             }
         }
 
@@ -63,9 +62,9 @@ public class armorUtils {
         }
         final double[] score = {0.0};
         stack.applyAttributeModifiers(slot, (RegistryEntry<EntityAttribute> attributeEntry, EntityAttributeModifier modifier) -> {
-            if (attributeEntry.matches(EntityAttributes.GENERIC_ARMOR)) {
+            if (attributeEntry.matches(EntityAttributes.ARMOR)) {
                 score[0] += modifier.value();
-            } else if (attributeEntry.matches(EntityAttributes.GENERIC_ARMOR_TOUGHNESS)) {
+            } else if (attributeEntry.matches(EntityAttributes.ARMOR_TOUGHNESS)) {
                 score[0] += modifier.value() * 0.1;
             }
         });
@@ -77,7 +76,7 @@ public class armorUtils {
         ItemStack bestArmor = ItemStack.EMPTY;
         double bestScore = 0.0;
 
-        for (ItemStack item : inventory.main) {
+        for (ItemStack item : inventory.getMainStacks()) {
             if (!item.isEmpty() && isArmorForSlot(item, slot)) {
                 double score = getArmorScore(item, slot);
                 if (score > bestScore) {
