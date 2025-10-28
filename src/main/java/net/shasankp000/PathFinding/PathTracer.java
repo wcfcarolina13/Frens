@@ -5,6 +5,7 @@ import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
+import net.shasankp000.CommandUtils;
 import net.shasankp000.Commands.modCommandRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -93,7 +94,7 @@ public class PathTracer {
                 // if was sprinting previously, set to false.
                 if (shouldSprint) {
                     shouldSprint = false; // reset the flag
-                    server.getCommandManager().executeWithPrefix(botSource, "/player " + botName + " unsprint");
+                    CommandUtils.run(botSource, "player " + botName + " unsprint");
                 }
 
                 // ✅ Complete the path and set final result
@@ -136,17 +137,17 @@ public class PathTracer {
             // Schedule jump if required, slightly before reaching the target to ensure proper timing
             if (segment.jump()) {
                 scheduler.schedule(() -> {
-                    server.getCommandManager().executeWithPrefix(botSource, "/player " + botName + " jump");
+                    CommandUtils.run(botSource, "player " + botName + " jump");
                     LOGGER.info(botName + " performed a jump!");
                 }, jumpDelay, TimeUnit.MILLISECONDS); // Jump 200ms before reaching target
             }
 
             if (segment.sprint()) {
-                server.getCommandManager().executeWithPrefix(botSource, "/player " + botName + " sprint");
+                CommandUtils.run(botSource, "player " + botName + " sprint");
             }
             else {
                 // if was set to sprint before, stop sprinting anyways.
-                server.getCommandManager().executeWithPrefix(botSource, "/player " + botName + " unsprint");
+                CommandUtils.run(botSource, "player " + botName + " unsprint");
             }
 
             scheduler.schedule(() -> {
@@ -401,7 +402,7 @@ public class PathTracer {
                 lastDirection = direction;
             }
 
-            server.getCommandManager().executeWithPrefix(botSource, "/player " + botName + " look " + direction);
+            CommandUtils.run(botSource, "player " + botName + " look " + direction);
             LOGGER.info("{} is now facing {} (dx: {}, dy: {}, dz: {})", botName, direction, dx, dy, dz);
         }
     }

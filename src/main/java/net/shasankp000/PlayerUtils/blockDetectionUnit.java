@@ -40,7 +40,7 @@ public class blockDetectionUnit {
         String normalized = BlockNameNormalizer.normalizeBlockName(blockType);
         logger.info("Normalized block name: {} → {}", blockType, normalized);
 
-        Vec3d botPosition = bot.getPos();
+        Vec3d botPosition = bot.getEntityPos();
         Direction getDirection = bot.getHorizontalFacing();
         Vec3d botDirection = Vec3d.of(getDirection.getVector());
         double rayLength = 15.0;
@@ -55,11 +55,11 @@ public class blockDetectionUnit {
                 bot
         );
 
-        BlockHitResult hitResult = bot.getWorld().raycast(raycastContext);
+        BlockHitResult hitResult = bot.getEntityWorld().raycast(raycastContext);
 
         if (hitResult.getType() == HitResult.Type.BLOCK) {
             BlockPos hitPos = hitResult.getBlockPos();
-            BlockState hitBlockState = bot.getWorld().getBlockState(hitPos);
+            BlockState hitBlockState = bot.getEntityWorld().getBlockState(hitPos);
             Block hitBlock = hitBlockState.getBlock();
             Identifier hitBlockId = Registries.BLOCK.getId(hitBlock);
 

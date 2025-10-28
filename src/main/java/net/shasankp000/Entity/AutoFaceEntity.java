@@ -1,8 +1,10 @@
 package net.shasankp000.Entity;
 
+import net.shasankp000.CommandUtils;
+import net.shasankp000.EntityUtil;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.minecraft.entity.Entity;
-import net.minecraft.entity.mob.HostileEntity;
+// import net.minecraft.entity.mob.HostileEntity;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.util.math.Box;
@@ -67,7 +69,7 @@ public class AutoFaceEntity {
 
         botExecutors.put(bot, botExecutor);
 
-        MinecraftServer server = bot.getServer();
+        MinecraftServer server = bot.getCommandSource().getServer();
 
         // Load Q-table from storage
         try {
@@ -121,7 +123,7 @@ public class AutoFaceEntity {
 
                 // Filter only hostile entities
                  hostileEntities = nearbyEntities.stream()
-                        .filter(entity -> entity instanceof HostileEntity)
+                        .filter(EntityUtil::isHostile)
                         .toList();
 
                 boolean hasSculkNearby = false;
@@ -141,10 +143,10 @@ public class AutoFaceEntity {
 
                     // Find the closest hostile entity
                     Entity closestHostile = hostileEntities.stream()
-                            .min(Comparator.comparingDouble(e -> e.squaredDistanceTo(bot.getPos())))
+                            .min(Comparator.comparingDouble(e -> e.squaredDistanceTo(bot)))
                             .orElseThrow(); // Use orElseThrow since empty case is already handled
 
-                    double distanceToHostileEntity = Math.sqrt(closestHostile.squaredDistanceTo(bot.getPos()));
+                    double distanceToHostileEntity = Math.sqrt(closestHostile.squaredDistanceTo(bot));
 
                     if ((PathTracer.BotSegmentManager.getBotMovementStatus() || isBotMoving) || blockDetectionUnit.getBlockDetectionStatus() || isBotExecutingTask()) {
                         System.out.println("Bot is busy, skipping facing the closest entity");
@@ -216,11 +218,11 @@ public class AutoFaceEntity {
                     try {
 
                         // Find the closest hostile entity
-                        Entity closestHostile = hostileEntities.stream()
-                                .min(Comparator.comparingDouble(e -> e.squaredDistanceTo(bot.getPos())))
-                                .orElseThrow(); // Use orElseThrow since empty case is already handled
+                    Entity closestHostile = hostileEntities.stream()
+                            .min(Comparator.comparingDouble(e -> e.squaredDistanceTo(bot)))
+                            .orElseThrow(); // Use orElseThrow since empty case is already handled
 
-                        distanceToHostileEntity = Math.sqrt(closestHostile.squaredDistanceTo(bot.getPos()));
+                    distanceToHostileEntity = Math.sqrt(closestHostile.squaredDistanceTo(bot));
 
                         // Log details of the detected hostile entity
                         System.out.println("Closest hostile entity: " + closestHostile.getName().getString()
@@ -237,7 +239,7 @@ public class AutoFaceEntity {
                     if (PathTracer.BotSegmentManager.getBotMovementStatus() || isBotMoving || isBotExecutingTask()) {
                         System.out.println("Stopping movement since danger zone is detected.");
                         ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withMaxLevel(4), "Terminating all current tasks due to threat detections");
-                        server.getCommandManager().executeWithPrefix(bot.getCommandSource().withSilent().withMaxLevel(4), "/player " + bot.getName().getString() + " stop");
+                CommandUtils.run(bot.getCommandSource().withSilent().withMaxLevel(4), "player " + bot.getName().getString() + " stop");
                     }
 
 
@@ -353,7 +355,7 @@ public class AutoFaceEntity {
     public static List<Entity> detectNearbyEntities(ServerPlayerEntity bot, double boundingBoxSize) {
         // Define a bounding box around the bot with the given size
         Box searchBox = bot.getBoundingBox().expand(boundingBoxSize, boundingBoxSize, boundingBoxSize);
-        return bot.getWorld().getOtherEntities(bot, searchBox);
+        return bot.getEntityWorld().getOtherEntities(bot, searchBox);
     }
 
     public static String determineDirectionToBot(ServerPlayerEntity bot, Entity target) {

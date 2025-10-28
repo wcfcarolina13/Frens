@@ -3,6 +3,7 @@ package net.shasankp000.ChatUtils;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.text.Text;
+import net.shasankp000.CommandUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -109,7 +110,7 @@ public class ChatUtils {
             LOGGER.info("Broadcasting message part {}: '{}' from source: {}", partIndex, coloredMessage, sourceName);
 
             // Using the command manager to send the message
-            server.getCommandManager().executeWithPrefix(source, "/say " + coloredMessage);
+            CommandUtils.run(source, "say " + coloredMessage);
 
             LOGGER.debug("Successfully broadcasted message part {}", partIndex);
 
@@ -141,7 +142,7 @@ public class ChatUtils {
         server.execute(() -> {
             try {
                 Text textComponent = Text.literal("§7" + message); // Gray color for system messages
-                server.getCommandManager().executeWithPrefix(source.withSilent(), "/say " + textComponent.getString());
+                CommandUtils.run(source.withSilent(), "say " + textComponent.getString());
                 LOGGER.debug("Successfully sent system message");
             } catch (Exception e) {
                 LOGGER.error("Failed to send system message: {}", e.getMessage(), e);

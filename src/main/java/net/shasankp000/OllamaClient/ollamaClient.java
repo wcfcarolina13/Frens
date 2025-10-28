@@ -10,6 +10,7 @@ import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.command.argument.EntityArgumentType;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.command.ServerCommandSource;
+import net.shasankp000.CommandUtils;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.text.Text;
 import net.shasankp000.AIPlayer;
@@ -75,8 +76,8 @@ public class ollamaClient {
         String formatter = ChatUtils.getRandomColorCode();
 
         server.execute(() -> {
-            server.getCommandManager().executeWithPrefix(playerSource, "/say " + formatter + message);
-            server.getCommandManager().executeWithPrefix(botSource, "/say Processing your message, please wait.");
+            CommandUtils.run(playerSource, "say " + formatter + message);
+            CommandUtils.run(botSource, "say Processing your message, please wait.");
         });
 
         server.execute(() -> {

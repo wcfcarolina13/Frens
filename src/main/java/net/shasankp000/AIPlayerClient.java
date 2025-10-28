@@ -130,7 +130,7 @@ private static Path getBotProfilePath() {
             MinecraftClient client = MinecraftClient.getInstance();
 
             String rawMessage = message.getString();
-            UUID playerUUID = sender != null ? sender.getId() : null;
+            UUID playerUUID = signedMessage != null ? signedMessage.getSender() : null;
 
 
 
@@ -289,4 +289,3 @@ private static Path getBotProfilePath() {
 
     }
 }
-

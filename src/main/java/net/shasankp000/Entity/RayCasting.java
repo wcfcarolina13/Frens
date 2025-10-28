@@ -20,7 +20,7 @@ public class RayCasting {
 
     private static void detectBlocks(ServerPlayerEntity bot) {
 
-        Vec3d botPosition = bot.getPos();
+        Vec3d botPosition = bot.getEntityPos();
         Direction getDirection = bot.getHorizontalFacing();
         Vec3d botDirection = Vec3d.of(getDirection.getVector());
         double rayLength = 15.0;
@@ -34,7 +34,7 @@ public class RayCasting {
                 bot
         );
 
-        BlockHitResult hitResult = bot.getWorld().raycast(raycastContext);
+        BlockHitResult hitResult = bot.getEntityWorld().raycast(raycastContext);
 
 
         if (hitResult.getType() == HitResult.Type.BLOCK) {
@@ -55,4 +55,3 @@ public class RayCasting {
 
 
 }
-

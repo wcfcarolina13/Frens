@@ -24,7 +24,7 @@ public class hotBarUtils {
         // Ensure the client and player are not null
 
         // Get the selected slot's stack
-        int selectedSlot = bot.getInventory().selectedSlot;
+        int selectedSlot = bot.getInventory().getSelectedSlot();
         ItemStack selectedStack = bot.getInventory().getStack(selectedSlot);
 
         // Check if the slot is not empty

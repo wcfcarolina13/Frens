@@ -58,6 +58,8 @@ import net.shasankp000.ChatUtils.ChatContextManager;
 
 import net.shasankp000.ChatUtils.ChatUtils;
 
+import net.shasankp000.CommandUtils;
+
 import net.shasankp000.Entity.EntityDetails;
 
 import net.shasankp000.GameAI.BotEventHandler;
@@ -205,7 +207,7 @@ public class FunctionCallerV2 {
             System.out.println("Facing entity at: " + targetX + ", " + targetY + ", " + targetZ);
             ServerPlayerEntity bot = Objects.requireNonNull(botSource.getPlayer());
             // Get the world
-            var world = bot.getWorld();
+            var world = bot.getEntityWorld();
             // Create a small bounding box around the coordinates to find nearby entities
             var box = new Box(
                     targetX - 1, targetY - 1, targetZ - 1,
@@ -252,8 +254,12 @@ public class FunctionCallerV2 {
             System.out.println("Turning to: " + direction);
             MinecraftServer server = botSource.getServer();
             String botName = botSource.getName();
-            server.getCommandManager().executeWithPrefix(botSource, "/player " + botName + " turn " + direction); // choosing the command route instead of calling function to check if the bug still exists.
-            getFunctionOutput("Now facing " + direction + " which is in " + Objects.requireNonNull(botSource.getPlayer()).getFacing().getName() + " in " + Objects.requireNonNull(botSource.getPlayer()).getFacing().getAxis().asString() + " axis.");
+            if (server == null) {
+                getFunctionOutput("Server unavailable. Cannot execute turn command.");
+                return;
+            }
+            CommandUtils.run(botSource, "player " + botName + " turn " + direction);
+            getFunctionOutput("Now facing " + direction + " which is in " + Objects.requireNonNull(botSource.getPlayer()).getFacing().asString() + " in " + Objects.requireNonNull(botSource.getPlayer()).getFacing().getAxis().asString() + " axis.");
         }
 
         /** look: change head facing direction **/
@@ -261,8 +267,12 @@ public class FunctionCallerV2 {
             System.out.println("Looking at: " + cardinalDirection);
             MinecraftServer server = botSource.getServer();
             String botName = botSource.getName();
-            server.getCommandManager().executeWithPrefix(botSource, "/player " + botName + " look " + cardinalDirection); // choosing the command route instead of calling function to check if the bug still exists.
-            getFunctionOutput("Now facing cardinal direction: " + Objects.requireNonNull(botSource.getPlayer()).getFacing().getName() + " which is in " + Objects.requireNonNull(botSource.getPlayer()).getFacing().getAxis().asString() + " axis.");
+            if (server == null) {
+                getFunctionOutput("Server unavailable. Cannot execute look command.");
+                return;
+            }
+            CommandUtils.run(botSource, "player " + botName + " look " + cardinalDirection);
+            getFunctionOutput("Now facing cardinal direction: " + Objects.requireNonNull(botSource.getPlayer()).getFacing().asString() + " which is in " + Objects.requireNonNull(botSource.getPlayer()).getFacing().getAxis().asString() + " axis.");
         }
 
         /** mineBlock: break block **/
@@ -593,7 +603,7 @@ public class FunctionCallerV2 {
             // first time call.
             assert botSource.getPlayer() != null;
             Direction facingDir = botSource.getPlayer().getFacing();
-            sb.append("- Facing: ").append(facingDir.getName());
+            sb.append("- Facing: ").append(facingDir.asString());
             sb.append(" (axis: ").append(facingDir.getAxis().asString()).append(")");
         }
 

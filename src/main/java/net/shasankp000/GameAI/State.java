@@ -229,17 +229,16 @@ public class State implements Serializable {
 
 
         System.out.println("distanceToHostileEntitySimilar: " + distanceToHostileEntitySimilar);
-        System.out.println("distanceToDangerZoneSimilar: " + distanceToHostileEntitySimilar);
+        System.out.println("distanceToDangerZoneSimilar: " + distanceToDangerZoneSimilar);
         System.out.println("nearByEntitiesSimilar: " + nearbyEntitiesSimilar);
         System.out.println("nearbyBlockSimilar: " + nearbyBlocksSimilar);
 
-        // Combine all checks
-        return distanceToHostileEntitySimilar &&
-                distanceToDangerZoneSimilar &&
-                timeOfDaySimilar &&
-                dimensionTypeSimilar &&
-                nearbyEntitiesSimilar ||
-                nearbyBlocksSimilar;
+        // All scalar checks must match, and at least one environmental heuristic must line up.
+        return distanceToHostileEntitySimilar
+                && distanceToDangerZoneSimilar
+                && timeOfDaySimilar
+                && dimensionTypeSimilar
+                && (nearbyEntitiesSimilar || nearbyBlocksSimilar);
     }
 
     private static double calculateBlockOverlap( List<String> lastBlocks, List<String> currentBlocks) {
@@ -248,19 +247,15 @@ public class State implements Serializable {
             return 0.0; // No overlap if block list is empty
         }
 
-        double blockOverlapRatio = 0.0;
-
-        // Calculate block similarity overlap
-
         long similarBlocksCount = currentBlocks.stream()
                 .filter(block -> lastBlocks.stream().anyMatch(lastBlock -> lastBlock.contains(block)))
                 .count();
 
-        blockOverlapRatio = (double) similarBlocksCount / Math.max(lastBlocks.size(), currentBlocks.size());
+        double blockOverlapRatio = (double) similarBlocksCount / Math.max(lastBlocks.size(), currentBlocks.size());
         System.out.println("Block overlap ratio: " + blockOverlapRatio);
 
-        // Combine both ratios (weighted equally or adjust weights if needed)
-        return (blockOverlapRatio) / 2.0; // Average overlap ratio
+        // Maintain a conservative match threshold by slightly damping the raw overlap ratio.
+        return blockOverlapRatio / 2.0;
     }
 
 

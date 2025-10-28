@@ -33,8 +33,8 @@ public class LookController {
     }
 
     public static void faceEntity(ServerPlayerEntity bot, Entity target) {
-        Vec3d botPos = bot.getPos();
-        Vec3d targetPos = target.getPos();
+        Vec3d botPos = bot.getEntityPos();
+        Vec3d targetPos = target.getEntityPos();
         Vec3d direction = targetPos.subtract(botPos).normalize();
 
         double yaw = Math.toDegrees(Math.atan2(direction.z, direction.x)) - 90;
@@ -46,4 +46,3 @@ public class LookController {
         System.out.printf("Facing entity %s at Yaw: %.2f Pitch: %.2f%n", target.getName().getString(), yaw, pitch);
     }
 }
-

@@ -18,6 +18,7 @@ import net.minecraft.server.world.ServerWorld;
 import net.minecraft.text.Text;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
+import net.shasankp000.CommandUtils;
 import net.minecraft.util.math.Vec2f;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.GameMode;
@@ -853,7 +854,7 @@ public class modCommandRegistry {
 
             ServerCommandSource botSource = bot.getCommandSource().withLevel(2).withSilent().withMaxLevel(4);
 
-            server.getCommandManager().executeWithPrefix(botSource, "/say §cThis command has not been implemented yet and is a work in progress! ");
+            CommandUtils.run(botSource, "say §cThis command has not been implemented yet and is a work in progress! ");
 
 
         }
@@ -1045,7 +1046,7 @@ public class modCommandRegistry {
 
         if (source.getPlayer() != null) {
 
-            server.getCommandManager().executeWithPrefix(source, "/player " + botName + " move forward");
+            CommandUtils.run(source, "player " + botName + " move forward");
 
         }
 
@@ -1055,7 +1056,7 @@ public class modCommandRegistry {
 
         if (source.getPlayer() != null) {
 
-            server.getCommandManager().executeWithPrefix(source, "/player " + botName + " move backward");
+            CommandUtils.run(source, "player " + botName + " move backward");
 
         }
 
@@ -1066,7 +1067,7 @@ public class modCommandRegistry {
 
         if (source.getPlayer() != null) {
 
-            server.getCommandManager().executeWithPrefix(source, "/player " + botName + " stop");
+            CommandUtils.run(source, "player " + botName + " stop");
 
         }
 
@@ -1077,7 +1078,7 @@ public class modCommandRegistry {
 
         if (source.getPlayer() != null) {
 
-            server.getCommandManager().executeWithPrefix(source, "/player " + botName + " move left");
+            CommandUtils.run(source, "player " + botName + " move left");
 
         }
 
@@ -1087,7 +1088,7 @@ public class modCommandRegistry {
 
         if (source.getPlayer() != null) {
 
-            server.getCommandManager().executeWithPrefix(source, "/player " + botName + " move right");
+            CommandUtils.run(source, "player " + botName + " move right");
 
         }
 

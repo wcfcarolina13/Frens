@@ -7,6 +7,7 @@ import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.minecraft.command.argument.EntityArgumentType;
 import net.minecraft.network.packet.c2s.play.ClientCommandC2SPacket;
 import net.minecraft.network.packet.c2s.play.PlayerInputC2SPacket;
+import net.minecraft.util.PlayerInput;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.network.ServerPlayNetworkHandler;
@@ -243,10 +244,10 @@ public class InputPacketHandler {
         }
 
 
-        lastPosition = bot.getPos();
+        lastPosition = bot.getEntityPos();
 
         ServerPlayNetworkHandler networkHandler = bot.networkHandler;
-        PlayerInputC2SPacket packet = new PlayerInputC2SPacket(0.0f, 1.0f, false, false); // W key packet.
+        PlayerInputC2SPacket packet = new PlayerInputC2SPacket(new PlayerInput(true, false, false, false, false, false, false)); // W key packet.
         networkHandler.onPlayerInput(packet);
 
 
@@ -257,7 +258,7 @@ public class InputPacketHandler {
             ticksRemaining = 20; // Number of ticks to hold the key
 
             Direction direction = bot.getHorizontalFacing();
-            System.out.println(direction.getAxis().getName());
+            System.out.println(direction.getAxis().asString());
 
             if(direction.getAxis().equals(Direction.Axis.X)) {
 
@@ -278,7 +279,7 @@ public class InputPacketHandler {
                 });
 
                 if (ticksRemaining <= 0) {
-                    System.out.println("Current bot position: " + finalBot[0].getPos());
+                    System.out.println("Current bot position: " + finalBot[0].getEntityPos());
                 }
 
 
@@ -302,7 +303,7 @@ public class InputPacketHandler {
                 });
 
                 if (ticksRemaining <= 0) {
-                    System.out.println("Current bot position: " + finalBot[0].getPos());
+                    System.out.println("Current bot position: " + finalBot[0].getEntityPos());
                 }
 
 
@@ -337,10 +338,10 @@ public class InputPacketHandler {
         }
 
 
-        lastPosition = bot.getPos();
+        lastPosition = bot.getEntityPos();
 
         ServerPlayNetworkHandler networkHandler = bot.networkHandler;
-        PlayerInputC2SPacket packet = new PlayerInputC2SPacket(0.0f, -1.0f, false, false); // S key packet.
+        PlayerInputC2SPacket packet = new PlayerInputC2SPacket(new PlayerInput(false, true, false, false, false, false, false)); // S key packet.
         networkHandler.onPlayerInput(packet);
 
         System.out.println("Recorded current bot position as last pos: " + lastPosition);
@@ -349,7 +350,7 @@ public class InputPacketHandler {
             ticksRemaining = 20; // Number of ticks to hold the key
 
             Direction direction = bot.getHorizontalFacing();
-            System.out.println(direction.getAxis().getName());
+            System.out.println(direction.getAxis().asString());
 
             if(direction.getAxis().equals(Direction.Axis.X)) {
 
@@ -370,7 +371,7 @@ public class InputPacketHandler {
                 });
 
                 if (ticksRemaining <= 0) {
-                    System.out.println("Current bot position: " + finalBot[0].getPos());
+                    System.out.println("Current bot position: " + finalBot[0].getEntityPos());
                 }
 
 
@@ -394,7 +395,7 @@ public class InputPacketHandler {
                 });
 
                 if (ticksRemaining <= 0) {
-                    System.out.println("Current bot position: " + finalBot[0].getPos());
+                    System.out.println("Current bot position: " + finalBot[0].getEntityPos());
                 }
 
 
@@ -431,10 +432,10 @@ public class InputPacketHandler {
         }
 
 
-        lastPosition = bot.getPos();
+        lastPosition = bot.getEntityPos();
 
         ServerPlayNetworkHandler networkHandler = bot.networkHandler;
-        PlayerInputC2SPacket packet = new PlayerInputC2SPacket(-1.0f, 0.0f, false, false); // A key packet.
+        PlayerInputC2SPacket packet = new PlayerInputC2SPacket(new PlayerInput(false, false, true, false, false, false, false)); // A key packet.
         networkHandler.onPlayerInput(packet);
 
         System.out.println("Recorded current bot position as last pos: " + lastPosition);
@@ -444,7 +445,7 @@ public class InputPacketHandler {
             ticksRemaining = 20; // Number of ticks to hold the key
 
             Direction direction = bot.getHorizontalFacing();
-            System.out.println(direction.getAxis().getName());
+            System.out.println(direction.getAxis().asString());
 
             final ServerPlayerEntity[] finalBot = {bot};
 
@@ -462,7 +463,7 @@ public class InputPacketHandler {
                 });
 
                 if (ticksRemaining <= 0) {
-                    System.out.println("Current bot position: " + finalBot[0].getPos());
+                    System.out.println("Current bot position: " + finalBot[0].getEntityPos());
                 }
 
 
@@ -481,7 +482,7 @@ public class InputPacketHandler {
                 });
 
                 if (ticksRemaining <= 0) {
-                    System.out.println("Current bot position: " + finalBot[0].getPos());
+                    System.out.println("Current bot position: " + finalBot[0].getEntityPos());
                 }
 
             }
@@ -517,10 +518,10 @@ public class InputPacketHandler {
         }
 
 
-        lastPosition = bot.getPos();
+        lastPosition = bot.getEntityPos();
 
         ServerPlayNetworkHandler networkHandler = bot.networkHandler;
-        PlayerInputC2SPacket packet = new PlayerInputC2SPacket(1.0f, 0.0f, false, false); // D key packet.
+        PlayerInputC2SPacket packet = new PlayerInputC2SPacket(new PlayerInput(false, false, false, true, false, false, false)); // D key packet.
         networkHandler.onPlayerInput(packet);
 
         System.out.println("Recorded current bot position as last pos: " + lastPosition);
@@ -530,7 +531,7 @@ public class InputPacketHandler {
 
 
             Direction direction = bot.getHorizontalFacing();
-            System.out.println(direction.getAxis().getName());
+            System.out.println(direction.getAxis().asString());
 
             final ServerPlayerEntity[] finalBot = {bot};
 
@@ -548,7 +549,7 @@ public class InputPacketHandler {
                 });
 
                 if (ticksRemaining <= 0) {
-                    System.out.println("Current bot position: " + finalBot[0].getPos());
+                    System.out.println("Current bot position: " + finalBot[0].getEntityPos());
                 }
 
 
@@ -567,7 +568,7 @@ public class InputPacketHandler {
                 });
 
                 if (ticksRemaining <= 0) {
-                    System.out.println("Current bot position: " + finalBot[0].getPos());
+                    System.out.println("Current bot position: " + finalBot[0].getEntityPos());
                 }
 
             }

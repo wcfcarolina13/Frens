@@ -7,6 +7,7 @@ import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.util.math.Vec3i;
+import net.shasankp000.CommandUtils;
 import net.shasankp000.Entity.LookController;
 import net.shasankp000.PlayerUtils.blockDetectionUnit;
 
@@ -25,10 +26,10 @@ public class ChartPathToBlock {
             // Face the block
             LookController.faceBlock(bot, targetBlockPos);
 
-            Objects.requireNonNull(server).getCommandManager().executeWithPrefix(botSource, "/player " + botName + " move forward");
+            CommandUtils.run(botSource, "player " + botName + " move forward");
 
             // If the bot collides with a block, stop
-            Vec3d nextPos = bot.getPos().add(bot.getRotationVec(1.0f).multiply(0.1));
+        Vec3d nextPos = bot.getEntityPos().add(bot.getRotationVec(1.0f).multiply(0.1));
 
             // Convert manually to Vec3i
             Vec3i nextPosInt = new Vec3i(
@@ -37,8 +38,8 @@ public class ChartPathToBlock {
                     MathHelper.floor(nextPos.z)
             );
 
-            if (bot.getWorld().getBlockState(new BlockPos(nextPosInt)).isOpaque()) {
-                Objects.requireNonNull(server).getCommandManager().executeWithPrefix(botSource, "/player " + botName + " stop");
+            if (bot.getEntityWorld().getBlockState(new BlockPos(nextPosInt)).isOpaque()) {
+                CommandUtils.run(botSource, "player " + botName + " stop");
 
                 // Check if it’s the correct block
                 BlockPos hitPos = blockDetectionUnit.detectBlocks(bot, blockType); // returns BlockPos instead of string

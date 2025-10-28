@@ -65,7 +65,6 @@ public class DropdownMenuWidget extends ClickableWidget {
         return false;
     }
 
-    @Override
     protected void appendClickableNarrations(NarrationMessageBuilder builder) {
         // nothing to do there
         return;

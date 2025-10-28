@@ -1,0 +1,428 @@
+
+> Configure project :
+Fabric Loom: 1.11.8
+
+> Task :compileJava FAILED
+/Users/roti/AI-Player/src/main/java/net/shasankp000/GraphicalUserInterface/Widgets/DropdownMenuWidget.java:48: error: method does not override or implement a method from a supertype
+    @Override
+    ^
+/Users/roti/AI-Player/src/main/java/net/shasankp000/Entity/AutoFaceEntity.java:72: error: cannot find symbol
+        MinecraftServer server = bot.getServer();
+                                    ^
+  symbol:   method getServer()
+  location: variable bot of type ServerPlayerEntity
+/Users/roti/AI-Player/src/main/java/net/shasankp000/Entity/createFakePlayer.java:63: error: cannot find symbol
+        UserCache.setUseRemote(false);
+                 ^
+  symbol:   method setUseRemote(boolean)
+  location: class UserCache
+/Users/roti/AI-Player/src/main/java/net/shasankp000/Entity/createFakePlayer.java:68: error: cannot find symbol
+            gameProfile = useMojangAuth ? server.getUserCache().findByName(username).orElse(null) : null;
+                                                ^
+  symbol:   method getUserCache()
+  location: variable server of type MinecraftServer
+/Users/roti/AI-Player/src/main/java/net/shasankp000/Entity/createFakePlayer.java:71: error: cannot find symbol
+            UserCache.setUseRemote(useMojangAuth);
+                     ^
+  symbol:   method setUseRemote(boolean)
+  location: class UserCache
+/Users/roti/AI-Player/src/main/java/net/shasankp000/Entity/createFakePlayer.java:83: error: cannot find symbol
+                botProfile.put(gameProfile.getName(), gameProfile.getId().toString());
+                                          ^
+  symbol:   method getName()
+  location: variable gameProfile of type GameProfile
+/Users/roti/AI-Player/src/main/java/net/shasankp000/Entity/createFakePlayer.java:83: error: cannot find symbol
+                botProfile.put(gameProfile.getName(), gameProfile.getId().toString());
+                                                                 ^
+  symbol:   method getId()
+  location: variable gameProfile of type GameProfile
+/Users/roti/AI-Player/src/main/java/net/shasankp000/Entity/createFakePlayer.java:115: error: cannot find symbol
+            fetchGameProfile(gameProfile.getName()).thenAccept(p -> {
+                                        ^
+  symbol:   method getName()
+  location: variable gameProfile of type GameProfile
+/Users/roti/AI-Player/src/main/java/net/shasankp000/Entity/createFakePlayer.java:137: error: no suitable method found for teleport(ServerWorld,double,double,double,float,float)
+        instance.teleport(worldIn, pos.x, pos.y, pos.z, (float) yaw, (float) pitch);
+                ^
+    method LivingEntity.teleport(double,double,double,boolean) is not applicable
+      (actual and formal argument lists differ in length)
+    method ServerPlayerEntity.teleport(ServerWorld,double,double,double,Set<PositionFlag>,float,float,boolean) is not applicable
+      (actual and formal argument lists differ in length)
+/Users/roti/AI-Player/src/main/java/net/shasankp000/Entity/createFakePlayer.java:142: error: constructor EntityPositionS2CPacket in record EntityPositionS2CPacket cannot be applied to given types;
+        server.getPlayerManager().sendToDimension(new EntityPositionS2CPacket(instance), dimensionId);
+                                                  ^
+  required: int,EntityPosition,Set<PositionFlag>,boolean
+  found:    createFakePlayer
+  reason: actual and formal argument lists differ in length
+/Users/roti/AI-Player/src/main/java/net/shasankp000/Entity/createFakePlayer.java:143: error: cannot find symbol
+        instance.dataTracker.set(PLAYER_MODEL_PARTS, (byte) 0x7f);
+                                 ^
+  symbol:   variable PLAYER_MODEL_PARTS
+  location: class createFakePlayer
+/Users/roti/AI-Player/src/main/java/net/shasankp000/Entity/createFakePlayer.java:181: error: method does not override or implement a method from a supertype
+    @Override
+    ^
+/Users/roti/AI-Player/src/main/java/net/shasankp000/Entity/createFakePlayer.java:194: error: server has private access in ServerPlayerEntity
+            this.server.send(new ServerTask(this.server.getTicks(), () -> {
+                                                ^
+/Users/roti/AI-Player/src/main/java/net/shasankp000/Entity/createFakePlayer.java:194: error: server has private access in ServerPlayerEntity
+            this.server.send(new ServerTask(this.server.getTicks(), () -> {
+                ^
+/Users/roti/AI-Player/src/main/java/net/shasankp000/Entity/createFakePlayer.java:203: error: cannot find symbol
+        if (Objects.requireNonNull(this.getServer()).getTicks() % 10 == 0)
+                                       ^
+  symbol: method getServer()
+/Users/roti/AI-Player/src/main/java/net/shasankp000/Entity/createFakePlayer.java:206: error: cannot find symbol
+            this.getServerWorld().getChunkManager().updatePosition(this);
+                ^
+  symbol: method getServerWorld()
+/Users/roti/AI-Player/src/main/java/net/shasankp000/Entity/createFakePlayer.java:258: error: teleportTo(TeleportTarget) in createFakePlayer cannot override teleportTo(TeleportTarget) in ServerPlayerEntity
+    public Entity teleportTo(TeleportTarget target)
+                  ^
+  return type Entity is not compatible with ServerPlayerEntity
+/Users/roti/AI-Player/src/main/java/net/shasankp000/PathFinding/ChartPathToBlock.java:20: error: cannot find symbol
+        MinecraftServer server = bot.getServer();
+                                    ^
+  symbol:   method getServer()
+  location: variable bot of type ServerPlayerEntity
+/Users/roti/AI-Player/src/main/java/net/shasankp000/PacketHandler/InputPacketHandler.java:176: error: cannot find symbol
+            ClientCommandC2SPacket packet = new ClientCommandC2SPacket(bot, ClientCommandC2SPacket.Mode.PRESS_SHIFT_KEY);
+                                                                                                       ^
+  symbol:   variable PRESS_SHIFT_KEY
+  location: class Mode
+/Users/roti/AI-Player/src/main/java/net/shasankp000/PacketHandler/InputPacketHandler.java:213: error: cannot find symbol
+            ClientCommandC2SPacket packet = new ClientCommandC2SPacket(bot, ClientCommandC2SPacket.Mode.RELEASE_SHIFT_KEY);
+                                                                                                       ^
+  symbol:   variable RELEASE_SHIFT_KEY
+  location: class Mode
+/Users/roti/AI-Player/src/main/java/net/shasankp000/PlayerUtils/armorUtils.java:43: error: cannot find symbol
+                bot.getInventory().armor.set(slot.getEntitySlotId(), bestArmor.copy()); // update the armor slots data for the server for the bot.
+                                  ^
+  symbol:   variable armor
+  location: class PlayerInventory
+/Users/roti/AI-Player/src/main/java/net/shasankp000/PlayerUtils/armorUtils.java:66: error: cannot find symbol
+            if (attributeEntry.matches(EntityAttributes.GENERIC_ARMOR)) {
+                                                       ^
+  symbol:   variable GENERIC_ARMOR
+  location: class EntityAttributes
+/Users/roti/AI-Player/src/main/java/net/shasankp000/PlayerUtils/armorUtils.java:68: error: cannot find symbol
+            } else if (attributeEntry.matches(EntityAttributes.GENERIC_ARMOR_TOUGHNESS)) {
+                                                              ^
+  symbol:   variable GENERIC_ARMOR_TOUGHNESS
+  location: class EntityAttributes
+/Users/roti/AI-Player/src/main/java/net/shasankp000/PlayerUtils/armorUtils.java:80: error: main has private access in PlayerInventory
+        for (ItemStack item : inventory.main) {
+                                       ^
+/Users/roti/AI-Player/src/main/java/net/shasankp000/PlayerUtils/getFrostLevel.java:13: error: cannot find symbol
+        BlockState blockState = bot.getWorld().getBlockState(botPosition);
+                                   ^
+  symbol:   method getWorld()
+  location: variable bot of type PlayerEntity
+/Users/roti/AI-Player/src/main/java/net/shasankp000/PlayerUtils/getFrostLevel.java:24: error: cannot find symbol
+        if (bot.getWorld().getBiome(botPosition).value().getTemperature() < 0.15f) {
+               ^
+  symbol:   method getWorld()
+  location: variable bot of type PlayerEntity
+/Users/roti/AI-Player/src/main/java/net/shasankp000/PlayerUtils/MiningTool.java:30: error: cannot find symbol
+                BlockState blockState = bot.getWorld().getBlockState(targetBlockPos);
+                                           ^
+  symbol:   method getWorld()
+  location: variable bot of type ServerPlayerEntity
+/Users/roti/AI-Player/src/main/java/net/shasankp000/PlayerUtils/MiningTool.java:38: error: cannot find symbol
+                    BlockState currentState = bot.getWorld().getBlockState(targetBlockPos);
+                                                 ^
+  symbol:   method getWorld()
+  location: variable bot of type ServerPlayerEntity
+/Users/roti/AI-Player/src/main/java/net/shasankp000/PlayerUtils/MiningTool.java:75: error: selectedSlot has private access in PlayerInventory
+                bot.getInventory().selectedSlot = i;
+                                  ^
+/Users/roti/AI-Player/src/main/java/net/shasankp000/Commands/modCommandRegistry.java:199: error: cannot find symbol
+                                                    MinecraftServer server = bot.getServer();
+                                                                                ^
+  symbol:   method getServer()
+  location: variable bot of type ServerPlayerEntity
+/Users/roti/AI-Player/src/main/java/net/shasankp000/Commands/modCommandRegistry.java:207: error: cannot find symbol
+                                                            LOGGER.info("Now facing {} which is in {} in {} axis", direction, bot.getFacing().getName(), bot.getFacing().getAxis().asString());
+                                                                                                                                             ^
+  symbol:   method getName()
+  location: class Direction
+/Users/roti/AI-Player/src/main/java/net/shasankp000/Commands/modCommandRegistry.java:232: error: cannot find symbol
+                                                                            MinecraftServer server = bot.getServer();
+                                                                                                        ^
+  symbol:   method getServer()
+  location: variable bot of type ServerPlayerEntity
+/Users/roti/AI-Player/src/main/java/net/shasankp000/Commands/modCommandRegistry.java:257: error: cannot find symbol
+                                            MinecraftServer server = bot.getServer();
+                                                                        ^
+  symbol:   method getServer()
+  location: variable bot of type ServerPlayerEntity
+/Users/roti/AI-Player/src/main/java/net/shasankp000/Commands/modCommandRegistry.java:688: error: cannot find symbol
+                Objects.requireNonNull(bot.getAttributeInstance(EntityAttributes.GENERIC_KNOCKBACK_RESISTANCE)).setBaseValue(0.0);
+                                                                                ^
+  symbol:   variable GENERIC_KNOCKBACK_RESISTANCE
+  location: class EntityAttributes
+/Users/roti/AI-Player/src/main/java/net/shasankp000/Commands/modCommandRegistry.java:725: error: cannot find symbol
+                Objects.requireNonNull(bot.getAttributeInstance(EntityAttributes.GENERIC_KNOCKBACK_RESISTANCE)).setBaseValue(0.0);
+                                                                                ^
+  symbol:   variable GENERIC_KNOCKBACK_RESISTANCE
+  location: class EntityAttributes
+/Users/roti/AI-Player/src/main/java/net/shasankp000/Commands/modCommandRegistry.java:884: error: cannot find symbol
+            bot.teleport(bot.getServerWorld(), newPosition.getX(), newPosition.getY(), newPosition.getZ(), Set.of(), bot.getYaw(), bot.getPitch());
+                            ^
+  symbol:   method getServerWorld()
+  location: variable bot of type ServerPlayerEntity
+/Users/roti/AI-Player/src/main/java/net/shasankp000/DangerZoneDetector/CliffDetector.java:22: error: cannot find symbol
+        Vec3d botPos = source.getPos();
+                             ^
+  symbol:   method getPos()
+  location: variable source of type ServerPlayerEntity
+/Users/roti/AI-Player/src/main/java/net/shasankp000/DangerZoneDetector/CliffDetector.java:23: error: cannot find symbol
+        World world = source.getWorld();
+                            ^
+  symbol:   method getWorld()
+  location: variable source of type ServerPlayerEntity
+/Users/roti/AI-Player/src/main/java/net/shasankp000/DangerZoneDetector/LavaDetector.java:56: error: cannot find symbol
+        BlockHitResult blockHit = source.getWorld().raycast(new RaycastContext(
+                                        ^
+  symbol:   method getWorld()
+  location: variable source of type ServerPlayerEntity
+/Users/roti/AI-Player/src/main/java/net/shasankp000/DangerZoneDetector/LavaDetector.java:65: error: cannot find symbol
+        if (blockHit != null && source.getWorld().getBlockState(blockHit.getBlockPos()).isOf(Blocks.LAVA)) {
+                                      ^
+  symbol:   method getWorld()
+  location: variable source of type ServerPlayerEntity
+/Users/roti/AI-Player/src/main/java/net/shasankp000/DangerZoneDetector/LavaDetector.java:80: error: cannot find symbol
+        World world = source.getWorld();
+                            ^
+  symbol:   method getWorld()
+  location: variable source of type ServerPlayerEntity
+/Users/roti/AI-Player/src/main/java/net/shasankp000/DangerZoneDetector/LavaDetector.java:96: error: cannot find symbol
+                        double distance = source.getPos().distanceTo(Vec3d.ofCenter(mutable));
+                                                ^
+  symbol:   method getPos()
+  location: variable source of type ServerPlayerEntity
+Note: Some input files use or override a deprecated API.
+Note: Recompile with -Xlint:deprecation for details.
+42 errors
+
+[Incubating] Problems report is available at: file:///Users/roti/AI-Player/build/reports/problems/problems-report.html
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':compileJava'.
+> Compilation failed; see the compiler output below.
+  /Users/roti/AI-Player/src/main/java/net/shasankp000/Entity/createFakePlayer.java:142: error: constructor EntityPositionS2CPacket in record EntityPositionS2CPacket cannot be applied to given types;
+          server.getPlayerManager().sendToDimension(new EntityPositionS2CPacket(instance), dimensionId);
+                                                    ^
+    required: int,EntityPosition,Set<PositionFlag>,boolean
+    found:    createFakePlayer
+    reason: actual and formal argument lists differ in length
+  /Users/roti/AI-Player/src/main/java/net/shasankp000/Entity/createFakePlayer.java:137: error: no suitable method found for teleport(ServerWorld,double,double,double,float,float)
+          instance.teleport(worldIn, pos.x, pos.y, pos.z, (float) yaw, (float) pitch);
+                  ^
+      method LivingEntity.teleport(double,double,double,boolean) is not applicable
+        (actual and formal argument lists differ in length)
+      method ServerPlayerEntity.teleport(ServerWorld,double,double,double,Set<PositionFlag>,float,float,boolean) is not applicable
+        (actual and formal argument lists differ in length)
+  /Users/roti/AI-Player/src/main/java/net/shasankp000/Entity/createFakePlayer.java:203: error: cannot find symbol
+          if (Objects.requireNonNull(this.getServer()).getTicks() % 10 == 0)
+                                         ^
+    symbol: method getServer()
+  /Users/roti/AI-Player/src/main/java/net/shasankp000/Entity/createFakePlayer.java:206: error: cannot find symbol
+              this.getServerWorld().getChunkManager().updatePosition(this);
+                  ^
+    symbol: method getServerWorld()
+  Note: Recompile with -Xlint:deprecation for details.
+  /Users/roti/AI-Player/src/main/java/net/shasankp000/Entity/createFakePlayer.java:258: error: teleportTo(TeleportTarget) in createFakePlayer cannot override teleportTo(TeleportTarget) in ServerPlayerEntity
+      public Entity teleportTo(TeleportTarget target)
+                    ^
+    return type Entity is not compatible with ServerPlayerEntity
+  /Users/roti/AI-Player/src/main/java/net/shasankp000/Entity/createFakePlayer.java:143: error: cannot find symbol
+          instance.dataTracker.set(PLAYER_MODEL_PARTS, (byte) 0x7f);
+                                   ^
+    symbol:   variable PLAYER_MODEL_PARTS
+    location: class createFakePlayer
+  /Users/roti/AI-Player/src/main/java/net/shasankp000/PacketHandler/InputPacketHandler.java:176: error: cannot find symbol
+              ClientCommandC2SPacket packet = new ClientCommandC2SPacket(bot, ClientCommandC2SPacket.Mode.PRESS_SHIFT_KEY);
+                                                                                                         ^
+    symbol:   variable PRESS_SHIFT_KEY
+    location: class Mode
+  /Users/roti/AI-Player/src/main/java/net/shasankp000/PacketHandler/InputPacketHandler.java:213: error: cannot find symbol
+              ClientCommandC2SPacket packet = new ClientCommandC2SPacket(bot, ClientCommandC2SPacket.Mode.RELEASE_SHIFT_KEY);
+                                                                                                         ^
+    symbol:   variable RELEASE_SHIFT_KEY
+    location: class Mode
+  /Users/roti/AI-Player/src/main/java/net/shasankp000/PlayerUtils/armorUtils.java:43: error: cannot find symbol
+                  bot.getInventory().armor.set(slot.getEntitySlotId(), bestArmor.copy()); // update the armor slots data for the server for the bot.
+                                    ^
+    symbol:   variable armor
+    location: class PlayerInventory
+  /Users/roti/AI-Player/src/main/java/net/shasankp000/PlayerUtils/armorUtils.java:66: error: cannot find symbol
+              if (attributeEntry.matches(EntityAttributes.GENERIC_ARMOR)) {
+                                                         ^
+    symbol:   variable GENERIC_ARMOR
+    location: class EntityAttributes
+  /Users/roti/AI-Player/src/main/java/net/shasankp000/PlayerUtils/armorUtils.java:68: error: cannot find symbol
+              } else if (attributeEntry.matches(EntityAttributes.GENERIC_ARMOR_TOUGHNESS)) {
+                                                                ^
+    symbol:   variable GENERIC_ARMOR_TOUGHNESS
+    location: class EntityAttributes
+  /Users/roti/AI-Player/src/main/java/net/shasankp000/Commands/modCommandRegistry.java:688: error: cannot find symbol
+                  Objects.requireNonNull(bot.getAttributeInstance(EntityAttributes.GENERIC_KNOCKBACK_RESISTANCE)).setBaseValue(0.0);
+                                                                                  ^
+    symbol:   variable GENERIC_KNOCKBACK_RESISTANCE
+    location: class EntityAttributes
+  /Users/roti/AI-Player/src/main/java/net/shasankp000/Commands/modCommandRegistry.java:725: error: cannot find symbol
+                  Objects.requireNonNull(bot.getAttributeInstance(EntityAttributes.GENERIC_KNOCKBACK_RESISTANCE)).setBaseValue(0.0);
+                                                                                  ^
+    symbol:   variable GENERIC_KNOCKBACK_RESISTANCE
+    location: class EntityAttributes
+  /Users/roti/AI-Player/src/main/java/net/shasankp000/Entity/createFakePlayer.java:194: error: server has private access in ServerPlayerEntity
+              this.server.send(new ServerTask(this.server.getTicks(), () -> {
+                                                  ^
+  /Users/roti/AI-Player/src/main/java/net/shasankp000/Entity/createFakePlayer.java:194: error: server has private access in ServerPlayerEntity
+              this.server.send(new ServerTask(this.server.getTicks(), () -> {
+                  ^
+  /Users/roti/AI-Player/src/main/java/net/shasankp000/PlayerUtils/armorUtils.java:80: error: main has private access in PlayerInventory
+          for (ItemStack item : inventory.main) {
+                                         ^
+  /Users/roti/AI-Player/src/main/java/net/shasankp000/PlayerUtils/MiningTool.java:75: error: selectedSlot has private access in PlayerInventory
+                  bot.getInventory().selectedSlot = i;
+                                    ^
+  Note: Some input files use or override a deprecated API.
+  /Users/roti/AI-Player/src/main/java/net/shasankp000/GraphicalUserInterface/Widgets/DropdownMenuWidget.java:48: error: method does not override or implement a method from a supertype
+      @Override
+      ^
+  /Users/roti/AI-Player/src/main/java/net/shasankp000/Entity/createFakePlayer.java:181: error: method does not override or implement a method from a supertype
+      @Override
+      ^
+  /Users/roti/AI-Player/src/main/java/net/shasankp000/Entity/AutoFaceEntity.java:72: error: cannot find symbol
+          MinecraftServer server = bot.getServer();
+                                      ^
+    symbol:   method getServer()
+    location: variable bot of type ServerPlayerEntity
+  /Users/roti/AI-Player/src/main/java/net/shasankp000/Entity/createFakePlayer.java:63: error: cannot find symbol
+          UserCache.setUseRemote(false);
+                   ^
+    symbol:   method setUseRemote(boolean)
+    location: class UserCache
+  /Users/roti/AI-Player/src/main/java/net/shasankp000/Entity/createFakePlayer.java:68: error: cannot find symbol
+              gameProfile = useMojangAuth ? server.getUserCache().findByName(username).orElse(null) : null;
+                                                  ^
+    symbol:   method getUserCache()
+    location: variable server of type MinecraftServer
+  /Users/roti/AI-Player/src/main/java/net/shasankp000/Entity/createFakePlayer.java:71: error: cannot find symbol
+              UserCache.setUseRemote(useMojangAuth);
+                       ^
+    symbol:   method setUseRemote(boolean)
+    location: class UserCache
+  /Users/roti/AI-Player/src/main/java/net/shasankp000/Entity/createFakePlayer.java:83: error: cannot find symbol
+                  botProfile.put(gameProfile.getName(), gameProfile.getId().toString());
+                                            ^
+    symbol:   method getName()
+    location: variable gameProfile of type GameProfile
+  /Users/roti/AI-Player/src/main/java/net/shasankp000/Entity/createFakePlayer.java:83: error: cannot find symbol
+                  botProfile.put(gameProfile.getName(), gameProfile.getId().toString());
+                                                                   ^
+    symbol:   method getId()
+    location: variable gameProfile of type GameProfile
+  /Users/roti/AI-Player/src/main/java/net/shasankp000/Entity/createFakePlayer.java:115: error: cannot find symbol
+              fetchGameProfile(gameProfile.getName()).thenAccept(p -> {
+                                          ^
+    symbol:   method getName()
+    location: variable gameProfile of type GameProfile
+  /Users/roti/AI-Player/src/main/java/net/shasankp000/PathFinding/ChartPathToBlock.java:20: error: cannot find symbol
+          MinecraftServer server = bot.getServer();
+                                      ^
+    symbol:   method getServer()
+    location: variable bot of type ServerPlayerEntity
+  /Users/roti/AI-Player/src/main/java/net/shasankp000/PlayerUtils/getFrostLevel.java:13: error: cannot find symbol
+          BlockState blockState = bot.getWorld().getBlockState(botPosition);
+                                     ^
+    symbol:   method getWorld()
+    location: variable bot of type PlayerEntity
+  /Users/roti/AI-Player/src/main/java/net/shasankp000/PlayerUtils/getFrostLevel.java:24: error: cannot find symbol
+          if (bot.getWorld().getBiome(botPosition).value().getTemperature() < 0.15f) {
+                 ^
+    symbol:   method getWorld()
+    location: variable bot of type PlayerEntity
+  /Users/roti/AI-Player/src/main/java/net/shasankp000/PlayerUtils/MiningTool.java:30: error: cannot find symbol
+                  BlockState blockState = bot.getWorld().getBlockState(targetBlockPos);
+                                             ^
+    symbol:   method getWorld()
+    location: variable bot of type ServerPlayerEntity
+  /Users/roti/AI-Player/src/main/java/net/shasankp000/PlayerUtils/MiningTool.java:38: error: cannot find symbol
+                      BlockState currentState = bot.getWorld().getBlockState(targetBlockPos);
+                                                   ^
+    symbol:   method getWorld()
+    location: variable bot of type ServerPlayerEntity
+  /Users/roti/AI-Player/src/main/java/net/shasankp000/Commands/modCommandRegistry.java:199: error: cannot find symbol
+                                                      MinecraftServer server = bot.getServer();
+                                                                                  ^
+    symbol:   method getServer()
+    location: variable bot of type ServerPlayerEntity
+  /Users/roti/AI-Player/src/main/java/net/shasankp000/Commands/modCommandRegistry.java:207: error: cannot find symbol
+                                                              LOGGER.info("Now facing {} which is in {} in {} axis", direction, bot.getFacing().getName(), bot.getFacing().getAxis().asString());
+                                                                                                                                               ^
+    symbol:   method getName()
+    location: class Direction
+  /Users/roti/AI-Player/src/main/java/net/shasankp000/Commands/modCommandRegistry.java:232: error: cannot find symbol
+                                                                              MinecraftServer server = bot.getServer();
+                                                                                                          ^
+    symbol:   method getServer()
+    location: variable bot of type ServerPlayerEntity
+  /Users/roti/AI-Player/src/main/java/net/shasankp000/Commands/modCommandRegistry.java:257: error: cannot find symbol
+                                              MinecraftServer server = bot.getServer();
+                                                                          ^
+    symbol:   method getServer()
+    location: variable bot of type ServerPlayerEntity
+  /Users/roti/AI-Player/src/main/java/net/shasankp000/Commands/modCommandRegistry.java:884: error: cannot find symbol
+              bot.teleport(bot.getServerWorld(), newPosition.getX(), newPosition.getY(), newPosition.getZ(), Set.of(), bot.getYaw(), bot.getPitch());
+                              ^
+    symbol:   method getServerWorld()
+    location: variable bot of type ServerPlayerEntity
+  /Users/roti/AI-Player/src/main/java/net/shasankp000/DangerZoneDetector/CliffDetector.java:22: error: cannot find symbol
+          Vec3d botPos = source.getPos();
+                               ^
+    symbol:   method getPos()
+    location: variable source of type ServerPlayerEntity
+  /Users/roti/AI-Player/src/main/java/net/shasankp000/DangerZoneDetector/CliffDetector.java:23: error: cannot find symbol
+          World world = source.getWorld();
+                              ^
+    symbol:   method getWorld()
+    location: variable source of type ServerPlayerEntity
+  /Users/roti/AI-Player/src/main/java/net/shasankp000/DangerZoneDetector/LavaDetector.java:56: error: cannot find symbol
+          BlockHitResult blockHit = source.getWorld().raycast(new RaycastContext(
+                                          ^
+    symbol:   method getWorld()
+    location: variable source of type ServerPlayerEntity
+  /Users/roti/AI-Player/src/main/java/net/shasankp000/DangerZoneDetector/LavaDetector.java:65: error: cannot find symbol
+          if (blockHit != null && source.getWorld().getBlockState(blockHit.getBlockPos()).isOf(Blocks.LAVA)) {
+                                        ^
+    symbol:   method getWorld()
+    location: variable source of type ServerPlayerEntity
+  /Users/roti/AI-Player/src/main/java/net/shasankp000/DangerZoneDetector/LavaDetector.java:80: error: cannot find symbol
+          World world = source.getWorld();
+                              ^
+    symbol:   method getWorld()
+    location: variable source of type ServerPlayerEntity
+  /Users/roti/AI-Player/src/main/java/net/shasankp000/DangerZoneDetector/LavaDetector.java:96: error: cannot find symbol
+                          double distance = source.getPos().distanceTo(Vec3d.ofCenter(mutable));
+                                                  ^
+    symbol:   method getPos()
+    location: variable source of type ServerPlayerEntity
+  42 errors
+
+* Try:
+> Check your code and dependencies to fix the compilation error(s)
+> Run with --scan to get full insights.
+
+Deprecated Gradle features were used in this build, making it incompatible with Gradle 9.0.
+
+You can use '--warning-mode all' to show the individual deprecation warnings and determine if they come from your own scripts or plugins.
+
+For more on this, please refer to https://docs.gradle.org/8.14.2/userguide/command_line_interface.html#sec:command_line_warnings in the Gradle documentation.
+
+BUILD FAILED in 1s
+1 actionable task: 1 executed

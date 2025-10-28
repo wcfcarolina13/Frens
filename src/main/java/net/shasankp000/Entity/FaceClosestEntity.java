@@ -27,8 +27,8 @@ public class FaceClosestEntity {
 
         if (closestEntity != null) {
             // Calculate the direction to the closest entity
-            Vec3d botPos = bot.getPos();
-            Vec3d entityPos = closestEntity.getPos();
+        Vec3d botPos = bot.getEntityPos();
+        Vec3d entityPos = closestEntity.getEntityPos();
             Vec3d direction = entityPos.subtract(botPos).normalize();
 
             // Calculate yaw and pitch

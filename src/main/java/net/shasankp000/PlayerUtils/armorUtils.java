@@ -1,12 +1,17 @@
 package net.shasankp000.PlayerUtils;
 
+import net.minecraft.component.DataComponentTypes;
+import net.minecraft.component.type.EquippableComponent;
 import net.minecraft.entity.EquipmentSlot;
+import net.minecraft.entity.attribute.EntityAttribute;
+import net.minecraft.entity.attribute.EntityAttributeModifier;
+import net.minecraft.entity.attribute.EntityAttributes;
 import net.minecraft.entity.player.PlayerInventory;
-import net.minecraft.item.ArmorItem;
 import net.minecraft.item.ItemStack;
 import net.minecraft.network.packet.s2c.play.EntityEquipmentUpdateS2CPacket;
 import net.minecraft.server.network.ServerPlayerEntity;
 import com.mojang.datafixers.util.Pair; // Import the correct Pair class
+import net.minecraft.registry.entry.RegistryEntry;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -27,7 +32,7 @@ public class armorUtils {
             ItemStack bestArmor = findBestArmor(inventory, slot);
 
             // Equip the armor if it's better than what's currently equipped
-            if (!bestArmor.isEmpty() && (equippedArmor.isEmpty() || isBetterArmor(bestArmor, equippedArmor))) {
+            if (!bestArmor.isEmpty() && (equippedArmor.isEmpty() || isBetterArmor(bestArmor, equippedArmor, slot))) {
                 bot.equipStack(slot, bestArmor);
                 inventory.removeOne(bestArmor); // Remove the equipped armor from inventory
                 System.out.println("Equipped " + bestArmor.getName().getString() + " in slot " + slot.getName());
@@ -41,24 +46,42 @@ public class armorUtils {
 
         // Send the equipment update packet to all nearby players
         if (!equipmentUpdates.isEmpty()) {
-            bot.getServerWorld().getPlayers().forEach(player ->
+            bot.getEntityWorld().getPlayers().forEach(player ->
                     player.networkHandler.sendPacket(new EntityEquipmentUpdateS2CPacket(bot.getId(), equipmentUpdates))
             );
         }
     }
 
+    private static boolean isArmorForSlot(ItemStack stack, EquipmentSlot slot) {
+        EquippableComponent equippable = stack.get(DataComponentTypes.EQUIPPABLE);
+        return equippable != null && equippable.slot() == slot;
+    }
+
+    private static double getArmorScore(ItemStack stack, EquipmentSlot slot) {
+        if (stack.isEmpty()) {
+            return 0.0;
+        }
+        final double[] score = {0.0};
+        stack.applyAttributeModifiers(slot, (RegistryEntry<EntityAttribute> attributeEntry, EntityAttributeModifier modifier) -> {
+            if (attributeEntry.matches(EntityAttributes.GENERIC_ARMOR)) {
+                score[0] += modifier.value();
+            } else if (attributeEntry.matches(EntityAttributes.GENERIC_ARMOR_TOUGHNESS)) {
+                score[0] += modifier.value() * 0.1;
+            }
+        });
+        return score[0];
+    }
+
     // Helper method to find the best armor for a specific slot
     private static ItemStack findBestArmor(PlayerInventory inventory, EquipmentSlot slot) {
         ItemStack bestArmor = ItemStack.EMPTY;
-        int bestProtection = 0;
+        double bestScore = 0.0;
 
         for (ItemStack item : inventory.main) {
-            if (item.getItem() instanceof ArmorItem armorItem && armorItem.getSlotType() == slot) {
-                int protection = armorItem.getProtection();
-
-                // Replace the bestArmor if the current item has higher protection
-                if (protection > bestProtection) {
-                    bestProtection = protection;
+            if (!item.isEmpty() && isArmorForSlot(item, slot)) {
+                double score = getArmorScore(item, slot);
+                if (score > bestScore) {
+                    bestScore = score;
                     bestArmor = item;
                 }
             }
@@ -67,19 +90,18 @@ public class armorUtils {
     }
 
     // Helper method to compare two armor pieces
-    private static boolean isBetterArmor(ItemStack newArmor, ItemStack currentArmor) {
-        if (newArmor.isEmpty() || !(newArmor.getItem() instanceof ArmorItem)) {
+    private static boolean isBetterArmor(ItemStack newArmor, ItemStack currentArmor, EquipmentSlot slot) {
+        if (newArmor.isEmpty() || !isArmorForSlot(newArmor, slot)) {
             return false;
         }
 
-        if (currentArmor.isEmpty() || !(currentArmor.getItem() instanceof ArmorItem)) {
+        if (currentArmor.isEmpty() || !isArmorForSlot(currentArmor, slot)) {
             return true;
         }
 
-        int newProtection = ((ArmorItem) newArmor.getItem()).getProtection();
-        int currentProtection = ((ArmorItem) currentArmor.getItem()).getProtection();
-
-        return newProtection > currentProtection;
+        double newScore = getArmorScore(newArmor, slot);
+        double currentScore = getArmorScore(currentArmor, slot);
+        return newScore > currentScore;
     }
 
     public static void autoDeEquipArmor(ServerPlayerEntity bot) {
@@ -117,7 +139,7 @@ public class armorUtils {
 
         // Send the equipment update packet to all nearby players
         if (!equipmentUpdates.isEmpty()) {
-            bot.getServerWorld().getPlayers().forEach(player ->
+            bot.getEntityWorld().getPlayers().forEach(player ->
                     player.networkHandler.sendPacket(new EntityEquipmentUpdateS2CPacket(bot.getId(), equipmentUpdates))
             );
         }

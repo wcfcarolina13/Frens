@@ -63,21 +63,18 @@ public class RLAgent {
 
         System.out.println("PodMap from the state: " + podMap);
 
-        double podThreshold = 0.7; // Define PoD threshold
+        double podThreshold = 0.7;
 
-        // Adjust the risk threshold dynamically based on risk appetite
-        double riskThreshold = riskAppetite >= 0.7 ? 5.0  // High risk appetite allows riskier actions
-                : riskAppetite >= 0.3 ? 2.5  // Moderate risk appetite uses default threshold
-                : 1.0;                      // Low risk appetite restricts to very low-risk actions
+        double riskThreshold = riskAppetite >= 0.7 ? 5.0
+                : riskAppetite >= 0.3 ? 2.5
+                : 1.0;
 
         System.out.println("Calculated risk threshold: " + riskThreshold);
 
-        // Build the viableActions map by filtering for valid actions
         Map<Action, Double> viableActions = riskMap.entrySet().stream()
-                .filter(entry -> podMap.getOrDefault(entry.getKey(), 0.0) < podThreshold) // Exclude actions with high PoD
-                .filter(entry -> entry.getValue() < riskThreshold) // Include actions below the adjusted risk threshold
-                .filter(entry -> entry.getValue() < 0.0) // including actions with negative risk, widening the exploration space a bit
-                .filter(entry -> entry.getValue() != 0.0) // don't include absolutely pointless actions.
+                .filter(entry -> Double.isFinite(entry.getValue()))
+                .filter(entry -> podMap.getOrDefault(entry.getKey(), 0.0) < podThreshold)
+                .filter(entry -> entry.getValue() <= riskThreshold)
                 .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
 
         System.out.println("Viable actions map: " + viableActions);
@@ -188,10 +185,9 @@ public class RLAgent {
 
         // Build the viableActions map by filtering for valid actions
         Map<Action, Double> viableActions = riskMap.entrySet().stream()
-                .filter(entry -> podMap.getOrDefault(entry.getKey(), 0.0) < podThreshold) // Exclude actions with high PoD
-                .filter(entry -> entry.getValue() < riskThreshold) // Include actions below the adjusted risk threshold
-                .filter(entry -> entry.getValue() < 0.0) // including actions with negative risk, widening the exploration space a bit
-                .filter(entry -> entry.getValue() != 0.0) // don't include absolutely pointless actions.
+                .filter(entry -> Double.isFinite(entry.getValue()))
+                .filter(entry -> podMap.getOrDefault(entry.getKey(), 0.0) < podThreshold)
+                .filter(entry -> entry.getValue() <= riskThreshold)
                 .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
 
 
