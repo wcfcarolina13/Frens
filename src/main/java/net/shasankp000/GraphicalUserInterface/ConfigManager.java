@@ -147,8 +147,6 @@ public class ConfigManager extends Screen {
 
     @Override
     public void render(DrawContext context, int mouseX, int mouseY, float delta) {
-        // Render background with slight transparency
-        this.renderBackground(context, mouseX, mouseY, delta);
         super.render(context, mouseX, mouseY, delta);
 
         // Color scheme
@@ -237,4 +235,3 @@ public class ConfigManager extends Screen {
 
 
 }
-
