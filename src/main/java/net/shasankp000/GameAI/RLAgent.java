@@ -287,7 +287,7 @@ public class RLAgent {
         int solidNeighborCount = currentState.getSolidNeighborCount();
         boolean hasHeadroom = currentState.hasHeadroom();
         boolean hasEscapeRoute = currentState.hasEscapeRoute();
-        boolean spartanMode = enclosed && !hasEscapeRoute && !hasHeadroom;
+        boolean spartanMode = BotEventHandler.isSpartanModeActive() || (enclosed && !hasEscapeRoute && !hasHeadroom);
 
         for (Action action : possibleActions) {
             double risk = 0.0;
@@ -1045,7 +1045,7 @@ public class RLAgent {
                 .toList();
 
         int reward = 0;
-        boolean spartanMode = enclosed && !hasEscapeRoute && !hasHeadroom;
+        boolean spartanMode = BotEventHandler.isSpartanModeActive() || (enclosed && !hasEscapeRoute && !hasHeadroom);
 
         if (spartanMode) {
             reward -= 5;

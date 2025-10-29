@@ -53,6 +53,8 @@ public class BotEventHandler {
     private static int stationaryTicks = 0;
     private static final int STUCK_TICK_THRESHOLD = 12;
     private static boolean spartanModeActive = false;
+    private static int failedBlockBreakAttempts = 0;
+    private static final int MAX_FAILED_BLOCK_ATTEMPTS = 4;
     private static Vec3d lastSafePosition = null;
 
     public BotEventHandler(MinecraftServer server, ServerPlayerEntity bot) {
@@ -370,14 +372,29 @@ public class BotEventHandler {
     }
 
     private static void handleSpartanMode(ServerPlayerEntity bot, EnvironmentSnapshot snapshot) {
-        boolean candidate = isSpartanCandidate(snapshot);
+        boolean candidate = isSpartanCandidate(snapshot) || failedBlockBreakAttempts >= MAX_FAILED_BLOCK_ATTEMPTS;
         if (candidate && !spartanModeActive) {
             spartanModeActive = true;
             BotActions.sneak(bot, false);
+            BotActions.selectBestWeapon(bot);
             ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withMaxLevel(4),
                     bot.getName().getString() + " is going Spartan mode! No escape route detected.");
         } else if (!candidate && spartanModeActive) {
             spartanModeActive = false;
+            failedBlockBreakAttempts = 0;
+        }
+    }
+
+    private static void registerBlockBreakResult(ServerPlayerEntity bot, boolean success) {
+        if (success) {
+            failedBlockBreakAttempts = 0;
+            return;
+        }
+
+        failedBlockBreakAttempts = Math.min(MAX_FAILED_BLOCK_ATTEMPTS, failedBlockBreakAttempts + 1);
+        if (failedBlockBreakAttempts >= MAX_FAILED_BLOCK_ATTEMPTS) {
+            EnvironmentSnapshot snapshot = analyzeEnvironment(bot);
+            handleSpartanMode(bot, snapshot);
         }
     }
 
@@ -416,6 +433,7 @@ public class BotEventHandler {
         spartanModeActive = false;
         stationaryTicks = 0;
         lastKnownPosition = null;
+        failedBlockBreakAttempts = 0;
 
         Vec3d target = lastSafePosition;
         MinecraftServer srv = bot.getCommandSource().getServer();
@@ -433,6 +451,8 @@ public class BotEventHandler {
         if (srv != null) {
             srv.send(new ServerTask(srv.getTicks() + 40, () -> bot.setInvulnerable(false)));
         }
+
+        lastSafePosition = target;
 
         ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withMaxLevel(4),
                 bot.getName().getString() + " has regrouped and is ready to re-engage.");
@@ -582,6 +602,11 @@ public class BotEventHandler {
         BlockDistanceLimitedSearch blockDistanceLimitedSearch = new BlockDistanceLimitedSearch(bot, 3, 5);
 
         List<String> nearbyBlocks = blockDistanceLimitedSearch.detectNearbyBlocks();
+
+        EnvironmentSnapshot environmentSnapshot = analyzeEnvironment(bot);
+        if (!isSpartanCandidate(environmentSnapshot)) {
+            lastSafePosition = new Vec3d(bot.getX(), bot.getY(), bot.getZ());
+        }
 
         SelectedItemDetails selectedItem = new SelectedItemDetails(
                 selectedItemStack.getItem().getName().getString(),
@@ -748,6 +773,7 @@ public class BotEventHandler {
             case "breakBlock" -> {
                 System.out.println("Performing action: break block ahead");
                 boolean success = BotActions.breakBlockAhead(bot);
+                registerBlockBreakResult(bot, success);
                 if (!success) {
                     System.out.println("No suitable block to break ahead.");
                 }
@@ -755,6 +781,11 @@ public class BotEventHandler {
             case "placeSupportBlock" -> {
                 System.out.println("Performing action: place support block");
                 boolean success = BotActions.placeSupportBlock(bot);
+                if (!success) {
+                    registerBlockBreakResult(bot, false);
+                } else {
+                    failedBlockBreakAttempts = 0;
+                }
                 if (!success) {
                     System.out.println("Unable to place support block (no block or blocked space).");
                 }
@@ -767,3 +798,6 @@ public class BotEventHandler {
         }
     }
 }
+    public static boolean isSpartanModeActive() {
+        return spartanModeActive;
+    }

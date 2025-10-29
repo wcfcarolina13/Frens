@@ -4,7 +4,11 @@ import net.minecraft.block.BlockState;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.mob.HostileEntity;
 import net.minecraft.item.BlockItem;
+import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
+import net.minecraft.item.SwordItem;
+import net.minecraft.item.AxeItem;
+import net.minecraft.item.TridentItem;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.Hand;
@@ -60,6 +64,26 @@ public final class BotActions {
 
     public static void sprint(ServerPlayerEntity bot, boolean value) {
         bot.setSprinting(value);
+    }
+
+    public static boolean selectBestWeapon(ServerPlayerEntity bot) {
+        int slot = findWeaponSlot(bot, SwordItem.class);
+        if (slot == -1) {
+            slot = findWeaponSlot(bot, TridentItem.class);
+        }
+        if (slot == -1) {
+            slot = findWeaponSlot(bot, AxeItem.class);
+        }
+        if (slot == -1) {
+            slot = findAnyOccupiedSlot(bot);
+        }
+
+        if (slot != -1) {
+            selectHotbarSlot(bot, slot);
+            return true;
+        }
+
+        return false;
     }
 
     public static void jumpForward(ServerPlayerEntity bot) {
@@ -197,6 +221,25 @@ public final class BotActions {
         }
 
         return hardness <= allowedHardness;
+    }
+
+    private static int findWeaponSlot(ServerPlayerEntity bot, Class<? extends Item> clazz) {
+        for (int i = 0; i < 9; i++) {
+            ItemStack stack = bot.getInventory().getStack(i);
+            if (!stack.isEmpty() && clazz.isInstance(stack.getItem())) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    private static int findAnyOccupiedSlot(ServerPlayerEntity bot) {
+        for (int i = 0; i < 9; i++) {
+            if (!bot.getInventory().getStack(i).isEmpty()) {
+                return i;
+            }
+        }
+        return -1;
     }
 
     private static void moveRelative(ServerPlayerEntity bot, double distance) {
