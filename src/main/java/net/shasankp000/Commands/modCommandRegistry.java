@@ -95,6 +95,15 @@ public class modCommandRegistry {
                                         )
                                 )
                         )
+                        .then(literal("equip")
+                                .then(CommandManager.argument("bot", EntityArgumentType.player())
+                                        .executes(context -> {
+                                            ServerPlayerEntity bot = EntityArgumentType.getPlayer(context, "bot");
+                                            equipDefaultLoadout(context.getSource().getServer(), bot);
+                                            return 1;
+                                        })
+                                )
+                        )
                         .then(literal("walk")
                                 .then(CommandManager.argument("bot", EntityArgumentType.player())
                                         .then(CommandManager.argument("till", IntegerArgumentType.integer())
@@ -1091,6 +1100,37 @@ public class modCommandRegistry {
 
     }
 
+    private static void equipDefaultLoadout(MinecraftServer server, ServerPlayerEntity bot) {
+        if (server == null || bot == null) {
+            return;
+        }
+
+        String targetName = bot.getName().getString();
+        String[] commands = new String[]{
+                "give " + targetName + " diamond_sword{Enchantments:[{id:sharpness,lvl:5},{id:unbreaking,lvl:3}]}",
+                "give " + targetName + " bow{Enchantments:[{id:power,lvl:5},{id:unbreaking,lvl:3},{id:infinity,lvl:1}]}",
+                "give " + targetName + " arrow 1",
+                "give " + targetName + " shield{Enchantments:[{id:unbreaking,lvl:3}]}",
+                "give " + targetName + " netherite_chestplate{Enchantments:[{id:protection,lvl:4},{id:unbreaking,lvl:3}]}",
+                "give " + targetName + " netherite_helmet{Enchantments:[{id:protection,lvl:4},{id:respiration,lvl:3},{id:unbreaking,lvl:3}]}",
+                "give " + targetName + " netherite_leggings{Enchantments:[{id:protection,lvl:4},{id:unbreaking,lvl:3}]}",
+                "give " + targetName + " netherite_boots{Enchantments:[{id:protection,lvl:4},{id:feather_falling,lvl:4},{id:unbreaking,lvl:3}]}",
+                "give " + targetName + " netherite_pickaxe{Enchantments:[{id:efficiency,lvl:5},{id:unbreaking,lvl:3},{id:mending,lvl:1}]}",
+                "give " + targetName + " netherite_axe{Enchantments:[{id:sharpness,lvl:5},{id:unbreaking,lvl:3}]}",
+                "give " + targetName + " netherite_shovel{Enchantments:[{id:efficiency,lvl:5},{id:unbreaking,lvl:3}]}",
+                "give " + targetName + " golden_carrot 64",
+                "give " + targetName + " cooked_beef 64",
+                "give " + targetName + " torch 64"
+        };
+
+        server.execute(() -> {
+            ServerCommandSource commandSource = server.getCommandSource().withLevel(4);
+            Arrays.stream(commands).forEach(cmd -> CommandUtils.run(commandSource, cmd));
+
+            ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withMaxLevel(4),
+                    "Loadout equipped! Stay sharp out there.");
+        });
+    }
 
     private static @NotNull BlockPos getBlockPos(CommandContext<ServerCommandSource> context) {
         ServerPlayerEntity player = context.getSource().getPlayer(); // gets the player who executed the command
