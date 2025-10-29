@@ -1,6 +1,5 @@
 package net.shasankp000.GameAI;
 
-import net.shasankp000.CommandUtils;
 import net.shasankp000.EntityUtil;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.component.DataComponentTypes;
@@ -85,8 +84,6 @@ public class BotEventHandler {
         }
 
         try {
-            ServerCommandSource botSource = bot.getCommandSource().withSilent().withMaxLevel(4);
-
             System.out.println("Distance from danger zone: " + DangerZoneDetector.detectDangerZone(bot, 10, 10 , 10) + " blocks");
 
             List<Entity> nearbyEntities = AutoFaceEntity.detectNearbyEntities(bot, 10); // Example bounding box size
@@ -138,7 +135,7 @@ public class BotEventHandler {
                 }
 
                 performLearningStep(rlAgentHook, qTable, currentState, nearbyEntitiesList, nearbyBlocks,
-                        distanceToHostileEntity, time, dimension, botSource);
+                        distanceToHostileEntity, time, dimension);
 
             } else if ((DangerZoneDetector.detectDangerZone(bot, 10, 10, 10) <= 5.0 && DangerZoneDetector.detectDangerZone(bot, 10, 10, 10) > 0.0) || hasSculkNearby) {
                 System.out.println("Danger zone detected within 5 blocks");
@@ -170,7 +167,7 @@ public class BotEventHandler {
                 }
 
                 performLearningStep(rlAgentHook, qTable, currentState, nearbyEntitiesList, nearbyBlocks,
-                        distanceToHostileEntity, time, dimension, botSource);
+                        distanceToHostileEntity, time, dimension);
             } else {
                 System.out.println("Passive environment detected. Running exploratory step.");
 
@@ -191,7 +188,7 @@ public class BotEventHandler {
                         : 50.0;
 
                 performLearningStep(rlAgentHook, qTable, currentState, nearbyEntitiesList, nearbyBlocks,
-                        safeDistance, time, dimension, botSource);
+                        safeDistance, time, dimension);
             }
 
 
@@ -253,7 +250,7 @@ public class BotEventHandler {
                     System.out.println("Play Mode - Chosen action: " + chosenAction);
 
                     // Execute action
-                    executeAction(chosenAction, botSource);
+                    executeAction(chosenAction);
                 }
                 else if (DangerZoneDetector.detectDangerZone(bot, 10, 10, 10) <= 5.0 && DangerZoneDetector.detectDangerZone(bot, 10, 10, 10) > 0.0) {
 
@@ -271,7 +268,7 @@ public class BotEventHandler {
                     System.out.println("Play Mode - Chosen action: " + chosenAction);
 
                     // Execute action
-                    executeAction(chosenAction, botSource);
+                    executeAction(chosenAction);
                 }
 
 
@@ -285,30 +282,30 @@ public class BotEventHandler {
         }
     }
 
-    private static void executeAction(StateActions.Action chosenAction, ServerCommandSource botSource) {
+    private static void executeAction(StateActions.Action chosenAction) {
         switch (chosenAction) {
-            case MOVE_FORWARD -> performAction("moveForward", botSource);
-            case MOVE_BACKWARD -> performAction("moveBackward", botSource);
-            case TURN_LEFT -> performAction("turnLeft", botSource);
-            case TURN_RIGHT -> performAction("turnRight", botSource);
-            case JUMP -> performAction("jump", botSource);
-            case SNEAK -> performAction("sneak", botSource);
-            case SPRINT -> performAction("sprint", botSource);
-            case STOP_SNEAKING -> performAction("unsneak", botSource);
-            case STOP_SPRINTING -> performAction("unsprint", botSource);
-            case STOP_MOVING -> performAction("stopMoving", botSource);
-            case USE_ITEM -> performAction("useItem", botSource);
+            case MOVE_FORWARD -> performAction("moveForward");
+            case MOVE_BACKWARD -> performAction("moveBackward");
+            case TURN_LEFT -> performAction("turnLeft");
+            case TURN_RIGHT -> performAction("turnRight");
+            case JUMP -> performAction("jump");
+            case SNEAK -> performAction("sneak");
+            case SPRINT -> performAction("sprint");
+            case STOP_SNEAKING -> performAction("unsneak");
+            case STOP_SPRINTING -> performAction("unsprint");
+            case STOP_MOVING -> performAction("stopMoving");
+            case USE_ITEM -> performAction("useItem");
             case EQUIP_ARMOR -> armorUtils.autoEquipArmor(bot);
-            case ATTACK -> performAction("attack", botSource);
-            case HOTBAR_1 -> performAction("hotbar1", botSource);
-            case HOTBAR_2 -> performAction("hotbar2", botSource);
-            case HOTBAR_3 -> performAction("hotbar3", botSource);
-            case HOTBAR_4 -> performAction("hotbar4", botSource);
-            case HOTBAR_5 -> performAction("hotbar5", botSource);
-            case HOTBAR_6 -> performAction("hotbar6", botSource);
-            case HOTBAR_7 -> performAction("hotbar7", botSource);
-            case HOTBAR_8 -> performAction("hotbar8", botSource);
-            case HOTBAR_9 -> performAction("hotbar9", botSource);
+            case ATTACK -> performAction("attack");
+            case HOTBAR_1 -> performAction("hotbar1");
+            case HOTBAR_2 -> performAction("hotbar2");
+            case HOTBAR_3 -> performAction("hotbar3");
+            case HOTBAR_4 -> performAction("hotbar4");
+            case HOTBAR_5 -> performAction("hotbar5");
+            case HOTBAR_6 -> performAction("hotbar6");
+            case HOTBAR_7 -> performAction("hotbar7");
+            case HOTBAR_8 -> performAction("hotbar8");
+            case HOTBAR_9 -> performAction("hotbar9");
             case STAY -> System.out.println("Performing action: Stay and do nothing");
         }
     }
@@ -321,8 +318,7 @@ public class BotEventHandler {
             List<String> nearbyBlocks,
             double distanceToHostileEntity,
             String time,
-            String dimension,
-            ServerCommandSource botSource) throws IOException {
+            String dimension) throws IOException {
 
         double riskAppetite = rlAgentHook.calculateRiskAppetite(currentState);
         List<StateActions.Action> potentialActionList = rlAgentHook.suggestPotentialActions(currentState);
@@ -334,9 +330,9 @@ public class BotEventHandler {
         StateActions.Action chosenAction = entry.getKey();
         double risk = entry.getValue();
 
-        System.out.println("Chosen action: " + chosenAction);
+        LOGGER.info("Training step chosen action: {}", chosenAction);
 
-        executeAction(chosenAction, botSource);
+        executeAction(chosenAction);
 
         BlockDistanceLimitedSearch blockDistanceLimitedSearch = new BlockDistanceLimitedSearch(bot, 3, 5);
         List<String> updatedBlocks = blockDistanceLimitedSearch.detectNearbyBlocks();
@@ -421,13 +417,14 @@ public class BotEventHandler {
                 actionPodMap.getOrDefault(chosenAction, 0.0)
         );
 
-        System.out.println("Reward: " + reward);
+        LOGGER.info("Reward for action {}: {}", chosenAction, reward);
 
         double qValue = rlAgentHook.calculateQValue(currentState, chosenAction, reward, nextState, qTable);
         qTable.addEntry(currentState, chosenAction, qValue, nextState);
 
         QTableStorage.saveQTable(qTable, null);
         QTableStorage.saveEpsilon(rlAgentHook.getEpsilon(), qTableDir + "/epsilon.bin");
+        LOGGER.info("Persisted Q-table and epsilon after action {}", chosenAction);
 
         BotEventHandler.currentState = nextState;
     }
@@ -490,106 +487,107 @@ public class BotEventHandler {
     }
 
 
-    private static void performAction(String action, ServerCommandSource botSource) {
-        String botName = botSource.getName();
-
+    private static void performAction(String action) {
         switch (action) {
-            case "moveForward":
+            case "moveForward" -> {
                 System.out.println("Performing action: move forward");
-                runPlayerCommand(botSource, botName, "move forward");
+                BotActions.moveForward(bot);
                 AutoFaceEntity.isBotMoving = true;
-                break;
-            case "moveBackward":
+            }
+            case "moveBackward" -> {
                 System.out.println("Performing action: move backward");
-                runPlayerCommand(botSource, botName, "move backward");
+                BotActions.moveBackward(bot);
                 AutoFaceEntity.isBotMoving = true;
-                break;
-            case "turnLeft":
+            }
+            case "turnLeft" -> {
                 System.out.println("Performing action: turn left");
-                runPlayerCommand(botSource, botName, "turn left");
-                break;
-            case "turnRight":
+                BotActions.turnLeft(bot);
+            }
+            case "turnRight" -> {
                 System.out.println("Performing action: turn right");
-                runPlayerCommand(botSource, botName, "turn right");
-                break;
-            case "jump":
+                BotActions.turnRight(bot);
+            }
+            case "jump" -> {
                 System.out.println("Performing action: jump");
-                bot.jump();
-                break;
-            case "sneak":
+                BotActions.jump(bot);
+            }
+            case "sneak" -> {
                 System.out.println("Performing action: sneak");
-                runPlayerCommand(botSource, botName, "sneak");
-                break;
-            case "sprint":
+                BotActions.sneak(bot, true);
+            }
+            case "sprint" -> {
                 System.out.println("Performing action: sprint");
-                runPlayerCommand(botSource, botName, "sprint");
-                break;
-            case "unsneak":
+                BotActions.sprint(bot, true);
+            }
+            case "unsneak" -> {
                 System.out.println("Performing action: unsneak");
-                runPlayerCommand(botSource, botName, "unsneak");
-                break;
-            case "unsprint":
+                BotActions.sneak(bot, false);
+            }
+            case "unsprint" -> {
                 System.out.println("Performing action: unsprint");
-                runPlayerCommand(botSource, botName, "unsprint");
-                break;
-            case "stopMoving":
+                BotActions.sprint(bot, false);
+            }
+            case "stopMoving" -> {
                 System.out.println("Performing action: stop moving");
-                runPlayerCommand(botSource, botName, "stop");
+                BotActions.stop(bot);
                 AutoFaceEntity.isBotMoving = false;
-                break;
-            case "useItem":
+            }
+            case "useItem" -> {
                 System.out.println("Performing action: use currently selected item");
-                runPlayerCommand(botSource, botName, "use");
-                break;
-            case "attack":
+                BotActions.useSelectedItem(bot);
+            }
+            case "attack" -> {
                 System.out.println("Performing action: attack");
-                FaceClosestEntity.faceClosestEntity(bot, AutoFaceEntity.hostileEntities);
-                runPlayerCommand(botSource, botName, "attack");
-                break;
-            case "hotbar1":
+                List<Entity> hostiles = AutoFaceEntity.hostileEntities;
+                if (hostiles == null || hostiles.isEmpty()) {
+                    hostiles = AutoFaceEntity.detectNearbyEntities(bot, 10).stream()
+                            .filter(EntityUtil::isHostile)
+                            .toList();
+                }
+                if (!hostiles.isEmpty()) {
+                    FaceClosestEntity.faceClosestEntity(bot, hostiles);
+                    BotActions.attackNearest(bot, hostiles);
+                } else {
+                    System.out.println("No hostile entities available to attack.");
+                }
+            }
+            case "hotbar1" -> {
                 System.out.println("Performing action: Select hotbar slot 1");
-                runPlayerCommand(botSource, botName, "hotbar 1");
-                break;
-            case "hotbar2":
+                BotActions.selectHotbarSlot(bot, 0);
+            }
+            case "hotbar2" -> {
                 System.out.println("Performing action: Select hotbar slot 2");
-                runPlayerCommand(botSource, botName, "hotbar 2");
-                break;
-            case "hotbar3":
+                BotActions.selectHotbarSlot(bot, 1);
+            }
+            case "hotbar3" -> {
                 System.out.println("Performing action: Select hotbar slot 3");
-                runPlayerCommand(botSource, botName, "hotbar 3");
-                break;
-            case "hotbar4":
+                BotActions.selectHotbarSlot(bot, 2);
+            }
+            case "hotbar4" -> {
                 System.out.println("Performing action: Select hotbar slot 4");
-                runPlayerCommand(botSource, botName, "hotbar 4");
-                break;
-            case "hotbar5":
+                BotActions.selectHotbarSlot(bot, 3);
+            }
+            case "hotbar5" -> {
                 System.out.println("Performing action: Select hotbar slot 5");
-                runPlayerCommand(botSource, botName, "hotbar 5");
-                break;
-            case "hotbar6":
+                BotActions.selectHotbarSlot(bot, 4);
+            }
+            case "hotbar6" -> {
                 System.out.println("Performing action: Select hotbar slot 6");
-                runPlayerCommand(botSource, botName, "hotbar 6");
-                break;
-            case "hotbar7":
+                BotActions.selectHotbarSlot(bot, 5);
+            }
+            case "hotbar7" -> {
                 System.out.println("Performing action: Select hotbar slot 7");
-                runPlayerCommand(botSource, botName, "hotbar 7");
-                break;
-            case "hotbar8":
+                BotActions.selectHotbarSlot(bot, 6);
+            }
+            case "hotbar8" -> {
                 System.out.println("Performing action: Select hotbar slot 8");
-                runPlayerCommand(botSource, botName, "hotbar 8");
-                break;
-            case "hotbar9":
+                BotActions.selectHotbarSlot(bot, 7);
+            }
+            case "hotbar9" -> {
                 System.out.println("Performing action: Select hotbar slot 9");
-                runPlayerCommand(botSource, botName, "hotbar 9");
-                break;
-
-            default:
-                System.out.println("Invalid action");
-                break;
+                BotActions.selectHotbarSlot(bot, 8);
+            }
+            default -> System.out.println("Invalid action");
         }
-    }
-
-    private static void runPlayerCommand(ServerCommandSource botSource, String botName, String action) {
-        CommandUtils.run(botSource, "player " + botName + " " + action);
     }
 }

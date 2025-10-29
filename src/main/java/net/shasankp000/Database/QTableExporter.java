@@ -29,6 +29,8 @@ public class QTableExporter {
                 // Serialize state-action pair and corresponding QEntry
                 String currentState = serializeState(pair.getState());
                 Map<String, Object> stateDetails = new HashMap<>();
+                stateDetails.put("actionTaken", pair.getAction().name());
+                stateDetails.put("qValue", qEntry.getQValue());
                 stateDetails.put("stateDetails", serializeStateObject(pair.getState()));
                 stateDetails.put("NextState", serializeStateObject(qEntry.getNextState()));
 
