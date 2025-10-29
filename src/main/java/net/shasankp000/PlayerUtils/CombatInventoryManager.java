@@ -1,17 +1,24 @@
 package net.shasankp000.PlayerUtils;
 
 import net.minecraft.component.DataComponentTypes;
+import net.minecraft.component.type.FoodComponent;
 import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.entity.attribute.EntityAttributeInstance;
 import net.minecraft.entity.attribute.EntityAttributes;
 import net.minecraft.entity.player.PlayerInventory;
+import net.minecraft.entity.player.HungerManager;
+import net.minecraft.entity.Entity;
 import net.minecraft.item.ItemStack;
 import net.minecraft.server.network.ServerPlayerEntity;
-import net.minecraft.util.Hand;
+
+import net.shasankp000.GameAI.BotActions;
 
 import java.util.Arrays;
 import java.util.Locale;
 import java.util.OptionalInt;
+import java.util.List;
+
+import net.minecraft.util.Hand;
 
 /**
  * Helper utilities that prepare the bot's inventory for combat situations.
@@ -24,6 +31,9 @@ public final class CombatInventoryManager {
 
     private static final double MIN_COMBAT_ATTACK_SPEED = 6.0D;
     private static final int HOTBAR_SIZE = 9;
+    private static final int HUNGER_THRESHOLD = 14;
+    private static final float CRITICAL_HEALTH_THRESHOLD = 12.0F;
+    private static final double HOSTILE_ALERT_DISTANCE_SQ = 36.0D; // 6 blocks
 
     private CombatInventoryManager() {
     }
@@ -42,6 +52,39 @@ public final class CombatInventoryManager {
         ensureBestWeaponAccessible(bot);
         ensureFoodAccessible(bot);
         boostAttackSpeed(bot);
+    }
+
+    public static boolean tryConsumeIfNeeded(ServerPlayerEntity bot, List<Entity> hostileEntities) {
+        if (bot == null || bot.isDead()) {
+            return false;
+        }
+
+        HungerManager hungerManager = bot.getHungerManager();
+        int foodLevel = hungerManager.getFoodLevel();
+        boolean hungerLow = foodLevel <= HUNGER_THRESHOLD;
+        boolean healthLow = bot.getHealth() <= CRITICAL_HEALTH_THRESHOLD && foodLevel < 20;
+        boolean shouldEat = hungerLow || healthLow;
+
+        if (!shouldEat || !isSafeToEat(bot, hostileEntities)) {
+            return false;
+        }
+
+        PlayerInventory inventory = bot.getInventory();
+        OptionalInt foodSlot = findCheapestFoodSlot(inventory);
+        if (foodSlot.isEmpty()) {
+            return false;
+        }
+
+        int slot = foodSlot.getAsInt();
+        int targetHotbar = 7;
+        if (slot != targetHotbar) {
+            swapStacks(inventory, slot, targetHotbar);
+        }
+
+        BotActions.selectHotbarSlot(bot, targetHotbar);
+        BotActions.useSelectedItem(bot);
+        ensureBestWeaponAccessible(bot);
+        return true;
     }
 
     private static void autoEquipMissingArmor(ServerPlayerEntity bot) {
@@ -187,7 +230,7 @@ public final class CombatInventoryManager {
     }
 
     private static boolean isFoodStack(ItemStack stack) {
-        return !stack.isEmpty() && stack.getComponents().contains(DataComponentTypes.FOOD);
+        return getFoodComponent(stack) != null;
     }
 
     private static double materialWeight(String key) {
@@ -210,5 +253,40 @@ public final class CombatInventoryManager {
             return 0.8;
         }
         return 1.0;
+    }
+
+    private static OptionalInt findCheapestFoodSlot(PlayerInventory inventory) {
+        int bestSlot = -1;
+        double bestScore = Double.POSITIVE_INFINITY;
+
+        for (int i = 0; i < PlayerInventory.MAIN_SIZE; i++) {
+            ItemStack stack = inventory.getStack(i);
+            FoodComponent food = getFoodComponent(stack);
+            if (food != null) {
+                double score = food.nutrition() + food.saturation() * 0.25D;
+                if (score < bestScore || (score == bestScore && (bestSlot < 0 || stack.getCount() < inventory.getStack(bestSlot).getCount()))) {
+                    bestScore = score;
+                    bestSlot = i;
+                }
+            }
+        }
+
+        return bestSlot >= 0 ? OptionalInt.of(bestSlot) : OptionalInt.empty();
+    }
+
+    private static boolean isSafeToEat(ServerPlayerEntity bot, List<Entity> hostiles) {
+        if (hostiles == null || hostiles.isEmpty()) {
+            return true;
+        }
+        for (Entity hostile : hostiles) {
+            if (hostile.squaredDistanceTo(bot) <= HOSTILE_ALERT_DISTANCE_SQ && bot.canSee(hostile)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static FoodComponent getFoodComponent(ItemStack stack) {
+        return stack != null && !stack.isEmpty() ? stack.getComponents().get(DataComponentTypes.FOOD) : null;
     }
 }

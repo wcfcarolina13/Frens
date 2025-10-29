@@ -128,6 +128,10 @@ public class AutoFaceEntity {
                         .filter(EntityUtil::isHostile)
                         .toList();
 
+                if (CombatInventoryManager.tryConsumeIfNeeded(bot, hostileEntities)) {
+                    return;
+                }
+
                 boolean hasSculkNearby = false;
 
                 BlockDistanceLimitedSearch blockDistanceLimitedSearch = new BlockDistanceLimitedSearch(bot, 3, 5);
