@@ -57,6 +57,7 @@ public class BotEventHandler {
     private static int failedBlockBreakAttempts = 0;
     private static final int MAX_FAILED_BLOCK_ATTEMPTS = 4;
     private static Vec3d lastSafePosition = null;
+    private static long lastRespawnHandledTick = -1;
 
     public BotEventHandler(MinecraftServer server, ServerPlayerEntity bot) {
         BotEventHandler.server = server;
@@ -483,12 +484,34 @@ public class BotEventHandler {
         bot.setInvulnerable(true);
         if (srv != null) {
             srv.send(new ServerTask(srv.getTicks() + 40, () -> bot.setInvulnerable(false)));
+            lastRespawnHandledTick = srv.getTicks();
         }
 
         lastSafePosition = target;
 
         ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withMaxLevel(4),
                 bot.getName().getString() + " has regrouped and is ready to re-engage.");
+    }
+
+    public static void ensureRespawnHandled(ServerPlayerEntity bot) {
+        MinecraftServer srv = bot.getCommandSource().getServer();
+        if (srv == null) {
+            return;
+        }
+
+        long checkTick = srv.getTicks() + 5;
+        srv.send(new ServerTask((int) checkTick, () -> {
+            long ticksSince = lastRespawnHandledTick < 0 ? Long.MAX_VALUE : checkTick - lastRespawnHandledTick;
+            if (ticksSince <= 5) {
+                return; // recent respawn already handled
+            }
+
+            LOGGER.warn("AFTER_RESPAWN did not fire for bot {}; forcing respawn routine", bot.getName().getString());
+            if (bot.isDead()) {
+                bot.setHealth(bot.getMaxHealth());
+            }
+            onBotRespawn(bot);
+        }));
     }
 
     private void performLearningStep(

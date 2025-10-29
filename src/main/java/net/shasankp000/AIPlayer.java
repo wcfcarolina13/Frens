@@ -123,8 +123,12 @@ public class AIPlayer implements ModInitializer {
             if (entity instanceof ServerPlayerEntity serverPlayer) {
                 if (BotEventHandler.bot != null) {
                     if (serverPlayer.getName().getString().equals(BotEventHandler.bot.getName().getString())) {
+                        LOGGER.info("Detected bot death at ({}, {}, {}) damageSource={} alive={}",
+                                serverPlayer.getX(), serverPlayer.getY(), serverPlayer.getZ(),
+                                damageSource.getType(), serverPlayer.isAlive());
                         QTableStorage.saveLastKnownState(BotEventHandler.getCurrentState(), BotEventHandler.qTableDir + "/lastKnownState.bin");
                         BotEventHandler.botDied = true; // set flag for bot's death.
+                        BotEventHandler.ensureRespawnHandled(serverPlayer);
                     }
                 }
             }
@@ -136,6 +140,7 @@ public class AIPlayer implements ModInitializer {
                 System.out.println("Bot has respawned. Updating state...");
                 BotEventHandler.hasRespawned = true;
                 BotEventHandler.botSpawnCount++;
+                LOGGER.info("AFTER_RESPAWN fired for bot {} (alive flag={})", newPlayer.getName().getString(), alive);
                 AutoFaceEntity.handleBotRespawn(newPlayer);
                 BotEventHandler.onBotRespawn(newPlayer);
             }
