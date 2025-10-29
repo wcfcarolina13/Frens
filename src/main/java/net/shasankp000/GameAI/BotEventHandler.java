@@ -10,6 +10,7 @@ import net.minecraft.registry.RegistryKey;
 import net.minecraft.server.ServerTask;
 import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.world.ServerWorld;
+import net.minecraft.registry.tag.EntityTypeTags;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
@@ -709,6 +710,8 @@ public class BotEventHandler {
             return true;
         }
 
+        BotActions.lowerShield(bot);
+
         Vec3d targetPos = positionOf(target);
         double distanceSq = bot.squaredDistanceTo(targetPos);
         if (distanceSq > 100) {
@@ -727,6 +730,8 @@ public class BotEventHandler {
         if (!hostileEntities.isEmpty() && engageHostiles(bot, hostileEntities)) {
             return true;
         }
+
+        BotActions.lowerShield(bot);
 
         Entity nearestItem = findNearestItem(bot, nearbyEntities, guardRadius);
         if (nearestItem != null) {
@@ -779,9 +784,18 @@ public class BotEventHandler {
             return false;
         }
         double distance = Math.sqrt(closest.squaredDistanceTo(bot));
+        boolean projectileThreat = closest.getType().isIn(EntityTypeTags.SKELETONS) || closest.getName().getString().toLowerCase(Locale.ROOT).contains("pillager");
+        boolean multipleThreats = hostileEntities.size() > 1;
+        boolean lowHealth = bot.getHealth() <= bot.getMaxHealth() * 0.5F;
+        boolean shouldBlock = (projectileThreat || multipleThreats || lowHealth) && distance <= 4.5D;
+
         if (distance > 3.0D) {
+            BotActions.lowerShield(bot);
             moveToward(bot, positionOf(closest), 2.5D, true);
+        } else if (shouldBlock && BotActions.raiseShield(bot)) {
+            return true;
         } else {
+            BotActions.lowerShield(bot);
             BotActions.selectBestWeapon(bot);
             BotActions.attackNearest(bot, hostileEntities);
         }
@@ -802,6 +816,8 @@ public class BotEventHandler {
         bot.setYaw(yaw);
         bot.setHeadYaw(yaw);
         bot.setBodyYaw(yaw);
+
+        BotActions.lowerShield(bot);
         BotActions.sprint(bot, sprint);
         BotActions.moveForward(bot);
         if (target.y - pos.y > 0.6D) {

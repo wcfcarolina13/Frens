@@ -281,6 +281,46 @@ public final class BotActions {
         }
     }
 
+    public static boolean raiseShield(ServerPlayerEntity bot) {
+        if (bot.isBlocking() || bot.isUsingItem()) {
+            return true;
+        }
+
+        Hand shieldHand = findShieldHand(bot);
+        if (shieldHand == null) {
+            return false;
+        }
+
+        bot.setCurrentHand(shieldHand);
+        return true;
+    }
+
+    public static void lowerShield(ServerPlayerEntity bot) {
+        if (bot.isBlocking() || bot.isUsingItem()) {
+            ItemStack active = bot.getActiveItem();
+            if (active.isOf(Items.SHIELD)) {
+                bot.clearActiveItem();
+            }
+        }
+    }
+
+    private static Hand findShieldHand(ServerPlayerEntity bot) {
+        if (bot.getOffHandStack().isOf(Items.SHIELD)) {
+            return Hand.OFF_HAND;
+        }
+        if (bot.getMainHandStack().isOf(Items.SHIELD)) {
+            return Hand.MAIN_HAND;
+        }
+        for (int i = 0; i < 9; i++) {
+            ItemStack stack = bot.getInventory().getStack(i);
+            if (stack.isOf(Items.SHIELD)) {
+                selectHotbarSlot(bot, i);
+                return Hand.MAIN_HAND;
+            }
+        }
+        return null;
+    }
+
     private static BlockPos getRelativeBlockPos(ServerPlayerEntity bot, int forwardOffset, int verticalOffset) {
         Direction facing = getFacingDirection(bot);
         BlockPos basePos = bot.getBlockPos().add(0, verticalOffset, 0);
