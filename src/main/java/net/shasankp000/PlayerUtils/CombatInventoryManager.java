@@ -31,6 +31,7 @@ public final class CombatInventoryManager {
 
     private static final double MIN_COMBAT_ATTACK_SPEED = 6.0D;
     private static final int HOTBAR_SIZE = 9;
+    private static final int FOOD_HOTBAR_SLOT = 7;
     private static final int HUNGER_THRESHOLD = 14;
     private static final float CRITICAL_HEALTH_THRESHOLD = 12.0F;
     private static final double HOSTILE_ALERT_DISTANCE_SQ = 36.0D; // 6 blocks
@@ -59,6 +60,10 @@ public final class CombatInventoryManager {
             return false;
         }
 
+        if (bot.isUsingItem()) {
+            return false;
+        }
+
         HungerManager hungerManager = bot.getHungerManager();
         int foodLevel = hungerManager.getFoodLevel();
         boolean hungerLow = foodLevel <= HUNGER_THRESHOLD;
@@ -76,14 +81,14 @@ public final class CombatInventoryManager {
         }
 
         int slot = foodSlot.getAsInt();
-        int targetHotbar = 7;
-        if (slot != targetHotbar) {
-            swapStacks(inventory, slot, targetHotbar);
+        if (slot >= HOTBAR_SIZE) {
+            swapStacks(inventory, slot, FOOD_HOTBAR_SLOT);
+            slot = FOOD_HOTBAR_SLOT;
         }
 
-        BotActions.selectHotbarSlot(bot, targetHotbar);
+        BotActions.selectHotbarSlot(bot, slot);
         BotActions.useSelectedItem(bot);
-        ensureBestWeaponAccessible(bot);
+        inventory.markDirty();
         return true;
     }
 
