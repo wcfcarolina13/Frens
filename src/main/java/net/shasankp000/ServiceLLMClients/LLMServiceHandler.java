@@ -1,7 +1,6 @@
 package net.shasankp000.ServiceLLMClients;
 
 import io.github.amithkoujalgi.ollama4j.core.OllamaAPI;
-import io.github.amithkoujalgi.ollama4j.core.types.OllamaModelType;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.network.ServerPlayerEntity;
@@ -9,14 +8,12 @@ import net.shasankp000.AIPlayer;
 import net.shasankp000.ChatUtils.ChatUtils;
 import net.shasankp000.ChatUtils.Helper.RAG2;
 import net.shasankp000.ChatUtils.NLPProcessor;
-import net.shasankp000.Database.SQLiteDB;
 import net.shasankp000.Exception.intentMisclassification;
 import net.shasankp000.FunctionCaller.FunctionCallerV2;
 import net.shasankp000.Overlay.ThinkingStateManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
