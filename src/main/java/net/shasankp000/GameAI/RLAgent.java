@@ -72,11 +72,26 @@ public class RLAgent {
 
         System.out.println("Calculated risk threshold: " + riskThreshold);
 
-        Map<Action, Double> viableActions = riskMap.entrySet().stream()
+        Map<Action, Double> finiteActions = riskMap.entrySet().stream()
                 .filter(entry -> Double.isFinite(entry.getValue()))
+                .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
+
+        Map<Action, Double> viableActions = finiteActions.entrySet().stream()
                 .filter(entry -> podMap.getOrDefault(entry.getKey(), 0.0) < podThreshold)
                 .filter(entry -> entry.getValue() <= riskThreshold)
                 .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
+
+        // If every action exceeds the thresholds, fall back to the lowest-risk options we have.
+        if (viableActions.isEmpty() && !finiteActions.isEmpty()) {
+            viableActions = finiteActions.entrySet().stream()
+                    .sorted(Map.Entry.comparingByValue())
+                    .collect(Collectors.toMap(
+                            Map.Entry::getKey,
+                            Map.Entry::getValue,
+                            (a, b) -> a,
+                            LinkedHashMap::new
+                    ));
+        }
 
         System.out.println("Viable actions map: " + viableActions);
 
@@ -92,6 +107,7 @@ public class RLAgent {
             } else {
                 // Default to STAY if no viable actions exist
                 chosenAction = Action.STAY;
+                chosenRiskValue = riskMap.getOrDefault(Action.STAY, Double.POSITIVE_INFINITY);
             }
 
         } else {
