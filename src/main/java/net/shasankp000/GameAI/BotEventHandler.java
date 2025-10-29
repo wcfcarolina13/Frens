@@ -216,6 +216,7 @@ public class BotEventHandler {
             synchronized (monitorLock) {
                 isExecuting = false;
                 AutoFaceEntity.isHandlerTriggered = false;
+                AutoFaceEntity.setBotExecutingTask(false);
                 System.out.println("Resetting handler trigger flag to: " + false);
             }
         }
@@ -298,6 +299,7 @@ public class BotEventHandler {
                 System.out.println("Resetting handler trigger flag.");
                 isExecuting = false;
                 AutoFaceEntity.isHandlerTriggered = false; // Reset the trigger flag
+                AutoFaceEntity.setBotExecutingTask(false);
             }
         }
     }

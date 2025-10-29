@@ -41,6 +41,7 @@ public class AutoFaceEntity {
     private static boolean botExecutingTask;
     public static boolean hostileEntityInFront;
     public static boolean isHandlerTriggered;
+    private static long lastBusyLogMs = 0L;
     private static boolean isWorldTickListenerActive = true; // Flag to control execution
     private static QTable qTable;
     public static RLAgent rlAgent;
@@ -263,11 +264,16 @@ public class AutoFaceEntity {
                 else {
 
                     if ((PathTracer.BotSegmentManager.getBotMovementStatus() || isBotMoving) || blockDetectionUnit.getBlockDetectionStatus() || isBotExecutingTask()) {
-                        System.out.println("Bot is busy, skipping facing the closest entity");
+                        long now = System.currentTimeMillis();
+                        if (now - lastBusyLogMs > 2500L) {
+                            System.out.println("Bot is busy, skipping facing the closest entity");
+                            lastBusyLogMs = now;
+                        }
                     }
 
                     else {
                         botBusy = false; // Clear the flag if no hostile entities are in front
+                        lastBusyLogMs = 0L;
 
                         hostileEntityInFront = false;
 
