@@ -12,6 +12,7 @@ import net.shasankp000.Database.StateActionTransition;
 import net.shasankp000.Entity.EntityDetails;
 import net.shasankp000.GameAI.StateActions.Action;
 import net.shasankp000.PlayerUtils.ResourceEvaluator;
+import net.shasankp000.PlayerUtils.SelectedItemDetails;
 import net.shasankp000.PlayerUtils.ThreatDetector;
 import net.shasankp000.Commands.modCommandRegistry;
 import net.shasankp000.DangerZoneDetector.CliffDetector;
@@ -905,7 +906,7 @@ public class RLAgent {
 
 
     public int calculateReward(int botX, int botY, int botZ, List<EntityDetails> nearbyEntities, List<String> nearbyBlocks, double distanceToHostileEntity, int botHealth,
-                               double distanceToDanger, List<ItemStack> hotBarItems, String selectedItem,
+                               double distanceToDanger, List<ItemStack> hotBarItems, SelectedItemDetails selectedItem,
                                String timeOfDay, String dimension, int botHungerLevel, int botOxygenLevel,
                                ItemStack offhandItem, Map<String, ItemStack> armorItems,
                                StateActions.Action actionTaken, double risk, double pod) {
@@ -965,14 +966,22 @@ public class RLAgent {
 
 
         // 4. Selected item and offhand
-        if (!hostileEntities.isEmpty() && selectedItem.contains("Sword") || selectedItem.contains("Bow") || selectedItem.contains("Axe") || selectedItem.contains("Crossbow") || selectedItem.contains("Trident") && offhandItem.getItem().getName().getString().equalsIgnoreCase("shield")) {
-            reward += 20; // Weapon and shield equipped
-        } else if (!hostileEntities.isEmpty() && selectedItem.contains("Pickaxe") || selectedItem.contains("Hoe") && offhandItem.getItem().getName().getString().equalsIgnoreCase("shield")) {
-            reward += 15; // lower value weapon and shield equipped
-        } else if (!hostileEntities.isEmpty() && selectedItem.contains("Air") && offhandItem.getItem().getName().getString().equalsIgnoreCase("shield")) {
-            reward += 10; // only shield equipped
-        } else {
-            reward -= 5; // Irrelevant item selected
+        boolean hasShieldEquipped = offhandItem.getItem().getName().getString().equalsIgnoreCase("shield");
+        String selectedItemName = selectedItem.getName();
+        boolean hasMeleeWeapon = selectedItemName.contains("Sword") || selectedItemName.contains("Axe") || selectedItemName.contains("Trident");
+        boolean hasRangedWeapon = selectedItemName.contains("Bow") || selectedItemName.contains("Crossbow");
+        boolean hasUtilityTool = selectedItemName.contains("Pickaxe") || selectedItemName.contains("Hoe");
+
+        if (!hostileEntities.isEmpty()) {
+            if ((hasMeleeWeapon || hasRangedWeapon) && hasShieldEquipped) {
+                reward += 20; // Weapon and shield equipped
+            } else if (hasUtilityTool && hasShieldEquipped) {
+                reward += 15; // lower value weapon and shield equipped
+            } else if (selectedItemName.contains("Air") && hasShieldEquipped) {
+                reward += 10; // only shield equipped
+            } else {
+                reward -= 5; // Irrelevant item selected when hostiles are present
+            }
         }
 
 
@@ -1043,6 +1052,29 @@ public class RLAgent {
             reward -= 20; // Penalize low oxygen levels
         } else if (botOxygenLevel >= 150) {
             reward += 10; // Reward full or more than half full oxygen levels
+        }
+
+        if (actionTaken == StateActions.Action.USE_ITEM) {
+            if (selectedItem.isFood()) {
+                if (botHungerLevel < 20) {
+                    reward += 12; // Encourage consuming food when not saturated
+                } else {
+                    reward += 2; // Small positive even if already full—no penalty for topping off
+                }
+            } else {
+                reward -= 4; // Using non-food items idly provides little value
+            }
+        }
+
+        if (actionTaken == StateActions.Action.EQUIP_ARMOR) {
+            long missingPieces = armorItems.values().stream()
+                    .filter(ItemStack::isEmpty)
+                    .count();
+            if (missingPieces > 0) {
+                reward += 10; // Filling gaps in armor is valuable
+            } else {
+                reward += 2; // Maintaining armor is still slightly positive
+            }
         }
 
 

@@ -137,95 +137,8 @@ public class BotEventHandler {
                     currentState = createInitialState(bot);
                 }
 
-                double riskAppetite = rlAgentHook.calculateRiskAppetite(currentState);
-                List<StateActions.Action> potentialActionList = rlAgentHook.suggestPotentialActions(currentState);
-                Map<StateActions.Action, Double> riskMap = rlAgentHook.calculateRisk(currentState, potentialActionList);
-
-                Map<StateActions.Action, Double> chosenActionMap = rlAgentHook.chooseAction(currentState, riskAppetite, riskMap);
-                Map.Entry<StateActions.Action, Double> entry = chosenActionMap.entrySet().iterator().next();
-
-                StateActions.Action chosenAction = entry.getKey();
-                double risk = entry.getValue();
-
-                System.out.println("Chosen action: " + chosenAction);
-
-                executeAction(chosenAction, botSource);
-
-
-                List<ItemStack> hotBarItems = hotBarUtils.getHotbarItems(bot);
-                SelectedItemDetails selectedItem = new SelectedItemDetails(
-                        hotBarUtils.getSelectedHotbarItemStack(bot).getItem().getName().getString(),
-                        hotBarUtils.getSelectedHotbarItemStack(bot).getComponents().contains(DataComponentTypes.FOOD), // as per 1.20.6 changes.
-                        isBlockItem.checkBlockItem(hotBarUtils.getSelectedHotbarItemStack(bot))
-                );
-
-                double dangerDistance = DangerZoneDetector.detectDangerZone(bot, 10, 5, 5);
-                int botHungerLevel = getPlayerHunger.getBotHungerLevel(bot);
-                int botOxygenLevel = getPlayerOxygen.getBotOxygenLevel(bot);
-                int botFrostLevel = getFrostLevel.calculateFrostLevel(bot);
-                Map<String, ItemStack> armorItems = getArmorStack.getArmorItems(bot);
-                ItemStack offhandItem = getOffHandStack.getOffhandItem(bot);
-
-                State nextState = new State(
-                        (int) bot.getX(),
-                        (int) bot.getY(),
-                        (int) bot.getZ(),
-                        nearbyEntitiesList,
-                        nearbyBlocks,
-                        distanceToHostileEntity,
-                        (int) bot.getHealth(),
-                        dangerDistance,
-                        hotBarItems,
-                        selectedItem,
-                        time,
-                        dimension,
-                        botHungerLevel,
-                        botOxygenLevel,
-                        botFrostLevel,
-                        offhandItem,
-                        armorItems,
-                        chosenAction,
-                        riskMap,
-                        riskAppetite,
-                        currentState.getPodMap()
-                );
-
-                rlAgentHook.decayEpsilon();
-                Map<StateActions.Action, Double> actionPodMap = rlAgentHook.assessRiskOutcome(currentState, nextState, chosenAction);
-                nextState.setPodMap(actionPodMap);
-
-                double reward = rlAgentHook.calculateReward(
-                        (int) bot.getX(),
-                        (int) bot.getY(),
-                        (int) bot.getZ(),
-                        nearbyEntitiesList,
-                        nearbyBlocks,
-                        distanceToHostileEntity,
-                        (int) bot.getHealth(),
-                        dangerDistance,
-                        hotBarItems,
-                        selectedItem.getName(),
-                        time,
-                        dimension,
-                        botHungerLevel,
-                        botOxygenLevel,
-                        offhandItem,
-                        armorItems,
-                        chosenAction,
-                        risk,
-                        actionPodMap.getOrDefault(chosenAction, 0.0)
-                );
-
-                System.out.println("Reward: " + reward);
-
-                double qValue = rlAgentHook.calculateQValue(currentState, chosenAction, reward, nextState, qTable);
-                qTable.addEntry(currentState, chosenAction, qValue, nextState);
-
-
-                QTableStorage.saveQTable(qTable, qTableDir + "/qtable.bin");
-                QTableStorage.saveEpsilon(rlAgentHook.getEpsilon(), qTableDir + "/epsilon.bin");
-
-                BotEventHandler.currentState = nextState;
+                performLearningStep(rlAgentHook, qTable, currentState, nearbyEntitiesList, nearbyBlocks,
+                        distanceToHostileEntity, time, dimension, botSource);
 
             } else if ((DangerZoneDetector.detectDangerZone(bot, 10, 10, 10) <= 5.0 && DangerZoneDetector.detectDangerZone(bot, 10, 10, 10) > 0.0) || hasSculkNearby) {
                 System.out.println("Danger zone detected within 5 blocks");
@@ -256,96 +169,29 @@ public class BotEventHandler {
                     currentState = createInitialState(bot);
                 }
 
-                double riskAppetite = rlAgentHook.calculateRiskAppetite(currentState);
-                List<StateActions.Action> potentialActionList = rlAgentHook.suggestPotentialActions(currentState);
-                Map<StateActions.Action, Double> riskMap = rlAgentHook.calculateRisk(currentState, potentialActionList);
+                performLearningStep(rlAgentHook, qTable, currentState, nearbyEntitiesList, nearbyBlocks,
+                        distanceToHostileEntity, time, dimension, botSource);
+            } else {
+                System.out.println("Passive environment detected. Running exploratory step.");
 
-                Map<StateActions.Action, Double> chosenActionMap = rlAgentHook.chooseAction(currentState, riskAppetite, riskMap);
-                Map.Entry<StateActions.Action, Double> entry = chosenActionMap.entrySet().iterator().next();
+                List<EntityDetails> nearbyEntitiesList = nearbyEntities.stream()
+                        .map(entity -> EntityDetails.from(bot, entity))
+                        .toList();
 
-                StateActions.Action chosenAction = entry.getKey();
-                double risk = entry.getValue();
+                State currentState = BotEventHandler.currentState != null ? BotEventHandler.currentState : createInitialState(bot);
+                if (currentState.getRiskMap() == null) {
+                    currentState.setRiskMap(new HashMap<>());
+                }
+                if (currentState.getPodMap() == null) {
+                    currentState.setPodMap(new HashMap<>());
+                }
 
-                System.out.println("Chosen action: " + chosenAction);
+                double safeDistance = Double.isFinite(distanceToHostileEntity) && distanceToHostileEntity > 0
+                        ? distanceToHostileEntity
+                        : 50.0;
 
-                executeAction(chosenAction, botSource);
-
-                nearbyBlocks = blockDistanceLimitedSearch.detectNearbyBlocks();
-
-                List<ItemStack> hotBarItems = hotBarUtils.getHotbarItems(bot);
-                SelectedItemDetails selectedItem = new SelectedItemDetails(
-                        hotBarUtils.getSelectedHotbarItemStack(bot).getItem().getName().getString(),
-                        hotBarUtils.getSelectedHotbarItemStack(bot).getComponents().contains(DataComponentTypes.FOOD), // as per 1.20.6 changes.,
-                        isBlockItem.checkBlockItem(hotBarUtils.getSelectedHotbarItemStack(bot))
-                );
-
-                double dangerDistance = DangerZoneDetector.detectDangerZone(bot, 10, 5, 5);
-                int botHungerLevel = getPlayerHunger.getBotHungerLevel(bot);
-                int botOxygenLevel = getPlayerOxygen.getBotOxygenLevel(bot);
-                int botFrostLevel = getFrostLevel.calculateFrostLevel(bot);
-                Map<String, ItemStack> armorItems = getArmorStack.getArmorItems(bot);
-                ItemStack offhandItem = getOffHandStack.getOffhandItem(bot);
-
-                State nextState = new State(
-                        (int) bot.getX(),
-                        (int) bot.getY(),
-                        (int) bot.getZ(),
-                        nearbyEntitiesList,
-                        nearbyBlocks,
-                        distanceToHostileEntity,
-                        (int) bot.getHealth(),
-                        dangerDistance,
-                        hotBarItems,
-                        selectedItem,
-                        time,
-                        dimension,
-                        botHungerLevel,
-                        botOxygenLevel,
-                        botFrostLevel,
-                        offhandItem,
-                        armorItems,
-                        chosenAction,
-                        riskMap,
-                        riskAppetite,
-                        currentState.getPodMap()
-                );
-
-                rlAgentHook.decayEpsilon();
-                Map<StateActions.Action, Double> actionPodMap = rlAgentHook.assessRiskOutcome(currentState, nextState, chosenAction);
-                nextState.setPodMap(actionPodMap);
-
-                double reward = rlAgentHook.calculateReward(
-                        (int) bot.getX(),
-                        (int) bot.getY(),
-                        (int) bot.getZ(),
-                        nearbyEntitiesList,
-                        nearbyBlocks,
-                        distanceToHostileEntity,
-                        (int) bot.getHealth(),
-                        dangerDistance,
-                        hotBarItems,
-                        selectedItem.getName(),
-                        time,
-                        dimension,
-                        botHungerLevel,
-                        botOxygenLevel,
-                        offhandItem,
-                        armorItems,
-                        chosenAction,
-                        risk,
-                        actionPodMap.getOrDefault(chosenAction, 0.0)
-                );
-
-                System.out.println("Reward: " + reward);
-
-                double qValue = rlAgentHook.calculateQValue(currentState, chosenAction, reward, nextState, qTable);
-                qTable.addEntry(currentState, chosenAction, qValue, nextState);
-
-
-                QTableStorage.saveQTable(qTable, qTableDir + "/qtable.bin");
-                QTableStorage.saveEpsilon(rlAgentHook.getEpsilon(), qTableDir + "/epsilon.bin");
-
-                BotEventHandler.currentState = nextState;
+                performLearningStep(rlAgentHook, qTable, currentState, nearbyEntitiesList, nearbyBlocks,
+                        safeDistance, time, dimension, botSource);
             }
 
 
@@ -465,6 +311,125 @@ public class BotEventHandler {
             case HOTBAR_9 -> performAction("hotbar9", botSource);
             case STAY -> System.out.println("Performing action: Stay and do nothing");
         }
+    }
+
+    private void performLearningStep(
+            RLAgent rlAgentHook,
+            QTable qTable,
+            State currentState,
+            List<EntityDetails> nearbyEntitiesList,
+            List<String> nearbyBlocks,
+            double distanceToHostileEntity,
+            String time,
+            String dimension,
+            ServerCommandSource botSource) throws IOException {
+
+        double riskAppetite = rlAgentHook.calculateRiskAppetite(currentState);
+        List<StateActions.Action> potentialActionList = rlAgentHook.suggestPotentialActions(currentState);
+        Map<StateActions.Action, Double> riskMap = rlAgentHook.calculateRisk(currentState, potentialActionList);
+
+        Map<StateActions.Action, Double> chosenActionMap = rlAgentHook.chooseAction(currentState, riskAppetite, riskMap);
+        Map.Entry<StateActions.Action, Double> entry = chosenActionMap.entrySet().iterator().next();
+
+        StateActions.Action chosenAction = entry.getKey();
+        double risk = entry.getValue();
+
+        System.out.println("Chosen action: " + chosenAction);
+
+        executeAction(chosenAction, botSource);
+
+        BlockDistanceLimitedSearch blockDistanceLimitedSearch = new BlockDistanceLimitedSearch(bot, 3, 5);
+        List<String> updatedBlocks = blockDistanceLimitedSearch.detectNearbyBlocks();
+
+        List<EntityDetails> updatedEntities = AutoFaceEntity.detectNearbyEntities(bot, 10).stream()
+                .map(entity -> EntityDetails.from(bot, entity))
+                .toList();
+
+        double newDistanceToHostile = updatedEntities.stream()
+                .filter(EntityDetails::isHostile)
+                .mapToDouble(entity -> Math.hypot(entity.getX() - bot.getX(), entity.getZ() - bot.getZ()))
+                .min()
+                .orElse(distanceToHostileEntity);
+
+        double dangerDistance = DangerZoneDetector.detectDangerZone(bot, 10, 5, 5);
+        int botHungerLevel = getPlayerHunger.getBotHungerLevel(bot);
+        int botOxygenLevel = getPlayerOxygen.getBotOxygenLevel(bot);
+        int botFrostLevel = getFrostLevel.calculateFrostLevel(bot);
+        Map<String, ItemStack> armorItems = getArmorStack.getArmorItems(bot);
+        ItemStack offhandItem = getOffHandStack.getOffhandItem(bot);
+        List<ItemStack> hotBarItems = hotBarUtils.getHotbarItems(bot);
+        SelectedItemDetails selectedItem = new SelectedItemDetails(
+                hotBarUtils.getSelectedHotbarItemStack(bot).getItem().getName().getString(),
+                hotBarUtils.getSelectedHotbarItemStack(bot).getComponents().contains(DataComponentTypes.FOOD),
+                isBlockItem.checkBlockItem(hotBarUtils.getSelectedHotbarItemStack(bot))
+        );
+
+        String updatedTime = GetTime.getTimeOfWorld(bot) >= 12000 ? "night" : "day";
+        String updatedDimension = bot.getCommandSource().getWorld().getRegistryKey().getValue().toString();
+
+        Map<StateActions.Action, Double> basePodMap = currentState.getPodMap() != null
+                ? currentState.getPodMap()
+                : new HashMap<>();
+
+        State nextState = new State(
+                (int) bot.getX(),
+                (int) bot.getY(),
+                (int) bot.getZ(),
+                updatedEntities,
+                updatedBlocks,
+                newDistanceToHostile,
+                (int) bot.getHealth(),
+                dangerDistance,
+                hotBarItems,
+                selectedItem,
+                updatedTime,
+                updatedDimension,
+                botHungerLevel,
+                botOxygenLevel,
+                botFrostLevel,
+                offhandItem,
+                armorItems,
+                chosenAction,
+                riskMap,
+                riskAppetite,
+                basePodMap
+        );
+
+        rlAgentHook.decayEpsilon();
+        Map<StateActions.Action, Double> actionPodMap = rlAgentHook.assessRiskOutcome(currentState, nextState, chosenAction);
+        nextState.setPodMap(actionPodMap);
+
+        double reward = rlAgentHook.calculateReward(
+                (int) bot.getX(),
+                (int) bot.getY(),
+                (int) bot.getZ(),
+                updatedEntities,
+                updatedBlocks,
+                newDistanceToHostile,
+                (int) bot.getHealth(),
+                dangerDistance,
+                hotBarItems,
+                selectedItem,
+                updatedTime,
+                updatedDimension,
+                botHungerLevel,
+                botOxygenLevel,
+                offhandItem,
+                armorItems,
+                chosenAction,
+                risk,
+                actionPodMap.getOrDefault(chosenAction, 0.0)
+        );
+
+        System.out.println("Reward: " + reward);
+
+        double qValue = rlAgentHook.calculateQValue(currentState, chosenAction, reward, nextState, qTable);
+        qTable.addEntry(currentState, chosenAction, qValue, nextState);
+
+        QTableStorage.saveQTable(qTable, null);
+        QTableStorage.saveEpsilon(rlAgentHook.getEpsilon(), qTableDir + "/epsilon.bin");
+
+        BotEventHandler.currentState = nextState;
     }
 
 

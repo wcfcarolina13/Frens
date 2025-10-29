@@ -273,6 +273,17 @@ public class AutoFaceEntity {
                         hostileEntityInFront = false;
 
                         FaceClosestEntity.faceClosestEntity(bot, nearbyEntities);
+
+                        if (modCommandRegistry.isTrainingMode && !isHandlerTriggered) {
+                            isHandlerTriggered = true;
+                            BotEventHandler eventHandler = new BotEventHandler(server, bot);
+                            try {
+                                eventHandler.detectAndReact(finalRlAgent, Double.POSITIVE_INFINITY, qTable);
+                            } catch (IOException e) {
+                                System.out.println("Exception occurred during passive training: " + e.getMessage());
+                                throw new RuntimeException(e);
+                            }
+                        }
                     }
 
                 }
