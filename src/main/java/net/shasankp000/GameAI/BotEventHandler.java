@@ -67,6 +67,8 @@ public class BotEventHandler {
     private static double guardRadius = 6.0D;
     private static Vec3d baseTarget = null;
     private static boolean assistAllies = false;
+    private static boolean shieldRaised = false;
+    private static long shieldDecisionTick = 0L;
 
     private enum Mode {
         IDLE,
@@ -710,7 +712,7 @@ public class BotEventHandler {
             return true;
         }
 
-        BotActions.lowerShield(bot);
+        lowerShieldTracking(bot);
 
         Vec3d targetPos = positionOf(target);
         double distanceSq = bot.squaredDistanceTo(targetPos);
@@ -731,7 +733,7 @@ public class BotEventHandler {
             return true;
         }
 
-        BotActions.lowerShield(bot);
+        lowerShieldTracking(bot);
 
         Entity nearestItem = findNearestItem(bot, nearbyEntities, guardRadius);
         if (nearestItem != null) {
@@ -790,12 +792,27 @@ public class BotEventHandler {
         boolean shouldBlock = (projectileThreat || multipleThreats || lowHealth) && distance <= 4.5D;
 
         if (distance > 3.0D) {
-            BotActions.lowerShield(bot);
+            lowerShieldTracking(bot);
             moveToward(bot, positionOf(closest), 2.5D, true);
-        } else if (shouldBlock && BotActions.raiseShield(bot)) {
+        } else if (shouldBlock) {
+            long now = bot.getCommandSource().getServer().getTicks();
+            if (!shieldRaised) {
+                if (BotActions.raiseShield(bot)) {
+                    shieldRaised = true;
+                    shieldDecisionTick = now;
+                }
+                return true;
+            }
+
+            if (now - shieldDecisionTick >= 15) {
+                lowerShieldTracking(bot);
+                BotActions.selectBestWeapon(bot);
+                BotActions.attackNearest(bot, hostileEntities);
+                shieldDecisionTick = now;
+            }
             return true;
         } else {
-            BotActions.lowerShield(bot);
+            lowerShieldTracking(bot);
             BotActions.selectBestWeapon(bot);
             BotActions.attackNearest(bot, hostileEntities);
         }
@@ -817,7 +834,7 @@ public class BotEventHandler {
         bot.setHeadYaw(yaw);
         bot.setBodyYaw(yaw);
 
-        BotActions.lowerShield(bot);
+        lowerShieldTracking(bot);
         BotActions.sprint(bot, sprint);
         BotActions.moveForward(bot);
         if (target.y - pos.y > 0.6D) {
@@ -853,6 +870,15 @@ public class BotEventHandler {
 
     private static Vec3d positionOf(Entity entity) {
         return new Vec3d(entity.getX(), entity.getY(), entity.getZ());
+    }
+
+    private static void lowerShieldTracking(ServerPlayerEntity bot) {
+        if (shieldRaised) {
+            BotActions.lowerShield(bot);
+            shieldRaised = false;
+        } else {
+            BotActions.lowerShield(bot);
+        }
     }
 
     private void performLearningStep(
