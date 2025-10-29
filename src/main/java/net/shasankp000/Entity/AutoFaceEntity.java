@@ -1,6 +1,5 @@
 package net.shasankp000.Entity;
 
-import net.shasankp000.CommandUtils;
 import net.shasankp000.EntityUtil;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.minecraft.entity.Entity;
@@ -10,6 +9,7 @@ import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.util.math.Box;
 import net.shasankp000.ChatUtils.ChatUtils;
 import net.shasankp000.Database.QTable;
+import net.shasankp000.GameAI.BotActions;
 import net.shasankp000.GameAI.BotEventHandler;
 import net.shasankp000.GameAI.RLAgent;
 import net.shasankp000.Commands.modCommandRegistry;
@@ -148,57 +148,54 @@ public class AutoFaceEntity {
 
                     double distanceToHostileEntity = Math.sqrt(closestHostile.squaredDistanceTo(bot));
 
-                    if ((PathTracer.BotSegmentManager.getBotMovementStatus() || isBotMoving) || blockDetectionUnit.getBlockDetectionStatus() || isBotExecutingTask()) {
-                        System.out.println("Bot is busy, skipping facing the closest entity");
+                    if (distanceToHostileEntity <= 10.0) {
+                        boolean botWasBusy = PathTracer.BotSegmentManager.getBotMovementStatus()
+                                || isBotMoving
+                                || blockDetectionUnit.getBlockDetectionStatus()
+                                || isBotExecutingTask();
 
-                        if (distanceToHostileEntity <= 10.0) {
+                        if (botWasBusy) {
+                            System.out.println("Bot is busy, stopping tasks before reacting to hostile.");
                             isBotMoving = false;
                             setBotExecutingTask(false);
                             ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withMaxLevel(4), "Terminating all current tasks due to threat detections");
-
-
-                            FaceClosestEntity.faceClosestEntity(bot, AutoFaceEntity.hostileEntities);
-
-
-
-                            // Log details of the detected hostile entity
-                            System.out.println("Closest hostile entity: " + closestHostile.getName().getString()
-                                    + " at distance: " + distanceToHostileEntity);
-
-                            botBusy = true; // Set the bot as busy if hostile entities are in range
-                            hostileEntityInFront = true;
-
-                            // Trigger the handler
-                            if (isHandlerTriggered) {
-                                System.out.println("isHandlerTriggered: " + isHandlerTriggered);
-                                System.out.println("Handler already triggered. Skipping.");
-                            } else {
-                                System.out.println("Triggering handler for hostile entity.");
-                                isHandlerTriggered = true;
-
-                                BotEventHandler eventHandler = new BotEventHandler(server, bot);
-
-                                if (modCommandRegistry.isTrainingMode) {
-
-                                    try {
-                                        eventHandler.detectAndReact(finalRlAgent, distanceToHostileEntity, qTable);
-                                    } catch (IOException e) {
-                                        System.out.println("Exception occurred in startAutoFace: " + e.getMessage());
-                                        throw new RuntimeException(e);
-
-                                    }
-                                }
-                                else {
-
-                                    eventHandler.detectAndReactPlayMode(finalRlAgent, qTable);
-
-                                }
-
-                            }
                         }
 
-                    }
+                        FaceClosestEntity.faceClosestEntity(bot, AutoFaceEntity.hostileEntities);
 
+                        // Log details of the detected hostile entity
+                        System.out.println("Closest hostile entity: " + closestHostile.getName().getString()
+                                + " at distance: " + distanceToHostileEntity);
+
+                        hostileEntityInFront = true;
+
+                        // Trigger the handler
+                        if (isHandlerTriggered) {
+                            System.out.println("Handler already triggered. Skipping.");
+                        } else {
+                            System.out.println("Triggering handler for hostile entity.");
+                            isHandlerTriggered = true;
+
+                            BotEventHandler eventHandler = new BotEventHandler(server, bot);
+
+                            if (modCommandRegistry.isTrainingMode) {
+
+                                try {
+                                    eventHandler.detectAndReact(finalRlAgent, distanceToHostileEntity, qTable);
+                                } catch (IOException e) {
+                                    System.out.println("Exception occurred in startAutoFace: " + e.getMessage());
+                                    throw new RuntimeException(e);
+
+                                }
+                            }
+                            else {
+
+                                eventHandler.detectAndReactPlayMode(finalRlAgent, qTable);
+
+                            }
+
+                        }
+                    }
 
                 }
                 else if ((DangerZoneDetector.detectDangerZone(bot, 10, 10 , 10) <= 5 && DangerZoneDetector.detectDangerZone(bot, 10, 10 , 10)!= 0) || hasSculkNearby)  {
@@ -239,7 +236,9 @@ public class AutoFaceEntity {
                     if (PathTracer.BotSegmentManager.getBotMovementStatus() || isBotMoving || isBotExecutingTask()) {
                         System.out.println("Stopping movement since danger zone is detected.");
                         ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withMaxLevel(4), "Terminating all current tasks due to threat detections");
-                CommandUtils.run(bot.getCommandSource().withSilent().withMaxLevel(4), "player " + bot.getName().getString() + " stop");
+                        BotActions.stop(bot);
+                        isBotMoving = false;
+                        setBotExecutingTask(false);
                     }
 
 
