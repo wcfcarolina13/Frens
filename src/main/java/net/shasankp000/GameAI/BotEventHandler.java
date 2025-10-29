@@ -42,6 +42,7 @@ public class BotEventHandler {
     public static final Logger LOGGER = LoggerFactory.getLogger("ai-player");
     private static MinecraftServer server = null;
     public static ServerPlayerEntity bot = null;
+    private static UUID registeredBotUuid = null;
     public static final String qTableDir = LauncherEnvironment.getStorageDirectory("qtable_storage");
     private static final Object monitorLock = new Object();
     private static boolean isExecuting = false;
@@ -60,9 +61,25 @@ public class BotEventHandler {
     private static long lastRespawnHandledTick = -1;
 
     public BotEventHandler(MinecraftServer server, ServerPlayerEntity bot) {
-        BotEventHandler.server = server;
-        BotEventHandler.bot = bot;
+        if (server != null && bot != null && (registeredBotUuid == null || registeredBotUuid.equals(bot.getUuid()))) {
+            registerBot(bot);
+        }
+    }
 
+    public static void registerBot(ServerPlayerEntity candidate) {
+        if (candidate == null) {
+            return;
+        }
+        registeredBotUuid = candidate.getUuid();
+        BotEventHandler.bot = candidate;
+        MinecraftServer srv = candidate.getCommandSource().getServer();
+        if (srv != null) {
+            BotEventHandler.server = srv;
+        }
+    }
+
+    public static boolean isRegisteredBot(ServerPlayerEntity candidate) {
+        return registeredBotUuid != null && candidate != null && candidate.getUuid().equals(registeredBotUuid);
     }
 
     private static State initializeBotState(QTable qTable) {
@@ -447,6 +464,7 @@ public class BotEventHandler {
     }
 
     public static void onBotRespawn(ServerPlayerEntity bot) {
+        registerBot(bot);
         spartanModeActive = false;
         stationaryTicks = 0;
         lastKnownPosition = null;
@@ -496,6 +514,9 @@ public class BotEventHandler {
     }
 
     public static void ensureRespawnHandled(ServerPlayerEntity bot) {
+        if (!isRegisteredBot(bot)) {
+            return;
+        }
         MinecraftServer srv = bot.getCommandSource().getServer();
         if (srv == null) {
             return;

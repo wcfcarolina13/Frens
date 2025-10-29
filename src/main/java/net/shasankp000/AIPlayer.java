@@ -121,22 +121,20 @@ public class AIPlayer implements ModInitializer {
 
         ServerLivingEntityEvents.AFTER_DEATH.register((entity, damageSource) -> {
             if (entity instanceof ServerPlayerEntity serverPlayer) {
-                if (BotEventHandler.bot != null) {
-                    if (serverPlayer.getName().getString().equals(BotEventHandler.bot.getName().getString())) {
+                if (BotEventHandler.isRegisteredBot(serverPlayer)) {
                         LOGGER.info("Detected bot death at ({}, {}, {}) damageSource={} alive={}",
                                 serverPlayer.getX(), serverPlayer.getY(), serverPlayer.getZ(),
                                 damageSource.getType(), serverPlayer.isAlive());
                         QTableStorage.saveLastKnownState(BotEventHandler.getCurrentState(), BotEventHandler.qTableDir + "/lastKnownState.bin");
                         BotEventHandler.botDied = true; // set flag for bot's death.
                         BotEventHandler.ensureRespawnHandled(serverPlayer);
-                    }
                 }
             }
         });
 
         ServerPlayerEvents.AFTER_RESPAWN.register((oldPlayer, newPlayer, alive) -> {
             // Check if the respawned player is the bot
-            if (oldPlayer instanceof ServerPlayerEntity && newPlayer instanceof ServerPlayerEntity && oldPlayer.getName().getString().equals(newPlayer.getName().getString())) {
+            if (oldPlayer instanceof ServerPlayerEntity && newPlayer instanceof ServerPlayerEntity && BotEventHandler.isRegisteredBot(newPlayer)) {
                 System.out.println("Bot has respawned. Updating state...");
                 BotEventHandler.hasRespawned = true;
                 BotEventHandler.botSpawnCount++;

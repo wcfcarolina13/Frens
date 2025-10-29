@@ -694,6 +694,7 @@ public class modCommandRegistry {
                 Objects.requireNonNull(bot.getAttributeInstance(EntityAttributes.KNOCKBACK_RESISTANCE)).setBaseValue(0.0);
 
                 RespawnHandler.registerRespawnListener(bot);
+                BotEventHandler.registerBot(bot);
 
                 AutoFaceEntity.startAutoFace(bot);
 
@@ -733,6 +734,7 @@ public class modCommandRegistry {
                 System.out.println("Registering respawn listener....");
 
                 RespawnHandler.registerRespawnListener(bot);
+                BotEventHandler.registerBot(bot);
 
                 ollamaClient.botName = botName; // set the bot's name.
 

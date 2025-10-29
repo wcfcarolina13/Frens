@@ -163,7 +163,7 @@ public class AutoFaceEntity {
                             ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withMaxLevel(4), "Terminating all current tasks due to threat detections");
                         }
 
-                        if (BotEventHandler.bot == bot) {
+                        if (BotEventHandler.isRegisteredBot(bot)) {
                             CombatInventoryManager.ensureCombatLoadout(bot);
                         }
 
@@ -215,7 +215,7 @@ public class AutoFaceEntity {
                     botBusy = true;
 
                     BotEventHandler eventHandler = new BotEventHandler(server, bot);
-                    if (BotEventHandler.bot == bot) {
+                    if (BotEventHandler.isRegisteredBot(bot)) {
                         CombatInventoryManager.ensureCombatLoadout(bot);
                     }
 
