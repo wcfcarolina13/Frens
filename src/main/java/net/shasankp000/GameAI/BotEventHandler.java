@@ -802,12 +802,12 @@ public class BotEventHandler {
         bot.setYaw(yaw);
         bot.setHeadYaw(yaw);
         bot.setBodyYaw(yaw);
-        if (sprint) {
-            bot.setSprinting(true);
-        }
+        BotActions.sprint(bot, sprint);
         BotActions.moveForward(bot);
-        if (target.y - pos.y > 1.25D) {
+        if (target.y - pos.y > 0.6D) {
             BotActions.jump(bot);
+        } else {
+            BotActions.autoJumpIfNeeded(bot);
         }
     }
 

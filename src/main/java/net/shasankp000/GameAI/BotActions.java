@@ -25,7 +25,7 @@ import java.util.List;
  */
 public final class BotActions {
 
-    private static final double STEP_DISTANCE = 0.75;
+    private static final double STEP_DISTANCE = 0.45;
     private static final float TURN_DEGREES = 20.0f;
 
     private BotActions() {}
@@ -41,6 +41,8 @@ public final class BotActions {
     public static void stop(ServerPlayerEntity bot) {
         bot.setVelocity(Vec3d.ZERO);
         bot.velocityDirty = true;
+        bot.setSprinting(false);
+        bot.setSneaking(false);
     }
 
     public static void turnLeft(ServerPlayerEntity bot) {
@@ -90,8 +92,11 @@ public final class BotActions {
 
         if (target != null) {
             selectBestWeapon(bot);
-            bot.attack(target);
-            bot.swingHand(Hand.MAIN_HAND, true);
+            double distanceSq = target.squaredDistanceTo(bot);
+            if (distanceSq <= 9.0 && bot.canSee(target)) {
+                bot.attack(target);
+                bot.swingHand(Hand.MAIN_HAND, true);
+            }
         }
     }
 
@@ -254,6 +259,26 @@ public final class BotActions {
         double dz = Math.cos(yawRad) * distance;
 
         bot.teleport(bot.getX() + dx, bot.getY(), bot.getZ() + dz, true);
+    }
+
+    public static void autoJumpIfNeeded(ServerPlayerEntity bot) {
+        if (!bot.isOnGround()) {
+            return;
+        }
+        ServerWorld world = bot.getCommandSource().getWorld();
+        BlockPos front = getRelativeBlockPos(bot, 1, 0);
+        BlockPos frontAbove = front.up();
+        BlockPos frontBelow = front.down();
+
+        boolean obstacleAhead = !world.getBlockState(front).isAir();
+        boolean headSpace = world.getBlockState(frontAbove).isAir();
+        boolean gapAhead = world.getBlockState(front).isAir() && world.getBlockState(frontBelow).isAir();
+
+        if (obstacleAhead && headSpace) {
+            bot.jump();
+        } else if (gapAhead) {
+            bot.jump();
+        }
     }
 
     private static BlockPos getRelativeBlockPos(ServerPlayerEntity bot, int forwardOffset, int verticalOffset) {

@@ -36,7 +36,7 @@ public class AutoFaceEntity {
 
     public static final Logger LOGGER = LoggerFactory.getLogger("ai-player");
     private static final double BOUNDING_BOX_SIZE = 10.0; // Detection range in blocks
-    private static final int INTERVAL_SECONDS = 1; // Interval in seconds to check for nearby entities
+    private static final long LOOP_INTERVAL_MS = 200; // Interval for behaviour loop
     private static final ExecutorService executor3 = Executors.newSingleThreadExecutor();
     public static boolean botBusy;
     private static boolean botExecutingTask;
@@ -334,7 +334,7 @@ public class AutoFaceEntity {
             }
 
 
-        }, 0, INTERVAL_SECONDS, TimeUnit.SECONDS);
+        }, 0, LOOP_INTERVAL_MS, TimeUnit.MILLISECONDS);
 
     }
 
