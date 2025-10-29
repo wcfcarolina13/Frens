@@ -51,6 +51,7 @@ public class BotEventHandler {
     private static Vec3d lastKnownPosition = null;
     private static int stationaryTicks = 0;
     private static final int STUCK_TICK_THRESHOLD = 12;
+    private static boolean spartanModeActive = false;
 
     public BotEventHandler(MinecraftServer server, ServerPlayerEntity bot) {
         BotEventHandler.server = server;
@@ -101,6 +102,7 @@ public class BotEventHandler {
                     hostileEntities.size(), net.shasankp000.Commands.modCommandRegistry.isTrainingMode, isExecuting);
 
             EnvironmentSnapshot environmentSnapshot = analyzeEnvironment(bot);
+            handleSpartanMode(bot, environmentSnapshot);
             updateStuckTracker(bot, environmentSnapshot);
 
 
@@ -361,6 +363,22 @@ public class BotEventHandler {
         return !state.isAir() && !state.getCollisionShape(world, pos).isEmpty();
     }
 
+    private static boolean isSpartanCandidate(EnvironmentSnapshot snapshot) {
+        return snapshot.enclosed() && !snapshot.hasEscapeRoute() && !snapshot.hasHeadroom();
+    }
+
+    private static void handleSpartanMode(ServerPlayerEntity bot, EnvironmentSnapshot snapshot) {
+        boolean candidate = isSpartanCandidate(snapshot);
+        if (candidate && !spartanModeActive) {
+            spartanModeActive = true;
+            BotActions.sneak(bot, false);
+            ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withMaxLevel(4),
+                    bot.getName().getString() + " is going Spartan mode! No escape route detected.");
+        } else if (!candidate && spartanModeActive) {
+            spartanModeActive = false;
+        }
+    }
+
     private static void updateStuckTracker(ServerPlayerEntity bot, EnvironmentSnapshot environmentSnapshot) {
         Vec3d currentPos = new Vec3d(bot.getX(), bot.getY(), bot.getZ());
         if (lastKnownPosition == null) {
@@ -375,6 +393,12 @@ public class BotEventHandler {
         } else {
             stationaryTicks = 0;
             lastKnownPosition = currentPos;
+        }
+
+        if (isSpartanCandidate(environmentSnapshot)) {
+            lastKnownPosition = currentPos;
+            stationaryTicks = 0;
+            return;
         }
 
         if (stationaryTicks >= STUCK_TICK_THRESHOLD || (environmentSnapshot.enclosed() && !environmentSnapshot.hasEscapeRoute())) {

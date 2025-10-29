@@ -287,6 +287,7 @@ public class RLAgent {
         int solidNeighborCount = currentState.getSolidNeighborCount();
         boolean hasHeadroom = currentState.hasHeadroom();
         boolean hasEscapeRoute = currentState.hasEscapeRoute();
+        boolean spartanMode = enclosed && !hasEscapeRoute && !hasHeadroom;
 
         for (Action action : possibleActions) {
             double risk = 0.0;
@@ -366,7 +367,9 @@ public class RLAgent {
                         risk += 5.0; // Jumping is risky with low health
                     }
 
-                    if (enclosed && !hasEscapeRoute) {
+                    if (spartanMode) {
+                        risk -= 4.0;
+                    } else if (enclosed && !hasEscapeRoute) {
                         risk -= 2.5; // jumping may help reach headroom while trapped
                     } else if (!hasHeadroom) {
                         risk += 3.0;
@@ -376,14 +379,18 @@ public class RLAgent {
 
                 case JUMP_FORWARD:
                     risk += 3.0;
-                    if (enclosed) {
-                        risk -= 4.0;
-                    }
-                    if (!hasEscapeRoute) {
-                        risk -= 2.0;
-                    }
-                    if (!hasHeadroom) {
-                        risk += 4.0;
+                    if (spartanMode) {
+                        risk -= 3.0;
+                    } else {
+                        if (enclosed) {
+                            risk -= 4.0;
+                        }
+                        if (!hasEscapeRoute) {
+                            risk -= 2.0;
+                        }
+                        if (!hasHeadroom) {
+                            risk += 4.0;
+                        }
                     }
 
                     break;
@@ -395,7 +402,9 @@ public class RLAgent {
 
                     else {risk += 0.0;}
 
-                    if (enclosed && !hasEscapeRoute) {
+                    if (spartanMode) {
+                        risk += 15.0;
+                    } else if (enclosed && !hasEscapeRoute) {
                         risk += 7.0;
                     }
                     break;
@@ -412,7 +421,9 @@ public class RLAgent {
                         risk += 0.0; // pointless sneaking otherwise
                     }
 
-                    if (enclosed && !hasEscapeRoute) {
+                    if (spartanMode) {
+                        risk += 8.0;
+                    } else if (enclosed && !hasEscapeRoute) {
                         risk += 2.0;
                     }
 
@@ -546,39 +557,55 @@ public class RLAgent {
                     }
 
                     // Final adjustments
+                    if (spartanMode) {
+                        totalRisk -= 20.0;
+                    }
+
                     risk += totalRisk; // Add total risk for attacking
 
                     System.out.println("Risk for ATTACK action: " + risk);
                     break;
 
                 case BREAK_BLOCK_FORWARD:
-                    risk -= enclosed ? 6.0 : 1.5;
-                    risk -= Math.min(6, solidNeighborCount) * 0.5;
-                    if (hasEscapeRoute) {
-                        risk += 2.0;
+                    if (spartanMode) {
+                        risk += 8.0;
+                    } else {
+                        risk -= enclosed ? 6.0 : 1.5;
+                        risk -= Math.min(6, solidNeighborCount) * 0.5;
+                        if (hasEscapeRoute) {
+                            risk += 2.0;
+                        }
                     }
                     break;
 
                 case PLACE_SUPPORT_BLOCK:
-                    risk += 2.5;
-                    if (enclosed) {
-                        risk -= 3.5;
-                    }
-                    if (!hasHeadroom) {
-                        risk -= 2.0;
-                    }
-                    if (!hasEscapeRoute) {
-                        risk -= 1.5;
+                    if (spartanMode) {
+                        risk += 6.0;
+                    } else {
+                        risk += 2.5;
+                        if (enclosed) {
+                            risk -= 3.5;
+                        }
+                        if (!hasHeadroom) {
+                            risk -= 2.0;
+                        }
+                        if (!hasEscapeRoute) {
+                            risk -= 1.5;
+                        }
                     }
                     break;
 
                 case ESCAPE_STAIRS:
-                    risk += 1.0;
-                    if (enclosed || !hasEscapeRoute) {
-                        risk -= 6.0;
-                    }
-                    if (!hasHeadroom) {
-                        risk += 3.0;
+                    if (spartanMode) {
+                        risk += 10.0;
+                    } else {
+                        risk += 1.0;
+                        if (enclosed || !hasEscapeRoute) {
+                            risk -= 6.0;
+                        }
+                        if (!hasHeadroom) {
+                            risk += 3.0;
+                        }
                     }
                     break;
 
@@ -645,6 +672,10 @@ public class RLAgent {
                                 currentState.getBotHungerLevel() <= 6) {
                             risk -= 3.0;
                             System.out.println("Food selected when hungry. Risk reduced: " + risk);
+                        }
+
+                        if (spartanMode && (hotbarItem.contains("Sword") || hotbarItem.contains("Axe") || hotbarItem.contains("Trident"))) {
+                            risk -= 5.0;
                         }
 
                         // Penalize irrelevant item selection near hostiles
@@ -1014,6 +1045,11 @@ public class RLAgent {
                 .toList();
 
         int reward = 0;
+        boolean spartanMode = enclosed && !hasEscapeRoute && !hasHeadroom;
+
+        if (spartanMode) {
+            reward -= 5;
+        }
 
         if (enclosed && !hasEscapeRoute) {
             reward -= 8;
@@ -1159,6 +1195,16 @@ public class RLAgent {
 
         if (hasWoolItems && (hasWardenNearby || hasSculkNearby)) {
             reward += 10; // Reward for having sound-dampening items in inventory
+        }
+
+        if (spartanMode) {
+            switch (actionTaken) {
+                case ATTACK -> reward += 20;
+                case HOTBAR_1, HOTBAR_2, HOTBAR_3, HOTBAR_4, HOTBAR_5, HOTBAR_6, HOTBAR_7, HOTBAR_8, HOTBAR_9 -> reward += 5;
+                case SPRINT, STOP_SNEAKING -> reward += 6;
+                case BREAK_BLOCK_FORWARD, PLACE_SUPPORT_BLOCK, ESCAPE_STAIRS, SNEAK, STAY -> reward -= 12;
+                default -> {}
+            }
         }
 
 
