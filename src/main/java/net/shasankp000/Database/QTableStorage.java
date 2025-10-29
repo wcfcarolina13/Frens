@@ -9,7 +9,10 @@ import org.slf4j.LoggerFactory;
 
 import java.io.*;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
+import java.util.stream.Stream;
 
 
 public class QTableStorage {
@@ -79,16 +82,38 @@ public class QTableStorage {
         String[] possiblePaths = LauncherEnvironment.getFallbackDirectories("qtable_storage");
 
         for (String dir : possiblePaths) {
-            String filePath = dir + File.separator + "qtable.bin";
-            File file = new File(filePath);
+            Path baseDir = Paths.get(dir);
+            Path qTablePath = baseDir.resolve("qtable.bin");
+            File file = qTablePath.toFile();
 
             if (file.exists()) {
                 try {
-                    QTable loadedTable = load(filePath);
-                    LOGGER.info("✅ Q-table loaded from: {}", filePath);
+                    QTable loadedTable = load(qTablePath.toString());
+                    LOGGER.info("✅ Q-table loaded from: {}", qTablePath);
                     return loadedTable;
                 } catch (Exception e) {
-                    LOGGER.warn("❌ Failed to load Q-table from {}: {}", filePath, e.getMessage());
+                    LOGGER.warn("❌ Failed to load Q-table from {}: {}", qTablePath, e.getMessage());
+                }
+            } else {
+                Path legacyPath = locateLegacyQTable(baseDir, qTablePath);
+                if (legacyPath != null) {
+                    if (migrateLegacyQTable(legacyPath, qTablePath)) {
+                        try {
+                            QTable migratedTable = load(qTablePath.toString());
+                            LOGGER.info("✅ Loaded migrated Q-table from: {}", qTablePath);
+                            return migratedTable;
+                        } catch (Exception e) {
+                            LOGGER.warn("❌ Failed to load migrated Q-table from {}: {}", qTablePath, e.getMessage());
+                        }
+                    } else {
+                        try {
+                            QTable legacyTable = load(legacyPath.toString());
+                            LOGGER.info("✅ Loaded legacy Q-table directly from: {}", legacyPath);
+                            return legacyTable;
+                        } catch (Exception e) {
+                            LOGGER.warn("❌ Failed to load legacy Q-table from {}: {}", legacyPath, e.getMessage());
+                        }
+                    }
                 }
             }
         }
@@ -148,6 +173,36 @@ public class QTableStorage {
                     LOGGER.warn("❌ Fallback save failed for {}: {}", fallbackPath, e2.getMessage());
                 }
             }
+        }
+    }
+
+    private static Path locateLegacyQTable(Path baseDir, Path expectedPath) {
+        if (!Files.exists(baseDir)) {
+            return null;
+        }
+
+        try (Stream<Path> stream = Files.walk(baseDir, 6)) {
+            return stream
+                    .filter(Files::isRegularFile)
+                    .filter(path -> path.getFileName().toString().equals("qtable.bin"))
+                    .filter(path -> !path.equals(expectedPath))
+                    .findFirst()
+                    .orElse(null);
+        } catch (IOException e) {
+            LOGGER.warn("❌ Failed to search for legacy Q-table under {}: {}", baseDir, e.getMessage());
+            return null;
+        }
+    }
+
+    private static boolean migrateLegacyQTable(Path legacyPath, Path targetPath) {
+        try {
+            Files.createDirectories(targetPath.getParent());
+            Files.copy(legacyPath, targetPath, StandardCopyOption.REPLACE_EXISTING);
+            LOGGER.info("✅ Migrated legacy Q-table from {} to {}", legacyPath, targetPath);
+            return true;
+        } catch (IOException e) {
+            LOGGER.warn("❌ Failed to migrate legacy Q-table from {} to {}: {}", legacyPath, targetPath, e.getMessage());
+            return false;
         }
     }
 
@@ -240,4 +295,3 @@ public class QTableStorage {
     }
 
 }
-
