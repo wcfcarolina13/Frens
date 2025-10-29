@@ -631,11 +631,6 @@ public class BotEventHandler {
 
         Map<StateActions.Action, Double> podMap = new HashMap<>(); // blank pod map for now.
 
-        EnvironmentSnapshot environmentSnapshot = analyzeEnvironment(bot);
-        if (!isSpartanCandidate(environmentSnapshot)) {
-            lastSafePosition = new Vec3d(bot.getX(), bot.getY(), bot.getZ());
-        }
-
         return new State(
                 (int) bot.getX(),
                 (int) bot.getY(),
@@ -797,7 +792,8 @@ public class BotEventHandler {
             default -> System.out.println("Invalid action");
         }
     }
-}
+
     public static boolean isSpartanModeActive() {
         return spartanModeActive;
     }
+}

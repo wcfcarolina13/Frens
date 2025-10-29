@@ -4,11 +4,8 @@ import net.minecraft.block.BlockState;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.mob.HostileEntity;
 import net.minecraft.item.BlockItem;
-import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
-import net.minecraft.item.SwordItem;
-import net.minecraft.item.AxeItem;
-import net.minecraft.item.TridentItem;
+import net.minecraft.item.Items;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.Hand;
@@ -67,19 +64,13 @@ public final class BotActions {
     }
 
     public static boolean selectBestWeapon(ServerPlayerEntity bot) {
-        int slot = findWeaponSlot(bot, SwordItem.class);
-        if (slot == -1) {
-            slot = findWeaponSlot(bot, TridentItem.class);
-        }
-        if (slot == -1) {
-            slot = findWeaponSlot(bot, AxeItem.class);
-        }
-        if (slot == -1) {
-            slot = findAnyOccupiedSlot(bot);
+        int weaponSlot = findWeaponSlot(bot);
+        if (weaponSlot == -1) {
+            weaponSlot = findAnyOccupiedSlot(bot);
         }
 
-        if (slot != -1) {
-            selectHotbarSlot(bot, slot);
+        if (weaponSlot != -1) {
+            selectHotbarSlot(bot, weaponSlot);
             return true;
         }
 
@@ -223,10 +214,10 @@ public final class BotActions {
         return hardness <= allowedHardness;
     }
 
-    private static int findWeaponSlot(ServerPlayerEntity bot, Class<? extends Item> clazz) {
+    private static int findWeaponSlot(ServerPlayerEntity bot) {
         for (int i = 0; i < 9; i++) {
             ItemStack stack = bot.getInventory().getStack(i);
-            if (!stack.isEmpty() && clazz.isInstance(stack.getItem())) {
+            if (!stack.isEmpty() && isLikelyWeapon(stack)) {
                 return i;
             }
         }
@@ -240,6 +231,19 @@ public final class BotActions {
             }
         }
         return -1;
+    }
+
+    private static boolean isLikelyWeapon(ItemStack stack) {
+        if (stack.isEmpty()) {
+            return false;
+        }
+
+        if (stack.isOf(Items.BOW) || stack.isOf(Items.CROSSBOW) || stack.isOf(Items.TRIDENT)) {
+            return true;
+        }
+
+        String key = stack.getItem().getTranslationKey().toLowerCase(java.util.Locale.ROOT);
+        return key.contains("sword") || key.contains("axe") || key.contains("trident") || key.contains("mace") || key.contains("dagger");
     }
 
     private static void moveRelative(ServerPlayerEntity bot, double distance) {
