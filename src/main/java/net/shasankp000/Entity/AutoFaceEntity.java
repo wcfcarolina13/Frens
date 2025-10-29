@@ -15,6 +15,7 @@ import net.shasankp000.GameAI.RLAgent;
 import net.shasankp000.Commands.modCommandRegistry;
 import net.shasankp000.Database.QTableStorage;
 import net.shasankp000.PlayerUtils.BlockDistanceLimitedSearch;
+import net.shasankp000.PlayerUtils.CombatInventoryManager;
 import net.shasankp000.PlayerUtils.blockDetectionUnit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -162,6 +163,8 @@ public class AutoFaceEntity {
                             ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withMaxLevel(4), "Terminating all current tasks due to threat detections");
                         }
 
+                        CombatInventoryManager.ensureCombatLoadout(bot);
+
                         FaceClosestEntity.faceClosestEntity(bot, AutoFaceEntity.hostileEntities);
 
                         // Log details of the detected hostile entity
@@ -210,6 +213,7 @@ public class AutoFaceEntity {
                     botBusy = true;
 
                     BotEventHandler eventHandler = new BotEventHandler(server, bot);
+                    CombatInventoryManager.ensureCombatLoadout(bot);
 
                     double distanceToHostileEntity = 0.0;
 

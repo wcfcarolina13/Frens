@@ -1,9 +1,22 @@
 package net.shasankp000.GameAI;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.EnumMap;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Random;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 
+import net.minecraft.component.DataComponentTypes;
+import net.minecraft.item.BlockItem;
+import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.shasankp000.Database.QEntry;
 import net.shasankp000.Database.QTable;
@@ -22,6 +35,22 @@ public class RLAgent {
     private static final double MIN_EPSILON = 0.1; // Minimum exploration rate
     private static final double EPSILON_DECAY_RATE = 0.99; // Decay rate for epsilon
 
+    private static final Map<Action, Integer> HOTBAR_INDEX;
+
+    static {
+        EnumMap<Action, Integer> map = new EnumMap<>(Action.class);
+        map.put(Action.HOTBAR_1, 0);
+        map.put(Action.HOTBAR_2, 1);
+        map.put(Action.HOTBAR_3, 2);
+        map.put(Action.HOTBAR_4, 3);
+        map.put(Action.HOTBAR_5, 4);
+        map.put(Action.HOTBAR_6, 5);
+        map.put(Action.HOTBAR_7, 6);
+        map.put(Action.HOTBAR_8, 7);
+        map.put(Action.HOTBAR_9, 8);
+        HOTBAR_INDEX = Map.copyOf(map);
+    }
+
     // Q-table: Maps each state to a map of actions and their Q-values
     private final QTable qTable;
     private final Random random;
@@ -29,6 +58,41 @@ public class RLAgent {
     /**
      * Default constructor with epsilon initialized to 1.0.
      */
+
+    private static int hotbarIndexFor(Action action) {
+        return HOTBAR_INDEX.getOrDefault(action, -1);
+    }
+
+    private static boolean isWeaponItem(Item item) {
+        if (item == null) {
+            return false;
+        }
+        String key = item.getTranslationKey().toLowerCase(Locale.ROOT);
+        return key.contains("sword")
+                || key.contains("axe")
+                || key.contains("trident")
+                || key.contains("bow")
+                || key.contains("crossbow")
+                || key.contains("mace");
+    }
+
+    private static boolean isUtilityTool(Item item) {
+        if (item == null) {
+            return false;
+        }
+        String key = item.getTranslationKey().toLowerCase(Locale.ROOT);
+        return key.contains("pickaxe")
+                || key.contains("shovel")
+                || key.contains("hoe");
+    }
+
+    private static boolean isShieldItem(Item item) {
+        return item != null && item.getTranslationKey().toLowerCase(Locale.ROOT).contains("shield");
+    }
+
+    private static boolean isFoodStack(ItemStack stack) {
+        return stack != null && !stack.isEmpty() && stack.getComponents().contains(DataComponentTypes.FOOD);
+    }
 
     public RLAgent() {
         this.epsilon = 1.0; // Initial exploration rate
@@ -1043,8 +1107,41 @@ public class RLAgent {
         List<EntityDetails> hostileEntities = nearbyEntities.stream()
                 .filter(EntityDetails::isHostile)
                 .toList();
+        boolean hostilesPresent = !hostileEntities.isEmpty();
 
         int reward = 0;
+        ItemStack hotbarSelection = ItemStack.EMPTY;
+        int selectedHotbarIndex = hotbarIndexFor(actionTaken);
+        if (selectedHotbarIndex >= 0 && selectedHotbarIndex < hotBarItems.size()) {
+            hotbarSelection = hotBarItems.get(selectedHotbarIndex);
+            if (hotbarSelection.isEmpty()) {
+                reward -= hostilesPresent ? 18 : 8;
+            } else {
+                Item chosenItem = hotbarSelection.getItem();
+                if (hostilesPresent) {
+                    if (isWeaponItem(chosenItem)) {
+                        reward += 12;
+                    } else if (isShieldItem(chosenItem)) {
+                        reward += 6;
+                    } else if (isFoodStack(hotbarSelection)) {
+                        reward -= 3;
+                    } else if (chosenItem instanceof BlockItem) {
+                        reward -= 2;
+                    } else if (isUtilityTool(chosenItem)) {
+                        reward -= 4;
+                    } else {
+                        reward -= 5;
+                    }
+                } else {
+                    if (isFoodStack(hotbarSelection)) {
+                        reward += 4;
+                    } else if (isWeaponItem(chosenItem)) {
+                        reward += 2;
+                    }
+                }
+            }
+        }
+
         boolean spartanMode = BotEventHandler.isSpartanModeActive() || (enclosed && !hasEscapeRoute && !hasHeadroom);
 
         if (spartanMode) {
@@ -1119,18 +1216,18 @@ public class RLAgent {
 
 
         // 4. Selected item and offhand
-        boolean hasShieldEquipped = offhandItem.getItem().getName().getString().equalsIgnoreCase("shield");
-        String selectedItemName = selectedItem.getName();
-        boolean hasMeleeWeapon = selectedItemName.contains("Sword") || selectedItemName.contains("Axe") || selectedItemName.contains("Trident");
-        boolean hasRangedWeapon = selectedItemName.contains("Bow") || selectedItemName.contains("Crossbow");
-        boolean hasUtilityTool = selectedItemName.contains("Pickaxe") || selectedItemName.contains("Hoe");
+        boolean hasShieldEquipped = isShieldItem(offhandItem.getItem());
+        String selectedItemName = selectedItem.getName().toLowerCase(Locale.ROOT);
+        boolean hasMeleeWeapon = selectedItemName.contains("sword") || selectedItemName.contains("axe") || selectedItemName.contains("trident") || selectedItemName.contains("mace");
+        boolean hasRangedWeapon = selectedItemName.contains("bow") || selectedItemName.contains("crossbow");
+        boolean hasUtilityTool = selectedItemName.contains("pickaxe") || selectedItemName.contains("hoe") || selectedItemName.contains("shovel");
 
-        if (!hostileEntities.isEmpty()) {
+        if (hostilesPresent) {
             if ((hasMeleeWeapon || hasRangedWeapon) && hasShieldEquipped) {
                 reward += 20; // Weapon and shield equipped
             } else if (hasUtilityTool && hasShieldEquipped) {
                 reward += 15; // lower value weapon and shield equipped
-            } else if (selectedItemName.contains("Air") && hasShieldEquipped) {
+            } else if (selectedItemName.contains("air") && hasShieldEquipped) {
                 reward += 10; // only shield equipped
             } else {
                 reward -= 5; // Irrelevant item selected when hostiles are present
@@ -1198,12 +1295,24 @@ public class RLAgent {
         }
 
         if (spartanMode) {
-            switch (actionTaken) {
-                case ATTACK -> reward += 20;
-                case HOTBAR_1, HOTBAR_2, HOTBAR_3, HOTBAR_4, HOTBAR_5, HOTBAR_6, HOTBAR_7, HOTBAR_8, HOTBAR_9 -> reward += 5;
-                case SPRINT, STOP_SNEAKING -> reward += 6;
-                case BREAK_BLOCK_FORWARD, PLACE_SUPPORT_BLOCK, ESCAPE_STAIRS, SNEAK, STAY -> reward -= 12;
-                default -> {}
+            if (actionTaken == Action.ATTACK) {
+                reward += 20;
+            } else if (HOTBAR_INDEX.containsKey(actionTaken)) {
+                if (hotbarSelection.isEmpty()) {
+                    reward -= 15;
+                } else if (isWeaponItem(hotbarSelection.getItem())) {
+                    reward += 18;
+                } else {
+                    reward += 4;
+                }
+            } else if (actionTaken == Action.SPRINT || actionTaken == Action.STOP_SNEAKING) {
+                reward += 6;
+            } else if (actionTaken == Action.BREAK_BLOCK_FORWARD
+                    || actionTaken == Action.PLACE_SUPPORT_BLOCK
+                    || actionTaken == Action.ESCAPE_STAIRS
+                    || actionTaken == Action.SNEAK
+                    || actionTaken == Action.STAY) {
+                reward -= 12;
             }
         }
 
