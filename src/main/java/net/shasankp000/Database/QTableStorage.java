@@ -112,6 +112,16 @@ public class QTableStorage {
             // Ensure directory exists
             Files.createDirectories(Paths.get(workingDir));
 
+            var path = Paths.get(filePath);
+            if (Files.isSymbolicLink(path)) {
+                try {
+                    Files.deleteIfExists(path);
+                    LOGGER.info("Removed legacy symlink for Q-table at {}", filePath);
+                } catch (IOException e) {
+                    LOGGER.warn("Failed to delete legacy symlink {}: {}", filePath, e.getMessage());
+                }
+            }
+
             try (FileOutputStream fos = new FileOutputStream(filePath);
                  ObjectOutputStream oos = new ObjectOutputStream(fos)) {
 
@@ -230,5 +240,4 @@ public class QTableStorage {
     }
 
 }
-
 
