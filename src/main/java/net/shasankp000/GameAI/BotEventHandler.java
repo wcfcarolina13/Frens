@@ -5,6 +5,7 @@ import net.minecraft.block.BlockState;
 import net.minecraft.component.DataComponentTypes;
 import net.minecraft.entity.Entity;
 import net.minecraft.item.ItemStack;
+import net.minecraft.network.packet.s2c.play.PositionFlag;
 import net.minecraft.registry.RegistryKey;
 import net.minecraft.server.ServerTask;
 import net.minecraft.server.command.ServerCommandSource;
@@ -367,6 +368,19 @@ public class BotEventHandler {
         return !state.isAir() && !state.getCollisionShape(world, pos).isEmpty();
     }
 
+    private static ServerPlayerEntity findEscortPlayer(ServerPlayerEntity bot) {
+        MinecraftServer srv = bot.getCommandSource().getServer();
+        if (srv == null) {
+            return null;
+        }
+
+        return srv.getPlayerManager().getPlayerList().stream()
+                .filter(player -> !player.getUuid().equals(bot.getUuid()))
+                .filter(player -> !player.isSpectator())
+                .min(Comparator.comparingDouble(player -> player.squaredDistanceTo(bot)))
+                .orElse(null);
+    }
+
     private static boolean isSpartanCandidate(EnvironmentSnapshot snapshot) {
         return snapshot.enclosed() && !snapshot.hasEscapeRoute() && !snapshot.hasHeadroom();
     }
@@ -435,16 +449,35 @@ public class BotEventHandler {
         lastKnownPosition = null;
         failedBlockBreakAttempts = 0;
 
-        Vec3d target = lastSafePosition;
+        ServerPlayerEntity escortPlayer = findEscortPlayer(bot);
+        Vec3d target = escortPlayer != null
+                ? new Vec3d(escortPlayer.getX(), escortPlayer.getY(), escortPlayer.getZ())
+                : lastSafePosition;
         MinecraftServer srv = bot.getCommandSource().getServer();
-        ServerWorld homeWorld = bot.getCommandSource().getWorld();
+        ServerWorld botWorld = bot.getCommandSource().getWorld();
+        ServerWorld destinationWorld = botWorld;
+
+        if (escortPlayer != null) {
+            destinationWorld = escortPlayer.getCommandSource().getWorld();
+            lastSafePosition = new Vec3d(escortPlayer.getX(), escortPlayer.getY(), escortPlayer.getZ());
+        }
 
         if (target == null) {
             BlockPos anchor = bot.getBlockPos().up(2);
             target = new Vec3d(anchor.getX() + 0.5, anchor.getY(), anchor.getZ() + 0.5);
         }
 
-        bot.refreshPositionAndAngles(target.x, target.y, target.z, bot.getYaw(), bot.getPitch());
+        if (destinationWorld != null && destinationWorld != botWorld) {
+            bot.teleport(destinationWorld, target.x, target.y, target.z,
+                    EnumSet.noneOf(PositionFlag.class),
+                    escortPlayer != null ? escortPlayer.getYaw() : bot.getYaw(),
+                    escortPlayer != null ? escortPlayer.getPitch() : bot.getPitch(),
+                    true);
+        } else {
+            bot.refreshPositionAndAngles(target.x, target.y, target.z,
+                    escortPlayer != null ? escortPlayer.getYaw() : bot.getYaw(),
+                    escortPlayer != null ? escortPlayer.getPitch() : bot.getPitch());
+        }
 
         bot.setVelocity(Vec3d.ZERO);
         bot.setInvulnerable(true);

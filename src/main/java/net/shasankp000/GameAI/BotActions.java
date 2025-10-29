@@ -89,6 +89,7 @@ public final class BotActions {
                 .orElse(null);
 
         if (target != null) {
+            selectBestWeapon(bot);
             bot.attack(target);
             bot.swingHand(Hand.MAIN_HAND, true);
         }
