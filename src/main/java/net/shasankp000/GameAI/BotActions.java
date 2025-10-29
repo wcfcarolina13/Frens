@@ -98,7 +98,7 @@ public final class BotActions {
     public static boolean breakBlockAhead(ServerPlayerEntity bot) {
         ServerWorld world = bot.getCommandSource().getWorld();
         BlockPos targetPos = getRelativeBlockPos(bot, 1, 0);
-        if (!world.getBlockState(targetPos).isAir() && canBreak(world, targetPos)) {
+        if (!world.getBlockState(targetPos).isAir() && canBreak(world, targetPos, bot)) {
             boolean success = world.breakBlock(targetPos, true, bot);
             if (success) {
                 bot.swingHand(Hand.MAIN_HAND, true);
@@ -108,7 +108,7 @@ public final class BotActions {
 
         // Try the block above-front if the direct block was air (stair carving)
         BlockPos upperPos = getRelativeBlockPos(bot, 1, 1);
-        if (!world.getBlockState(upperPos).isAir() && canBreak(world, upperPos)) {
+        if (!world.getBlockState(upperPos).isAir() && canBreak(world, upperPos, bot)) {
             boolean success = world.breakBlock(upperPos, true, bot);
             if (success) {
                 bot.swingHand(Hand.MAIN_HAND, true);
@@ -170,12 +170,33 @@ public final class BotActions {
         jumpForward(bot);
     }
 
-    private static boolean canBreak(ServerWorld world, BlockPos pos) {
+    private static boolean canBreak(ServerWorld world, BlockPos pos, ServerPlayerEntity bot) {
         BlockState state = world.getBlockState(pos);
         if (state.isAir() || state.isOf(net.minecraft.block.Blocks.BEDROCK)) {
             return false;
         }
-        return state.getHardness(world, pos) >= 0.0f;
+
+        float hardness = state.getHardness(world, pos);
+        if (hardness < 0) {
+            return false;
+        }
+
+        ItemStack tool = bot.getMainHandStack();
+        if (!tool.isEmpty() && tool.isSuitableFor(state)) {
+            return true;
+        }
+
+        float allowedHardness = 0.5f; // fist baseline – dirt, sand, gravel, glass
+        if (!tool.isEmpty()) {
+            float miningSpeed = tool.getMiningSpeedMultiplier(state);
+            if (miningSpeed > 1.0f) {
+                allowedHardness = 3.0f; // capable tool, allow stone-tier
+            } else {
+                allowedHardness = 1.0f; // miscellaneous item, slightly better than fist
+            }
+        }
+
+        return hardness <= allowedHardness;
     }
 
     private static void moveRelative(ServerPlayerEntity bot, double distance) {
