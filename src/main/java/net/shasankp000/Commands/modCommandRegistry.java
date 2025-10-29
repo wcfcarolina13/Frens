@@ -50,6 +50,16 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
+import net.minecraft.enchantment.Enchantment;
+import net.minecraft.enchantment.Enchantments;
+import net.minecraft.item.ItemStack;
+import net.minecraft.item.Items;
+import net.minecraft.registry.RegistryKey;
+import net.minecraft.registry.RegistryKeys;
+import net.minecraft.registry.DynamicRegistryManager;
+import net.minecraft.registry.Registry;
+import net.minecraft.registry.entry.RegistryEntry;
+
 
 import static net.shasankp000.PathFinding.PathFinder.*;
 import static net.minecraft.server.command.CommandManager.literal;
@@ -1108,30 +1118,78 @@ public class modCommandRegistry {
         }
 
         String targetName = bot.getName().getString();
-        String[] commands = new String[]{
-                "give " + targetName + " minecraft:diamond_sword{Enchantments:[{id:\"minecraft:sharpness\",lvl:5s},{id:\"minecraft:unbreaking\",lvl:3s}]}",
-                "give " + targetName + " minecraft:bow{Enchantments:[{id:\"minecraft:power\",lvl:5s},{id:\"minecraft:unbreaking\",lvl:3s},{id:\"minecraft:infinity\",lvl:1s}]}",
-                "give " + targetName + " minecraft:arrow 1",
-                "give " + targetName + " minecraft:shield{Enchantments:[{id:\"minecraft:unbreaking\",lvl:3s}]}",
-                "give " + targetName + " minecraft:netherite_chestplate{Enchantments:[{id:\"minecraft:protection\",lvl:4s},{id:\"minecraft:unbreaking\",lvl:3s}]}",
-                "give " + targetName + " minecraft:netherite_helmet{Enchantments:[{id:\"minecraft:protection\",lvl:4s},{id:\"minecraft:respiration\",lvl:3s},{id:\"minecraft:unbreaking\",lvl:3s}]}",
-                "give " + targetName + " minecraft:netherite_leggings{Enchantments:[{id:\"minecraft:protection\",lvl:4s},{id:\"minecraft:unbreaking\",lvl:3s}]}",
-                "give " + targetName + " minecraft:netherite_boots{Enchantments:[{id:\"minecraft:protection\",lvl:4s},{id:\"minecraft:feather_falling\",lvl:4s},{id:\"minecraft:unbreaking\",lvl:3s}]}",
-                "give " + targetName + " minecraft:netherite_pickaxe{Enchantments:[{id:\"minecraft:efficiency\",lvl:5s},{id:\"minecraft:unbreaking\",lvl:3s},{id:\"minecraft:mending\",lvl:1s}]}",
-                "give " + targetName + " minecraft:netherite_axe{Enchantments:[{id:\"minecraft:sharpness\",lvl:5s},{id:\"minecraft:unbreaking\",lvl:3s}]}",
-                "give " + targetName + " minecraft:netherite_shovel{Enchantments:[{id:\"minecraft:efficiency\",lvl:5s},{id:\"minecraft:unbreaking\",lvl:3s}]}",
-                "give " + targetName + " minecraft:golden_carrot 64",
-                "give " + targetName + " minecraft:cooked_beef 64",
-                "give " + targetName + " minecraft:torch 64"
-        };
-
         server.execute(() -> {
-            ServerCommandSource commandSource = server.getCommandSource().withLevel(4);
-            Arrays.stream(commands).forEach(cmd -> CommandUtils.run(commandSource, cmd));
+            DynamicRegistryManager.Immutable registryManager = server.getRegistryManager();
+
+            giveStack(bot, withEnchantments(registryManager, Items.DIAMOND_SWORD.getDefaultStack(),
+                    new int[]{5, 3},
+                    Enchantments.SHARPNESS, Enchantments.UNBREAKING));
+
+            giveStack(bot, withEnchantments(registryManager, Items.BOW.getDefaultStack(),
+                    new int[]{5, 3, 1},
+                    Enchantments.POWER, Enchantments.UNBREAKING, Enchantments.INFINITY));
+            giveStack(bot, new ItemStack(Items.ARROW));
+
+            giveStack(bot, withEnchantments(registryManager, Items.SHIELD.getDefaultStack(),
+                    new int[]{3},
+                    Enchantments.UNBREAKING));
+
+            giveStack(bot, withEnchantments(registryManager, Items.NETHERITE_CHESTPLATE.getDefaultStack(),
+                    new int[]{4, 3},
+                    Enchantments.PROTECTION, Enchantments.UNBREAKING));
+            giveStack(bot, withEnchantments(registryManager, Items.NETHERITE_HELMET.getDefaultStack(),
+                    new int[]{4, 3, 3},
+                    Enchantments.PROTECTION, Enchantments.RESPIRATION, Enchantments.UNBREAKING));
+            giveStack(bot, withEnchantments(registryManager, Items.NETHERITE_LEGGINGS.getDefaultStack(),
+                    new int[]{4, 3},
+                    Enchantments.PROTECTION, Enchantments.UNBREAKING));
+            giveStack(bot, withEnchantments(registryManager, Items.NETHERITE_BOOTS.getDefaultStack(),
+                    new int[]{4, 4, 3},
+                    Enchantments.PROTECTION, Enchantments.FEATHER_FALLING, Enchantments.UNBREAKING));
+
+            giveStack(bot, withEnchantments(registryManager, Items.NETHERITE_PICKAXE.getDefaultStack(),
+                    new int[]{5, 3, 1},
+                    Enchantments.EFFICIENCY, Enchantments.UNBREAKING, Enchantments.MENDING));
+            giveStack(bot, withEnchantments(registryManager, Items.NETHERITE_AXE.getDefaultStack(),
+                    new int[]{5, 3},
+                    Enchantments.SHARPNESS, Enchantments.UNBREAKING));
+            giveStack(bot, withEnchantments(registryManager, Items.NETHERITE_SHOVEL.getDefaultStack(),
+                    new int[]{5, 3},
+                    Enchantments.EFFICIENCY, Enchantments.UNBREAKING));
+
+            giveStack(bot, new ItemStack(Items.GOLDEN_CARROT, 64));
+            giveStack(bot, new ItemStack(Items.COOKED_BEEF, 64));
+            giveStack(bot, new ItemStack(Items.TORCH, 64));
+
+            armorUtils.autoEquipArmor(bot);
+            CombatInventoryManager.ensureCombatLoadout(bot);
 
             ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withMaxLevel(4),
                     "Loadout equipped! Stay sharp out there.");
         });
+    }
+
+    private static void giveStack(ServerPlayerEntity bot, ItemStack stack) {
+        if (stack.isEmpty()) {
+            return;
+        }
+        if (!bot.getInventory().insertStack(stack.copy())) {
+            bot.dropItem(stack, false);
+        }
+    }
+
+    private static ItemStack withEnchantments(DynamicRegistryManager registryManager, ItemStack stack, int[] levels, RegistryKey<Enchantment>... enchantments) {
+        if (stack.isEmpty()) {
+            return stack;
+        }
+        Registry<Enchantment> registry = registryManager.getOrThrow(RegistryKeys.ENCHANTMENT);
+        for (int i = 0; i < enchantments.length && i < levels.length; i++) {
+            RegistryEntry<Enchantment> entry = registry.getEntry(enchantments[i].getValue()).orElse(null);
+            if (entry != null) {
+                stack.addEnchantment(entry, levels[i]);
+            }
+        }
+        return stack;
     }
 
     private static @NotNull BlockPos getBlockPos(CommandContext<ServerCommandSource> context) {
