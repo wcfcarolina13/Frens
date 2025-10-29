@@ -1109,20 +1109,20 @@ public class modCommandRegistry {
 
         String targetName = bot.getName().getString();
         String[] commands = new String[]{
-                "give " + targetName + " diamond_sword{Enchantments:[{id:sharpness,lvl:5},{id:unbreaking,lvl:3}]}",
-                "give " + targetName + " bow{Enchantments:[{id:power,lvl:5},{id:unbreaking,lvl:3},{id:infinity,lvl:1}]}",
-                "give " + targetName + " arrow 1",
-                "give " + targetName + " shield{Enchantments:[{id:unbreaking,lvl:3}]}",
-                "give " + targetName + " netherite_chestplate{Enchantments:[{id:protection,lvl:4},{id:unbreaking,lvl:3}]}",
-                "give " + targetName + " netherite_helmet{Enchantments:[{id:protection,lvl:4},{id:respiration,lvl:3},{id:unbreaking,lvl:3}]}",
-                "give " + targetName + " netherite_leggings{Enchantments:[{id:protection,lvl:4},{id:unbreaking,lvl:3}]}",
-                "give " + targetName + " netherite_boots{Enchantments:[{id:protection,lvl:4},{id:feather_falling,lvl:4},{id:unbreaking,lvl:3}]}",
-                "give " + targetName + " netherite_pickaxe{Enchantments:[{id:efficiency,lvl:5},{id:unbreaking,lvl:3},{id:mending,lvl:1}]}",
-                "give " + targetName + " netherite_axe{Enchantments:[{id:sharpness,lvl:5},{id:unbreaking,lvl:3}]}",
-                "give " + targetName + " netherite_shovel{Enchantments:[{id:efficiency,lvl:5},{id:unbreaking,lvl:3}]}",
-                "give " + targetName + " golden_carrot 64",
-                "give " + targetName + " cooked_beef 64",
-                "give " + targetName + " torch 64"
+                "give " + targetName + " minecraft:diamond_sword{Enchantments:[{id:\"minecraft:sharpness\",lvl:5s},{id:\"minecraft:unbreaking\",lvl:3s}]}",
+                "give " + targetName + " minecraft:bow{Enchantments:[{id:\"minecraft:power\",lvl:5s},{id:\"minecraft:unbreaking\",lvl:3s},{id:\"minecraft:infinity\",lvl:1s}]}",
+                "give " + targetName + " minecraft:arrow 1",
+                "give " + targetName + " minecraft:shield{Enchantments:[{id:\"minecraft:unbreaking\",lvl:3s}]}",
+                "give " + targetName + " minecraft:netherite_chestplate{Enchantments:[{id:\"minecraft:protection\",lvl:4s},{id:\"minecraft:unbreaking\",lvl:3s}]}",
+                "give " + targetName + " minecraft:netherite_helmet{Enchantments:[{id:\"minecraft:protection\",lvl:4s},{id:\"minecraft:respiration\",lvl:3s},{id:\"minecraft:unbreaking\",lvl:3s}]}",
+                "give " + targetName + " minecraft:netherite_leggings{Enchantments:[{id:\"minecraft:protection\",lvl:4s},{id:\"minecraft:unbreaking\",lvl:3s}]}",
+                "give " + targetName + " minecraft:netherite_boots{Enchantments:[{id:\"minecraft:protection\",lvl:4s},{id:\"minecraft:feather_falling\",lvl:4s},{id:\"minecraft:unbreaking\",lvl:3s}]}",
+                "give " + targetName + " minecraft:netherite_pickaxe{Enchantments:[{id:\"minecraft:efficiency\",lvl:5s},{id:\"minecraft:unbreaking\",lvl:3s},{id:\"minecraft:mending\",lvl:1s}]}",
+                "give " + targetName + " minecraft:netherite_axe{Enchantments:[{id:\"minecraft:sharpness\",lvl:5s},{id:\"minecraft:unbreaking\",lvl:3s}]}",
+                "give " + targetName + " minecraft:netherite_shovel{Enchantments:[{id:\"minecraft:efficiency\",lvl:5s},{id:\"minecraft:unbreaking\",lvl:3s}]}",
+                "give " + targetName + " minecraft:golden_carrot 64",
+                "give " + targetName + " minecraft:cooked_beef 64",
+                "give " + targetName + " minecraft:torch 64"
         };
 
         server.execute(() -> {
