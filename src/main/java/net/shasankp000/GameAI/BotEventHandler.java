@@ -91,6 +91,9 @@ public class BotEventHandler {
                     .filter(EntityUtil::isHostile)
                     .toList();
 
+            LOGGER.info("detectAndReact triggered: hostiles={}, trainingMode={}, alreadyExecuting={}",
+                    hostileEntities.size(), net.shasankp000.Commands.modCommandRegistry.isTrainingMode, isExecuting);
+
 
             BlockDistanceLimitedSearch blockDistanceLimitedSearch = new BlockDistanceLimitedSearch(bot, 3, 5);
 
@@ -319,6 +322,10 @@ public class BotEventHandler {
             double distanceToHostileEntity,
             String time,
             String dimension) throws IOException {
+
+        LOGGER.info("Starting performLearningStep. Current state hash: {}, hostiles in state: {}",
+                currentState.hashCode(),
+                currentState.getNearbyEntities() != null ? currentState.getNearbyEntities().stream().filter(EntityDetails::isHostile).count() : 0);
 
         double riskAppetite = rlAgentHook.calculateRiskAppetite(currentState);
         List<StateActions.Action> potentialActionList = rlAgentHook.suggestPotentialActions(currentState);
