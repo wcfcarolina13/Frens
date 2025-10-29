@@ -5,6 +5,7 @@ import com.mojang.brigadier.arguments.DoubleArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
+import com.mojang.brigadier.exceptions.SimpleCommandExceptionType;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.minecraft.command.argument.BlockPosArgumentType;
 import net.minecraft.command.argument.EntityArgumentType;
@@ -68,6 +69,7 @@ import net.shasankp000.PacketHandler.InputPacketHandler;
 public class modCommandRegistry {
 
     private static final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
+    private static final double DEFAULT_GUARD_RADIUS = 6.0D;
     public static boolean isTrainingMode = false;
     public static String botName = "";
     public static final Logger LOGGER = LoggerFactory.getLogger("mod-command-registry");
@@ -106,90 +108,64 @@ public class modCommandRegistry {
                                 )
                         )
                         .then(literal("follow")
+                                .executes(context -> {
+                                    ServerPlayerEntity bot = getActiveBotOrThrow(context);
+                                    ServerPlayerEntity target = context.getSource().getPlayer();
+                                    return executeFollow(context, bot, target);
+                                })
                                 .then(CommandManager.argument("bot", EntityArgumentType.player())
                                         .executes(context -> {
                                             ServerPlayerEntity bot = EntityArgumentType.getPlayer(context, "bot");
                                             ServerPlayerEntity target = context.getSource().getPlayer();
-                                            String result = BotEventHandler.setFollowMode(bot, target);
-                                            ChatUtils.sendSystemMessage(context.getSource(), result);
-                                            return 1;
+                                            return executeFollow(context, bot, target);
                                         })
                                         .then(CommandManager.argument("target", EntityArgumentType.player())
                                                 .executes(context -> {
                                                     ServerPlayerEntity bot = EntityArgumentType.getPlayer(context, "bot");
                                                     ServerPlayerEntity target = EntityArgumentType.getPlayer(context, "target");
-                                                    String result = BotEventHandler.setFollowMode(bot, target);
-                                                    ChatUtils.sendSystemMessage(context.getSource(), result);
-                                                    return 1;
+                                                    return executeFollow(context, bot, target);
                                                 })
                                         )
                                 )
                         )
                         .then(literal("guard")
+                                .executes(context -> executeGuard(context, getActiveBotOrThrow(context), DEFAULT_GUARD_RADIUS))
+                                .then(CommandManager.argument("radius", DoubleArgumentType.doubleArg(3.0D, 32.0D))
+                                        .executes(context -> executeGuard(context, getActiveBotOrThrow(context), DoubleArgumentType.getDouble(context, "radius")))
+                                )
                                 .then(CommandManager.argument("bot", EntityArgumentType.player())
-                                        .executes(context -> {
-                                            ServerPlayerEntity bot = EntityArgumentType.getPlayer(context, "bot");
-                                            String result = BotEventHandler.setGuardMode(bot, 6.0D);
-                                            ChatUtils.sendSystemMessage(context.getSource(), result);
-                                            return 1;
-                                        })
+                                        .executes(context -> executeGuard(context, EntityArgumentType.getPlayer(context, "bot"), DEFAULT_GUARD_RADIUS))
                                         .then(CommandManager.argument("radius", DoubleArgumentType.doubleArg(3.0D, 32.0D))
-                                                .executes(context -> {
-                                                    ServerPlayerEntity bot = EntityArgumentType.getPlayer(context, "bot");
-                                                    double radius = DoubleArgumentType.getDouble(context, "radius");
-                                                    String result = BotEventHandler.setGuardMode(bot, radius);
-                                                    ChatUtils.sendSystemMessage(context.getSource(), result);
-                                                    return 1;
-                                                })
+                                                .executes(context -> executeGuard(context, EntityArgumentType.getPlayer(context, "bot"), DoubleArgumentType.getDouble(context, "radius")))
                                         )
                                 )
                         )
                         .then(literal("stay")
+                                .executes(context -> executeStay(context, getActiveBotOrThrow(context)))
                                 .then(CommandManager.argument("bot", EntityArgumentType.player())
-                                        .executes(context -> {
-                                            ServerPlayerEntity bot = EntityArgumentType.getPlayer(context, "bot");
-                                            String result = BotEventHandler.setStayMode(bot);
-                                            ChatUtils.sendSystemMessage(context.getSource(), result);
-                                            return 1;
-                                        })
+                                        .executes(context -> executeStay(context, EntityArgumentType.getPlayer(context, "bot")))
                                 )
                         )
                         .then(literal("return_to_base")
+                                .executes(context -> executeReturnToBase(context, getActiveBotOrThrow(context), context.getSource().getPlayer()))
                                 .then(CommandManager.argument("bot", EntityArgumentType.player())
-                                        .executes(context -> {
-                                            ServerPlayerEntity bot = EntityArgumentType.getPlayer(context, "bot");
-                                            ServerPlayerEntity commander = context.getSource().getPlayer();
-                                            String result = BotEventHandler.setReturnToBase(bot, commander);
-                                            ChatUtils.sendSystemMessage(context.getSource(), result);
-                                            return 1;
-                                        })
+                                        .executes(context -> executeReturnToBase(context, EntityArgumentType.getPlayer(context, "bot"), context.getSource().getPlayer()))
                                 )
                         )
                         .then(literal("fight_with_me")
+                                .then(CommandManager.argument("mode", StringArgumentType.string())
+                                        .executes(context -> executeAssistToggle(context, getActiveBotOrThrow(context), parseAssistMode(StringArgumentType.getString(context, "mode"))))
+                                )
                                 .then(CommandManager.argument("bot", EntityArgumentType.player())
                                         .then(CommandManager.argument("mode", StringArgumentType.string())
-                                                .executes(context -> {
-                                                    ServerPlayerEntity bot = EntityArgumentType.getPlayer(context, "bot");
-                                                    String raw = StringArgumentType.getString(context, "mode").toLowerCase(Locale.ROOT);
-                                                    boolean enable;
-                                                    switch (raw) {
-                                                        case "off", "false", "no", "disable", "stop" -> enable = false;
-                                                        default -> enable = true;
-                                                    }
-                                                    String result = BotEventHandler.toggleAssistAllies(bot, enable);
-                                                    ChatUtils.sendSystemMessage(context.getSource(), result);
-                                                    return 1;
-                                                })
+                                                .executes(context -> executeAssistToggle(context, EntityArgumentType.getPlayer(context, "bot"), parseAssistMode(StringArgumentType.getString(context, "mode"))))
                                         )
                                 )
                         )
                         .then(literal("equip")
+                                .executes(context -> executeEquip(context, getActiveBotOrThrow(context)))
                                 .then(CommandManager.argument("bot", EntityArgumentType.player())
-                                        .executes(context -> {
-                                            ServerPlayerEntity bot = EntityArgumentType.getPlayer(context, "bot");
-                                            equipDefaultLoadout(context.getSource().getServer(), bot);
-                                            return 1;
-                                        })
+                                        .executes(context -> executeEquip(context, EntityArgumentType.getPlayer(context, "bot")))
                                 )
                         )
                         .then(literal("walk")
@@ -1268,6 +1244,65 @@ public class modCommandRegistry {
             }
         });
         return stack;
+    }
+
+    private static int executeFollow(CommandContext<ServerCommandSource> context, ServerPlayerEntity bot, ServerPlayerEntity target) {
+        String result = BotEventHandler.setFollowMode(bot, target);
+        ChatUtils.sendSystemMessage(context.getSource(), result);
+        return 1;
+    }
+
+    private static int executeGuard(CommandContext<ServerCommandSource> context, ServerPlayerEntity bot, double radius) {
+        String result = BotEventHandler.setGuardMode(bot, radius);
+        ChatUtils.sendSystemMessage(context.getSource(), result);
+        return 1;
+    }
+
+    private static int executeStay(CommandContext<ServerCommandSource> context, ServerPlayerEntity bot) {
+        String result = BotEventHandler.setStayMode(bot);
+        ChatUtils.sendSystemMessage(context.getSource(), result);
+        return 1;
+    }
+
+    private static int executeReturnToBase(CommandContext<ServerCommandSource> context, ServerPlayerEntity bot, ServerPlayerEntity commander) {
+        String result = BotEventHandler.setReturnToBase(bot, commander);
+        ChatUtils.sendSystemMessage(context.getSource(), result);
+        return 1;
+    }
+
+    private static int executeEquip(CommandContext<ServerCommandSource> context, ServerPlayerEntity bot) {
+        equipDefaultLoadout(context.getSource().getServer(), bot);
+        ChatUtils.sendSystemMessage(context.getSource(), "Equipping loadout on " + bot.getName().getString() + ".");
+        return 1;
+    }
+
+    private static int executeAssistToggle(CommandContext<ServerCommandSource> context, ServerPlayerEntity bot, boolean enable) {
+        String result = BotEventHandler.toggleAssistAllies(bot, enable);
+        ChatUtils.sendSystemMessage(context.getSource(), result);
+        return 1;
+    }
+
+    private static boolean parseAssistMode(String raw) throws CommandSyntaxException {
+        String normalized = raw.trim().toLowerCase(Locale.ROOT);
+        return switch (normalized) {
+            case "on", "enable", "enabled", "true", "yes", "fight", "assist", "start" -> true;
+            case "off", "disable", "disabled", "false", "no", "stop", "standdown", "standby" -> false;
+            default -> throw new SimpleCommandExceptionType(Text.literal("Unknown mode '" + raw + "'. Use on/enable or off/disable.")).create();
+        };
+    }
+
+    private static ServerPlayerEntity getActiveBotOrThrow(CommandContext<ServerCommandSource> context) throws CommandSyntaxException {
+        ServerPlayerEntity active = BotEventHandler.bot;
+        if (active != null) {
+            ServerPlayerEntity refreshed = context.getSource()
+                    .getServer()
+                    .getPlayerManager()
+                    .getPlayer(active.getUuid());
+            if (refreshed != null) {
+                return refreshed;
+            }
+        }
+        throw new SimpleCommandExceptionType(Text.literal("No active bot found. Specify a bot name or spawn one with /bot spawn.")).create();
     }
 
     private static @NotNull BlockPos getBlockPos(CommandContext<ServerCommandSource> context) {
