@@ -98,7 +98,7 @@ public final class BotActions {
     public static boolean breakBlockAhead(ServerPlayerEntity bot) {
         ServerWorld world = bot.getCommandSource().getWorld();
         BlockPos targetPos = getRelativeBlockPos(bot, 1, 0);
-        if (!world.getBlockState(targetPos).isAir()) {
+        if (!world.getBlockState(targetPos).isAir() && canBreak(world, targetPos)) {
             boolean success = world.breakBlock(targetPos, true, bot);
             if (success) {
                 bot.swingHand(Hand.MAIN_HAND, true);
@@ -108,7 +108,7 @@ public final class BotActions {
 
         // Try the block above-front if the direct block was air (stair carving)
         BlockPos upperPos = getRelativeBlockPos(bot, 1, 1);
-        if (!world.getBlockState(upperPos).isAir()) {
+        if (!world.getBlockState(upperPos).isAir() && canBreak(world, upperPos)) {
             boolean success = world.breakBlock(upperPos, true, bot);
             if (success) {
                 bot.swingHand(Hand.MAIN_HAND, true);
@@ -168,6 +168,14 @@ public final class BotActions {
             breakBlockAhead(bot);
         }
         jumpForward(bot);
+    }
+
+    private static boolean canBreak(ServerWorld world, BlockPos pos) {
+        BlockState state = world.getBlockState(pos);
+        if (state.isAir() || state.isOf(net.minecraft.block.Blocks.BEDROCK)) {
+            return false;
+        }
+        return state.getHardness(world, pos) >= 0.0f;
     }
 
     private static void moveRelative(ServerPlayerEntity bot, double distance) {
