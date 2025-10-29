@@ -132,6 +132,10 @@ public class AutoFaceEntity {
                     return;
                 }
 
+                if (BotEventHandler.updateBehavior(bot, server, nearbyEntities, hostileEntities)) {
+                    return;
+                }
+
                 boolean hasSculkNearby = false;
 
                 BlockDistanceLimitedSearch blockDistanceLimitedSearch = new BlockDistanceLimitedSearch(bot, 3, 5);

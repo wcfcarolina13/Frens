@@ -180,6 +180,46 @@ public class ToolRegistry {
                         }
                     })
             )
+
+            ,new Tool(
+                    "followPlayer",
+                    "Sets the bot to follow the specified player.",
+                    List.of(new Tool.Parameter("playerName", "Name of the player to follow.")),
+                    Set.of(),
+                    (sharedState, paramMap, result) -> {}
+            )
+
+            ,new Tool(
+                    "guardArea",
+                    "Orders the bot to guard its current area.",
+                    List.of(new Tool.Parameter("radius", "Guard radius in blocks (optional).")),
+                    Set.of(),
+                    (sharedState, paramMap, result) -> {}
+            )
+
+            ,new Tool(
+                    "stayPut",
+                    "Makes the bot stay at its current location.",
+                    List.of(new Tool.Parameter("None", "No parameters needed.")),
+                    Set.of(),
+                    (sharedState, paramMap, result) -> {}
+            )
+
+            ,new Tool(
+                    "returnToBase",
+                    "Sends the bot back to its base location.",
+                    List.of(new Tool.Parameter("None", "No parameters needed.")),
+                    Set.of(),
+                    (sharedState, paramMap, result) -> {}
+            )
+
+            ,new Tool(
+                    "toggleAssist",
+                    "Toggles whether the bot assists allies in combat.",
+                    List.of(new Tool.Parameter("mode", "Use 'on' or 'off'.")),
+                    Set.of(),
+                    (sharedState, paramMap, result) -> {}
+            )
     );
 
 }

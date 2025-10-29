@@ -322,6 +322,48 @@ public class FunctionCallerV2 {
             getFunctionOutput("Remaining hearts: " + getHealth.getBotHealthLevel(Objects.requireNonNull(botSource.getPlayer())));
         }
 
+        private static void followPlayer(String targetName) {
+            ServerPlayerEntity bot = Objects.requireNonNull(botSource.getPlayer());
+            MinecraftServer server = botSource.getServer();
+            if (server == null) {
+                getFunctionOutput("Server unavailable.");
+                return;
+            }
+            ServerPlayerEntity target = server.getPlayerManager().getPlayer(targetName);
+            String result = BotEventHandler.setFollowMode(bot, target);
+            getFunctionOutput(result);
+        }
+
+        private static void guardArea(double radius) {
+            ServerPlayerEntity bot = Objects.requireNonNull(botSource.getPlayer());
+            String result = BotEventHandler.setGuardMode(bot, radius);
+            getFunctionOutput(result);
+        }
+
+        private static void stayPut() {
+            ServerPlayerEntity bot = Objects.requireNonNull(botSource.getPlayer());
+            String result = BotEventHandler.setStayMode(bot);
+            getFunctionOutput(result);
+        }
+
+        private static void returnToBase() {
+            ServerPlayerEntity bot = Objects.requireNonNull(botSource.getPlayer());
+            String result = BotEventHandler.setReturnToBase(bot);
+            getFunctionOutput(result);
+        }
+
+        private static void toggleAssist(String modeRaw) {
+            ServerPlayerEntity bot = Objects.requireNonNull(botSource.getPlayer());
+            String normalized = modeRaw == null ? "on" : modeRaw.toLowerCase(Locale.ROOT);
+            boolean enable;
+            switch (normalized) {
+                case "off", "false", "no", "disable", "stop" -> enable = false;
+                default -> enable = true;
+            }
+            String result = BotEventHandler.toggleAssistAllies(bot, enable);
+            getFunctionOutput(result);
+        }
+
         private static void webSearch(String query) {
             System.out.println("Running web search...");
             getFunctionOutput("Web search result: " + WebSearchTool.search(query));
@@ -1451,6 +1493,35 @@ public class FunctionCallerV2 {
                 case "getHealthLevel" -> {
                     logger.info("Calling method: getHealthLevel");
                     Tools.getHealthLevel();
+                }
+                case "followPlayer" -> {
+                    String targetName = resolvePlaceholder(paramMap.get("playerName"));
+                    logger.info("Calling method: followPlayer with target={} ", targetName);
+                    Tools.followPlayer(targetName);
+                }
+                case "guardArea" -> {
+                    String radiusRaw = paramMap.getOrDefault("radius", "6.0");
+                    double radius;
+                    try {
+                        radius = Double.parseDouble(resolvePlaceholder(radiusRaw));
+                    } catch (NumberFormatException ex) {
+                        radius = 6.0D;
+                    }
+                    logger.info("Calling method: guardArea with radius={} ", radius);
+                    Tools.guardArea(radius);
+                }
+                case "stayPut" -> {
+                    logger.info("Calling method: stayPut");
+                    Tools.stayPut();
+                }
+                case "returnToBase" -> {
+                    logger.info("Calling method: returnToBase");
+                    Tools.returnToBase();
+                }
+                case "toggleAssist" -> {
+                    String modeRaw = resolvePlaceholder(paramMap.get("mode"));
+                    logger.info("Calling method: toggleAssist with mode={}", modeRaw);
+                    Tools.toggleAssist(modeRaw);
                 }
                 case "updateState" -> {
                     String keysRaw = paramMap.get("keys");

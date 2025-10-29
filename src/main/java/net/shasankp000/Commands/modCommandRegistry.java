@@ -1,6 +1,7 @@
 package net.shasankp000.Commands;
 
 import com.mojang.brigadier.arguments.IntegerArgumentType;
+import com.mojang.brigadier.arguments.DoubleArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
@@ -8,8 +9,15 @@ import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.minecraft.command.argument.BlockPosArgumentType;
 import net.minecraft.command.argument.EntityArgumentType;
 import net.minecraft.entity.attribute.EntityAttributes;
+import net.minecraft.enchantment.Enchantment;
+import net.minecraft.enchantment.Enchantments;
+import net.minecraft.enchantment.EnchantmentHelper;
 import net.minecraft.item.ItemStack;
+import net.minecraft.item.Items;
+import net.minecraft.registry.DynamicRegistryManager;
+import net.minecraft.registry.Registry;
 import net.minecraft.registry.RegistryKey;
+import net.minecraft.registry.RegistryKeys;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.command.CommandManager;
 import net.minecraft.server.command.ServerCommandSource;
@@ -50,14 +58,6 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
-import net.minecraft.enchantment.Enchantment;
-import net.minecraft.enchantment.Enchantments;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
-import net.minecraft.registry.RegistryKey;
-import net.minecraft.registry.RegistryKeys;
-import net.minecraft.registry.DynamicRegistryManager;
-import net.minecraft.registry.Registry;
 import net.minecraft.registry.entry.RegistryEntry;
 
 
@@ -100,6 +100,84 @@ public class modCommandRegistry {
                                                     spawnBot(context, spawnMode);
 
 
+                                                    return 1;
+                                                })
+                                        )
+                                )
+                        )
+                        .then(literal("follow")
+                                .then(CommandManager.argument("bot", EntityArgumentType.player())
+                                        .executes(context -> {
+                                            ServerPlayerEntity bot = EntityArgumentType.getPlayer(context, "bot");
+                                            ServerPlayerEntity target = context.getSource().getPlayer();
+                                            String result = BotEventHandler.setFollowMode(bot, target);
+                                            ChatUtils.sendSystemMessage(context.getSource(), result);
+                                            return 1;
+                                        })
+                                        .then(CommandManager.argument("target", EntityArgumentType.player())
+                                                .executes(context -> {
+                                                    ServerPlayerEntity bot = EntityArgumentType.getPlayer(context, "bot");
+                                                    ServerPlayerEntity target = EntityArgumentType.getPlayer(context, "target");
+                                                    String result = BotEventHandler.setFollowMode(bot, target);
+                                                    ChatUtils.sendSystemMessage(context.getSource(), result);
+                                                    return 1;
+                                                })
+                                        )
+                                )
+                        )
+                        .then(literal("guard")
+                                .then(CommandManager.argument("bot", EntityArgumentType.player())
+                                        .executes(context -> {
+                                            ServerPlayerEntity bot = EntityArgumentType.getPlayer(context, "bot");
+                                            String result = BotEventHandler.setGuardMode(bot, 6.0D);
+                                            ChatUtils.sendSystemMessage(context.getSource(), result);
+                                            return 1;
+                                        })
+                                        .then(CommandManager.argument("radius", DoubleArgumentType.doubleArg(3.0D, 32.0D))
+                                                .executes(context -> {
+                                                    ServerPlayerEntity bot = EntityArgumentType.getPlayer(context, "bot");
+                                                    double radius = DoubleArgumentType.getDouble(context, "radius");
+                                                    String result = BotEventHandler.setGuardMode(bot, radius);
+                                                    ChatUtils.sendSystemMessage(context.getSource(), result);
+                                                    return 1;
+                                                })
+                                        )
+                                )
+                        )
+                        .then(literal("stay")
+                                .then(CommandManager.argument("bot", EntityArgumentType.player())
+                                        .executes(context -> {
+                                            ServerPlayerEntity bot = EntityArgumentType.getPlayer(context, "bot");
+                                            String result = BotEventHandler.setStayMode(bot);
+                                            ChatUtils.sendSystemMessage(context.getSource(), result);
+                                            return 1;
+                                        })
+                                )
+                        )
+                        .then(literal("return_to_base")
+                                .then(CommandManager.argument("bot", EntityArgumentType.player())
+                                        .executes(context -> {
+                                            ServerPlayerEntity bot = EntityArgumentType.getPlayer(context, "bot");
+                                            ServerPlayerEntity commander = context.getSource().getPlayer();
+                                            String result = BotEventHandler.setReturnToBase(bot, commander);
+                                            ChatUtils.sendSystemMessage(context.getSource(), result);
+                                            return 1;
+                                        })
+                                )
+                        )
+                        .then(literal("fight_with_me")
+                                .then(CommandManager.argument("bot", EntityArgumentType.player())
+                                        .then(CommandManager.argument("mode", StringArgumentType.string())
+                                                .executes(context -> {
+                                                    ServerPlayerEntity bot = EntityArgumentType.getPlayer(context, "bot");
+                                                    String raw = StringArgumentType.getString(context, "mode").toLowerCase(Locale.ROOT);
+                                                    boolean enable;
+                                                    switch (raw) {
+                                                        case "off", "false", "no", "disable", "stop" -> enable = false;
+                                                        default -> enable = true;
+                                                    }
+                                                    String result = BotEventHandler.toggleAssistAllies(bot, enable);
+                                                    ChatUtils.sendSystemMessage(context.getSource(), result);
                                                     return 1;
                                                 })
                                         )
@@ -1183,12 +1261,12 @@ public class modCommandRegistry {
             return stack;
         }
         Registry<Enchantment> registry = registryManager.getOrThrow(RegistryKeys.ENCHANTMENT);
-        for (int i = 0; i < enchantments.length && i < levels.length; i++) {
-            RegistryEntry<Enchantment> entry = registry.getEntry(enchantments[i].getValue()).orElse(null);
-            if (entry != null) {
-                stack.addEnchantment(entry, levels[i]);
+        EnchantmentHelper.apply(stack, builder -> {
+            for (int i = 0; i < enchantments.length && i < levels.length; i++) {
+                RegistryEntry<Enchantment> entry = registry.getOrThrow(enchantments[i]);
+                builder.set(entry, levels[i]);
             }
-        }
+        });
         return stack;
     }
 

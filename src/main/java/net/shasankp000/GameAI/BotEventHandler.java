@@ -33,6 +33,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.lang.reflect.Field;
 import java.util.*;
 
 import static net.shasankp000.GameAI.State.isStateConsistent;
@@ -58,6 +59,21 @@ public class BotEventHandler {
     private static int failedBlockBreakAttempts = 0;
     private static final int MAX_FAILED_BLOCK_ATTEMPTS = 4;
     private static Vec3d lastSafePosition = null;
+    private static final Random RANDOM = new Random();
+    private static Mode currentMode = Mode.IDLE;
+    private static UUID followTargetUuid = null;
+    private static Vec3d guardCenter = null;
+    private static double guardRadius = 6.0D;
+    private static Vec3d baseTarget = null;
+    private static boolean assistAllies = false;
+
+    private enum Mode {
+        IDLE,
+        FOLLOW,
+        GUARD,
+        STAY,
+        RETURNING_BASE
+    }
     private static long lastRespawnHandledTick = -1;
 
     public BotEventHandler(MinecraftServer server, ServerPlayerEntity bot) {
@@ -535,6 +551,292 @@ public class BotEventHandler {
             }
             onBotRespawn(bot);
         }));
+    }
+
+    public static boolean updateBehavior(ServerPlayerEntity bot, MinecraftServer server, List<Entity> nearbyEntities, List<Entity> hostileEntities) {
+        if (!isRegisteredBot(bot)) {
+            return false;
+        }
+
+        switch (currentMode) {
+            case FOLLOW -> {
+                return handleFollow(bot, server, hostileEntities);
+            }
+            case GUARD -> {
+                return handleGuard(bot, nearbyEntities, hostileEntities);
+            }
+            case STAY -> {
+                BotActions.stop(bot);
+                return true;
+            }
+            case RETURNING_BASE -> {
+                return handleReturnToBase(bot);
+            }
+            default -> {
+                return false;
+            }
+        }
+    }
+
+    public static String setFollowMode(ServerPlayerEntity bot, ServerPlayerEntity target) {
+        if (target == null) {
+            return "Unable to follow — target not found.";
+        }
+        registerBot(bot);
+        followTargetUuid = target.getUuid();
+        currentMode = Mode.FOLLOW;
+        guardCenter = null;
+        baseTarget = null;
+        sendBotMessage(bot, "Following " + target.getName().getString() + ".");
+        return "Now following " + target.getName().getString() + ".";
+    }
+
+    public static String setGuardMode(ServerPlayerEntity bot, double radius) {
+        registerBot(bot);
+        guardCenter = positionOf(bot);
+        guardRadius = Math.max(3.0D, radius);
+        currentMode = Mode.GUARD;
+        followTargetUuid = null;
+        baseTarget = null;
+        sendBotMessage(bot, String.format(Locale.ROOT, "Guarding this area (radius %.1f blocks).", guardRadius));
+        return "Guarding the area.";
+    }
+
+    public static String setStayMode(ServerPlayerEntity bot) {
+        registerBot(bot);
+        currentMode = Mode.STAY;
+        followTargetUuid = null;
+        guardCenter = positionOf(bot);
+        baseTarget = null;
+        sendBotMessage(bot, "Staying put here.");
+        return "Bot will hold position.";
+    }
+
+    public static String setReturnToBase(ServerPlayerEntity bot, Vec3d base) {
+        registerBot(bot);
+        if (base == null) {
+            return "No base location available.";
+        }
+        baseTarget = base;
+        currentMode = Mode.RETURNING_BASE;
+        followTargetUuid = null;
+        guardCenter = null;
+        sendBotMessage(bot, "Returning to base.");
+        return "Bot is returning to base.";
+    }
+
+    public static String setReturnToBase(ServerPlayerEntity bot, ServerPlayerEntity commander) {
+        ServerWorld world = bot.getCommandSource().getWorld();
+        Vec3d base;
+        if (commander != null) {
+            ServerWorld commanderWorld = commander.getCommandSource().getWorld();
+            BlockPos spawn = resolveSpawnPoint(commanderWorld);
+            base = Vec3d.ofCenter(spawn);
+        } else {
+            BlockPos spawn = resolveSpawnPoint(world);
+            base = Vec3d.ofCenter(spawn);
+        }
+        return setReturnToBase(bot, base);
+    }
+
+    public static String setReturnToBase(ServerPlayerEntity bot) {
+        ServerWorld world = bot.getCommandSource().getWorld();
+        BlockPos spawn = resolveSpawnPoint(world);
+        return setReturnToBase(bot, Vec3d.ofCenter(spawn));
+    }
+
+    public static String toggleAssistAllies(ServerPlayerEntity bot, boolean enable) {
+        registerBot(bot);
+        assistAllies = enable;
+        String message = enable ? "Engaging threats against allies." : "Standing down unless attacked.";
+        sendBotMessage(bot, message);
+        return message;
+    }
+
+    private static BlockPos resolveSpawnPoint(ServerWorld world) {
+        Object spawnPoint = world.getSpawnPoint();
+        if (spawnPoint != null) {
+            Class<?> clazz = spawnPoint.getClass();
+            try {
+                Object result = clazz.getMethod("pos").invoke(spawnPoint);
+                if (result instanceof BlockPos blockPos) {
+                    return blockPos;
+                }
+            } catch (ReflectiveOperationException ignored) {
+            }
+            try {
+                Object result = clazz.getMethod("toImmutable").invoke(spawnPoint);
+                if (result instanceof BlockPos blockPos) {
+                    return blockPos;
+                }
+            } catch (ReflectiveOperationException ignored) {
+            }
+            try {
+                Field field = clazz.getDeclaredField("pos");
+                field.setAccessible(true);
+                Object result = field.get(spawnPoint);
+                if (result instanceof BlockPos blockPos) {
+                    return blockPos;
+                }
+            } catch (ReflectiveOperationException ignored) {
+            }
+        }
+        return BlockPos.ORIGIN;
+    }
+
+    public static Mode getCurrentMode() {
+        return currentMode;
+    }
+
+    private static boolean handleFollow(ServerPlayerEntity bot, MinecraftServer server, List<Entity> hostileEntities) {
+        ServerPlayerEntity target = null;
+        if (followTargetUuid != null && server != null) {
+            target = server.getPlayerManager().getPlayer(followTargetUuid);
+        }
+        if (target == null) {
+            currentMode = Mode.IDLE;
+            followTargetUuid = null;
+            sendBotMessage(bot, "Follow target lost. Returning to idle.");
+            return false;
+        }
+
+        List<Entity> augmentedHostiles = new ArrayList<>(hostileEntities);
+        if (assistAllies) {
+            augmentedHostiles.addAll(findHostilesAround(target, 8.0D));
+        }
+
+        if (!augmentedHostiles.isEmpty() && engageHostiles(bot, augmentedHostiles)) {
+            return true;
+        }
+
+        Vec3d targetPos = positionOf(target);
+        double distanceSq = bot.squaredDistanceTo(targetPos);
+        if (distanceSq > 100) {
+            bot.refreshPositionAndAngles(targetPos.x, targetPos.y, targetPos.z, target.getYaw(), target.getPitch());
+            return true;
+        }
+        moveToward(bot, targetPos, 3.0D, true);
+        return true;
+    }
+
+    private static boolean handleGuard(ServerPlayerEntity bot, List<Entity> nearbyEntities, List<Entity> hostileEntities) {
+        if (guardCenter == null) {
+        guardCenter = positionOf(bot);
+        }
+
+        if (!hostileEntities.isEmpty() && engageHostiles(bot, hostileEntities)) {
+            return true;
+        }
+
+        Entity nearestItem = findNearestItem(bot, nearbyEntities, guardRadius);
+        if (nearestItem != null) {
+            moveToward(bot, positionOf(nearestItem), 1.5D, false);
+            return true;
+        }
+
+        double distanceFromCenter = positionOf(bot).distanceTo(guardCenter);
+        if (distanceFromCenter > guardRadius) {
+            moveToward(bot, guardCenter, 2.0D, false);
+            return true;
+        }
+
+        if (RANDOM.nextDouble() < 0.02) {
+            Vec3d wanderTarget = randomPointWithin(guardCenter, guardRadius * 0.6D);
+            moveToward(bot, wanderTarget, 2.0D, false);
+            return true;
+        }
+
+        BotActions.stop(bot);
+        return true;
+    }
+
+    private static boolean handleReturnToBase(ServerPlayerEntity bot) {
+        if (baseTarget == null) {
+            currentMode = Mode.IDLE;
+            return false;
+        }
+
+        double distance = positionOf(bot).distanceTo(baseTarget);
+        if (distance <= 3.0D) {
+            currentMode = Mode.STAY;
+            sendBotMessage(bot, "Arrived at base. Holding position.");
+            baseTarget = null;
+            return true;
+        }
+
+        moveToward(bot, baseTarget, 2.0D, false);
+        return true;
+    }
+
+    private static boolean engageHostiles(ServerPlayerEntity bot, List<Entity> hostileEntities) {
+        if (hostileEntities.isEmpty()) {
+            return false;
+        }
+        Entity closest = hostileEntities.stream()
+                .min(Comparator.comparingDouble(e -> e.squaredDistanceTo(bot)))
+                .orElse(null);
+        if (closest == null) {
+            return false;
+        }
+        double distance = Math.sqrt(closest.squaredDistanceTo(bot));
+        if (distance > 3.0D) {
+            moveToward(bot, positionOf(closest), 2.5D, true);
+        } else {
+            BotActions.selectBestWeapon(bot);
+            BotActions.attackNearest(bot, hostileEntities);
+        }
+        return true;
+    }
+
+    private static void moveToward(ServerPlayerEntity bot, Vec3d target, double stopDistance, boolean sprint) {
+        Vec3d pos = positionOf(bot);
+        double dx = target.x - pos.x;
+        double dz = target.z - pos.z;
+        double distanceSq = dx * dx + dz * dz;
+        if (distanceSq <= stopDistance * stopDistance) {
+            BotActions.stop(bot);
+            return;
+        }
+
+        float yaw = (float) (Math.toDegrees(Math.atan2(-dx, dz)));
+        bot.setYaw(yaw);
+        bot.setHeadYaw(yaw);
+        bot.setBodyYaw(yaw);
+        if (sprint) {
+            bot.setSprinting(true);
+        }
+        BotActions.moveForward(bot);
+        if (target.y - pos.y > 1.25D) {
+            BotActions.jump(bot);
+        }
+    }
+
+    private static Entity findNearestItem(ServerPlayerEntity bot, List<Entity> entities, double radius) {
+        return entities.stream()
+                .filter(entity -> entity instanceof net.minecraft.entity.ItemEntity)
+                .filter(entity -> entity.squaredDistanceTo(bot) <= radius * radius)
+                .min(Comparator.comparingDouble(entity -> entity.squaredDistanceTo(bot)))
+                .orElse(null);
+    }
+
+    private static List<Entity> findHostilesAround(ServerPlayerEntity player, double radius) {
+        return player.getEntityWorld().getOtherEntities(player, player.getBoundingBox().expand(radius), EntityUtil::isHostile);
+    }
+
+    private static Vec3d randomPointWithin(Vec3d center, double radius) {
+        double angle = RANDOM.nextDouble() * Math.PI * 2;
+        double distance = RANDOM.nextDouble() * radius;
+        double x = center.x + Math.cos(angle) * distance;
+        double z = center.z + Math.sin(angle) * distance;
+        return new Vec3d(x, center.y, z);
+    }
+
+    private static void sendBotMessage(ServerPlayerEntity bot, String message) {
+        ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withMaxLevel(4), message);
+    }
+
+    private static Vec3d positionOf(Entity entity) {
+        return new Vec3d(entity.getX(), entity.getY(), entity.getZ());
     }
 
     private void performLearningStep(
