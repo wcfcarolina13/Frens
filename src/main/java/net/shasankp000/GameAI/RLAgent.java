@@ -94,6 +94,26 @@ public class RLAgent {
         return stack != null && !stack.isEmpty() && stack.getComponents().contains(DataComponentTypes.FOOD);
     }
 
+    private static double evaluateWeaponHeuristic(ItemStack stack) {
+        if (stack == null || stack.isEmpty()) {
+            return Double.NEGATIVE_INFINITY;
+        }
+        String key = stack.getItem().getTranslationKey().toLowerCase(Locale.ROOT);
+        double base = 0;
+        if (key.contains("netherite")) base += 5;
+        else if (key.contains("diamond")) base += 4;
+        else if (key.contains("iron")) base += 3;
+        else if (key.contains("gold")) base += 2;
+        else if (key.contains("stone")) base += 1.5;
+        else if (key.contains("wood")) base += 1;
+        if (key.contains("sword")) base += 5;
+        else if (key.contains("axe")) base += 4.5;
+        else if (key.contains("trident")) base += 4;
+        else if (key.contains("bow") || key.contains("crossbow")) base += 3.5;
+        else if (key.contains("mace")) base += 3.8;
+        return base;
+    }
+
     public RLAgent() {
         this.epsilon = 1.0; // Initial exploration rate
         qTable = new QTable();
@@ -1111,35 +1131,45 @@ public class RLAgent {
 
         int reward = 0;
         ItemStack hotbarSelection = ItemStack.EMPTY;
+        ItemStack bestWeaponStack = ItemStack.EMPTY;
+        if (hostilesPresent && !hotBarItems.isEmpty()) {
+            bestWeaponStack = hotBarItems.stream()
+                    .filter(stack -> !stack.isEmpty() && isWeaponItem(stack.getItem()))
+                    .max((a, b) -> Double.compare(evaluateWeaponHeuristic(a), evaluateWeaponHeuristic(b)))
+                    .orElse(ItemStack.EMPTY);
+        }
         int selectedHotbarIndex = hotbarIndexFor(actionTaken);
         if (selectedHotbarIndex >= 0 && selectedHotbarIndex < hotBarItems.size()) {
             hotbarSelection = hotBarItems.get(selectedHotbarIndex);
-            if (hotbarSelection.isEmpty()) {
-                reward -= hostilesPresent ? 18 : 8;
-            } else {
-                Item chosenItem = hotbarSelection.getItem();
-                if (hostilesPresent) {
-                    if (isWeaponItem(chosenItem)) {
-                        reward += 12;
-                    } else if (isShieldItem(chosenItem)) {
-                        reward += 6;
-                    } else if (isFoodStack(hotbarSelection)) {
-                        reward -= 3;
-                    } else if (chosenItem instanceof BlockItem) {
-                        reward -= 2;
-                    } else if (isUtilityTool(chosenItem)) {
-                        reward -= 4;
-                    } else {
-                        reward -= 5;
-                    }
+                if (hotbarSelection.isEmpty()) {
+                    reward -= hostilesPresent ? 18 : 8;
                 } else {
-                    if (isFoodStack(hotbarSelection)) {
-                        reward += 4;
-                    } else if (isWeaponItem(chosenItem)) {
-                        reward += 2;
+                    Item chosenItem = hotbarSelection.getItem();
+                    if (hostilesPresent) {
+                        if (isWeaponItem(chosenItem)) {
+                            reward += 12;
+                            if (!bestWeaponStack.isEmpty() && ItemStack.areItemsAndComponentsEqual(hotbarSelection, bestWeaponStack)) {
+                                reward += 20;
+                            }
+                        } else if (isShieldItem(chosenItem)) {
+                            reward += 6;
+                        } else if (isFoodStack(hotbarSelection)) {
+                            reward -= 3;
+                        } else if (chosenItem instanceof BlockItem) {
+                            reward -= 2;
+                        } else if (isUtilityTool(chosenItem)) {
+                            reward -= 4;
+                        } else {
+                            reward -= 5;
+                        }
+                    } else {
+                        if (isFoodStack(hotbarSelection)) {
+                            reward += 4;
+                        } else if (isWeaponItem(chosenItem)) {
+                            reward += 2;
+                        }
                     }
                 }
-            }
         }
 
         boolean spartanMode = BotEventHandler.isSpartanModeActive() || (enclosed && !hasEscapeRoute && !hasHeadroom);
