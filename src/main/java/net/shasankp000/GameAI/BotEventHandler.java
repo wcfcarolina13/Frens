@@ -1,13 +1,16 @@
 package net.shasankp000.GameAI;
 
 import net.shasankp000.EntityUtil;
-import net.fabricmc.loader.api.FabricLoader;
+import net.minecraft.block.BlockState;
 import net.minecraft.component.DataComponentTypes;
 import net.minecraft.entity.Entity;
-import net.minecraft.entity.mob.HostileEntity;
 import net.minecraft.item.ItemStack;
 import net.minecraft.registry.RegistryKey;
 import net.minecraft.server.command.ServerCommandSource;
+import net.minecraft.server.world.ServerWorld;
+import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Direction;
+import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.World;
 import net.shasankp000.ChatUtils.ChatUtils;
 import net.shasankp000.DangerZoneDetector.DangerZoneDetector;
@@ -45,6 +48,9 @@ public class BotEventHandler {
     public static boolean hasRespawned = false; // flag to track if the bot has respawned before or not
     public static int botSpawnCount = 0;
     private static State currentState = null;
+    private static Vec3d lastKnownPosition = null;
+    private static int stationaryTicks = 0;
+    private static final int STUCK_TICK_THRESHOLD = 12;
 
     public BotEventHandler(MinecraftServer server, ServerPlayerEntity bot) {
         BotEventHandler.server = server;
@@ -93,6 +99,9 @@ public class BotEventHandler {
 
             LOGGER.info("detectAndReact triggered: hostiles={}, trainingMode={}, alreadyExecuting={}",
                     hostileEntities.size(), net.shasankp000.Commands.modCommandRegistry.isTrainingMode, isExecuting);
+
+            EnvironmentSnapshot environmentSnapshot = analyzeEnvironment(bot);
+            updateStuckTracker(bot, environmentSnapshot);
 
 
             BlockDistanceLimitedSearch blockDistanceLimitedSearch = new BlockDistanceLimitedSearch(bot, 3, 5);
@@ -292,6 +301,7 @@ public class BotEventHandler {
             case TURN_LEFT -> performAction("turnLeft");
             case TURN_RIGHT -> performAction("turnRight");
             case JUMP -> performAction("jump");
+            case JUMP_FORWARD -> performAction("jumpForward");
             case SNEAK -> performAction("sneak");
             case SPRINT -> performAction("sprint");
             case STOP_SNEAKING -> performAction("unsneak");
@@ -300,6 +310,9 @@ public class BotEventHandler {
             case USE_ITEM -> performAction("useItem");
             case EQUIP_ARMOR -> armorUtils.autoEquipArmor(bot);
             case ATTACK -> performAction("attack");
+            case BREAK_BLOCK_FORWARD -> performAction("breakBlock");
+            case PLACE_SUPPORT_BLOCK -> performAction("placeSupportBlock");
+            case ESCAPE_STAIRS -> performAction("escapeStairs");
             case HOTBAR_1 -> performAction("hotbar1");
             case HOTBAR_2 -> performAction("hotbar2");
             case HOTBAR_3 -> performAction("hotbar3");
@@ -310,6 +323,66 @@ public class BotEventHandler {
             case HOTBAR_8 -> performAction("hotbar8");
             case HOTBAR_9 -> performAction("hotbar9");
             case STAY -> System.out.println("Performing action: Stay and do nothing");
+        }
+    }
+
+    private record EnvironmentSnapshot(boolean enclosed, int solidNeighborCount, boolean hasHeadroom, boolean hasEscapeRoute) {}
+
+    private static EnvironmentSnapshot analyzeEnvironment(ServerPlayerEntity bot) {
+        ServerWorld world = bot.getCommandSource().getWorld();
+        BlockPos pos = bot.getBlockPos();
+
+        int solidNeighbors = 0;
+        for (Direction direction : Direction.values()) {
+            if (direction == Direction.DOWN || direction == Direction.UP || direction.getAxis().isHorizontal()) {
+                BlockPos checkPos = pos.offset(direction);
+                if (isSolid(world, checkPos)) {
+                    solidNeighbors++;
+                }
+            }
+        }
+
+        boolean headroom = world.getBlockState(pos.up()).isAir();
+        boolean escapeRoute = false;
+        for (Direction direction : Direction.Type.HORIZONTAL) {
+            BlockPos forward = pos.offset(direction);
+            if (world.getBlockState(forward).isAir() && world.getBlockState(forward.up()).isAir()) {
+                escapeRoute = true;
+                break;
+            }
+        }
+
+        boolean enclosed = solidNeighbors >= 5 || (!escapeRoute && !headroom);
+        return new EnvironmentSnapshot(enclosed, solidNeighbors, headroom, escapeRoute);
+    }
+
+    private static boolean isSolid(ServerWorld world, BlockPos pos) {
+        BlockState state = world.getBlockState(pos);
+        return !state.isAir() && !state.getCollisionShape(world, pos).isEmpty();
+    }
+
+    private static void updateStuckTracker(ServerPlayerEntity bot, EnvironmentSnapshot environmentSnapshot) {
+        Vec3d currentPos = new Vec3d(bot.getX(), bot.getY(), bot.getZ());
+        if (lastKnownPosition == null) {
+            lastKnownPosition = currentPos;
+            stationaryTicks = 0;
+            return;
+        }
+
+        double distanceSq = currentPos.squaredDistanceTo(lastKnownPosition);
+        if (distanceSq < 0.04) {
+            stationaryTicks++;
+        } else {
+            stationaryTicks = 0;
+            lastKnownPosition = currentPos;
+        }
+
+        if (stationaryTicks >= STUCK_TICK_THRESHOLD || (environmentSnapshot.enclosed() && !environmentSnapshot.hasEscapeRoute())) {
+            LOGGER.info("Escape routine triggered (stationaryTicks={}, enclosed={}, hasEscapeRoute={})",
+                    stationaryTicks, environmentSnapshot.enclosed(), environmentSnapshot.hasEscapeRoute());
+            BotActions.escapeStairs(bot);
+            stationaryTicks = 0;
+            lastKnownPosition = new Vec3d(bot.getX(), bot.getY(), bot.getZ());
         }
     }
 
@@ -367,6 +440,8 @@ public class BotEventHandler {
                 isBlockItem.checkBlockItem(hotBarUtils.getSelectedHotbarItemStack(bot))
         );
 
+        EnvironmentSnapshot nextEnv = analyzeEnvironment(bot);
+
         String updatedTime = GetTime.getTimeOfWorld(bot) >= 12000 ? "night" : "day";
         String updatedDimension = bot.getCommandSource().getWorld().getRegistryKey().getValue().toString();
 
@@ -392,6 +467,10 @@ public class BotEventHandler {
                 botFrostLevel,
                 offhandItem,
                 armorItems,
+                nextEnv.enclosed(),
+                nextEnv.solidNeighborCount(),
+                nextEnv.hasHeadroom(),
+                nextEnv.hasEscapeRoute(),
                 chosenAction,
                 riskMap,
                 riskAppetite,
@@ -419,6 +498,10 @@ public class BotEventHandler {
                 botOxygenLevel,
                 offhandItem,
                 armorItems,
+                nextEnv.enclosed(),
+                nextEnv.hasHeadroom(),
+                nextEnv.hasEscapeRoute(),
+                nextEnv.solidNeighborCount(),
                 chosenAction,
                 risk,
                 actionPodMap.getOrDefault(chosenAction, 0.0)
@@ -468,6 +551,8 @@ public class BotEventHandler {
 
         Map<StateActions.Action, Double> podMap = new HashMap<>(); // blank pod map for now.
 
+        EnvironmentSnapshot environmentSnapshot = analyzeEnvironment(bot);
+
         return new State(
                 (int) bot.getX(),
                 (int) bot.getY(),
@@ -486,6 +571,10 @@ public class BotEventHandler {
                 botFrostLevel,
                 offhandItem,
                 armorItems,
+                environmentSnapshot.enclosed(),
+                environmentSnapshot.solidNeighborCount(),
+                environmentSnapshot.hasHeadroom(),
+                environmentSnapshot.hasEscapeRoute(),
                 StateActions.Action.STAY,
                 riskMap,
                 DEFAULT_RISK_APPETITE,
@@ -517,6 +606,10 @@ public class BotEventHandler {
             case "jump" -> {
                 System.out.println("Performing action: jump");
                 BotActions.jump(bot);
+            }
+            case "jumpForward" -> {
+                System.out.println("Performing action: jump forward");
+                BotActions.jumpForward(bot);
             }
             case "sneak" -> {
                 System.out.println("Performing action: sneak");
@@ -593,6 +686,24 @@ public class BotEventHandler {
             case "hotbar9" -> {
                 System.out.println("Performing action: Select hotbar slot 9");
                 BotActions.selectHotbarSlot(bot, 8);
+            }
+            case "breakBlock" -> {
+                System.out.println("Performing action: break block ahead");
+                boolean success = BotActions.breakBlockAhead(bot);
+                if (!success) {
+                    System.out.println("No suitable block to break ahead.");
+                }
+            }
+            case "placeSupportBlock" -> {
+                System.out.println("Performing action: place support block");
+                boolean success = BotActions.placeSupportBlock(bot);
+                if (!success) {
+                    System.out.println("Unable to place support block (no block or blocked space).");
+                }
+            }
+            case "escapeStairs" -> {
+                System.out.println("Performing action: escape stairs");
+                BotActions.escapeStairs(bot);
             }
             default -> System.out.println("Invalid action");
         }

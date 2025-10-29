@@ -34,6 +34,11 @@ public class State implements Serializable {
     private final String offhandItem; // Serialized as the item name
     private final Map<String, String> armorItems; // Serialized as a map of item names
 
+    private final boolean enclosed;
+    private final int solidNeighborCount;
+    private final boolean hasHeadroom;
+    private final boolean hasEscapeRoute;
+
     private final StateActions.Action actionTaken;
     private List<EntityDetails> nearbyEntities = List.of();
     private Map<StateActions.Action, Double> riskMap;
@@ -47,6 +52,7 @@ public class State implements Serializable {
     public State(int botX, int botY, int botZ, List<EntityDetails> nearbyEntities, List<String> nearbyBlocks, double distanceToHostileEntity, int botHealth, double distanceToDangerZone,
                  List<ItemStack> hotBarItems, SelectedItemDetails selectedItem, String timeOfDay, String dimensionType,
                  int botHungerLevel, int botOxygenLevel, int frostLevel ,ItemStack offhandItem, Map<String, ItemStack> armorItems,
+                 boolean enclosed, int solidNeighborCount, boolean hasHeadroom, boolean hasEscapeRoute,
                  StateActions.Action actionTaken, Map<StateActions.Action, Double> riskMap , double riskAppetite, Map<StateActions.Action, Double> podMap) {
 
         this.botX = botX;
@@ -68,6 +74,10 @@ public class State implements Serializable {
 
         this.offhandItem = serializeItemStack(offhandItem);
         this.armorItems = serializeArmorItems(armorItems);
+        this.enclosed = enclosed;
+        this.solidNeighborCount = solidNeighborCount;
+        this.hasHeadroom = hasHeadroom;
+        this.hasEscapeRoute = hasEscapeRoute;
         this.actionTaken = actionTaken;
 
         this.nearbyEntities = nearbyEntities;
@@ -94,6 +104,10 @@ public class State implements Serializable {
     public int getBotOxygenLevel() { return botOxygenLevel; }
     public String getOffhandItem() { return offhandItem; }
     public Map<String, String> getArmorItems() { return armorItems; }
+    public boolean isEnclosed() { return enclosed; }
+    public int getSolidNeighborCount() { return solidNeighborCount; }
+    public boolean hasHeadroom() { return hasHeadroom; }
+    public boolean hasEscapeRoute() { return hasEscapeRoute; }
     public StateActions.Action getActionTaken() { return actionTaken; }
     public List<EntityDetails> getNearbyEntities() { return nearbyEntities;}
     public List<String> getNearbyBlocks() { return nearbyBlocks; }
@@ -178,6 +192,10 @@ public class State implements Serializable {
                 ", botFrostLevel = " + frostLevel +
                 ", offhandItem ='" + offhandItem + '\'' +
                 ", armorItems =" + armorItems +
+                ", enclosed =" + enclosed +
+                ", solidNeighborCount =" + solidNeighborCount +
+                ", hasHeadroom =" + hasHeadroom +
+                ", hasEscapeRoute =" + hasEscapeRoute +
                 ", actionTaken =" + actionTaken +
                 ", riskMap = " + riskMap +
                 ", riskAppetite = " + riskAppetite +
@@ -204,6 +222,10 @@ public class State implements Serializable {
         stateMap.put("botFrostLevel", getFrostLevel());
         stateMap.put("offhandItem", getOffhandItem()); // Assuming `getOffhandItem()` returns String
         stateMap.put("armorItems", getArmorItems()); // Assuming `getArmorItems()` returns Map<String, String>
+        stateMap.put("enclosed", isEnclosed());
+        stateMap.put("solidNeighborCount", getSolidNeighborCount());
+        stateMap.put("hasHeadroom", hasHeadroom());
+        stateMap.put("hasEscapeRoute", hasEscapeRoute());
         stateMap.put("actionTaken", getActionTaken().toString()); // Convert enum to string
         stateMap.put("riskMap", getRiskMap());
         stateMap.put("riskAppetite", getRiskAppetite());

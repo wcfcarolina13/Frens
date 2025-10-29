@@ -8,14 +8,12 @@ import net.minecraft.item.ItemStack;
 import net.shasankp000.Database.QEntry;
 import net.shasankp000.Database.QTable;
 import net.shasankp000.Database.StateActionPair;
-import net.shasankp000.Database.StateActionTransition;
 import net.shasankp000.Entity.EntityDetails;
 import net.shasankp000.GameAI.StateActions.Action;
 import net.shasankp000.PlayerUtils.ResourceEvaluator;
 import net.shasankp000.PlayerUtils.SelectedItemDetails;
 import net.shasankp000.PlayerUtils.ThreatDetector;
 import net.shasankp000.Commands.modCommandRegistry;
-import net.shasankp000.DangerZoneDetector.CliffDetector;
 
 public class RLAgent {
     private static final double ALPHA = 0.1;  // Learning rate
@@ -285,6 +283,11 @@ public class RLAgent {
 
         double nearbyHostileCount = hostileEntities.size();
 
+        boolean enclosed = currentState.isEnclosed();
+        int solidNeighborCount = currentState.getSolidNeighborCount();
+        boolean hasHeadroom = currentState.hasHeadroom();
+        boolean hasEscapeRoute = currentState.hasEscapeRoute();
+
         for (Action action : possibleActions) {
             double risk = 0.0;
 
@@ -363,6 +366,26 @@ public class RLAgent {
                         risk += 5.0; // Jumping is risky with low health
                     }
 
+                    if (enclosed && !hasEscapeRoute) {
+                        risk -= 2.5; // jumping may help reach headroom while trapped
+                    } else if (!hasHeadroom) {
+                        risk += 3.0;
+                    }
+
+                    break;
+
+                case JUMP_FORWARD:
+                    risk += 3.0;
+                    if (enclosed) {
+                        risk -= 4.0;
+                    }
+                    if (!hasEscapeRoute) {
+                        risk -= 2.0;
+                    }
+                    if (!hasHeadroom) {
+                        risk += 4.0;
+                    }
+
                     break;
 
                 case STAY:
@@ -371,6 +394,10 @@ public class RLAgent {
                     }
 
                     else {risk += 0.0;}
+
+                    if (enclosed && !hasEscapeRoute) {
+                        risk += 7.0;
+                    }
                     break;
 
                 case SNEAK:
@@ -385,6 +412,9 @@ public class RLAgent {
                         risk += 0.0; // pointless sneaking otherwise
                     }
 
+                    if (enclosed && !hasEscapeRoute) {
+                        risk += 2.0;
+                    }
 
                     break;
 
@@ -519,6 +549,37 @@ public class RLAgent {
                     risk += totalRisk; // Add total risk for attacking
 
                     System.out.println("Risk for ATTACK action: " + risk);
+                    break;
+
+                case BREAK_BLOCK_FORWARD:
+                    risk -= enclosed ? 6.0 : 1.5;
+                    risk -= Math.min(6, solidNeighborCount) * 0.5;
+                    if (hasEscapeRoute) {
+                        risk += 2.0;
+                    }
+                    break;
+
+                case PLACE_SUPPORT_BLOCK:
+                    risk += 2.5;
+                    if (enclosed) {
+                        risk -= 3.5;
+                    }
+                    if (!hasHeadroom) {
+                        risk -= 2.0;
+                    }
+                    if (!hasEscapeRoute) {
+                        risk -= 1.5;
+                    }
+                    break;
+
+                case ESCAPE_STAIRS:
+                    risk += 1.0;
+                    if (enclosed || !hasEscapeRoute) {
+                        risk -= 6.0;
+                    }
+                    if (!hasHeadroom) {
+                        risk += 3.0;
+                    }
                     break;
 
 
@@ -868,6 +929,18 @@ public class RLAgent {
             case USE_ITEM:
                 if (currentState.getBotHealth() < 10 || currentState.getBotHungerLevel() < 8) weight += 3; // Prioritize consumables
                 break;
+            case JUMP_FORWARD:
+                if (currentState.isEnclosed() || currentState.getSolidNeighborCount() >= 5) weight += 2;
+                break;
+            case BREAK_BLOCK_FORWARD:
+                if (currentState.isEnclosed() && !currentState.hasEscapeRoute()) weight += 4;
+                break;
+            case PLACE_SUPPORT_BLOCK:
+                if (!currentState.hasEscapeRoute()) weight += 3;
+                break;
+            case ESCAPE_STAIRS:
+                if (!currentState.hasEscapeRoute() || !currentState.hasHeadroom()) weight += 5;
+                break;
             // Other cases can be added based on relevance
         }
 
@@ -925,6 +998,7 @@ public class RLAgent {
                                double distanceToDanger, List<ItemStack> hotBarItems, SelectedItemDetails selectedItem,
                                String timeOfDay, String dimension, int botHungerLevel, int botOxygenLevel,
                                ItemStack offhandItem, Map<String, ItemStack> armorItems,
+                               boolean enclosed, boolean hasHeadroom, boolean hasEscapeRoute, int solidNeighborCount,
                                StateActions.Action actionTaken, double risk, double pod) {
 
         boolean hasWoolItems = hotBarItems.stream()
@@ -940,6 +1014,33 @@ public class RLAgent {
                 .toList();
 
         int reward = 0;
+
+        if (enclosed && !hasEscapeRoute) {
+            reward -= 8;
+            if (actionTaken == StateActions.Action.STAY || actionTaken == StateActions.Action.SNEAK) {
+                reward -= 6;
+            }
+        }
+
+        if (actionTaken == StateActions.Action.BREAK_BLOCK_FORWARD) {
+            reward += enclosed ? 8 : 3;
+        }
+
+        if (actionTaken == StateActions.Action.PLACE_SUPPORT_BLOCK) {
+            reward += (!hasEscapeRoute ? 6 : 2);
+        }
+
+        if (actionTaken == StateActions.Action.ESCAPE_STAIRS) {
+            reward += enclosed ? 12 : 4;
+        }
+
+        if (actionTaken == StateActions.Action.JUMP_FORWARD && enclosed) {
+            reward += 4;
+        }
+
+        if (solidNeighborCount >= 5 && actionTaken == StateActions.Action.STAY) {
+            reward -= 4;
+        }
 
         // 1. Distance to hostile entity
         if (distanceToHostileEntity > 10) {
@@ -1025,6 +1126,11 @@ public class RLAgent {
                 break;
             default:
                 reward -= 20; // Unknown dimension, penalize
+        }
+
+
+        if (!enclosed && hasEscapeRoute) {
+            reward += 6; // positive feedback for freeing itself
         }
 
 

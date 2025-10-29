@@ -1,12 +1,17 @@
 package net.shasankp000.GameAI;
 
+import net.minecraft.block.BlockState;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.mob.HostileEntity;
+import net.minecraft.item.BlockItem;
 import net.minecraft.item.ItemStack;
 import net.minecraft.server.network.ServerPlayerEntity;
+import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.Hand;
 import net.minecraft.util.ActionResult;
 import net.minecraft.util.math.MathHelper;
+import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 
 import java.util.Comparator;
@@ -57,6 +62,11 @@ public final class BotActions {
         bot.setSprinting(value);
     }
 
+    public static void jumpForward(ServerPlayerEntity bot) {
+        bot.jump();
+        moveRelative(bot, STEP_DISTANCE * 0.6);
+    }
+
     public static void attackNearest(ServerPlayerEntity bot, List<Entity> nearbyEntities) {
         Entity target = nearbyEntities.stream()
                 .filter(entity -> entity instanceof HostileEntity)
@@ -85,6 +95,81 @@ public final class BotActions {
         bot.getInventory().setSelectedSlot(MathHelper.clamp(index, 0, 8));
     }
 
+    public static boolean breakBlockAhead(ServerPlayerEntity bot) {
+        ServerWorld world = bot.getCommandSource().getWorld();
+        BlockPos targetPos = getRelativeBlockPos(bot, 1, 0);
+        if (!world.getBlockState(targetPos).isAir()) {
+            boolean success = world.breakBlock(targetPos, true, bot);
+            if (success) {
+                bot.swingHand(Hand.MAIN_HAND, true);
+                return true;
+            }
+        }
+
+        // Try the block above-front if the direct block was air (stair carving)
+        BlockPos upperPos = getRelativeBlockPos(bot, 1, 1);
+        if (!world.getBlockState(upperPos).isAir()) {
+            boolean success = world.breakBlock(upperPos, true, bot);
+            if (success) {
+                bot.swingHand(Hand.MAIN_HAND, true);
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    public static boolean placeSupportBlock(ServerPlayerEntity bot) {
+        ServerWorld world = bot.getCommandSource().getWorld();
+        int slot = findPlaceableHotbarSlot(bot);
+        if (slot == -1) {
+            return false;
+        }
+
+        ItemStack stack = bot.getInventory().getStack(slot);
+        if (!(stack.getItem() instanceof BlockItem blockItem)) {
+            return false;
+        }
+
+        selectHotbarSlot(bot, slot);
+
+        BlockPos below = bot.getBlockPos().down();
+        BlockPos target = world.getBlockState(below).isAir() ? below : getRelativeBlockPos(bot, 0, -1);
+        if (!world.getBlockState(target).isAir()) {
+            // Try front-lower spot for stair stepping
+            target = getRelativeBlockPos(bot, 1, -1);
+        }
+
+        if (!world.getBlockState(target).isAir()) {
+            return false;
+        }
+
+        BlockState stateToPlace = blockItem.getBlock().getDefaultState();
+        if (!stateToPlace.canPlaceAt(world, target)) {
+            return false;
+        }
+
+        boolean placed = world.setBlockState(target, stateToPlace);
+        if (placed) {
+            stack.decrement(1);
+            if (stack.isEmpty()) {
+                bot.getInventory().setStack(slot, ItemStack.EMPTY);
+            }
+            bot.swingHand(Hand.MAIN_HAND, true);
+            return true;
+        }
+
+        return false;
+    }
+
+    public static void escapeStairs(ServerPlayerEntity bot) {
+        boolean placed = placeSupportBlock(bot);
+        if (!placed) {
+            breakBlockAhead(bot);
+        }
+        jumpForward(bot);
+    }
+
     private static void moveRelative(ServerPlayerEntity bot, double distance) {
         float yaw = bot.getYaw();
         double yawRad = Math.toRadians(yaw);
@@ -92,6 +177,32 @@ public final class BotActions {
         double dz = Math.cos(yawRad) * distance;
 
         bot.teleport(bot.getX() + dx, bot.getY(), bot.getZ() + dz, true);
+    }
+
+    private static BlockPos getRelativeBlockPos(ServerPlayerEntity bot, int forwardOffset, int verticalOffset) {
+        Direction facing = getFacingDirection(bot);
+        BlockPos basePos = bot.getBlockPos().add(0, verticalOffset, 0);
+        return basePos.offset(facing, forwardOffset);
+    }
+
+    private static Direction getFacingDirection(ServerPlayerEntity bot) {
+        int index = MathHelper.floor((bot.getYaw() * 4.0F / 360.0F) + 0.5D) & 3;
+        return switch (index) {
+            case 0 -> Direction.SOUTH;
+            case 1 -> Direction.WEST;
+            case 2 -> Direction.NORTH;
+            default -> Direction.EAST;
+        };
+    }
+
+    private static int findPlaceableHotbarSlot(ServerPlayerEntity bot) {
+        for (int i = 0; i < 9; i++) {
+            ItemStack stack = bot.getInventory().getStack(i);
+            if (!stack.isEmpty() && stack.getItem() instanceof BlockItem) {
+                return i;
+            }
+        }
+        return -1;
     }
 
     private static void rotate(ServerPlayerEntity bot, float deltaYaw) {
