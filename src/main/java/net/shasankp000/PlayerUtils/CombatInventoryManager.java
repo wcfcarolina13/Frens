@@ -22,7 +22,7 @@ import java.util.OptionalInt;
  */
 public final class CombatInventoryManager {
 
-    private static final double MIN_COMBAT_ATTACK_SPEED = 12.0D;
+    private static final double MIN_COMBAT_ATTACK_SPEED = 6.0D;
     private static final int HOTBAR_SIZE = 9;
 
     private CombatInventoryManager() {

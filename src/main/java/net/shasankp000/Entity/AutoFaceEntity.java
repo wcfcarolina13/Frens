@@ -163,7 +163,9 @@ public class AutoFaceEntity {
                             ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withMaxLevel(4), "Terminating all current tasks due to threat detections");
                         }
 
-                        CombatInventoryManager.ensureCombatLoadout(bot);
+                        if (BotEventHandler.bot == bot) {
+                            CombatInventoryManager.ensureCombatLoadout(bot);
+                        }
 
                         FaceClosestEntity.faceClosestEntity(bot, AutoFaceEntity.hostileEntities);
 
@@ -213,7 +215,9 @@ public class AutoFaceEntity {
                     botBusy = true;
 
                     BotEventHandler eventHandler = new BotEventHandler(server, bot);
-                    CombatInventoryManager.ensureCombatLoadout(bot);
+                    if (BotEventHandler.bot == bot) {
+                        CombatInventoryManager.ensureCombatLoadout(bot);
+                    }
 
                     double distanceToHostileEntity = 0.0;
 
