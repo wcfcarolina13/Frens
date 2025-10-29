@@ -6,6 +6,7 @@ import net.minecraft.component.DataComponentTypes;
 import net.minecraft.entity.Entity;
 import net.minecraft.item.ItemStack;
 import net.minecraft.registry.RegistryKey;
+import net.minecraft.server.ServerTask;
 import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
@@ -52,6 +53,7 @@ public class BotEventHandler {
     private static int stationaryTicks = 0;
     private static final int STUCK_TICK_THRESHOLD = 12;
     private static boolean spartanModeActive = false;
+    private static Vec3d lastSafePosition = null;
 
     public BotEventHandler(MinecraftServer server, ServerPlayerEntity bot) {
         BotEventHandler.server = server;
@@ -410,6 +412,32 @@ public class BotEventHandler {
         }
     }
 
+    public static void onBotRespawn(ServerPlayerEntity bot) {
+        spartanModeActive = false;
+        stationaryTicks = 0;
+        lastKnownPosition = null;
+
+        Vec3d target = lastSafePosition;
+        MinecraftServer srv = bot.getCommandSource().getServer();
+        ServerWorld homeWorld = bot.getCommandSource().getWorld();
+
+        if (target == null) {
+            BlockPos anchor = bot.getBlockPos().up(2);
+            target = new Vec3d(anchor.getX() + 0.5, anchor.getY(), anchor.getZ() + 0.5);
+        }
+
+        bot.refreshPositionAndAngles(target.x, target.y, target.z, bot.getYaw(), bot.getPitch());
+
+        bot.setVelocity(Vec3d.ZERO);
+        bot.setInvulnerable(true);
+        if (srv != null) {
+            srv.send(new ServerTask(srv.getTicks() + 40, () -> bot.setInvulnerable(false)));
+        }
+
+        ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withMaxLevel(4),
+                bot.getName().getString() + " has regrouped and is ready to re-engage.");
+    }
+
     private void performLearningStep(
             RLAgent rlAgentHook,
             QTable qTable,
@@ -465,6 +493,9 @@ public class BotEventHandler {
         );
 
         EnvironmentSnapshot nextEnv = analyzeEnvironment(bot);
+        if (!isSpartanCandidate(nextEnv)) {
+            lastSafePosition = new Vec3d(bot.getX(), bot.getY(), bot.getZ());
+        }
 
         String updatedTime = GetTime.getTimeOfWorld(bot) >= 12000 ? "night" : "day";
         String updatedDimension = bot.getCommandSource().getWorld().getRegistryKey().getValue().toString();
@@ -576,6 +607,9 @@ public class BotEventHandler {
         Map<StateActions.Action, Double> podMap = new HashMap<>(); // blank pod map for now.
 
         EnvironmentSnapshot environmentSnapshot = analyzeEnvironment(bot);
+        if (!isSpartanCandidate(environmentSnapshot)) {
+            lastSafePosition = new Vec3d(bot.getX(), bot.getY(), bot.getZ());
+        }
 
         return new State(
                 (int) bot.getX(),

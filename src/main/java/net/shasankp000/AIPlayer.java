@@ -137,6 +137,7 @@ public class AIPlayer implements ModInitializer {
                 BotEventHandler.hasRespawned = true;
                 BotEventHandler.botSpawnCount++;
                 AutoFaceEntity.handleBotRespawn(newPlayer);
+                BotEventHandler.onBotRespawn(newPlayer);
             }
         });
     }
