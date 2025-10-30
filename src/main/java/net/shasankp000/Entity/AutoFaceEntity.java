@@ -32,6 +32,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Random;
+import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -75,9 +76,16 @@ public class AutoFaceEntity {
     public static void startAutoFace(ServerPlayerEntity bot) {
         // Stop any existing executor for this bot
 
-        Bot = bot;
+        ServerPlayerEntity previousBot = Bot;
+        if (previousBot != null && previousBot != bot) {
+            stopAutoFace(previousBot);
+        }
+
+        shutdownExecutorsWithUuid(bot.getUuid());
 
         stopAutoFace(bot);
+
+        Bot = bot;
 
         ScheduledExecutorService botExecutor = Executors.newSingleThreadScheduledExecutor();
 
@@ -379,6 +387,38 @@ public class AutoFaceEntity {
 
             } catch (InterruptedException e) {
                 System.out.println("Error shutting down executor for bot: {" + bot.getName().getString() + "}" + " " + e);
+                Thread.currentThread().interrupt();
+            }
+        }
+    }
+
+    private static void shutdownExecutorsWithUuid(UUID uuid) {
+        if (uuid == null) {
+            return;
+        }
+        botExecutors.entrySet().removeIf(entry -> {
+            ServerPlayerEntity trackedBot = entry.getKey();
+            if (trackedBot == null) {
+                shutdownExecutor(entry.getValue());
+                return true;
+            }
+            if (uuid.equals(trackedBot.getUuid())) {
+                shutdownExecutor(entry.getValue());
+                return true;
+            }
+            return false;
+        });
+    }
+
+    private static void shutdownExecutor(ScheduledExecutorService executor) {
+        if (executor == null) {
+            return;
+        }
+        if (!executor.isShutdown()) {
+            executor.shutdownNow();
+            try {
+                executor.awaitTermination(1, TimeUnit.SECONDS);
+            } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
             }
         }
