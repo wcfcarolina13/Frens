@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.EnumMap;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -18,6 +19,7 @@ import net.minecraft.component.DataComponentTypes;
 import net.minecraft.item.BlockItem;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
+import net.minecraft.util.math.Vec3d;
 import net.shasankp000.Database.QEntry;
 import net.shasankp000.Database.QTable;
 import net.shasankp000.Database.StateActionPair;
@@ -27,6 +29,7 @@ import net.shasankp000.PlayerUtils.ResourceEvaluator;
 import net.shasankp000.PlayerUtils.SelectedItemDetails;
 import net.shasankp000.PlayerUtils.ThreatDetector;
 import net.shasankp000.Commands.modCommandRegistry;
+import net.shasankp000.GameAI.BotEventHandler;
 
 public class RLAgent {
     private static final double ALPHA = 0.1;  // Learning rate
@@ -36,6 +39,13 @@ public class RLAgent {
     private static final double EPSILON_DECAY_RATE = 0.99; // Decay rate for epsilon
 
     private static final Map<Action, Integer> HOTBAR_INDEX;
+    private static final Set<String> PASSIVE_ENTITY_NAMES = Set.of(
+            "villager", "wandering trader",
+            "cow", "pig", "sheep", "chicken", "rabbit", "fox", "goat", "bee",
+            "cat", "wolf", "horse", "donkey", "mule", "llama", "camel",
+            "ocelot", "parrot", "bat", "polar bear", "panda", "axolotl", "sniffer",
+            "turtle", "mooshroom", "strider", "allay"
+    );
 
     static {
         EnumMap<Action, Integer> map = new EnumMap<>(Action.class);
@@ -1114,7 +1124,9 @@ public class RLAgent {
                                String timeOfDay, String dimension, int botHungerLevel, int botOxygenLevel,
                                ItemStack offhandItem, Map<String, ItemStack> armorItems,
                                boolean enclosed, boolean hasHeadroom, boolean hasEscapeRoute, int solidNeighborCount,
-                               StateActions.Action actionTaken, double risk, double pod) {
+                               StateActions.Action actionTaken, double risk, double pod,
+                               BotEventHandler.Mode currentMode, BotEventHandler.CombatStyle combatStyle,
+                               Vec3d commanderPos, float commanderHealth, Vec3d guardCenter, double guardRadius) {
 
         boolean hasWoolItems = hotBarItems.stream()
                 .anyMatch(item -> item.getItem().getName().getString().toLowerCase().contains("wool") || item.getItem().getName().getString().toLowerCase().contains("carpet"));
@@ -1128,6 +1140,14 @@ public class RLAgent {
                 .filter(EntityDetails::isHostile)
                 .toList();
         boolean hostilesPresent = !hostileEntities.isEmpty();
+
+        Vec3d botPosition = new Vec3d(botX + 0.5, botY, botZ + 0.5);
+        List<EntityDetails> passiveEntities = nearbyEntities.stream()
+                .filter(entity -> !entity.isHostile() && isPassiveEntity(entity))
+                .toList();
+        List<Vec3d> hostilePositions = hostileEntities.stream()
+                .map(RLAgent::toVec3d)
+                .toList();
 
         int reward = 0;
         ItemStack hotbarSelection = ItemStack.EMPTY;
@@ -1261,6 +1281,89 @@ public class RLAgent {
                 reward += 10; // only shield equipped
             } else {
                 reward -= 5; // Irrelevant item selected when hostiles are present
+            }
+        }
+
+
+        // Protection rewards/penalties for allies and guarded zones
+        if (commanderPos != null) {
+            boolean hostileNearCommander = hostilePositions.stream()
+                    .anyMatch(pos -> pos.squaredDistanceTo(commanderPos) <= 36.0D);
+            double commanderDistance = commanderPos.distanceTo(botPosition);
+            if (hostileNearCommander) {
+                if (commanderDistance <= 6.0D) {
+                    reward += 18;
+                } else {
+                    reward -= 18;
+                }
+            }
+            if (commanderHealth >= 0) {
+                if (commanderHealth < 8.0F) {
+                    reward -= 12;
+                } else if (commanderHealth >= 18.0F) {
+                    reward += 4;
+                }
+            }
+        }
+
+        if (guardCenter != null && guardRadius > 0.0D) {
+            double guardRadiusSq = guardRadius * guardRadius;
+            double guardDistance = guardCenter.distanceTo(botPosition);
+            boolean hostilesInGuard = hostilePositions.stream()
+                    .anyMatch(pos -> pos.squaredDistanceTo(guardCenter) <= guardRadiusSq);
+            if (hostilesInGuard) {
+                if (guardDistance <= guardRadius + 2.0D) {
+                    reward += 12;
+                } else {
+                    reward -= 12;
+                }
+            } else if (guardDistance <= guardRadius) {
+                reward += 4;
+            }
+
+            List<EntityDetails> passiveInGuard = passiveEntities.stream()
+                    .filter(entity -> toVec3d(entity).squaredDistanceTo(guardCenter) <= guardRadiusSq)
+                    .toList();
+            if (!passiveInGuard.isEmpty()) {
+                for (EntityDetails passive : passiveInGuard) {
+                    Vec3d passivePos = toVec3d(passive);
+                    boolean hostileNearPassive = hostilePositions.stream()
+                            .anyMatch(pos -> pos.squaredDistanceTo(passivePos) <= 36.0D);
+                    if (hostileNearPassive) {
+                        double botToPassive = passivePos.distanceTo(botPosition);
+                        if (botToPassive <= 6.0D) {
+                            reward += 10;
+                        } else {
+                            reward -= 10;
+                        }
+                    }
+                }
+            }
+        } else {
+            for (EntityDetails passive : passiveEntities) {
+                Vec3d passivePos = toVec3d(passive);
+                boolean hostileNearPassive = hostilePositions.stream()
+                        .anyMatch(pos -> pos.squaredDistanceTo(passivePos) <= 36.0D);
+                if (hostileNearPassive) {
+                    double botToPassive = passivePos.distanceTo(botPosition);
+                    if (botToPassive <= 6.0D) {
+                        reward += 8;
+                    } else {
+                        reward -= 8;
+                    }
+                }
+            }
+        }
+
+        if (combatStyle == BotEventHandler.CombatStyle.EVASIVE && hostilesPresent) {
+            if (distanceToHostileEntity > 6.0D) {
+                reward += 5;
+            } else {
+                reward -= 5;
+            }
+        } else if (combatStyle == BotEventHandler.CombatStyle.AGGRESSIVE && hostilesPresent) {
+            if (distanceToHostileEntity <= 6.0D) {
+                reward += 5;
             }
         }
 
@@ -1417,5 +1520,14 @@ public class RLAgent {
     }
 
 
+
+    private static boolean isPassiveEntity(EntityDetails details) {
+        String name = details.getName().toLowerCase(Locale.ROOT);
+        return PASSIVE_ENTITY_NAMES.contains(name);
+    }
+
+    private static Vec3d toVec3d(EntityDetails details) {
+        return new Vec3d(details.getX(), details.getY(), details.getZ());
+    }
 
 }

@@ -1216,7 +1216,12 @@ public class modCommandRegistry {
             giveStack(bot, withEnchantments(registryManager, Items.BOW.getDefaultStack(),
                     new int[]{5, 3, 1},
                     Enchantments.POWER, Enchantments.UNBREAKING, Enchantments.INFINITY));
-            giveStack(bot, new ItemStack(Items.ARROW));
+            giveStack(bot, new ItemStack(Items.ARROW, 64));
+            giveStack(bot, new ItemStack(Items.SPECTRAL_ARROW, 32));
+
+            giveStack(bot, withEnchantments(registryManager, Items.CROSSBOW.getDefaultStack(),
+                    new int[]{3, 3},
+                    Enchantments.QUICK_CHARGE, Enchantments.UNBREAKING));
 
             giveStack(bot, withEnchantments(registryManager, Items.SHIELD.getDefaultStack(),
                     new int[]{3},

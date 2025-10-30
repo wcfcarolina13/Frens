@@ -76,7 +76,7 @@ public class BotEventHandler {
     private static boolean shieldRaised = false;
     private static long shieldDecisionTick = 0L;
 
-    private enum Mode {
+    public enum Mode {
         IDLE,
         FOLLOW,
         GUARD,
@@ -705,6 +705,14 @@ public class BotEventHandler {
         return combatStyle;
     }
 
+    public static Vec3d getGuardCenterVec() {
+        return guardCenter;
+    }
+
+    public static double getGuardRadiusValue() {
+        return guardRadius;
+    }
+
     public static String setCombatStyle(ServerPlayerEntity bot, CombatStyle style) {
         combatStyle = style;
         String message = style == CombatStyle.AGGRESSIVE ?
@@ -1026,6 +1034,12 @@ public class BotEventHandler {
         Map<StateActions.Action, Double> actionPodMap = rlAgentHook.assessRiskOutcome(currentState, nextState, chosenAction);
         nextState.setPodMap(actionPodMap);
 
+        ServerPlayerEntity commander = findEscortPlayer(bot);
+        Vec3d commanderPos = commander != null ? new Vec3d(commander.getX(), commander.getY(), commander.getZ()) : null;
+        float commanderHealth = commander != null ? commander.getHealth() : -1f;
+        Vec3d guardCenterVec = getGuardCenterVec();
+        double guardRadiusValue = guardCenterVec != null ? getGuardRadiusValue() : 0.0D;
+
         double reward = rlAgentHook.calculateReward(
                 (int) bot.getX(),
                 (int) bot.getY(),
@@ -1049,7 +1063,13 @@ public class BotEventHandler {
                 nextEnv.solidNeighborCount(),
                 chosenAction,
                 risk,
-                actionPodMap.getOrDefault(chosenAction, 0.0)
+                actionPodMap.getOrDefault(chosenAction, 0.0),
+                getCurrentMode(),
+                getCombatStyle(),
+                commanderPos,
+                commanderHealth,
+                guardCenterVec,
+                guardRadiusValue
         );
 
         LOGGER.info("Reward for action {}: {}", chosenAction, reward);
