@@ -20,6 +20,7 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 
 /**
@@ -392,21 +393,33 @@ public final class BotActions {
         bot.setPitch(pitch);
 
         if (stack.getItem() instanceof net.minecraft.item.CrossbowItem crossbow) {
+            if (state.forceMelee && state.isCurrentTarget(target)) {
+                return false;
+            }
+            state.ensureTarget(target);
             return handleCrossbow(bot, target, selection.hand, stack, crossbow, state, serverTick);
         }
 
         if (stack.getItem() instanceof net.minecraft.item.BowItem) {
-            return handleChargeWeapon(bot, selection.hand, stack, state, serverTick, BOW_MIN_CHARGE_TICKS);
+            if (state.forceMelee && state.isCurrentTarget(target)) {
+                return false;
+            }
+            state.ensureTarget(target);
+            return handleChargeWeapon(bot, target, selection.hand, stack, state, serverTick, BOW_MIN_CHARGE_TICKS);
         }
 
         if (stack.getItem() instanceof net.minecraft.item.TridentItem) {
-            return handleChargeWeapon(bot, selection.hand, stack, state, serverTick, 10);
+            if (state.forceMelee && state.isCurrentTarget(target)) {
+                return false;
+            }
+            state.ensureTarget(target);
+            return handleChargeWeapon(bot, target, selection.hand, stack, state, serverTick, 10);
         }
 
         return false;
     }
 
-    private static boolean handleChargeWeapon(ServerPlayerEntity bot, Hand hand, ItemStack stack, RangedAttackState state, long serverTick, int minChargeTicks) {
+    private static boolean handleChargeWeapon(ServerPlayerEntity bot, LivingEntity target, Hand hand, ItemStack stack, RangedAttackState state, long serverTick, int minChargeTicks) {
         if (!canFire(bot, stack)) {
             return false;
         }
@@ -423,6 +436,7 @@ public final class BotActions {
                 bot.stopUsingItem();
                 state.cooldownTick = serverTick + RANGED_COOLDOWN_TICKS;
                 state.chargeStartTick = 0L;
+                state.recordShot(bot, target);
             }
             return true;
         }
@@ -446,6 +460,7 @@ public final class BotActions {
             float divergence = 14 - bot.getEntityWorld().getDifficulty().getId() * 4;
             crossbow.shootAll(bot.getEntityWorld(), bot, hand, stack, velocity, divergence, target);
             state.cooldownTick = serverTick + RANGED_COOLDOWN_TICKS;
+            state.recordShot(bot, target);
             return true;
         }
 
@@ -508,6 +523,7 @@ public final class BotActions {
         RangedAttackState state = RANGED_STATE.remove(bot.getUuid());
         if (state != null) {
             bot.stopUsingItem();
+            state.forceMelee = false;
         }
     }
 
@@ -517,7 +533,18 @@ public final class BotActions {
         }
         RangedAttackState state = RANGED_STATE.remove(uuid);
         if (state != null) {
-            // nothing else to do, state cleared
+            state.forceMelee = false;
+        }
+    }
+
+    public static void clearForceMelee(ServerPlayerEntity bot) {
+        if (bot == null) {
+            return;
+        }
+        RangedAttackState state = RANGED_STATE.get(bot.getUuid());
+        if (state != null) {
+            state.forceMelee = false;
+            state.lowAngleStreak = 0;
         }
     }
 
@@ -526,5 +553,36 @@ public final class BotActions {
     private static class RangedAttackState {
         long chargeStartTick = 0L;
         long cooldownTick = 0L;
+        UUID currentTarget = null;
+        int lowAngleStreak = 0;
+        boolean forceMelee = false;
+
+        void ensureTarget(LivingEntity target) {
+            UUID targetUuid = target.getUuid();
+            if (!Objects.equals(currentTarget, targetUuid)) {
+                currentTarget = targetUuid;
+                lowAngleStreak = 0;
+                forceMelee = false;
+            }
+        }
+
+        boolean isCurrentTarget(LivingEntity target) {
+            return Objects.equals(currentTarget, target.getUuid());
+        }
+
+        void recordShot(ServerPlayerEntity bot, LivingEntity target) {
+            if (!isCurrentTarget(target)) {
+                ensureTarget(target);
+            }
+            double verticalDiff = bot.getY() - target.getY();
+            if (verticalDiff > 1.5D) {
+                lowAngleStreak++;
+                if (lowAngleStreak >= 3) {
+                    forceMelee = true;
+                }
+            } else {
+                lowAngleStreak = 0;
+            }
+        }
     }
 }

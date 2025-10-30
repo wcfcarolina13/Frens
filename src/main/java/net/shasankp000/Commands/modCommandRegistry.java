@@ -186,6 +186,16 @@ public class modCommandRegistry {
                                         )
                                 )
                         )
+                        .then(literal("stance")
+                                .then(CommandManager.argument("style", StringArgumentType.string())
+                                        .executes(context -> executeCombatStyle(context, getActiveBotOrThrow(context), parseCombatStyle(StringArgumentType.getString(context, "style"))))
+                                )
+                                .then(CommandManager.argument("bot", EntityArgumentType.player())
+                                        .then(CommandManager.argument("style", StringArgumentType.string())
+                                                .executes(context -> executeCombatStyle(context, EntityArgumentType.getPlayer(context, "bot"), parseCombatStyle(StringArgumentType.getString(context, "style"))))
+                                        )
+                                )
+                        )
                         .then(literal("equip")
                                 .executes(context -> executeEquip(context, getActiveBotOrThrow(context)))
                                 .then(CommandManager.argument("bot", EntityArgumentType.player())
@@ -1306,12 +1316,27 @@ public class modCommandRegistry {
         return 1;
     }
 
+    private static int executeCombatStyle(CommandContext<ServerCommandSource> context, ServerPlayerEntity bot, BotEventHandler.CombatStyle style) {
+        String result = BotEventHandler.setCombatStyle(bot, style);
+        ChatUtils.sendSystemMessage(context.getSource(), result);
+        return 1;
+    }
+
     private static boolean parseAssistMode(String raw) throws CommandSyntaxException {
         String normalized = raw.trim().toLowerCase(Locale.ROOT);
         return switch (normalized) {
             case "on", "enable", "enabled", "true", "yes", "fight", "assist", "start" -> true;
             case "off", "disable", "disabled", "false", "no", "stop", "standdown", "standby" -> false;
             default -> throw new SimpleCommandExceptionType(Text.literal("Unknown mode '" + raw + "'. Use on/enable or off/disable.")).create();
+        };
+    }
+
+    private static BotEventHandler.CombatStyle parseCombatStyle(String raw) throws CommandSyntaxException {
+        String normalized = raw.trim().toLowerCase(Locale.ROOT);
+        return switch (normalized) {
+            case "aggressive", "aggro", "push", "attack" -> BotEventHandler.CombatStyle.AGGRESSIVE;
+            case "evasive", "defensive", "retreat", "cover" -> BotEventHandler.CombatStyle.EVASIVE;
+            default -> throw new SimpleCommandExceptionType(Text.literal("Unknown stance '" + raw + "'. Use aggressive or evasive.")).create();
         };
     }
 

@@ -63,6 +63,11 @@ public class BotEventHandler {
     private static Vec3d lastSafePosition = null;
     private static final Random RANDOM = new Random();
     private static Mode currentMode = Mode.IDLE;
+    public enum CombatStyle {
+        AGGRESSIVE,
+        EVASIVE
+    }
+    private static CombatStyle combatStyle = CombatStyle.AGGRESSIVE;
     private static UUID followTargetUuid = null;
     private static Vec3d guardCenter = null;
     private static double guardRadius = 6.0D;
@@ -696,6 +701,19 @@ public class BotEventHandler {
         return currentMode == Mode.IDLE || currentMode == Mode.STAY || currentMode == Mode.GUARD;
     }
 
+    public static CombatStyle getCombatStyle() {
+        return combatStyle;
+    }
+
+    public static String setCombatStyle(ServerPlayerEntity bot, CombatStyle style) {
+        combatStyle = style;
+        String message = style == CombatStyle.AGGRESSIVE ?
+                "Combat stance set to aggressive." :
+                "Combat stance set to evasive.";
+        sendBotMessage(bot, message);
+        return message;
+    }
+
     private static boolean handleFollow(ServerPlayerEntity bot, MinecraftServer server, List<Entity> hostileEntities) {
         ServerPlayerEntity target = null;
         if (followTargetUuid != null && server != null) {
@@ -793,12 +811,21 @@ public class BotEventHandler {
         double distance = Math.sqrt(closest.squaredDistanceTo(bot));
         boolean targetVisible = closest instanceof LivingEntity living && bot.canSee(living);
         boolean hasRanged = targetVisible && BotActions.hasRangedWeapon(bot);
+        double verticalDiff = bot.getY() - closest.getY();
         boolean projectileThreat = closest.getType().isIn(EntityTypeTags.SKELETONS) || closest.getName().getString().toLowerCase(Locale.ROOT).contains("pillager");
         boolean multipleThreats = hostileEntities.size() > 1;
         boolean lowHealth = bot.getHealth() <= bot.getMaxHealth() * 0.5F;
         boolean shouldBlock = (projectileThreat || multipleThreats || lowHealth) && distance <= 4.5D;
 
-        if (hasRanged && distance >= 4.0D && closest instanceof LivingEntity living) {
+        if (combatStyle == CombatStyle.EVASIVE && distance <= 6.0D && verticalDiff > 1.0D) {
+            BotActions.moveBackward(bot);
+            if (bot.isOnGround() && verticalDiff > 2.0D) {
+                BotActions.jump(bot);
+            }
+            return true;
+        }
+
+        if (hasRanged && distance >= 5.0D && closest instanceof LivingEntity living) {
             if (BotActions.performRangedAttack(bot, living, server.getTicks())) {
                 return true;
             }
@@ -828,8 +855,13 @@ public class BotEventHandler {
             return true;
         } else {
             lowerShieldTracking(bot);
-            BotActions.selectBestWeapon(bot);
-            BotActions.attackNearest(bot, hostileEntities);
+            boolean hasMelee = BotActions.selectBestWeapon(bot);
+            if (!hasMelee && hasRanged && closest instanceof LivingEntity living) {
+                BotActions.clearForceMelee(bot);
+                BotActions.performRangedAttack(bot, living, server.getTicks());
+            } else {
+                BotActions.attackNearest(bot, hostileEntities);
+            }
         }
         return true;
     }
