@@ -390,6 +390,7 @@ public class AutoFaceEntity {
                 Thread.currentThread().interrupt();
             }
         }
+        BotActions.resetRangedState(bot);
     }
 
     private static void shutdownExecutorsWithUuid(UUID uuid) {
@@ -400,10 +401,12 @@ public class AutoFaceEntity {
             ServerPlayerEntity trackedBot = entry.getKey();
             if (trackedBot == null) {
                 shutdownExecutor(entry.getValue());
+                BotActions.resetRangedState(uuid);
                 return true;
             }
             if (uuid.equals(trackedBot.getUuid())) {
                 shutdownExecutor(entry.getValue());
+                BotActions.resetRangedState(uuid);
                 return true;
             }
             return false;

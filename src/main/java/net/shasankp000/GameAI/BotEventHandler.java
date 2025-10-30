@@ -4,6 +4,7 @@ import net.shasankp000.EntityUtil;
 import net.minecraft.block.BlockState;
 import net.minecraft.component.DataComponentTypes;
 import net.minecraft.entity.Entity;
+import net.minecraft.entity.LivingEntity;
 import net.minecraft.item.ItemStack;
 import net.minecraft.network.packet.s2c.play.PositionFlag;
 import net.minecraft.registry.RegistryKey;
@@ -712,7 +713,7 @@ public class BotEventHandler {
             augmentedHostiles.addAll(findHostilesAround(target, 8.0D));
         }
 
-        if (!augmentedHostiles.isEmpty() && engageHostiles(bot, augmentedHostiles)) {
+        if (!augmentedHostiles.isEmpty() && engageHostiles(bot, server, augmentedHostiles)) {
             return true;
         }
 
@@ -733,7 +734,7 @@ public class BotEventHandler {
         guardCenter = positionOf(bot);
         }
 
-        if (!hostileEntities.isEmpty() && engageHostiles(bot, hostileEntities)) {
+        if (!hostileEntities.isEmpty() && engageHostiles(bot, server, hostileEntities)) {
             return true;
         }
 
@@ -779,7 +780,7 @@ public class BotEventHandler {
         return true;
     }
 
-    private static boolean engageHostiles(ServerPlayerEntity bot, List<Entity> hostileEntities) {
+    private static boolean engageHostiles(ServerPlayerEntity bot, MinecraftServer server, List<Entity> hostileEntities) {
         if (hostileEntities.isEmpty()) {
             return false;
         }
@@ -790,10 +791,20 @@ public class BotEventHandler {
             return false;
         }
         double distance = Math.sqrt(closest.squaredDistanceTo(bot));
+        boolean targetVisible = closest instanceof LivingEntity living && bot.canSee(living);
+        boolean hasRanged = targetVisible && BotActions.hasRangedWeapon(bot);
         boolean projectileThreat = closest.getType().isIn(EntityTypeTags.SKELETONS) || closest.getName().getString().toLowerCase(Locale.ROOT).contains("pillager");
         boolean multipleThreats = hostileEntities.size() > 1;
         boolean lowHealth = bot.getHealth() <= bot.getMaxHealth() * 0.5F;
         boolean shouldBlock = (projectileThreat || multipleThreats || lowHealth) && distance <= 4.5D;
+
+        if (hasRanged && distance >= 4.0D && closest instanceof LivingEntity living) {
+            if (BotActions.performRangedAttack(bot, living, server.getTicks())) {
+                return true;
+            }
+        } else {
+            BotActions.resetRangedState(bot);
+        }
 
         if (distance > 3.0D) {
             lowerShieldTracking(bot);

@@ -2,6 +2,7 @@ package net.shasankp000.GameAI;
 
 import net.minecraft.block.BlockState;
 import net.minecraft.entity.Entity;
+import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.mob.HostileEntity;
 import net.minecraft.item.BlockItem;
 import net.minecraft.item.ItemStack;
@@ -16,7 +17,10 @@ import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 
 /**
  * Minimal action executor that replaces the old Carpet "player" commands.
@@ -27,6 +31,10 @@ public final class BotActions {
 
     private static final double STEP_DISTANCE = 0.45;
     private static final float TURN_DEGREES = 20.0f;
+    private static final int BOW_MIN_CHARGE_TICKS = 15;
+    private static final int RANGED_COOLDOWN_TICKS = 20;
+
+    private static final Map<UUID, RangedAttackState> RANGED_STATE = new HashMap<>();
 
     private BotActions() {}
 
@@ -43,6 +51,7 @@ public final class BotActions {
         bot.velocityDirty = true;
         bot.setSprinting(false);
         bot.setSneaking(false);
+        resetRangedState(bot);
     }
 
     public static void turnLeft(ServerPlayerEntity bot) {
@@ -352,5 +361,170 @@ public final class BotActions {
         bot.setYaw(newYaw);
         bot.setHeadYaw(newYaw);
         bot.setBodyYaw(newYaw);
+    }
+
+    public static boolean performRangedAttack(ServerPlayerEntity bot, LivingEntity target, long serverTick) {
+        if (bot == null || target == null || bot.getEntityWorld() == null) {
+            return false;
+        }
+
+        Selection selection = selectBestRangedWeapon(bot);
+        if (selection == null) {
+            return false;
+        }
+
+        ItemStack stack = selection.stack;
+        UUID botUuid = bot.getUuid();
+        RangedAttackState state = RANGED_STATE.computeIfAbsent(botUuid, uuid -> new RangedAttackState());
+
+        // face target
+        double targetX = target.getX();
+        double targetY = target.getBodyY(0.333333333333d);
+        double targetZ = target.getZ();
+        double dx = targetX - bot.getX();
+        double dy = targetY - bot.getEyeY();
+        double dz = targetZ - bot.getZ();
+        float yaw = (float) (Math.toDegrees(Math.atan2(-dx, dz)));
+        float pitch = (float) (Math.toDegrees(-Math.atan2(dy, Math.sqrt(dx * dx + dz * dz))));
+        bot.setYaw(yaw);
+        bot.setHeadYaw(yaw);
+        bot.setBodyYaw(yaw);
+        bot.setPitch(pitch);
+
+        if (stack.getItem() instanceof net.minecraft.item.CrossbowItem crossbow) {
+            return handleCrossbow(bot, target, selection.hand, stack, crossbow, state, serverTick);
+        }
+
+        if (stack.getItem() instanceof net.minecraft.item.BowItem) {
+            return handleChargeWeapon(bot, selection.hand, stack, state, serverTick, BOW_MIN_CHARGE_TICKS);
+        }
+
+        if (stack.getItem() instanceof net.minecraft.item.TridentItem) {
+            return handleChargeWeapon(bot, selection.hand, stack, state, serverTick, 10);
+        }
+
+        return false;
+    }
+
+    private static boolean handleChargeWeapon(ServerPlayerEntity bot, Hand hand, ItemStack stack, RangedAttackState state, long serverTick, int minChargeTicks) {
+        if (!canFire(bot, stack)) {
+            return false;
+        }
+
+        if (state.cooldownTick > serverTick) {
+            return true;
+        }
+
+        if (bot.isUsingItem()) {
+            if (state.chargeStartTick == 0L) {
+                state.chargeStartTick = serverTick - 1;
+            }
+            if (serverTick - state.chargeStartTick >= minChargeTicks) {
+                bot.stopUsingItem();
+                state.cooldownTick = serverTick + RANGED_COOLDOWN_TICKS;
+                state.chargeStartTick = 0L;
+            }
+            return true;
+        }
+
+        bot.setCurrentHand(hand);
+        state.chargeStartTick = serverTick;
+        return true;
+    }
+
+    private static boolean handleCrossbow(ServerPlayerEntity bot, LivingEntity target, Hand hand, ItemStack stack, net.minecraft.item.CrossbowItem crossbow, RangedAttackState state, long serverTick) {
+        if (!canFire(bot, stack)) {
+            return false;
+        }
+
+        if (state.cooldownTick > serverTick) {
+            return true;
+        }
+
+        if (net.minecraft.item.CrossbowItem.isCharged(stack)) {
+            float velocity = 1.6F;
+            float divergence = 14 - bot.getEntityWorld().getDifficulty().getId() * 4;
+            crossbow.shootAll(bot.getEntityWorld(), bot, hand, stack, velocity, divergence, target);
+            state.cooldownTick = serverTick + RANGED_COOLDOWN_TICKS;
+            return true;
+        }
+
+        if (bot.isUsingItem()) {
+            if (net.minecraft.item.CrossbowItem.isCharged(stack)) {
+                bot.stopUsingItem();
+                state.cooldownTick = serverTick + 2;
+            }
+            return true;
+        }
+
+        bot.setCurrentHand(hand);
+        state.chargeStartTick = serverTick;
+        return true;
+    }
+
+    private static boolean canFire(ServerPlayerEntity bot, ItemStack weapon) {
+        ItemStack projectile = bot.getProjectileType(weapon);
+        return !projectile.isEmpty() || bot.getAbilities().creativeMode;
+    }
+
+    public static boolean hasRangedWeapon(ServerPlayerEntity bot) {
+        return selectBestRangedWeapon(bot) != null;
+    }
+
+    private static Selection selectBestRangedWeapon(ServerPlayerEntity bot) {
+        ItemStack main = bot.getMainHandStack();
+        if (isRangedWeapon(main)) {
+            return new Selection(Hand.MAIN_HAND, main);
+        }
+
+        ItemStack off = bot.getOffHandStack();
+        if (isRangedWeapon(off)) {
+            return new Selection(Hand.OFF_HAND, off);
+        }
+
+        for (int i = 0; i < 9; i++) {
+            ItemStack stack = bot.getInventory().getStack(i);
+            if (isRangedWeapon(stack)) {
+                selectHotbarSlot(bot, i);
+                return new Selection(Hand.MAIN_HAND, stack);
+            }
+        }
+        return null;
+    }
+
+    private static boolean isRangedWeapon(ItemStack stack) {
+        if (stack.isEmpty()) {
+            return false;
+        }
+        return stack.getItem() instanceof net.minecraft.item.BowItem ||
+                stack.getItem() instanceof net.minecraft.item.CrossbowItem ||
+                stack.getItem() instanceof net.minecraft.item.TridentItem;
+    }
+
+    public static void resetRangedState(ServerPlayerEntity bot) {
+        if (bot == null) {
+            return;
+        }
+        RangedAttackState state = RANGED_STATE.remove(bot.getUuid());
+        if (state != null) {
+            bot.stopUsingItem();
+        }
+    }
+
+    public static void resetRangedState(UUID uuid) {
+        if (uuid == null) {
+            return;
+        }
+        RangedAttackState state = RANGED_STATE.remove(uuid);
+        if (state != null) {
+            // nothing else to do, state cleared
+        }
+    }
+
+    private record Selection(Hand hand, ItemStack stack) {}
+
+    private static class RangedAttackState {
+        long chargeStartTick = 0L;
+        long cooldownTick = 0L;
     }
 }
