@@ -691,6 +691,10 @@ public class BotEventHandler {
         return currentMode;
     }
 
+    public static boolean isPassiveMode() {
+        return currentMode == Mode.IDLE || currentMode == Mode.STAY || currentMode == Mode.GUARD;
+    }
+
     private static boolean handleFollow(ServerPlayerEntity bot, MinecraftServer server, List<Entity> hostileEntities) {
         ServerPlayerEntity target = null;
         if (followTargetUuid != null && server != null) {

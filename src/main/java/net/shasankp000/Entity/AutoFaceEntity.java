@@ -4,9 +4,12 @@ import net.shasankp000.EntityUtil;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.minecraft.entity.Entity;
 // import net.minecraft.entity.mob.HostileEntity;
+import net.minecraft.command.argument.EntityAnchorArgumentType;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
+import net.minecraft.util.Hand;
 import net.minecraft.util.math.Box;
+import net.minecraft.util.math.Vec3d;
 import net.shasankp000.ChatUtils.ChatUtils;
 import net.shasankp000.Database.QTable;
 import net.shasankp000.GameAI.BotActions;
@@ -27,6 +30,8 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.Random;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -38,11 +43,18 @@ public class AutoFaceEntity {
     private static final double BOUNDING_BOX_SIZE = 10.0; // Detection range in blocks
     private static final long LOOP_INTERVAL_MS = 200; // Interval for behaviour loop
     private static final ExecutorService executor3 = Executors.newSingleThreadExecutor();
+    private static final long EMOTE_COOLDOWN_TICKS = 20L * 45; // ~45 seconds
+    private static final long HOSTILE_COOLDOWN_TICKS = 20L * 15; // wait 15 seconds after combat
+    private static final double EMOTE_MAX_DISTANCE = 6.0D;
+    private static final double EMOTE_LOOK_THRESHOLD = 0.65D;
+    private static final Random EMOTE_RANDOM = new Random();
     public static boolean botBusy;
     private static boolean botExecutingTask;
     public static boolean hostileEntityInFront;
     public static boolean isHandlerTriggered;
     private static long lastBusyLogMs = 0L;
+    private static long lastEmoteTick = -EMOTE_COOLDOWN_TICKS;
+    private static long lastHostileTick = 0L;
     private static boolean isWorldTickListenerActive = true; // Flag to control execution
     private static QTable qTable;
     public static RLAgent rlAgent;
@@ -127,6 +139,10 @@ public class AutoFaceEntity {
                  hostileEntities = nearbyEntities.stream()
                         .filter(EntityUtil::isHostile)
                         .toList();
+
+                if (!hostileEntities.isEmpty()) {
+                    lastHostileTick = server.getTicks();
+                }
 
                 if (CombatInventoryManager.tryConsumeIfNeeded(bot, hostileEntities)) {
                     return;
@@ -305,6 +321,8 @@ public class AutoFaceEntity {
                                 throw new RuntimeException(e);
                             }
                         }
+
+                        maybePerformAmbientEmote(bot, server, nearbyEntities);
                     }
 
                 }
@@ -423,6 +441,75 @@ public class AutoFaceEntity {
         double botFacing = (botYaw + 360) % 360;
         double relativeAngle = (angleToEntity - botFacing + 360) % 360;
         return relativeAngle;
+    }
+
+    private static void maybePerformAmbientEmote(ServerPlayerEntity bot, MinecraftServer server, List<Entity> nearbyEntities) {
+        if (server == null || bot == null) {
+            return;
+        }
+        if (!BotEventHandler.isPassiveMode() || BotEventHandler.isSpartanModeActive()) {
+            return;
+        }
+        if (hostileEntities != null && !hostileEntities.isEmpty()) {
+            return;
+        }
+        int serverTicks = server.getTicks();
+        if (serverTicks - lastEmoteTick < EMOTE_COOLDOWN_TICKS) {
+            return;
+        }
+        if (serverTicks - lastHostileTick < HOSTILE_COOLDOWN_TICKS) {
+            return;
+        }
+        if (bot.isUsingItem() || bot.isBlocking() || bot.isSleeping() || bot.isSneaking()) {
+            return;
+        }
+        if (bot.getVelocity().horizontalLengthSquared() > 0.01D) {
+            return;
+        }
+        if (EMOTE_RANDOM.nextDouble() > 0.2D) { // 20% chance each opportunity
+            return;
+        }
+
+        Optional<ServerPlayerEntity> target = findGazingPlayer(bot, nearbyEntities);
+        if (target.isEmpty()) {
+            return;
+        }
+
+        ServerPlayerEntity player = target.get();
+        bot.lookAt(EntityAnchorArgumentType.EntityAnchor.EYES, player.getEyePos());
+        performWave(bot);
+        lastEmoteTick = serverTicks;
+    }
+
+    private static Optional<ServerPlayerEntity> findGazingPlayer(ServerPlayerEntity bot, List<Entity> nearbyEntities) {
+        return nearbyEntities.stream()
+                .filter(entity -> entity instanceof ServerPlayerEntity)
+                .map(entity -> (ServerPlayerEntity) entity)
+                .filter(player -> !player.getUuid().equals(bot.getUuid()))
+                .filter(player -> !player.isSpectator())
+                .filter(player -> player.getCommandSource().getWorld() == bot.getCommandSource().getWorld())
+                .filter(player -> player.squaredDistanceTo(bot) <= EMOTE_MAX_DISTANCE * EMOTE_MAX_DISTANCE)
+                .filter(player -> isLookingAtBot(player, bot))
+                .findFirst();
+    }
+
+    private static boolean isLookingAtBot(ServerPlayerEntity player, ServerPlayerEntity bot) {
+        Vec3d eyeToBot = bot.getEyePos().subtract(player.getEyePos());
+        double distanceSq = eyeToBot.lengthSquared();
+        if (distanceSq < 0.0001D) {
+            return false;
+        }
+        Vec3d direction = eyeToBot.normalize();
+        Vec3d playerLook = player.getRotationVec(1.0F).normalize();
+        return playerLook.dotProduct(direction) >= EMOTE_LOOK_THRESHOLD;
+    }
+
+    private static void performWave(ServerPlayerEntity bot) {
+        if (!bot.getOffHandStack().isEmpty()) {
+            bot.swingHand(Hand.OFF_HAND, true);
+        } else {
+            bot.swingHand(Hand.MAIN_HAND, true);
+        }
     }
 
 
