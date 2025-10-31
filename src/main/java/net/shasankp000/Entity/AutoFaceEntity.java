@@ -1,5 +1,6 @@
 package net.shasankp000.Entity;
 
+import net.shasankp000.Entity.RayCasting;
 import net.shasankp000.EntityUtil;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.minecraft.entity.Entity;
@@ -448,7 +449,12 @@ public class AutoFaceEntity {
     public static List<Entity> detectNearbyEntities(ServerPlayerEntity bot, double boundingBoxSize) {
         // Define a bounding box around the bot with the given size
         Box searchBox = bot.getBoundingBox().expand(boundingBoxSize, boundingBoxSize, boundingBoxSize);
-        return bot.getEntityWorld().getOtherEntities(bot, searchBox);
+        List<Entity> allNearbyEntities = bot.getEntityWorld().getOtherEntities(bot, searchBox);
+
+        // Filter entities to only include those with a line of sight to the bot
+        return allNearbyEntities.stream()
+                .filter(entity -> RayCasting.hasLineOfSight(bot, entity))
+                .toList();
     }
 
     public static String determineDirectionToBot(ServerPlayerEntity bot, Entity target) {
