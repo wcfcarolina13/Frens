@@ -31,6 +31,6 @@ A detailed review of the project's core components has been conducted:
 
 ## Next Steps
 
-1.  **Identify Run Command:** Determine the Gradle task or script to launch the Minecraft client with the mod.
+1.  **Identify Run Command:** The command to run the Minecraft client with the mod is `./gradlew runClient`.
 2.  **Run the Client:** Execute the identified command to test the mod in a live environment.
 3.  **Further Optimizations/Refactoring:** Based on the detailed review, several areas for potential optimization and refactoring have been identified (e.g., consistent logging, hardcoded values, performance of `isStateConsistent`, `calculateRisk`/`calculateReward` complexity). These can be addressed in future iterations.
