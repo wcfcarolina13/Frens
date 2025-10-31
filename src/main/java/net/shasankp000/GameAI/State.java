@@ -9,6 +9,7 @@ import java.io.Serializable;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.stream.Collectors;
 
 public class State implements Serializable {
@@ -310,4 +311,44 @@ public class State implements Serializable {
     }
 
 
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        State state1 = (State) o;
+        return botX == state1.botX &&
+               botY == state1.botY &&
+               botZ == state1.botZ &&
+               frostLevel == state1.frostLevel &&
+               Double.compare(state1.distanceToHostileEntity, distanceToHostileEntity) == 0 &&
+               Double.compare(state1.distanceToDangerZone, distanceToDangerZone) == 0 &&
+               botHealth == state1.botHealth &&
+               botHungerLevel == state1.botHungerLevel &&
+               botOxygenLevel == state1.botOxygenLevel &&
+               enclosed == state1.enclosed &&
+               solidNeighborCount == state1.solidNeighborCount &&
+               hasHeadroom == state1.hasHeadroom &&
+               hasEscapeRoute == state1.hasEscapeRoute &&
+               riskAppetite == state1.riskAppetite &&
+               actionTaken == state1.actionTaken &&
+               Objects.equals(hotBarItems, state1.hotBarItems) &&
+               Objects.equals(selectedItem, state1.selectedItem) &&
+               Objects.equals(timeOfDay, state1.timeOfDay) &&
+               Objects.equals(dimensionType, state1.dimensionType) &&
+               Objects.equals(offhandItem, state1.offhandItem) &&
+               Objects.equals(armorItems, state1.armorItems) &&
+               Objects.equals(nearbyEntities, state1.nearbyEntities) &&
+               Objects.equals(riskMap, state1.riskMap) &&
+               Objects.equals(nearbyBlocks, state1.nearbyBlocks) &&
+               Objects.equals(podMap, state1.podMap);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(botX, botY, botZ, frostLevel, distanceToHostileEntity, distanceToDangerZone,
+                            botHealth, hotBarItems, selectedItem, timeOfDay, dimensionType,
+                            botHungerLevel, botOxygenLevel, offhandItem, armorItems, enclosed,
+                            solidNeighborCount, hasHeadroom, hasEscapeRoute, actionTaken,
+                            nearbyEntities, riskMap, riskAppetite, nearbyBlocks, podMap);
+    }
 }
