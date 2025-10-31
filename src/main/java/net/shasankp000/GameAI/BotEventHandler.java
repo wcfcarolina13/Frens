@@ -404,7 +404,7 @@ public class BotEventHandler {
             }
         }
 
-        boolean enclosed = solidNeighbors >= 5 || (!escapeRoute && !headroom);
+        boolean enclosed = solidNeighbors >= 5;
         return new EnvironmentSnapshot(enclosed, solidNeighbors, headroom, escapeRoute);
     }
 
