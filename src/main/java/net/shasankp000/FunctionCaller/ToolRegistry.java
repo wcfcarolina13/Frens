@@ -110,6 +110,24 @@ public class ToolRegistry {
             ),
 
             new Tool(
+                    "chopWood",
+                    """
+                    Detects and chops wood blocks of a specified tree type. This is a composite tool.
+                    """,
+                    List.of(
+                            new Tool.Parameter("treeType", "Type of tree to chop (e.g., 'oak_log', 'birch_log').")
+                    ),
+                    Set.of("lastChoppedBlock.x", "lastChoppedBlock.y", "lastChoppedBlock.z"),
+                    (sharedState, paramMap, result) -> {
+                        if (sharedState.containsKey("lastDetectedBlock.x")) {
+                            sharedState.put("lastChoppedBlock.x", sharedState.get("lastDetectedBlock.x"));
+                            sharedState.put("lastChoppedBlock.y", sharedState.get("lastDetectedBlock.y"));
+                            sharedState.put("lastChoppedBlock.z", sharedState.get("lastDetectedBlock.z"));
+                        }
+                    }
+            ),
+
+            new Tool(
                     "getOxygenLevel",
                     """
                     Retrieves the bot's current oxygen (air) level.

@@ -405,6 +405,47 @@ public class FunctionCallerV2 {
                 getFunctionOutput("Failed to cultivate land: " + e.getMessage());
             }
         }
+
+        /** chopWood: chop a wood block **/
+        private static void chopWood(String treeType) {
+            System.out.println("Chopping wood of type: " + treeType);
+            if (botSource == null || botSource.getPlayer() == null) {
+                getFunctionOutput("Bot not found.");
+                return;
+            }
+            try {
+                // 1. Detect the block
+                blockDetectionUnit.detectBlocks(Objects.requireNonNull(botSource.getPlayer()), treeType);
+                BlockPos detectedPos = (BlockPos) SharedStateUtils.getValue(sharedState, "lastDetectedBlock.pos");
+                if (detectedPos == null) {
+                    getFunctionOutput("No " + treeType + " found.");
+                    return;
+                }
+                // 2. Go to the block
+                String goToResult = GoTo.goTo(botSource, detectedPos.getX(), detectedPos.getY(), detectedPos.getZ(), false);
+                if (goToResult.contains("Failed")) {
+                    getFunctionOutput("Failed to go to block: " + goToResult);
+                    return;
+                }
+                // 3. Mine the block
+                CompletableFuture<String> miningFuture = CompletableFuture.supplyAsync(() -> {
+                    try {
+                        return MiningTool.mineBlock(
+                                Objects.requireNonNull(botSource.getPlayer()),
+                                detectedPos
+                        ).get();
+                    } catch (Exception e) {
+                        e.printStackTrace();
+                        return "⚠️ Failed to mine block: " + e.getMessage();
+                    }
+                });
+                String mineResult = miningFuture.get(10, TimeUnit.SECONDS);
+                getFunctionOutput(mineResult);
+            } catch (Exception e) {
+                logger.error("Error in chopWood: ", e);
+                getFunctionOutput("Failed to chop wood: " + e.getMessage());
+            }
+        }
     }
 
     private static String toolBuilder() {
@@ -1112,7 +1153,8 @@ public class FunctionCallerV2 {
             Map.entry("getOxygenLevel", List.of("oxygenLevel")),
             Map.entry("getHungerLevel", List.of("hungerLevel")),
             Map.entry("getHealthLevel", List.of("healthLevel")),
-            Map.entry("cultivateLand", List.of("lastCultivateStatus"))
+            Map.entry("cultivateLand", List.of("lastCultivateStatus")),
+            Map.entry("chopWood", List.of("lastChopStatus"))
     );
 
     private static void parseOutputValues(String functionName, String output) {
@@ -1195,6 +1237,13 @@ public class FunctionCallerV2 {
                 if (output.contains("Cultivation complete!")) {
                     values.add("success");
                 } else if (output.contains("Failed to cultivate land")) {
+                    values.add("failed");
+                }
+            }
+            case "chopWood" -> {
+                if (output.contains("Mining complete!")) {
+                    values.add("success");
+                } else if (output.contains("Failed to chop wood")) {
                     values.add("failed");
                 }
             }
@@ -1316,6 +1365,11 @@ public class FunctionCallerV2 {
                     int targetZ = Integer.parseInt(resolvePlaceholder(paramMap.get("targetZ")));
                     logger.info("Calling method: mineBlock with targetX={} targetY={} targetZ={}", targetX, targetY, targetZ);
                     Tools.mineBlock(targetX, targetY, targetZ);
+                }
+                case "chopWood" -> {
+                    String treeType = resolvePlaceholder(paramMap.get("treeType"));
+                    logger.info("Calling method: chopWood with treeType={}", treeType);
+                    Tools.chopWood(treeType);
                 }
                 case "getOxygenLevel" -> {
                     logger.info("Calling method: getOxygenLevel");
