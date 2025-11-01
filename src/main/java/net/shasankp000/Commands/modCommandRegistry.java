@@ -335,7 +335,6 @@ public class modCommandRegistry {
                                                                         .executes(context -> {
 
                                                                             ServerPlayerEntity bot = EntityArgumentType.getPlayer(context, "bot");
-                                                                            MinecraftServer server = bot.getCommandSource().getServer();
                                                                             String blockType = StringArgumentType.getString(context, "block_type");
                                                                             int x = IntegerArgumentType.getInteger(context, "x");
                                                                             int y = IntegerArgumentType.getInteger(context, "y");
@@ -940,33 +939,7 @@ public class modCommandRegistry {
 
     }
 
-    private static void notImplementedMessage(CommandContext<ServerCommandSource> context) {
 
-        MinecraftServer server = context.getSource().getServer();
-
-        String botName = StringArgumentType.getString(context, "bot_name");
-
-        ServerPlayerEntity bot = server.getPlayerManager().getPlayer(botName);
-
-        if (bot == null) {
-
-            context.getSource().sendMessage(Text.of("The requested bot could not be found on the server!"));
-            server.sendMessage(Text.literal("Error! Bot not found!"));
-            LOGGER.error("The requested bot could not be found on the server!");
-
-        }
-
-        else {
-
-            ServerCommandSource botSource = bot.getCommandSource().withLevel(2).withSilent().withMaxLevel(4);
-
-            CommandUtils.run(botSource, "say §cThis command has not been implemented yet and is a work in progress! ");
-
-
-        }
-
-
-    }
 
     private static void teleportForward(CommandContext<ServerCommandSource> context) {
         MinecraftServer server = context.getSource().getServer();
@@ -1158,16 +1131,7 @@ public class modCommandRegistry {
 
     }
 
-    private static void moveBackward(MinecraftServer server, ServerCommandSource source, String botName) {
 
-        if (source.getPlayer() != null) {
-
-            CommandUtils.run(source, "player " + botName + " move backward");
-
-        }
-
-
-    }
 
     public static void stopMoving(MinecraftServer server, ServerCommandSource source, String botName) {
 
@@ -1180,75 +1144,54 @@ public class modCommandRegistry {
 
     }
 
-    private static void moveLeft(MinecraftServer server, ServerCommandSource source, String botName) {
-
-        if (source.getPlayer() != null) {
-
-            CommandUtils.run(source, "player " + botName + " move left");
-
-        }
-
-    }
-
-    private static void moveRight(MinecraftServer server, ServerCommandSource source, String botName) {
-
-        if (source.getPlayer() != null) {
-
-            CommandUtils.run(source, "player " + botName + " move right");
-
-        }
-
-    }
-
     private static void equipDefaultLoadout(MinecraftServer server, ServerPlayerEntity bot) {
         if (server == null || bot == null) {
             return;
         }
 
-        String targetName = bot.getName().getString();
         server.execute(() -> {
             DynamicRegistryManager.Immutable registryManager = server.getRegistryManager();
 
             giveStack(bot, withEnchantments(registryManager, Items.DIAMOND_SWORD.getDefaultStack(),
                     new int[]{5, 3},
-                    Enchantments.SHARPNESS, Enchantments.UNBREAKING));
+                    (RegistryKey<Enchantment>[]) new RegistryKey[]{Enchantments.SHARPNESS, Enchantments.UNBREAKING}));
 
             giveStack(bot, withEnchantments(registryManager, Items.BOW.getDefaultStack(),
                     new int[]{5, 3, 1},
-                    Enchantments.POWER, Enchantments.UNBREAKING, Enchantments.INFINITY));
+                    (RegistryKey<Enchantment>[]) new RegistryKey[]{Enchantments.POWER, Enchantments.UNBREAKING, Enchantments.INFINITY}));
             giveStack(bot, new ItemStack(Items.ARROW, 64));
             giveStack(bot, new ItemStack(Items.SPECTRAL_ARROW, 32));
 
             giveStack(bot, withEnchantments(registryManager, Items.CROSSBOW.getDefaultStack(),
                     new int[]{3, 3},
-                    Enchantments.QUICK_CHARGE, Enchantments.UNBREAKING));
+                    (RegistryKey<Enchantment>[]) new RegistryKey[]{Enchantments.QUICK_CHARGE, Enchantments.UNBREAKING}));
 
             giveStack(bot, withEnchantments(registryManager, Items.SHIELD.getDefaultStack(),
                     new int[]{3},
-                    Enchantments.UNBREAKING));
+                    (RegistryKey<Enchantment>[]) new RegistryKey[]{Enchantments.UNBREAKING}));
 
             giveStack(bot, withEnchantments(registryManager, Items.NETHERITE_CHESTPLATE.getDefaultStack(),
                     new int[]{4, 3},
-                    Enchantments.PROTECTION, Enchantments.UNBREAKING));
+                    (RegistryKey<Enchantment>[]) new RegistryKey[]{Enchantments.PROTECTION, Enchantments.UNBREAKING}));
             giveStack(bot, withEnchantments(registryManager, Items.NETHERITE_HELMET.getDefaultStack(),
                     new int[]{4, 3, 3},
-                    Enchantments.PROTECTION, Enchantments.RESPIRATION, Enchantments.UNBREAKING));
+                    (RegistryKey<Enchantment>[]) new RegistryKey[]{Enchantments.PROTECTION, Enchantments.RESPIRATION, Enchantments.UNBREAKING}));
             giveStack(bot, withEnchantments(registryManager, Items.NETHERITE_LEGGINGS.getDefaultStack(),
                     new int[]{4, 3},
-                    Enchantments.PROTECTION, Enchantments.UNBREAKING));
+                    (RegistryKey<Enchantment>[]) new RegistryKey[]{Enchantments.PROTECTION, Enchantments.UNBREAKING}));
             giveStack(bot, withEnchantments(registryManager, Items.NETHERITE_BOOTS.getDefaultStack(),
                     new int[]{4, 4, 3},
-                    Enchantments.PROTECTION, Enchantments.FEATHER_FALLING, Enchantments.UNBREAKING));
+                    (RegistryKey<Enchantment>[]) new RegistryKey[]{Enchantments.PROTECTION, Enchantments.FEATHER_FALLING, Enchantments.UNBREAKING}));
 
             giveStack(bot, withEnchantments(registryManager, Items.NETHERITE_PICKAXE.getDefaultStack(),
                     new int[]{5, 3, 1},
-                    Enchantments.EFFICIENCY, Enchantments.UNBREAKING, Enchantments.MENDING));
+                    (RegistryKey<Enchantment>[]) new RegistryKey[]{Enchantments.EFFICIENCY, Enchantments.UNBREAKING, Enchantments.MENDING}));
             giveStack(bot, withEnchantments(registryManager, Items.NETHERITE_AXE.getDefaultStack(),
                     new int[]{5, 3},
-                    Enchantments.SHARPNESS, Enchantments.UNBREAKING));
+                    (RegistryKey<Enchantment>[]) new RegistryKey[]{Enchantments.SHARPNESS, Enchantments.UNBREAKING}));
             giveStack(bot, withEnchantments(registryManager, Items.NETHERITE_SHOVEL.getDefaultStack(),
                     new int[]{5, 3},
-                    Enchantments.EFFICIENCY, Enchantments.UNBREAKING));
+                    (RegistryKey<Enchantment>[]) new RegistryKey[]{Enchantments.EFFICIENCY, Enchantments.UNBREAKING}));
 
             giveStack(bot, new ItemStack(Items.GOLDEN_CARROT, 64));
             giveStack(bot, new ItemStack(Items.COOKED_BEEF, 64));
@@ -1271,6 +1214,7 @@ public class modCommandRegistry {
         }
     }
 
+    @SafeVarargs
     private static ItemStack withEnchantments(DynamicRegistryManager registryManager, ItemStack stack, int[] levels, RegistryKey<Enchantment>... enchantments) {
         if (stack.isEmpty()) {
             return stack;

@@ -3,11 +3,9 @@ package net.shasankp000.PacketHandler;
 
 import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
-import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.minecraft.command.argument.EntityArgumentType;
 import net.minecraft.network.packet.c2s.play.ClientCommandC2SPacket;
-import net.minecraft.network.packet.c2s.play.PlayerInputC2SPacket;
-import net.minecraft.util.PlayerInput;
+
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.network.ServerPlayNetworkHandler;
@@ -91,7 +89,6 @@ public class InputPacketHandler {
         try {
 
             // Get the bot's network handler (which implements ServerPlayPacketListener)
-            ServerPlayNetworkHandler networkHandler = bot.networkHandler;
 
             // Create a packet to simulate releasing the sprint key.
             // Send the packet to the server
@@ -129,11 +126,7 @@ public class InputPacketHandler {
 
         try {
 
-            // Get the bot's network handler (which implements ServerPlayPacketListener)
-            ServerPlayNetworkHandler networkHandler = bot.networkHandler;
 
-            // Create a packet to simulate holding down the sprint key.
-            ClientCommandC2SPacket packet = new ClientCommandC2SPacket(bot, ClientCommandC2SPacket.Mode.START_SPRINTING);
 
             // Send the packet to the server
             // networkHandler.onClientCommand(packet);
@@ -219,8 +212,7 @@ public class InputPacketHandler {
 
         lastPosition = bot.getEntityPos();
 
-        ServerPlayNetworkHandler networkHandler = bot.networkHandler;
-        // PlayerInputC2SPacket packet = new PlayerInputC2SPacket(new PlayerInput(true, false, false, false, false, false, false)); // W key packet.
+
         // networkHandler.onPlayerInput(packet);
 
 
@@ -313,7 +305,6 @@ public class InputPacketHandler {
 
         lastPosition = bot.getEntityPos();
 
-        ServerPlayNetworkHandler networkHandler = bot.networkHandler;
         // PlayerInputC2SPacket packet = new PlayerInputC2SPacket(new PlayerInput(false, true, false, false, false, false, false)); // S key packet.
         // networkHandler.onPlayerInput(packet);
 
@@ -405,14 +396,6 @@ public class InputPacketHandler {
         }
 
 
-        lastPosition = bot.getEntityPos();
-
-        ServerPlayNetworkHandler networkHandler = bot.networkHandler;
-        // PlayerInputC2SPacket packet = new PlayerInputC2SPacket(new PlayerInput(false, false, true, false, false, false, false)); // A key packet.
-        // networkHandler.onPlayerInput(packet);
-
-        System.out.println("Recorded current bot position as last pos: " + lastPosition);
-
 
         try {
             ticksRemaining = 20; // Number of ticks to hold the key
@@ -490,14 +473,6 @@ public class InputPacketHandler {
             return;
         }
 
-
-        lastPosition = bot.getEntityPos();
-
-        ServerPlayNetworkHandler networkHandler = bot.networkHandler;
-        // PlayerInputC2SPacket packet = new PlayerInputC2SPacket(new PlayerInput(false, false, false, true, false, false, false)); // D key packet.
-        // networkHandler.onPlayerInput(packet);
-
-        System.out.println("Recorded current bot position as last pos: " + lastPosition);
 
         try {
             ticksRemaining = 20; // Number of ticks to hold the key

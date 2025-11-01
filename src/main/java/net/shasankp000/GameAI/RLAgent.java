@@ -4,12 +4,10 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.EnumMap;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Random;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -29,7 +27,6 @@ import net.shasankp000.PlayerUtils.ResourceEvaluator;
 import net.shasankp000.PlayerUtils.SelectedItemDetails;
 import net.shasankp000.PlayerUtils.ThreatDetector;
 import net.shasankp000.Commands.modCommandRegistry;
-import net.shasankp000.GameAI.BotEventHandler;
 
 public class RLAgent {
     private static final double ALPHA = 0.1;  // Learning rate
@@ -314,14 +311,6 @@ public class RLAgent {
 
 
 
-    private double getQValueForAction(State state, Action action, QTable qTable) {
-        StateActionPair pair = new StateActionPair(state, action);
-        QEntry entry = qTable.getEntry(pair);
-
-        return (entry != null) ? entry.getQValue() : Double.NEGATIVE_INFINITY;
-    }
-
-
 
     private double getPodForAction(Action action, QTable qTable) {
         double totalReward = 0.0;
@@ -333,7 +322,6 @@ public class RLAgent {
 
             if (pair.getAction() == action) {
                 double qValue = qEntry.getQValue();
-                totalReward += Math.abs(qValue);
                 if (qValue < 0) {
                     deathCount++;
                 }
@@ -786,8 +774,10 @@ public class RLAgent {
 
 
                 default:
-                        risk += 0.0; // unknown action, don't penalize without context.
-                        break;
+                    risk += 0.0; // unknown action, don't penalize without context.
+                    break;
+
+
 
                 }
 
