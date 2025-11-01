@@ -112,9 +112,17 @@ public class FunctionCallerV2 {
 
     private static UUID playerUUID;
 
-    private static final Pattern THINK_BLOCK = Pattern.compile("([\\s\\S]*?)", Pattern.DOTALL);
+
 
     private static String selectedLM = AIPlayer.CONFIG.getSelectedLanguageModel();
+
+    // Constants for JSON keys
+    private static final String FUNCTION_NAME_KEY = "functionName";
+    private static final String PIPELINE_KEY = "pipeline";
+    private static final String CLARIFICATION_KEY = "clarification";
+    private static final String PARAMETERS_KEY = "parameters";
+    private static final String PARAMETER_NAME_KEY = "parameterName";
+    private static final String PARAMETER_VALUE_KEY = "parameterValue";
 
     public FunctionCallerV2(ServerCommandSource botSource, UUID playerUUID) {
         FunctionCallerV2.botSource = botSource;
@@ -381,7 +389,7 @@ public class FunctionCallerV2 {
             return Map.of(
                     "name", tool.name(),
                     "description", tool.description(),
-                    "parameters", tool.parameters().stream().map(param -> Map.of(
+                    PARAMETERS_KEY, tool.parameters().stream().map(param -> Map.of(
                             "name", param.name(),
                             "description", param.description(),
                             "required", true
@@ -521,7 +529,7 @@ public class FunctionCallerV2 {
             
             ✅ Always use $placeholders when a step depends on values returned by a previous step. The pipeline executor will resolve these placeholders dynamically with the correct output from the previous step.
             
-            ✅ Always use the "parameterName" and "parameterValue" fields exactly — do not rename them.
+            ✅ Always use the " + PARAMETER_NAME_KEY + " and " + PARAMETER_VALUE_KEY + " fields exactly — do not rename them.
             
             ✅ Do not output any extra words, explanations, or formatting — only valid JSON.
             
@@ -584,9 +592,7 @@ public class FunctionCallerV2 {
         Here are some example player prompts you may receive: \n
         1. Could you check if there is a block in front of you? \n
         2. Look around for any hostile mobs, and report to me if you find any. \n
-        3. Could you mine some stone and bring them to me? \n
-        4. Craft a set of iron armor. \n
-        5. Please go to coordinates 10 -60 20. \n
+                3. Could you mine some stone and bring them to me? \n\n        5. Please go to coordinates 10 -60 20. \n\n
         \n
         A few more variations of the prompts may be: \n
         "Could you search for blocks in front of you?"
@@ -598,9 +604,7 @@ public class FunctionCallerV2 {
         \n
         1. The player asked you to check whether there is a block in front of you or not. \n
         2. The player asked you to search for hostile mobs around you, and to report to the player if you find any such hostile mob. \n
-        3. The player asked you to mine some stone and then bring the stone to the player. \n
-        4. The player asked you to craft a set of iron armor. \n
-        5. The player asked you to go to coordinates 10 -60 20. You followed the instructions and began movement to the coordinates. \n
+                3. The player asked you to mine some stone and then bring the stone to the player. \n\n        4. The player asked you to go to coordinates 10 -60 20. You followed the instructions and began movement to the coordinates. \n\n
         Remember that all the context you generate should be in the past tense, sense it is being recorded after the deed has been done.
         \n
         "Remember that when dealing with prompts that ask the bot to go to a specific set of x y z coordinates, you MUST NOT alter the coordinates, they SHOULD BE the exact same as in the prompt given by the player.
@@ -618,7 +622,7 @@ public class FunctionCallerV2 {
             OllamaChatResult chatResult = ollamaAPI.chat(requestModel);
             contextOutput = chatResult.getResponse();
         } catch (OllamaBaseException | IOException | InterruptedException | JsonSyntaxException e) {
-            logger.error("{}", (Object) e.getStackTrace());
+            logger.error("Error generating prompt context: {}", e.getMessage(), e);
         }
         return contextOutput;
     }
@@ -708,12 +712,10 @@ public class FunctionCallerV2 {
             OllamaChatResult chatResult = ollamaAPI.chat(requestModel);
             response = chatResult.getResponse();
             logger.info("Raw LLM Response: {}", response);
-            String cleanedResponse = stripThinkBlock(response);
-            String jsonPart = extractJson(cleanedResponse);
+            String jsonPart = extractJson(response);
             logger.info("Extracted JSON: {}", jsonPart);
-            executeFunction(userPrompt, jsonPart);
         } catch (Exception e) {
-            logger.error("Error in Function Caller: {}", e);
+            logger.error("Error in Function Caller (Ollama): {}", e.getMessage(), e);
         }
     }
 
@@ -735,30 +737,28 @@ public class FunctionCallerV2 {
         try {
             response = client.sendPrompt(fullSystemPrompt, userPrompt);
             logger.info("Raw LLM Response: {}", response);
-            String cleanedResponse = stripThinkBlock(response);
-            String jsonPart = extractJson(cleanedResponse);
+            String jsonPart = extractJson(response);
             logger.info("Extracted JSON: {}", jsonPart);
             executeFunction(userPrompt, jsonPart, client);
         } catch (Exception e) {
-            logger.error("Error in Function Caller: {}", e);
+            logger.error("Error in Function Caller (LLMClient): {}", e.getMessage(), e);
         }
     }
 
     private static String extractJson(String response) {
-        String stripped = stripThinkBlock(response); // Use fix 1 here
         // Try to locate either a JSON object or array
-        int objStart = stripped.indexOf("{");
-        int objEnd = stripped.lastIndexOf("}") + 1;
-        int arrStart = stripped.indexOf("[");
-        int arrEnd = stripped.lastIndexOf("]") + 1;
+        int objStart = response.indexOf("{");
+        int objEnd = response.lastIndexOf("}") + 1;
+        int arrStart = response.indexOf("[");
+        int arrEnd = response.lastIndexOf("]") + 1;
         // Try full JSON object (most likely case)
         if (objStart != -1 && objEnd != -1 && objEnd > objStart) {
-            String candidate = stripped.substring(objStart, objEnd);
+            String candidate = response.substring(objStart, objEnd);
             if (isValidJson(candidate)) return candidate;
         }
         // Try JSON array (secondary fallback)
         if (arrStart != -1 && arrEnd != -1 && arrEnd > arrStart) {
-            String candidate = stripped.substring(arrStart, arrEnd);
+            String candidate = response.substring(arrStart, arrEnd);
             if (isValidJson(candidate)) return candidate;
         }
         logger.error("❌ Could not extract valid JSON from response:\n{}", response);
@@ -774,13 +774,7 @@ public class FunctionCallerV2 {
         }
     }
 
-    private static String stripThinkBlock(String response) {
-        Matcher matcher = THINK_BLOCK.matcher(response);
-        if (matcher.find()) {
-            return response.replace(matcher.group(0), "").trim(); // Strip the full ...
-        }
-        return response.trim();
-    }
+
 
     private static void executeFunction(String userInput, String response) {
         String executionDateTime = getCurrentDateandTime();
@@ -791,35 +785,35 @@ public class FunctionCallerV2 {
                 JsonReader reader = new JsonReader(new StringReader(cleanedResponse));
                 reader.setLenient(true);
                 JsonObject jsonObject = JsonParser.parseReader(reader).getAsJsonObject();
-                if (jsonObject.has("pipeline")) {
+                if (jsonObject.has(PIPELINE_KEY)) {
                     AutoFaceEntity.setBotExecutingTask(true);
-                    JsonArray pipeline = jsonObject.getAsJsonArray("pipeline");
+                    JsonArray pipeline = jsonObject.getAsJsonArray(PIPELINE_KEY);
                     runPipelineLoop(pipeline);
-                } else if (jsonObject.has("functionName")) {
+                } else if (jsonObject.has(FUNCTION_NAME_KEY)) {
                     AutoFaceEntity.setBotExecutingTask(true);
-                    String fnName = jsonObject.get("functionName").getAsString();
-                    JsonArray paramsArray = jsonObject.get("parameters").getAsJsonArray();
+                    String fnName = jsonObject.get(FUNCTION_NAME_KEY).getAsString();
+                    JsonArray paramsArray = jsonObject.get(PARAMETERS_KEY).getAsJsonArray();
                     Map<String, String> paramMap = new ConcurrentHashMap<>();
                     StringBuilder params = new StringBuilder();
                     for (JsonElement parameter : paramsArray) {
                         JsonObject paramObj = parameter.getAsJsonObject();
-                        String paramName = paramObj.get("parameterName").getAsString();
-                        String paramValue = paramObj.get("parameterValue").getAsString();
+                        String paramName = paramObj.get(PARAMETER_NAME_KEY).getAsString();
+                        String paramValue = paramObj.get(PARAMETER_VALUE_KEY).getAsString();
                         paramValue = resolvePlaceholder(paramValue);
                         params.append(paramName).append("=").append(paramValue).append(", ");
                         paramMap.put(paramName, paramValue);
                     }
                     logger.info("Executing: {} with {}", fnName, paramMap);
                     callFunction(fnName, paramMap).join();
-                } else if (jsonObject.has("clarification")) {
+                } else if (jsonObject.has(CLARIFICATION_KEY)) {
                     System.out.println("Detected clarification");
-                    String clarification = jsonObject.get("clarification").getAsString();
+                    String clarification = jsonObject.get(CLARIFICATION_KEY).getAsString();
                     // Save the clarification state
                     ChatContextManager.setPendingClarification(playerUUID, userInput, clarification, botSource.getName());
                     // Relay to player in-game
-                    sendMessageToPlayer(clarification);
+                    // sendMessageToPlayer(clarification); // Removed as per refactoring
                 } else {
-                    throw new IllegalStateException("Response must have either functionName or pipeline.");
+                    throw new IllegalStateException("Response must have either " + FUNCTION_NAME_KEY + " or " + PIPELINE_KEY + ".");
                 }
                 // getFunctionResultAndSave(userInput, executionDateTime);
             });
@@ -837,34 +831,34 @@ public class FunctionCallerV2 {
                 JsonReader reader = new JsonReader(new StringReader(cleanedResponse));
                 reader.setLenient(true);
                 JsonObject jsonObject = JsonParser.parseReader(reader).getAsJsonObject();
-                if (jsonObject.has("pipeline")) {
+                if (jsonObject.has(PIPELINE_KEY)) {
                     AutoFaceEntity.setBotExecutingTask(true);
-                    JsonArray pipeline = jsonObject.getAsJsonArray("pipeline");
+                    JsonArray pipeline = jsonObject.getAsJsonArray(PIPELINE_KEY);
                     runPipelineLoop(pipeline, client);
-                } else if (jsonObject.has("functionName")) {
+                } else if (jsonObject.has(FUNCTION_NAME_KEY)) {
                     AutoFaceEntity.setBotExecutingTask(true);
-                    String fnName = jsonObject.get("functionName").getAsString();
-                    JsonArray paramsArray = jsonObject.get("parameters").getAsJsonArray();
+                    String fnName = jsonObject.get(FUNCTION_NAME_KEY).getAsString();
+                    JsonArray paramsArray = jsonObject.get(PARAMETERS_KEY).getAsJsonArray();
                     Map<String, String> paramMap = new ConcurrentHashMap<>();
                     StringBuilder params = new StringBuilder();
                     for (JsonElement parameter : paramsArray) {
                         JsonObject paramObj = parameter.getAsJsonObject();
-                        String paramName = paramObj.get("parameterName").getAsString();
-                        String paramValue = paramObj.get("parameterValue").getAsString();
+                        String paramName = paramObj.get(PARAMETER_NAME_KEY).getAsString();
+                        String paramValue = paramObj.get(PARAMETER_VALUE_KEY).getAsString();
                         paramValue = resolvePlaceholder(paramValue);
                         params.append(paramName).append("=").append(paramValue).append(", ");
                         paramMap.put(paramName, paramValue);
                     }
                     logger.info("Executing: {} with {}", fnName, paramMap);
                     callFunction(fnName, paramMap).join();
-                } else if (jsonObject.has("clarification")) {
-                    String clarification = jsonObject.get("clarification").getAsString();
+                } else if (jsonObject.has(CLARIFICATION_KEY)) {
+                    String clarification = jsonObject.get(CLARIFICATION_KEY).getAsString();
                     // Save the clarification state
                     ChatContextManager.setPendingClarification(playerUUID, userInput, clarification, botSource.getName());
                     // Relay to player in-game
-                    sendMessageToPlayer(clarification);
+                    // sendMessageToPlayer(clarification); // Removed as per refactoring
                 } else {
-                    throw new IllegalStateException("Response must have either functionName or pipeline.");
+                    throw new IllegalStateException("Response must have either " + FUNCTION_NAME_KEY + " or " + PIPELINE_KEY + ".");
                 }
                 // getFunctionResultAndSave(userInput, executionDateTime);
             });
@@ -873,41 +867,20 @@ public class FunctionCallerV2 {
         }
     }
 
-    private static void processLLMOutput(String fullResponse, String botName, ServerCommandSource botSource) {
-        logger.info("processLLMOutput called with response: '{}', botName: '{}'", fullResponse, botName);
-        if (fullResponse == null || fullResponse.trim().isEmpty()) {
-            logger.warn("fullResponse is null or empty");
-            return;
-        }
-        Matcher matcher = THINK_BLOCK.matcher(fullResponse);
-        if (matcher.find()) {
-            logger.info("Think block found");
-            String thinking = matcher.group(1).trim();
-            String remainder = fullResponse.replace(matcher.group(0), "").trim();
-            ThinkingStateManager.start(botName);
-            ChatUtils.sendChatMessages(botSource, botName + " is thinking...");
-            for (String line : thinking.split("\\n")) {
-                ThinkingStateManager.appendThoughtLine(line);
-            }
-            ThinkingStateManager.end();
-            ChatUtils.sendChatMessages(botSource, botName + " is done thinking!");
-            if (!remainder.isEmpty()) {
-                logger.info("Sending remainder: '{}'", remainder);
-                ChatUtils.sendChatMessages(botSource, botName + ": " + remainder);
-            } else {
-                logger.info("Remainder is empty");
-            }
-        } else {
-            logger.info("No think block found, sending full response: '{}'", fullResponse);
-            ChatUtils.sendChatMessages(botSource, fullResponse);
-        }
-    }
 
-    private static void sendMessageToPlayer(String message) {
-        processLLMOutput(message, botSource.getName(), botSource);
-    }
+
+
 
     private static void runPipelineLoop(JsonArray pipeline) {
+        runPipelineLoopInternal(pipeline, null);
+    }
+
+    // overloaded method to handle the other LLM providers
+    private static void runPipelineLoop(JsonArray pipeline, LLMClient client) {
+        runPipelineLoopInternal(pipeline, client);
+    }
+
+    private static void runPipelineLoopInternal(JsonArray pipeline, LLMClient client) {
         List<JsonObject> steps = new ArrayList<>();
         List<String> executedSteps = new ArrayList<>();
         for (JsonElement step : pipeline) {
@@ -923,13 +896,13 @@ public class FunctionCallerV2 {
 
         while (!pipelineStack.isEmpty()) {
             JsonObject step = pipelineStack.pop();
-            String functionName = step.get("functionName").getAsString();
-            JsonArray parameters = step.getAsJsonArray("parameters");
+            String functionName = step.get(FUNCTION_NAME_KEY).getAsString();
+            JsonArray parameters = step.getAsJsonArray(PARAMETERS_KEY);
             Map<String, String> paramMap = new HashMap<>();
             for (JsonElement param : parameters) {
                 JsonObject paramObj = param.getAsJsonObject();
-                String paramName = paramObj.get("parameterName").getAsString();
-                String paramValue = resolvePlaceholder(paramObj.get("parameterValue").getAsString());
+                String paramName = paramObj.get(PARAMETER_NAME_KEY).getAsString();
+                String paramValue = resolvePlaceholder(paramObj.get(PARAMETER_VALUE_KEY).getAsString());
                 paramMap.put(paramName, paramValue);
             }
 
@@ -957,22 +930,26 @@ public class FunctionCallerV2 {
 
                     String botContext = buildLLMBotContext(initialState, sharedState, surroundings);
                     String fullSystemPrompt = systemPrompt + "\n\nBot's context information:\n" + botContext;
-                    OllamaChatRequestModel requestModel = builder
-                            .withMessage(OllamaChatMessageRole.SYSTEM, fullSystemPrompt)
-                            .withMessage(OllamaChatMessageRole.USER, newPrompt)
-                            .build();
-                    OllamaChatResult result = ollamaAPI.chat(requestModel);
-                    String llmResponse = result.getResponse();
+                    String llmResponse;
+                    if (client == null) {
+                        OllamaChatRequestModel requestModel = builder
+                                .withMessage(OllamaChatMessageRole.SYSTEM, fullSystemPrompt)
+                                .withMessage(OllamaChatMessageRole.USER, newPrompt)
+                                .build();
+                        OllamaChatResult result = ollamaAPI.chat(requestModel);
+                        llmResponse = result.getResponse();
+                    } else {
+                        llmResponse = client.sendPrompt(fullSystemPrompt, newPrompt);
+                    }
                     logger.info("Raw LLM response: {}", llmResponse);
-                    String cleanedResponse = stripThinkBlock(llmResponse);
-                    String jsonPart = extractJson(cleanedResponse);
+                    String jsonPart = extractJson(llmResponse);
                     logger.info("Extracted JSON: {}", jsonPart);
                     JsonObject llmResponseObj = JsonParser.parseString(jsonPart).getAsJsonObject();
 
-                    if (llmResponseObj.has("pipeline")) {
+                    if (llmResponseObj.has(PIPELINE_KEY)) {
                         logger.info("LLM provided NEW pipeline. Rebuilding stack.");
                         retryCount = 0;
-                        JsonArray newPipeline = llmResponseObj.getAsJsonArray("pipeline");
+                        JsonArray newPipeline = llmResponseObj.getAsJsonArray(PIPELINE_KEY);
                         pipelineStack.clear();
                         List<JsonObject> newSteps = new ArrayList<>();
                         for (JsonElement e : newPipeline) {
@@ -980,11 +957,11 @@ public class FunctionCallerV2 {
                         }
                         pipelineStack.addAll(newSteps);
                         continue;
-                    } else if (llmResponseObj.has("clarification")) {
+                    } else if (llmResponseObj.has(CLARIFICATION_KEY)) {
                         logger.info("LLM requested clarification. Relaying to player.");
-                        String clarification = llmResponseObj.get("clarification").getAsString();
+                        String clarification = llmResponseObj.get(CLARIFICATION_KEY).getAsString();
                         ChatContextManager.setPendingClarification(playerUUID, "A recent action failed.", clarification, botSource.getName());
-                        sendMessageToPlayer(clarification);
+                        // sendMessageToPlayer(clarification); // Removed as per refactoring
                         break;
                     } else {
                         logger.warn("LLM did not return a pipeline or clarification. Exiting.");
@@ -1049,211 +1026,37 @@ public class FunctionCallerV2 {
 
                     String botContext = buildLLMBotContext(initialState, sharedState, surroundings);
                     String fullSystemPrompt = systemPrompt + "\n\nBot's context information:\n" + botContext;
-                    OllamaChatRequestModel requestModel = builder
-                            .withMessage(OllamaChatMessageRole.SYSTEM, fullSystemPrompt)
-                            .withMessage(OllamaChatMessageRole.USER, newPrompt)
-                            .build();
-                    OllamaChatResult llmResult = ollamaAPI.chat(requestModel);
-                    String llmResponse = llmResult.getResponse();
-                    logger.info("Raw LLM response: {}", llmResponse);
-                    String cleanedResponse = stripThinkBlock(llmResponse);
-                    String jsonPart = extractJson(cleanedResponse);
-                    logger.info("Extracted JSON: {}", jsonPart);
-                    JsonObject llmResponseObj = JsonParser.parseString(jsonPart).getAsJsonObject();
-
-                    if (llmResponseObj.has("pipeline")) {
-                        logger.info("LLM provided NEW pipeline. Rebuilding stack.");
-                        retryCount = 0;
-                        JsonArray newPipeline = llmResponseObj.getAsJsonArray("pipeline");
-                        pipelineStack.clear();
-                        List<JsonObject> newSteps = new ArrayList<>();
-                        for (JsonElement e : newPipeline) {
-                            newSteps.add(e.getAsJsonObject());
-                        }
-                        pipelineStack.addAll(newSteps);
-                    } else if (llmResponseObj.has("clarification")) {
-                        logger.info("LLM requested clarification. Relaying to player.");
-                        String clarification = llmResponseObj.get("clarification").getAsString();
-                        ChatContextManager.setPendingClarification(playerUUID, "A recent action failed.", clarification, botSource.getName());
-                        sendMessageToPlayer(clarification);
-                        break;
+                    String llmResponse;
+                    if (client == null) {
+                        OllamaChatRequestModel requestModel = builder
+                                .withMessage(OllamaChatMessageRole.SYSTEM, fullSystemPrompt)
+                                .withMessage(OllamaChatMessageRole.USER, newPrompt)
+                                .build();
+                        OllamaChatResult llmResult = ollamaAPI.chat(requestModel);
+                        llmResponse = llmResult.getResponse();
                     } else {
-                        logger.warn("LLM did not return a pipeline or clarification. Exiting.");
-                        break;
+                        llmResponse = client.sendPrompt(fullSystemPrompt, newPrompt);
                     }
-                } catch (Exception e) {
-                    logger.error("❌ Error in LLM fallback after verifier failure: {}", e);
-                    retryCount++;
-                    continue;
-                }
-            }
-        }
-        blockDetectionUnit.setIsBlockDetectionActive(false);
-        PathTracer.flushAllMovementTasks();
-        AutoFaceEntity.setBotExecutingTask(false);
-        AutoFaceEntity.isBotMoving = false;
-        logger.info("✔️ Autoface module has been reset.");
-    }
-
-    // overloaded method to handle the other LLM providers
-    private static void runPipelineLoop(JsonArray pipeline, LLMClient client) {
-        List<JsonObject> steps = new ArrayList<>();
-        List<String> executedSteps = new ArrayList<>();
-        for (JsonElement step : pipeline) {
-            steps.add(step.getAsJsonObject());
-        }
-
-        Deque<JsonObject> pipelineStack = new ArrayDeque<>(steps);
-        logger.info("Pipeline stack: {}", pipelineStack);
-        String systemPrompt = FunctionCallerV2.buildPrompt(toolBuilder());
-        final int maxRetries = 3;
-        int retryCount = 0;
-
-        while (!pipelineStack.isEmpty()) {
-            JsonObject step = pipelineStack.pop();
-            String functionName = step.get("functionName").getAsString();
-            JsonArray parameters = step.getAsJsonArray("parameters");
-            Map<String, String> paramMap = new HashMap<>();
-            for (JsonElement param : parameters) {
-                JsonObject paramObj = param.getAsJsonObject();
-                String paramName = paramObj.get("parameterName").getAsString();
-                String paramValue = resolvePlaceholder(paramObj.get("parameterValue").getAsString());
-                paramMap.put(paramName, paramValue);
-            }
-
-            boolean hasUnresolved = paramMap.values().stream().anyMatch(v -> v.equals("__UNRESOLVED__"));
-            if (hasUnresolved) {
-                logger.warn("⚠️ One or more parameters in step '{}' are unresolved. Triggering LLM fallback.", functionName);
-                if (retryCount >= maxRetries) {
-                    logger.error("❌ Max LLM fallback retries reached due to unresolved parameters. Aborting.");
-                    break;
-                }
-                String newPrompt = "The following steps in the pipeline were successfully executed:\n"
-                        + String.join("\n", executedSteps)
-                        + "\n\nExecution failed at step: " + functionName
-                        + "\nCause: One or more placeholders could not be resolved from shared state.";
-                try {
-                    State initialState = BotEventHandler.createInitialState(botSource.getPlayer());
-                    InternalMap map = new InternalMap(botSource.getPlayer(), 1, 1);
-                    map.updateMap();
-                    // If method returns Map<String, String>
-                    Map<String, String> surroundingsStr = map.summarizeSurroundings();
-                    Map<String, Object> surroundings = new HashMap<>();
-                    for (Map.Entry<String, String> entry : surroundingsStr.entrySet()) {
-                        surroundings.put(entry.getKey(), entry.getValue());
-                    }
-
-                    String botContext = buildLLMBotContext(initialState, sharedState, surroundings);
-                    String fullSystemPrompt = systemPrompt + "\n\nBot's context information:\n" + botContext;
-                    String llmResponse = client.sendPrompt(fullSystemPrompt, newPrompt);
                     logger.info("Raw LLM response: {}", llmResponse);
-                    String cleanedResponse = stripThinkBlock(llmResponse);
-                    String jsonPart = extractJson(cleanedResponse);
+                    String jsonPart = extractJson(llmResponse);
                     logger.info("Extracted JSON: {}", jsonPart);
                     JsonObject llmResponseObj = JsonParser.parseString(jsonPart).getAsJsonObject();
 
-                    if (llmResponseObj.has("pipeline")) {
+                    if (llmResponseObj.has(PIPELINE_KEY)) {
                         logger.info("LLM provided NEW pipeline. Rebuilding stack.");
                         retryCount = 0;
-                        JsonArray newPipeline = llmResponseObj.getAsJsonArray("pipeline");
+                        JsonArray newPipeline = llmResponseObj.getAsJsonArray(PIPELINE_KEY);
                         pipelineStack.clear();
                         List<JsonObject> newSteps = new ArrayList<>();
                         for (JsonElement e : newPipeline) {
                             newSteps.add(e.getAsJsonObject());
                         }
                         pipelineStack.addAll(newSteps);
-                        continue;
-                    } else if (llmResponseObj.has("clarification")) {
+                    } else if (llmResponseObj.has(CLARIFICATION_KEY)) {
                         logger.info("LLM requested clarification. Relaying to player.");
-                        String clarification = llmResponseObj.get("clarification").getAsString();
+                        String clarification = llmResponseObj.get(CLARIFICATION_KEY).getAsString();
                         ChatContextManager.setPendingClarification(playerUUID, "A recent action failed.", clarification, botSource.getName());
-                        sendMessageToPlayer(clarification);
-                        break;
-                    } else {
-                        logger.warn("LLM did not return a pipeline or clarification. Exiting.");
-                        break;
-                    }
-                } catch (Exception e) {
-                    logger.error("❌ Error in LLM fallback after unresolved parameters: {}", e);
-                    retryCount++;
-                    continue;
-                }
-            }
-
-            logger.info("Running function: " + functionName + " with " + paramMap);
-            callFunction(functionName, paramMap).join();
-            logger.info("Function output: {}", functionOutput);
-            parseOutputValues(functionName, functionOutput);
-
-            // Short wait for state to settle (e.g., for movement tools)
-            try {
-                Thread.sleep(100);
-            } catch (InterruptedException e) {
-                logger.warn("Interrupted during state settle wait");
-            }
-
-            // Get bot entity
-            ServerPlayerEntity bot = botSource.getPlayer();
-            if (bot == null) {
-                logger.error("Bot entity not found for verification");
-                continue;
-            }
-
-            // Use state-based verifier
-            ToolVerifiers.StateVerifier verifier = ToolVerifiers.VERIFIER_REGISTRY.get(functionName);
-            ToolVerifiers.VerificationResult result = (verifier == null)
-                    ? new ToolVerifiers.VerificationResult(true, null)
-                    : verifier.verify(paramMap, sharedState, bot);
-
-            if (result.success) {
-                logger.info("✅ Verifier passed for {} with data: {}", functionName, result.data);
-                executedSteps.add(functionName + ", Output: " + functionOutput);
-            } else {
-                logger.warn("❌ Verifier failed for {} with data: {}", functionName, result.data);
-                if (retryCount >= maxRetries) {
-                    logger.error("❌ Max LLM fallback retries reached due to verifier failures. Aborting.");
-                    break;
-                }
-                String newPrompt = "The following steps were executed successfully:\n"
-                        + String.join("\n", executedSteps)
-                        + "\n\nExecution failed at step: " + functionName
-                        + "\nFunction output: " + functionOutput
-                        + "\nVerification details: " + result.data;
-                try {
-                    State initialState = BotEventHandler.createInitialState(botSource.getPlayer());
-                    InternalMap map = new InternalMap(botSource.getPlayer(), 1, 1);
-                    map.updateMap();
-                    // If method returns Map<String, String>
-                    Map<String, String> surroundingsStr = map.summarizeSurroundings();
-                    Map<String, Object> surroundings = new HashMap<>();
-                    for (Map.Entry<String, String> entry : surroundingsStr.entrySet()) {
-                        surroundings.put(entry.getKey(), entry.getValue());
-                    }
-
-                    String botContext = buildLLMBotContext(initialState, sharedState, surroundings);
-                    String fullSystemPrompt = systemPrompt + "\n\nBot's context information:\n" + botContext;
-                    String llmResponse = client.sendPrompt(fullSystemPrompt, newPrompt);
-                    logger.info("Raw LLM response: {}", llmResponse);
-                    String cleanedResponse = stripThinkBlock(llmResponse);
-                    String jsonPart = extractJson(cleanedResponse);
-                    logger.info("Extracted JSON: {}", jsonPart);
-                    JsonObject llmResponseObj = JsonParser.parseString(jsonPart).getAsJsonObject();
-
-                    if (llmResponseObj.has("pipeline")) {
-                        logger.info("LLM provided NEW pipeline. Rebuilding stack.");
-                        retryCount = 0;
-                        JsonArray newPipeline = llmResponseObj.getAsJsonArray("pipeline");
-                        pipelineStack.clear();
-                        List<JsonObject> newSteps = new ArrayList<>();
-                        for (JsonElement e : newPipeline) {
-                            newSteps.add(e.getAsJsonObject());
-                        }
-                        pipelineStack.addAll(newSteps);
-                    } else if (llmResponseObj.has("clarification")) {
-                        logger.info("LLM requested clarification. Relaying to player.");
-                        String clarification = llmResponseObj.get("clarification").getAsString();
-                        ChatContextManager.setPendingClarification(playerUUID, "A recent action failed.", clarification, botSource.getName());
-                        sendMessageToPlayer(clarification);
+                        // sendMessageToPlayer(clarification); // Removed as per refactoring
                         break;
                     } else {
                         logger.warn("LLM did not return a pipeline or clarification. Exiting.");

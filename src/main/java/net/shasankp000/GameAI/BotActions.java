@@ -16,6 +16,10 @@ import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 
+
+
+
+
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
@@ -271,6 +275,13 @@ public final class BotActions {
         bot.teleport(bot.getX() + dx, bot.getY(), bot.getZ() + dz, true);
     }
 
+    private static void rotate(ServerPlayerEntity bot, float angle) {
+        float newYaw = bot.getYaw() + angle;
+        bot.setYaw(newYaw);
+        bot.setHeadYaw(newYaw);
+        bot.setBodyYaw(newYaw); // Keep body, head, and yaw aligned for simplicity
+    }
+
     public static void autoJumpIfNeeded(ServerPlayerEntity bot) {
         if (!bot.isOnGround()) {
             return;
@@ -357,12 +368,9 @@ public final class BotActions {
         return -1;
     }
 
-    private static void rotate(ServerPlayerEntity bot, float deltaYaw) {
-        float newYaw = bot.getYaw() + deltaYaw;
-        bot.setYaw(newYaw);
-        bot.setHeadYaw(newYaw);
-        bot.setBodyYaw(newYaw);
-    }
+
+
+
 
     public static boolean performRangedAttack(ServerPlayerEntity bot, LivingEntity target, long serverTick) {
         if (bot == null || target == null || bot.getEntityWorld() == null) {
@@ -549,6 +557,8 @@ public final class BotActions {
     }
 
     private record Selection(Hand hand, ItemStack stack) {}
+
+
 
     private static class RangedAttackState {
         long chargeStartTick = 0L;

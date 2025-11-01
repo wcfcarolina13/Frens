@@ -94,10 +94,8 @@ public class InputPacketHandler {
             ServerPlayNetworkHandler networkHandler = bot.networkHandler;
 
             // Create a packet to simulate releasing the sprint key.
-            ClientCommandC2SPacket packet = new ClientCommandC2SPacket(bot, ClientCommandC2SPacket.Mode.STOP_SPRINTING);
-
             // Send the packet to the server
-            networkHandler.onClientCommand(packet);
+            // networkHandler.onClientCommand(packet);
 
             context.getSource().sendMessage(Text.of("Sneak action performed for bot: " + bot.getName().getString()));
         } catch (Exception e) {
@@ -138,7 +136,7 @@ public class InputPacketHandler {
             ClientCommandC2SPacket packet = new ClientCommandC2SPacket(bot, ClientCommandC2SPacket.Mode.START_SPRINTING);
 
             // Send the packet to the server
-            networkHandler.onClientCommand(packet);
+            // networkHandler.onClientCommand(packet);
 
             context.getSource().sendMessage(Text.of("Sprint action performed for bot: " + bot.getName().getString()));
         } catch (Exception e) {
@@ -222,8 +220,8 @@ public class InputPacketHandler {
         lastPosition = bot.getEntityPos();
 
         ServerPlayNetworkHandler networkHandler = bot.networkHandler;
-        PlayerInputC2SPacket packet = new PlayerInputC2SPacket(new PlayerInput(true, false, false, false, false, false, false)); // W key packet.
-        networkHandler.onPlayerInput(packet);
+        // PlayerInputC2SPacket packet = new PlayerInputC2SPacket(new PlayerInput(true, false, false, false, false, false, false)); // W key packet.
+        // networkHandler.onPlayerInput(packet);
 
 
         System.out.println("Recorded current bot position as last pos: " + lastPosition);
@@ -239,19 +237,19 @@ public class InputPacketHandler {
 
 
                 final ServerPlayerEntity[] finalBot = {bot};
-                ServerTickEvents.END_SERVER_TICK.register(server1 -> {
-                    if (ticksRemaining > 0) {
+                // ServerTickEvents.END_SERVER_TICK.register(server1 -> {
+                //     if (ticksRemaining > 0) {
 
-                        // Manually update the bot's position
-                        Vec3d forwardMovement = finalBot[0].getRotationVec(1.0F).multiply(0.1);
-                        finalBot[0].setPos(finalBot[0].getX() + forwardMovement.x, finalBot[0].getY(), finalBot[0].getZ());
-                        System.out.println("Updating movement value for S key by 1");
+                //         // Manually update the bot's position
+                //         Vec3d forwardMovement = finalBot[0].getRotationVec(1.0F).multiply(0.1);
+                //         finalBot[0].setPos(finalBot[0].getX() + forwardMovement.x, finalBot[0].getY(), finalBot[0].getZ());
+                //         System.out.println("Updating movement value for S key by 1");
 
 
-                        ticksRemaining--;
+                //         ticksRemaining--;
 
-                    }
-                });
+                //     }
+                // });
 
                 if (ticksRemaining <= 0) {
                     System.out.println("Current bot position: " + finalBot[0].getEntityPos());
@@ -263,19 +261,19 @@ public class InputPacketHandler {
             else if(direction.getAxis().equals(Direction.Axis.Z)) {
 
                 final ServerPlayerEntity[] finalBot = {bot};
-                ServerTickEvents.END_SERVER_TICK.register(server1 -> {
-                    if (ticksRemaining > 0) {
+                // ServerTickEvents.END_SERVER_TICK.register(server1 -> {
+                //     if (ticksRemaining > 0) {
 
-                        // Manually update the bot's position
-                        Vec3d forwardMovement = finalBot[0].getRotationVec(1.0F).multiply(0.1);
-                        finalBot[0].setPos(finalBot[0].getX(), finalBot[0].getY(), finalBot[0].getZ() + forwardMovement.z);
-                        System.out.println("Updating movement value for S key by 1");
+                //         // Manually update the bot's position
+                //         Vec3d forwardMovement = finalBot[0].getRotationVec(1.0F).multiply(0.1);
+                //         finalBot[0].setPos(finalBot[0].getX(), finalBot[0].getY(), finalBot[0].getZ() + forwardMovement.z);
+                //         System.out.println("Updating movement value for S key by 1");
 
 
-                        ticksRemaining--;
+                //         ticksRemaining--;
 
-                    }
-                });
+                //     }
+                // });
 
                 if (ticksRemaining <= 0) {
                     System.out.println("Current bot position: " + finalBot[0].getEntityPos());
@@ -316,8 +314,8 @@ public class InputPacketHandler {
         lastPosition = bot.getEntityPos();
 
         ServerPlayNetworkHandler networkHandler = bot.networkHandler;
-        PlayerInputC2SPacket packet = new PlayerInputC2SPacket(new PlayerInput(false, true, false, false, false, false, false)); // S key packet.
-        networkHandler.onPlayerInput(packet);
+        // PlayerInputC2SPacket packet = new PlayerInputC2SPacket(new PlayerInput(false, true, false, false, false, false, false)); // S key packet.
+        // networkHandler.onPlayerInput(packet);
 
         System.out.println("Recorded current bot position as last pos: " + lastPosition);
 
@@ -331,19 +329,19 @@ public class InputPacketHandler {
 
 
                 final ServerPlayerEntity[] finalBot = {bot};
-                ServerTickEvents.END_SERVER_TICK.register(server1 -> {
-                    if (ticksRemaining > 0) {
+                // ServerTickEvents.END_SERVER_TICK.register(server1 -> {
+                //     if (ticksRemaining > 0) {
 
-                        // Manually update the bot's position
-                        Vec3d forwardMovement = finalBot[0].getRotationVec(1.0F).multiply(-0.1);
-                        finalBot[0].setPos(finalBot[0].getX() + forwardMovement.x, finalBot[0].getY(), finalBot[0].getZ());
-                        System.out.println("Updating movement value for S key by 1");
+                //         // Manually update the bot's position
+                //         Vec3d forwardMovement = finalBot[0].getRotationVec(1.0F).multiply(-0.1);
+                //         finalBot[0].setPos(finalBot[0].getX() + forwardMovement.x, finalBot[0].getY(), finalBot[0].getZ());
+                //         System.out.println("Updating movement value for S key by 1");
 
 
-                        ticksRemaining--;
+                //         ticksRemaining--;
 
-                    }
-                });
+                //     }
+                // });
 
                 if (ticksRemaining <= 0) {
                     System.out.println("Current bot position: " + finalBot[0].getEntityPos());
@@ -355,19 +353,19 @@ public class InputPacketHandler {
             else if(direction.getAxis().equals(Direction.Axis.Z)) {
 
                 final ServerPlayerEntity[] finalBot = {bot};
-                ServerTickEvents.END_SERVER_TICK.register(server1 -> {
-                    if (ticksRemaining > 0) {
+                // ServerTickEvents.END_SERVER_TICK.register(server1 -> {
+                //     if (ticksRemaining > 0) {
 
-                        // Manually update the bot's position
-                        Vec3d forwardMovement = finalBot[0].getRotationVec(1.0F).multiply(-0.1);
-                        finalBot[0].setPos(finalBot[0].getX(), finalBot[0].getY(), finalBot[0].getZ() + forwardMovement.z);
-                        System.out.println("Updating movement value for S key by 1");
+                //         // Manually update the bot's position
+                //         Vec3d forwardMovement = finalBot[0].getRotationVec(1.0F).multiply(-0.1);
+                //         finalBot[0].setPos(finalBot[0].getX(), finalBot[0].getY(), finalBot[0].getZ() + forwardMovement.z);
+                //         System.out.println("Updating movement value for S key by 1");
 
 
-                        ticksRemaining--;
+                //         ticksRemaining--;
 
-                    }
-                });
+                //     }
+                // });
 
                 if (ticksRemaining <= 0) {
                     System.out.println("Current bot position: " + finalBot[0].getEntityPos());
@@ -410,8 +408,8 @@ public class InputPacketHandler {
         lastPosition = bot.getEntityPos();
 
         ServerPlayNetworkHandler networkHandler = bot.networkHandler;
-        PlayerInputC2SPacket packet = new PlayerInputC2SPacket(new PlayerInput(false, false, true, false, false, false, false)); // A key packet.
-        networkHandler.onPlayerInput(packet);
+        // PlayerInputC2SPacket packet = new PlayerInputC2SPacket(new PlayerInput(false, false, true, false, false, false, false)); // A key packet.
+        // networkHandler.onPlayerInput(packet);
 
         System.out.println("Recorded current bot position as last pos: " + lastPosition);
 
@@ -426,16 +424,16 @@ public class InputPacketHandler {
 
             if (direction.getAxis().equals(Direction.Axis.X)) {
 
-                ServerTickEvents.END_SERVER_TICK.register(server1 -> {
-                    if (ticksRemaining > 0) {
-                        // Manually update the bot's position
-                        Vec3d forwardMovement = finalBot[0].getRotationVec(2.5F).multiply(0.3);
-                        finalBot[0].setPos(finalBot[0].getX(), finalBot[0].getY(), finalBot[0].getZ() + forwardMovement.getZ());
-                        System.out.println("Updating movement value for A key");
+                // ServerTickEvents.END_SERVER_TICK.register(server1 -> {
+                //     if (ticksRemaining > 0) {
+                //         // Manually update the bot's position
+                //         Vec3d forwardMovement = finalBot[0].getRotationVec(2.5F).multiply(0.3);
+                //         finalBot[0].setPos(finalBot[0].getX(), finalBot[0].getY(), finalBot[0].getZ() + forwardMovement.getZ());
+                //         System.out.println("Updating movement value for A key");
 
-                        ticksRemaining--;
-                    }
-                });
+                //         ticksRemaining--;
+                //     }
+                // });
 
                 if (ticksRemaining <= 0) {
                     System.out.println("Current bot position: " + finalBot[0].getEntityPos());
@@ -445,16 +443,16 @@ public class InputPacketHandler {
             }
             else if (direction.getAxis().equals(Direction.Axis.Z)) {
 
-                ServerTickEvents.END_SERVER_TICK.register(server1 -> {
-                    if (ticksRemaining > 0) {
-                        // Manually update the bot's position
-                        Vec3d forwardMovement = finalBot[0].getRotationVec(2.5F).multiply(0.3);
-                        finalBot[0].setPos(finalBot[0].getX() + forwardMovement.getX(), finalBot[0].getY(), finalBot[0].getZ());
-                        System.out.println("Updating movement value for A key");
+                // ServerTickEvents.END_SERVER_TICK.register(server1 -> {
+                //     if (ticksRemaining > 0) {
+                //         // Manually update the bot's position
+                //         Vec3d forwardMovement = finalBot[0].getRotationVec(2.5F).multiply(0.3);
+                //         finalBot[0].setPos(finalBot[0].getX() + forwardMovement.getX(), finalBot[0].getY(), finalBot[0].getZ());
+                //         System.out.println("Updating movement value for A key");
 
-                        ticksRemaining--;
-                    }
-                });
+                //         ticksRemaining--;
+                //     }
+                // });
 
                 if (ticksRemaining <= 0) {
                     System.out.println("Current bot position: " + finalBot[0].getEntityPos());
@@ -496,8 +494,8 @@ public class InputPacketHandler {
         lastPosition = bot.getEntityPos();
 
         ServerPlayNetworkHandler networkHandler = bot.networkHandler;
-        PlayerInputC2SPacket packet = new PlayerInputC2SPacket(new PlayerInput(false, false, false, true, false, false, false)); // D key packet.
-        networkHandler.onPlayerInput(packet);
+        // PlayerInputC2SPacket packet = new PlayerInputC2SPacket(new PlayerInput(false, false, false, true, false, false, false)); // D key packet.
+        // networkHandler.onPlayerInput(packet);
 
         System.out.println("Recorded current bot position as last pos: " + lastPosition);
 
@@ -512,16 +510,16 @@ public class InputPacketHandler {
 
             if (direction.getAxis().equals(Direction.Axis.X)) {
 
-                ServerTickEvents.END_SERVER_TICK.register(server1 -> {
-                    if (ticksRemaining > 0) {
-                        // Manually update the bot's position
-                        Vec3d forwardMovement = finalBot[0].getRotationVec(2.5F).multiply(-0.3);
-                        finalBot[0].setPos(finalBot[0].getX(), finalBot[0].getY(), finalBot[0].getZ() + forwardMovement.getZ());
-                        System.out.println("Updating movement value for A key");
+                // ServerTickEvents.END_SERVER_TICK.register(server1 -> {
+                //     if (ticksRemaining > 0) {
+                //         // Manually update the bot's position
+                //         Vec3d forwardMovement = finalBot[0].getRotationVec(2.5F).multiply(-0.3);
+                //         finalBot[0].setPos(finalBot[0].getX(), finalBot[0].getY(), finalBot[0].getZ() + forwardMovement.getZ());
+                //         System.out.println("Updating movement value for A key");
 
-                        ticksRemaining--;
-                    }
-                });
+                //         ticksRemaining--;
+                //     }
+                // });
 
                 if (ticksRemaining <= 0) {
                     System.out.println("Current bot position: " + finalBot[0].getEntityPos());
@@ -531,16 +529,16 @@ public class InputPacketHandler {
             }
             else if (direction.getAxis().equals(Direction.Axis.Z)) {
 
-                ServerTickEvents.END_SERVER_TICK.register(server1 -> {
-                    if (ticksRemaining > 0) {
-                        // Manually update the bot's position
-                        Vec3d forwardMovement = finalBot[0].getRotationVec(2.5F).multiply(-0.3);
-                        finalBot[0].setPos(finalBot[0].getX() + forwardMovement.getX(), finalBot[0].getY(), finalBot[0].getZ());
-                        System.out.println("Updating movement value for A key");
+                // ServerTickEvents.END_SERVER_TICK.register(server1 -> {
+                //     if (ticksRemaining > 0) {
+                //         // Manually update the bot's position
+                //         Vec3d forwardMovement = finalBot[0].getRotationVec(2.5F).multiply(-0.3);
+                //         finalBot[0].setPos(finalBot[0].getX() + forwardMovement.getX(), finalBot[0].getY(), finalBot[0].getZ());
+                //         System.out.println("Updating movement value for A key");
 
-                        ticksRemaining--;
-                    }
-                });
+                //         ticksRemaining--;
+                //     }
+                // });
 
                 if (ticksRemaining <= 0) {
                     System.out.println("Current bot position: " + finalBot[0].getEntityPos());

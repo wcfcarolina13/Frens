@@ -5,7 +5,6 @@ import net.minecraft.block.BlockState;
 import net.minecraft.component.DataComponentTypes;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.LivingEntity;
-import net.minecraft.item.ItemStack;
 import net.minecraft.network.packet.s2c.play.PositionFlag;
 import net.minecraft.registry.RegistryKey;
 import net.minecraft.server.ServerTask;
@@ -15,6 +14,7 @@ import net.minecraft.registry.tag.EntityTypeTags;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
+import net.minecraft.item.ItemStack;
 import net.minecraft.world.World;
 import net.shasankp000.ChatUtils.ChatUtils;
 import net.shasankp000.DangerZoneDetector.DangerZoneDetector;
@@ -98,12 +98,10 @@ public class BotEventHandler {
         registeredBotUuid = candidate.getUuid();
         BotEventHandler.bot = candidate;
         MinecraftServer srv = candidate.getCommandSource().getServer();
-        if (srv != null) {
-            BotEventHandler.server = srv;
-        }
-    }
-
-    public static boolean isRegisteredBot(ServerPlayerEntity candidate) {
+                                if (srv != null) {
+                                    BotEventHandler.server = srv;
+                                }
+                            }    public static boolean isRegisteredBot(ServerPlayerEntity candidate) {
         return registeredBotUuid != null && candidate != null && candidate.getUuid().equals(registeredBotUuid);
     }
 
