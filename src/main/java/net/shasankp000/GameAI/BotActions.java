@@ -556,6 +556,37 @@ public final class BotActions {
         }
     }
 
+    public static boolean useHoe(ServerPlayerEntity bot, BlockPos targetPos) {
+        int hoeSlot = findHoeSlot(bot);
+        if (hoeSlot == -1) {
+            return false; // No hoe found
+        }
+
+        selectHotbarSlot(bot, hoeSlot);
+
+        // Simulate right-click on the block
+        ServerWorld world = bot.getCommandSource().getWorld();
+        ItemStack hoeStack = bot.getMainHandStack();
+        ActionResult result = hoeStack.useOnBlock(new net.minecraft.item.ItemUsageContext(bot, Hand.MAIN_HAND, new net.minecraft.util.hit.BlockHitResult(Vec3d.ofCenter(targetPos), Direction.UP, targetPos, false)));
+
+        if (result.isAccepted()) {
+            bot.swingHand(Hand.MAIN_HAND, true);
+            bot.addExhaustion(0.02F); // Using a hoe causes exhaustion
+            return true;
+        }
+        return false;
+    }
+
+    private static int findHoeSlot(ServerPlayerEntity bot) {
+        for (int i = 0; i < 9; i++) {
+            ItemStack stack = bot.getInventory().getStack(i);
+            if (!stack.isEmpty() && stack.getItem() instanceof net.minecraft.item.HoeItem) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
     private record Selection(Hand hand, ItemStack stack) {}
 
 

@@ -63,8 +63,9 @@ import net.shasankp000.CommandUtils;
 import net.shasankp000.Entity.EntityDetails;
 
 import net.shasankp000.GameAI.BotEventHandler;
-
 import net.shasankp000.GameAI.State;
+
+import net.shasankp000.GameAI.BotActions;
 
 import net.shasankp000.Database.OldSQLiteDB;
 
@@ -380,6 +381,29 @@ public class FunctionCallerV2 {
         private static void sendMessageToChat(String message) {
             System.out.println("Sending message to chat...");
             ChatUtils.sendChatMessages(botSource, message);
+        }
+
+        /** cultivateLand: cultivate a dirt block **/
+        private static void cultivateLand(int targetX, int targetY, int targetZ) {
+            System.out.println("Cultivating land at: " + targetX + ", " + targetY + ", " + targetZ);
+            if (botSource == null || botSource.getPlayer() == null) {
+                getFunctionOutput("Bot not found.");
+                return;
+            }
+            try {
+                // 1. Go to the block
+                String goToResult = GoTo.goTo(botSource, targetX, targetY, targetZ, false);
+                if (goToResult.contains("Failed")) {
+                    getFunctionOutput("Failed to go to block: " + goToResult);
+                    return;
+                }
+                // 2. Use hoe on the block
+                boolean useHoeResult = BotActions.useHoe(Objects.requireNonNull(botSource.getPlayer()), new BlockPos(targetX, targetY, targetZ));
+                getFunctionOutput(String.valueOf(useHoeResult));
+            } catch (Exception e) {
+                logger.error("Error in cultivateLand: ", e);
+                getFunctionOutput("Failed to cultivate land: " + e.getMessage());
+            }
         }
     }
 
@@ -1087,7 +1111,8 @@ public class FunctionCallerV2 {
             Map.entry("mineBlock", List.of("lastMineStatus")),
             Map.entry("getOxygenLevel", List.of("oxygenLevel")),
             Map.entry("getHungerLevel", List.of("hungerLevel")),
-            Map.entry("getHealthLevel", List.of("healthLevel"))
+            Map.entry("getHealthLevel", List.of("healthLevel")),
+            Map.entry("cultivateLand", List.of("lastCultivateStatus"))
     );
 
     private static void parseOutputValues(String functionName, String output) {
@@ -1164,6 +1189,13 @@ public class FunctionCallerV2 {
                     values.add(Integer.parseInt(matcher.group(1)));
                     values.add(Integer.parseInt(matcher.group(2)));
                     values.add(Integer.parseInt(matcher.group(3)));
+                }
+            }
+            case "cultivateLand" -> {
+                if (output.contains("Cultivation complete!")) {
+                    values.add("success");
+                } else if (output.contains("Failed to cultivate land")) {
+                    values.add("failed");
                 }
             }
         }
@@ -1351,6 +1383,13 @@ public class FunctionCallerV2 {
                     String query = paramMap.get("query");
                     logger.info("Calling method: webSearch with query='{}'", query);
                     Tools.webSearch(query);
+                }
+                case "cultivateLand" -> {
+                    int targetX = Integer.parseInt(resolvePlaceholder(paramMap.get("targetX")));
+                    int targetY = Integer.parseInt(resolvePlaceholder(paramMap.get("targetY")));
+                    int targetZ = Integer.parseInt(resolvePlaceholder(paramMap.get("targetZ")));
+                    logger.info("Calling method: cultivateLand with targetX={} targetY={} targetZ={}", targetX, targetY, targetZ);
+                    Tools.cultivateLand(targetX, targetY, targetZ);
                 }
                 default -> logger.warn("Unknown function: {}", functionName);
             }

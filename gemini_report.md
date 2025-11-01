@@ -1,15 +1,32 @@
+### October 31, 2025 - Status Update
 
-## October 31, 2025 - Debugging AI Player Item Usage (Continued)
+**Current Status on the last request:**
 
-**Problem:** AI player cannot consume consumables (e.g., bread) or use items like spawn eggs.
+I have successfully implemented the "Mining Tool" and "Chopping Wood" and "Shoveling Dirt" skills. This involved:
 
-**Actions Taken (Spawn Egg Fixes):**
+1.  **Checkpoint:** I attempted to create a git commit as a checkpoint, but there were no new changes to commit as the previous changes were already committed.
+2.  **Renamed `mineBlock` to `mineBlockAtCoordinates`:** This was done in both `ToolRegistry.java` and `FunctionCallerV2.java`.
+3.  **Added a new composite `mineBlock` tool:** This tool takes `blockType` as a parameter and internally orchestrates a pipeline of `detectBlocks` and `mineBlockAtCoordinates`. This was implemented in `ToolRegistry.java` and `FunctionCallerV2.java`.
+4.  **Added a new composite `chopWood` tool:** This tool takes `treeType` as a parameter and internally orchestrates a pipeline of `detectBlocks`, `goTo`, and `mineBlockAtCoordinates`. This was implemented in `ToolRegistry.java` and `FunctionCallerV2.java`.
+5.  **Added a new composite `shovelDirt` tool:** This tool takes no parameters and internally orchestrates a pipeline of `detectBlocks` (for "dirt"), `goTo`, and `mineBlockAtCoordinates`. This was implemented in `ToolRegistry.java` and `FunctionCallerV2.java`.
+6.  **Updated `functionStateKeyMap` and `parseOutputValues`:** These were updated in `FunctionCallerV2.java` to reflect the new and renamed tools.
+7.  **Verified builds:** After each significant change, I ran `gradlew build` to ensure no new errors were introduced. All builds were successful.
 
-1.  **Modified `ItemUsageManager.java` to handle Spawn Eggs:**
-    *   Changed the spawn egg identification from `Items.SPAWN_EGG` to `instanceof net.minecraft.item.SpawnEggItem` for correct type checking.
-    *   Implemented a `raycastForBlock` helper method within `ItemUsageManager` to perform a raycast and find a target block for spawn eggs.
-    *   Modified the `startUsingItem` method to use `stack.getItem().useOnBlock(context)` with a newly created `net.minecraft.item.ItemUsageContext` when a spawn egg is detected and a target block is found via raycasting.
-    *   Added necessary imports: `net.minecraft.item.SpawnEggItem`, `net.minecraft.item.ItemUsageContext`, `net.minecraft.util.hit.BlockHitResult`, `net.minecraft.util.math.Vec3d`, and `net.minecraft.world.RaycastContext`.
+**Current Status on "Cultivating with a Hoe":**
 
-**Current Status:**
-The project now compiles successfully after these changes. Both consumable item usage and spawn egg usage should now be handled correctly by the `ItemUsageManager`.
+*   The `cultivateLand` tool is defined in `ToolRegistry.java`.
+*   The `useHoe` and `findHoeSlot` methods have been added to `BotActions.java`.
+*   **Modified `FunctionCallerV2.java`:**
+    *   Added a new `case "cultivateLand"` to the `executeFunction` method.
+    *   Defined the `cultivateLand` method within the `Tools` class, orchestrating `goTo` and `BotActions.useHoe`.
+    *   Updated `functionStateKeyMap` with `cultivateLand` and `lastCultivateStatus`.
+    *   Updated `parseOutputValues` to handle the output of `cultivateLand`.
+    *   Corrected the type mismatch for `useHoeResult` from `String` to `boolean` and converted it to `String` for `getFunctionOutput`.
+*   **Verified builds:** All builds were successful after the modifications.
+
+**Next Steps:**
+
+1.  Review `ToolRegistry.java` to ensure `cultivateLand` is correctly defined and its parameters are accurate.
+2.  Ensure `BotActions.useHoe` is correctly implemented and returns a boolean.
+3.  Consider adding a test case for the `cultivateLand` functionality.
+4.  Commit the changes.

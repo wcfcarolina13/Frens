@@ -127,6 +127,42 @@ public class ToolRegistry {
                     }
             ),
 
+            new Tool(
+                    "shovelDirt",
+                    """
+                    Detects and shovels dirt blocks. This is a composite tool.
+                    """,
+                    List.of(), // No parameters needed for now
+                    Set.of("lastShoveledBlock.x", "lastShoveledBlock.y", "lastShoveledBlock.z"),
+                    (sharedState, paramMap, result) -> {
+                        // The actual shoveling is done by a pipeline, so this ResultProcessor is for the final outcome
+                        // For now, we'll just copy the detected block coordinates if available
+                        if (sharedState.containsKey("lastDetectedBlock.x")) {
+                            sharedState.put("lastShoveledBlock.x", sharedState.get("lastDetectedBlock.x"));
+                            sharedState.put("lastShoveledBlock.y", sharedState.get("lastDetectedBlock.y"));
+                            sharedState.put("lastShoveledBlock.z", sharedState.get("lastDetectedBlock.z"));
+                        }
+                    }
+            ),
+
+            new Tool(
+                    "cultivateLand",
+                    """
+                    Detects dirt blocks and cultivates them with a hoe. This is a composite tool.
+                    """,
+                    List.of(
+                            new Tool.Parameter("targetX", "Target block X coordinate."),
+                            new Tool.Parameter("targetY", "Target block Y coordinate."),
+                            new Tool.Parameter("targetZ", "Target block Z coordinate.")
+                    ),
+                    Set.of("lastCultivatedBlock.x", "lastCultivatedBlock.y", "lastCultivatedBlock.z"),
+                    (sharedState, paramMap, result) -> {
+                        sharedState.put("lastCultivatedBlock.x", paramMap.get("targetX"));
+                        sharedState.put("lastCultivatedBlock.y", paramMap.get("targetY"));
+                        sharedState.put("lastCultivatedBlock.z", paramMap.get("targetZ"));
+                    }
+            ),
+
             // Add other tools below in same pattern...
 
             new Tool(
