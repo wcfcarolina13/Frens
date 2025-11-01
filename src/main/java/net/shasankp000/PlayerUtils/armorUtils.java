@@ -62,9 +62,9 @@ public class armorUtils {
         }
         final double[] score = {0.0};
         stack.applyAttributeModifiers(slot, (RegistryEntry<EntityAttribute> attributeEntry, EntityAttributeModifier modifier) -> {
-            if (attributeEntry.matches(EntityAttributes.ARMOR)) {
+            if (attributeEntry.equals(EntityAttributes.ARMOR)) {
                 score[0] += modifier.value();
-            } else if (attributeEntry.matches(EntityAttributes.ARMOR_TOUGHNESS)) {
+            } else if (attributeEntry.equals(EntityAttributes.ARMOR_TOUGHNESS)) {
                 score[0] += modifier.value() * 0.1;
             }
         });
