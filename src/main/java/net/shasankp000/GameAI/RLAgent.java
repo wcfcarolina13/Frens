@@ -18,6 +18,7 @@ import net.minecraft.item.BlockItem;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.util.math.Vec3d;
+import net.shasankp000.GameAI.ActionHoldTracker.ActionHoldSnapshot;
 import net.shasankp000.Database.QEntry;
 import net.shasankp000.Database.QTable;
 import net.shasankp000.Database.StateActionPair;
@@ -1116,7 +1117,8 @@ public class RLAgent {
                                boolean enclosed, boolean hasHeadroom, boolean hasEscapeRoute, int solidNeighborCount,
                                StateActions.Action actionTaken, double risk, double pod,
                                BotEventHandler.Mode currentMode, BotEventHandler.CombatStyle combatStyle,
-                               Vec3d commanderPos, float commanderHealth, Vec3d guardCenter, double guardRadius) {
+                               Vec3d commanderPos, float commanderHealth, Vec3d guardCenter, double guardRadius,
+                               ActionHoldSnapshot holdSnapshot) {
 
         boolean hasWoolItems = hotBarItems.stream()
                 .anyMatch(item -> item.getItem().getName().getString().toLowerCase().contains("wool") || item.getItem().getName().getString().toLowerCase().contains("carpet"));
@@ -1140,6 +1142,23 @@ public class RLAgent {
                 .toList();
 
         int reward = 0;
+        if (holdSnapshot != null && holdSnapshot.matches(actionTaken)) {
+            int streak = Math.max(0, holdSnapshot.consecutiveCount() - 1);
+            long duration = Math.max(0L, holdSnapshot.durationMs());
+            if (holdSnapshot.sustained()) {
+                int durationBonus = (int) Math.min(duration / 250L, 6L);
+                int holdBonus = Math.min(12, streak + durationBonus + 2);
+                switch (actionTaken) {
+                    case MOVE_FORWARD, MOVE_BACKWARD -> reward += holdBonus;
+                    case SPRINT -> reward += holdBonus + 2;
+                    case BREAK_BLOCK_FORWARD -> reward += holdBonus + 3;
+                    default -> {
+                    }
+                }
+            } else if (streak == 0 && duration > 120L && duration < 220L) {
+                reward -= 2;
+            }
+        }
         ItemStack hotbarSelection = ItemStack.EMPTY;
         ItemStack bestWeaponStack = ItemStack.EMPTY;
         if (hostilesPresent && !hotBarItems.isEmpty()) {

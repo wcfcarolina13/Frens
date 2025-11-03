@@ -66,6 +66,9 @@ import net.shasankp000.GameAI.BotEventHandler;
 import net.shasankp000.GameAI.State;
 
 import net.shasankp000.GameAI.BotActions;
+import net.shasankp000.GameAI.skills.SkillContext;
+import net.shasankp000.GameAI.skills.SkillExecutionResult;
+import net.shasankp000.GameAI.skills.SkillManager;
 
 import net.shasankp000.Database.OldSQLiteDB;
 
@@ -84,6 +87,7 @@ import net.shasankp000.PathFinding.PathTracer;
 import net.shasankp000.PlayerUtils.*;
 
 import net.shasankp000.ServiceLLMClients.LLMClient;
+import net.shasankp000.Commands.modCommandRegistry;
 
 import net.shasankp000.WebSearch.WebSearchTool;
 
@@ -129,6 +133,10 @@ public class FunctionCallerV2 {
         FunctionCallerV2.botSource = botSource;
         ollamaAPI.setRequestTimeoutSeconds(90);
         FunctionCallerV2.playerUUID = playerUUID;
+    }
+
+    public static Map<String, Object> getSharedState() {
+        return sharedState;
     }
 
     private static class ExecutionRecord {
@@ -249,6 +257,10 @@ public class FunctionCallerV2 {
                 if (outputPos == null) {
                     output = "Block not found!";
                 } else {
+                    SharedStateUtils.setValue(sharedState, "lastDetectedBlock.pos", outputPos);
+                    SharedStateUtils.setValue(sharedState, "lastDetectedBlock.x", outputPos.getX());
+                    SharedStateUtils.setValue(sharedState, "lastDetectedBlock.y", outputPos.getY());
+                    SharedStateUtils.setValue(sharedState, "lastDetectedBlock.z", outputPos.getZ());
                     output = "Block found at " + outputPos.getX() + " " + outputPos.getY() + " " + outputPos.getZ();
                 }
                 getFunctionOutput(output);
@@ -444,6 +456,25 @@ public class FunctionCallerV2 {
             } catch (Exception e) {
                 logger.error("Error in chopWood: ", e);
                 getFunctionOutput("Failed to chop wood: " + e.getMessage());
+            }
+        }
+
+        /** shovelDirt: detect and mine dirt block **/
+        private static void shovelDirt() {
+            System.out.println("Shoveling dirt via skill manager...");
+            if (botSource == null) {
+                getFunctionOutput("Bot not found.");
+                return;
+            }
+            try {
+                SkillExecutionResult result = SkillManager.runSkill(
+                        "dirt_shovel",
+                        new SkillContext(botSource, sharedState)
+                );
+                getFunctionOutput(result.message());
+            } catch (Exception e) {
+                logger.error("Error executing dirt_shovel skill: ", e);
+                getFunctionOutput("Failed to shovel dirt: " + e.getMessage());
             }
         }
     }
@@ -839,6 +870,21 @@ public class FunctionCallerV2 {
         }
     }
 
+    private static void prepareForExternalCommand() {
+        if (modCommandRegistry.isTrainingMode) {
+            BotEventHandler.setExternalOverrideActive(true);
+            logger.info("📴 Pausing training loop for external command");
+        }
+        PathTracer.flushAllMovementTasks();
+        AutoFaceEntity.isBotMoving = false;
+        if (botSource != null) {
+            ServerPlayerEntity player = botSource.getPlayer();
+            if (player != null) {
+                BotActions.stop(player);
+            }
+        }
+    }
+
 
 
     private static void executeFunction(String userInput, String response) {
@@ -851,11 +897,18 @@ public class FunctionCallerV2 {
                 reader.setLenient(true);
                 JsonObject jsonObject = JsonParser.parseReader(reader).getAsJsonObject();
                 if (jsonObject.has(PIPELINE_KEY)) {
+                    prepareForExternalCommand();
                     AutoFaceEntity.setBotExecutingTask(true);
                     JsonArray pipeline = jsonObject.getAsJsonArray(PIPELINE_KEY);
-                    runPipelineLoop(pipeline);
+                    try {
+                        logger.info("🧭 Executing pipeline with {} step(s)", pipeline.size());
+                        System.out.println("[FunctionCaller] Received pipeline with " + pipeline.size() + " steps.");
+                        runPipelineLoop(pipeline);
+                    } catch (Exception e) {
+                        logger.error("Error executing pipeline response: {}", e.getMessage(), e);
+                    }
                 } else if (jsonObject.has(FUNCTION_NAME_KEY)) {
-                    AutoFaceEntity.setBotExecutingTask(true);
+                    prepareForExternalCommand();
                     String fnName = jsonObject.get(FUNCTION_NAME_KEY).getAsString();
                     JsonArray paramsArray = jsonObject.get(PARAMETERS_KEY).getAsJsonArray();
                     Map<String, String> paramMap = new ConcurrentHashMap<>();
@@ -868,8 +921,19 @@ public class FunctionCallerV2 {
                         params.append(paramName).append("=").append(paramValue).append(", ");
                         paramMap.put(paramName, paramValue);
                     }
-                    logger.info("Executing: {} with {}", fnName, paramMap);
-                    callFunction(fnName, paramMap).join();
+                    AutoFaceEntity.setBotExecutingTask(true);
+                    try {
+                        logger.info("Executing: {} with {}", fnName, paramMap);
+                        callFunction(fnName, paramMap).join();
+                    } catch (CompletionException ce) {
+                        logger.error("Function {} execution failed: {}", fnName,
+                                ce.getCause() != null ? ce.getCause().getMessage() : ce.getMessage(), ce);
+                    } catch (Exception e) {
+                        logger.error("Function {} execution failed: {}", fnName, e.getMessage(), e);
+                    } finally {
+                        AutoFaceEntity.setBotExecutingTask(false);
+                        AutoFaceEntity.isBotMoving = false;
+                    }
                 } else if (jsonObject.has(CLARIFICATION_KEY)) {
                     System.out.println("Detected clarification");
                     String clarification = jsonObject.get(CLARIFICATION_KEY).getAsString();
@@ -897,11 +961,16 @@ public class FunctionCallerV2 {
                 reader.setLenient(true);
                 JsonObject jsonObject = JsonParser.parseReader(reader).getAsJsonObject();
                 if (jsonObject.has(PIPELINE_KEY)) {
+                    prepareForExternalCommand();
                     AutoFaceEntity.setBotExecutingTask(true);
                     JsonArray pipeline = jsonObject.getAsJsonArray(PIPELINE_KEY);
-                    runPipelineLoop(pipeline, client);
+                    try {
+                        runPipelineLoop(pipeline, client);
+                    } catch (Exception e) {
+                        logger.error("Error executing pipeline response: {}", e.getMessage(), e);
+                    }
                 } else if (jsonObject.has(FUNCTION_NAME_KEY)) {
-                    AutoFaceEntity.setBotExecutingTask(true);
+                    prepareForExternalCommand();
                     String fnName = jsonObject.get(FUNCTION_NAME_KEY).getAsString();
                     JsonArray paramsArray = jsonObject.get(PARAMETERS_KEY).getAsJsonArray();
                     Map<String, String> paramMap = new ConcurrentHashMap<>();
@@ -914,8 +983,19 @@ public class FunctionCallerV2 {
                         params.append(paramName).append("=").append(paramValue).append(", ");
                         paramMap.put(paramName, paramValue);
                     }
-                    logger.info("Executing: {} with {}", fnName, paramMap);
-                    callFunction(fnName, paramMap).join();
+                    AutoFaceEntity.setBotExecutingTask(true);
+                    try {
+                        logger.info("Executing: {} with {}", fnName, paramMap);
+                        callFunction(fnName, paramMap).join();
+                    } catch (CompletionException ce) {
+                        logger.error("Function {} execution failed: {}", fnName,
+                                ce.getCause() != null ? ce.getCause().getMessage() : ce.getMessage(), ce);
+                    } catch (Exception e) {
+                        logger.error("Function {} execution failed: {}", fnName, e.getMessage(), e);
+                    } finally {
+                        AutoFaceEntity.setBotExecutingTask(false);
+                        AutoFaceEntity.isBotMoving = false;
+                    }
                 } else if (jsonObject.has(CLARIFICATION_KEY)) {
                     String clarification = jsonObject.get(CLARIFICATION_KEY).getAsString();
                     // Save the clarification state
@@ -937,12 +1017,33 @@ public class FunctionCallerV2 {
 
 
     private static void runPipelineLoop(JsonArray pipeline) {
-        runPipelineLoopInternal(pipeline, null);
+        runPipeline(pipeline, null);
     }
 
     // overloaded method to handle the other LLM providers
     private static void runPipelineLoop(JsonArray pipeline, LLMClient client) {
-        runPipelineLoopInternal(pipeline, client);
+        runPipeline(pipeline, client);
+    }
+
+    private static void runPipeline(JsonArray pipeline, LLMClient client) {
+        try {
+            runPipelineLoopInternal(pipeline, client);
+        } finally {
+            cleanupAfterPipeline();
+        }
+    }
+
+    private static void cleanupAfterPipeline() {
+        blockDetectionUnit.setIsBlockDetectionActive(false);
+        PathTracer.flushAllMovementTasks();
+        AutoFaceEntity.setBotExecutingTask(false);
+        AutoFaceEntity.isBotMoving = false;
+        if (modCommandRegistry.isTrainingMode) {
+            BotEventHandler.setExternalOverrideActive(false);
+        }
+        boolean moving = PathTracer.BotSegmentManager.getBotMovementStatus();
+        logger.info("✔️ Pipeline cleanup executed. movementStatus={} blockDetectionActive={}", moving, blockDetectionUnit.getBlockDetectionStatus());
+        System.out.println("[FunctionCaller] Cleanup complete. movementStatus=" + moving);
     }
 
     private static void runPipelineLoopInternal(JsonArray pipeline, LLMClient client) {
@@ -953,7 +1054,9 @@ public class FunctionCallerV2 {
         }
 
         Deque<JsonObject> pipelineStack = new ArrayDeque<>(steps); // Keep FIFO order
-        logger.info("Pipeline stack: {}", pipelineStack);
+        int totalSteps = pipelineStack.size();
+        logger.info("🚀 Starting pipeline with {} step(s)", totalSteps);
+        System.out.println("[FunctionCaller] Starting pipeline with " + totalSteps + " step(s)");
         OllamaChatRequestBuilder builder = OllamaChatRequestBuilder.getInstance(selectedLM);
         String systemPrompt = FunctionCallerV2.buildPrompt(toolBuilder());
         final int maxRetries = 3;
@@ -1039,9 +1142,12 @@ public class FunctionCallerV2 {
                 }
             }
 
-            logger.info("Running function: " + functionName + " with " + paramMap);
+            int currentStep = executedSteps.size() + 1;
+            logger.info("▶️ Step {}/{} → {} with {}", currentStep, totalSteps, functionName, paramMap);
+            System.out.println("[FunctionCaller] Step " + currentStep + "/" + totalSteps + " executing " + functionName + " params=" + paramMap);
             callFunction(functionName, paramMap).join(); // Sync call
             logger.info("Function output: {}", functionOutput);
+            System.out.println("[FunctionCaller] Step " + currentStep + " output=" + functionOutput);
             parseOutputValues(functionName, functionOutput);
 
             // Short wait for state to settle (e.g., for movement tools)
@@ -1066,9 +1172,11 @@ public class FunctionCallerV2 {
 
             if (result.success) {
                 logger.info("✅ Verifier passed for {} with data: {}", functionName, result.data);
+                System.out.println("[FunctionCaller] Verifier success for " + functionName + " data=" + result.data);
                 executedSteps.add(functionName + ", Output: " + functionOutput);
             } else {
                 logger.warn("❌ Verifier failed for {} with data: {}", functionName, result.data);
+                System.out.println("[FunctionCaller] Verifier failed for " + functionName + " data=" + result.data);
                 if (retryCount >= maxRetries) {
                     logger.error("❌ Max LLM fallback retries reached due to verifier failures. Aborting.");
                     break;
@@ -1134,11 +1242,8 @@ public class FunctionCallerV2 {
                 }
             }
         }
-        blockDetectionUnit.setIsBlockDetectionActive(false);
-        PathTracer.flushAllMovementTasks();
-        AutoFaceEntity.setBotExecutingTask(false);
-        AutoFaceEntity.isBotMoving = false;
-        logger.info("✔️ Autoface module has been reset.");
+        logger.info("🏁 Pipeline finished. Executed {} step(s).", executedSteps.size());
+        System.out.println("[FunctionCaller] Pipeline finished. Executed " + executedSteps.size() + " step(s).");
     }
 
     private static final Map<String, List<String>> functionStateKeyMap = Map.ofEntries(
@@ -1348,6 +1453,10 @@ public class FunctionCallerV2 {
                     String blockType = resolvePlaceholder(paramMap.get("blockType"));
                     logger.info("Calling method: detectBlocks with blockType={}", blockType);
                     Tools.detectBlocks(blockType);
+                }
+                case "shovelDirt" -> {
+                    logger.info("Calling method: shovelDirt");
+                    Tools.shovelDirt();
                 }
                 case "turn" -> {
                     String direction = resolvePlaceholder(paramMap.get("direction"));

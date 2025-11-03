@@ -47,6 +47,10 @@ import net.shasankp000.PathFinding.PathFinder;
 import net.shasankp000.PathFinding.PathTracer;
 import net.shasankp000.PathFinding.Segment;
 import net.shasankp000.PlayerUtils.*;
+import net.shasankp000.GameAI.skills.SkillManager;
+import net.shasankp000.GameAI.skills.SkillContext;
+import net.shasankp000.GameAI.skills.SkillExecutionResult;
+import net.shasankp000.FunctionCaller.FunctionCallerV2;
 import net.shasankp000.ServiceLLMClients.LLMClient;
 import net.shasankp000.ServiceLLMClients.LLMServiceHandler;
 import net.shasankp000.WorldUitls.isFoodItem;
@@ -55,6 +59,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -107,7 +112,30 @@ public class modCommandRegistry {
                                         )
                                 )
                         )
+                        .then(literal("skill")
+                                .then(CommandManager.argument("skill_name", StringArgumentType.string())
+                                        .executes(context -> {
+                                            ServerPlayerEntity bot = getActiveBotOrThrow(context);
+                                            String skillName = StringArgumentType.getString(context, "skill_name");
+                                            return executeSkill(context, bot, skillName, null);
+                                        })
+                                        .then(CommandManager.argument("count", IntegerArgumentType.integer(1, 64))
+                                                .executes(context -> {
+                                                    ServerPlayerEntity bot = getActiveBotOrThrow(context);
+                                                    String skillName = StringArgumentType.getString(context, "skill_name");
+                                                    int count = IntegerArgumentType.getInteger(context, "count");
+                                                    return executeSkill(context, bot, skillName, count);
+                                                })
+                                        )
+                                )
+                        )
                         .then(literal("follow")
+                                .then(literal("stop")
+                                        .executes(context -> executeFollowStop(context, getActiveBotOrThrow(context)))
+                                        .then(CommandManager.argument("bot", EntityArgumentType.player())
+                                                .executes(context -> executeFollowStop(context, EntityArgumentType.getPlayer(context, "bot")))
+                                        )
+                                )
                                 .executes(context -> {
                                     ServerPlayerEntity bot = getActiveBotOrThrow(context);
                                     ServerPlayerEntity target = context.getSource().getPlayer();
@@ -804,6 +832,8 @@ public class modCommandRegistry {
             // don't initialize ollama client.
 
         } else if (spawnMode.equals("play")) {
+            isTrainingMode = false;
+            LOGGER.info("Training mode disabled for play spawn.");
 
             createFakePlayer.createFake(
                     botName,
@@ -1235,6 +1265,12 @@ public class modCommandRegistry {
         return 1;
     }
 
+    private static int executeFollowStop(CommandContext<ServerCommandSource> context, ServerPlayerEntity bot) {
+        String result = BotEventHandler.stopFollowing(bot);
+        ChatUtils.sendSystemMessage(context.getSource(), result);
+        return 1;
+    }
+
     private static int executeGuard(CommandContext<ServerCommandSource> context, ServerPlayerEntity bot, double radius) {
         String result = BotEventHandler.setGuardMode(bot, radius);
         ChatUtils.sendSystemMessage(context.getSource(), result);
@@ -1268,6 +1304,21 @@ public class modCommandRegistry {
     private static int executeCombatStyle(CommandContext<ServerCommandSource> context, ServerPlayerEntity bot, BotEventHandler.CombatStyle style) {
         String result = BotEventHandler.setCombatStyle(bot, style);
         ChatUtils.sendSystemMessage(context.getSource(), result);
+        return 1;
+    }
+
+    private static int executeSkill(CommandContext<ServerCommandSource> context, ServerPlayerEntity bot, String skillName, Integer count) {
+        Map<String, Object> params = new HashMap<>();
+        if (count != null) {
+            params.put("count", count);
+        }
+        ServerCommandSource source = context.getSource();
+        SkillContext skillContext = new SkillContext(bot.getCommandSource(), FunctionCallerV2.getSharedState(), params);
+        ChatUtils.sendSystemMessage(source, "Starting skill '" + skillName + "'...");
+        CompletableFuture.runAsync(() -> {
+            SkillExecutionResult result = SkillManager.runSkill(skillName, skillContext);
+            source.getServer().execute(() -> ChatUtils.sendSystemMessage(source, result.message()));
+        });
         return 1;
     }
 

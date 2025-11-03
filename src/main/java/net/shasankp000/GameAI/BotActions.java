@@ -134,9 +134,8 @@ public final class BotActions {
         ServerWorld world = bot.getCommandSource().getWorld();
         BlockPos targetPos = getRelativeBlockPos(bot, 1, 0);
         if (!world.getBlockState(targetPos).isAir() && canBreak(world, targetPos, bot)) {
-            boolean success = world.breakBlock(targetPos, true, bot);
+            boolean success = breakBlock(world, targetPos, bot);
             if (success) {
-                bot.swingHand(Hand.MAIN_HAND, true);
                 return true;
             }
         }
@@ -144,9 +143,8 @@ public final class BotActions {
         // Try the block above-front if the direct block was air (stair carving)
         BlockPos upperPos = getRelativeBlockPos(bot, 1, 1);
         if (!world.getBlockState(upperPos).isAir() && canBreak(world, upperPos, bot)) {
-            boolean success = world.breakBlock(upperPos, true, bot);
+            boolean success = breakBlock(world, upperPos, bot);
             if (success) {
-                bot.swingHand(Hand.MAIN_HAND, true);
                 return true;
             }
         }
@@ -205,6 +203,33 @@ public final class BotActions {
         jumpForward(bot);
     }
 
+    public static boolean digOut(ServerPlayerEntity bot) {
+        ServerWorld world = bot.getCommandSource().getWorld();
+        if (world == null) {
+            return false;
+        }
+
+        BlockPos origin = bot.getBlockPos();
+        boolean brokeAny = false;
+
+        BlockPos[] verticalTargets = new BlockPos[] {
+                origin,
+                origin.up(),
+                origin.up(2)
+        };
+        for (BlockPos target : verticalTargets) {
+            brokeAny |= breakBlock(world, target, bot);
+        }
+
+        for (Direction direction : Direction.Type.HORIZONTAL) {
+            BlockPos horizontal = origin.offset(direction);
+            brokeAny |= breakBlock(world, horizontal, bot);
+            brokeAny |= breakBlock(world, horizontal.up(), bot);
+        }
+
+        return brokeAny;
+    }
+
     private static boolean canBreak(ServerWorld world, BlockPos pos, ServerPlayerEntity bot) {
         BlockState state = world.getBlockState(pos);
         if (state.isAir() || state.isOf(net.minecraft.block.Blocks.BEDROCK)) {
@@ -232,6 +257,17 @@ public final class BotActions {
         }
 
         return hardness <= allowedHardness;
+    }
+
+    private static boolean breakBlock(ServerWorld world, BlockPos pos, ServerPlayerEntity bot) {
+        if (!canBreak(world, pos, bot)) {
+            return false;
+        }
+        boolean success = world.breakBlock(pos, true, bot);
+        if (success) {
+            bot.swingHand(Hand.MAIN_HAND, true);
+        }
+        return success;
     }
 
     private static int findWeaponSlot(ServerPlayerEntity bot) {

@@ -1,0 +1,29 @@
+[
+  {
+    "id": "minecraft:dirt",
+    "name": "Dirt",
+    "hardness": 0.5,
+    "preferredTool": "Shovel",
+    "toolOptions": ["wooden_shovel", "stone_shovel", "iron_shovel", "diamond_shovel", "netherite_shovel"],
+    "dropSummary": ["Drops itself"],
+    "notes": ["Breaks instantly with any shovel", "Useful filler block; low blast resistance"]
+  },
+  {
+    "id": "minecraft:oak_log",
+    "name": "Oak Log",
+    "hardness": 2.0,
+    "preferredTool": "Axe",
+    "toolOptions": ["wooden_axe", "stone_axe", "iron_axe", "diamond_axe", "netherite_axe"],
+    "dropSummary": ["Drops itself"],
+    "notes": ["Cut logs from the top down to avoid floating trunks", "Fuel source and primary wood crafting input"]
+  },
+  {
+    "id": "minecraft:stone",
+    "name": "Stone",
+    "hardness": 1.5,
+    "preferredTool": "Pickaxe",
+    "toolOptions": ["wooden_pickaxe", "stone_pickaxe", "iron_pickaxe", "diamond_pickaxe", "netherite_pickaxe"],
+    "dropSummary": ["Drops cobblestone unless Silk Touch"],
+    "notes": ["Requires pickaxe; breaking with other tools yields no drops"]
+  }
+]

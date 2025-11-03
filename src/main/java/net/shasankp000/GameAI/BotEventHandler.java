@@ -57,12 +57,14 @@ public class BotEventHandler {
     private static Vec3d lastKnownPosition = null;
     private static int stationaryTicks = 0;
     private static final int STUCK_TICK_THRESHOLD = 12;
+    private static final boolean SPARTAN_MODE_ENABLED = false;
     private static boolean spartanModeActive = false;
     private static int failedBlockBreakAttempts = 0;
     private static final int MAX_FAILED_BLOCK_ATTEMPTS = 4;
     private static Vec3d lastSafePosition = null;
     private static final Random RANDOM = new Random();
     private static Mode currentMode = Mode.IDLE;
+    private static volatile boolean externalOverrideActive = false;
     public enum CombatStyle {
         AGGRESSIVE,
         EVASIVE
@@ -89,6 +91,22 @@ public class BotEventHandler {
         if (server != null && bot != null && (registeredBotUuid == null || registeredBotUuid.equals(bot.getUuid()))) {
             registerBot(bot);
         }
+    }
+
+    public static void setExternalOverrideActive(boolean active) {
+        if (externalOverrideActive == active) {
+            return;
+        }
+        externalOverrideActive = active;
+        if (active) {
+            LOGGER.info("External override activated; pausing training loop.");
+        } else {
+            LOGGER.info("External override cleared; training loop may resume.");
+        }
+    }
+
+    public static boolean isExternalOverrideActive() {
+        return externalOverrideActive;
     }
 
     public static void registerBot(ServerPlayerEntity candidate) {
@@ -124,6 +142,10 @@ public class BotEventHandler {
     }
 
     public void detectAndReact(RLAgent rlAgentHook, double distanceToHostileEntity, QTable qTable) throws IOException {
+        if (externalOverrideActive) {
+            LOGGER.debug("Skipping detectAndReact because external override is active.");
+            return;
+        }
         synchronized (monitorLock) {
             if (isExecuting) {
                 System.out.println("Executing detection code");
@@ -137,7 +159,8 @@ public class BotEventHandler {
         }
 
         try {
-            System.out.println("Distance from danger zone: " + DangerZoneDetector.detectDangerZone(bot, 10, 10 , 10) + " blocks");
+            double dangerDistance = DangerZoneDetector.detectDangerZone(bot, 10, 10, 10);
+            System.out.println("Distance from danger zone: " + dangerDistance + " blocks");
 
             List<Entity> nearbyEntities = AutoFaceEntity.detectNearbyEntities(bot, 10); // Example bounding box size
             List<Entity> hostileEntities = nearbyEntities.stream()
@@ -147,17 +170,18 @@ public class BotEventHandler {
             LOGGER.info("detectAndReact triggered: hostiles={}, trainingMode={}, alreadyExecuting={}",
                     hostileEntities.size(), net.shasankp000.Commands.modCommandRegistry.isTrainingMode, isExecuting);
 
-            EnvironmentSnapshot environmentSnapshot = analyzeEnvironment(bot);
-            handleSpartanMode(bot, environmentSnapshot);
-            updateStuckTracker(bot, environmentSnapshot);
-
-
             BlockDistanceLimitedSearch blockDistanceLimitedSearch = new BlockDistanceLimitedSearch(bot, 3, 5);
 
             List<String> nearbyBlocks = blockDistanceLimitedSearch.detectNearbyBlocks();
 
             boolean hasSculkNearby = nearbyBlocks.stream()
                     .anyMatch(block -> block.contains("Sculk Sensor") || block.contains("Sculk Shrieker"));
+
+            EnvironmentSnapshot environmentSnapshot = analyzeEnvironment(bot);
+            boolean threatDetected = shouldEnterCombat(!hostileEntities.isEmpty(), dangerDistance, hasSculkNearby);
+            handleSpartanMode(bot, environmentSnapshot, threatDetected);
+            updateStuckTracker(bot, environmentSnapshot);
+
             System.out.println("Nearby blocks: " + nearbyBlocks);
 
             int timeofDay = GetTime.getTimeOfWorld(bot);
@@ -197,7 +221,7 @@ public class BotEventHandler {
                 performLearningStep(rlAgentHook, qTable, currentState, nearbyEntitiesList, nearbyBlocks,
                         distanceToHostileEntity, time, dimension);
 
-            } else if ((DangerZoneDetector.detectDangerZone(bot, 10, 10, 10) <= 5.0 && DangerZoneDetector.detectDangerZone(bot, 10, 10, 10) > 0.0) || hasSculkNearby) {
+            } else if ((dangerDistance > 0.0 && dangerDistance <= 5.0) || hasSculkNearby) {
                 System.out.println("Danger zone detected within 5 blocks");
 
                 System.out.println("Triggered handler for danger zone case.");
@@ -270,6 +294,10 @@ public class BotEventHandler {
     }
 
     public void detectAndReactPlayMode(RLAgent rlAgentHook, QTable qTable) {
+        if (externalOverrideActive) {
+            LOGGER.debug("Skipping detectAndReactPlayMode because external override is active.");
+            return;
+        }
         synchronized (monitorLock) {
             if (isExecuting) {
                 System.out.println("Already executing detection code, skipping...");
@@ -345,6 +373,7 @@ public class BotEventHandler {
     }
 
     private static void executeAction(StateActions.Action chosenAction) {
+        ActionHoldTracker.recordAction(chosenAction);
         switch (chosenAction) {
             case MOVE_FORWARD -> performAction("moveForward");
             case MOVE_BACKWARD -> performAction("moveBackward");
@@ -428,8 +457,40 @@ public class BotEventHandler {
         return snapshot.enclosed() && !snapshot.hasEscapeRoute() && !snapshot.hasHeadroom();
     }
 
-    private static void handleSpartanMode(ServerPlayerEntity bot, EnvironmentSnapshot snapshot) {
-        boolean candidate = isSpartanCandidate(snapshot) || failedBlockBreakAttempts >= MAX_FAILED_BLOCK_ATTEMPTS;
+    private static boolean shouldEnterCombat(boolean hostilesNearby, double dangerDistance, boolean hasSculkNearby) {
+        boolean dangerProximity = dangerDistance > 0.0 && dangerDistance <= 5.0;
+        return hostilesNearby || dangerProximity || hasSculkNearby;
+    }
+
+    private static boolean assessImmediateThreat(ServerPlayerEntity bot) {
+        if (bot == null) {
+            return false;
+        }
+        double dangerDistance = DangerZoneDetector.detectDangerZone(bot, 10, 10, 10);
+        List<Entity> nearbyEntities = AutoFaceEntity.detectNearbyEntities(bot, 10);
+        boolean hostilesNearby = nearbyEntities.stream().anyMatch(EntityUtil::isHostile);
+        boolean hasSculkNearby = false;
+        if (!hostilesNearby) {
+            try {
+                BlockDistanceLimitedSearch search = new BlockDistanceLimitedSearch(bot, 3, 5);
+                hasSculkNearby = search.detectNearbyBlocks().stream()
+                        .anyMatch(block -> block.contains("Sculk Sensor") || block.contains("Sculk Shrieker"));
+            } catch (Exception e) {
+                LOGGER.warn("Unable to evaluate sculk proximity while assessing threats: {}", e.getMessage());
+            }
+        }
+        return shouldEnterCombat(hostilesNearby, dangerDistance, hasSculkNearby);
+    }
+
+    private static void handleSpartanMode(ServerPlayerEntity bot, EnvironmentSnapshot snapshot, boolean threatDetected) {
+        if (!SPARTAN_MODE_ENABLED) {
+            spartanModeActive = false;
+            failedBlockBreakAttempts = 0;
+            return;
+        }
+        boolean environmentTrigger = isSpartanCandidate(snapshot) && threatDetected;
+        boolean failureTrigger = threatDetected && failedBlockBreakAttempts >= MAX_FAILED_BLOCK_ATTEMPTS;
+        boolean candidate = environmentTrigger || failureTrigger;
         if (candidate && !spartanModeActive) {
             spartanModeActive = true;
             BotActions.sneak(bot, false);
@@ -451,7 +512,8 @@ public class BotEventHandler {
         failedBlockBreakAttempts = Math.min(MAX_FAILED_BLOCK_ATTEMPTS, failedBlockBreakAttempts + 1);
         if (failedBlockBreakAttempts >= MAX_FAILED_BLOCK_ATTEMPTS) {
             EnvironmentSnapshot snapshot = analyzeEnvironment(bot);
-            handleSpartanMode(bot, snapshot);
+            boolean threatDetected = assessImmediateThreat(bot);
+            handleSpartanMode(bot, snapshot, threatDetected);
         }
     }
 
@@ -474,6 +536,15 @@ public class BotEventHandler {
         if (isSpartanCandidate(environmentSnapshot)) {
             lastKnownPosition = currentPos;
             stationaryTicks = 0;
+            boolean threatDetected = assessImmediateThreat(bot);
+            if (!threatDetected) {
+                LOGGER.info("Bot enclosed without active threats; attempting dig-out routine.");
+                boolean cleared = BotActions.digOut(bot);
+                if (cleared) {
+                    failedBlockBreakAttempts = 0;
+                    lastKnownPosition = new Vec3d(bot.getX(), bot.getY(), bot.getZ());
+                }
+            }
             return;
         }
 
@@ -586,6 +657,10 @@ public class BotEventHandler {
     }
 
     public static String setFollowMode(ServerPlayerEntity bot, ServerPlayerEntity target) {
+        if (isExternalOverrideActive()) {
+            sendBotMessage(bot, "Busy with another task right now.");
+            return "Bot is busy executing another task. Try again after it finishes.";
+        }
         if (target == null) {
             return "Unable to follow — target not found.";
         }
@@ -596,6 +671,28 @@ public class BotEventHandler {
         baseTarget = null;
         sendBotMessage(bot, "Following " + target.getName().getString() + ".");
         return "Now following " + target.getName().getString() + ".";
+    }
+
+    public static String stopFollowing(ServerPlayerEntity bot) {
+        if (bot != null) {
+            registerBot(bot);
+        }
+        boolean wasFollowing = currentMode == Mode.FOLLOW && followTargetUuid != null;
+        followTargetUuid = null;
+        if (bot != null) {
+            BotActions.stop(bot);
+        }
+        if (currentMode == Mode.FOLLOW) {
+            currentMode = Mode.IDLE;
+        }
+        if (bot != null && wasFollowing) {
+            sendBotMessage(bot, "Stopping follow command.");
+        }
+        return wasFollowing ? "Bot stopped following." : "Bot is not currently following anyone.";
+    }
+
+    public static UUID getFollowTargetUuid() {
+        return followTargetUuid;
     }
 
     public static String setGuardMode(ServerPlayerEntity bot, double radius) {
@@ -944,6 +1041,11 @@ public class BotEventHandler {
             String time,
             String dimension) throws IOException {
 
+        if (externalOverrideActive) {
+            LOGGER.debug("Aborting learning step because external override is active.");
+            return;
+        }
+
         LOGGER.info("Starting performLearningStep. Current state hash: {}, hostiles in state: {}",
                 currentState.hashCode(),
                 currentState.getNearbyEntities() != null ? currentState.getNearbyEntities().stream().filter(EntityDetails::isHostile).count() : 0);
@@ -1038,6 +1140,8 @@ public class BotEventHandler {
         Vec3d guardCenterVec = getGuardCenterVec();
         double guardRadiusValue = guardCenterVec != null ? getGuardRadiusValue() : 0.0D;
 
+        ActionHoldTracker.ActionHoldSnapshot holdSnapshot = ActionHoldTracker.snapshot();
+
         double reward = rlAgentHook.calculateReward(
                 (int) bot.getX(),
                 (int) bot.getY(),
@@ -1067,7 +1171,8 @@ public class BotEventHandler {
                 commanderPos,
                 commanderHealth,
                 guardCenterVec,
-                guardRadiusValue
+                guardRadiusValue,
+                holdSnapshot
         );
 
         LOGGER.info("Reward for action {}: {}", chosenAction, reward);
