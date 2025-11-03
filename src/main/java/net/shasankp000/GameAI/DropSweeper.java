@@ -20,7 +20,8 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.Locale;
 import java.util.concurrent.CompletableFuture;
-import java.util.Map;
+import java.util.HashSet;
+import java.util.Set;
 
 /**
  * Utility that walks the bot over to nearby item entities so drops from recent
@@ -54,24 +55,17 @@ public final class DropSweeper {
         int attempts = 0;
         Vec3d origin = currentPosition(player);
 
-        Map<BlockPos, Integer> dropAttempts = new HashMap<>();
+        Set<ItemEntity> excludedDrops = new HashSet<>();
 
         while (attempts < maxTargets && System.currentTimeMillis() <= deadline) {
-            ItemEntity targetDrop = findClosestDrop(player, world, horizontalRadius, verticalRange);
+            ItemEntity targetDrop = findClosestDrop(player, world, horizontalRadius, verticalRange, excludedDrops);
             if (targetDrop == null) {
                 LOGGER.debug("Drop sweep finished: no drops within radius {}.", horizontalRadius);
                 break;
             }
 
             BlockPos dropBlock = targetDrop.getBlockPos().toImmutable();
-            int tries = dropAttempts.getOrDefault(dropBlock, 0);
-            if (tries >= 3) {
-                LOGGER.info("Drop sweep skipping {} at {} after {} attempts.", describeDrop(targetDrop), dropBlock, tries);
-                attempts++;
-                continue;
-            }
-
-            dropAttempts.put(dropBlock, tries + 1);
+            excludedDrops.add(targetDrop);
 
             double distanceSq = player.squaredDistanceTo(targetDrop);
             if (distanceSq <= PICKUP_DISTANCE_SQUARED) {
@@ -107,14 +101,12 @@ public final class DropSweeper {
 
             if (success && itemCollected) {
                 LOGGER.info("Drop sweep collected {} ({})", describeDrop(targetDrop), result);
-                dropAttempts.remove(dropBlock);
             } else if (success) {
                 LOGGER.info("Drop sweep reached {} but item still present ({}). Nudging for pickup.", destination, result);
                 boolean nudged = attemptManualNudge(player, targetDrop, dropPos);
                 if (nudged) {
                     if (targetDrop.isRemoved() || player.squaredDistanceTo(targetDrop) <= PICKUP_DISTANCE_SQUARED) {
                         LOGGER.info("Drop sweep manual nudge collected {} near {}", describeDrop(targetDrop), dropPos);
-                        dropAttempts.remove(dropBlock);
                     } else {
                         LOGGER.warn("Drop sweep manual nudge near {} completed but item still present.", dropPos);
                     }
@@ -131,21 +123,11 @@ public final class DropSweeper {
         LOGGER.debug("Drop sweep completed after {} attempt(s), total displacement {}m.", attempts, String.format("%.2f", movedDistance));
     }
 
-    private static ItemEntity findClosestDrop(ServerPlayerEntity player, ServerWorld world, double radius, double verticalRange) {
+    private static ItemEntity findClosestDrop(ServerPlayerEntity player, ServerWorld world, double radius, double verticalRange, Set<ItemEntity> excludedDrops) {
         return world.getEntitiesByClass(
                         ItemEntity.class,
                         Box.of(currentPosition(player), radius * 2, verticalRange * 2, radius * 2),
-                        drop -> !drop.isRemoved() && drop.isAlive())
-                .stream()
-                .min(Comparator.comparingDouble(player::squaredDistanceTo))
-                .orElse(null);
-    }
-
-    private static ItemEntity findClosestDropExcluding(ServerPlayerEntity player, ServerWorld world, double radius, double verticalRange, ItemEntity excluded) {
-        return world.getEntitiesByClass(
-                        ItemEntity.class,
-                        Box.of(currentPosition(player), radius * 2, verticalRange * 2, radius * 2),
-                        drop -> drop != excluded && !drop.isRemoved() && drop.isAlive())
+                        drop -> !drop.isRemoved() && drop.isAlive() && !excludedDrops.contains(drop))
                 .stream()
                 .min(Comparator.comparingDouble(player::squaredDistanceTo))
                 .orElse(null);
