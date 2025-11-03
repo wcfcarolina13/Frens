@@ -29,7 +29,7 @@ import java.util.Map;
 public final class DropSweeper {
 
     private static final Logger LOGGER = LoggerFactory.getLogger("drop-sweeper");
-    private static final double PICKUP_DISTANCE_SQUARED = 1.2 * 1.2;
+    private static final double PICKUP_DISTANCE_SQUARED = 1.0 * 1.0;
 
     private DropSweeper() {
     }
