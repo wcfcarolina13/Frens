@@ -1,6 +1,7 @@
 package net.shasankp000.GameAI.skills;
 
 import net.minecraft.server.network.ServerPlayerEntity;
+import net.shasankp000.ChatUtils.ChatUtils;
 import net.shasankp000.GameAI.DropSweeper;
 import net.shasankp000.GameAI.BotEventHandler;
 import net.shasankp000.GameAI.skills.impl.DirtShovelSkill;
@@ -52,16 +53,16 @@ public final class SkillManager {
         try {
             return skill.execute(context);
         } finally {
-                    try {
-                        LOGGER.info("Calling DropSweeper.sweep(). botSource: {}, player: {}, world: {}", context.botSource(), context.botSource().getPlayer(), context.botSource().getWorld());
-                        DropSweeper.sweep(
-                                context.botSource(),
-                                DROP_SWEEP_RADIUS,
-                                DROP_SWEEP_VERTICAL,
-                                DROP_SWEEP_MAX_TARGETS,
-                                DROP_SWEEP_MAX_DURATION_MS
-                        );
-                    } catch (Exception sweepError) {                LOGGER.warn("Drop sweep after skill '{}' failed: {}", name, sweepError.getMessage(), sweepError);
+                            try {
+                                ChatUtils.sendSystemMessage(context.botSource(), "About to call DropSweeper.sweep()");
+                                DropSweeper.sweep(
+                                        context.botSource(),
+                                        DROP_SWEEP_RADIUS,
+                                        DROP_SWEEP_VERTICAL,
+                                        DROP_SWEEP_MAX_TARGETS,
+                                        DROP_SWEEP_MAX_DURATION_MS
+                                );
+                            } catch (Exception sweepError) {                LOGGER.warn("Drop sweep after skill '{}' failed: {}", name, sweepError.getMessage(), sweepError);
             }
             BotEventHandler.setExternalOverrideActive(false);
             if (botPlayer != null && resumeFollowUuid != null) {
