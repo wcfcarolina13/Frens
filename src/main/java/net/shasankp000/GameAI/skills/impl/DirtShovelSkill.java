@@ -11,6 +11,7 @@ import net.shasankp000.GameAI.skills.DirtNavigationPolicy;
 import net.shasankp000.GameAI.skills.Skill;
 import net.shasankp000.GameAI.skills.SkillContext;
 import net.shasankp000.GameAI.skills.SkillExecutionResult;
+import net.shasankp000.GameAI.skills.SkillManager;
 import net.shasankp000.PathFinding.GoTo;
 import net.shasankp000.PlayerUtils.MiningTool;
 import net.shasankp000.FunctionCaller.SharedStateUtils;
@@ -20,6 +21,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
@@ -48,14 +50,20 @@ public final class DirtShovelSkill implements Skill {
         int horizontalRadius = getIntParameter(context, "searchRadius", DEFAULT_HORIZONTAL_RADIUS);
         int verticalRange = getIntParameter(context, "verticalRange", DEFAULT_VERTICAL_RANGE);
         Set<BlockPos> excluded = extractExcluded(context.parameters());
+        BlockPos squareCenter = extractSquareCenter(context.parameters());
+        Integer squareRadius = extractSquareRadius(context.parameters());
 
         try {
-            List<BlockPos> candidates = gatherCandidateDirt(player, horizontalRadius, verticalRange, excluded);
+            List<BlockPos> candidates = gatherCandidateDirt(player, horizontalRadius, verticalRange, excluded, squareCenter, squareRadius);
             if (candidates.isEmpty()) {
                 return failure(context, "No dirt block detected within radius " + horizontalRadius + ".");
             }
 
             for (BlockPos detectedPos : candidates) {
+                if (SkillManager.shouldAbortSkill(player)) {
+                    LOGGER.warn("dirt_shovel interrupted before targeting {} due to cancellation request.", detectedPos);
+                    return failure(context, "dirt_shovel paused due to nearby threat.");
+                }
                 BlockPos originBeforeMove = player.getBlockPos();
                 if (context.sharedState() != null) {
                     SharedStateUtils.setValue(context.sharedState(), "pendingDirtTarget.x", detectedPos.getX());
@@ -63,8 +71,8 @@ public final class DirtShovelSkill implements Skill {
                     SharedStateUtils.setValue(context.sharedState(), "pendingDirtTarget.z", detectedPos.getZ());
                 }
 
-                BlockPos approachPos = computeApproachPosition(player, detectedPos);
-                if (approachPos == null) {
+                ApproachPlan approachPlan = computeApproachPlan(player, detectedPos);
+                if (approachPlan == null) {
                     LOGGER.debug("Skipping {} no approach available", detectedPos);
                     if (excluded != null) {
                         excluded.add(detectedPos);
@@ -73,6 +81,19 @@ public final class DirtShovelSkill implements Skill {
                     continue;
                 }
 
+                if (!approachPlan.blocksToClear().isEmpty()) {
+                    LOGGER.info("Carving approach to {} by clearing {}", detectedPos, approachPlan.blocksToClear());
+                    if (!carveApproach(player, approachPlan)) {
+                        LOGGER.warn("Failed to carve approach blocks {} for {}", approachPlan.blocksToClear(), detectedPos);
+                        if (excluded != null) {
+                            excluded.add(detectedPos);
+                        }
+                        DirtNavigationPolicy.record(originBeforeMove, detectedPos, false);
+                        continue;
+                    }
+                }
+
+                BlockPos approachPos = approachPlan.standPosition();
                 LookController.faceBlock(player, detectedPos);
 
                 BlockPos currentPos = player.getBlockPos();
@@ -191,7 +212,30 @@ public final class DirtShovelSkill implements Skill {
         return null;
     }
 
-    private List<BlockPos> gatherCandidateDirt(ServerPlayerEntity player, int horizontalRadius, int verticalRange, Set<BlockPos> excluded) {
+    private BlockPos extractSquareCenter(Map<String, Object> parameters) {
+        Object xObj = parameters.get("squareCenterX");
+        Object yObj = parameters.get("squareCenterY");
+        Object zObj = parameters.get("squareCenterZ");
+        if (xObj instanceof Number x && yObj instanceof Number y && zObj instanceof Number z) {
+            return new BlockPos(x.intValue(), y.intValue(), z.intValue());
+        }
+        return null;
+    }
+
+    private Integer extractSquareRadius(Map<String, Object> parameters) {
+        Object value = parameters.get("squareRadius");
+        if (value instanceof Number number) {
+            return number.intValue();
+        }
+        return null;
+    }
+
+    private List<BlockPos> gatherCandidateDirt(ServerPlayerEntity player,
+                                               int horizontalRadius,
+                                               int verticalRange,
+                                               Set<BlockPos> excluded,
+                                               BlockPos squareCenter,
+                                               Integer squareRadius) {
         BlockPos origin = player.getBlockPos();
         List<BlockPos> candidates = new ArrayList<>();
 
@@ -203,6 +247,11 @@ public final class DirtShovelSkill implements Skill {
                 for (int dy = -verticalRange; dy <= verticalRange; dy++) {
                     BlockPos candidate = origin.add(dx, dy, dz);
                     if (excluded != null && excluded.contains(candidate)) {
+                        continue;
+                    }
+                    if (squareCenter != null && squareRadius != null
+                            && (Math.abs(candidate.getX() - squareCenter.getX()) > squareRadius
+                            || Math.abs(candidate.getZ() - squareCenter.getZ()) > squareRadius)) {
                         continue;
                     }
                     boolean sameColumn = dx == 0 && dz == 0;
@@ -224,28 +273,90 @@ public final class DirtShovelSkill implements Skill {
         return candidates;
     }
 
-    private BlockPos computeApproachPosition(ServerPlayerEntity player, BlockPos target) {
+    private ApproachPlan computeApproachPlan(ServerPlayerEntity player, BlockPos target) {
+        List<ApproachPlan> fallbackPlans = new ArrayList<>();
         for (Direction direction : Direction.Type.HORIZONTAL) {
-            BlockPos support = target.offset(direction);
-            BlockPos stand = support.up();
-            if (isStandable(player, support, stand)) {
-                return stand;
+            ApproachPlan plan = evaluateStandOption(player, target.offset(direction), target.offset(direction).up());
+            if (plan == null) {
+                continue;
+            }
+            if (plan.blocksToClear().isEmpty()) {
+                return plan;
+            }
+            fallbackPlans.add(plan);
+        }
+
+        ApproachPlan abovePlan = evaluateStandOption(player, target, target.up());
+        if (abovePlan != null) {
+            if (abovePlan.blocksToClear().isEmpty()) {
+                return abovePlan;
+            }
+            fallbackPlans.add(abovePlan);
+        }
+
+        if (fallbackPlans.isEmpty()) {
+            return null;
+        }
+        fallbackPlans.sort(Comparator.comparingInt(plan -> plan.blocksToClear().size()));
+        return fallbackPlans.get(0);
+    }
+
+    private ApproachPlan evaluateStandOption(ServerPlayerEntity player, BlockPos support, BlockPos stand) {
+        BlockPos head = stand.up();
+        boolean supportSolid = !isPassable(player, support);
+        if (!supportSolid) {
+            return null;
+        }
+
+        boolean standClear = isPassable(player, stand);
+        boolean headClear = isPassable(player, head);
+        if (standClear && headClear) {
+            return new ApproachPlan(stand, Collections.emptyList());
+        }
+
+        List<BlockPos> toClear = new ArrayList<>();
+        if (!standClear) {
+            toClear.add(stand);
+        }
+        if (!headClear) {
+            toClear.add(head);
+        }
+        if (toClear.isEmpty()) {
+            return null;
+        }
+        return new ApproachPlan(stand, List.copyOf(toClear));
+    }
+
+    private boolean carveApproach(ServerPlayerEntity player, ApproachPlan plan) {
+        for (BlockPos blockPos : plan.blocksToClear()) {
+            if (player.getEntityWorld().getBlockState(blockPos).isAir()) {
+                continue;
+            }
+
+            LookController.faceBlock(player, blockPos);
+            CompletableFuture<String> future = MiningTool.mineBlock(player, blockPos);
+            String result;
+            try {
+                result = future.get(6, TimeUnit.SECONDS);
+            } catch (TimeoutException timeout) {
+                future.cancel(true);
+                LOGGER.warn("Clearing block {} timed out", blockPos);
+                return false;
+            } catch (Exception e) {
+                LOGGER.warn("Failed to clear block {} while carving approach", blockPos, e);
+                return false;
+            }
+
+            if (result == null || !result.toLowerCase().contains("complete")) {
+                LOGGER.warn("Clearing block {} reported unsuccessful result: {}", blockPos, result);
+                return false;
+            }
+            if (!player.getEntityWorld().getBlockState(blockPos).isAir()) {
+                LOGGER.warn("Block {} still present after carve attempt", blockPos);
+                return false;
             }
         }
-
-        BlockPos supportAbove = target;
-        BlockPos standAbove = target.up();
-        if (isStandable(player, supportAbove, standAbove)) {
-            return standAbove;
-        }
-
-        BlockPos supportBelow = target.down();
-        BlockPos standBelow = supportBelow.up();
-        if (isStandable(player, supportBelow, standBelow)) {
-            return standBelow;
-        }
-
-        return null;
+        return true;
     }
 
     private boolean isPassable(ServerPlayerEntity player, BlockPos pos) {
@@ -270,12 +381,24 @@ public final class DirtShovelSkill implements Skill {
         return id != null && id.getPath().contains("dirt");
     }
 
-    public SkillExecutionResult perform(ServerCommandSource source, Map<String, Object> sharedState, int horizontalRadius, int verticalRange, Set<BlockPos> excluded) {
+    public SkillExecutionResult perform(ServerCommandSource source,
+                                        Map<String, Object> sharedState,
+                                        int horizontalRadius,
+                                        int verticalRange,
+                                        Set<BlockPos> excluded,
+                                        BlockPos squareCenter,
+                                        Integer squareRadius) {
         Map<String, Object> params = new java.util.HashMap<>();
         params.put("searchRadius", horizontalRadius);
         params.put("verticalRange", verticalRange);
         if (excluded != null) {
             params.put("excludedBlocks", excluded);
+        }
+        if (squareCenter != null && squareRadius != null) {
+            params.put("squareCenterX", squareCenter.getX());
+            params.put("squareCenterY", squareCenter.getY());
+            params.put("squareCenterZ", squareCenter.getZ());
+            params.put("squareRadius", squareRadius);
         }
         return execute(new SkillContext(source, sharedState, params));
     }
@@ -285,5 +408,8 @@ public final class DirtShovelSkill implements Skill {
             SharedStateUtils.setValue(context.sharedState(), "lastShovelStatus", "failure");
         }
         return SkillExecutionResult.failure(message);
+    }
+
+    private record ApproachPlan(BlockPos standPosition, List<BlockPos> blocksToClear) {
     }
 }

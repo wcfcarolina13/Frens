@@ -933,6 +933,7 @@ public class FunctionCallerV2 {
                     } finally {
                         AutoFaceEntity.setBotExecutingTask(false);
                         AutoFaceEntity.isBotMoving = false;
+                        BotEventHandler.setExternalOverrideActive(false);
                     }
                 } else if (jsonObject.has(CLARIFICATION_KEY)) {
                     System.out.println("Detected clarification");

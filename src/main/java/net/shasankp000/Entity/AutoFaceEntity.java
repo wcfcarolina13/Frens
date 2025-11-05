@@ -4,6 +4,7 @@ import net.shasankp000.Entity.RayCasting;
 import net.shasankp000.EntityUtil;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.minecraft.entity.Entity;
+import net.minecraft.entity.LivingEntity;
 // import net.minecraft.entity.mob.HostileEntity;
 import net.minecraft.command.argument.EntityAnchorArgumentType;
 import net.minecraft.server.MinecraftServer;
@@ -15,7 +16,9 @@ import net.shasankp000.ChatUtils.ChatUtils;
 import net.shasankp000.Database.QTable;
 import net.shasankp000.GameAI.BotActions;
 import net.shasankp000.GameAI.BotEventHandler;
+import net.shasankp000.GameAI.services.TaskService;
 import net.shasankp000.GameAI.RLAgent;
+import net.shasankp000.GameAI.skills.SkillManager;
 import net.shasankp000.Commands.modCommandRegistry;
 import net.shasankp000.Database.QTableStorage;
 import net.shasankp000.PlayerUtils.BlockDistanceLimitedSearch;
@@ -50,6 +53,7 @@ public class AutoFaceEntity {
     private static final double EMOTE_MAX_DISTANCE = 6.0D;
     private static final double EMOTE_LOOK_THRESHOLD = 0.65D;
     private static final Random EMOTE_RANDOM = new Random();
+    private static final long DANGER_MESSAGE_COOLDOWN_MS = 4000L;
     public static boolean botBusy;
     private static boolean botExecutingTask;
     public static boolean hostileEntityInFront;
@@ -65,6 +69,7 @@ public class AutoFaceEntity {
     private static final Map<ServerPlayerEntity, ScheduledExecutorService> botExecutors = new HashMap<>();
     private static ServerPlayerEntity Bot = null;
     public static boolean isBotMoving = false;
+    private static volatile long lastDangerMessageMs = 0L;
 
     public static void setBotExecutingTask(boolean value) {
         botExecutingTask = value;
@@ -182,6 +187,17 @@ public class AutoFaceEntity {
                             .orElseThrow(); // Use orElseThrow since empty case is already handled
 
                     double distanceToHostileEntity = Math.sqrt(closestHostile.squaredDistanceTo(bot));
+                    boolean botSeesHostile = closestHostile instanceof LivingEntity livingHostile
+                            ? bot.canSee(livingHostile)
+                            : bot.canSee(closestHostile);
+                    ServerPlayerEntity followTarget = BotEventHandler.getFollowTarget();
+                    boolean playerSeesHostile = followTarget != null
+                            && (closestHostile instanceof LivingEntity living
+                            ? followTarget.canSee(living)
+                            : followTarget.canSee(closestHostile));
+                    if (botSeesHostile && (!playerSeesHostile)) {
+                        broadcastDangerAlert(bot);
+                    }
 
                     if (distanceToHostileEntity <= 10.0) {
                         boolean botWasBusy = PathTracer.BotSegmentManager.getBotMovementStatus()
@@ -193,7 +209,8 @@ public class AutoFaceEntity {
                             System.out.println("Bot is busy, stopping tasks before reacting to hostile.");
                             isBotMoving = false;
                             setBotExecutingTask(false);
-                            ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withMaxLevel(4), "Terminating all current tasks due to threat detections");
+                            broadcastDangerAlert(bot);
+                            SkillManager.requestSkillPause(bot, null);
                         }
 
                         if (BotEventHandler.isRegisteredBot(bot)) {
@@ -277,7 +294,8 @@ public class AutoFaceEntity {
 
                     if (PathTracer.BotSegmentManager.getBotMovementStatus() || isBotMoving || isBotExecutingTask()) {
                         System.out.println("Stopping movement since danger zone is detected.");
-                        ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withMaxLevel(4), "Terminating all current tasks due to threat detections");
+                        broadcastDangerAlert(bot);
+                        SkillManager.requestSkillPause(bot, null);
                         BotActions.stop(bot);
                         isBotMoving = false;
                         setBotExecutingTask(false);
@@ -307,7 +325,8 @@ public class AutoFaceEntity {
                     if ((PathTracer.BotSegmentManager.getBotMovementStatus() || isBotMoving) || blockDetectionUnit.getBlockDetectionStatus() || isBotExecutingTask()) {
                         long now = System.currentTimeMillis();
                         if (now - lastBusyLogMs > 2500L) {
-                            System.out.println("Bot is busy, skipping facing the closest entity");
+                            LOGGER.info("Bot is busy, skipping facing the closest entity. Status: PathTracer={}, isBotMoving={}, blockDetection={}, isBotExecutingTask={}",
+                                    PathTracer.BotSegmentManager.getBotMovementStatus(), isBotMoving, blockDetectionUnit.getBlockDetectionStatus(), isBotExecutingTask());
                             lastBusyLogMs = now;
                         }
                     }
@@ -431,6 +450,7 @@ public class AutoFaceEntity {
 
     public static void handleBotRespawn(ServerPlayerEntity bot) {
         // Ensure complete cleanup before restart
+        TaskService.onBotRespawn(bot);
         stopAutoFace(bot);
         isWorldTickListenerActive = true;
 
@@ -559,6 +579,19 @@ public class AutoFaceEntity {
         } else {
             bot.swingHand(Hand.MAIN_HAND, true);
         }
+    }
+
+    private static void broadcastDangerAlert(ServerPlayerEntity bot) {
+        if (bot == null) {
+            return;
+        }
+        long now = System.currentTimeMillis();
+        if (now - lastDangerMessageMs < DANGER_MESSAGE_COOLDOWN_MS) {
+            return;
+        }
+        lastDangerMessageMs = now;
+        ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withMaxLevel(4),
+                "§cTerminating all current tasks due to threat detections");
     }
 
 

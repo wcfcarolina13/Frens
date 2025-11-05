@@ -48,6 +48,7 @@ import net.shasankp000.PathFinding.PathTracer;
 import net.shasankp000.PathFinding.Segment;
 import net.shasankp000.PlayerUtils.*;
 import net.shasankp000.GameAI.skills.SkillManager;
+import net.shasankp000.GameAI.services.TaskService;
 import net.shasankp000.GameAI.skills.SkillContext;
 import net.shasankp000.GameAI.skills.SkillExecutionResult;
 import net.shasankp000.FunctionCaller.FunctionCallerV2;
@@ -65,6 +66,11 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
 import net.minecraft.registry.entry.RegistryEntry;
+import net.minecraft.item.Item;
+import net.minecraft.item.ItemStack;
+import net.minecraft.registry.Registries;
+import net.minecraft.util.Identifier;
+import net.minecraft.entity.player.PlayerInventory;
 
 
 import static net.shasankp000.PathFinding.PathFinder.*;
@@ -119,14 +125,32 @@ public class modCommandRegistry {
                                             String skillName = StringArgumentType.getString(context, "skill_name");
                                             return executeSkill(context, bot, skillName, null);
                                         })
-                                        .then(CommandManager.argument("count", IntegerArgumentType.integer(1, 64))
+                                        .then(CommandManager.argument("arguments", StringArgumentType.greedyString())
                                                 .executes(context -> {
                                                     ServerPlayerEntity bot = getActiveBotOrThrow(context);
                                                     String skillName = StringArgumentType.getString(context, "skill_name");
-                                                    int count = IntegerArgumentType.getInteger(context, "count");
-                                                    return executeSkill(context, bot, skillName, count);
+                                                    String args = StringArgumentType.getString(context, "arguments");
+                                                    return executeSkill(context, bot, skillName, args);
                                                 })
                                         )
+                                )
+                        )
+                        .then(literal("inventory")
+                                .executes(context -> executeInventorySummary(context, getActiveBotOrThrow(context)))
+                                .then(literal("count")
+                                        .then(CommandManager.argument("item", StringArgumentType.string())
+                                                .executes(context -> {
+                                                    ServerPlayerEntity bot = getActiveBotOrThrow(context);
+                                                    String itemId = StringArgumentType.getString(context, "item");
+                                                    return executeInventoryCount(context, bot, itemId);
+                                                })
+                                        )
+                                )
+                        )
+                        .then(literal("stop")
+                                .executes(context -> executeStop(context, getActiveBotOrThrow(context)))
+                                .then(CommandManager.argument("bot", EntityArgumentType.player())
+                                        .executes(context -> executeStop(context, EntityArgumentType.getPlayer(context, "bot")))
                                 )
                         )
                         .then(literal("follow")
@@ -794,6 +818,8 @@ public class modCommandRegistry {
 
         ServerCommandSource serverSource = server.getCommandSource();
 
+        TaskService.forceAbort("§cSpawning bot '" + botName + "'.");
+
 
         if (spawnMode.equals("training")) {
 
@@ -807,6 +833,11 @@ public class modCommandRegistry {
                     mode,
                     false
             );
+
+            ServerWorld spawnWorld = server.getWorld(dimType);
+            if (spawnWorld != null) {
+                BotEventHandler.rememberSpawn(spawnWorld, pos.add(0.5, 0, 0.5), facing.y, facing.x);
+            }
 
             isTrainingMode = true;
 
@@ -845,6 +876,11 @@ public class modCommandRegistry {
                     mode,
                     false
             );
+
+            ServerWorld spawnWorld = server.getWorld(dimType);
+            if (spawnWorld != null) {
+                BotEventHandler.rememberSpawn(spawnWorld, pos.add(0.5, 0, 0.5), facing.y, facing.x);
+            }
 
 
 
@@ -1164,14 +1200,9 @@ public class modCommandRegistry {
 
 
     public static void stopMoving(MinecraftServer server, ServerCommandSource source, String botName) {
-
         if (source.getPlayer() != null) {
-
             CommandUtils.run(source, "player " + botName + " stop");
-
         }
-
-
     }
 
     private static void equipDefaultLoadout(MinecraftServer server, ServerPlayerEntity bot) {
@@ -1307,10 +1338,90 @@ public class modCommandRegistry {
         return 1;
     }
 
-    private static int executeSkill(CommandContext<ServerCommandSource> context, ServerPlayerEntity bot, String skillName, Integer count) {
+    private static int executeInventorySummary(CommandContext<ServerCommandSource> context, ServerPlayerEntity bot) {
+        PlayerInventory inventory = bot.getInventory();
+        Map<Item, Integer> totals = new LinkedHashMap<>();
+        for (int i = 0; i < inventory.size(); i++) {
+            ItemStack stack = inventory.getStack(i);
+            if (stack.isEmpty()) {
+                continue;
+            }
+            totals.merge(stack.getItem(), stack.getCount(), Integer::sum);
+        }
+        if (totals.isEmpty()) {
+            ChatUtils.sendSystemMessage(context.getSource(), bot.getName().getString() + " has an empty inventory.");
+            return 1;
+        }
+        String summary = totals.entrySet()
+                .stream()
+                .sorted((a, b) -> Integer.compare(b.getValue(), a.getValue()))
+                .limit(15)
+                .map(entry -> entry.getValue() + "x " + entry.getKey().getName().getString())
+                .reduce((a, b) -> a + ", " + b)
+                .orElse("(no items)");
+        ChatUtils.sendSystemMessage(context.getSource(), "Inventory summary: " + summary);
+        return 1;
+    }
+
+    private static int executeInventoryCount(CommandContext<ServerCommandSource> context, ServerPlayerEntity bot, String itemId) {
+        Identifier id = Identifier.tryParse(itemId);
+        if (id == null || !Registries.ITEM.containsId(id)) {
+            ChatUtils.sendSystemMessage(context.getSource(), "Unknown item: " + itemId);
+            return 0;
+        }
+        Item item = Registries.ITEM.get(id);
+        int total = countInventoryItems(bot, item);
+        ChatUtils.sendSystemMessage(context.getSource(), bot.getName().getString() + " is carrying " + total + "x " + item.getName().getString() + ".");
+        return 1;
+    }
+
+    private static int countInventoryItems(ServerPlayerEntity bot, Item item) {
+        PlayerInventory inventory = bot.getInventory();
+        int total = 0;
+        for (int i = 0; i < inventory.size(); i++) {
+            ItemStack stack = inventory.getStack(i);
+            if (!stack.isEmpty() && stack.isOf(item)) {
+                total += stack.getCount();
+            }
+        }
+        return total;
+    }
+
+    private static int executeStop(CommandContext<ServerCommandSource> context, ServerPlayerEntity bot) {
+        MinecraftServer server = context.getSource().getServer();
+        if (server == null || bot == null) {
+            return 0;
+        }
+        stopMoving(server, context.getSource(), bot.getName().getString());
+        TaskService.forceAbort("§cCurrent task aborted via /bot stop.");
+        net.shasankp000.PathFinding.PathTracer.flushAllMovementTasks();
+        ChatUtils.sendSystemMessage(context.getSource(), "Stopping " + bot.getName().getString() + "...");
+        return 1;
+    }
+
+    private static int executeSkill(CommandContext<ServerCommandSource> context, ServerPlayerEntity bot, String skillName, String rawArgs) {
         Map<String, Object> params = new HashMap<>();
+        Integer count = null;
+        List<String> options = new ArrayList<>();
+        if (rawArgs != null && !rawArgs.isBlank()) {
+            String[] tokens = rawArgs.trim().split("\\s+");
+            int index = 0;
+            if (tokens.length > 0) {
+                try {
+                    count = Integer.parseInt(tokens[0]);
+                    index = 1;
+                } catch (NumberFormatException ignored) {
+                }
+            }
+            for (int i = index; i < tokens.length; i++) {
+                options.add(tokens[i].toLowerCase(Locale.ROOT));
+            }
+        }
         if (count != null) {
             params.put("count", count);
+        }
+        if (!options.isEmpty()) {
+            params.put("options", options);
         }
         ServerCommandSource source = context.getSource();
         SkillContext skillContext = new SkillContext(bot.getCommandSource(), FunctionCallerV2.getSharedState(), params);

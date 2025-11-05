@@ -5,6 +5,7 @@ import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Vec3d;
 
 import java.util.List;
 import java.util.Queue;
@@ -29,8 +30,15 @@ public class GoTo {
         System.out.println("Found bot: " + botSource.getName());
 
         try {
+            BlockPos target = new BlockPos(x, y, z);
+            Vec3d botPos = new Vec3d(bot.getX(), bot.getY(), bot.getZ());
+            Vec3d targetCenter = new Vec3d(target.getX() + 0.5, target.getY(), target.getZ() + 0.5);
+            if (botPos.squaredDistanceTo(targetCenter) <= 0.75D * 0.75D) {
+                return String.format("Bot moved to position - x: %d y: %d z: %d",
+                        target.getX(), target.getY(), target.getZ());
+            }
             // Calculate the path
-            List<PathNode> rawPath = calculatePath(bot.getBlockPos(), new BlockPos(x, y, z), world);
+            List<PathNode> rawPath = calculatePath(bot.getBlockPos(), target, world);
 
             // Simplify + filter
             List<PathNode> finalPath = simplifyPath(rawPath, world);
@@ -56,12 +64,10 @@ public class GoTo {
                 finalOutput = "Error. Player not found";
             }
             else if (result.equals("Max retries exceeded")) {
-                finalOutput = String.format("Bot moved to position - x: %d y: %d z: %d",
-                        (int) bot.getX(), (int) bot.getY(), (int) bot.getZ());
+                finalOutput = "Error. Max retries exceeded";
             }
             else if (result.equals("Re-pathing failed")) {
-                finalOutput = String.format("Bot moved to position - x: %d y: %d z: %d",
-                        (int) bot.getX(), (int) bot.getY(), (int) bot.getZ());
+                finalOutput = "Error. Re-pathing failed";
             }
             else if (result.contains("Path processing failed: ")) {
                 finalOutput = "Error. Path tracer failed to process the pathfinder's data";

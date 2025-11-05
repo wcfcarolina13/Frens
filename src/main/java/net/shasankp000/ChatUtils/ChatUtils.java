@@ -8,9 +8,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
-import java.util.Random;
 
 public class ChatUtils {
     private static final Logger LOGGER = LoggerFactory.getLogger("ai-player");
@@ -18,11 +16,6 @@ public class ChatUtils {
     // Configuration
     private static final int MAX_CHAT_LENGTH = 100;
     private static final long MESSAGE_DELAY_MS = 2500L;
-    private static final List<String> COLOR_CODES = Arrays.asList(
-            "§9", "§b", "§d", "§e", "§6", "§5", "§c", "§7"
-    );
-
-    private static final Random random = new Random();
 
     // We no longer use a separate scheduler for chat messages.
     // The server's main thread will handle scheduling internally.
@@ -104,7 +97,7 @@ public class ChatUtils {
             }
 
             // Now use the formattedMessage to build the final colored message.
-            String coloredMessage = getRandomColorCode() + formattedMessage;
+            String coloredMessage = formattedMessage;
 
 
             LOGGER.info("Broadcasting message part {}: '{}' from source: {}", partIndex, coloredMessage, sourceName);
@@ -226,7 +219,7 @@ public class ChatUtils {
      * Get a random color code for message formatting.
      */
     public static String getRandomColorCode() {
-        return COLOR_CODES.get(random.nextInt(COLOR_CODES.size()));
+        return "";
     }
 
     /**

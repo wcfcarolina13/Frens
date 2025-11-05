@@ -23,6 +23,7 @@ import net.minecraft.util.math.Vec3d;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
@@ -44,11 +45,26 @@ public final class BotActions {
     private BotActions() {}
 
     public static void moveForward(ServerPlayerEntity bot) {
-        moveRelative(bot, STEP_DISTANCE);
+        moveRelative(bot, STEP_DISTANCE, false, 0, 0);
     }
 
     public static void moveBackward(ServerPlayerEntity bot) {
-        moveRelative(bot, -STEP_DISTANCE);
+        moveRelative(bot, -STEP_DISTANCE, false, 0, 0);
+    }
+
+    public static void moveForwardStep(ServerPlayerEntity bot, double distance) {
+        moveRelative(bot, distance, false, 0, 0);
+    }
+
+    public static void moveToward(ServerPlayerEntity bot, Vec3d target, double maxStep) {
+        double dx = target.x - bot.getX();
+        double dz = target.z - bot.getZ();
+        double horizontal = Math.sqrt(dx * dx + dz * dz);
+        if (horizontal < 1e-4) {
+            return;
+        }
+        double step = Math.min(maxStep, horizontal);
+        moveRelative(bot, step, true, dx / horizontal, dz / horizontal);
     }
 
     public static void stop(ServerPlayerEntity bot) {
@@ -93,9 +109,42 @@ public final class BotActions {
         return false;
     }
 
+    public static boolean selectBestTool(ServerPlayerEntity bot, String preferKeyword, String avoidKeyword) {
+        if (bot == null) {
+            return false;
+        }
+        preferKeyword = preferKeyword != null ? preferKeyword.toLowerCase(Locale.ROOT) : null;
+        avoidKeyword = avoidKeyword != null ? avoidKeyword.toLowerCase(Locale.ROOT) : null;
+        int bestSlot = -1;
+        boolean preferMatchFound = false;
+        for (int slot = 0; slot < 9; slot++) {
+            ItemStack stack = bot.getInventory().getStack(slot);
+            if (stack.isEmpty()) {
+                continue;
+            }
+            String key = stack.getItem().getTranslationKey().toLowerCase(Locale.ROOT);
+            if (avoidKeyword != null && key.contains(avoidKeyword)) {
+                continue;
+            }
+            if (preferKeyword != null && key.contains(preferKeyword)) {
+                bestSlot = slot;
+                preferMatchFound = true;
+                break;
+            }
+            if (!preferMatchFound && bestSlot == -1) {
+                bestSlot = slot;
+            }
+        }
+        if (bestSlot != -1) {
+            selectHotbarSlot(bot, bestSlot);
+            return true;
+        }
+        return false;
+    }
+
     public static void jumpForward(ServerPlayerEntity bot) {
         bot.jump();
-        moveRelative(bot, STEP_DISTANCE * 0.6);
+        moveRelative(bot, STEP_DISTANCE * 0.6, false, 0, 0);
     }
 
     public static void attackNearest(ServerPlayerEntity bot, List<Entity> nearbyEntities) {
@@ -192,6 +241,39 @@ public final class BotActions {
             return true;
         }
 
+        return false;
+    }
+
+    public static boolean placeBlockAt(ServerPlayerEntity bot, BlockPos target) {
+        ServerWorld world = bot.getCommandSource().getWorld();
+        if (world == null || target == null) {
+            return false;
+        }
+        if (!world.getBlockState(target).isAir() && world.getFluidState(target).isEmpty()) {
+            return false;
+        }
+        int slot = findPlaceableHotbarSlot(bot);
+        if (slot == -1) {
+            return false;
+        }
+        ItemStack stack = bot.getInventory().getStack(slot);
+        if (!(stack.getItem() instanceof BlockItem blockItem)) {
+            return false;
+        }
+        BlockState stateToPlace = blockItem.getBlock().getDefaultState();
+        if (!stateToPlace.canPlaceAt(world, target)) {
+            return false;
+        }
+        selectHotbarSlot(bot, slot);
+        boolean placed = world.setBlockState(target, stateToPlace);
+        if (placed) {
+            stack.decrement(1);
+            if (stack.isEmpty()) {
+                bot.getInventory().setStack(slot, ItemStack.EMPTY);
+            }
+            bot.swingHand(Hand.MAIN_HAND, true);
+            return true;
+        }
         return false;
     }
 
@@ -298,17 +380,24 @@ public final class BotActions {
             return true;
         }
 
-        String key = stack.getItem().getTranslationKey().toLowerCase(java.util.Locale.ROOT);
+        String key = stack.getItem().getTranslationKey().toLowerCase(Locale.ROOT);
         return key.contains("sword") || key.contains("axe") || key.contains("trident") || key.contains("mace") || key.contains("dagger");
     }
 
-    private static void moveRelative(ServerPlayerEntity bot, double distance) {
+    private static void moveRelative(ServerPlayerEntity bot, double distance, boolean customDirection, double dirX, double dirZ) {
         float yaw = bot.getYaw();
-        double yawRad = Math.toRadians(yaw);
-        double dx = -Math.sin(yawRad) * distance;
-        double dz = Math.cos(yawRad) * distance;
+        double dx;
+        double dz;
+        if (customDirection) {
+            dx = dirX * distance;
+            dz = dirZ * distance;
+        } else {
+            double yawRad = Math.toRadians(yaw);
+            dx = -Math.sin(yawRad) * distance;
+            dz = Math.cos(yawRad) * distance;
+        }
 
-        bot.teleport(bot.getX() + dx, bot.getY(), bot.getZ() + dz, true);
+        bot.refreshPositionAndAngles(bot.getX() + dx, bot.getY(), bot.getZ() + dz, bot.getYaw(), bot.getPitch());
     }
 
     private static void rotate(ServerPlayerEntity bot, float angle) {

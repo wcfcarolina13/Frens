@@ -415,3 +415,101 @@ I have successfully implemented the "Mining Tool" and "Chopping Wood" and "Shove
 
 *(Gradle build still needed locally due to wrapper lock.)*
 
+#### 2025-11-02 20:46 CST - Codex Update
+
+**Foothold Carving**
+- `DirtShovelSkill` now carves blocked stand/head spaces before giving up, clearing a minimal set of obstructing blocks so enclosed dirt pockets remain actionable (`src/main/java/net/shasankp000/GameAI/skills/impl/DirtShovelSkill.java:295`).
+- Approach planning picks the lowest-effort carve plan first and only falls back to digging when no clean paths exist, keeping the previous fast path intact.
+
+**Verification**
+- `./gradlew build`
+
+**Next Step**
+- Re-run `/bot skill collect_dirt 50` inside the tight dirt pocket and confirm the new carve pass clears corridors; capture any remaining “No reachable dirt” logs so we can extend the fallback.
+
+#### 2025-11-02 21:08 CST - Codex Update
+
+**Exploration Steps**
+- `CollectDirtSkill` now triggers reposition runs after repeated failures, scanning for standable tiles and using the new reinforcement tracker to bias offsets that historically succeed (`src/main/java/net/shasankp000/GameAI/skills/impl/CollectDirtSkill.java:253`, `src/main/java/net/shasankp000/GameAI/skills/ExplorationMovePolicy.java:1`).
+- Navigation attempts feed both deterministic retries and RL data via `navigateWithPolicy`, so movements that actually unlock fresh dirt become preferred over time while unsafe routes are deprioritized (`src/main/java/net/shasankp000/GameAI/skills/impl/CollectDirtSkill.java:286`).
+
+**Loot Sweep**
+- After each dig the bot now queues nearby drop positions (up to ~6 blocks out) and walks to them before resuming collection, giving the loot vacuum explicit pathfinding support instead of relying on proximity alone (`src/main/java/net/shasankp000/GameAI/skills/impl/CollectDirtSkill.java:210`).
+
+**Verification**
+- `./gradlew build`
+
+**Next Step**
+- Run `/bot skill collect_dirt 50` in the safe room and confirm “collect_dirt exploration” navigation logs appear before new dirt is found; share any remaining failure lines so we can widen the candidate offsets or add carve support for the exploration step.
+
+#### 2025-11-02 21:24 CST - Codex Update
+
+**Movement Verification**
+- `CollectDirtSkill` now validates GoTo results by measuring actual displacement; if the bot doesn't leave its current block, the skill falls back to manual movement using `BotActions.moveForward` / `jumpForward` and logs the outcome (`src/main/java/net/shasankp000/GameAI/skills/impl/CollectDirtSkill.java:337`).
+- Manual nudges run on the server thread so reinforcement feedback only records a success when the bot truly moves, preventing false positives in the exploration tracker (`src/main/java/net/shasankp000/GameAI/skills/impl/CollectDirtSkill.java:386`).
+
+**Verification**
+- `./gradlew build`
+
+**Next Step**
+- Re-run `/bot skill collect_dirt 50`; you should see either `collect_dirt exploration navigation success` or the new “Manual nudge” logs when GoTo alone doesn’t move the bot. Share logs if the bot still stays planted so we can expand the nudge heuristics.
+
+#### 2025-11-02 21:33 CST - Codex Update
+
+**Exploration Reset**
+- After a successful exploration hop, any cached dirt positions marked as unreachable are cleared so the shovel step can re-evaluate targets from the new vantage point instead of giving up early (`src/main/java/net/shasankp000/GameAI/skills/impl/CollectDirtSkill.java:129`).
+- The reset only fires when the bot actually relocates, keeping the reinforcement history intact while preventing stale exclusions from blocking progress.
+
+**Verification**
+- `./gradlew build`
+
+**Next Step**
+- Try `/bot skill collect_dirt 50` again; watch whether the loop keeps harvesting once exploration moves the bot. If it still stops despite obvious blocks, grab the latest log so we can tune the candidate filters next.
+
+#### 2025-11-02 21:45 CST - Codex Update
+
+**Drop Sweep**
+- Added a shared drop-sweeping utility that paths to nearby item entities and logs pickup attempts so freshly-mined loot is gathered consistently (`src/main/java/net/shasankp000/GameAI/DropSweeper.java:24`).
+- `SkillManager` now invokes the sweeper before releasing external override or resuming follow mode, ensuring the bot wraps up loot collection before rejoining escort duties (`src/main/java/net/shasankp000/GameAI/skills/SkillManager.java:55`).
+
+**Verification**
+- `./gradlew build`
+
+**Next Step**
+- Run `/bot skill collect_dirt 50` (or any other skill) and check for `Drop sweep heading...` logs; you should see the bot vacuum nearby drops before it returns to following players or the idle loop. Share the log if pickups stall so we can extend the sweep radius or target count.
+
+#### 2025-11-02 21:55 CST - Codex Update
+
+**Approach Check**
+- Navigation helper now verifies the bot actually reaches the shovel/loot destination before treating the move as successful, so it no longer starts mining while still several blocks away (`src/main/java/net/shasankp000/GameAI/skills/impl/CollectDirtSkill.java:310`).
+- Manual nudges keep pushing until the bot is within ~3 blocks of the destination; otherwise the attempt is recorded as a failure and the dirt target is skipped rather than retried indefinitely (`src/main/java/net/shasankp000/GameAI/skills/impl/CollectDirtSkill.java:347`).
+
+**Verification**
+- `./gradlew build`
+
+**Next Step**
+- Try `/bot skill collect_dirt 50` again; watch for logs like “GoTo reached … but is X blocks from target… attempting manual nudge” followed by either “manual nudge reached …” or “manual nudge still …” so we can confirm it only mines once it’s actually in range.
+
+#### 2025-11-02 22:02 CST - Codex Update
+
+**Drop Sweep Paths**
+- Drop sweeper now finds a standable approach block next to each item entity and only calls `GoTo` on reachable positions, preventing it from stalling on floating drops (`src/main/java/net/shasankp000/GameAI/DropSweeper.java:74`).
+- After walking over a pile the helper issues a short manual nudge so stubborn drops are vacuumed before the bot resumes follow mode (`src/main/java/net/shasankp000/GameAI/DropSweeper.java:118`).
+
+**Verification**
+- `./gradlew build`
+
+**Next Step**
+- Re-run `/bot skill collect_dirt 50` and watch for `Drop sweep heading…` followed by either “collected” or “manual nudge completed”; share the log if items still remain so we can widen the radius or duration.
+
+#### 2025-11-02 22:12 CST - Codex Update
+
+**Drop Sweep Guardrails**
+- Track per-drop attempt counts and cap retries at three so the cleanup loop can bail out instead of thrashing on unreachable stacks (`src/main/java/net/shasankp000/GameAI/DropSweeper.java:70`).
+- Manual nudges now report whether the drop was actually collected; if not, the sweeper logs the miss and moves on rather than looping forever (`src/main/java/net/shasankp000/GameAI/DropSweeper.java:111`).
+
+**Verification**
+- `./gradlew build`
+
+**Next Step**
+- Kick off `/bot skill collect_dirt 5` or `/bot skill collect_dirt 50` and confirm we stop seeing the repeated “Drop sweep heading …” spam; if certain drops still linger, grab coordinates so we can extend the approach planner with carve support.

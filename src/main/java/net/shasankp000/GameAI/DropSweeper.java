@@ -8,17 +8,16 @@ import net.minecraft.server.world.ServerWorld;
 import net.minecraft.text.Text;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Box;
-import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
-import net.shasankp000.PathFinding.GoTo;
 import net.shasankp000.GameAI.BotActions;
+import net.shasankp000.GameAI.services.MovementService;
 import net.shasankp000.Entity.LookController;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.Comparator;
 import java.util.HashMap;
-import java.util.Locale;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.HashSet;
 import java.util.Set;
@@ -40,7 +39,12 @@ public final class DropSweeper {
                              double verticalRange,
                              int maxTargets,
                              long maxDurationMillis) {
+        LOGGER.info("Drop sweep initiated with radius={}, vRange={}, maxTargets={}, duration={}ms",
+                horizontalRadius, verticalRange, maxTargets, maxDurationMillis);
         ServerPlayerEntity player = source.getPlayer();
+        if (player != null) {
+            LOGGER.info("Bot is holding: {}", player.getMainHandStack().getItem().getName().getString());
+        }
         if (player == null) {
             LOGGER.debug("Drop sweep skipped: no bot player available.");
             return;
@@ -64,6 +68,8 @@ public final class DropSweeper {
                 break;
             }
 
+            LOGGER.info("Found {} drops, closest is {}.", excludedDrops.size() + 1, describeDrop(targetDrop));
+
             BlockPos dropBlock = targetDrop.getBlockPos().toImmutable();
             excludedDrops.add(targetDrop);
 
@@ -76,33 +82,40 @@ public final class DropSweeper {
             }
 
             BlockPos dropPos = dropBlock;
-            BlockPos destination = findPickupDestination(player, dropPos);
-            if (destination == null) {
-                LOGGER.debug("Drop sweep skipping {}: no standable block nearby", describeDrop(targetDrop));
+            MovementService.MovementOptions options = MovementService.MovementOptions.lootCollection();
+            Optional<MovementService.MovementPlan> planOpt = MovementService.planLootApproach(player, dropPos, options);
+            if (planOpt.isEmpty()) {
+                LOGGER.debug("Drop sweep skipping {}: no viable approach plan", describeDrop(targetDrop));
                 attempts++;
                 continue;
             }
 
-            LOGGER.info("Drop sweep heading to {} for {}", destination, describeDrop(targetDrop));
-            String result = GoTo.goTo(source, destination.getX(), destination.getY(), destination.getZ(), false);
+            MovementService.MovementPlan plan = planOpt.get();
+            MovementService.MovementResult movement = MovementService.execute(source, player, plan);
+            LOGGER.info("Drop sweep movement ({}) -> {}", plan.mode(), movement.detail());
             attempts++;
 
-            boolean success = isGoToSuccess(result);
+            boolean success = movement.success();
+            BlockPos checkPos = movement.arrivedAt() != null ? movement.arrivedAt() : dropPos;
             if (success) {
-                double distanceToDestinationSq = player.squaredDistanceTo(destination.getX() + 0.5, destination.getY() + 0.5, destination.getZ() + 0.5);
-                if (distanceToDestinationSq > 9.0) { // 3 blocks radius
+                double distanceToDestinationSq = player.squaredDistanceTo(
+                        checkPos.getX() + 0.5,
+                        checkPos.getY() + 0.5,
+                        checkPos.getZ() + 0.5
+                );
+                if (distanceToDestinationSq > 9.0) {
                     success = false;
-                    result = "Too far from destination (distance=" + String.format("%.2f", Math.sqrt(distanceToDestinationSq)) + ")";
+                    LOGGER.info("Drop sweep movement ended {} blocks from {}", String.format("%.2f", Math.sqrt(distanceToDestinationSq)), checkPos);
                 }
             }
 
             boolean itemCollected = targetDrop.isRemoved()
-                    || player.squaredDistanceTo(destination.getX() + 0.5, destination.getY(), destination.getZ() + 0.5) <= PICKUP_DISTANCE_SQUARED;
+                    || player.squaredDistanceTo(dropPos.getX() + 0.5, dropPos.getY(), dropPos.getZ() + 0.5) <= PICKUP_DISTANCE_SQUARED;
 
             if (success && itemCollected) {
-                LOGGER.info("Drop sweep collected {} ({})", describeDrop(targetDrop), result);
+                LOGGER.info("Drop sweep collected {} ({})", describeDrop(targetDrop), movement.detail());
             } else if (success) {
-                LOGGER.info("Drop sweep reached {} but item still present ({}). Nudging for pickup.", destination, result);
+                LOGGER.info("Drop sweep reached {} but item still present ({}). Nudging for pickup.", checkPos, movement.detail());
                 boolean nudged = attemptManualNudge(player, targetDrop, dropPos);
                 if (nudged) {
                     if (targetDrop.isRemoved() || player.squaredDistanceTo(targetDrop) <= PICKUP_DISTANCE_SQUARED) {
@@ -114,7 +127,7 @@ public final class DropSweeper {
                     LOGGER.warn("Drop sweep manual nudge failed near {}", dropPos);
                 }
             } else {
-                LOGGER.warn("Drop sweep failed to reach {}: {}", destination, result);
+                LOGGER.warn("Drop sweep failed to approach {}: {}", dropPos, movement.detail());
             }
         }
 
@@ -127,18 +140,10 @@ public final class DropSweeper {
         return world.getEntitiesByClass(
                         ItemEntity.class,
                         Box.of(currentPosition(player), radius * 2, verticalRange * 2, radius * 2),
-                        drop -> !drop.isRemoved() && drop.isAlive() && !excludedDrops.contains(drop))
+                        drop -> !drop.isRemoved() && drop.isAlive() && !excludedDrops.contains(drop) && drop.squaredDistanceTo(player) > PICKUP_DISTANCE_SQUARED)
                 .stream()
                 .min(Comparator.comparingDouble(player::squaredDistanceTo))
                 .orElse(null);
-    }
-
-    private static boolean isGoToSuccess(String result) {
-        if (result == null) {
-            return false;
-        }
-        String lowered = result.toLowerCase(Locale.ROOT);
-        return !(lowered.contains("failed") || lowered.contains("error") || lowered.contains("not found"));
     }
 
     private static String describeDrop(ItemEntity entity) {
@@ -146,62 +151,11 @@ public final class DropSweeper {
         return name == null ? entity.getStack().toString() : name.getString();
     }
 
-    private static BlockPos findPickupDestination(ServerPlayerEntity player, BlockPos dropPos) {
-        ServerWorld world = (player.getEntityWorld() instanceof ServerWorld serverWorld) ? serverWorld : null;
-        if (world == null) {
-            return null;
-        }
-
-        BlockPos bestPos = null;
-        double bestDistance = Double.MAX_VALUE;
-
-        for (Direction direction : Direction.Type.HORIZONTAL) {
-            BlockPos foot = dropPos.offset(direction);
-            BlockPos head = foot.up();
-            if (!isNavigableStand(world, foot, head)) {
-                continue;
-            }
-            double distance = player.getBlockPos().getSquaredDistance(head);
-            if (distance < bestDistance) {
-                bestDistance = distance;
-                bestPos = head;
-            }
-        }
-
-        if (bestPos == null) {
-            BlockPos footBelow = dropPos.down();
-            BlockPos head = dropPos;
-            if (isNavigableStand(world, footBelow, head)) {
-                bestPos = head;
-            }
-        }
-
-        if (bestPos == null) {
-            BlockPos foot = dropPos;
-            BlockPos head = dropPos.up();
-            if (isNavigableStand(world, foot, head)) {
-                bestPos = head;
-            }
-        }
-
-        return bestPos;
-    }
-
-    private static boolean isNavigableStand(ServerWorld world, BlockPos foot, BlockPos head) {
-        return isStandable(world, foot, head)
-                && world.getBlockState(head.up()).getCollisionShape(world, head.up()).isEmpty();
-    }
-
-    private static boolean isStandable(ServerWorld world, BlockPos foot, BlockPos head) {
-        return !world.getBlockState(foot).getCollisionShape(world, foot).isEmpty()
-                && world.getBlockState(head).getCollisionShape(world, head).isEmpty();
-    }
-
     private static Vec3d currentPosition(ServerPlayerEntity player) {
         return new Vec3d(player.getX(), player.getY(), player.getZ());
     }
 
-    private static boolean attemptManualNudge(ServerPlayerEntity player, ItemEntity targetDrop, BlockPos dropPos) {
+    public static boolean attemptManualNudge(ServerPlayerEntity player, ItemEntity targetDrop, BlockPos dropPos) {
         CompletableFuture<Boolean> future = new CompletableFuture<>();
         ServerWorld world = (player.getEntityWorld() instanceof ServerWorld serverWorld) ? serverWorld : null;
         MinecraftServer server = world != null ? world.getServer() : null;

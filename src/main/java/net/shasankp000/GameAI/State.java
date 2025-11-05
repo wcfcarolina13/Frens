@@ -250,12 +250,6 @@ public class State implements Serializable {
         boolean nearbyEntitiesSimilar = calculateEntityOverlap(lastState.getNearbyEntities(), currentState.getNearbyEntities()) >= ENTITY_SIMILARITY_THRESHOLD;
         boolean nearbyBlocksSimilar = calculateBlockOverlap(lastState.getNearbyBlocks(), currentState.getNearbyBlocks()) >= BLOCK_SIMILARITY_THRESHOLD;
 
-
-        System.out.println("distanceToHostileEntitySimilar: " + distanceToHostileEntitySimilar);
-        System.out.println("distanceToDangerZoneSimilar: " + distanceToDangerZoneSimilar);
-        System.out.println("nearByEntitiesSimilar: " + nearbyEntitiesSimilar);
-        System.out.println("nearbyBlockSimilar: " + nearbyBlocksSimilar);
-
         // All scalar checks must match, and at least one environmental heuristic must line up.
         return distanceToHostileEntitySimilar
                 && distanceToDangerZoneSimilar
@@ -275,7 +269,6 @@ public class State implements Serializable {
                 .count();
 
         double blockOverlapRatio = (double) similarBlocksCount / Math.max(lastBlocks.size(), currentBlocks.size());
-        System.out.println("Block overlap ratio: " + blockOverlapRatio);
 
         // Maintain a conservative match threshold by slightly damping the raw overlap ratio.
         return blockOverlapRatio / 2.0;
@@ -303,9 +296,6 @@ public class State implements Serializable {
 
         // Calculate overlap ratio (based on exact matches)
         double overlapRatio = (double) exactNameMatches / Math.max(lastEntityNames.size(), currentEntityNames.size());
-
-        // Optionally log for debugging
-        System.out.println("Entity name overlap ratio: " + overlapRatio);
 
         return overlapRatio;
     }

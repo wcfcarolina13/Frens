@@ -1,17 +1,18 @@
 package net.shasankp000.GameAI.skills;
 
 import net.minecraft.server.network.ServerPlayerEntity;
-import net.shasankp000.ChatUtils.ChatUtils;
-import net.shasankp000.GameAI.DropSweeper;
 import net.shasankp000.GameAI.BotEventHandler;
-import net.shasankp000.GameAI.skills.impl.DirtShovelSkill;
+import net.shasankp000.GameAI.DropSweeper;
+import net.shasankp000.GameAI.services.TaskService;
 import net.shasankp000.GameAI.skills.impl.CollectDirtSkill;
+import net.shasankp000.GameAI.skills.impl.DirtShovelSkill;
+import net.shasankp000.GameAI.skills.impl.DropSweepSkill;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 public final class SkillManager {
 
@@ -25,6 +26,7 @@ public final class SkillManager {
     static {
         register(new DirtShovelSkill());
         register(new CollectDirtSkill());
+        register(new DropSweepSkill());
     }
 
     private SkillManager() {
@@ -41,6 +43,13 @@ public final class SkillManager {
             return SkillExecutionResult.failure("Skill '" + name + "' not available.");
         }
         ServerPlayerEntity botPlayer = context.botSource().getPlayer();
+        UUID botUuid = botPlayer != null ? botPlayer.getUuid() : null;
+        var ticketOpt = TaskService.beginSkill(name, context.botSource(), botUuid);
+        if (ticketOpt.isEmpty()) {
+            return SkillExecutionResult.failure("Another skill is already running.");
+        }
+        TaskService.TaskTicket ticket = ticketOpt.get();
+
         UUID resumeFollowUuid = null;
         if (botPlayer != null && BotEventHandler.getCurrentMode() == BotEventHandler.Mode.FOLLOW) {
             UUID currentFollow = BotEventHandler.getFollowTargetUuid();
@@ -49,28 +58,51 @@ public final class SkillManager {
             }
             BotEventHandler.stopFollowing(botPlayer);
         }
+
         BotEventHandler.setExternalOverrideActive(true);
+        SkillExecutionResult result = SkillExecutionResult.failure("Skill '" + name + "' ended unexpectedly.");
         try {
-            return skill.execute(context);
+            result = skill.execute(context);
+            if (TaskService.isAbortRequested(botUuid)) {
+                String reason = TaskService.getCancelReason(botUuid)
+                        .orElse("Skill '" + name + "' paused due to nearby threat.");
+                result = SkillExecutionResult.failure(reason);
+            }
+            return result;
         } finally {
-                            try {
-                                ChatUtils.sendSystemMessage(context.botSource(), "About to call DropSweeper.sweep()");
-                                DropSweeper.sweep(
-                                        context.botSource(),
-                                        DROP_SWEEP_RADIUS,
-                                        DROP_SWEEP_VERTICAL,
-                                        DROP_SWEEP_MAX_TARGETS,
-                                        DROP_SWEEP_MAX_DURATION_MS
-                                );
-                            } catch (Exception sweepError) {                LOGGER.warn("Drop sweep after skill '{}' failed: {}", name, sweepError.getMessage(), sweepError);
+            boolean abortRequested = TaskService.isAbortRequested(botUuid);
+            try {
+                if (botPlayer != null && !abortRequested) {
+                    DropSweeper.sweep(
+                            context.botSource().withSilent().withMaxLevel(4),
+                            DROP_SWEEP_RADIUS,
+                            DROP_SWEEP_VERTICAL,
+                            DROP_SWEEP_MAX_TARGETS,
+                            DROP_SWEEP_MAX_DURATION_MS
+                    );
+                }
+            } catch (Exception sweepError) {
+                LOGGER.warn("Drop sweep after skill '{}' failed: {}", name, sweepError.getMessage(), sweepError);
             }
             BotEventHandler.setExternalOverrideActive(false);
-            if (botPlayer != null && resumeFollowUuid != null) {
+            if (botPlayer != null && resumeFollowUuid != null && !abortRequested) {
                 ServerPlayerEntity target = context.botSource().getServer().getPlayerManager().getPlayer(resumeFollowUuid);
                 if (target != null) {
                     BotEventHandler.setFollowMode(botPlayer, target);
                 }
             }
+            boolean success = result != null && result.success() && !abortRequested;
+            TaskService.complete(ticket, success);
         }
+    }
+
+    public static boolean shouldAbortSkill(ServerPlayerEntity botPlayer) {
+        UUID botUuid = botPlayer != null ? botPlayer.getUuid() : null;
+        return TaskService.isAbortRequested(botUuid);
+    }
+
+    public static boolean requestSkillPause(ServerPlayerEntity bot, String reason) {
+        UUID uuid = bot != null ? bot.getUuid() : null;
+        return TaskService.requestPause(uuid, reason);
     }
 }

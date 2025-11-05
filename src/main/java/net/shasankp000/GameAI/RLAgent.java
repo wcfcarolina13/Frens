@@ -33,8 +33,8 @@ public class RLAgent {
     private static final double ALPHA = 0.1;  // Learning rate
     private static final double GAMMA = 0.9;  // Discount factor
     public double epsilon;
-    private static final double MIN_EPSILON = 0.1; // Minimum exploration rate
-    private static final double EPSILON_DECAY_RATE = 0.99; // Decay rate for epsilon
+    private static final double MIN_EPSILON = 0.25; // Minimum exploration rate
+    private static final double EPSILON_DECAY_RATE = 0.995; // Decay rate for epsilon
 
     private static final Map<Action, Integer> HOTBAR_INDEX;
     private static final Set<String> PASSIVE_ENTITY_NAMES = Set.of(

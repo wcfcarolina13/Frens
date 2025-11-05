@@ -4,6 +4,7 @@ import net.shasankp000.EntityUtil;
 import net.minecraft.block.BlockState;
 import net.minecraft.component.DataComponentTypes;
 import net.minecraft.entity.Entity;
+import net.minecraft.entity.ItemEntity;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.network.packet.s2c.play.PositionFlag;
 import net.minecraft.registry.RegistryKey;
@@ -12,10 +13,14 @@ import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.registry.tag.EntityTypeTags;
 import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.item.ItemStack;
+import net.minecraft.world.Heightmap;
 import net.minecraft.world.World;
+import net.minecraft.world.GameMode;
+import net.minecraft.entity.EntityType;
 import net.shasankp000.ChatUtils.ChatUtils;
 import net.shasankp000.DangerZoneDetector.DangerZoneDetector;
 import net.shasankp000.Database.QTable;
@@ -30,6 +35,10 @@ import net.shasankp000.LauncherDetection.LauncherEnvironment;
 import net.shasankp000.PlayerUtils.*;
 import net.shasankp000.WorldUitls.GetTime;
 import net.shasankp000.Entity.EntityDetails;
+import net.shasankp000.PathFinding.GoTo;
+import net.shasankp000.GameAI.DropSweeper;
+import net.shasankp000.GameAI.services.TaskService;
+import net.shasankp000.Entity.createFakePlayer;
 import net.shasankp000.WorldUitls.isBlockItem;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -37,6 +46,10 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.lang.reflect.Field;
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static net.shasankp000.GameAI.State.isStateConsistent;
 
@@ -53,6 +66,11 @@ public class BotEventHandler {
     public static boolean botDied = false; // Flag to track if the bot died
     public static boolean hasRespawned = false; // flag to track if the bot has respawned before or not
     public static int botSpawnCount = 0;
+    private static Vec3d lastSpawnPosition = null;
+    private static RegistryKey<World> lastSpawnWorld = null;
+    private static float lastSpawnYaw = 0.0F;
+    private static float lastSpawnPitch = 0.0F;
+    private static String lastBotName = null;
     private static State currentState = null;
     private static Vec3d lastKnownPosition = null;
     private static int stationaryTicks = 0;
@@ -63,8 +81,15 @@ public class BotEventHandler {
     private static final int MAX_FAILED_BLOCK_ATTEMPTS = 4;
     private static Vec3d lastSafePosition = null;
     private static final Random RANDOM = new Random();
+    private static final long DROP_SWEEP_COOLDOWN_MS = 4000L;
+    private static volatile long lastDropSweepMs = 0L;
+    private static final AtomicBoolean dropSweepInProgress = new AtomicBoolean(false);
+    private static final long DROP_RETRY_COOLDOWN_MS = 15_000L;
+    private static final Map<BlockPos, Long> dropRetryTimestamps = new ConcurrentHashMap<>();
+    private static final double RL_MANUAL_NUDGE_DISTANCE_SQ = 4.0D;
     private static Mode currentMode = Mode.IDLE;
     private static volatile boolean externalOverrideActive = false;
+    private static volatile boolean pendingBotRespawn = false;
     public enum CombatStyle {
         AGGRESSIVE,
         EVASIVE
@@ -109,6 +134,60 @@ public class BotEventHandler {
         return externalOverrideActive;
     }
 
+    public static void rememberSpawn(ServerWorld world, Vec3d pos, float yaw, float pitch) {
+        if (world != null) {
+            lastSpawnWorld = world.getRegistryKey();
+        }
+        lastSpawnPosition = pos;
+        lastSpawnYaw = yaw;
+        lastSpawnPitch = pitch;
+    }
+
+    public static void ensureBotPresence(MinecraftServer srv) {
+        if (srv == null || lastBotName == null) {
+            return;
+        }
+        ServerPlayerEntity existing = null;
+        if (registeredBotUuid != null) {
+            existing = srv.getPlayerManager().getPlayer(registeredBotUuid);
+        }
+        if (existing == null) {
+            existing = srv.getPlayerManager().getPlayer(lastBotName);
+        }
+        if (existing != null) {
+            registerBot(existing);
+            return;
+        }
+        if (pendingBotRespawn) {
+            return;
+        }
+
+        RegistryKey<World> worldKey = lastSpawnWorld != null ? lastSpawnWorld : World.OVERWORLD;
+        ServerWorld world = srv.getWorld(worldKey);
+        if (world == null) {
+            world = srv.getOverworld();
+            worldKey = World.OVERWORLD;
+        }
+        Vec3d spawn = lastSpawnPosition;
+        if (spawn == null) {
+            double centerX = world.getWorldBorder().getCenterX();
+            double centerZ = world.getWorldBorder().getCenterZ();
+            int spawnX = (int) Math.round(centerX);
+            int spawnZ = (int) Math.round(centerZ);
+            int spawnY = world.getTopY(net.minecraft.world.Heightmap.Type.MOTION_BLOCKING, spawnX, spawnZ);
+            spawn = new Vec3d(spawnX + 0.5, spawnY, spawnZ + 0.5);
+        }
+        final RegistryKey<World> targetWorld = worldKey;
+        final Vec3d spawnPos = spawn;
+        final float yaw = lastSpawnYaw;
+        final float pitch = lastSpawnPitch;
+        pendingBotRespawn = true;
+        srv.execute(() -> {
+            TaskService.forceAbort("§cRestoring bot after owner respawn.");
+            createFakePlayer.createFake(lastBotName, srv, spawnPos, yaw, pitch, targetWorld, GameMode.SURVIVAL, false);
+        });
+    }
+
     public static void registerBot(ServerPlayerEntity candidate) {
         if (candidate == null) {
             return;
@@ -116,10 +195,17 @@ public class BotEventHandler {
         registeredBotUuid = candidate.getUuid();
         BotEventHandler.bot = candidate;
         MinecraftServer srv = candidate.getCommandSource().getServer();
-                                if (srv != null) {
-                                    BotEventHandler.server = srv;
-                                }
-                            }    public static boolean isRegisteredBot(ServerPlayerEntity candidate) {
+        if (srv != null) {
+            BotEventHandler.server = srv;
+        }
+        lastBotName = candidate.getName().getString();
+        if (candidate.getEntityWorld() instanceof ServerWorld serverWorld) {
+            rememberSpawn(serverWorld, new Vec3d(candidate.getX(), candidate.getY(), candidate.getZ()), candidate.getYaw(), candidate.getPitch());
+        }
+        pendingBotRespawn = false;
+    }
+
+    public static boolean isRegisteredBot(ServerPlayerEntity candidate) {
         return registeredBotUuid != null && candidate != null && candidate.getUuid().equals(registeredBotUuid);
     }
 
@@ -142,6 +228,9 @@ public class BotEventHandler {
     }
 
     public void detectAndReact(RLAgent rlAgentHook, double distanceToHostileEntity, QTable qTable) throws IOException {
+        if (bot != null) {
+            engageImmediateThreats(bot);
+        }
         if (externalOverrideActive) {
             LOGGER.debug("Skipping detectAndReact because external override is active.");
             return;
@@ -255,6 +344,8 @@ public class BotEventHandler {
             } else {
                 System.out.println("Passive environment detected. Running exploratory step.");
 
+                collectNearbyDrops(bot, 6.0D);
+
                 List<EntityDetails> nearbyEntitiesList = nearbyEntities.stream()
                         .map(entity -> EntityDetails.from(bot, entity))
                         .toList();
@@ -281,6 +372,7 @@ public class BotEventHandler {
                 isExecuting = false;
                 AutoFaceEntity.isHandlerTriggered = false;
                 AutoFaceEntity.setBotExecutingTask(false);
+                AutoFaceEntity.isBotMoving = false;
                 System.out.println("Resetting handler trigger flag to: " + false);
             }
         }
@@ -368,6 +460,7 @@ public class BotEventHandler {
                 isExecuting = false;
                 AutoFaceEntity.isHandlerTriggered = false; // Reset the trigger flag
                 AutoFaceEntity.setBotExecutingTask(false);
+                AutoFaceEntity.isBotMoving = false;
             }
         }
     }
@@ -602,6 +695,12 @@ public class BotEventHandler {
         }
 
         lastSafePosition = target;
+        TaskService.forceAbort("§cTask aborted due to bot respawn.");
+        setExternalOverrideActive(false);
+        currentMode = Mode.IDLE;
+        if (destinationWorld != null) {
+            rememberSpawn(destinationWorld, target, bot.getYaw(), bot.getPitch());
+        }
 
         ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withMaxLevel(4),
                 bot.getName().getString() + " has regrouped and is ready to re-engage.");
@@ -800,12 +899,38 @@ public class BotEventHandler {
         return combatStyle;
     }
 
+    public static boolean engageImmediateThreats(ServerPlayerEntity bot) {
+        if (bot == null) {
+            return false;
+        }
+        MinecraftServer srv = bot.getCommandSource().getServer();
+        if (srv == null) {
+            return false;
+        }
+        List<Entity> hostiles = AutoFaceEntity.detectNearbyEntities(bot, 10.0D)
+                .stream()
+                .filter(EntityUtil::isHostile)
+                .toList();
+        if (hostiles.isEmpty()) {
+            return false;
+        }
+        srv.execute(() -> engageHostiles(bot, srv, hostiles));
+        return true;
+    }
+
     public static Vec3d getGuardCenterVec() {
         return guardCenter;
     }
 
     public static double getGuardRadiusValue() {
         return guardRadius;
+    }
+
+    public static ServerPlayerEntity getFollowTarget() {
+        if (followTargetUuid == null || server == null) {
+            return null;
+        }
+        return server.getPlayerManager().getPlayer(followTargetUuid);
     }
 
     public static String setCombatStyle(ServerPlayerEntity bot, CombatStyle style) {
@@ -850,6 +975,140 @@ public class BotEventHandler {
         return true;
     }
 
+    public static void collectNearbyDrops(ServerPlayerEntity bot, double radius) {
+        if (bot == null) {
+            return;
+        }
+        if (dropSweepInProgress.get()) {
+            return;
+        }
+        MinecraftServer srv = bot.getCommandSource().getServer();
+        if (srv == null) {
+            return;
+        }
+        World rawWorld = bot.getEntityWorld();
+        if (!(rawWorld instanceof ServerWorld world)) {
+            return;
+        }
+        double verticalRange = Math.max(6.0D, radius);
+        Box searchBox = bot.getBoundingBox().expand(radius, verticalRange, radius);
+        List<ItemEntity> drops = world.getEntitiesByClass(
+                ItemEntity.class,
+                searchBox,
+                drop -> drop.isAlive() && !drop.isRemoved() && drop.squaredDistanceTo(bot) > 1.0D
+        );
+        long now = System.currentTimeMillis();
+        Iterator<ItemEntity> iterator = drops.iterator();
+        while (iterator.hasNext()) {
+            BlockPos pos = iterator.next().getBlockPos().toImmutable();
+            Long lastAttempt = dropRetryTimestamps.get(pos);
+            if (lastAttempt != null) {
+                if (now - lastAttempt < DROP_RETRY_COOLDOWN_MS) {
+                    iterator.remove();
+                    continue;
+                }
+                dropRetryTimestamps.remove(pos);
+            }
+        }
+        if (drops.isEmpty()) {
+            return;
+        }
+        boolean trainingMode = net.shasankp000.Commands.modCommandRegistry.isTrainingMode;
+
+        if (trainingMode) {
+            ItemEntity closest = drops.stream()
+                    .min(Comparator.comparingDouble(bot::squaredDistanceTo))
+                    .orElse(null);
+            if (closest == null) {
+                return;
+            }
+            double distanceSq = bot.squaredDistanceTo(closest);
+            if (distanceSq > RL_MANUAL_NUDGE_DISTANCE_SQ) {
+                dropRetryTimestamps.put(closest.getBlockPos().toImmutable(), now);
+                return;
+            }
+            if (!dropSweepInProgress.compareAndSet(false, true)) {
+                return;
+            }
+            BlockPos dropPos = closest.getBlockPos().toImmutable();
+            boolean nudged = false;
+            long completionTime = System.currentTimeMillis();
+            try {
+                nudged = DropSweeper.attemptManualNudge(bot, closest, dropPos);
+                completionTime = System.currentTimeMillis();
+                lastDropSweepMs = completionTime;
+                if (nudged) {
+                    dropRetryTimestamps.remove(dropPos);
+                    return;
+                }
+                dropRetryTimestamps.put(dropPos, completionTime);
+                CompletableFuture<Void> sweepFuture = CompletableFuture.runAsync(() -> {
+                    try {
+                        ServerCommandSource source = bot.getCommandSource().withSilent().withMaxLevel(4);
+                        DropSweeper.sweep(source, radius, verticalRange, 2, 3000L);
+                    } catch (Exception sweepError) {
+                        LOGGER.warn("Training drop sweep failed near {}: {}", dropPos, sweepError.getMessage());
+                    }
+                });
+                try {
+                    sweepFuture.get(3500, TimeUnit.MILLISECONDS);
+                } catch (Exception waitError) {
+                    LOGGER.warn("Training drop sweep wait interrupted: {}", waitError.getMessage());
+                }
+            } finally {
+                dropSweepInProgress.set(false);
+            }
+            return;
+        }
+        if (now - lastDropSweepMs < DROP_SWEEP_COOLDOWN_MS) {
+            return;
+        }
+        lastDropSweepMs = now;
+
+        Set<BlockPos> attemptedPositions = new HashSet<>();
+        for (ItemEntity drop : drops) {
+            attemptedPositions.add(drop.getBlockPos().toImmutable());
+        }
+        final Set<BlockPos> trackedPositions = Set.copyOf(attemptedPositions);
+        final ServerWorld trackedWorld = world;
+
+        dropSweepInProgress.set(true);
+        boolean trainingModeActive = net.shasankp000.Commands.modCommandRegistry.isTrainingMode;
+        boolean needOverride = !trainingModeActive && !isExternalOverrideActive();
+        if (needOverride) {
+            setExternalOverrideActive(true);
+        }
+        final boolean activatedOverride = needOverride;
+        CompletableFuture<Void> sweepFuture = CompletableFuture.runAsync(() -> {
+            try {
+                ServerCommandSource source = bot.getCommandSource().withSilent().withMaxLevel(4);
+                DropSweeper.sweep(source, radius, verticalRange, 4, 4000L);
+            } catch (Exception sweepError) {
+                LOGGER.warn("Drop sweep failed: {}", sweepError.getMessage(), sweepError);
+            }
+        });
+        sweepFuture.whenComplete((ignored, throwable) -> srv.execute(() -> {
+            long completionTime = System.currentTimeMillis();
+            for (BlockPos pos : trackedPositions) {
+                Box checkBox = Box.of(Vec3d.ofCenter(pos), 1.5D, 1.5D, 1.5D);
+                boolean stillPresent = !trackedWorld.getEntitiesByClass(
+                        ItemEntity.class,
+                        checkBox,
+                        entity -> entity.isAlive() && !entity.isRemoved()
+                ).isEmpty();
+                if (stillPresent) {
+                    dropRetryTimestamps.put(pos, completionTime);
+                } else {
+                    dropRetryTimestamps.remove(pos);
+                }
+            }
+            dropSweepInProgress.set(false);
+            if (activatedOverride) {
+                setExternalOverrideActive(false);
+            }
+        }));
+    }
+
     private static boolean handleGuard(ServerPlayerEntity bot, List<Entity> nearbyEntities, List<Entity> hostileEntities) {
         if (guardCenter == null) {
         guardCenter = positionOf(bot);
@@ -863,7 +1122,7 @@ public class BotEventHandler {
 
         Entity nearestItem = findNearestItem(bot, nearbyEntities, guardRadius);
         if (nearestItem != null) {
-            moveToward(bot, positionOf(nearestItem), 1.5D, false);
+            collectNearbyDrops(bot, Math.max(guardRadius, 4.0D));
             return true;
         }
 
@@ -916,9 +1175,10 @@ public class BotEventHandler {
         boolean hasRanged = targetVisible && BotActions.hasRangedWeapon(bot);
         double verticalDiff = bot.getY() - closest.getY();
         boolean projectileThreat = closest.getType().isIn(EntityTypeTags.SKELETONS) || closest.getName().getString().toLowerCase(Locale.ROOT).contains("pillager");
+        boolean creeperThreat = closest.getType() == EntityType.CREEPER;
         boolean multipleThreats = hostileEntities.size() > 1;
         boolean lowHealth = bot.getHealth() <= bot.getMaxHealth() * 0.5F;
-        boolean shouldBlock = (projectileThreat || multipleThreats || lowHealth) && distance <= 4.5D;
+        boolean shouldBlock = (projectileThreat || creeperThreat || multipleThreats || lowHealth) && distance <= 4.5D;
 
         if (combatStyle == CombatStyle.EVASIVE && distance <= 6.0D && verticalDiff > 1.0D) {
             BotActions.moveBackward(bot);
@@ -928,12 +1188,27 @@ public class BotEventHandler {
             return true;
         }
 
+        if (creeperThreat && distance <= 4.0D) {
+            BotActions.raiseShield(bot);
+            BotActions.moveBackward(bot);
+            return true;
+        }
+
         if (hasRanged && distance >= 5.0D && closest instanceof LivingEntity living) {
             if (BotActions.performRangedAttack(bot, living, server.getTicks())) {
                 return true;
             }
         } else {
             BotActions.resetRangedState(bot);
+        }
+
+        if (creeperThreat && distance <= 3.0D) {
+            if (!shieldRaised && BotActions.raiseShield(bot)) {
+                shieldRaised = true;
+                shieldDecisionTick = bot.getCommandSource().getServer().getTicks();
+            }
+            BotActions.moveBackward(bot);
+            return true;
         }
 
         if (distance > 3.0D) {
