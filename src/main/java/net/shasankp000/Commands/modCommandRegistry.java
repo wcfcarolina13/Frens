@@ -1477,6 +1477,7 @@ public class modCommandRegistry {
             }
             totals.merge(stack.getItem(), stack.getCount(), Integer::sum);
         }
+        LOGGER.info("Found " + totals.size() + " unique items in " + bot.getName().getString() + "'s inventory.");
         if (totals.isEmpty()) {
             ChatUtils.sendSystemMessage(context.getSource(), bot.getName().getString() + " has an empty inventory.");
             return 1;
@@ -1884,27 +1885,42 @@ public class modCommandRegistry {
 
     private static int executeSkill(CommandContext<ServerCommandSource> context, ServerPlayerEntity bot, String skillName, String rawArgs) {
         Map<String, Object> params = new HashMap<>();
-        Integer count = null;
-        List<String> options = new ArrayList<>();
         if (rawArgs != null && !rawArgs.isBlank()) {
             String[] tokens = rawArgs.trim().split("\\s+");
-            int index = 0;
-            if (tokens.length > 0) {
+            Integer count = null;
+            Set<Identifier> targetBlocks = new HashSet<>();
+            List<String> options = new ArrayList<>();
+
+            for (String token : tokens) {
                 try {
-                    count = Integer.parseInt(tokens[0]);
-                    index = 1;
+                    count = Integer.parseInt(token);
+                    continue;
                 } catch (NumberFormatException ignored) {
                 }
+
+                Identifier id = Identifier.tryParse(token);
+                if (id != null && Registries.BLOCK.containsId(id)) {
+                    targetBlocks.add(id);
+                } else {
+                    // try to prepend minecraft:
+                    id = Identifier.tryParse("minecraft:" + token);
+                    if (id != null && Registries.BLOCK.containsId(id)) {
+                        targetBlocks.add(id);
+                    } else {
+                        options.add(token.toLowerCase(Locale.ROOT));
+                    }
+                }
             }
-            for (int i = index; i < tokens.length; i++) {
-                options.add(tokens[i].toLowerCase(Locale.ROOT));
+
+            if (count != null) {
+                params.put("count", count);
             }
-        }
-        if (count != null) {
-            params.put("count", count);
-        }
-        if (!options.isEmpty()) {
-            params.put("options", options);
+            if (!targetBlocks.isEmpty()) {
+                params.put("targetBlocks", targetBlocks);
+            }
+            if (!options.isEmpty()) {
+                params.put("options", options);
+            }
         }
         ServerCommandSource source = context.getSource();
         SkillResumeService.recordExecution(bot, skillName, rawArgs, source);

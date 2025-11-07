@@ -170,8 +170,34 @@ public class AIPlayer implements ModInitializer {
         ServerMessageEvents.CHAT_MESSAGE.register((message, sender, params) -> {
             String raw = message.getContent().getString();
             boolean consumed = FunctionCallerV2.tryHandleConfirmation(sender.getUuid(), raw);
-            if (!consumed) {
-                SkillResumeService.handleChat(sender, raw);
+            if (consumed) {
+                return;
+            }
+
+            SkillResumeService.handleChat(sender, raw);
+
+            // New logic starts here
+            String[] parts = raw.split(" ");
+            if (parts.length < 2) {
+                return;
+            }
+            String botName = parts[0];
+            // A very simple check to see if the first word is a bot name.
+            // A better approach would be to get a list of all bots.
+            if (BotEventHandler.isRegisteredBot(serverInstance.getPlayerManager().getPlayer(botName))) {
+                ServerPlayerEntity bot = serverInstance.getPlayerManager().getPlayer(botName);
+                if (bot == null) {
+                    return;
+                }
+                
+                String userPrompt = String.join(" ", java.util.Arrays.copyOfRange(parts, 1, parts.length));
+
+                NLPProcessor.Intent intent = NLPProcessor.getIntention(userPrompt);
+
+                if (intent == NLPProcessor.Intent.REQUEST_ACTION) {
+                    FunctionCallerV2 functionCaller = new FunctionCallerV2(bot.getCommandSource(), sender.getUuid());
+                    functionCaller.run(userPrompt);
+                }
             }
         });
     }

@@ -66,6 +66,7 @@ public class CollectDirtSkill implements Skill {
     private final Set<Item> trackedItems;
     private final Set<Identifier> targetBlockIds;
     private final String preferredTool;
+    private final int maxFails;
 
     public CollectDirtSkill() {
         this(
@@ -93,7 +94,8 @@ public class CollectDirtSkill implements Skill {
                         Blocks.SAND,
                         Blocks.RED_SAND
                 ),
-                "shovel"
+                "shovel",
+                0 // Default maxFails
         );
     }
 
@@ -101,12 +103,14 @@ public class CollectDirtSkill implements Skill {
                                String harvestLabel,
                                Set<Item> trackedItems,
                                Set<Identifier> targetBlockIds,
-                               String preferredTool) {
+                               String preferredTool,
+                               int maxFails) {
         this.skillName = skillName;
         this.harvestLabel = harvestLabel;
         this.trackedItems = trackedItems;
         this.targetBlockIds = targetBlockIds;
         this.preferredTool = preferredTool;
+        this.maxFails = maxFails;
     }
 
     protected static Set<Item> itemSet(Item... items) {
@@ -180,8 +184,10 @@ public class CollectDirtSkill implements Skill {
 
         try {
 
+        int currentMaxFails = this.maxFails > 0 ? this.maxFails : MAX_ATTEMPTS_WITHOUT_PROGRESS;
+
         while (collected < targetCount
-                && failuresInRow < MAX_ATTEMPTS_WITHOUT_PROGRESS
+                && failuresInRow < currentMaxFails
                 && System.currentTimeMillis() - startTime < MAX_RUNTIME_MILLIS
                 && !Thread.currentThread().isInterrupted()) {
 
@@ -250,7 +256,8 @@ public class CollectDirtSkill implements Skill {
                     activeSquareCenter != null ? effectiveHorizontal : null,
                     targetBlockIds,
                     harvestLabel,
-                    preferredTool
+                    preferredTool,
+                    false
             );
 
             lastMessage = result.message();
@@ -321,7 +328,7 @@ public class CollectDirtSkill implements Skill {
 
                 boolean hitSearchCeiling = horizontalRadius + radiusBoost >= MAX_HORIZONTAL_RADIUS
                         && verticalRange + verticalBoost >= MAX_VERTICAL_RANGE;
-                if (hitSearchCeiling && failuresInRow >= MAX_STALLED_FAILURES) {
+                if (hitSearchCeiling && failuresInRow >= currentMaxFails) {
                     LOGGER.warn("{} giving up after {} stalled attempts at max search range.", skillName, failuresInRow);
                     outcome = SkillExecutionResult.failure("No reachable " + harvestLabel + " within safe range. Move closer and retry.");
                     break;
@@ -882,5 +889,39 @@ public class CollectDirtSkill implements Skill {
             }
         }
         return total;
+    }
+
+    private boolean isOnSurface(ServerPlayerEntity player) {
+        if (player == null) {
+            return false;
+        }
+        BlockPos botPos = player.getBlockPos();
+        ServerWorld world = (ServerWorld) player.getEntityWorld();
+
+        // Check if there's air above the bot (at least 2 blocks for head room)
+        if (!world.getBlockState(botPos.up(1)).isAir() || !world.getBlockState(botPos.up(2)).isAir()) {
+            return false;
+        }
+
+        // Check if the block the bot is standing on is solid
+        if (world.getBlockState(botPos.down()).isAir()) {
+            return false;
+        }
+
+        // Check if the bot is at a reasonable surface Y-level (e.g., above sea level)
+        return botPos.getY() >= world.getSeaLevel();
+    }
+
+    @SuppressWarnings("unchecked")
+    private Set<Identifier> getTargetBlockIdsParameter(SkillContext context, Set<Identifier> defaultIds) {
+        Object raw = context.parameters().get("targetBlocks");
+        if (raw instanceof Set<?> set) {
+            try {
+                return (Set<Identifier>) set;
+            } catch (ClassCastException e) {
+                LOGGER.warn("targetBlocks parameter contained unexpected value: {}", set);
+            }
+        }
+        return defaultIds;
     }
 }

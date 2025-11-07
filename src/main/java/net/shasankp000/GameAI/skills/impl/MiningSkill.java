@@ -35,13 +35,27 @@ public final class MiningSkill extends CollectDirtSkill {
             Blocks.TUFF
     );
 
+    private static final int DEFAULT_MAX_FAILS = 5; // New default for mining
+
     public MiningSkill() {
         super(
                 "mining",
                 "stone",
                 TARGET_ITEMS,
                 TARGET_BLOCKS,
-                "pickaxe"
+                "pickaxe",
+                DEFAULT_MAX_FAILS // Pass default maxFails
+        );
+    }
+
+    public MiningSkill(Set<Identifier> targetBlockIds, int maxFails) {
+        super(
+                "mining",
+                "stone",
+                TARGET_ITEMS,
+                targetBlockIds,
+                "pickaxe",
+                maxFails
         );
     }
 }

@@ -57,8 +57,8 @@ public final class SkillResumeService {
             return;
         }
         AWAITING_DECISION.put(bot.getUuid(), Boolean.TRUE);
-        Object responderKey = responderKey(pending.source());
-        PENDING_BY_RESPONDER.put(responderKey, pending);
+        Object expectedResponderKey = responderKey(pending.source());
+        PENDING_BY_RESPONDER.put((Object) expectedResponderKey, pending);
 
         TaskService.forceAbort(bot.getUuid(), "§cSkill paused: bot died.");
 

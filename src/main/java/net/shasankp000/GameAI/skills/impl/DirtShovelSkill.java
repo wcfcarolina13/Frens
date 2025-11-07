@@ -56,10 +56,11 @@ public final class DirtShovelSkill implements Skill {
         Set<Identifier> targetBlocks = extractTargetBlocks(context.parameters());
         String harvestLabel = extractHarvestLabel(context.parameters());
         String preferredTool = extractPreferredTool(context.parameters());
+        boolean diggingDown = getBooleanParameter(context, "diggingDown", false);
 
         String label = harvestLabel != null ? harvestLabel : "target";
         try {
-            List<BlockPos> candidates = gatherCandidateDirt(player, horizontalRadius, verticalRange, excluded, squareCenter, squareRadius, targetBlocks);
+            List<BlockPos> candidates = gatherCandidateDirt(player, horizontalRadius, verticalRange, excluded, squareCenter, squareRadius, targetBlocks, diggingDown);
             if (candidates.isEmpty()) {
                 return failure(context, "No " + label + " block detected within radius " + horizontalRadius + ".");
             }
@@ -274,9 +275,27 @@ public final class DirtShovelSkill implements Skill {
                                                Set<BlockPos> excluded,
                                                BlockPos squareCenter,
                                                Integer squareRadius,
-                                               Set<Identifier> targetBlocks) {
+                                               Set<Identifier> targetBlocks,
+                                               boolean diggingDown) {
         BlockPos origin = player.getBlockPos();
         List<BlockPos> candidates = new ArrayList<>();
+
+        if (diggingDown) {
+            for (int dy = -1; dy >= -verticalRange; dy--) {
+                BlockPos candidate = origin.add(0, dy, 0);
+                if (excluded != null && excluded.contains(candidate)) {
+                    continue;
+                }
+                BlockState state = player.getEntityWorld().getBlockState(candidate);
+                if (matchesTargetBlock(state, targetBlocks)) {
+                    candidates.add(candidate);
+                }
+            }
+            if (!candidates.isEmpty()) {
+                candidates.sort(Comparator.comparingDouble(pos -> origin.getSquaredDistance(pos)));
+                return candidates;
+            }
+        }
 
         for (int dx = -horizontalRadius; dx <= horizontalRadius; dx++) {
             for (int dz = -horizontalRadius; dz <= horizontalRadius; dz++) {
@@ -294,7 +313,7 @@ public final class DirtShovelSkill implements Skill {
                         continue;
                     }
                     boolean sameColumn = dx == 0 && dz == 0;
-                    if (sameColumn && dy <= 0) {
+                    if (sameColumn && dy <= 0 && !diggingDown) { // Only skip if not explicitly digging down
                         continue;
                     }
                     BlockState state = player.getEntityWorld().getBlockState(candidate);
@@ -439,7 +458,8 @@ public final class DirtShovelSkill implements Skill {
                                         Integer squareRadius,
                                         Set<Identifier> targetBlocks,
                                         String harvestLabel,
-                                        String preferredTool) {
+                                        String preferredTool,
+                                        boolean diggingDown) {
         Map<String, Object> params = new java.util.HashMap<>();
         params.put("searchRadius", horizontalRadius);
         params.put("verticalRange", verticalRange);
@@ -461,6 +481,7 @@ public final class DirtShovelSkill implements Skill {
         if (preferredTool != null && !preferredTool.isBlank()) {
             params.put("preferredTool", preferredTool);
         }
+        params.put("diggingDown", diggingDown);
         return execute(new SkillContext(source, sharedState, params));
     }
 
@@ -469,6 +490,18 @@ public final class DirtShovelSkill implements Skill {
             SharedStateUtils.setValue(context.sharedState(), "lastShovelStatus", "failure");
         }
         return SkillExecutionResult.failure(message);
+    }
+
+    private boolean getBooleanParameter(SkillContext context, String key, boolean defaultValue) {
+        Map<String, Object> params = context.parameters();
+        Object value = params.get(key);
+        if (value instanceof Boolean bool) {
+            return bool;
+        }
+        if (value instanceof String str) {
+            return Boolean.parseBoolean(str);
+        }
+        return defaultValue;
     }
 
     private record ApproachPlan(BlockPos standPosition, List<BlockPos> blocksToClear) {

@@ -52,6 +52,7 @@ import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Box;
 
 import net.minecraft.util.math.Direction;
+import net.minecraft.util.Identifier;
 
 import net.shasankp000.AIPlayer;
 
@@ -493,6 +494,68 @@ public class FunctionCallerV2 {
             } catch (Exception e) {
                 logger.error("Error executing dirt_shovel skill: ", e);
                 getFunctionOutput("Failed to shovel dirt: " + e.getMessage());
+            }
+        }
+
+        /** runSkill: generic skill runner **/
+        private static void runSkill(String skillName, String countStr, String targetBlockIdsStr, String maxFailsStr, String optionsStr) {
+            System.out.println("Running skill: " + skillName + " with count: " + countStr + ", targetBlockIds: " + targetBlockIdsStr + ", maxFails: " + maxFailsStr + ", options: " + optionsStr);
+            if (botSource == null) {
+                getFunctionOutput("Bot not found.");
+                return;
+            }
+            try {
+                Map<String, Object> params = new HashMap<>();
+
+                // Parse count
+                if (countStr != null && !countStr.isBlank()) {
+                    try {
+                        params.put("count", Integer.parseInt(countStr));
+                    } catch (NumberFormatException ignored) { /* Ignore if not a number */ }
+                }
+
+                // Parse targetBlockIds
+                if (targetBlockIdsStr != null && !targetBlockIdsStr.isBlank()) {
+                    Set<Identifier> targetBlockIds = new HashSet<>();
+                    for (String id : targetBlockIdsStr.split(",")) {
+                        Identifier identifier = Identifier.tryParse(id.trim());
+                        if (identifier != null) {
+                            targetBlockIds.add(identifier);
+                        }
+                    }
+                    if (!targetBlockIds.isEmpty()) {
+                        params.put("targetBlocks", targetBlockIds);
+                    }
+                }
+
+                // Parse maxFails
+                if (maxFailsStr != null && !maxFailsStr.isBlank()) {
+                    try {
+                        params.put("maxFails", Integer.parseInt(maxFailsStr));
+                    } catch (NumberFormatException ignored) { /* Ignore if not a number */ }
+                }
+
+                // Parse options
+                if (optionsStr != null && !optionsStr.isBlank()) {
+                    List<String> options = new ArrayList<>();
+                    for (String option : optionsStr.split("\\s+")) {
+                        if (!option.isBlank()) {
+                            options.add(option.toLowerCase(Locale.ROOT));
+                        }
+                    }
+                    if (!options.isEmpty()) {
+                        params.put("options", options);
+                    }
+                }
+
+                SkillExecutionResult result = SkillManager.runSkill(
+                        skillName,
+                        new SkillContext(botSource, sharedState, params)
+                );
+                getFunctionOutput(result.message());
+            } catch (Exception e) {
+                logger.error("Error executing skill '{}': ", skillName, e);
+                getFunctionOutput("Failed to run skill '" + skillName + "': " + e.getMessage());
             }
         }
     }
@@ -1462,7 +1525,8 @@ public class FunctionCallerV2 {
             Map.entry("getHungerLevel", List.of("hungerLevel")),
             Map.entry("getHealthLevel", List.of("healthLevel")),
             Map.entry("cultivateLand", List.of("lastCultivateStatus")),
-            Map.entry("chopWood", List.of("lastChopStatus"))
+            Map.entry("chopWood", List.of("lastChopStatus")),
+            Map.entry("runSkill", List.of("lastSkillResult.message"))
     );
 
     private static void parseOutputValues(String functionName, String output) {
@@ -1554,6 +1618,9 @@ public class FunctionCallerV2 {
                 } else if (output.contains("Failed to chop wood")) {
                     values.add("failed");
                 }
+            }
+            case "runSkill" -> {
+                values.add(output);
             }
         }
 
@@ -1756,6 +1823,15 @@ public class FunctionCallerV2 {
                     int targetZ = Integer.parseInt(resolvePlaceholder(paramMap.get("targetZ")));
                     logger.info("Calling method: cultivateLand with targetX={} targetY={} targetZ={}", targetX, targetY, targetZ);
                     Tools.cultivateLand(targetX, targetY, targetZ);
+                }
+                case "runSkill" -> {
+                    String skillName = resolvePlaceholder(paramMap.get("skillName"));
+                    String count = resolvePlaceholder(paramMap.getOrDefault("count", ""));
+                    String targetBlockIds = resolvePlaceholder(paramMap.getOrDefault("targetBlockIds", ""));
+                    String maxFails = resolvePlaceholder(paramMap.getOrDefault("maxFails", ""));
+                    String options = resolvePlaceholder(paramMap.getOrDefault("options", ""));
+                    logger.info("Calling method: runSkill with skillName={} count={} targetBlockIds={} maxFails={} options={}", skillName, count, targetBlockIds, maxFails, options);
+                    Tools.runSkill(skillName, count, targetBlockIds, maxFails, options);
                 }
                 default -> logger.warn("Unknown function: {}", functionName);
             }

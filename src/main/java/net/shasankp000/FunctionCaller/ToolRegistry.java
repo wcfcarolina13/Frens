@@ -273,6 +273,26 @@ public class ToolRegistry {
                     List.of(new Tool.Parameter("mode", "Use 'on' or 'off'.")),
                     Set.of(),
                     (sharedState, paramMap, result) -> {}
+            ),
+
+            new Tool(
+                    "runSkill",
+                    """
+                    Executes a named skill with optional arguments. This is a generic skill runner.
+                    """,
+                    List.of(
+                            new Tool.Parameter("skillName", "The name of the skill to run (e.g., 'collect_dirt', 'mining')."),
+                            new Tool.Parameter("count", "Optional: The number of items to collect."),
+                            new Tool.Parameter("targetBlockIds", "Optional: Comma-separated list of block IDs to target (e.g., 'minecraft:stone,minecraft:cobblestone')."),
+                            new Tool.Parameter("maxFails", "Optional: The maximum number of failures before giving up."),
+                            new Tool.Parameter("options", "Optional: Additional options for the skill, as a single string (e.g., 'until square').")
+                    ),
+                    Set.of("lastSkillResult.message"),
+                    (sharedState, paramMap, result) -> {
+                        if (result instanceof String message) {
+                            sharedState.put("lastSkillResult.message", message);
+                        }
+                    }
             )
     );
 
