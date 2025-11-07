@@ -27,6 +27,7 @@ import java.io.StringReader;
 import java.sql.SQLException;
 
 import java.util.*;
+import java.util.LinkedHashSet;
 
 import java.util.concurrent.*;
 
@@ -55,6 +56,7 @@ import net.minecraft.util.math.Direction;
 import net.shasankp000.AIPlayer;
 
 import net.shasankp000.ChatUtils.ChatContextManager;
+import net.shasankp000.ChatUtils.ConfirmationState;
 
 import net.shasankp000.ChatUtils.ChatUtils;
 
@@ -128,6 +130,22 @@ public class FunctionCallerV2 {
     private static final String PARAMETERS_KEY = "parameters";
     private static final String PARAMETER_NAME_KEY = "parameterName";
     private static final String PARAMETER_VALUE_KEY = "parameterValue";
+    private static final Map<String, String> BOT_PERSONALITIES = Map.ofEntries(
+            Map.entry("jake", "Jake is a pragmatic field engineer. He speaks in concise, confident sentences, focuses on plans and logistics, and prefers to keep emotions out of the conversation."),
+            Map.entry("bob", "Bob is a dry-humoured veteran ranger. He sounds a little weary but dependable, sprinkles in the occasional sardonic remark, and keeps things grounded in reality.")
+    );
+    private static final String DEFAULT_PERSONA = "You are an adult adventurer in a rugged RPG-like Minecraft world. Speak plainly, focus on survival, and avoid cutesy language.";
+    private static final Set<String> CONFIRMATION_FUNCTIONS = Set.of(
+            "collect_dirt",
+            "mining",
+            "dirt_shovel",
+            "drop_sweep",
+            "mineBlock",
+            "gatherResource",
+            "harvestCrop"
+    );
+    private static final Set<String> AFFIRMATIVE_RESPONSES = Set.of("yes", "y", "yeah", "yep", "sure", "affirmative", "do it", "go", "confirm");
+    private static final Set<String> NEGATIVE_RESPONSES = Set.of("no", "n", "nope", "nah", "stop", "cancel", "hold", "wait");
 
     public FunctionCallerV2(ServerCommandSource botSource, UUID playerUUID) {
         FunctionCallerV2.botSource = botSource;
@@ -497,8 +515,127 @@ public class FunctionCallerV2 {
 
     // This code right here is pure EUREKA moment.
     private static String buildPrompt(String toolString) {
-        return """
+        return buildPrompt(toolString, resolvePersona());
+    }
+
+    private static String buildPrompt(String toolString, String personaInstructions) {
+        String persona = (personaInstructions == null || personaInstructions.isBlank()) ? DEFAULT_PERSONA : personaInstructions;
+        return String.format("""
             You are a first-principles reasoning **function-caller AI agent** for a Minecraft bot.
+            
+            Persona & Voice
+            - You embody the following persona: %s
+            - Speak like an adult adventurer in a serious RPG setting—confident, grounded, and never cutesy.
+            - Each bot keeps its own voice. Stay consistent between replies.
+            
+            Conversation vs Command
+            - When the player is merely chatting, asking questions, or does not require an action, respond with JSON of the form {"conversation": "<your reply>"} and nothing else.
+            - When the player requests an action, return either a single function call or a pipeline as described below.
+            - You may include {"clarification": "..."} when you genuinely need more detail.
+            
+            Confirmation Policy
+            - **Only** request confirmation for resource-intensive jobs (mining, gathering, farming, bulk hauling, etc.).
+            - Use the fields {"requiresConfirmation": true, "confirmationPrompt": "..."} to ask before executing that pipeline.
+            - Never ask for confirmation when the player wants to stop, follow, navigate, defend, or issue other immediate tactical orders.
+            
+            ---
+            
+            Key Principles
+            
+            1. **Use only the tools you have.** 
+            Do not hallucinate new tools. Each tool has clear parameters, a purpose, and trade-offs.
+            
+            2. **Use the fewest tools possible.** 
+            When a single tool is enough, use it. 
+            When multiple tools must be chained, output them as a pipeline in the correct order.
+            
+            3. **Focus on action verbs.** 
+            Player prompts contain action verbs that reveal intent: go, walk, navigate, check, search, mine, approach, align, harvest, etcetera. 
+            Always match these to the most relevant tools.
+            
+            4. **Use $placeholders for shared state.** 
+            If a step depends on output from a previous step, use `$lastDetectedBlock.x` (etc.). 
+            The runtime will substitute these dynamically.
+            
+            ---
+            
+            Execution Loop
+            
+            After each step, you will be given the output of the previous function.
+            You must decide what to do next:
+            - Continue with the remaining steps in the pipeline.
+            - Retry the same function with adjusted parameters.
+            - Abandon the current pipeline and create a completely new pipeline.
+            
+            ---
+            
+            ### **Examples**
+            
+            ✅ **Conversation only:**
+            { "conversation": "Nothing unusual on my patrol. Want me to scout the ridge next?" }
+            
+            ✅ **Retry:**
+            If the previous function failed or needs adjustments, output:
+            {
+              "functionName": "goTo",
+              "parameters": [
+                { "parameterName": "x", "parameterValue": "12" },
+                { "parameterName": "y", "parameterValue": "65" },
+                { "parameterName": "z", "parameterValue": "-20" },
+                { "parameterName": "sprint", "parameterValue": "false" }
+              ]
+            }
+            
+            ✅ Rebuild pipeline:
+            If the plan must change completely, output:
+            {
+              "pipeline": [
+                {
+                  "functionName": "detectBlocks",
+                  "parameters": [
+                    { "parameterName": "blockType", "parameterValue": "stone" }
+                  ]
+                },
+                {
+                  "functionName": "goTo",
+                  "parameters": [
+                    { "parameterName": "x", "parameterValue": "$lastDetectedBlock.x" },
+                    { "parameterName": "y", "parameterValue": "$lastDetectedBlock.y" },
+                    { "parameterName": "z", "parameterValue": "$lastDetectedBlock.z" },
+                    { "parameterName": "sprint", "parameterValue": "true" }
+                  ]
+                }
+              ]
+            }
+            
+            ---
+            
+            When to chain tools:
+            
+            For example if the player outputs: "Can you fetch me some wood?" or "Can you mine some iron?" or "Can you plant the wheat seeds from the chest?"
+            
+            These type of requests are requests which involve multi-step actions, each action chained in a particular order.
+            
+            To fulfill these type of requests you need to chain the tools you have at your disposal in a specific order by understanding what each tool does and how each tool works.
+            
+            ---
+            
+            How you must output:
+            
+            If you only need to use one tool, output in this JSON format.
+            
+            {
+              "functionName": "searchBlock",
+              "parameters": [
+                { "parameterName": "direction", "parameterValue": "front" }
+              ]
+            }
+            
+            If you need multiple tools in a sequence, output as follows:
+            
+            {
+              "pipeline": [
+                {
             
             You will be provided with additional context information of the minecraft bot you are controlling. Use that information well to carefully plan your approach.
             
@@ -670,12 +807,23 @@ public class FunctionCallerV2 {
             
             Below is your list of tools, each with its name, description, required parameters and the key names:
             
-            """ + toolString +
-                """
+            %s
                 
                 And the correct placeholders to use per tool: \n
                 
-                """ + functionStateKeyMap + "\n Do remember to add a placeholder symbol: $ in front of each parameter name when designing the pipeline json.";
+                %s
+                 Do remember to add a placeholder symbol: $ in front of each parameter name when designing the pipeline json.""", persona, toolString, functionStateKeyMap);
+    }
+
+    private static String resolvePersona() {
+        if (botSource == null) {
+            return DEFAULT_PERSONA;
+        }
+        String name = botSource.getName();
+        if (name == null) {
+            return DEFAULT_PERSONA;
+        }
+        return BOT_PERSONALITIES.getOrDefault(name.toLowerCase(Locale.ROOT), DEFAULT_PERSONA);
     }
 
     private static String generatePromptContext(String userPrompt) {
@@ -888,7 +1036,18 @@ public class FunctionCallerV2 {
 
 
     private static void executeFunction(String userInput, String response) {
-        String executionDateTime = getCurrentDateandTime();
+        executeFunctionInternal(userInput, response, null, false);
+    }
+
+    private static void executeFunction(String userInput, String response, LLMClient client) {
+        executeFunctionInternal(userInput, response, client, false);
+    }
+
+
+
+
+
+    private static void executeFunctionInternal(String userInput, String response, LLMClient client, boolean fromConfirmation) {
         try {
             executor.submit(() -> {
                 String cleanedResponse = cleanJsonString(response);
@@ -896,14 +1055,29 @@ public class FunctionCallerV2 {
                 JsonReader reader = new JsonReader(new StringReader(cleanedResponse));
                 reader.setLenient(true);
                 JsonObject jsonObject = JsonParser.parseReader(reader).getAsJsonObject();
+
+                if (jsonObject.has("conversation")) {
+                    deliverConversation(jsonObject.get("conversation").getAsString());
+                    return;
+                }
+
+                if (!fromConfirmation && requiresConfirmation(jsonObject)) {
+                    if (maybeRequestConfirmation(userInput, jsonObject, cleanedResponse)) {
+                        return;
+                    }
+                }
+
                 if (jsonObject.has(PIPELINE_KEY)) {
                     prepareForExternalCommand();
                     AutoFaceEntity.setBotExecutingTask(true);
                     JsonArray pipeline = jsonObject.getAsJsonArray(PIPELINE_KEY);
                     try {
                         logger.info("🧭 Executing pipeline with {} step(s)", pipeline.size());
-                        System.out.println("[FunctionCaller] Received pipeline with " + pipeline.size() + " steps.");
-                        runPipelineLoop(pipeline);
+                        if (client == null) {
+                            runPipelineLoop(pipeline);
+                        } else {
+                            runPipelineLoop(pipeline, client);
+                        }
                     } catch (Exception e) {
                         logger.error("Error executing pipeline response: {}", e.getMessage(), e);
                     }
@@ -912,13 +1086,11 @@ public class FunctionCallerV2 {
                     String fnName = jsonObject.get(FUNCTION_NAME_KEY).getAsString();
                     JsonArray paramsArray = jsonObject.get(PARAMETERS_KEY).getAsJsonArray();
                     Map<String, String> paramMap = new ConcurrentHashMap<>();
-                    StringBuilder params = new StringBuilder();
                     for (JsonElement parameter : paramsArray) {
                         JsonObject paramObj = parameter.getAsJsonObject();
                         String paramName = paramObj.get(PARAMETER_NAME_KEY).getAsString();
                         String paramValue = paramObj.get(PARAMETER_VALUE_KEY).getAsString();
                         paramValue = resolvePlaceholder(paramValue);
-                        params.append(paramName).append("=").append(paramValue).append(", ");
                         paramMap.put(paramName, paramValue);
                     }
                     AutoFaceEntity.setBotExecutingTask(true);
@@ -936,86 +1108,16 @@ public class FunctionCallerV2 {
                         BotEventHandler.setExternalOverrideActive(false);
                     }
                 } else if (jsonObject.has(CLARIFICATION_KEY)) {
-                    System.out.println("Detected clarification");
                     String clarification = jsonObject.get(CLARIFICATION_KEY).getAsString();
-                    // Save the clarification state
                     ChatContextManager.setPendingClarification(playerUUID, userInput, clarification, botSource.getName());
-                    // Relay to player in-game
-                    // sendMessageToPlayer(clarification); // Removed as per refactoring
                 } else {
                     throw new IllegalStateException("Response must have either " + FUNCTION_NAME_KEY + " or " + PIPELINE_KEY + ".");
                 }
-                // getFunctionResultAndSave(userInput, executionDateTime);
             });
         } catch (JsonSyntaxException | NullPointerException | IllegalStateException e) {
             logger.error("Error processing JSON response: {}", e.getMessage(), e);
         }
     }
-
-    private static void executeFunction(String userInput, String response, LLMClient client) {
-        String executionDateTime = getCurrentDateandTime();
-        try {
-            executor.submit(() -> {
-                String cleanedResponse = cleanJsonString(response);
-                logger.info("Cleaned JSON Response: {}", cleanedResponse);
-                JsonReader reader = new JsonReader(new StringReader(cleanedResponse));
-                reader.setLenient(true);
-                JsonObject jsonObject = JsonParser.parseReader(reader).getAsJsonObject();
-                if (jsonObject.has(PIPELINE_KEY)) {
-                    prepareForExternalCommand();
-                    AutoFaceEntity.setBotExecutingTask(true);
-                    JsonArray pipeline = jsonObject.getAsJsonArray(PIPELINE_KEY);
-                    try {
-                        runPipelineLoop(pipeline, client);
-                    } catch (Exception e) {
-                        logger.error("Error executing pipeline response: {}", e.getMessage(), e);
-                    }
-                } else if (jsonObject.has(FUNCTION_NAME_KEY)) {
-                    prepareForExternalCommand();
-                    String fnName = jsonObject.get(FUNCTION_NAME_KEY).getAsString();
-                    JsonArray paramsArray = jsonObject.get(PARAMETERS_KEY).getAsJsonArray();
-                    Map<String, String> paramMap = new ConcurrentHashMap<>();
-                    StringBuilder params = new StringBuilder();
-                    for (JsonElement parameter : paramsArray) {
-                        JsonObject paramObj = parameter.getAsJsonObject();
-                        String paramName = paramObj.get(PARAMETER_NAME_KEY).getAsString();
-                        String paramValue = paramObj.get(PARAMETER_VALUE_KEY).getAsString();
-                        paramValue = resolvePlaceholder(paramValue);
-                        params.append(paramName).append("=").append(paramValue).append(", ");
-                        paramMap.put(paramName, paramValue);
-                    }
-                    AutoFaceEntity.setBotExecutingTask(true);
-                    try {
-                        logger.info("Executing: {} with {}", fnName, paramMap);
-                        callFunction(fnName, paramMap).join();
-                    } catch (CompletionException ce) {
-                        logger.error("Function {} execution failed: {}", fnName,
-                                ce.getCause() != null ? ce.getCause().getMessage() : ce.getMessage(), ce);
-                    } catch (Exception e) {
-                        logger.error("Function {} execution failed: {}", fnName, e.getMessage(), e);
-                    } finally {
-                        AutoFaceEntity.setBotExecutingTask(false);
-                        AutoFaceEntity.isBotMoving = false;
-                    }
-                } else if (jsonObject.has(CLARIFICATION_KEY)) {
-                    String clarification = jsonObject.get(CLARIFICATION_KEY).getAsString();
-                    // Save the clarification state
-                    ChatContextManager.setPendingClarification(playerUUID, userInput, clarification, botSource.getName());
-                    // Relay to player in-game
-                    // sendMessageToPlayer(clarification); // Removed as per refactoring
-                } else {
-                    throw new IllegalStateException("Response must have either " + FUNCTION_NAME_KEY + " or " + PIPELINE_KEY + ".");
-                }
-                // getFunctionResultAndSave(userInput, executionDateTime);
-            });
-        } catch (JsonSyntaxException | NullPointerException | IllegalStateException e) {
-            logger.error("Error processing JSON response: {}", e.getMessage(), e);
-        }
-    }
-
-
-
-
 
     private static void runPipelineLoop(JsonArray pipeline) {
         runPipeline(pipeline, null);
@@ -1045,6 +1147,106 @@ public class FunctionCallerV2 {
         boolean moving = PathTracer.BotSegmentManager.getBotMovementStatus();
         logger.info("✔️ Pipeline cleanup executed. movementStatus={} blockDetectionActive={}", moving, blockDetectionUnit.getBlockDetectionStatus());
         System.out.println("[FunctionCaller] Cleanup complete. movementStatus=" + moving);
+    }
+
+    private static void deliverConversation(String reply) {
+        if (botSource == null || reply == null || reply.isBlank()) {
+            return;
+        }
+        ChatUtils.sendChatMessages(botSource.withSilent().withMaxLevel(4), reply.trim());
+    }
+
+    private static boolean requiresConfirmation(JsonObject payload) {
+        if (payload.has("requiresConfirmation") && payload.get("requiresConfirmation").getAsBoolean()) {
+            return true;
+        }
+        if (payload.has(FUNCTION_NAME_KEY)) {
+            return CONFIRMATION_FUNCTIONS.contains(payload.get(FUNCTION_NAME_KEY).getAsString());
+        }
+        if (payload.has(PIPELINE_KEY)) {
+            JsonArray steps = payload.getAsJsonArray(PIPELINE_KEY);
+            for (JsonElement element : steps) {
+                JsonObject step = element.getAsJsonObject();
+                if (step.has(FUNCTION_NAME_KEY) && CONFIRMATION_FUNCTIONS.contains(step.get(FUNCTION_NAME_KEY).getAsString())) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private static boolean maybeRequestConfirmation(String userInput, JsonObject payload, String cleanedJson) {
+        if (playerUUID == null) {
+            return false;
+        }
+        String prompt = payload.has("confirmationPrompt")
+                ? payload.get("confirmationPrompt").getAsString()
+                : buildDefaultConfirmationPrompt(payload);
+        if (!prompt.toLowerCase(Locale.ROOT).contains("yes")) {
+            prompt = prompt + " (yes/no)";
+        }
+        ChatContextManager.setPendingConfirmation(playerUUID,
+                new ConfirmationState(botSource != null ? botSource.getName() : "Bot", userInput, prompt, cleanedJson));
+        deliverConversation(prompt);
+        return true;
+    }
+
+    private static String buildDefaultConfirmationPrompt(JsonObject payload) {
+        return "Should I go ahead with " + describeAction(payload) + "?";
+    }
+
+    private static String describeAction(JsonObject payload) {
+        if (payload.has(FUNCTION_NAME_KEY)) {
+            return payload.get(FUNCTION_NAME_KEY).getAsString();
+        }
+        if (payload.has(PIPELINE_KEY)) {
+            LinkedHashSet<String> names = new LinkedHashSet<>();
+            JsonArray steps = payload.getAsJsonArray(PIPELINE_KEY);
+            for (JsonElement element : steps) {
+                JsonObject step = element.getAsJsonObject();
+                if (step.has(FUNCTION_NAME_KEY)) {
+                    names.add(step.get(FUNCTION_NAME_KEY).getAsString());
+                }
+            }
+            if (!names.isEmpty()) {
+                return String.join(" → ", names);
+            }
+        }
+        return "that job";
+    }
+
+    public static boolean tryHandleConfirmation(UUID commanderId, String playerMessage) {
+        ConfirmationState state = ChatContextManager.getPendingConfirmation(commanderId);
+        if (state == null) {
+            return false;
+        }
+        Boolean decision = parseDecision(playerMessage);
+        if (decision == null) {
+            deliverConversation("Give me a quick yes or no so I know whether to proceed.");
+            return true;
+        }
+        ChatContextManager.clearPendingConfirmation(commanderId);
+        if (decision) {
+            deliverConversation("On it.");
+            executeFunctionInternal(state.originalMessage, state.payloadJson, null, true);
+        } else {
+            deliverConversation("Understood. I'll hold off for now.");
+        }
+        return true;
+    }
+
+    private static Boolean parseDecision(String message) {
+        if (message == null) {
+            return null;
+        }
+        String normalized = message.trim().toLowerCase(Locale.ROOT);
+        if (AFFIRMATIVE_RESPONSES.contains(normalized)) {
+            return true;
+        }
+        if (NEGATIVE_RESPONSES.contains(normalized)) {
+            return false;
+        }
+        return null;
     }
 
     private static void runPipelineLoopInternal(JsonArray pipeline, LLMClient client) {

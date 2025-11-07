@@ -15,7 +15,10 @@ import org.slf4j.LoggerFactory;
 import java.util.ArrayDeque;
 import java.util.Queue;
 import java.util.HashSet;
+import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -27,9 +30,8 @@ import java.util.concurrent.atomic.AtomicReference;
 public final class PathTracer {
 
     public static final Logger LOGGER = LoggerFactory.getLogger("ai-player");
-
     private static volatile boolean shouldSprint;
-    private static final AtomicReference<BotSegmentManager> ACTIVE_MANAGER = new AtomicReference<>();
+    private static final Map<UUID, BotSegmentManager> ACTIVE_MANAGERS = new ConcurrentHashMap<>();
 
     private PathTracer() {
     }
@@ -39,17 +41,19 @@ public final class PathTracer {
         private final MinecraftServer server;
         private final ServerCommandSource botSource;
         private final String botName;
+        private final UUID botUuid;
         private final Queue<Segment> jobQueue = new ArrayDeque<>();
         private BlockPos finalTarget = null;
 
-        private static final AtomicReference<String> FINAL_RESULT = new AtomicReference<>("");
-        private static volatile boolean moving = false;
-        private static CompletableFuture<String> completionFuture = null;
+        private final AtomicReference<String> finalResult = new AtomicReference<>("");
+        private final CompletableFuture<String> completionFuture = new CompletableFuture<>();
+        private volatile boolean moving = false;
 
-        BotSegmentManager(MinecraftServer server, ServerCommandSource botSource, String botName) {
+        BotSegmentManager(MinecraftServer server, ServerCommandSource botSource, String botName, UUID botUuid) {
             this.server = server;
             this.botSource = botSource;
             this.botName = botName;
+            this.botUuid = botUuid;
         }
 
         void addSegmentJob(Segment segment) {
@@ -58,7 +62,12 @@ public final class PathTracer {
         }
 
         void begin() {
-            server.execute(this::processQueue);
+            Runnable task = this::processQueue;
+            if (server.isOnThread()) {
+                task.run();
+            } else {
+                server.execute(task);
+            }
         }
 
         private void processQueue() {
@@ -73,12 +82,10 @@ public final class PathTracer {
             while (!jobQueue.isEmpty()) {
                 Segment segment = jobQueue.poll();
                 if (!executeSegment(player, segment)) {
-                    moving = false;
                     return;
                 }
             }
             ensureFinalPosition(player);
-            moving = false;
             complete(tracePathOutput(botSource));
         }
 
@@ -163,39 +170,42 @@ public final class PathTracer {
         }
 
         private void complete(String result) {
-            FINAL_RESULT.set(result);
-            CompletableFuture<String> future = getPathCompletionFuture();
-            if (!future.isDone()) {
-                future.complete(result);
+            moving = false;
+            finalResult.set(result);
+            if (!completionFuture.isDone()) {
+                completionFuture.complete(result);
             }
+            ACTIVE_MANAGERS.remove(botUuid, this);
         }
 
         void cancel() {
             jobQueue.clear();
         }
 
+        void cancel(String reason) {
+            jobQueue.clear();
+            complete(reason != null ? reason : "Path cleared");
+        }
+
         public static boolean getBotMovementStatus() {
+            return ACTIVE_MANAGERS.values().stream().anyMatch(BotSegmentManager::isMoving);
+        }
+
+        public boolean isMoving() {
             return moving;
         }
 
-        public static CompletableFuture<String> getPathCompletionFuture() {
-            if (completionFuture == null || completionFuture.isDone()) {
-                completionFuture = new CompletableFuture<>();
-            }
+        public CompletableFuture<String> completionFuture() {
             return completionFuture;
         }
 
         public static void clearJobs() {
-            BotSegmentManager active = ACTIVE_MANAGER.getAndSet(null);
-            if (active != null) {
-                active.jobQueue.clear();
-            }
-            moving = false;
-            if (completionFuture != null && !completionFuture.isDone()) {
-                completionFuture.complete("Path cleared");
-            }
-            completionFuture = null;
-            FINAL_RESULT.set("");
+            ACTIVE_MANAGERS.keySet().forEach(uuid -> {
+                BotSegmentManager manager = ACTIVE_MANAGERS.remove(uuid);
+                if (manager != null) {
+                    manager.cancel("Path cleared");
+                }
+            });
         }
 
         public static String tracePathOutput(ServerCommandSource botSource) {
@@ -216,19 +226,29 @@ public final class PathTracer {
                                                       Queue<Segment> segments,
                                                       boolean sprint) {
         shouldSprint = sprint;
-        BotSegmentManager.clearJobs();
+        ServerPlayerEntity player = botSource.getPlayer();
+        UUID botUuid = player != null ? player.getUuid() : UUID.randomUUID();
 
-        BotSegmentManager manager = new BotSegmentManager(server, botSource, botName);
-        ACTIVE_MANAGER.set(manager);
+        BotSegmentManager existing = ACTIVE_MANAGERS.remove(botUuid);
+        if (existing != null) {
+            existing.cancel("Path cleared");
+        }
 
-        CompletableFuture<String> completionFuture = BotSegmentManager.getPathCompletionFuture();
+        BotSegmentManager manager = new BotSegmentManager(server, botSource, botName, botUuid);
+        ACTIVE_MANAGERS.put(botUuid, manager);
+
         segments.forEach(manager::addSegmentJob);
         manager.begin();
-        return completionFuture;
+        return manager.completionFuture();
     }
 
     public static void flushAllMovementTasks() {
-        BotSegmentManager.clearJobs();
+        ACTIVE_MANAGERS.keySet().forEach(uuid -> {
+            BotSegmentManager manager = ACTIVE_MANAGERS.remove(uuid);
+            if (manager != null) {
+                manager.cancel("Flushed");
+            }
+        });
         LOGGER.info("All movement tasks flushed");
     }
 

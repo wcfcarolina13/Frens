@@ -58,6 +58,8 @@ public class BotEventHandler {
     public static final Logger LOGGER = LoggerFactory.getLogger("ai-player");
     private static MinecraftServer server = null;
     public static ServerPlayerEntity bot = null;
+    private static final boolean DEBUG_RL = false;
+    private static final Set<UUID> REGISTERED_BOTS = ConcurrentHashMap.newKeySet();
     private static UUID registeredBotUuid = null;
     public static final String qTableDir = LauncherEnvironment.getStorageDirectory("qtable_storage");
     private static final Object monitorLock = new Object();
@@ -87,7 +89,9 @@ public class BotEventHandler {
     private static final long DROP_RETRY_COOLDOWN_MS = 15_000L;
     private static final Map<BlockPos, Long> dropRetryTimestamps = new ConcurrentHashMap<>();
     private static final double RL_MANUAL_NUDGE_DISTANCE_SQ = 4.0D;
-    private static Mode currentMode = Mode.IDLE;
+    private static final double ALLY_DEFENSE_RADIUS = 12.0D;
+    private static final Map<UUID, CommandState> COMMAND_STATES = new ConcurrentHashMap<>();
+    private static final Map<UUID, Long> LAST_RL_SAMPLE_TICK = new ConcurrentHashMap<>();
     private static volatile boolean externalOverrideActive = false;
     private static volatile boolean pendingBotRespawn = false;
     public enum CombatStyle {
@@ -95,13 +99,6 @@ public class BotEventHandler {
         EVASIVE
     }
     private static CombatStyle combatStyle = CombatStyle.AGGRESSIVE;
-    private static UUID followTargetUuid = null;
-    private static Vec3d guardCenter = null;
-    private static double guardRadius = 6.0D;
-    private static Vec3d baseTarget = null;
-    private static boolean assistAllies = false;
-    private static boolean shieldRaised = false;
-    private static long shieldDecisionTick = 0L;
 
     public enum Mode {
         IDLE,
@@ -111,6 +108,210 @@ public class BotEventHandler {
         RETURNING_BASE
     }
     private static long lastRespawnHandledTick = -1;
+
+    private static void debugRL(String message) {
+        if (DEBUG_RL) {
+            LOGGER.debug(message);
+        }
+    }
+
+    private static final class CommandState {
+        Mode mode = Mode.IDLE;
+        UUID followTargetUuid;
+        Vec3d guardCenter;
+        double guardRadius = 6.0D;
+        Vec3d baseTarget;
+        boolean assistAllies;
+        boolean shieldRaised;
+        long shieldDecisionTick;
+    }
+
+    public static boolean throttleTraining(ServerPlayerEntity bot, boolean urgent) {
+        if (bot == null || bot.getCommandSource().getServer() == null) {
+            return true;
+        }
+        int interval = urgent ? 2 : 20; // urgent ~0.1s, passive ~1s (assuming 20tps)
+        long now = bot.getCommandSource().getServer().getTicks();
+        long last = LAST_RL_SAMPLE_TICK.getOrDefault(bot.getUuid(), Long.MIN_VALUE);
+        if (now - last < interval) {
+            return false;
+        }
+        LAST_RL_SAMPLE_TICK.put(bot.getUuid(), now);
+        return true;
+    }
+
+    private static CommandState stateFor(ServerPlayerEntity bot) {
+        if (bot == null) {
+            return null;
+        }
+        return COMMAND_STATES.computeIfAbsent(bot.getUuid(), id -> new CommandState());
+    }
+
+    private static CommandState stateFor(UUID uuid) {
+        if (uuid == null) {
+            return null;
+        }
+        return COMMAND_STATES.computeIfAbsent(uuid, id -> new CommandState());
+    }
+
+    private static CommandState primaryState() {
+        if (registeredBotUuid != null) {
+            return stateFor(registeredBotUuid);
+        }
+        Iterator<UUID> iterator = REGISTERED_BOTS.iterator();
+        if (iterator.hasNext()) {
+            return stateFor(iterator.next());
+        }
+        return null;
+    }
+
+    private static void setMode(ServerPlayerEntity bot, Mode mode) {
+        CommandState state = stateFor(bot);
+        if (state != null) {
+            state.mode = mode;
+        }
+        if (bot != null && registeredBotUuid != null && bot.getUuid().equals(registeredBotUuid)) {
+            CommandState primary = primaryState();
+            if (primary != null) {
+                primary.mode = mode;
+            }
+        }
+    }
+
+    private static Mode getMode(ServerPlayerEntity bot) {
+        CommandState state = stateFor(bot);
+        return state != null ? state.mode : Mode.IDLE;
+    }
+
+    private static void setFollowTarget(ServerPlayerEntity bot, UUID targetUuid) {
+        CommandState state = stateFor(bot);
+        if (state != null) {
+            state.followTargetUuid = targetUuid;
+        }
+        if (bot != null && registeredBotUuid != null && bot.getUuid().equals(registeredBotUuid)) {
+            CommandState primary = primaryState();
+            if (primary != null) {
+                primary.followTargetUuid = targetUuid;
+            }
+        }
+    }
+
+    private static UUID getFollowTargetFor(ServerPlayerEntity bot) {
+        CommandState state = stateFor(bot);
+        return state != null ? state.followTargetUuid : null;
+    }
+
+    private static void clearState(ServerPlayerEntity bot) {
+        if (bot == null) {
+            return;
+        }
+        COMMAND_STATES.remove(bot.getUuid());
+    }
+
+    private static void setGuardState(ServerPlayerEntity bot, Vec3d center, double radius) {
+        CommandState state = stateFor(bot);
+        if (state != null) {
+            state.guardCenter = center;
+            state.guardRadius = radius;
+        }
+        if (bot != null && registeredBotUuid != null && bot.getUuid().equals(registeredBotUuid)) {
+            CommandState primary = primaryState();
+            if (primary != null) {
+                primary.guardCenter = center;
+                primary.guardRadius = radius;
+            }
+        }
+    }
+
+    private static Vec3d getGuardCenter(ServerPlayerEntity bot) {
+        CommandState state = stateFor(bot);
+        return state != null ? state.guardCenter : null;
+    }
+
+    private static double getGuardRadius(ServerPlayerEntity bot) {
+        CommandState state = stateFor(bot);
+        return state != null ? state.guardRadius : 6.0D;
+    }
+
+    private static void setBaseTarget(ServerPlayerEntity bot, Vec3d base) {
+        CommandState state = stateFor(bot);
+        if (state != null) {
+            state.baseTarget = base;
+        }
+        if (bot != null && registeredBotUuid != null && bot.getUuid().equals(registeredBotUuid)) {
+            CommandState primary = primaryState();
+            if (primary != null) {
+                primary.baseTarget = base;
+            }
+        }
+    }
+
+    private static void clearGuard(ServerPlayerEntity bot) {
+        setGuardState(bot, null, getGuardRadius(bot));
+    }
+
+    private static void clearBase(ServerPlayerEntity bot) {
+        setBaseTarget(bot, null);
+    }
+
+    private static Vec3d getBaseTarget(ServerPlayerEntity bot) {
+        CommandState state = stateFor(bot);
+        return state != null ? state.baseTarget : null;
+    }
+
+    private static void setAssistAllies(ServerPlayerEntity bot, boolean enable) {
+        CommandState state = stateFor(bot);
+        if (state != null) {
+            state.assistAllies = enable;
+        }
+        if (bot != null && registeredBotUuid != null && bot.getUuid().equals(registeredBotUuid)) {
+            CommandState primary = primaryState();
+            if (primary != null) {
+                primary.assistAllies = enable;
+            }
+        }
+    }
+
+    private static boolean isAssistAllies(ServerPlayerEntity bot) {
+        CommandState state = stateFor(bot);
+        return state != null && state.assistAllies;
+    }
+
+    private static void setShieldRaised(ServerPlayerEntity bot, boolean raised) {
+        CommandState state = stateFor(bot);
+        if (state != null) {
+            state.shieldRaised = raised;
+        }
+        if (bot != null && registeredBotUuid != null && bot.getUuid().equals(registeredBotUuid)) {
+            CommandState primary = primaryState();
+            if (primary != null) {
+                primary.shieldRaised = raised;
+            }
+        }
+    }
+
+    private static boolean isShieldRaised(ServerPlayerEntity bot) {
+        CommandState state = stateFor(bot);
+        return state != null && state.shieldRaised;
+    }
+
+    private static long getShieldDecisionTick(ServerPlayerEntity bot) {
+        CommandState state = stateFor(bot);
+        return state != null ? state.shieldDecisionTick : 0L;
+    }
+
+    private static void setShieldDecisionTick(ServerPlayerEntity bot, long tick) {
+        CommandState state = stateFor(bot);
+        if (state != null) {
+            state.shieldDecisionTick = tick;
+        }
+        if (bot != null && registeredBotUuid != null && bot.getUuid().equals(registeredBotUuid)) {
+            CommandState primary = primaryState();
+            if (primary != null) {
+                primary.shieldDecisionTick = tick;
+            }
+        }
+    }
 
     public BotEventHandler(MinecraftServer server, ServerPlayerEntity bot) {
         if (server != null && bot != null && (registeredBotUuid == null || registeredBotUuid.equals(bot.getUuid()))) {
@@ -152,6 +353,16 @@ public class BotEventHandler {
             existing = srv.getPlayerManager().getPlayer(registeredBotUuid);
         }
         if (existing == null) {
+            Iterator<UUID> iterator = REGISTERED_BOTS.iterator();
+            while (existing == null && iterator.hasNext()) {
+                UUID candidateId = iterator.next();
+                existing = srv.getPlayerManager().getPlayer(candidateId);
+                if (existing != null) {
+                    registeredBotUuid = candidateId;
+                }
+            }
+        }
+        if (existing == null) {
             existing = srv.getPlayerManager().getPlayer(lastBotName);
         }
         if (existing != null) {
@@ -182,8 +393,13 @@ public class BotEventHandler {
         final float yaw = lastSpawnYaw;
         final float pitch = lastSpawnPitch;
         pendingBotRespawn = true;
+        UUID targetUuid = registeredBotUuid;
         srv.execute(() -> {
-            TaskService.forceAbort("§cRestoring bot after owner respawn.");
+            if (targetUuid != null) {
+                TaskService.forceAbort(targetUuid, "§cRestoring bot after owner respawn.");
+            } else {
+                TaskService.forceAbort("§cRestoring bot after owner respawn.");
+            }
             createFakePlayer.createFake(lastBotName, srv, spawnPos, yaw, pitch, targetWorld, GameMode.SURVIVAL, false);
         });
     }
@@ -192,10 +408,12 @@ public class BotEventHandler {
         if (candidate == null) {
             return;
         }
+        REGISTERED_BOTS.add(candidate.getUuid());
         registeredBotUuid = candidate.getUuid();
         BotEventHandler.bot = candidate;
+        stateFor(candidate);
         MinecraftServer srv = candidate.getCommandSource().getServer();
-        if (srv != null) {
+        if (srv != null && (BotEventHandler.server == null || BotEventHandler.server == srv)) {
             BotEventHandler.server = srv;
         }
         lastBotName = candidate.getName().getString();
@@ -205,23 +423,43 @@ public class BotEventHandler {
         pendingBotRespawn = false;
     }
 
+    public static void unregisterBot(ServerPlayerEntity bot) {
+        if (bot == null) {
+            return;
+        }
+        UUID uuid = bot.getUuid();
+        REGISTERED_BOTS.remove(uuid);
+        clearState(bot);
+        LAST_RL_SAMPLE_TICK.remove(uuid);
+        if (registeredBotUuid != null && registeredBotUuid.equals(uuid)) {
+            registeredBotUuid = null;
+            Iterator<UUID> iterator = REGISTERED_BOTS.iterator();
+            if (iterator.hasNext()) {
+                registeredBotUuid = iterator.next();
+            }
+        }
+        if (BotEventHandler.bot != null && BotEventHandler.bot.getUuid().equals(uuid)) {
+            BotEventHandler.bot = null;
+        }
+    }
+
     public static boolean isRegisteredBot(ServerPlayerEntity candidate) {
-        return registeredBotUuid != null && candidate != null && candidate.getUuid().equals(registeredBotUuid);
+        return candidate != null && REGISTERED_BOTS.contains(candidate.getUuid());
     }
 
     private static State initializeBotState(QTable qTable) {
         State initialState = null;
 
         if (qTable == null || qTable.getTable().isEmpty()) {
-            System.out.println("No initial state available. Q-table is empty.");
+            debugRL("No initial state available. Q-table is empty.");
         } else {
-            System.out.println("Loaded Q-table: Total state-action pairs = " + qTable.getTable().size());
+            debugRL("Loaded Q-table: Total state-action pairs = " + qTable.getTable().size());
 
             // Get the most recent state from the Q-table
             StateActionPair recentPair = qTable.getTable().keySet().iterator().next();
             initialState = recentPair.getState();
 
-            System.out.println("Setting initial state to: " + initialState);
+            debugRL("Setting initial state to: " + initialState);
         }
 
         return initialState;
@@ -237,10 +475,10 @@ public class BotEventHandler {
         }
         synchronized (monitorLock) {
             if (isExecuting) {
-                System.out.println("Executing detection code");
+                debugRL("Executing detection code");
                 return; // Skip if already executing
             } else {
-                System.out.println("No immediate threats detected");
+                debugRL("No immediate threats detected");
                 // Reset state when no threats are detected
                 BotEventHandler.currentState = createInitialState(bot);
             }
@@ -249,14 +487,14 @@ public class BotEventHandler {
 
         try {
             double dangerDistance = DangerZoneDetector.detectDangerZone(bot, 10, 10, 10);
-            System.out.println("Distance from danger zone: " + dangerDistance + " blocks");
+            debugRL("Distance from danger zone: " + dangerDistance + " blocks");
 
             List<Entity> nearbyEntities = AutoFaceEntity.detectNearbyEntities(bot, 10); // Example bounding box size
             List<Entity> hostileEntities = nearbyEntities.stream()
                     .filter(EntityUtil::isHostile)
                     .toList();
 
-            LOGGER.info("detectAndReact triggered: hostiles={}, trainingMode={}, alreadyExecuting={}",
+            LOGGER.debug("detectAndReact triggered: hostiles={}, trainingMode={}, alreadyExecuting={}",
                     hostileEntities.size(), net.shasankp000.Commands.modCommandRegistry.isTrainingMode, isExecuting);
 
             BlockDistanceLimitedSearch blockDistanceLimitedSearch = new BlockDistanceLimitedSearch(bot, 3, 5);
@@ -271,7 +509,7 @@ public class BotEventHandler {
             handleSpartanMode(bot, environmentSnapshot, threatDetected);
             updateStuckTracker(bot, environmentSnapshot);
 
-            System.out.println("Nearby blocks: " + nearbyBlocks);
+            debugRL("Nearby blocks: " + nearbyBlocks);
 
             int timeofDay = GetTime.getTimeOfWorld(bot);
             String time = (timeofDay >= 12000 && timeofDay < 24000) ? "night" : "day";
@@ -293,14 +531,14 @@ public class BotEventHandler {
                     BotEventHandler.botDied = false;
 
                     if (isStateConsistent(lastKnownState, currentState)) {
-                        System.out.println("Merged values from last known state.");
+                        debugRL("Merged values from last known state.");
                         currentState.setRiskMap(lastKnownState.getRiskMap());
                         currentState.setPodMap(lastKnownState.getPodMap());
                     }
                 } else {
                     currentState = initializeBotState(qTable);
 
-                    System.out.println("Created initial state");
+                    debugRL("Created initial state");
                 }
 
                 if (botSpawnCount == 0) {
@@ -311,9 +549,9 @@ public class BotEventHandler {
                         distanceToHostileEntity, time, dimension);
 
             } else if ((dangerDistance > 0.0 && dangerDistance <= 5.0) || hasSculkNearby) {
-                System.out.println("Danger zone detected within 5 blocks");
+                debugRL("Danger zone detected within 5 blocks");
 
-                System.out.println("Triggered handler for danger zone case.");
+                debugRL("Triggered handler for danger zone case.");
 
                 List<EntityDetails> nearbyEntitiesList = nearbyEntities.stream()
                         .map(entity -> EntityDetails.from(bot, entity))
@@ -327,7 +565,7 @@ public class BotEventHandler {
                     BotEventHandler.botDied = false;
 
                     if (isStateConsistent(lastKnownState, currentState)) {
-                        System.out.println("Merged values from last known state.");
+                        debugRL("Merged values from last known state.");
                         currentState.setRiskMap(lastKnownState.getRiskMap());
                         currentState.setPodMap(lastKnownState.getPodMap());
                     }
@@ -342,7 +580,7 @@ public class BotEventHandler {
                 performLearningStep(rlAgentHook, qTable, currentState, nearbyEntitiesList, nearbyBlocks,
                         distanceToHostileEntity, time, dimension);
             } else {
-                System.out.println("Passive environment detected. Running exploratory step.");
+                debugRL("Passive environment detected. Running exploratory step.");
 
                 collectNearbyDrops(bot, 6.0D);
 
@@ -373,7 +611,7 @@ public class BotEventHandler {
                 AutoFaceEntity.isHandlerTriggered = false;
                 AutoFaceEntity.setBotExecutingTask(false);
                 AutoFaceEntity.isBotMoving = false;
-                System.out.println("Resetting handler trigger flag to: " + false);
+                debugRL("Resetting handler trigger flag to: " + false);
             }
         }
     }
@@ -392,7 +630,7 @@ public class BotEventHandler {
         }
         synchronized (monitorLock) {
             if (isExecuting) {
-                System.out.println("Already executing detection code, skipping...");
+                debugRL("Already executing detection code, skipping...");
                 return; // Skip if already executing
             }
             isExecuting = true;
@@ -428,7 +666,7 @@ public class BotEventHandler {
 
 
                     // Log chosen action for debugging
-                    System.out.println("Play Mode - Chosen action: " + chosenAction);
+                    debugRL("Play Mode - Chosen action: " + chosenAction);
 
                     // Execute action
                     executeAction(chosenAction);
@@ -446,7 +684,7 @@ public class BotEventHandler {
 
 
                     // Log chosen action for debugging
-                    System.out.println("Play Mode - Chosen action: " + chosenAction);
+                    debugRL("Play Mode - Chosen action: " + chosenAction);
 
                     // Execute action
                     executeAction(chosenAction);
@@ -456,7 +694,7 @@ public class BotEventHandler {
             }
         } finally {
             synchronized (monitorLock) {
-                System.out.println("Resetting handler trigger flag.");
+                debugRL("Resetting handler trigger flag.");
                 isExecuting = false;
                 AutoFaceEntity.isHandlerTriggered = false; // Reset the trigger flag
                 AutoFaceEntity.setBotExecutingTask(false);
@@ -494,7 +732,7 @@ public class BotEventHandler {
             case HOTBAR_7 -> performAction("hotbar7");
             case HOTBAR_8 -> performAction("hotbar8");
             case HOTBAR_9 -> performAction("hotbar9");
-            case STAY -> System.out.println("Performing action: Stay and do nothing");
+            case STAY -> debugRL("Performing action: Stay and do nothing");
         }
     }
 
@@ -695,9 +933,9 @@ public class BotEventHandler {
         }
 
         lastSafePosition = target;
-        TaskService.forceAbort("§cTask aborted due to bot respawn.");
+        TaskService.forceAbort(bot.getUuid(), "§cTask aborted due to bot respawn.");
         setExternalOverrideActive(false);
-        currentMode = Mode.IDLE;
+        setMode(bot, Mode.IDLE);
         if (destinationWorld != null) {
             rememberSpawn(destinationWorld, target, bot.getYaw(), bot.getPitch());
         }
@@ -735,24 +973,90 @@ public class BotEventHandler {
             return false;
         }
 
-        switch (currentMode) {
+        CommandState state = stateFor(bot);
+        Mode mode = state != null ? state.mode : Mode.IDLE;
+        List<Entity> augmentedHostiles = augmentHostiles(bot, hostileEntities);
+
+        switch (mode) {
             case FOLLOW -> {
-                return handleFollow(bot, server, hostileEntities);
+                return handleFollow(bot, state, server, augmentedHostiles);
             }
             case GUARD -> {
-                return handleGuard(bot, nearbyEntities, hostileEntities);
+                return handleGuard(bot, state, nearbyEntities, augmentedHostiles);
             }
             case STAY -> {
+                if (!augmentedHostiles.isEmpty() && engageHostiles(bot, server, augmentedHostiles)) {
+                    return true;
+                }
                 BotActions.stop(bot);
                 return true;
             }
             case RETURNING_BASE -> {
-                return handleReturnToBase(bot);
+                if (!augmentedHostiles.isEmpty() && engageHostiles(bot, server, augmentedHostiles)) {
+                    return true;
+                }
+                return handleReturnToBase(bot, state);
             }
             default -> {
+                if (!augmentedHostiles.isEmpty()) {
+                    return engageHostiles(bot, server, augmentedHostiles);
+                }
                 return false;
             }
         }
+    }
+
+    private static List<Entity> augmentHostiles(ServerPlayerEntity bot, List<Entity> baseHostiles) {
+        List<Entity> base = baseHostiles == null ? Collections.emptyList() : baseHostiles;
+        if (!isAssistAllies(bot)) {
+            return base;
+        }
+        List<Entity> allyThreats = gatherAllyThreats(bot);
+        if (allyThreats.isEmpty()) {
+            return base;
+        }
+        Set<Integer> seen = new HashSet<>();
+        List<Entity> combined = new ArrayList<>();
+        for (Entity entity : base) {
+            if (entity != null && entity.isAlive() && seen.add(entity.getId())) {
+                combined.add(entity);
+            }
+        }
+        for (Entity entity : allyThreats) {
+            if (entity != null && entity.isAlive() && seen.add(entity.getId())) {
+                combined.add(entity);
+            }
+        }
+        return combined;
+    }
+
+    private static List<Entity> gatherAllyThreats(ServerPlayerEntity bot) {
+        if (server == null || bot == null) {
+            return Collections.emptyList();
+        }
+        ServerWorld botWorld = bot.getCommandSource().getWorld();
+        if (botWorld == null) {
+            return Collections.emptyList();
+        }
+        List<Entity> threats = new ArrayList<>();
+        double radiusSq = ALLY_DEFENSE_RADIUS * ALLY_DEFENSE_RADIUS;
+        for (UUID allyId : REGISTERED_BOTS) {
+            if (allyId == null || allyId.equals(bot.getUuid())) {
+                continue;
+            }
+            ServerPlayerEntity ally = server.getPlayerManager().getPlayer(allyId);
+            if (ally == null || ally.isRemoved()) {
+                continue;
+            }
+            if (ally.getCommandSource().getWorld() != botWorld) {
+                continue;
+            }
+            if (ally.squaredDistanceTo(bot) > radiusSq) {
+                continue;
+            }
+            threats.addAll(findHostilesAround(ally, 8.0D));
+        }
+        return threats;
     }
 
     public static String setFollowMode(ServerPlayerEntity bot, ServerPlayerEntity target) {
@@ -764,10 +1068,10 @@ public class BotEventHandler {
             return "Unable to follow — target not found.";
         }
         registerBot(bot);
-        followTargetUuid = target.getUuid();
-        currentMode = Mode.FOLLOW;
-        guardCenter = null;
-        baseTarget = null;
+        setFollowTarget(bot, target.getUuid());
+        setMode(bot, Mode.FOLLOW);
+        clearGuard(bot);
+        clearBase(bot);
         sendBotMessage(bot, "Following " + target.getName().getString() + ".");
         return "Now following " + target.getName().getString() + ".";
     }
@@ -776,41 +1080,34 @@ public class BotEventHandler {
         if (bot != null) {
             registerBot(bot);
         }
-        boolean wasFollowing = currentMode == Mode.FOLLOW && followTargetUuid != null;
-        followTargetUuid = null;
+        boolean wasFollowing = getMode(bot) == Mode.FOLLOW && getFollowTargetFor(bot) != null;
+        setFollowTarget(bot, null);
         if (bot != null) {
             BotActions.stop(bot);
         }
-        if (currentMode == Mode.FOLLOW) {
-            currentMode = Mode.IDLE;
-        }
+        setMode(bot, Mode.IDLE);
         if (bot != null && wasFollowing) {
             sendBotMessage(bot, "Stopping follow command.");
         }
         return wasFollowing ? "Bot stopped following." : "Bot is not currently following anyone.";
     }
 
-    public static UUID getFollowTargetUuid() {
-        return followTargetUuid;
-    }
-
     public static String setGuardMode(ServerPlayerEntity bot, double radius) {
         registerBot(bot);
-        guardCenter = positionOf(bot);
-        guardRadius = Math.max(3.0D, radius);
-        currentMode = Mode.GUARD;
-        followTargetUuid = null;
-        baseTarget = null;
-        sendBotMessage(bot, String.format(Locale.ROOT, "Guarding this area (radius %.1f blocks).", guardRadius));
+        setGuardState(bot, positionOf(bot), Math.max(3.0D, radius));
+        setMode(bot, Mode.GUARD);
+        setFollowTarget(bot, null);
+        clearBase(bot);
+        sendBotMessage(bot, String.format(Locale.ROOT, "Guarding this area (radius %.1f blocks).", getGuardRadius(bot)));
         return "Guarding the area.";
     }
 
     public static String setStayMode(ServerPlayerEntity bot) {
         registerBot(bot);
-        currentMode = Mode.STAY;
-        followTargetUuid = null;
-        guardCenter = positionOf(bot);
-        baseTarget = null;
+        setMode(bot, Mode.STAY);
+        setFollowTarget(bot, null);
+        setGuardState(bot, positionOf(bot), getGuardRadius(bot));
+        clearBase(bot);
         sendBotMessage(bot, "Staying put here.");
         return "Bot will hold position.";
     }
@@ -820,10 +1117,10 @@ public class BotEventHandler {
         if (base == null) {
             return "No base location available.";
         }
-        baseTarget = base;
-        currentMode = Mode.RETURNING_BASE;
-        followTargetUuid = null;
-        guardCenter = null;
+        setBaseTarget(bot, base);
+        setMode(bot, Mode.RETURNING_BASE);
+        setFollowTarget(bot, null);
+        setGuardState(bot, null, getGuardRadius(bot));
         sendBotMessage(bot, "Returning to base.");
         return "Bot is returning to base.";
     }
@@ -850,8 +1147,18 @@ public class BotEventHandler {
 
     public static String toggleAssistAllies(ServerPlayerEntity bot, boolean enable) {
         registerBot(bot);
-        assistAllies = enable;
+        setAssistAllies(bot, enable);
         String message = enable ? "Engaging threats against allies." : "Standing down unless attacked.";
+        sendBotMessage(bot, message);
+        return message;
+    }
+
+    public static String setBotDefense(ServerPlayerEntity bot, boolean enable) {
+        registerBot(bot);
+        setAssistAllies(bot, enable);
+        String message = enable
+                ? "I'll defend nearby bots when they are attacked."
+                : "I'll focus on my own fights.";
         sendBotMessage(bot, message);
         return message;
     }
@@ -888,11 +1195,17 @@ public class BotEventHandler {
     }
 
     public static Mode getCurrentMode() {
-        return currentMode;
+        CommandState state = primaryState();
+        return state != null ? state.mode : Mode.IDLE;
+    }
+
+    public static Mode getCurrentMode(ServerPlayerEntity bot) {
+        return getMode(bot);
     }
 
     public static boolean isPassiveMode() {
-        return currentMode == Mode.IDLE || currentMode == Mode.STAY || currentMode == Mode.GUARD;
+        Mode mode = getCurrentMode();
+        return mode == Mode.IDLE || mode == Mode.STAY || mode == Mode.GUARD;
     }
 
     public static CombatStyle getCombatStyle() {
@@ -919,18 +1232,31 @@ public class BotEventHandler {
     }
 
     public static Vec3d getGuardCenterVec() {
-        return guardCenter;
+        CommandState state = primaryState();
+        return state != null ? state.guardCenter : null;
     }
 
     public static double getGuardRadiusValue() {
-        return guardRadius;
+        CommandState state = primaryState();
+        return state != null ? state.guardRadius : 6.0D;
     }
 
     public static ServerPlayerEntity getFollowTarget() {
-        if (followTargetUuid == null || server == null) {
+        CommandState state = primaryState();
+        UUID targetUuid = state != null ? state.followTargetUuid : null;
+        if (targetUuid == null || server == null) {
             return null;
         }
-        return server.getPlayerManager().getPlayer(followTargetUuid);
+        return server.getPlayerManager().getPlayer(targetUuid);
+    }
+
+    public static UUID getFollowTargetUuid(ServerPlayerEntity bot) {
+        return getFollowTargetFor(bot);
+    }
+
+    public static UUID getFollowTargetUuid() {
+        CommandState state = primaryState();
+        return state != null ? state.followTargetUuid : null;
     }
 
     public static String setCombatStyle(ServerPlayerEntity bot, CombatStyle style) {
@@ -942,20 +1268,20 @@ public class BotEventHandler {
         return message;
     }
 
-    private static boolean handleFollow(ServerPlayerEntity bot, MinecraftServer server, List<Entity> hostileEntities) {
-        ServerPlayerEntity target = null;
-        if (followTargetUuid != null && server != null) {
-            target = server.getPlayerManager().getPlayer(followTargetUuid);
-        }
+    private static boolean handleFollow(ServerPlayerEntity bot, CommandState state, MinecraftServer server, List<Entity> hostileEntities) {
+        UUID targetUuid = state != null ? state.followTargetUuid : null;
+        ServerPlayerEntity target = targetUuid != null && server != null
+                ? server.getPlayerManager().getPlayer(targetUuid)
+                : null;
         if (target == null) {
-            currentMode = Mode.IDLE;
-            followTargetUuid = null;
+            setMode(bot, Mode.IDLE);
+            setFollowTarget(bot, null);
             sendBotMessage(bot, "Follow target lost. Returning to idle.");
             return false;
         }
 
         List<Entity> augmentedHostiles = new ArrayList<>(hostileEntities);
-        if (assistAllies) {
+        if (isAssistAllies(bot)) {
             augmentedHostiles.addAll(findHostilesAround(target, 8.0D));
         }
 
@@ -1109,10 +1435,14 @@ public class BotEventHandler {
         }));
     }
 
-    private static boolean handleGuard(ServerPlayerEntity bot, List<Entity> nearbyEntities, List<Entity> hostileEntities) {
-        if (guardCenter == null) {
-        guardCenter = positionOf(bot);
+    private static boolean handleGuard(ServerPlayerEntity bot, CommandState state, List<Entity> nearbyEntities, List<Entity> hostileEntities) {
+        Vec3d center = state != null ? state.guardCenter : null;
+        double radius = state != null ? state.guardRadius : 6.0D;
+        if (center == null) {
+            center = positionOf(bot);
+            setGuardState(bot, center, radius);
         }
+        MinecraftServer server = bot.getCommandSource().getServer();
 
         if (!hostileEntities.isEmpty() && engageHostiles(bot, server, hostileEntities)) {
             return true;
@@ -1120,20 +1450,20 @@ public class BotEventHandler {
 
         lowerShieldTracking(bot);
 
-        Entity nearestItem = findNearestItem(bot, nearbyEntities, guardRadius);
+        Entity nearestItem = findNearestItem(bot, nearbyEntities, radius);
         if (nearestItem != null) {
-            collectNearbyDrops(bot, Math.max(guardRadius, 4.0D));
+            collectNearbyDrops(bot, Math.max(radius, 4.0D));
             return true;
         }
 
-        double distanceFromCenter = positionOf(bot).distanceTo(guardCenter);
-        if (distanceFromCenter > guardRadius) {
-            moveToward(bot, guardCenter, 2.0D, false);
+        double distanceFromCenter = positionOf(bot).distanceTo(center);
+        if (distanceFromCenter > radius) {
+            moveToward(bot, center, 2.0D, false);
             return true;
         }
 
         if (RANDOM.nextDouble() < 0.02) {
-            Vec3d wanderTarget = randomPointWithin(guardCenter, guardRadius * 0.6D);
+            Vec3d wanderTarget = randomPointWithin(center, radius * 0.6D);
             moveToward(bot, wanderTarget, 2.0D, false);
             return true;
         }
@@ -1142,21 +1472,22 @@ public class BotEventHandler {
         return true;
     }
 
-    private static boolean handleReturnToBase(ServerPlayerEntity bot) {
-        if (baseTarget == null) {
-            currentMode = Mode.IDLE;
+    private static boolean handleReturnToBase(ServerPlayerEntity bot, CommandState state) {
+        Vec3d base = state != null ? state.baseTarget : null;
+        if (base == null) {
+            setMode(bot, Mode.IDLE);
             return false;
         }
 
-        double distance = positionOf(bot).distanceTo(baseTarget);
+        double distance = positionOf(bot).distanceTo(base);
         if (distance <= 3.0D) {
-            currentMode = Mode.STAY;
+            setMode(bot, Mode.STAY);
             sendBotMessage(bot, "Arrived at base. Holding position.");
-            baseTarget = null;
+            setBaseTarget(bot, null);
             return true;
         }
 
-        moveToward(bot, baseTarget, 2.0D, false);
+        moveToward(bot, base, 2.0D, false);
         return true;
     }
 
@@ -1203,9 +1534,10 @@ public class BotEventHandler {
         }
 
         if (creeperThreat && distance <= 3.0D) {
-            if (!shieldRaised && BotActions.raiseShield(bot)) {
-                shieldRaised = true;
-                shieldDecisionTick = bot.getCommandSource().getServer().getTicks();
+            long tick = bot.getCommandSource().getServer().getTicks();
+            if (!isShieldRaised(bot) && BotActions.raiseShield(bot)) {
+                setShieldRaised(bot, true);
+                setShieldDecisionTick(bot, tick);
             }
             BotActions.moveBackward(bot);
             return true;
@@ -1216,19 +1548,19 @@ public class BotEventHandler {
             moveToward(bot, positionOf(closest), 2.5D, true);
         } else if (shouldBlock) {
             long now = bot.getCommandSource().getServer().getTicks();
-            if (!shieldRaised) {
+            if (!isShieldRaised(bot)) {
                 if (BotActions.raiseShield(bot)) {
-                    shieldRaised = true;
-                    shieldDecisionTick = now;
+                    setShieldRaised(bot, true);
+                    setShieldDecisionTick(bot, now);
                 }
                 return true;
             }
 
-            if (now - shieldDecisionTick >= 15) {
+            if (now - getShieldDecisionTick(bot) >= 15) {
                 lowerShieldTracking(bot);
                 BotActions.selectBestWeapon(bot);
                 BotActions.attackNearest(bot, hostileEntities);
-                shieldDecisionTick = now;
+                setShieldDecisionTick(bot, now);
             }
             return true;
         } else {
@@ -1298,9 +1630,12 @@ public class BotEventHandler {
     }
 
     private static void lowerShieldTracking(ServerPlayerEntity bot) {
-        if (shieldRaised) {
+        if (bot == null) {
+            return;
+        }
+        if (isShieldRaised(bot)) {
             BotActions.lowerShield(bot);
-            shieldRaised = false;
+            setShieldRaised(bot, false);
         } else {
             BotActions.lowerShield(bot);
         }
@@ -1532,58 +1867,58 @@ public class BotEventHandler {
     private static void performAction(String action) {
         switch (action) {
             case "moveForward" -> {
-                System.out.println("Performing action: move forward");
+                debugRL("Performing action: move forward");
                 BotActions.moveForward(bot);
                 AutoFaceEntity.isBotMoving = true;
             }
             case "moveBackward" -> {
-                System.out.println("Performing action: move backward");
+                debugRL("Performing action: move backward");
                 BotActions.moveBackward(bot);
                 AutoFaceEntity.isBotMoving = true;
             }
             case "turnLeft" -> {
-                System.out.println("Performing action: turn left");
+                debugRL("Performing action: turn left");
                 BotActions.turnLeft(bot);
             }
             case "turnRight" -> {
-                System.out.println("Performing action: turn right");
+                debugRL("Performing action: turn right");
                 BotActions.turnRight(bot);
             }
             case "jump" -> {
-                System.out.println("Performing action: jump");
+                debugRL("Performing action: jump");
                 BotActions.jump(bot);
             }
             case "jumpForward" -> {
-                System.out.println("Performing action: jump forward");
+                debugRL("Performing action: jump forward");
                 BotActions.jumpForward(bot);
             }
             case "sneak" -> {
-                System.out.println("Performing action: sneak");
+                debugRL("Performing action: sneak");
                 BotActions.sneak(bot, true);
             }
             case "sprint" -> {
-                System.out.println("Performing action: sprint");
+                debugRL("Performing action: sprint");
                 BotActions.sprint(bot, true);
             }
             case "unsneak" -> {
-                System.out.println("Performing action: unsneak");
+                debugRL("Performing action: unsneak");
                 BotActions.sneak(bot, false);
             }
             case "unsprint" -> {
-                System.out.println("Performing action: unsprint");
+                debugRL("Performing action: unsprint");
                 BotActions.sprint(bot, false);
             }
             case "stopMoving" -> {
-                System.out.println("Performing action: stop moving");
+                debugRL("Performing action: stop moving");
                 BotActions.stop(bot);
                 AutoFaceEntity.isBotMoving = false;
             }
             case "useItem" -> {
-                System.out.println("Performing action: use currently selected item");
+                debugRL("Performing action: use currently selected item");
                 BotActions.useSelectedItem(bot);
             }
             case "attack" -> {
-                System.out.println("Performing action: attack");
+                debugRL("Performing action: attack");
                 List<Entity> hostiles = AutoFaceEntity.hostileEntities;
                 if (hostiles == null || hostiles.isEmpty()) {
                     hostiles = AutoFaceEntity.detectNearbyEntities(bot, 10).stream()
@@ -1594,55 +1929,55 @@ public class BotEventHandler {
                     FaceClosestEntity.faceClosestEntity(bot, hostiles);
                     BotActions.attackNearest(bot, hostiles);
                 } else {
-                    System.out.println("No hostile entities available to attack.");
+                    debugRL("No hostile entities available to attack.");
                 }
             }
             case "hotbar1" -> {
-                System.out.println("Performing action: Select hotbar slot 1");
+                debugRL("Performing action: Select hotbar slot 1");
                 BotActions.selectHotbarSlot(bot, 0);
             }
             case "hotbar2" -> {
-                System.out.println("Performing action: Select hotbar slot 2");
+                debugRL("Performing action: Select hotbar slot 2");
                 BotActions.selectHotbarSlot(bot, 1);
             }
             case "hotbar3" -> {
-                System.out.println("Performing action: Select hotbar slot 3");
+                debugRL("Performing action: Select hotbar slot 3");
                 BotActions.selectHotbarSlot(bot, 2);
             }
             case "hotbar4" -> {
-                System.out.println("Performing action: Select hotbar slot 4");
+                debugRL("Performing action: Select hotbar slot 4");
                 BotActions.selectHotbarSlot(bot, 3);
             }
             case "hotbar5" -> {
-                System.out.println("Performing action: Select hotbar slot 5");
+                debugRL("Performing action: Select hotbar slot 5");
                 BotActions.selectHotbarSlot(bot, 4);
             }
             case "hotbar6" -> {
-                System.out.println("Performing action: Select hotbar slot 6");
+                debugRL("Performing action: Select hotbar slot 6");
                 BotActions.selectHotbarSlot(bot, 5);
             }
             case "hotbar7" -> {
-                System.out.println("Performing action: Select hotbar slot 7");
+                debugRL("Performing action: Select hotbar slot 7");
                 BotActions.selectHotbarSlot(bot, 6);
             }
             case "hotbar8" -> {
-                System.out.println("Performing action: Select hotbar slot 8");
+                debugRL("Performing action: Select hotbar slot 8");
                 BotActions.selectHotbarSlot(bot, 7);
             }
             case "hotbar9" -> {
-                System.out.println("Performing action: Select hotbar slot 9");
+                debugRL("Performing action: Select hotbar slot 9");
                 BotActions.selectHotbarSlot(bot, 8);
             }
             case "breakBlock" -> {
-                System.out.println("Performing action: break block ahead");
+                debugRL("Performing action: break block ahead");
                 boolean success = BotActions.breakBlockAhead(bot);
                 registerBlockBreakResult(bot, success);
                 if (!success) {
-                    System.out.println("No suitable block to break ahead.");
+                    debugRL("No suitable block to break ahead.");
                 }
             }
             case "placeSupportBlock" -> {
-                System.out.println("Performing action: place support block");
+                debugRL("Performing action: place support block");
                 boolean success = BotActions.placeSupportBlock(bot);
                 if (!success) {
                     registerBlockBreakResult(bot, false);
@@ -1650,14 +1985,14 @@ public class BotEventHandler {
                     failedBlockBreakAttempts = 0;
                 }
                 if (!success) {
-                    System.out.println("Unable to place support block (no block or blocked space).");
+                    debugRL("Unable to place support block (no block or blocked space).");
                 }
             }
             case "escapeStairs" -> {
-                System.out.println("Performing action: escape stairs");
+                debugRL("Performing action: escape stairs");
                 BotActions.escapeStairs(bot);
             }
-            default -> System.out.println("Invalid action");
+            default -> debugRL("Invalid action");
         }
     }
 

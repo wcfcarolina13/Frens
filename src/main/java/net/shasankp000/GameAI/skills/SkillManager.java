@@ -7,6 +7,7 @@ import net.shasankp000.GameAI.services.TaskService;
 import net.shasankp000.GameAI.skills.impl.CollectDirtSkill;
 import net.shasankp000.GameAI.skills.impl.DirtShovelSkill;
 import net.shasankp000.GameAI.skills.impl.DropSweepSkill;
+import net.shasankp000.GameAI.skills.impl.MiningSkill;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -26,6 +27,7 @@ public final class SkillManager {
     static {
         register(new DirtShovelSkill());
         register(new CollectDirtSkill());
+        register(new MiningSkill());
         register(new DropSweepSkill());
     }
 
@@ -51,8 +53,8 @@ public final class SkillManager {
         TaskService.TaskTicket ticket = ticketOpt.get();
 
         UUID resumeFollowUuid = null;
-        if (botPlayer != null && BotEventHandler.getCurrentMode() == BotEventHandler.Mode.FOLLOW) {
-            UUID currentFollow = BotEventHandler.getFollowTargetUuid();
+        if (botPlayer != null && BotEventHandler.getCurrentMode(botPlayer) == BotEventHandler.Mode.FOLLOW) {
+            UUID currentFollow = BotEventHandler.getFollowTargetUuid(botPlayer);
             if (currentFollow != null) {
                 resumeFollowUuid = currentFollow;
             }

@@ -5,7 +5,10 @@ import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
 import net.fabricmc.fabric.api.entity.event.v1.ServerPlayerEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
+import net.fabricmc.fabric.api.message.v1.ServerMessageEvents;
+import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
@@ -16,6 +19,9 @@ import net.shasankp000.Commands.modCommandRegistry;
 import net.shasankp000.Database.SQLiteDB;
 import net.shasankp000.FilingSystem.ManualConfig;
 import net.shasankp000.GameAI.BotEventHandler;
+import net.shasankp000.GameAI.services.SkillResumeService;
+import net.shasankp000.FunctionCaller.FunctionCallerV2;
+import net.shasankp000.GameAI.services.BotPersistenceService;
 
 import net.shasankp000.Database.QTableStorage;
 import net.shasankp000.Entity.AutoFaceEntity;
@@ -105,6 +111,8 @@ public class AIPlayer implements ModInitializer {
             }
         });
 
+        ServerLifecycleEvents.SERVER_STOPPING.register(server -> BotPersistenceService.saveAll(server));
+
         ServerLifecycleEvents.SERVER_STOPPED.register(server -> {
             AutoFaceEntity.onServerStopped(server);
             try {
@@ -119,6 +127,16 @@ public class AIPlayer implements ModInitializer {
             }
         });
 
+        ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> {
+            ServerPlayerEntity player = handler.player;
+            BotPersistenceService.onBotJoin(player);
+        });
+
+        ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> {
+            ServerPlayerEntity player = handler.player;
+            BotPersistenceService.onBotDisconnect(player);
+        });
+
         ServerLivingEntityEvents.AFTER_DEATH.register((entity, damageSource) -> {
             if (entity instanceof ServerPlayerEntity serverPlayer) {
                 if (BotEventHandler.isRegisteredBot(serverPlayer)) {
@@ -129,6 +147,7 @@ public class AIPlayer implements ModInitializer {
                         BotEventHandler.botDied = true; // set flag for bot's death.
                         BotEventHandler.ensureRespawnHandled(serverPlayer);
                 }
+                BotPersistenceService.onBotDeath(serverPlayer);
             }
         });
 
@@ -142,7 +161,18 @@ public class AIPlayer implements ModInitializer {
                 AutoFaceEntity.handleBotRespawn(newPlayer);
                 BotEventHandler.onBotRespawn(newPlayer);
             }
+            BotPersistenceService.onBotRespawn(oldPlayer, newPlayer, alive);
             BotEventHandler.ensureBotPresence(newPlayer.getCommandSource().getServer());
+        });
+
+        ServerTickEvents.END_SERVER_TICK.register(BotPersistenceService::onServerTick);
+
+        ServerMessageEvents.CHAT_MESSAGE.register((message, sender, params) -> {
+            String raw = message.getContent().getString();
+            boolean consumed = FunctionCallerV2.tryHandleConfirmation(sender.getUuid(), raw);
+            if (!consumed) {
+                SkillResumeService.handleChat(sender, raw);
+            }
         });
     }
 }

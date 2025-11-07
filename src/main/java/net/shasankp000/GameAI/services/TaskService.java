@@ -9,8 +9,12 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -102,13 +106,20 @@ public final class TaskService {
         }
     }
 
-    private static final AtomicReference<TaskTicket> ACTIVE = new AtomicReference<>();
+    private static final UUID GLOBAL_KEY = new UUID(0L, 0L);
+    private static final Map<UUID, TaskTicket> ACTIVE = new ConcurrentHashMap<>();
+
+    private static UUID key(UUID botUuid) {
+        return botUuid != null ? botUuid : GLOBAL_KEY;
+    }
 
     public static Optional<TaskTicket> beginSkill(String skillName,
                                                   ServerCommandSource source,
                                                   UUID botUuid) {
         TaskTicket ticket = new TaskTicket("skill:" + skillName, source, botUuid);
-        if (!ACTIVE.compareAndSet(null, ticket)) {
+        UUID slot = key(botUuid);
+        TaskTicket existing = ACTIVE.putIfAbsent(slot, ticket);
+        if (existing != null) {
             return Optional.empty();
         }
         LOGGER.info("Task '{}' started for bot {}", skillName, botUuid);
@@ -116,8 +127,8 @@ public final class TaskService {
     }
 
     public static boolean requestPause(UUID botUuid, String reason) {
-        TaskTicket ticket = ACTIVE.get();
-        if (ticket == null || !ticket.matches(botUuid)) {
+        TaskTicket ticket = ACTIVE.get(key(botUuid));
+        if (ticket == null) {
             return false;
         }
         if (!ticket.requestCancel(reason)) {
@@ -133,13 +144,13 @@ public final class TaskService {
     }
 
     public static boolean isAbortRequested(UUID botUuid) {
-        TaskTicket ticket = ACTIVE.get();
-        return ticket != null && ticket.matches(botUuid) && ticket.isCancelRequested();
+        TaskTicket ticket = ACTIVE.get(key(botUuid));
+        return ticket != null && ticket.isCancelRequested();
     }
 
     public static Optional<String> getCancelReason(UUID botUuid) {
-        TaskTicket ticket = ACTIVE.get();
-        if (ticket == null || !ticket.matches(botUuid)) {
+        TaskTicket ticket = ACTIVE.get(key(botUuid));
+        if (ticket == null) {
             return Optional.empty();
         }
         String reason = ticket.cancelReason();
@@ -155,29 +166,33 @@ public final class TaskService {
             finalState = State.ABORTED;
         }
         ticket.setState(finalState);
-        ACTIVE.compareAndSet(ticket, null);
+        ACTIVE.remove(key(ticket.botUuid()), ticket);
         LOGGER.info("Task '{}' finished with state {}", ticket.name(), finalState);
     }
 
     public static void forceAbort(String reason) {
-        TaskTicket ticket = ACTIVE.get();
+        Collection<TaskTicket> tickets = new ArrayList<>(ACTIVE.values());
+        if (tickets.isEmpty()) {
+            return;
+        }
+        tickets.forEach(ticket -> abortTicket(ticket, reason));
+        BotEventHandler.setExternalOverrideActive(false);
+    }
+
+    public static void forceAbort(UUID botUuid, String reason) {
+        TaskTicket ticket = ACTIVE.get(key(botUuid));
         if (ticket == null) {
             return;
         }
-        if (ticket.requestCancel(reason)) {
-            ticket.setState(State.ABORTED);
-            dispatchMessage(ticket, reason != null && !reason.isBlank()
-                    ? reason
-                    : "§cHalting current task.");
-            LOGGER.warn("Task '{}' aborted: {}", ticket.name(), ticket.cancelReason());
-        }
-        ACTIVE.compareAndSet(ticket, null);
+        abortTicket(ticket, reason);
         BotEventHandler.setExternalOverrideActive(false);
     }
 
     public static Optional<State> currentState() {
-        TaskTicket ticket = ACTIVE.get();
-        return ticket == null ? Optional.of(State.IDLE) : Optional.of(ticket.state());
+        if (ACTIVE.isEmpty()) {
+            return Optional.of(State.IDLE);
+        }
+        return Optional.of(State.RUNNING);
     }
 
     private static void dispatchMessage(TaskTicket ticket, String message) {
@@ -196,7 +211,17 @@ public final class TaskService {
         if (bot == null) {
             return;
         }
-        forceAbort("§cCurrent task aborted due to respawn.");
+        forceAbort(bot.getUuid(), "§cCurrent task aborted due to respawn.");
+    }
+
+    private static void abortTicket(TaskTicket ticket, String reason) {
+        if (ticket.requestCancel(reason)) {
+            ticket.setState(State.ABORTED);
+            dispatchMessage(ticket, reason != null && !reason.isBlank()
+                    ? reason
+                    : "§cHalting current task.");
+            LOGGER.warn("Task '{}' aborted: {}", ticket.name(), ticket.cancelReason());
+        }
+        ACTIVE.remove(key(ticket.botUuid()), ticket);
     }
 }
-

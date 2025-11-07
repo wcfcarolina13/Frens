@@ -28,8 +28,12 @@ import net.shasankp000.PlayerUtils.ResourceEvaluator;
 import net.shasankp000.PlayerUtils.SelectedItemDetails;
 import net.shasankp000.PlayerUtils.ThreatDetector;
 import net.shasankp000.Commands.modCommandRegistry;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class RLAgent {
+    private static final Logger LOGGER = LoggerFactory.getLogger("rl-agent");
+    private static final boolean DEBUG = false;
     private static final double ALPHA = 0.1;  // Learning rate
     private static final double GAMMA = 0.9;  // Discount factor
     public double epsilon;
@@ -44,6 +48,12 @@ public class RLAgent {
             "ocelot", "parrot", "bat", "polar bear", "panda", "axolotl", "sniffer",
             "turtle", "mooshroom", "strider", "allay"
     );
+
+    private static void debug(String message) {
+        if (DEBUG) {
+            LOGGER.debug(message);
+        }
+    }
 
     static {
         EnumMap<Action, Integer> map = new EnumMap<>(Action.class);
@@ -147,12 +157,12 @@ public class RLAgent {
         double chosenRiskValue = 0.0; // Default risk value
 
 
-        System.out.println("Generated random value: " + selectedRandomValue);
+        debug("Generated random value: " + selectedRandomValue);
 
         // Get the podMap from the state
         Map<Action, Double> podMap = state.getPodMap();
 
-        System.out.println("PodMap from the state: " + podMap);
+        debug("PodMap from the state: " + podMap);
 
         double podThreshold = 0.7;
 
@@ -160,7 +170,7 @@ public class RLAgent {
                 : riskAppetite >= 0.3 ? 2.5
                 : 1.0;
 
-        System.out.println("Calculated risk threshold: " + riskThreshold);
+        debug("Calculated risk threshold: " + riskThreshold);
 
         Map<Action, Double> finiteActions = riskMap.entrySet().stream()
                 .filter(entry -> Double.isFinite(entry.getValue()))
@@ -183,12 +193,12 @@ public class RLAgent {
                     ));
         }
 
-        System.out.println("Viable actions map: " + viableActions);
+        debug("Viable actions map: " + viableActions);
 
         // Apply epsilon-greedy strategy to choose an action from viableActions
         if (selectedRandomValue < epsilon) {
             // Exploration: Randomly select an action from viable actions
-            System.out.println("Exploring with epsilon: " + epsilon);
+            debug("Exploring with epsilon: " + epsilon);
 
             if (!viableActions.isEmpty()) {
                 List<Action> actionList = new ArrayList<>(viableActions.keySet());
@@ -210,7 +220,7 @@ public class RLAgent {
 
                 // no similar states could be found and thus no Q-value.
 
-                System.out.println("No suitable action found within the Qtable");
+                debug("No suitable action found within the Qtable");
 
                 // Fallback to viable actions if no similar state found
                 chosenAction = viableActions.entrySet().stream()
@@ -247,7 +257,7 @@ public class RLAgent {
 
                 // Skip if the next state is not optimal
                 if (!nextState.isOptimal()) {
-                    System.out.println("Skipping action " + pair.getAction() + " as it leads to a non-optimal state.");
+                    debug("Skipping action " + pair.getAction() + " as it leads to a non-optimal state.");
                     continue;
                 }
 
@@ -263,7 +273,7 @@ public class RLAgent {
         }
 
         if (bestAction == null) {
-            System.out.println("No viable actions found. Defaulting to STAY.");
+            debug("No viable actions found. Defaulting to STAY.");
 
             if ("detectAndReactPlayMode".equals(triggeredFrom)) {
                 return determineViableAction(currentState, riskMap);
@@ -272,7 +282,7 @@ public class RLAgent {
             return Action.STAY;
         }
 
-        System.out.println("Chosen action: " + bestAction + " with Q-value: " + bestQValue);
+        debug("Chosen action: " + bestAction + " with Q-value: " + bestQValue);
         return bestAction;
     }
 
@@ -299,7 +309,7 @@ public class RLAgent {
 
 
         if (viableActions.isEmpty()) {
-            System.out.println("No viable actions available. Defaulting to STAY.");
+            debug("No viable actions available. Defaulting to STAY.");
             return Action.STAY;
         }
 
@@ -339,7 +349,7 @@ public class RLAgent {
     // Decay epsilon after each episode or iteration
     public void decayEpsilon() {
         epsilon = Math.max(MIN_EPSILON, epsilon * EPSILON_DECAY_RATE);
-        System.out.println("Updated epsilon: " + epsilon);
+        debug("Updated epsilon: " + epsilon);
     }
 
     public Double getEpsilon() {
@@ -595,11 +605,11 @@ public class RLAgent {
                             .mapToDouble(entity -> {
                                 double entityRisk = getEntityRisk(currentState, entity);
 
-                                System.out.println("Entity risk: " + entityRisk + "for " + entity);
+                                debug("Entity risk: " + entityRisk + "for " + entity);
 
                                 if (entityRisk == 0.0) { // unknown entity or zombie/husk
 
-                                    System.out.println("Set unknown entity/zombie/husk risk to -10 by default");
+                                    debug("Set unknown entity/zombie/husk risk to -10 by default");
 
                                     entityRisk = -10; // set this purposely so that the action's value doesn't return 0.0;
                                 }
@@ -646,7 +656,7 @@ public class RLAgent {
 
                     risk += totalRisk; // Add total risk for attacking
 
-                    System.out.println("Risk for ATTACK action: " + risk);
+                    debug("Risk for ATTACK action: " + risk);
                     break;
 
                 case BREAK_BLOCK_FORWARD:
@@ -726,11 +736,11 @@ public class RLAgent {
 
                 case HOTBAR_1, HOTBAR_2, HOTBAR_3, HOTBAR_4, HOTBAR_5, HOTBAR_6, HOTBAR_7, HOTBAR_8, HOTBAR_9:
                     int hotbarIndex = action.ordinal() - Action.HOTBAR_1.ordinal();
-                    System.out.println("hotbar index: " + hotbarIndex);
+                    debug("hotbar index: " + hotbarIndex);
 
                     // Ensure the index is within bounds (0-8)
                     if (hotbarIndex >= currentState.getHotBarItems().size()) {
-                        System.err.println("Invalid hotbar index: " + hotbarIndex + ". Skipping action.");
+                        LOGGER.warn("Invalid hotbar index: " + hotbarIndex + ". Skipping action.");
                         break; // Skip if index is invalid
                     }
 
@@ -738,7 +748,7 @@ public class RLAgent {
 
                     if (hotbarItem == null || hotbarItem.equalsIgnoreCase("air")) {
                         risk += 5.0;
-                        System.out.println("Empty or air slot selected. Risk: " + risk);
+                        debug("Empty or air slot selected. Risk: " + risk);
                     } else {
                         // Favor selecting weapons when hostile entities are nearby
                         if (!hostileEntities.isEmpty() &&
@@ -746,7 +756,7 @@ public class RLAgent {
                                         hotbarItem.contains("Axe") || hotbarItem.contains("Crossbow") ||
                                         hotbarItem.contains("Trident"))) {
                             risk -= 3.0;
-                            System.out.println("Weapon selected. Risk reduced: " + risk);
+                            debug("Weapon selected. Risk reduced: " + risk);
                         }
 
                         // Favor selecting food when hungry
@@ -754,7 +764,7 @@ public class RLAgent {
                                 currentState.getSelectedItemStack().isFood() &&
                                 currentState.getBotHungerLevel() <= 6) {
                             risk -= 3.0;
-                            System.out.println("Food selected when hungry. Risk reduced: " + risk);
+                            debug("Food selected when hungry. Risk reduced: " + risk);
                         }
 
                         if (spartanMode && (hotbarItem.contains("Sword") || hotbarItem.contains("Axe") || hotbarItem.contains("Trident"))) {
@@ -766,7 +776,7 @@ public class RLAgent {
                                 currentState.getSelectedItemStack().isBlock()) {
                             if (!hostileEntities.isEmpty()) {
                                 risk += 2.0;
-                                System.out.println("Irrelevant item selected near hostiles. Risk increased: " + risk);
+                                debug("Irrelevant item selected near hostiles. Risk increased: " + risk);
                             }
                         }
                     }
@@ -785,7 +795,7 @@ public class RLAgent {
             }
 
             catch (Exception e) {
-                System.out.println("Exception in risk calculation: " + e.getMessage());
+                debug("Exception in risk calculation: " + e.getMessage());
             }
 
             // Normalize and cap the risk value
@@ -793,7 +803,7 @@ public class RLAgent {
             riskMap.put(action, risk);
         }
 
-        System.out.println("Final risk map: " + riskMap);
+        debug("Final risk map: " + riskMap);
 
         return riskMap; // Return the map of actions and their associated risks
 
@@ -979,7 +989,7 @@ public class RLAgent {
             pod += (postActionState.getFrostLevel() - initialState.getFrostLevel()) * 0.2; // Weight for frost increase
         }
 
-        System.out.println("Critical parameters stage passed, pod value: " + pod);
+        debug("Critical parameters stage passed, pod value: " + pod);
 
         // Proximity to danger zones
         if (initialState.getDistanceToDangerZone() != 0 && postActionState.getDistanceToDangerZone() != 0) {
@@ -988,7 +998,7 @@ public class RLAgent {
             }
         }
 
-        System.out.println("Danger zone pod value: " + pod);
+        debug("Danger zone pod value: " + pod);
 
         // Proximity to hostile entities
         if (initialState.getDistanceToHostileEntity() != 0 && postActionState.getDistanceToHostileEntity() != 0) {
@@ -997,12 +1007,12 @@ public class RLAgent {
             }
         }
 
-        System.out.println("Hostile entity pod value: " + pod);
+        debug("Hostile entity pod value: " + pod);
 
         // Normalize PoD to a value between 0 and 1
         pod = Math.min(1.0, pod);
 
-        System.out.println("final pod value: " + pod);
+        debug("final pod value: " + pod);
 
         actionPodMap.put(action, pod);
 
@@ -1521,7 +1531,7 @@ public class RLAgent {
         // Q-learning formula
         double newQValue = oldQValue + ALPHA * (reward + GAMMA * maxNextQValue - oldQValue);
 
-        System.out.println("Calculated Q-value for state-action pair: " + pair +
+        debug("Calculated Q-value for state-action pair: " + pair +
                 " with reward: " + reward +
                 ", new Q-value: " + newQValue);
 

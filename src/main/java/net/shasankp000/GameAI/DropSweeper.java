@@ -156,33 +156,70 @@ public final class DropSweeper {
     }
 
     public static boolean attemptManualNudge(ServerPlayerEntity player, ItemEntity targetDrop, BlockPos dropPos) {
-        CompletableFuture<Boolean> future = new CompletableFuture<>();
-        ServerWorld world = (player.getEntityWorld() instanceof ServerWorld serverWorld) ? serverWorld : null;
-        MinecraftServer server = world != null ? world.getServer() : null;
-
-        Runnable task = () -> {
-            try {
-                LookController.faceBlock(player, dropPos);
-                BotActions.moveForward(player);
-                BotActions.jumpForward(player);
-                boolean collected = targetDrop.isRemoved() || player.squaredDistanceTo(targetDrop) <= PICKUP_DISTANCE_SQUARED;
-                future.complete(collected);
-            } catch (Throwable t) {
-                future.completeExceptionally(t);
-            }
-        };
-
-        if (server == null || server.isOnThread()) {
-            task.run();
-        } else {
-            server.execute(task);
-        }
-
-        try {
-            return future.get();
-        } catch (Exception e) {
-            LOGGER.warn("Drop sweep nudge errored near {}: {}", dropPos, e.getMessage());
+        if (player == null || targetDrop == null || dropPos == null) {
             return false;
         }
+
+        ServerWorld world = player.getEntityWorld() instanceof ServerWorld serverWorld ? serverWorld : null;
+        MinecraftServer server = world != null ? world.getServer() : null;
+        if (server == null) {
+            return false;
+        }
+
+        boolean collected = false;
+        for (int attempt = 0; attempt < 3 && !collected; attempt++) {
+            CompletableFuture<Void> future = new CompletableFuture<>();
+            Runnable task = () -> {
+                try {
+                    LookController.faceBlock(player, dropPos);
+                    BotActions.sneak(player, false);
+                    BlockPos current = player.getBlockPos();
+                    int dy = dropPos.getY() - current.getY();
+                    if (dy > 0) {
+                        BotActions.jumpForward(player);
+                    } else {
+                        BotActions.moveForward(player);
+                        if (dy < 0) {
+                            BotActions.moveForward(player);
+                        } else {
+                            BotActions.jumpForward(player);
+                        }
+                    }
+                    future.complete(null);
+                } catch (Throwable t) {
+                    future.completeExceptionally(t);
+                }
+            };
+
+            if (server.isOnThread()) {
+                task.run();
+            } else {
+                server.execute(task);
+            }
+
+            try {
+                future.get();
+            } catch (Exception e) {
+                LOGGER.warn("Drop sweep nudge attempt {} near {} errored: {}", attempt + 1, dropPos, e.getMessage());
+                break;
+            }
+
+            try {
+                Thread.sleep(150L);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+
+            collected = targetDrop.isRemoved() || player.squaredDistanceTo(targetDrop) <= PICKUP_DISTANCE_SQUARED;
+            if (!collected) {
+                double distance = Math.sqrt(player.squaredDistanceTo(targetDrop));
+                LOGGER.debug("Drop sweep nudge attempt {} near {} still {} blocks away.",
+                        attempt + 1,
+                        dropPos,
+                        String.format("%.2f", distance));
+            }
+        }
+
+        return collected;
     }
 }

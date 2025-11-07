@@ -150,10 +150,12 @@ public final class MovementService {
         if (!approach.success()) {
             return approach;
         }
+        encourageSurfaceDrift(player);
 
         boolean waded = performManualStep(player, plan.wadeTarget());
         String detail = waded ? "Manual wade succeeded toward " + plan.wadeTarget()
                 : "Manual wade failed for " + plan.wadeTarget();
+        encourageSurfaceDrift(player);
         return new MovementResult(waded, Mode.WADE, plan.wadeTarget(), detail);
     }
 
@@ -227,7 +229,11 @@ public final class MovementService {
             success = distanceSq <= ARRIVAL_DISTANCE_SQ;
             if (!success) {
                 rawResult = rawResult + " (ended " + Math.sqrt(distanceSq) + " blocks away)";
+            } else if (mode == Mode.WADE) {
+                encourageSurfaceDrift(player);
             }
+        } else if (mode == Mode.WADE) {
+            encourageSurfaceDrift(player);
         }
         return new MovementResult(success, mode, destination, label + ": " + rawResult);
     }
@@ -282,6 +288,7 @@ public final class MovementService {
                 LookController.faceBlock(player, target);
                 BotActions.moveForward(player);
                 BotActions.jumpForward(player);
+                encourageSurfaceDrift(player);
                 future.complete(null);
             } catch (Throwable t) {
                 future.completeExceptionally(t);
@@ -389,5 +396,34 @@ public final class MovementService {
 
     private static ServerWorld getWorld(ServerPlayerEntity player) {
         return player != null && player.getEntityWorld() instanceof ServerWorld world ? world : null;
+    }
+
+    /**
+     * Keep the bot buoyant so that shallow water crossings look like proper wading instead of sinking.
+     */
+    private static void encourageSurfaceDrift(ServerPlayerEntity player) {
+        if (player == null) {
+            return;
+        }
+        ServerWorld world = getWorld(player);
+        if (world == null) {
+            return;
+        }
+        BlockPos feet = player.getBlockPos();
+        FluidState fluidState = world.getFluidState(feet);
+        if (!fluidState.isIn(FluidTags.WATER)) {
+            return;
+        }
+        boolean headSubmerged = world.getFluidState(feet.up()).isIn(FluidTags.WATER);
+        Vec3d velocity = player.getVelocity();
+        double upward = headSubmerged ? 0.08D : 0.04D;
+        if (velocity.y < 0.02D) {
+            player.setVelocity(velocity.x, 0.02D, velocity.z);
+        }
+        player.addVelocity(0.0D, upward, 0.0D);
+        player.velocityDirty = true;
+        if (player.isSneaking()) {
+            player.setSneaking(false);
+        }
     }
 }

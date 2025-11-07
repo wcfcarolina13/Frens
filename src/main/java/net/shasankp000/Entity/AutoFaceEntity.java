@@ -9,7 +9,9 @@ import net.minecraft.entity.LivingEntity;
 import net.minecraft.command.argument.EntityAnchorArgumentType;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
+import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.Hand;
+import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Vec3d;
 import net.shasankp000.ChatUtils.ChatUtils;
@@ -17,6 +19,7 @@ import net.shasankp000.Database.QTable;
 import net.shasankp000.GameAI.BotActions;
 import net.shasankp000.GameAI.BotEventHandler;
 import net.shasankp000.GameAI.services.TaskService;
+import net.shasankp000.GameAI.services.SkillResumeService;
 import net.shasankp000.GameAI.RLAgent;
 import net.shasankp000.GameAI.skills.SkillManager;
 import net.shasankp000.Commands.modCommandRegistry;
@@ -29,18 +32,23 @@ import org.slf4j.LoggerFactory;
 import net.shasankp000.DangerZoneDetector.DangerZoneDetector;
 import net.shasankp000.PathFinding.PathTracer;
 
+import net.minecraft.registry.tag.FluidTags;
+import net.minecraft.fluid.FluidState;
+
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Random;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public class AutoFaceEntity {
 
@@ -66,8 +74,8 @@ public class AutoFaceEntity {
     public static RLAgent rlAgent;
     public static List<Entity> hostileEntities;
 
-    private static final Map<ServerPlayerEntity, ScheduledExecutorService> botExecutors = new HashMap<>();
-    private static ServerPlayerEntity Bot = null;
+    private static final Map<UUID, ScheduledExecutorService> botExecutors = new ConcurrentHashMap<>();
+    private static final Map<UUID, AtomicBoolean> autoFaceInFlight = new ConcurrentHashMap<>();
     public static boolean isBotMoving = false;
     private static volatile long lastDangerMessageMs = 0L;
 
@@ -80,33 +88,23 @@ public class AutoFaceEntity {
     }
 
     public static void startAutoFace(ServerPlayerEntity bot) {
-        // Stop any existing executor for this bot
-
-        ServerPlayerEntity previousBot = Bot;
-        if (previousBot != null && previousBot != bot) {
-            stopAutoFace(previousBot);
-        }
-
-        shutdownExecutorsWithUuid(bot.getUuid());
-
+        UUID botId = bot.getUuid();
+        shutdownExecutorsWithUuid(botId);
         stopAutoFace(bot);
-
-        Bot = bot;
 
         ScheduledExecutorService botExecutor = Executors.newSingleThreadScheduledExecutor();
 
-        botExecutors.put(bot, botExecutor);
+        botExecutors.put(botId, botExecutor);
 
         MinecraftServer server = bot.getCommandSource().getServer();
 
         // Load Q-table from storage
         try {
             qTable = QTableStorage.loadQTable();
-            System.out.println("Loaded Q-table from storage.");
+            LOGGER.debug("Loaded Q-table from storage.");
 
         } catch (Exception e) {
-            System.out.println(e.getMessage());
-            System.err.println("No existing Q-table found. Starting fresh.");
+            LOGGER.warn("No existing Q-table found. Starting fresh.", e);
             qTable = new QTable();
         }
 
@@ -131,7 +129,7 @@ public class AutoFaceEntity {
 
             catch (Exception e) {
 
-                System.err.println("No existing epsilon found. Starting fresh.");
+                LOGGER.warn("No existing epsilon found. Starting fresh.", e);
 
             }
 
@@ -139,298 +137,285 @@ public class AutoFaceEntity {
 
 
         RLAgent finalRlAgent = rlAgent;
+        autoFaceInFlight.computeIfAbsent(bot.getUuid(), uuid -> new AtomicBoolean(false));
+
         botExecutor.scheduleAtFixedRate(() -> {
-            // Run detection and facing logic
-
-//            System.out.println("Is bot moving: " + PathTracer.getBotMovementStatus() + " " + isBotMoving);
-
-            if (server != null && server.isRunning() && bot.isAlive()) {
-
-                // Detect all entities within the bounding box
-                List<Entity> nearbyEntities = detectNearbyEntities(bot, BOUNDING_BOX_SIZE);
-
-                // Filter only hostile entities
-                 hostileEntities = nearbyEntities.stream()
-                        .filter(EntityUtil::isHostile)
-                        .toList();
-
-                if (!hostileEntities.isEmpty()) {
-                    lastHostileTick = server.getTicks();
-                }
-
-                if (CombatInventoryManager.tryConsumeIfNeeded(bot, hostileEntities)) {
-                    return;
-                }
-
-                if (BotEventHandler.updateBehavior(bot, server, nearbyEntities, hostileEntities)) {
-                    return;
-                }
-
-                boolean hasSculkNearby = false;
-
-                BlockDistanceLimitedSearch blockDistanceLimitedSearch = new BlockDistanceLimitedSearch(bot, 3, 5);
-
-                List<String> nearbyBlocks = blockDistanceLimitedSearch.detectNearbyBlocks();
-
-                hasSculkNearby = nearbyBlocks.stream()
-                        .anyMatch(block -> block.contains("Sculk Sensor") || block.contains("Sculk Shrieker"));
-
-
-                if (!hostileEntities.isEmpty()) {
-                    botBusy = true;
-
-                    System.out.println("Hostile entity detected!");
-
-                    // Find the closest hostile entity
-                    Entity closestHostile = hostileEntities.stream()
-                            .min(Comparator.comparingDouble(e -> e.squaredDistanceTo(bot)))
-                            .orElseThrow(); // Use orElseThrow since empty case is already handled
-
-                    double distanceToHostileEntity = Math.sqrt(closestHostile.squaredDistanceTo(bot));
-                    boolean botSeesHostile = closestHostile instanceof LivingEntity livingHostile
-                            ? bot.canSee(livingHostile)
-                            : bot.canSee(closestHostile);
-                    ServerPlayerEntity followTarget = BotEventHandler.getFollowTarget();
-                    boolean playerSeesHostile = followTarget != null
-                            && (closestHostile instanceof LivingEntity living
-                            ? followTarget.canSee(living)
-                            : followTarget.canSee(closestHostile));
-                    if (botSeesHostile && (!playerSeesHostile)) {
-                        broadcastDangerAlert(bot);
-                    }
-
-                    if (distanceToHostileEntity <= 10.0) {
-                        boolean botWasBusy = PathTracer.BotSegmentManager.getBotMovementStatus()
-                                || isBotMoving
-                                || blockDetectionUnit.getBlockDetectionStatus()
-                                || isBotExecutingTask();
-
-                        if (botWasBusy) {
-                            System.out.println("Bot is busy, stopping tasks before reacting to hostile.");
-                            isBotMoving = false;
-                            setBotExecutingTask(false);
-                            broadcastDangerAlert(bot);
-                            SkillManager.requestSkillPause(bot, null);
-                        }
-
-                        if (BotEventHandler.isRegisteredBot(bot)) {
-                            CombatInventoryManager.ensureCombatLoadout(bot);
-                        }
-
-                        FaceClosestEntity.faceClosestEntity(bot, AutoFaceEntity.hostileEntities);
-
-                        // Log details of the detected hostile entity
-                        System.out.println("Closest hostile entity: " + closestHostile.getName().getString()
-                                + " at distance: " + distanceToHostileEntity);
-
-                        hostileEntityInFront = true;
-
-                        // Trigger the handler
-                        if (isHandlerTriggered) {
-                            System.out.println("Handler already triggered. Skipping.");
-                        } else {
-                            System.out.println("Triggering handler for hostile entity.");
-                            isHandlerTriggered = true;
-
-                            BotEventHandler eventHandler = new BotEventHandler(server, bot);
-
-                            if (modCommandRegistry.isTrainingMode) {
-
-                                try {
-                                    eventHandler.detectAndReact(finalRlAgent, distanceToHostileEntity, qTable);
-                                } catch (IOException e) {
-                                    System.out.println("Exception occurred in startAutoFace: " + e.getMessage());
-                                    throw new RuntimeException(e);
-
-                                }
-                            }
-                            else {
-
-                                eventHandler.detectAndReactPlayMode(finalRlAgent, qTable);
-
-                            }
-
-                        }
-                    }
-
-                }
-                else if ((DangerZoneDetector.detectDangerZone(bot, 10, 10 , 10) <= 5 && DangerZoneDetector.detectDangerZone(bot, 10, 10 , 10)!= 0) || hasSculkNearby)  {
-
-                    System.out.println("Triggering handler for danger zone case");
-                    isBotMoving = false;
-                    setBotExecutingTask(false);
-
-
-
-                    botBusy = true;
-
-                    BotEventHandler eventHandler = new BotEventHandler(server, bot);
-                    if (BotEventHandler.isRegisteredBot(bot)) {
-                        CombatInventoryManager.ensureCombatLoadout(bot);
-                    }
-
-                    double distanceToHostileEntity = 0.0;
-
-                    try {
-
-                        // Find the closest hostile entity
-                    Entity closestHostile = hostileEntities.stream()
-                            .min(Comparator.comparingDouble(e -> e.squaredDistanceTo(bot)))
-                            .orElseThrow(); // Use orElseThrow since empty case is already handled
-
-                    distanceToHostileEntity = Math.sqrt(closestHostile.squaredDistanceTo(bot));
-
-                        // Log details of the detected hostile entity
-                        System.out.println("Closest hostile entity: " + closestHostile.getName().getString()
-                                + " at distance: " + distanceToHostileEntity);
-
-                    } catch (Exception e) {
-                        System.out.println("An exception occurred while calculating detecting hostile entities nearby" + e.getMessage());
-                        System.out.println(e.getStackTrace());
-                    }
-
-                    // first check if bot is moving, and if so, then stop moving.
-                    // the hope is that the bot will stop moving ahead of time since the danger zone detector has a wide range.
-
-                    if (PathTracer.BotSegmentManager.getBotMovementStatus() || isBotMoving || isBotExecutingTask()) {
-                        System.out.println("Stopping movement since danger zone is detected.");
-                        broadcastDangerAlert(bot);
-                        SkillManager.requestSkillPause(bot, null);
-                        BotActions.stop(bot);
-                        isBotMoving = false;
-                        setBotExecutingTask(false);
-                    }
-
-
-                    if (modCommandRegistry.isTrainingMode) {
-
-                        try {
-                            eventHandler.detectAndReact(finalRlAgent, distanceToHostileEntity ,qTable);
-                        } catch (IOException e) {
-                            System.out.println("Exception occurred in startAutoFace: " + e.getMessage());
-                            throw new RuntimeException(e);
-
-                        }
-                    }
-                    else {
-
-                        eventHandler.detectAndReactPlayMode(finalRlAgent, qTable);
-
-                    }
-
-                }
-
-                else {
-
-                    if ((PathTracer.BotSegmentManager.getBotMovementStatus() || isBotMoving) || blockDetectionUnit.getBlockDetectionStatus() || isBotExecutingTask()) {
-                        long now = System.currentTimeMillis();
-                        if (now - lastBusyLogMs > 2500L) {
-                            LOGGER.info("Bot is busy, skipping facing the closest entity. Status: PathTracer={}, isBotMoving={}, blockDetection={}, isBotExecutingTask={}",
-                                    PathTracer.BotSegmentManager.getBotMovementStatus(), isBotMoving, blockDetectionUnit.getBlockDetectionStatus(), isBotExecutingTask());
-                            lastBusyLogMs = now;
-                        }
-                    }
-
-                    else {
-                        botBusy = false; // Clear the flag if no hostile entities are in front
-                        lastBusyLogMs = 0L;
-
-                        hostileEntityInFront = false;
-
-                        FaceClosestEntity.faceClosestEntity(bot, nearbyEntities);
-
-                        if (modCommandRegistry.isTrainingMode && !isHandlerTriggered) {
-                            isHandlerTriggered = true;
-                            BotEventHandler eventHandler = new BotEventHandler(server, bot);
-                            try {
-                                eventHandler.detectAndReact(finalRlAgent, Double.POSITIVE_INFINITY, qTable);
-                            } catch (IOException e) {
-                                System.out.println("Exception occurred during passive training: " + e.getMessage());
-                                throw new RuntimeException(e);
-                            }
-                        }
-
-                        maybePerformAmbientEmote(bot, server, nearbyEntities);
-                    }
-
-                }
-
-
+            if (server == null) {
+                return;
             }
-
-            else if (server != null && !server.isRunning() || bot.isDisconnected()) {
-
-                stopAutoFace(bot);
-
+            AtomicBoolean guard = autoFaceInFlight.computeIfAbsent(bot.getUuid(), uuid -> new AtomicBoolean(false));
+            if (!guard.compareAndSet(false, true)) {
+                return;
+            }
+            final MinecraftServer dispatchServer = server;
+            dispatchServer.execute(() -> {
                 try {
-
-                    ServerTickEvents.END_WORLD_TICK.register(world -> {
-
-                        if (!isWorldTickListenerActive) {
-                            return; // Skip execution if listener is deactivated
-                        }
-
-                    });
-                } catch (Exception e) {
-
-                    System.out.println(e.getMessage());
+                    runAutoFaceTick(bot, dispatchServer, finalRlAgent);
+                } finally {
+                    guard.set(false);
                 }
-
-
-            }
-
-
+            });
         }, 0, LOOP_INTERVAL_MS, TimeUnit.MILLISECONDS);
 
     }
 
-    public static void onServerStopped(MinecraftServer minecraftServer) {
+    private static void keepBotAfloat(ServerPlayerEntity bot) {
+        if (bot == null) {
+            return;
+        }
+        ServerWorld world = bot.getCommandSource().getWorld();
+        BlockPos feet = bot.getBlockPos();
+        FluidState feetFluid = world.getFluidState(feet);
+        if (!feetFluid.isIn(FluidTags.WATER)) {
+            return;
+        }
+        boolean headSubmerged = world.getFluidState(feet.up()).isIn(FluidTags.WATER);
+        Vec3d velocity = bot.getVelocity();
+        if (velocity.y < 0.0D) {
+            bot.setVelocity(velocity.x, 0.0D, velocity.z);
+        }
+        double upward = headSubmerged ? 0.06D : 0.03D;
+        bot.addVelocity(0.0D, upward, 0.0D);
+        bot.velocityDirty = true;
+        bot.setSneaking(false);
+    }
 
-        executor3.submit(() -> {
+    private static void runAutoFaceTick(ServerPlayerEntity bot, MinecraftServer server, RLAgent rlAgent) {
+        if (server == null || bot == null) {
+            return;
+        }
+        if (!server.isRunning() || bot.isDisconnected()) {
+            stopAutoFace(bot);
             try {
-                stopAutoFace(Bot);
+                ServerTickEvents.END_WORLD_TICK.register(world -> {
+                    if (!isWorldTickListenerActive) {
+                        return;
+                    }
+                });
             } catch (Exception e) {
-                LOGGER.error("Failed to initialize Ollama client", e);
+                LOGGER.warn("Failed to register END_WORLD_TICK listener", e);
+            }
+            return;
+        }
+        if (!bot.isAlive()) {
+            return;
+        }
+
+        keepBotAfloat(bot);
+
+        List<Entity> nearbyEntities = detectNearbyEntities(bot, BOUNDING_BOX_SIZE);
+        hostileEntities = nearbyEntities.stream()
+                .filter(EntityUtil::isHostile)
+                .toList();
+
+        if (!hostileEntities.isEmpty()) {
+            lastHostileTick = server.getTicks();
+        }
+
+        if (CombatInventoryManager.tryConsumeIfNeeded(bot, hostileEntities)) {
+            return;
+        }
+
+        if (BotEventHandler.updateBehavior(bot, server, nearbyEntities, hostileEntities)) {
+            return;
+        }
+
+        BlockDistanceLimitedSearch blockDistanceLimitedSearch = new BlockDistanceLimitedSearch(bot, 3, 5);
+        List<String> nearbyBlocks = blockDistanceLimitedSearch.detectNearbyBlocks();
+        boolean hasSculkNearby = nearbyBlocks.stream()
+                .anyMatch(block -> block.contains("Sculk Sensor") || block.contains("Sculk Shrieker"));
+
+        if (!hostileEntities.isEmpty()) {
+            botBusy = true;
+
+            LOGGER.debug("Hostile entity detected!");
+
+            Entity closestHostile = hostileEntities.stream()
+                    .min(Comparator.comparingDouble(e -> e.squaredDistanceTo(bot)))
+                    .orElseThrow();
+
+            double distanceToHostileEntity = Math.sqrt(closestHostile.squaredDistanceTo(bot));
+            boolean botSeesHostile = closestHostile instanceof LivingEntity livingHostile
+                    ? bot.canSee(livingHostile)
+                    : bot.canSee(closestHostile);
+            ServerPlayerEntity followTarget = BotEventHandler.getFollowTarget();
+            boolean playerSeesHostile = followTarget != null
+                    && (closestHostile instanceof LivingEntity living
+                    ? followTarget.canSee(living)
+                    : followTarget.canSee(closestHostile));
+            if (botSeesHostile && !playerSeesHostile) {
+                broadcastDangerAlert(bot);
+            }
+
+            if (distanceToHostileEntity <= 10.0) {
+                boolean botWasBusy = PathTracer.BotSegmentManager.getBotMovementStatus()
+                        || isBotMoving
+                        || blockDetectionUnit.getBlockDetectionStatus()
+                        || isBotExecutingTask();
+
+                if (botWasBusy) {
+                    LOGGER.debug("Bot is busy, stopping tasks before reacting to hostile.");
+                    isBotMoving = false;
+                    setBotExecutingTask(false);
+                    broadcastDangerAlert(bot);
+                    SkillManager.requestSkillPause(bot, null);
+                    SkillResumeService.requestAutoResume(bot);
+                }
+
+                if (BotEventHandler.isRegisteredBot(bot)) {
+                    CombatInventoryManager.ensureCombatLoadout(bot);
+                }
+
+                FaceClosestEntity.faceClosestEntity(bot, hostileEntities);
+
+                LOGGER.debug("Closest hostile entity: " + closestHostile.getName().getString()
+                        + " at distance: " + distanceToHostileEntity);
+
+                hostileEntityInFront = true;
+
+                if (!isHandlerTriggered) {
+                    LOGGER.debug("Triggering handler for hostile entity.");
+                    isHandlerTriggered = true;
+
+                    BotEventHandler eventHandler = new BotEventHandler(server, bot);
+
+                    if (modCommandRegistry.isTrainingMode) {
+                        try {
+                            eventHandler.detectAndReact(rlAgent, distanceToHostileEntity, qTable);
+                        } catch (IOException e) {
+                            throw new RuntimeException(e);
+                        }
+                    } else {
+                        eventHandler.detectAndReactPlayMode(rlAgent, qTable);
+                    }
+                } else {
+                    LOGGER.debug("Handler already triggered. Skipping.");
+                }
+            }
+
+        } else if ((DangerZoneDetector.detectDangerZone(bot, 10, 10, 10) <= 5
+                && DangerZoneDetector.detectDangerZone(bot, 10, 10, 10) != 0) || hasSculkNearby) {
+
+            LOGGER.debug("Triggering handler for danger zone case");
+            isBotMoving = false;
+            setBotExecutingTask(false);
+            botBusy = true;
+
+            BotEventHandler eventHandler = new BotEventHandler(server, bot);
+            if (BotEventHandler.isRegisteredBot(bot)) {
+                CombatInventoryManager.ensureCombatLoadout(bot);
+            }
+
+            double distanceToHostileEntity = 0.0;
+            try {
+                Entity closestHostile = hostileEntities.stream()
+                        .min(Comparator.comparingDouble(e -> e.squaredDistanceTo(bot)))
+                        .orElseThrow();
+                distanceToHostileEntity = Math.sqrt(closestHostile.squaredDistanceTo(bot));
+                LOGGER.debug("Closest hostile entity: " + closestHostile.getName().getString()
+                        + " at distance: " + distanceToHostileEntity);
+            } catch (Exception e) {
+                LOGGER.warn("An exception occurred while calculating detecting hostile entities nearby", e);
+            }
+
+            if (PathTracer.BotSegmentManager.getBotMovementStatus() || isBotMoving || isBotExecutingTask()) {
+                LOGGER.debug("Stopping movement since danger zone is detected.");
+                broadcastDangerAlert(bot);
+                SkillManager.requestSkillPause(bot, null);
+                SkillResumeService.requestAutoResume(bot);
+                BotActions.stop(bot);
+                isBotMoving = false;
+                setBotExecutingTask(false);
+            }
+
+            boolean runHeavyLogic = BotEventHandler.throttleTraining(bot, true);
+            if (runHeavyLogic) {
+                if (modCommandRegistry.isTrainingMode) {
+                    try {
+                        eventHandler.detectAndReact(rlAgent, distanceToHostileEntity, qTable);
+                    } catch (IOException e) {
+                        throw new RuntimeException(e);
+                    }
+                } else {
+                    eventHandler.detectAndReactPlayMode(rlAgent, qTable);
+                }
+            }
+
+        } else {
+            if ((PathTracer.BotSegmentManager.getBotMovementStatus() || isBotMoving)
+                    || blockDetectionUnit.getBlockDetectionStatus() || isBotExecutingTask()) {
+                long now = System.currentTimeMillis();
+                if (now - lastBusyLogMs > 2500L) {
+                    LOGGER.info("Bot is busy, skipping facing the closest entity. Status: PathTracer={}, isBotMoving={}, blockDetection={}, isBotExecutingTask={}",
+                            PathTracer.BotSegmentManager.getBotMovementStatus(), isBotMoving,
+                            blockDetectionUnit.getBlockDetectionStatus(), isBotExecutingTask());
+                    lastBusyLogMs = now;
+                }
+            } else {
+                botBusy = false;
+                lastBusyLogMs = 0L;
+                hostileEntityInFront = false;
+
+                FaceClosestEntity.faceClosestEntity(bot, nearbyEntities);
+
+                boolean runHeavyLogic = BotEventHandler.throttleTraining(bot, false);
+                if (runHeavyLogic && modCommandRegistry.isTrainingMode && !isHandlerTriggered) {
+                    isHandlerTriggered = true;
+                    BotEventHandler eventHandler = new BotEventHandler(server, bot);
+                    try {
+                        eventHandler.detectAndReact(rlAgent, Double.POSITIVE_INFINITY, qTable);
+                    } catch (IOException e) {
+                        throw new RuntimeException(e);
+                    }
+                }
+
+                maybePerformAmbientEmote(bot, server, nearbyEntities);
+                SkillResumeService.tryAutoResume(bot);
+            }
+        }
+    }
+
+    public static void onServerStopped(MinecraftServer minecraftServer) {
+        executor3.submit(() -> {
+            for (UUID uuid : new ArrayList<>(botExecutors.keySet())) {
+                shutdownExecutorsWithUuid(uuid);
             }
         });
     }
 
 
     public static void stopAutoFace(ServerPlayerEntity bot) {
-        ScheduledExecutorService executor = botExecutors.remove(bot);
+        if (bot == null) {
+            return;
+        }
+        UUID key = bot.getUuid();
+        ScheduledExecutorService executor = botExecutors.remove(key);
         if (executor != null && !executor.isShutdown()) {
             executor.shutdownNow();
             try {
                 executor.awaitTermination(1, TimeUnit.SECONDS);
 
-                System.out.println("Autoface stopped.");
+                LOGGER.debug("Autoface stopped.");
 
             } catch (InterruptedException e) {
-                System.out.println("Error shutting down executor for bot: {" + bot.getName().getString() + "}" + " " + e);
+                LOGGER.debug("Error shutting down executor for bot: {}", bot.getName().getString(), e);
                 Thread.currentThread().interrupt();
             }
         }
         BotActions.resetRangedState(bot);
+        autoFaceInFlight.remove(key);
     }
 
     private static void shutdownExecutorsWithUuid(UUID uuid) {
         if (uuid == null) {
             return;
         }
-        botExecutors.entrySet().removeIf(entry -> {
-            ServerPlayerEntity trackedBot = entry.getKey();
-            if (trackedBot == null) {
-                shutdownExecutor(entry.getValue());
-                BotActions.resetRangedState(uuid);
-                return true;
-            }
-            if (uuid.equals(trackedBot.getUuid())) {
-                shutdownExecutor(entry.getValue());
-                BotActions.resetRangedState(uuid);
-                return true;
-            }
-            return false;
-        });
+        ScheduledExecutorService executor = botExecutors.remove(uuid);
+        if (executor != null) {
+            shutdownExecutor(executor);
+            BotActions.resetRangedState(uuid);
+        }
+        autoFaceInFlight.remove(uuid);
     }
 
     private static void shutdownExecutor(ScheduledExecutorService executor) {

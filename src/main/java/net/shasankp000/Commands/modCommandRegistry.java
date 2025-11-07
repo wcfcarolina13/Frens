@@ -48,6 +48,9 @@ import net.shasankp000.PathFinding.PathTracer;
 import net.shasankp000.PathFinding.Segment;
 import net.shasankp000.PlayerUtils.*;
 import net.shasankp000.GameAI.skills.SkillManager;
+import net.shasankp000.GameAI.services.BotInventoryStorageService;
+import net.shasankp000.GameAI.services.BotTargetingService;
+import net.shasankp000.GameAI.services.SkillResumeService;
 import net.shasankp000.GameAI.services.TaskService;
 import net.shasankp000.GameAI.skills.SkillContext;
 import net.shasankp000.GameAI.skills.SkillExecutionResult;
@@ -61,9 +64,11 @@ import org.slf4j.LoggerFactory;
 
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
 import net.minecraft.registry.entry.RegistryEntry;
 import net.minecraft.item.Item;
@@ -80,6 +85,7 @@ import net.shasankp000.PacketHandler.InputPacketHandler;
 public class modCommandRegistry {
 
     private static final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
+    private static final ExecutorService skillExecutor = Executors.newCachedThreadPool();
     private static final double DEFAULT_GUARD_RADIUS = 6.0D;
     public static boolean isTrainingMode = false;
     public static String botName = "";
@@ -101,8 +107,9 @@ public class modCommandRegistry {
 
 
     public static void register() {
-        CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> dispatcher.register(
-                literal("bot")
+        CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> {
+            dispatcher.register(
+                    literal("bot")
                         .then(literal("spawn")
                                 .then(CommandManager.argument("bot_name", StringArgumentType.string())
                                         .then(CommandManager.argument("mode", StringArgumentType.string())
@@ -118,67 +125,74 @@ public class modCommandRegistry {
                                         )
                                 )
                         )
-                        .then(literal("skill")
-                                .then(CommandManager.argument("skill_name", StringArgumentType.string())
-                                        .executes(context -> {
-                                            ServerPlayerEntity bot = getActiveBotOrThrow(context);
-                                            String skillName = StringArgumentType.getString(context, "skill_name");
-                                            return executeSkill(context, bot, skillName, null);
-                                        })
-                                        .then(CommandManager.argument("arguments", StringArgumentType.greedyString())
-                                                .executes(context -> {
-                                                    ServerPlayerEntity bot = getActiveBotOrThrow(context);
-                                                    String skillName = StringArgumentType.getString(context, "skill_name");
-                                                    String args = StringArgumentType.getString(context, "arguments");
-                                                    return executeSkill(context, bot, skillName, args);
-                                                })
-                                        )
-                                )
-                        )
+
                         .then(literal("inventory")
-                                .executes(context -> executeInventorySummary(context, getActiveBotOrThrow(context)))
+                                .executes(context -> executeInventorySummaryTargets(context, null))
+                                .then(CommandManager.argument("target", StringArgumentType.string())
+                                        .executes(context -> executeInventorySummaryTargets(context,
+                                                StringArgumentType.getString(context, "target"))))
                                 .then(literal("count")
                                         .then(CommandManager.argument("item", StringArgumentType.string())
-                                                .executes(context -> {
-                                                    ServerPlayerEntity bot = getActiveBotOrThrow(context);
-                                                    String itemId = StringArgumentType.getString(context, "item");
-                                                    return executeInventoryCount(context, bot, itemId);
-                                                })
+                                                .executes(context -> executeInventoryCountTargets(context,
+                                                        null,
+                                                        StringArgumentType.getString(context, "item")))
+                                                .then(CommandManager.argument("targets", StringArgumentType.string())
+                                                        .executes(context -> executeInventoryCountTargets(context,
+                                                                StringArgumentType.getString(context, "targets"),
+                                                                StringArgumentType.getString(context, "item"))))
                                         )
+                                )
+                                .then(literal("save")
+                                        .executes(context -> executeInventorySaveTargets(context, null))
+                                        .then(CommandManager.argument("targets", StringArgumentType.string())
+                                                .executes(context -> executeInventorySaveTargets(context,
+                                                        StringArgumentType.getString(context, "targets"))))
+                                )
+                                .then(literal("load")
+                                        .executes(context -> executeInventoryLoadTargets(context, null))
+                                        .then(CommandManager.argument("targets", StringArgumentType.string())
+                                                .executes(context -> executeInventoryLoadTargets(context,
+                                                        StringArgumentType.getString(context, "targets"))))
+                                )
+                        )
+                        .then(literal("skill")
+                                .then(CommandManager.argument("skill_name", StringArgumentType.string())
+                                        .executes(context -> executeSkillTargets(context,
+                                                StringArgumentType.getString(context, "skill_name"),
+                                                null))
+                                        .then(CommandManager.argument("arguments", StringArgumentType.greedyString())
+                                                .executes(context -> executeSkillTargets(context,
+                                                        StringArgumentType.getString(context, "skill_name"),
+                                                        StringArgumentType.getString(context, "arguments"))))
                                 )
                         )
                         .then(literal("stop")
-                                .executes(context -> executeStop(context, getActiveBotOrThrow(context)))
-                                .then(CommandManager.argument("bot", EntityArgumentType.player())
-                                        .executes(context -> executeStop(context, EntityArgumentType.getPlayer(context, "bot")))
-                                )
+                                .executes(context -> executeStopTargets(context, (String) null))
+                                .then(CommandManager.argument("target", StringArgumentType.string())
+                                        .executes(context -> executeStopTargets(context,
+                                                StringArgumentType.getString(context, "target"))))
                         )
                         .then(literal("follow")
                                 .then(literal("stop")
-                                        .executes(context -> executeFollowStop(context, getActiveBotOrThrow(context)))
-                                        .then(CommandManager.argument("bot", EntityArgumentType.player())
-                                                .executes(context -> executeFollowStop(context, EntityArgumentType.getPlayer(context, "bot")))
-                                        )
+                                        .executes(context -> executeFollowStopTargets(context, null))
+                                        .then(CommandManager.argument("target", StringArgumentType.string())
+                                                .executes(context -> executeFollowStopTargets(context,
+                                                        StringArgumentType.getString(context, "target"))))
                                 )
-                                .executes(context -> {
-                                    ServerPlayerEntity bot = getActiveBotOrThrow(context);
-                                    ServerPlayerEntity target = context.getSource().getPlayer();
-                                    return executeFollow(context, bot, target);
-                                })
-                                .then(CommandManager.argument("bot", EntityArgumentType.player())
-                                        .executes(context -> {
-                                            ServerPlayerEntity bot = EntityArgumentType.getPlayer(context, "bot");
-                                            ServerPlayerEntity target = context.getSource().getPlayer();
-                                            return executeFollow(context, bot, target);
-                                        })
-                                        .then(CommandManager.argument("target", EntityArgumentType.player())
-                                                .executes(context -> {
-                                                    ServerPlayerEntity bot = EntityArgumentType.getPlayer(context, "bot");
-                                                    ServerPlayerEntity target = EntityArgumentType.getPlayer(context, "target");
-                                                    return executeFollow(context, bot, target);
-                                                })
-                                        )
+                                .executes(context -> executeFollowTargets(context, null, context.getSource().getPlayer()))
+                                .then(CommandManager.argument("bots", StringArgumentType.string())
+                                        .executes(context -> executeFollowTargets(context,
+                                                StringArgumentType.getString(context, "bots"),
+                                                context.getSource().getPlayer()))
+                                        .then(CommandManager.argument("player", EntityArgumentType.player())
+                                                .executes(context -> executeFollowTargets(context,
+                                                        StringArgumentType.getString(context, "bots"),
+                                                        EntityArgumentType.getPlayer(context, "player"))))
                                 )
+                                .then(CommandManager.argument("player", EntityArgumentType.player())
+                                        .executes(context -> executeFollowTargets(context,
+                                                null,
+                                                EntityArgumentType.getPlayer(context, "player"))))
                         )
                         .then(literal("guard")
                                 .executes(context -> executeGuard(context, getActiveBotOrThrow(context), DEFAULT_GUARD_RADIUS))
@@ -235,6 +249,23 @@ public class modCommandRegistry {
                                 .then(CommandManager.argument("bot", EntityArgumentType.player())
                                         .then(CommandManager.argument("mode", StringArgumentType.string())
                                                 .executes(context -> executeAssistToggle(context, EntityArgumentType.getPlayer(context, "bot"), parseAssistMode(StringArgumentType.getString(context, "mode"))))
+                                        )
+                                )
+                        )
+                        .then(literal("defend")
+                                .then(literal("nearby")
+                                        .then(literal("bots")
+                                                .then(CommandManager.argument("mode", StringArgumentType.string())
+                                                        .executes(context -> executeDefendTargets(
+                                                                context,
+                                                                StringArgumentType.getString(context, "mode"),
+                                                                null))
+                                                        .then(CommandManager.argument("targets", StringArgumentType.string())
+                                                                .executes(context -> executeDefendTargets(
+                                                                        context,
+                                                                        StringArgumentType.getString(context, "mode"),
+                                                                        StringArgumentType.getString(context, "targets"))))
+                                                )
                                         )
                                 )
                         )
@@ -797,7 +828,24 @@ public class modCommandRegistry {
 
                                 })
                         )
-        ));
+                        .then(CommandManager.argument("inline", StringArgumentType.greedyString())
+                                .executes(context -> executeInlineBotCommand(context, StringArgumentType.getString(context, "inline"))))
+            );
+
+            dispatcher.register(
+                    literal("equip")
+                            .executes(context -> {
+                                ServerPlayerEntity player = context.getSource().getPlayer();
+                                if (player == null) {
+                                    throw new SimpleCommandExceptionType(Text.literal("Specify a player when running from console or command blocks.")).create();
+                                }
+                                return executeEquip(context, player);
+                            })
+                            .then(CommandManager.argument("player", EntityArgumentType.player())
+                                    .executes(context -> executeEquip(context, EntityArgumentType.getPlayer(context, "player")))
+                            )
+            );
+        });
     }
 
 
@@ -818,7 +866,10 @@ public class modCommandRegistry {
 
         ServerCommandSource serverSource = server.getCommandSource();
 
-        TaskService.forceAbort("§cSpawning bot '" + botName + "'.");
+        ServerPlayerEntity existingBot = server.getPlayerManager().getPlayer(botName);
+        if (existingBot != null) {
+            TaskService.forceAbort(existingBot.getUuid(), "§cSpawning bot '" + botName + "'.");
+        }
 
 
         if (spawnMode.equals("training")) {
@@ -1253,6 +1304,11 @@ public class modCommandRegistry {
             giveStack(bot, withEnchantments(registryManager, Items.NETHERITE_SHOVEL.getDefaultStack(),
                     new int[]{5, 3},
                     (RegistryKey<Enchantment>[]) new RegistryKey[]{Enchantments.EFFICIENCY, Enchantments.UNBREAKING}));
+            giveStack(bot, new ItemStack(Items.STONE_SHOVEL, 2));
+            giveStack(bot, new ItemStack(Items.STONE_HOE, 2));
+            giveStack(bot, new ItemStack(Items.STONE_PICKAXE, 2));
+            giveStack(bot, new ItemStack(Items.STONE_AXE, 2));
+            giveStack(bot, new ItemStack(Items.FISHING_ROD));
 
             giveStack(bot, new ItemStack(Items.GOLDEN_CARROT, 64));
             giveStack(bot, new ItemStack(Items.COOKED_BEEF, 64));
@@ -1291,14 +1347,12 @@ public class modCommandRegistry {
     }
 
     private static int executeFollow(CommandContext<ServerCommandSource> context, ServerPlayerEntity bot, ServerPlayerEntity target) {
-        String result = BotEventHandler.setFollowMode(bot, target);
-        ChatUtils.sendSystemMessage(context.getSource(), result);
+        BotEventHandler.setFollowMode(bot, target);
         return 1;
     }
 
     private static int executeFollowStop(CommandContext<ServerCommandSource> context, ServerPlayerEntity bot) {
-        String result = BotEventHandler.stopFollowing(bot);
-        ChatUtils.sendSystemMessage(context.getSource(), result);
+        BotEventHandler.stopFollowing(bot);
         return 1;
     }
 
@@ -1332,10 +1386,85 @@ public class modCommandRegistry {
         return 1;
     }
 
+    private static int executeDefendTargets(CommandContext<ServerCommandSource> context, String modeRaw, String targetArg) throws CommandSyntaxException {
+        boolean enable = parseAssistMode(modeRaw);
+        List<ServerPlayerEntity> bots = BotTargetingService.resolve(context.getSource(), targetArg);
+        for (ServerPlayerEntity bot : bots) {
+            BotEventHandler.setBotDefense(bot, enable);
+        }
+        if (!bots.isEmpty()) {
+            boolean isAll = targetArg != null && "all".equalsIgnoreCase(targetArg.trim());
+            String summary = formatBotList(bots, isAll);
+            String action = enable ? "will defend nearby bots." : "will focus on their own fights.";
+            ChatUtils.sendSystemMessage(context.getSource(), summary + " " + action);
+        }
+        return bots.size();
+    }
+
     private static int executeCombatStyle(CommandContext<ServerCommandSource> context, ServerPlayerEntity bot, BotEventHandler.CombatStyle style) {
         String result = BotEventHandler.setCombatStyle(bot, style);
         ChatUtils.sendSystemMessage(context.getSource(), result);
         return 1;
+    }
+
+    private static int executeInventorySummaryTargets(CommandContext<ServerCommandSource> context, String targetArg) throws CommandSyntaxException {
+        List<ServerPlayerEntity> bots = BotTargetingService.resolve(context.getSource(), targetArg);
+        int successes = 0;
+        for (ServerPlayerEntity bot : bots) {
+            successes += executeInventorySummary(context, bot);
+        }
+        return successes;
+    }
+
+    private static int executeInventoryCountTargets(CommandContext<ServerCommandSource> context, String targetArg, String itemId) throws CommandSyntaxException {
+        Identifier id = Identifier.tryParse(itemId);
+        if (id == null || !Registries.ITEM.containsId(id)) {
+            ChatUtils.sendSystemMessage(context.getSource(), "Unknown item: " + itemId);
+            return 0;
+        }
+        Item item = Registries.ITEM.get(id);
+        List<ServerPlayerEntity> bots = BotTargetingService.resolve(context.getSource(), targetArg);
+        int successes = 0;
+        int grandTotal = 0;
+        for (ServerPlayerEntity bot : bots) {
+            grandTotal += emitInventoryCount(context.getSource(), bot, item);
+            successes++;
+        }
+        if (bots.size() > 1) {
+            ChatUtils.sendSystemMessage(context.getSource(),
+                    "Combined total: " + grandTotal + "x " + item.getName().getString() + " across " + bots.size() + " bots.");
+        }
+        return successes;
+    }
+
+    private static int executeInventorySaveTargets(CommandContext<ServerCommandSource> context, String targetArg) throws CommandSyntaxException {
+        List<ServerPlayerEntity> bots = BotTargetingService.resolve(context.getSource(), targetArg);
+        int successes = 0;
+        for (ServerPlayerEntity bot : bots) {
+            boolean success = BotInventoryStorageService.save(bot);
+            if (success) {
+                successes++;
+                ChatUtils.sendSystemMessage(context.getSource(), "Saved inventory for " + bot.getName().getString() + ".");
+            } else {
+                ChatUtils.sendSystemMessage(context.getSource(), "Failed to save inventory for " + bot.getName().getString() + ".");
+            }
+        }
+        return successes;
+    }
+
+    private static int executeInventoryLoadTargets(CommandContext<ServerCommandSource> context, String targetArg) throws CommandSyntaxException {
+        List<ServerPlayerEntity> bots = BotTargetingService.resolve(context.getSource(), targetArg);
+        int successes = 0;
+        for (ServerPlayerEntity bot : bots) {
+            boolean success = BotInventoryStorageService.load(bot);
+            if (success) {
+                successes++;
+                ChatUtils.sendSystemMessage(context.getSource(), "Loaded inventory for " + bot.getName().getString() + ".");
+            } else {
+                ChatUtils.sendSystemMessage(context.getSource(), "No saved inventory found for " + bot.getName().getString() + ".");
+            }
+        }
+        return successes;
     }
 
     private static int executeInventorySummary(CommandContext<ServerCommandSource> context, ServerPlayerEntity bot) {
@@ -1359,20 +1488,14 @@ public class modCommandRegistry {
                 .map(entry -> entry.getValue() + "x " + entry.getKey().getName().getString())
                 .reduce((a, b) -> a + ", " + b)
                 .orElse("(no items)");
-        ChatUtils.sendSystemMessage(context.getSource(), "Inventory summary: " + summary);
+        ChatUtils.sendSystemMessage(context.getSource(), "Inventory summary for " + bot.getName().getString() + ": " + summary);
         return 1;
     }
 
-    private static int executeInventoryCount(CommandContext<ServerCommandSource> context, ServerPlayerEntity bot, String itemId) {
-        Identifier id = Identifier.tryParse(itemId);
-        if (id == null || !Registries.ITEM.containsId(id)) {
-            ChatUtils.sendSystemMessage(context.getSource(), "Unknown item: " + itemId);
-            return 0;
-        }
-        Item item = Registries.ITEM.get(id);
+    private static int emitInventoryCount(ServerCommandSource source, ServerPlayerEntity bot, Item item) {
         int total = countInventoryItems(bot, item);
-        ChatUtils.sendSystemMessage(context.getSource(), bot.getName().getString() + " is carrying " + total + "x " + item.getName().getString() + ".");
-        return 1;
+        ChatUtils.sendSystemMessage(source, bot.getName().getString() + " is carrying " + total + "x " + item.getName().getString() + ".");
+        return total;
     }
 
     private static int countInventoryItems(ServerPlayerEntity bot, Item item) {
@@ -1392,11 +1515,371 @@ public class modCommandRegistry {
         if (server == null || bot == null) {
             return 0;
         }
-        stopMoving(server, context.getSource(), bot.getName().getString());
-        TaskService.forceAbort("§cCurrent task aborted via /bot stop.");
+        String alias = bot.getName().getString();
+        stopMoving(server, context.getSource(), alias);
+        TaskService.forceAbort(bot.getUuid(), "§cCurrent task aborted via /bot stop.");
         net.shasankp000.PathFinding.PathTracer.flushAllMovementTasks();
-        ChatUtils.sendSystemMessage(context.getSource(), "Stopping " + bot.getName().getString() + "...");
+        ChatUtils.sendSystemMessage(context.getSource(), "Stopping " + alias + "...");
+        SkillResumeService.clear(bot.getUuid());
         return 1;
+    }
+
+    private static int executeSkillTargets(CommandContext<ServerCommandSource> context, String skillName, String rawInput) throws CommandSyntaxException {
+        SkillCommandInvocation invocation = parseSkillInvocation(context.getSource(), rawInput);
+        List<ServerPlayerEntity> targets = BotTargetingService.resolve(context.getSource(), invocation.target());
+        int successes = 0;
+        String rawArgs = invocation.arguments();
+
+        if (rawArgs == null || rawArgs.isBlank() || targets.size() <= 1) {
+            for (ServerPlayerEntity bot : targets) {
+                successes += executeSkill(context, bot, skillName, rawArgs);
+            }
+            return successes;
+        }
+
+        List<String> tokens = new ArrayList<>(Arrays.asList(rawArgs.trim().split("\\s+")));
+        Integer totalCount = null;
+        if (!tokens.isEmpty()) {
+            try {
+                totalCount = Integer.parseInt(tokens.get(0));
+                tokens.remove(0);
+            } catch (NumberFormatException ignored) {
+            }
+        }
+
+        if (totalCount == null) {
+            for (ServerPlayerEntity bot : targets) {
+                successes += executeSkill(context, bot, skillName, rawArgs);
+            }
+            return successes;
+        }
+
+        String optionSuffix = tokens.isEmpty() ? "" : " " + String.join(" ", tokens);
+        int botCount = targets.size();
+        boolean eachMode = invocation.each();
+        int base = eachMode ? totalCount : totalCount / botCount;
+        int remainder = eachMode ? 0 : totalCount % botCount;
+
+        for (int index = 0; index < targets.size(); index++) {
+            int assigned = eachMode ? base : base + (index < remainder ? 1 : 0);
+            if (!eachMode && assigned <= 0) {
+                continue;
+            }
+            String perBotArgs = assigned + (optionSuffix.isEmpty() ? "" : optionSuffix);
+            successes += executeSkill(context, targets.get(index), skillName, perBotArgs);
+        }
+
+        return successes;
+    }
+
+    private static String formatBotList(List<ServerPlayerEntity> bots, boolean isAll) {
+        if (bots == null || bots.isEmpty()) {
+            return "No bots";
+        }
+        if (isAll) {
+            return "All bots";
+        }
+        List<String> names = bots.stream()
+                .map(player -> player.getName().getString())
+                .collect(Collectors.toCollection(ArrayList::new));
+        if (names.size() == 1) {
+            return names.get(0);
+        }
+        String last = names.remove(names.size() - 1);
+        return String.join(", ", names) + " and " + last;
+    }
+
+    private static int executeStopTargets(CommandContext<ServerCommandSource> context, String targetArg) throws CommandSyntaxException {
+        List<ServerPlayerEntity> targets = BotTargetingService.resolve(context.getSource(), targetArg);
+        boolean isAll = targetArg != null && "all".equalsIgnoreCase(targetArg.trim());
+        return executeStopTargets(context, targets, isAll);
+    }
+
+    private static int executeStopTargets(CommandContext<ServerCommandSource> context, List<ServerPlayerEntity> targets) {
+        return executeStopTargets(context, targets, false);
+    }
+
+    private static int executeStopTargets(CommandContext<ServerCommandSource> context, List<ServerPlayerEntity> targets, boolean isAll) {
+        int successes = 0;
+        for (ServerPlayerEntity bot : targets) {
+            successes += executeStop(context, bot);
+        }
+        if (!targets.isEmpty()) {
+            String summary = formatBotList(targets, isAll);
+            String verb = (isAll || targets.size() > 1) ? "have" : "has";
+            ChatUtils.sendSystemMessage(context.getSource(), summary + " " + verb + " stopped.");
+        }
+        return successes;
+    }
+
+    private static int executeFollowTargets(CommandContext<ServerCommandSource> context, String targetArg, ServerPlayerEntity followTarget) throws CommandSyntaxException {
+        if (followTarget == null) {
+            throw new SimpleCommandExceptionType(Text.literal("Specify a player for the bots to follow.")).create();
+        }
+        List<ServerPlayerEntity> bots = BotTargetingService.resolve(context.getSource(), targetArg);
+        boolean isAll = targetArg != null && "all".equalsIgnoreCase(targetArg.trim());
+        return executeFollowTargets(context, bots, followTarget, isAll);
+    }
+
+    private static int executeFollowTargets(CommandContext<ServerCommandSource> context, List<ServerPlayerEntity> bots, ServerPlayerEntity followTarget, boolean isAll) {
+        int successes = 0;
+        for (ServerPlayerEntity bot : bots) {
+            successes += executeFollow(context, bot, followTarget);
+        }
+        if (!bots.isEmpty()) {
+            String summary = formatBotList(bots, isAll);
+            boolean plural = isAll || bots.size() > 1;
+            String verb = plural ? "are" : "is";
+            ChatUtils.sendSystemMessage(context.getSource(), summary + " " + verb + " following " + followTarget.getName().getString() + ".");
+        }
+        return successes;
+    }
+
+    private static int executeFollowStopTargets(CommandContext<ServerCommandSource> context, String targetArg) throws CommandSyntaxException {
+        List<ServerPlayerEntity> bots = BotTargetingService.resolve(context.getSource(), targetArg);
+        return executeFollowStopTargets(context, bots, targetArg != null && "all".equalsIgnoreCase(targetArg.trim()));
+    }
+
+    private static int executeFollowStopTargets(CommandContext<ServerCommandSource> context, List<ServerPlayerEntity> bots, boolean isAll) {
+        int successes = 0;
+        for (ServerPlayerEntity bot : bots) {
+            successes += executeFollowStop(context, bot);
+        }
+        if (!bots.isEmpty()) {
+            String summary = formatBotList(bots, isAll);
+            String verb = (isAll || bots.size() > 1) ? "have" : "has";
+            ChatUtils.sendSystemMessage(context.getSource(), summary + " " + verb + " stopped following.");
+        }
+        return successes;
+    }
+
+    private static int executeInlineBotCommand(CommandContext<ServerCommandSource> context, String rawInput) throws CommandSyntaxException {
+        if (rawInput == null || rawInput.isBlank()) {
+            throw new SimpleCommandExceptionType(Text.literal("Provide a command for the bots to run.")).create();
+        }
+
+        String normalized = rawInput.replace(",", " ").replaceAll("(?i)\\band\\b", " ").trim();
+        if (normalized.isEmpty()) {
+            throw new SimpleCommandExceptionType(Text.literal("Provide a command for the bots to run.")).create();
+        }
+
+        List<String> tokens = Arrays.stream(normalized.split("\\s+"))
+                .filter(token -> !token.isEmpty())
+                .collect(Collectors.toCollection(ArrayList::new));
+        if (tokens.isEmpty()) {
+            throw new SimpleCommandExceptionType(Text.literal("Provide a command for the bots to run.")).create();
+        }
+
+        List<String> lowerTokens = tokens.stream()
+                .map(token -> token.toLowerCase(Locale.ROOT))
+                .collect(Collectors.toList());
+
+        int actionIndex = -1;
+        for (int index = 0; index < lowerTokens.size(); index++) {
+            String token = lowerTokens.get(index);
+            if ("follow".equals(token) || "stop".equals(token)) {
+                actionIndex = index;
+                break;
+            }
+        }
+
+        if (actionIndex == -1) {
+            throw new SimpleCommandExceptionType(Text.literal("Unsupported inline syntax. Try explicit subcommands like /bot follow <bot>.")).create();
+        }
+
+        String action = lowerTokens.get(actionIndex);
+        List<String> prefixTokens = new ArrayList<>(tokens.subList(0, actionIndex));
+        List<String> suffixTokens = actionIndex + 1 < tokens.size()
+                ? new ArrayList<>(tokens.subList(actionIndex + 1, tokens.size()))
+                : new ArrayList<>();
+
+        if ("follow".equals(action)) {
+            return handleInlineFollow(context, prefixTokens, suffixTokens);
+        }
+        if ("stop".equals(action)) {
+            return handleInlineStop(context, prefixTokens, suffixTokens);
+        }
+
+        throw new SimpleCommandExceptionType(Text.literal("Unsupported inline action '" + action + "'.")).create();
+    }
+
+    private static int handleInlineFollow(CommandContext<ServerCommandSource> context,
+                                          List<String> prefixTokens,
+                                          List<String> suffixTokens) throws CommandSyntaxException {
+        ServerCommandSource source = context.getSource();
+        MinecraftServer server = source.getServer();
+
+        List<String> prefixAliases = parseAliasTokens(prefixTokens);
+        List<String> workingSuffix = new ArrayList<>(suffixTokens);
+
+        if (prefixAliases.isEmpty() && !workingSuffix.isEmpty() && "stop".equalsIgnoreCase(workingSuffix.get(0))) {
+            workingSuffix.remove(0);
+            List<ServerPlayerEntity> bots = BotTargetingService.resolve(source, null);
+            return executeFollowStopTargets(context, bots, false);
+        }
+
+        List<String> aliasSelection = new ArrayList<>(prefixAliases);
+
+        if (aliasSelection.isEmpty() && shouldTreatAsAlias(server, workingSuffix)) {
+            aliasSelection.addAll(parseAliasTokens(workingSuffix));
+            workingSuffix.clear();
+        }
+
+        boolean isAll = containsAllAlias(aliasSelection);
+
+        List<ServerPlayerEntity> bots;
+        if (aliasSelection.isEmpty()) {
+            bots = BotTargetingService.resolve(source, null);
+        } else {
+            bots = BotTargetingService.resolveMany(source, aliasSelection);
+        }
+
+        if (!workingSuffix.isEmpty() && "stop".equalsIgnoreCase(workingSuffix.get(0))) {
+            workingSuffix.remove(0);
+            return executeFollowStopTargets(context, bots, isAll);
+        }
+
+        ServerPlayerEntity followTarget;
+        if (!prefixAliases.isEmpty()) {
+            followTarget = resolveFollowTarget(source, workingSuffix);
+        } else if (!aliasSelection.isEmpty()) {
+            followTarget = source.getPlayer();
+        } else {
+            followTarget = resolveFollowTarget(source, workingSuffix);
+        }
+
+        return executeFollowTargets(context, bots, followTarget, isAll);
+    }
+
+    private static int handleInlineStop(CommandContext<ServerCommandSource> context,
+                                        List<String> prefixTokens,
+                                        List<String> suffixTokens) throws CommandSyntaxException {
+        ServerCommandSource source = context.getSource();
+        MinecraftServer server = source.getServer();
+
+        List<String> aliasSelection = parseAliasTokens(prefixTokens);
+        List<String> workingSuffix = new ArrayList<>(suffixTokens);
+
+        if (aliasSelection.isEmpty() && shouldTreatAsAlias(server, workingSuffix)) {
+            aliasSelection.addAll(parseAliasTokens(workingSuffix));
+            workingSuffix.clear();
+        }
+
+        boolean isAll = containsAllAlias(aliasSelection);
+
+        List<ServerPlayerEntity> bots;
+        if (aliasSelection.isEmpty()) {
+            bots = BotTargetingService.resolve(source, null);
+        } else {
+            bots = BotTargetingService.resolveMany(source, aliasSelection);
+        }
+
+        return executeStopTargets(context, bots, isAll);
+    }
+
+    private static boolean shouldTreatAsAlias(MinecraftServer server, List<String> tokens) {
+        if (tokens == null || tokens.isEmpty()) {
+            return false;
+        }
+        if (tokens.size() > 1) {
+            return true;
+        }
+        String token = tokens.get(0);
+        if ("all".equalsIgnoreCase(token)) {
+            return true;
+        }
+        return server != null && BotTargetingService.isKnownTarget(server, token);
+    }
+
+    private static List<String> parseAliasTokens(List<String> tokens) {
+        List<String> aliases = new ArrayList<>();
+        if (tokens == null || tokens.isEmpty()) {
+            return aliases;
+        }
+        for (String token : tokens) {
+            if (token == null) {
+                continue;
+            }
+            String trimmed = token.trim();
+            if (trimmed.isEmpty()) {
+                continue;
+            }
+            aliases.add(trimmed);
+        }
+        return aliases;
+    }
+
+    private static boolean containsAllAlias(List<String> aliases) {
+        if (aliases == null) {
+            return false;
+        }
+        for (String alias : aliases) {
+            if ("all".equalsIgnoreCase(alias)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static ServerPlayerEntity resolveFollowTarget(ServerCommandSource source, List<String> tokens) throws CommandSyntaxException {
+        if (tokens == null || tokens.isEmpty()) {
+            return source.getPlayer();
+        }
+        String descriptor = tokens.get(0);
+        if (descriptor == null || descriptor.isBlank()) {
+            return source.getPlayer();
+        }
+        String normalized = descriptor.trim();
+        if (normalized.equalsIgnoreCase("me") || normalized.equalsIgnoreCase("self") || normalized.equalsIgnoreCase("you") || normalized.equalsIgnoreCase("player")) {
+            return source.getPlayer();
+        }
+
+        MinecraftServer server = source.getServer();
+        if (server == null) {
+            throw new SimpleCommandExceptionType(Text.literal("Server context unavailable; cannot resolve follow target.")).create();
+        }
+
+        ServerPlayerEntity direct = server.getPlayerManager().getPlayer(normalized);
+        if (direct != null) {
+            return direct;
+        }
+
+        try {
+            List<ServerPlayerEntity> bots = BotTargetingService.resolve(source, normalized);
+            if (bots.size() == 1) {
+                return bots.get(0);
+            }
+        } catch (CommandSyntaxException ignored) {
+        }
+
+        throw new SimpleCommandExceptionType(Text.literal("Could not find follow target '" + normalized + "'.")).create();
+    }
+
+    private static SkillCommandInvocation parseSkillInvocation(ServerCommandSource source, String rawInput) throws CommandSyntaxException {
+        if (rawInput == null || rawInput.isBlank()) {
+            return new SkillCommandInvocation(null, null, false);
+        }
+        MinecraftServer server = source.getServer();
+        if (server == null) {
+            throw new SimpleCommandExceptionType(Text.literal("Command source is not attached to an active server.")).create();
+        }
+        List<String> tokens = new ArrayList<>(Arrays.asList(rawInput.trim().split("\\s+")));
+        boolean each = false;
+        for (Iterator<String> iterator = tokens.iterator(); iterator.hasNext(); ) {
+            String token = iterator.next();
+            if ("each".equalsIgnoreCase(token)) {
+                each = true;
+                iterator.remove();
+            }
+        }
+        String target = null;
+        if (!tokens.isEmpty() && BotTargetingService.isKnownTarget(server, tokens.get(tokens.size() - 1))) {
+            target = tokens.remove(tokens.size() - 1);
+        } else if (!tokens.isEmpty() && BotTargetingService.isKnownTarget(server, tokens.get(0))) {
+            target = tokens.remove(0);
+        }
+        String arguments = tokens.isEmpty() ? null : String.join(" ", tokens);
+        return new SkillCommandInvocation(target, arguments, each);
     }
 
     private static int executeSkill(CommandContext<ServerCommandSource> context, ServerPlayerEntity bot, String skillName, String rawArgs) {
@@ -1424,11 +1907,21 @@ public class modCommandRegistry {
             params.put("options", options);
         }
         ServerCommandSource source = context.getSource();
+        SkillResumeService.recordExecution(bot, skillName, rawArgs, source);
+        UUID botUuid = bot.getUuid();
         SkillContext skillContext = new SkillContext(bot.getCommandSource(), FunctionCallerV2.getSharedState(), params);
         ChatUtils.sendSystemMessage(source, "Starting skill '" + skillName + "'...");
-        CompletableFuture.runAsync(() -> {
+        MinecraftServer server = source.getServer();
+        if (server == null) {
+            ChatUtils.sendSystemMessage(source, "Unable to start skill: server unavailable.");
+            return 0;
+        }
+        skillExecutor.submit(() -> {
             SkillExecutionResult result = SkillManager.runSkill(skillName, skillContext);
-            source.getServer().execute(() -> ChatUtils.sendSystemMessage(source, result.message()));
+            server.execute(() -> {
+                ChatUtils.sendSystemMessage(source, result.message());
+                SkillResumeService.handleCompletion(botUuid, result.success());
+            });
         });
         return 1;
     }
@@ -1436,8 +1929,8 @@ public class modCommandRegistry {
     private static boolean parseAssistMode(String raw) throws CommandSyntaxException {
         String normalized = raw.trim().toLowerCase(Locale.ROOT);
         return switch (normalized) {
-            case "on", "enable", "enabled", "true", "yes", "fight", "assist", "start" -> true;
-            case "off", "disable", "disabled", "false", "no", "stop", "standdown", "standby" -> false;
+            case "on", "enable", "enabled", "true", "yes", "y", "fight", "assist", "start" -> true;
+            case "off", "disable", "disabled", "false", "no", "n", "stop", "standdown", "standby" -> false;
             default -> throw new SimpleCommandExceptionType(Text.literal("Unknown mode '" + raw + "'. Use on/enable or off/disable.")).create();
         };
     }
@@ -1450,6 +1943,8 @@ public class modCommandRegistry {
             default -> throw new SimpleCommandExceptionType(Text.literal("Unknown stance '" + raw + "'. Use aggressive or evasive.")).create();
         };
     }
+
+    private record SkillCommandInvocation(String target, String arguments, boolean each) {}
 
     private static ServerPlayerEntity getActiveBotOrThrow(CommandContext<ServerCommandSource> context) throws CommandSyntaxException {
         ServerPlayerEntity active = BotEventHandler.bot;

@@ -40,6 +40,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import net.shasankp000.AIPlayer;
 import net.shasankp000.network.FakeClientConnection;
+import net.shasankp000.GameAI.services.BotPersistenceService;
 
 // Same as carpet's code for spawning fake players, only difference is that it will work even if the command executor is in offline mode
 
@@ -64,28 +65,23 @@ public class createFakePlayer extends ServerPlayerEntity {
         GameProfile gameProfile = useMojangAuth ? resolver.getProfileByName(username).orElse(null) : null;
 
         Map<String, String> existingBotProfile = AIPlayer.CONFIG.getBotGameProfile();
+        if (existingBotProfile == null) {
+            existingBotProfile = new HashMap<>();
+        }
 
         if (gameProfile == null) {
 
             System.out.println("Existing Bot Profiles: " + existingBotProfile);
 
-            if (!existingBotProfile.containsKey(username) || existingBotProfile.isEmpty()) {
+            if (!existingBotProfile.containsKey(username)) {
                 gameProfile = new GameProfile(UUID.randomUUID(), username);
-                HashMap<String, String> botProfile = new HashMap<>();
-                botProfile.put(gameProfile.name(), gameProfile.id().toString());
+                Map<String, String> updatedProfiles = new HashMap<>(existingBotProfile);
+                updatedProfiles.put(gameProfile.name(), gameProfile.id().toString());
 
                 System.out.println("New GameProfile: " + gameProfile);
 
                 try {
-                    AIPlayer.CONFIG.setBotGameProfile(botProfile);
-
-                    // Save the data to config as strings
-                    Map<String, String> currentBotProfile = new HashMap<>();
-                    for (Map.Entry<String, String> entry : botProfile.entrySet()) {
-                        currentBotProfile.put(entry.getKey(), entry.getValue());
-                    }
-
-                    AIPlayer.CONFIG.setBotGameProfile(currentBotProfile);
+                    AIPlayer.CONFIG.setBotGameProfile(updatedProfiles);
                     AIPlayer.CONFIG.save();
                     System.out.println("Saved data to config");
 
@@ -134,6 +130,7 @@ public class createFakePlayer extends ServerPlayerEntity {
         EntityPosition change = EntityPosition.fromEntity(instance).withRotation((float) yaw, (float) pitch);
         server.getPlayerManager().sendToDimension(new EntityPositionS2CPacket(instance.getId(), change, Set.of(), instance.isOnGround()), dimensionId);
         instance.getAbilities().flying = flying;
+        BotPersistenceService.onBotJoin(instance);
     }
 
 

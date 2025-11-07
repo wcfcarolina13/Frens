@@ -7,6 +7,7 @@ import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
+import net.shasankp000.GameAI.BotActions;
 import net.shasankp000.GameAI.skills.DirtNavigationPolicy;
 import net.shasankp000.GameAI.skills.Skill;
 import net.shasankp000.GameAI.skills.SkillContext;
@@ -52,11 +53,15 @@ public final class DirtShovelSkill implements Skill {
         Set<BlockPos> excluded = extractExcluded(context.parameters());
         BlockPos squareCenter = extractSquareCenter(context.parameters());
         Integer squareRadius = extractSquareRadius(context.parameters());
+        Set<Identifier> targetBlocks = extractTargetBlocks(context.parameters());
+        String harvestLabel = extractHarvestLabel(context.parameters());
+        String preferredTool = extractPreferredTool(context.parameters());
 
+        String label = harvestLabel != null ? harvestLabel : "target";
         try {
-            List<BlockPos> candidates = gatherCandidateDirt(player, horizontalRadius, verticalRange, excluded, squareCenter, squareRadius);
+            List<BlockPos> candidates = gatherCandidateDirt(player, horizontalRadius, verticalRange, excluded, squareCenter, squareRadius, targetBlocks);
             if (candidates.isEmpty()) {
-                return failure(context, "No dirt block detected within radius " + horizontalRadius + ".");
+                return failure(context, "No " + label + " block detected within radius " + horizontalRadius + ".");
             }
 
             for (BlockPos detectedPos : candidates) {
@@ -124,12 +129,13 @@ public final class DirtShovelSkill implements Skill {
                     continue;
                 }
 
+                BotActions.selectBestTool(player, preferredTool, "sword");
                 CompletableFuture<String> miningFuture = CompletableFuture.supplyAsync(() -> {
                     try {
                         return MiningTool.mineBlock(player, detectedPos).get();
                     } catch (Exception e) {
-                        LOGGER.error("Error while mining dirt block", e);
-                        return "⚠️ Failed to shovel dirt: " + e.getMessage();
+                        LOGGER.error("Error while mining harvest block", e);
+                        return "⚠️ Failed to harvest block: " + e.getMessage();
                     }
                 });
 
@@ -149,7 +155,7 @@ public final class DirtShovelSkill implements Skill {
                     result = "Unknown shovel result";
                 }
                 if (player.getEntityWorld().getBlockState(detectedPos).getBlock() != Blocks.AIR) {
-                    LOGGER.warn("Dirt block {} still present after mining", detectedPos);
+                    LOGGER.warn("{} block {} still present after mining", label, detectedPos);
                     if (excluded != null) {
                         excluded.add(detectedPos);
                     }
@@ -179,10 +185,10 @@ public final class DirtShovelSkill implements Skill {
                 return SkillExecutionResult.success(result);
             }
 
-            return failure(context, "No reachable dirt blocks found within radius " + horizontalRadius + ".");
+            return failure(context, "No reachable " + label + " blocks found within radius " + horizontalRadius + ".");
         } catch (Exception e) {
             LOGGER.error("Dirt shovel skill failed", e);
-            return failure(context, "Error while shoveling dirt: " + e.getMessage());
+            return failure(context, "Error while shoveling " + label + ": " + e.getMessage());
         }
     }
 
@@ -230,12 +236,45 @@ public final class DirtShovelSkill implements Skill {
         return null;
     }
 
+    @SuppressWarnings("unchecked")
+    private Set<Identifier> extractTargetBlocks(Map<String, Object> parameters) {
+        if (parameters == null) {
+            return Collections.emptySet();
+        }
+        Object raw = parameters.get("targetBlocks");
+        if (raw instanceof Set<?> rawSet) {
+            try {
+                return (Set<Identifier>) rawSet;
+            } catch (ClassCastException e) {
+                LOGGER.warn("targetBlocks parameter contained unexpected value: {}", rawSet);
+            }
+        }
+        return Collections.emptySet();
+    }
+
+    private String extractHarvestLabel(Map<String, Object> parameters) {
+        if (parameters == null) {
+            return null;
+        }
+        Object label = parameters.get("harvestLabel");
+        return label instanceof String str ? str : null;
+    }
+
+    private String extractPreferredTool(Map<String, Object> parameters) {
+        if (parameters == null) {
+            return "shovel";
+        }
+        Object raw = parameters.get("preferredTool");
+        return raw instanceof String str && !str.isBlank() ? str : "shovel";
+    }
+
     private List<BlockPos> gatherCandidateDirt(ServerPlayerEntity player,
                                                int horizontalRadius,
                                                int verticalRange,
                                                Set<BlockPos> excluded,
                                                BlockPos squareCenter,
-                                               Integer squareRadius) {
+                                               Integer squareRadius,
+                                               Set<Identifier> targetBlocks) {
         BlockPos origin = player.getBlockPos();
         List<BlockPos> candidates = new ArrayList<>();
 
@@ -259,7 +298,7 @@ public final class DirtShovelSkill implements Skill {
                         continue;
                     }
                     BlockState state = player.getEntityWorld().getBlockState(candidate);
-                    if (!isDirtBlock(state)) {
+                    if (!matchesTargetBlock(state, targetBlocks)) {
                         continue;
                     }
                     candidates.add(candidate);
@@ -370,14 +409,24 @@ public final class DirtShovelSkill implements Skill {
                 && isPassable(player, head);
     }
 
-    private boolean isDirtBlock(BlockState state) {
+    private boolean matchesTargetBlock(BlockState state, Set<Identifier> targetBlocks) {
         if (state.isAir()) {
             return false;
         }
-        if (state.isOf(Blocks.DIRT) || state.isOf(Blocks.COARSE_DIRT) || state.isOf(Blocks.ROOTED_DIRT) || state.isOf(Blocks.GRASS_BLOCK)) {
+        Identifier id = Registries.BLOCK.getId(state.getBlock());
+        if (targetBlocks != null && !targetBlocks.isEmpty()) {
+            return id != null && targetBlocks.contains(id);
+        }
+        return isDefaultDirtBlock(state, id);
+    }
+
+    private boolean isDefaultDirtBlock(BlockState state, Identifier id) {
+        if (state.isOf(Blocks.DIRT)
+                || state.isOf(Blocks.COARSE_DIRT)
+                || state.isOf(Blocks.ROOTED_DIRT)
+                || state.isOf(Blocks.GRASS_BLOCK)) {
             return true;
         }
-        Identifier id = Registries.BLOCK.getId(state.getBlock());
         return id != null && id.getPath().contains("dirt");
     }
 
@@ -387,7 +436,10 @@ public final class DirtShovelSkill implements Skill {
                                         int verticalRange,
                                         Set<BlockPos> excluded,
                                         BlockPos squareCenter,
-                                        Integer squareRadius) {
+                                        Integer squareRadius,
+                                        Set<Identifier> targetBlocks,
+                                        String harvestLabel,
+                                        String preferredTool) {
         Map<String, Object> params = new java.util.HashMap<>();
         params.put("searchRadius", horizontalRadius);
         params.put("verticalRange", verticalRange);
@@ -399,6 +451,15 @@ public final class DirtShovelSkill implements Skill {
             params.put("squareCenterY", squareCenter.getY());
             params.put("squareCenterZ", squareCenter.getZ());
             params.put("squareRadius", squareRadius);
+        }
+        if (targetBlocks != null && !targetBlocks.isEmpty()) {
+            params.put("targetBlocks", targetBlocks);
+        }
+        if (harvestLabel != null && !harvestLabel.isBlank()) {
+            params.put("harvestLabel", harvestLabel);
+        }
+        if (preferredTool != null && !preferredTool.isBlank()) {
+            params.put("preferredTool", preferredTool);
         }
         return execute(new SkillContext(source, sharedState, params));
     }

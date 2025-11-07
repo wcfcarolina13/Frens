@@ -14,6 +14,8 @@ import net.shasankp000.Overlay.ThinkingStateManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.Locale;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
@@ -29,11 +31,23 @@ public class LLMServiceHandler {
     private static final String host = "http://localhost:11434";
     public static final OllamaAPI ollamaAPI = new OllamaAPI(host);
     public static boolean isInitialized = false;
+    private static final Map<String, String> BOT_PERSONALITIES = Map.of(
+            "jake", "Jake is a pragmatic field engineer who keeps his answers short, tactical, and grounded in survival priorities.",
+            "bob", "Bob is a dry-humoured veteran ranger who sounds a little weary but dependable, leaning on sardonic quips."
+    );
+    private static final String DEFAULT_PERSONA = "You are an adult adventurer; stay pragmatic, skip cutesy talk, and focus on believable survival chatter.";
+
 
     private static String generateSystemPrompt(String botName) {
 
+        String persona = BOT_PERSONALITIES.getOrDefault(
+                botName != null ? botName.toLowerCase(Locale.ROOT) : "",
+                DEFAULT_PERSONA
+        );
+
         return
                 "You are a Minecraft player named " + botName + " who is connected to Minecraft using a mod. You exist within the Minecraft world and can interact with the player and the environment just like any other player in the game. Your job is to engage in conversations with the player, respond to their questions, offer help, and provide information about the game. Address the player directly and appropriately, responding to their name or as 'Player' if their name is not known. Do not refer to the player as " + botName + ", only address yourself as " + botName + " Keep your responses relevant to Minecraft and make sure to stay in character as a helpful and knowledgeable assistant within the game."
+                        + "\n\nStay in character: " + persona + "\n"
                         +
                         """
                         

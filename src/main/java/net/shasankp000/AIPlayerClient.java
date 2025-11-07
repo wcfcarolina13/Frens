@@ -28,6 +28,10 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.UUID;
 
 public class AIPlayerClient implements ClientModInitializer {
@@ -56,18 +60,42 @@ private static Path getBotProfilePath() {
     }
 
 
-    private static String getBotNameIfMentioned(String message) {
-        String[] words = message.split("\\s+");
+    private static List<String> getMentionedBotNames(String message) {
+        if (message == null || botProfiles == null) {
+            return Collections.emptyList();
+        }
         JsonObject profiles = botProfiles.getAsJsonObject("botGameProfile");
+        if (profiles == null) {
+            return Collections.emptyList();
+        }
+        LinkedHashSet<String> matches = new LinkedHashSet<>();
+        boolean targetAll = false;
+        String[] words = message.split("\\s+");
         for (String word : words) {
             String cleaned = word.replaceAll("[^a-zA-Z0-9]", "").toLowerCase();
+            if (cleaned.isEmpty()) {
+                continue;
+            }
+            if (cleaned.equals("all") || cleaned.equals("everyone")) {
+                targetAll = true;
+            }
             for (String botName : profiles.keySet()) {
                 if (botName.equalsIgnoreCase(cleaned)) {
-                    return botName;
+                    matches.add(botName);
                 }
             }
         }
-        return null;
+        if (targetAll) {
+            matches.clear();
+            for (String botName : profiles.keySet()) {
+                matches.add(botName);
+            }
+        }
+        return new ArrayList<>(matches);
+    }
+
+    private static String getBotNameIfMentioned(String message) {
+        return getMentionedBotNames(message).stream().findFirst().orElse(null);
     }
 
 
@@ -247,39 +275,44 @@ private static Path getBotProfilePath() {
                 return;
             }
 
-            // Normal mention-based flow
-            String botName = getBotNameIfMentioned(message);
-            System.out.println("Mentioned bot name: " + botName);
-            if (botName != null) {
+            // Normal mention-based flow (supports multiple bots + "all")
+            List<String> botNames = getMentionedBotNames(message);
+            System.out.println("Mentioned bots: " + botNames);
+            if (botNames.isEmpty()) {
+                return;
+            }
 
-                switch (llmProvider) {
-                    case "openai", "gpt", "google", "gemini", "anthropic", "claude", "xAI", "xai", "grok":
-                        LLMClient llmClient = LLMClientFactory.createClient(llmProvider);
-
-                        if (llmClient!=null) {
+            switch (llmProvider) {
+                case "openai", "gpt", "google", "gemini", "anthropic", "claude", "xAI", "xai", "grok": {
+                    LLMClient llmClient = LLMClientFactory.createClient(llmProvider);
+                    if (llmClient != null) {
+                        for (String botName : botNames) {
                             LLMServiceHandler.runFromChat(message, botName, playerUUID, llmClient);
                         }
-                        else {
-                            LOGGER.error("Error! Returned client is null! Cannot proceed!");
-                            client.getToastManager().add(
-                                    SystemToast.create(client, SystemToast.Type.CHUNK_LOAD_FAILURE, Text.of("LLM Client factory error."), Text.of("Error! Returned client is null! Cannot proceed!"))
-                            );
-                        }
-                        break;
-
-                    case "ollama":
-                        ollamaClient.runFromChat(botName, message, playerUUID);
-                        break;
-
-                    default:
-                        LOGGER.warn("Unsupported provider detected. Defaulting to Ollama client");
+                    } else {
+                        LOGGER.error("Error! Returned client is null! Cannot proceed!");
                         client.getToastManager().add(
-                                SystemToast.create(client, SystemToast.Type.NARRATOR_TOGGLE, Text.of("Invalid LLM Client."), Text.of("Unsupported provider detected. Defaulting to Ollama client"))
+                                SystemToast.create(client, SystemToast.Type.CHUNK_LOAD_FAILURE, Text.of("LLM Client factory error."), Text.of("Error! Returned client is null! Cannot proceed!"))
                         );
-                        ollamaClient.runFromChat(botName, message, playerUUID);
-                        break;
-
+                    }
+                    break;
                 }
+
+                case "ollama":
+                    for (String botName : botNames) {
+                        ollamaClient.runFromChat(botName, message, playerUUID);
+                    }
+                    break;
+
+                default:
+                    LOGGER.warn("Unsupported provider detected. Defaulting to Ollama client");
+                    client.getToastManager().add(
+                            SystemToast.create(client, SystemToast.Type.NARRATOR_TOGGLE, Text.of("Invalid LLM Client."), Text.of("Unsupported provider detected. Defaulting to Ollama client"))
+                    );
+                    for (String botName : botNames) {
+                        ollamaClient.runFromChat(botName, message, playerUUID);
+                    }
+                    break;
 
             }
         });

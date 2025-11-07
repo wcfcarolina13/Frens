@@ -40,6 +40,10 @@ public class NLPProcessor {
     private static final String LIDSNetExpectedHash = "ad93089b9bfa735d472ab828942541d0d80203dbfd42a3a5bc303a8bc12158e8";
     private static String selectedLM = AIPlayer.CONFIG.getSelectedLanguageModel();
     private static Map<String, String> checkSumFileNameMap = getcheckSumFileNameMap();
+    private static final Set<String> ACTION_KEYWORDS = Set.of(
+            "stop", "collect", "gather", "mine", "follow", "defend", "attack", "escort", "come", "return", "harvest", "dig", "build"
+    );
+    private static final Set<String> BOT_HINTS = Set.of("jake", "bob", "bot", "bots");
 
     public enum Intent {
         REQUEST_ACTION,
@@ -383,6 +387,27 @@ public class NLPProcessor {
 
 
 
+    private static boolean looksLikeDirectCommand(String userPrompt) {
+        if (userPrompt == null) {
+            return false;
+        }
+        String normalized = userPrompt.toLowerCase(Locale.ROOT);
+        boolean mentionsBot = BOT_HINTS.stream().anyMatch(normalized::contains);
+        if (!mentionsBot) {
+            return false;
+        }
+        for (String keyword : ACTION_KEYWORDS) {
+            if (normalized.startsWith(keyword + " ")
+                    || normalized.contains(" " + keyword + " ")
+                    || normalized.contains(keyword + ",")
+                    || normalized.contains(keyword + " me")
+                    || normalized.contains(keyword + " all")) {
+                return true;
+            }
+        }
+        return normalized.startsWith("stop") || normalized.startsWith("come");
+    }
+
     // -------------------------------
     // Primary local prediction entry
     // -------------------------------
@@ -520,8 +545,12 @@ public class NLPProcessor {
             LOGGER.error("Error while resolving the final decision: {}", e.getMessage());
         }
 
-        return Intent.valueOf(decision);
+        Intent resolvedIntent = Intent.valueOf(decision);
+        if (resolvedIntent != Intent.REQUEST_ACTION && looksLikeDirectCommand(userPrompt)) {
+            resolvedIntent = Intent.REQUEST_ACTION;
+        }
 
+        return resolvedIntent;
     }
 
 

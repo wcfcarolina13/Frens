@@ -1,18 +1,22 @@
 package net.shasankp000.GameAI.skills.impl;
 
-import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.command.ServerCommandSource;
-import net.minecraft.server.network.ServerPlayerEntity;
+import net.minecraft.block.Block;
+import net.minecraft.block.Blocks;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.ItemEntity;
-import net.minecraft.server.world.ServerWorld;
 import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
+import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.command.ServerCommandSource;
+import net.minecraft.server.network.ServerPlayerEntity;
+import net.minecraft.server.world.ServerWorld;
+import net.minecraft.util.Identifier;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Direction;
+import net.minecraft.registry.Registries;
 import net.shasankp000.GameAI.skills.ExplorationMovePolicy;
 import net.shasankp000.GameAI.skills.Skill;
 import net.shasankp000.GameAI.skills.SkillContext;
@@ -32,21 +36,21 @@ import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.List;
-import java.util.Map;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-import java.util.Locale;
 import java.util.concurrent.CompletableFuture;
 
-public final class CollectDirtSkill implements Skill {
+public class CollectDirtSkill implements Skill {
 
     private static final int DEFAULT_COUNT = 10;
     private static final int MAX_ATTEMPTS_WITHOUT_PROGRESS = 3;
     private static final long MAX_RUNTIME_MILLIS = 60_000L;
-    private static final int MAX_HORIZONTAL_RADIUS = 16;
+    private static final int MAX_HORIZONTAL_RADIUS = 12;
     private static final int HORIZONTAL_RADIUS_STEP = 2;
     private static final int MAX_VERTICAL_RANGE = 8;
     private static final int VERTICAL_RANGE_STEP = 1;
@@ -54,11 +58,76 @@ public final class CollectDirtSkill implements Skill {
     private static final int EXPLORATION_STEP_VERTICAL = 2;
     private static final double DROP_SEARCH_RADIUS = 6.0;
     private static final int MAX_EXPLORATION_ATTEMPTS_PER_CYCLE = 3;
+    private static final int MAX_STALLED_FAILURES = 5;
     private static final Logger LOGGER = LoggerFactory.getLogger("skill-collect-dirt");
+
+    private final String skillName;
+    private final String harvestLabel;
+    private final Set<Item> trackedItems;
+    private final Set<Identifier> targetBlockIds;
+    private final String preferredTool;
+
+    public CollectDirtSkill() {
+        this(
+                "collect_dirt",
+                "dirt",
+                itemSet(
+                        Items.DIRT,
+                        Items.COARSE_DIRT,
+                        Items.ROOTED_DIRT,
+                        Items.GRASS_BLOCK,
+                        Items.GRAVEL,
+                        Items.SAND,
+                        Items.RED_SAND,
+                        Items.MUD
+                ),
+                blockIds(
+                        Blocks.DIRT,
+                        Blocks.COARSE_DIRT,
+                        Blocks.GRASS_BLOCK,
+                        Blocks.ROOTED_DIRT,
+                        Blocks.PODZOL,
+                        Blocks.MUD,
+                        Blocks.MYCELIUM,
+                        Blocks.GRAVEL,
+                        Blocks.SAND,
+                        Blocks.RED_SAND
+                ),
+                "shovel"
+        );
+    }
+
+    protected CollectDirtSkill(String skillName,
+                               String harvestLabel,
+                               Set<Item> trackedItems,
+                               Set<Identifier> targetBlockIds,
+                               String preferredTool) {
+        this.skillName = skillName;
+        this.harvestLabel = harvestLabel;
+        this.trackedItems = trackedItems;
+        this.targetBlockIds = targetBlockIds;
+        this.preferredTool = preferredTool;
+    }
+
+    protected static Set<Item> itemSet(Item... items) {
+        LinkedHashSet<Item> values = new LinkedHashSet<>();
+        for (Item item : items) {
+            values.add(item);
+        }
+        return Set.copyOf(values);
+    }
+
+    protected static Set<Identifier> blockIds(Block... blocks) {
+        LinkedHashSet<Identifier> ids = new LinkedHashSet<>();
+        for (Block block : blocks) {
+            ids.add(Registries.BLOCK.getId(block));
+        }
+        return Set.copyOf(ids);
+    }
 
     @Override
     public String name() {
-        return "collect_dirt";
+        return skillName;
     }
 
     @Override
@@ -71,8 +140,8 @@ public final class CollectDirtSkill implements Skill {
         ServerCommandSource source = context.botSource();
         ServerPlayerEntity playerForAbortCheck = source.getPlayer();
         if (playerForAbortCheck != null && SkillManager.shouldAbortSkill(playerForAbortCheck)) {
-            LOGGER.warn("collect_dirt aborted before starting due to external cancellation request.");
-            return SkillExecutionResult.failure("collect_dirt paused due to nearby threat.");
+            LOGGER.warn("{} aborted before starting due to external cancellation request.", skillName);
+            return SkillExecutionResult.failure(skillName + " paused due to nearby threat.");
         }
 
         List<String> optionTokens = getOptionTokens(context.parameters());
@@ -88,10 +157,10 @@ public final class CollectDirtSkill implements Skill {
         int verticalBoost = 0;
         Set<BlockPos> unreachable = new HashSet<>();
         int explorationAttempts = 0;
-        int baselineDirtCount = playerForAbortCheck != null ? countInventoryItems(playerForAbortCheck, Items.DIRT) : 0;
-        if (untilMode && baselineDirtCount >= targetCount) {
-            LOGGER.info("collect_dirt: initial inventory already meets requested amount ({} >= {}).", baselineDirtCount, targetCount);
-            return SkillExecutionResult.success("Already holding at least " + targetCount + " dirt blocks.");
+        int baselineHarvestCount = playerForAbortCheck != null ? countInventoryItems(playerForAbortCheck, trackedItems) : 0;
+        if (untilMode && baselineHarvestCount >= targetCount) {
+            LOGGER.info("{}: initial inventory already meets requested amount ({} >= {}).", skillName, baselineHarvestCount, targetCount);
+            return SkillExecutionResult.success("Already holding at least " + targetCount + " " + harvestLabel + " blocks.");
         }
         int inventoryCollected = 0;
         BlockPos squareCenter = null;
@@ -119,8 +188,8 @@ public final class CollectDirtSkill implements Skill {
             ServerPlayerEntity loopPlayer = source.getPlayer();
             if (loopPlayer != null) {
                 if (SkillManager.shouldAbortSkill(loopPlayer)) {
-                    LOGGER.warn("collect_dirt interrupted during iteration {} due to cancellation request.", attempt + 1);
-                    outcome = SkillExecutionResult.failure("collect_dirt paused due to nearby threat.");
+                    LOGGER.warn("{} interrupted during iteration {} due to cancellation request.", skillName, attempt + 1);
+                    outcome = SkillExecutionResult.failure(skillName + " paused due to nearby threat.");
                     break;
                 }
                 List<Entity> nearbyHostiles = AutoFaceEntity.detectNearbyEntities(loopPlayer, 10.0D)
@@ -128,7 +197,7 @@ public final class CollectDirtSkill implements Skill {
                         .filter(EntityUtil::isHostile)
                         .toList();
                 if (!nearbyHostiles.isEmpty()) {
-                    LOGGER.warn("collect_dirt detected {} hostile(s) nearby during iteration {}.", nearbyHostiles.size(), attempt + 1);
+                    LOGGER.warn("{} detected {} hostile(s) nearby during iteration {}.", skillName, nearbyHostiles.size(), attempt + 1);
                     boolean engaged = BotEventHandler.engageImmediateThreats(loopPlayer);
                     if (engaged) {
                         try {
@@ -138,23 +207,23 @@ public final class CollectDirtSkill implements Skill {
                         }
                         continue;
                     }
-                    if (SkillManager.requestSkillPause(loopPlayer, "§cPausing collect_dirt due to nearby threat.")) {
-                        outcome = SkillExecutionResult.failure("collect_dirt paused due to nearby threat.");
+                    if (SkillManager.requestSkillPause(loopPlayer, "§cPausing " + skillName + " due to nearby threat.")) {
+                        outcome = SkillExecutionResult.failure(skillName + " paused due to nearby threat.");
                         break;
                     }
                 }
             }
             if (loopPlayer != null) {
-                int currentCount = countInventoryItems(loopPlayer, Items.DIRT);
-                int effectiveCollected = untilMode ? currentCount : Math.max(0, currentCount - baselineDirtCount);
+                int currentCount = countInventoryItems(loopPlayer, trackedItems);
+                int effectiveCollected = untilMode ? currentCount : Math.max(0, currentCount - baselineHarvestCount);
                 if (effectiveCollected > inventoryCollected) {
                     inventoryCollected = effectiveCollected;
                 }
             }
             collected = Math.max(collected, inventoryCollected);
             if (collected >= targetCount) {
-                LOGGER.info("collect_dirt requirement already satisfied after inventory check ({} / {}).", collected, targetCount);
-                outcome = SkillExecutionResult.success("Collected " + collected + " dirt blocks.");
+                LOGGER.info("{} requirement already satisfied after inventory check ({} / {}).", skillName, collected, targetCount);
+                outcome = SkillExecutionResult.success("Collected " + collected + " " + harvestLabel + " blocks.");
                 break;
             }
 
@@ -162,8 +231,8 @@ public final class CollectDirtSkill implements Skill {
             int effectiveHorizontal = Math.min(horizontalRadius + radiusBoost, MAX_HORIZONTAL_RADIUS);
             int effectiveVertical = Math.min(verticalRange + verticalBoost, MAX_VERTICAL_RANGE);
 
-            LOGGER.info("collect_dirt iteration {} (collected {}/{}, radius={}, vertical={})",
-                    attempt, collected, targetCount, effectiveHorizontal, effectiveVertical);
+            LOGGER.info("{} iteration {} (collected {}/{}, radius={}, vertical={})",
+                    skillName, attempt, collected, targetCount, effectiveHorizontal, effectiveVertical);
 
             if (squareMode && context.sharedState() != null) {
                 SharedStateUtils.setValue(context.sharedState(), "collectDirt.square.radius", effectiveHorizontal);
@@ -178,16 +247,19 @@ public final class CollectDirtSkill implements Skill {
                     effectiveVertical,
                     unreachable,
                     activeSquareCenter,
-                    activeSquareCenter != null ? effectiveHorizontal : null
+                    activeSquareCenter != null ? effectiveHorizontal : null,
+                    targetBlockIds,
+                    harvestLabel,
+                    preferredTool
             );
 
             lastMessage = result.message();
 
             if (result.success()) {
                 if (loopPlayer != null) {
-                    BotActions.selectBestTool(loopPlayer, "shovel", "sword");
-                    int currentCount = countInventoryItems(loopPlayer, Items.DIRT);
-                    int effectiveCollected = untilMode ? currentCount : Math.max(0, currentCount - baselineDirtCount);
+                    BotActions.selectBestTool(loopPlayer, preferredTool, "sword");
+                    int currentCount = countInventoryItems(loopPlayer, trackedItems);
+                    int effectiveCollected = untilMode ? currentCount : Math.max(0, currentCount - baselineHarvestCount);
                     if (effectiveCollected > inventoryCollected) {
                         inventoryCollected = effectiveCollected;
                     }
@@ -201,27 +273,27 @@ public final class CollectDirtSkill implements Skill {
                     SharedStateUtils.setValue(context.sharedState(), "collectDirt.square.radius", effectiveHorizontal);
                 }
                 moveTowardLoot(source, context.sharedState(), activeSquareCenter != null, activeSquareCenter, effectiveHorizontal);
-                LOGGER.info("collect_dirt iteration {} succeeded: {}", attempt, lastMessage);
+                LOGGER.info("{} iteration {} succeeded: {}", skillName, attempt, lastMessage);
             } else {
                 failuresInRow++;
-                LOGGER.warn("collect_dirt iteration {} failed ({} consecutive failures): {}",
-                        attempt, failuresInRow, lastMessage);
+                LOGGER.warn("{} iteration {} failed ({} consecutive failures): {}",
+                        skillName, attempt, failuresInRow, lastMessage);
                 if (isUnreachableFailure(lastMessage)) {
                     BlockPos pending = getPendingTarget(context.sharedState());
                     if (pending != null) {
                         unreachable.add(pending);
-                        LOGGER.debug("Added {} to unreachable dirt targets (size={})", pending, unreachable.size());
+                        LOGGER.debug("Added {} to unreachable {} targets (size={})", pending, harvestLabel, unreachable.size());
                     }
                 }
                 if (shouldExpandSearch(lastMessage) && radiusBoost + horizontalRadius < MAX_HORIZONTAL_RADIUS) {
                     radiusBoost = Math.min(radiusBoost + HORIZONTAL_RADIUS_STEP, MAX_HORIZONTAL_RADIUS - horizontalRadius);
                     verticalBoost = Math.min(verticalBoost + VERTICAL_RANGE_STEP, MAX_VERTICAL_RANGE - verticalRange);
-                    LOGGER.info("collect_dirt expanding search to radius={} vertical={} after message '{}'",
-                            horizontalRadius + radiusBoost, verticalRange + verticalBoost, lastMessage);
+                    LOGGER.info("{} expanding search to radius={} vertical={} after message '{}'",
+                            skillName, horizontalRadius + radiusBoost, verticalRange + verticalBoost, lastMessage);
                 }
                 if (explorationAttempts < MAX_EXPLORATION_ATTEMPTS_PER_CYCLE
                         && shouldTriggerExploration(lastMessage, failuresInRow, collected)) {
-                    LOGGER.info("collect_dirt attempting exploration step after failure '{}'", lastMessage);
+                    LOGGER.info("{} attempting exploration step after failure '{}'", skillName, lastMessage);
                     BlockPos preExplorePos = source.getPlayer() != null ? source.getPlayer().getBlockPos() : null;
                     if (attemptExplorationStep(source, context.sharedState(), activeSquareCenter != null, activeSquareCenter, effectiveHorizontal)) {
                         failuresInRow = 0;
@@ -232,19 +304,27 @@ public final class CollectDirtSkill implements Skill {
                             if (postExplorePos != null && postExplorePos.getSquaredDistance(preExplorePos) > 1) {
                                 int cleared = unreachable.size();
                                 unreachable.clear();
-                                LOGGER.info("collect_dirt exploration cleared {} unreachable targets after relocation", cleared);
+                                LOGGER.info("{} exploration cleared {} unreachable targets after relocation", skillName, cleared);
                             }
                         } else {
                             int cleared = unreachable.size();
                             unreachable.clear();
-                            LOGGER.info("collect_dirt exploration cleared {} unreachable targets after relocation (player lookup unavailable)", cleared);
+                            LOGGER.info("{} exploration cleared {} unreachable targets after relocation (player lookup unavailable)", skillName, cleared);
                         }
-                        LOGGER.info("collect_dirt exploration step succeeded; retrying search.");
+                        LOGGER.info("{} exploration step succeeded; retrying search.", skillName);
                         startTime = System.currentTimeMillis();
                         explorationAttempts = 0;
                         continue;
                     }
                     explorationAttempts++;
+                }
+
+                boolean hitSearchCeiling = horizontalRadius + radiusBoost >= MAX_HORIZONTAL_RADIUS
+                        && verticalRange + verticalBoost >= MAX_VERTICAL_RANGE;
+                if (hitSearchCeiling && failuresInRow >= MAX_STALLED_FAILURES) {
+                    LOGGER.warn("{} giving up after {} stalled attempts at max search range.", skillName, failuresInRow);
+                    outcome = SkillExecutionResult.failure("No reachable " + harvestLabel + " within safe range. Move closer and retry.");
+                    break;
                 }
             }
         }
@@ -252,20 +332,22 @@ public final class CollectDirtSkill implements Skill {
         if (outcome == null) {
             ServerPlayerEntity finalPlayer = source.getPlayer();
             if (finalPlayer != null) {
-                int finalGain = Math.max(0, countInventoryItems(finalPlayer, Items.DIRT) - baselineDirtCount);
+                int finalGain = Math.max(0, countInventoryItems(finalPlayer, trackedItems) - baselineHarvestCount);
                 collected = Math.max(collected, finalGain);
             }
 
             if (collected < targetCount) {
-                String failureMsg = lastMessage.isEmpty() ? "Unable to collect the requested amount of dirt." : lastMessage;
+                String failureMsg = lastMessage.isEmpty()
+                        ? "Unable to collect the requested amount of " + harvestLabel + "."
+                        : lastMessage;
                 failureMsg += " Collected " + collected + " out of " + targetCount + " requested.";
-                LOGGER.warn("collect_dirt finished early with {} dirt gathered after {} attempts (runtime {} ms)",
-                        collected, attempt, System.currentTimeMillis() - startTime);
+                LOGGER.warn("{} finished early with {} {} gathered after {} attempts (runtime {} ms)",
+                        skillName, collected, harvestLabel, attempt, System.currentTimeMillis() - startTime);
                 outcome = SkillExecutionResult.failure(failureMsg);
             } else {
-                String summary = "Collected " + collected + " dirt block" + (collected == 1 ? "" : "s") + ".";
-                LOGGER.info("collect_dirt completed: {} (runtime {} ms, attempts {}, failures in a row {})",
-                        summary, System.currentTimeMillis() - startTime, attempt, failuresInRow);
+                String summary = "Collected " + collected + " " + harvestLabel + " block" + (collected == 1 ? "" : "s") + ".";
+                LOGGER.info("{} completed: {} (runtime {} ms, attempts {}, failures in a row {})",
+                        skillName, summary, System.currentTimeMillis() - startTime, attempt, failuresInRow);
                 outcome = SkillExecutionResult.success(summary);
             }
         }
@@ -283,20 +365,20 @@ public final class CollectDirtSkill implements Skill {
         if (message == null) {
             return false;
         }
-        String normalized = message.toLowerCase();
-        return normalized.contains("no dirt block detected")
-                || normalized.contains("no safe approach")
-                || normalized.contains("failed to reach dirt block")
-                || normalized.contains("too far from dirt block");
+        String normalized = message.toLowerCase(Locale.ROOT);
+        return mentionsHarvestIssue(normalized, "no target block detected")
+                || mentionsHarvestIssue(normalized, "no safe approach")
+                || mentionsHarvestIssue(normalized, "failed to reach target block")
+                || mentionsHarvestIssue(normalized, "too far from target block");
     }
 
     private boolean isUnreachableFailure(String message) {
         if (message == null) {
             return false;
         }
-        String normalized = message.toLowerCase();
-        return normalized.contains("no safe approach")
-                || normalized.contains("too far from dirt block");
+        String normalized = message.toLowerCase(Locale.ROOT);
+        return mentionsHarvestIssue(normalized, "no safe approach")
+                || mentionsHarvestIssue(normalized, "too far from target block");
     }
 
     private boolean shouldTriggerExploration(String message, int failuresInRow, int collected) {
@@ -306,16 +388,35 @@ public final class CollectDirtSkill implements Skill {
         if (message == null || message.isBlank()) {
             return failuresInRow >= 2;
         }
-        String normalized = message.toLowerCase();
-        if (normalized.contains("no dirt block detected")
-                || normalized.contains("no reachable dirt")
-                || normalized.contains("no safe approach")
-                || normalized.contains("failed to reach dirt")
-                || normalized.contains("too far from dirt block")
+        String normalized = message.toLowerCase(Locale.ROOT);
+        if (mentionsHarvestIssue(normalized, "no target block detected")
+                || mentionsHarvestIssue(normalized, "no reachable target")
+                || mentionsHarvestIssue(normalized, "no safe approach")
+                || mentionsHarvestIssue(normalized, "failed to reach target")
+                || mentionsHarvestIssue(normalized, "too far from target block")
                 || normalized.contains("unable to collect")) {
             return true;
         }
         return failuresInRow >= 2 && collected > 0;
+    }
+
+    private boolean mentionsHarvestIssue(String normalized, String phrase) {
+        if (normalized.contains(phrase)) {
+            return true;
+        }
+        if (normalized.contains("dirt") && phrase.contains("target")) {
+            String dirtVariant = phrase.replace("target", "dirt");
+            if (normalized.contains(dirtVariant)) {
+                return true;
+            }
+        }
+        if (harvestLabel != null && !harvestLabel.isBlank() && phrase.contains("target")) {
+            String labelVariant = phrase.replace("target", harvestLabel.toLowerCase(Locale.ROOT));
+            if (normalized.contains(labelVariant)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private BlockPos getPendingTarget(Map<String, Object> sharedState) {
@@ -341,7 +442,7 @@ public final class CollectDirtSkill implements Skill {
         }
         ServerPlayerEntity player = source.getPlayer();
         if (player != null && SkillManager.shouldAbortSkill(player)) {
-            LOGGER.info("collect_dirt loot pickup skipped due to cancellation request.");
+            LOGGER.info("{} loot pickup skipped due to cancellation request.", skillName);
             return;
         }
         Object xObj = SharedStateUtils.getValue(sharedState, "lastShoveledBlock.x");
@@ -376,15 +477,15 @@ public final class CollectDirtSkill implements Skill {
             }
             Optional<MovementService.MovementPlan> planOpt = MovementService.planLootApproach(player, target, movementOptions);
             if (planOpt.isEmpty()) {
-                LOGGER.debug("collect_dirt loot pickup: no movement plan for {}", target);
+                LOGGER.debug("{} loot pickup: no movement plan for {}", skillName, target);
                 continue;
             }
 
             MovementService.MovementPlan plan = planOpt.get();
             MovementService.MovementResult movement = MovementService.execute(source, player, plan);
-            LOGGER.info("collect_dirt loot movement ({}) -> {}", plan.mode(), movement.detail());
+            LOGGER.info("{} loot movement ({}) -> {}", skillName, plan.mode(), movement.detail());
             if (!movement.success()) {
-                LOGGER.info("collect_dirt loot movement failed for {}; issuing targeted sweep.", target);
+                LOGGER.info("{} loot movement failed for {}; issuing targeted sweep.", skillName, target);
                 double sweepRadius = Math.max(4.0D, squareRadius + 1.0D);
                 try {
                     DropSweeper.sweep(
@@ -409,10 +510,10 @@ public final class CollectDirtSkill implements Skill {
 
             double dropDistanceSq = player.getBlockPos().getSquaredDistance(target);
             if (dropDistanceSq > 0.25D) {
-                LOGGER.info("collect_dirt loot pickup: drop at {} still {} blocks away after movement, nudging.", target, String.format("%.2f", Math.sqrt(dropDistanceSq)));
+                LOGGER.info("{} loot pickup: drop at {} still {} blocks away after movement, nudging.", skillName, target, String.format("%.2f", Math.sqrt(dropDistanceSq)));
                 attemptManualNudge(player, target);
             } else {
-                LOGGER.info("collect_dirt loot pickup: arrived within {} blocks of {}", String.format("%.2f", Math.sqrt(dropDistanceSq)), target);
+                LOGGER.info("{} loot pickup: arrived within {} blocks of {}", skillName, String.format("%.2f", Math.sqrt(dropDistanceSq)), target);
             }
 
             moved = true;
@@ -420,7 +521,7 @@ public final class CollectDirtSkill implements Skill {
         }
 
         if (!moved) {
-            LOGGER.info("collect_dirt loot pickup skipped: no navigable destination near {}", lootPos);
+            LOGGER.info("{} loot pickup skipped: no navigable destination near {}", skillName, lootPos);
         }
         if (player != null && !SkillManager.shouldAbortSkill(player)) {
             double sweepRadius = Math.max(DROP_SEARCH_RADIUS, 4.0D);
@@ -451,7 +552,7 @@ public final class CollectDirtSkill implements Skill {
         BlockPos origin = player.getBlockPos();
         List<BlockPos> candidates = gatherExplorationTargets(player, squareMode, squareCenter, squareRadius);
         if (candidates.isEmpty()) {
-            LOGGER.info("collect_dirt exploration: no viable reposition targets near {}", origin);
+            LOGGER.info("{} exploration: no viable reposition targets near {}", skillName, origin);
             return false;
         }
 
@@ -479,7 +580,7 @@ public final class CollectDirtSkill implements Skill {
                 continue;
             }
 
-            if (navigateWithPolicy(source, player, destination, "collect_dirt exploration", squareMode, squareCenter, squareRadius)) {
+            if (navigateWithPolicy(source, player, destination, skillName + " exploration", squareMode, squareCenter, squareRadius)) {
                 if (sharedState != null) {
                     SharedStateUtils.setValue(sharedState, "exploration.lastSuccess.pos", destination);
                     SharedStateUtils.setValue(sharedState, "exploration.lastSuccess.x", destination.getX());
@@ -765,15 +866,18 @@ public final class CollectDirtSkill implements Skill {
         }
     }
 
-    private int countInventoryItems(ServerPlayerEntity player, Item target) {
+    private int countInventoryItems(ServerPlayerEntity player, Set<Item> targets) {
         if (player == null) {
+            return 0;
+        }
+        if (targets == null || targets.isEmpty()) {
             return 0;
         }
         PlayerInventory inventory = player.getInventory();
         int total = 0;
         for (int i = 0; i < inventory.size(); i++) {
             ItemStack stack = inventory.getStack(i);
-            if (stack.isOf(target)) {
+            if (!stack.isEmpty() && targets.contains(stack.getItem())) {
                 total += stack.getCount();
             }
         }

@@ -4,6 +4,7 @@ import net.minecraft.block.BlockState;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.mob.HostileEntity;
+import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.item.BlockItem;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
@@ -115,10 +116,12 @@ public final class BotActions {
         }
         preferKeyword = preferKeyword != null ? preferKeyword.toLowerCase(Locale.ROOT) : null;
         avoidKeyword = avoidKeyword != null ? avoidKeyword.toLowerCase(Locale.ROOT) : null;
-        int bestSlot = -1;
-        boolean preferMatchFound = false;
-        for (int slot = 0; slot < 9; slot++) {
-            ItemStack stack = bot.getInventory().getStack(slot);
+        PlayerInventory inventory = bot.getInventory();
+        int hotbarSize = 9;
+        int fallbackSlot = -1;
+
+        for (int slot = 0; slot < hotbarSize; slot++) {
+            ItemStack stack = inventory.getStack(slot);
             if (stack.isEmpty()) {
                 continue;
             }
@@ -127,18 +130,52 @@ public final class BotActions {
                 continue;
             }
             if (preferKeyword != null && key.contains(preferKeyword)) {
-                bestSlot = slot;
-                preferMatchFound = true;
-                break;
+                selectHotbarSlot(bot, slot);
+                return true;
             }
-            if (!preferMatchFound && bestSlot == -1) {
-                bestSlot = slot;
+            if (fallbackSlot == -1) {
+                fallbackSlot = slot;
             }
         }
-        if (bestSlot != -1) {
-            selectHotbarSlot(bot, bestSlot);
+        if (fallbackSlot != -1 && preferKeyword == null) {
+            selectHotbarSlot(bot, fallbackSlot);
             return true;
         }
+
+        int preferredSlot = -1;
+        for (int slot = hotbarSize; slot < PlayerInventory.MAIN_SIZE; slot++) {
+            ItemStack stack = inventory.getStack(slot);
+            if (stack.isEmpty()) {
+                continue;
+            }
+            String key = stack.getItem().getTranslationKey().toLowerCase(Locale.ROOT);
+            if (avoidKeyword != null && key.contains(avoidKeyword)) {
+                continue;
+            }
+            if (preferKeyword != null && key.contains(preferKeyword)) {
+                preferredSlot = slot;
+                break;
+            }
+            if (preferredSlot == -1 && preferKeyword == null) {
+                preferredSlot = slot;
+            }
+        }
+
+        if (preferredSlot != -1) {
+            int hotbarTarget = findEmptyHotbarSlot(inventory);
+            if (hotbarTarget == -1) {
+                hotbarTarget = fallbackSlot != -1 ? fallbackSlot : 0;
+            }
+            swapInventoryStacks(inventory, preferredSlot, hotbarTarget);
+            selectHotbarSlot(bot, hotbarTarget);
+            return true;
+        }
+
+        if (fallbackSlot != -1) {
+            selectHotbarSlot(bot, fallbackSlot);
+            return true;
+        }
+
         return false;
     }
 
@@ -398,6 +435,26 @@ public final class BotActions {
         }
 
         bot.refreshPositionAndAngles(bot.getX() + dx, bot.getY(), bot.getZ() + dz, bot.getYaw(), bot.getPitch());
+    }
+
+    private static int findEmptyHotbarSlot(PlayerInventory inventory) {
+        for (int i = 0; i < 9; i++) {
+            if (inventory.getStack(i).isEmpty()) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    private static void swapInventoryStacks(PlayerInventory inventory, int from, int to) {
+        if (from == to) {
+            return;
+        }
+        ItemStack fromStack = inventory.getStack(from);
+        ItemStack toStack = inventory.getStack(to);
+        inventory.setStack(from, toStack);
+        inventory.setStack(to, fromStack);
+        inventory.markDirty();
     }
 
     private static void rotate(ServerPlayerEntity bot, float angle) {
