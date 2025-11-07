@@ -63,6 +63,11 @@ Here's where we stand:
 *   **`OreYLevelKnowledge.java`**: Added `import java.util.Optional;` to resolve `Optional` symbol error.
 *   **`CollectDirtSkill.java`**: Removed `isOnSurface(loopPlayer)` from `shovelSkill.perform` call as `diggingDown` is now passed via `SkillContext`.
 
+### 2025-11-07 - Logging for Debugging
+
+*   **/bot inventory command**: Added logging to `modCommandRegistry.java` in `executeInventorySummaryTargets` to show the number of bots resolved and the `targetArg`.
+*   **/bot skill mining**: Added detailed logging to `modCommandRegistry.java` in `executeSkill` to track the parsing of `count`, `targetBlocks`, and `options`.
+
 ### 2025-11-07 - Bug Fixes
 
 *   **Chat LLM Unresponsive**: Added logic to `AIPlayer.java` to process chat messages as commands for the bot, enabling it to respond to natural language commands.
