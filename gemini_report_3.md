@@ -19,9 +19,9 @@
 ## General To-Do List
 
 ### Core Mechanics
-- [ ] Persistent inventory for bots (across sessions, not deaths).
+- [x] Persistent inventory for bots (across sessions, not deaths).
 - [ ] Bot aliases with unique inventories, hunger, sleep, and experience levels.
-- [ ] Bots should be able to safely drop into holes to collect items.
+- [ ] Bots should be able to safely drop into holes to collect items even when teleportation is not enabled.
 - [ ] Individual and group chat with bots.
 - [ ] Bots should resume jobs after respawning or rejoining the server.
 - [ ] Command individual or all bots at once.

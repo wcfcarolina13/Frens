@@ -1409,6 +1409,7 @@ public class modCommandRegistry {
 
     private static int executeInventorySummaryTargets(CommandContext<ServerCommandSource> context, String targetArg) throws CommandSyntaxException {
         List<ServerPlayerEntity> bots = BotTargetingService.resolve(context.getSource(), targetArg);
+        LOGGER.info("Resolved " + bots.size() + " bots for inventory summary with targetArg: " + (targetArg != null ? targetArg : "null"));
         int successes = 0;
         for (ServerPlayerEntity bot : bots) {
             successes += executeInventorySummary(context, bot);
@@ -1885,15 +1886,15 @@ public class modCommandRegistry {
 
     private static int executeSkill(CommandContext<ServerCommandSource> context, ServerPlayerEntity bot, String skillName, String rawArgs) {
         Map<String, Object> params = new HashMap<>();
+        Integer count = null;
+        Set<Identifier> targetBlocks = new HashSet<>();
+        List<String> options = new ArrayList<>();
         if (rawArgs != null && !rawArgs.isBlank()) {
             String[] tokens = rawArgs.trim().split("\\s+");
-            Integer count = null;
-            Set<Identifier> targetBlocks = new HashSet<>();
-            List<String> options = new ArrayList<>();
-
             for (String token : tokens) {
                 try {
                     count = Integer.parseInt(token);
+                    LOGGER.info("Parsed count: " + count);
                     continue;
                 } catch (NumberFormatException ignored) {
                 }
@@ -1901,13 +1902,16 @@ public class modCommandRegistry {
                 Identifier id = Identifier.tryParse(token);
                 if (id != null && Registries.BLOCK.containsId(id)) {
                     targetBlocks.add(id);
+                    LOGGER.info("Parsed target block (direct ID): " + id);
                 } else {
                     // try to prepend minecraft:
                     id = Identifier.tryParse("minecraft:" + token);
                     if (id != null && Registries.BLOCK.containsId(id)) {
                         targetBlocks.add(id);
+                        LOGGER.info("Parsed target block (minecraft: prefix): " + id);
                     } else {
                         options.add(token.toLowerCase(Locale.ROOT));
+                        LOGGER.info("Parsed option: " + token.toLowerCase(Locale.ROOT));
                     }
                 }
             }
@@ -1917,9 +1921,11 @@ public class modCommandRegistry {
             }
             if (!targetBlocks.isEmpty()) {
                 params.put("targetBlocks", targetBlocks);
+                LOGGER.info("Final target blocks in params: " + targetBlocks);
             }
             if (!options.isEmpty()) {
                 params.put("options", options);
+                LOGGER.info("Final options in params: " + options);
             }
         }
         ServerCommandSource source = context.getSource();
