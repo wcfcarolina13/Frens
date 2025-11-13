@@ -144,6 +144,12 @@ I have made the following changes to address these issues:
 [x] Chat inventory summary: `/bot inventory <alias>` prints inventory details in chat.
 [x] Bot item handoff: `/bot give <alias> <item> [count]` — bot drops/throws items to the player with the specified priority rules; missing items yield `I don't have that`. (Verified 2025-11-12)
 [ ] Bot item inventory view: Can interact with bot inventories the way you would a chest.
+    - [ ] Restructure BotInventoryScreen layout so bots have a clear Equipped section (armor, main hand, offhand) and a separate Backpack grid backed by BotMainInventoryView (27-slot chest-like layout).
+    - [ ] Add a visible 9-slot Hotbar row for the bot at the bottom of the inventory UI so players can see and manage the bot's active bar.
+    - [ ] Add slot borders and section headers (Equipped / Backpack / Hotbar) so the bot inventory feels consistent with vanilla player and chest screens.
+    - [ ] Ensure shift-click, double-click, and drag interactions in BotInventoryScreen mirror vanilla chest/player inventory behavior when moving items between player and bot.
+    - [ ] Add optional quick-action buttons in the bot inventory screen (Sort, Equip Best, Take All, Give All) wired to server-side handlers, keeping them disabled or hidden if permissions fail InventoryAccessPolicy checks.
+    - [ ] Wire BotInventoryAccess and InventoryAccessPolicy so opening a bot inventory uses the new chest-like view while still enforcing access rules.
 ## ToDo List
 [ ] Add persistent inventory to the bot, so it'll keep its inventory across game instances and spawning (not not deaths). 
 [ ] Introduce bot aliases (e.g., 'Jake' will have a different inventory, hunger level, sleep level, and experience points level than a different alias such as 'Bob')
