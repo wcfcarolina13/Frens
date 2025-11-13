@@ -30,6 +30,7 @@ public class ConfigManager extends Screen {
     private List<String> allModels;
     private List<String> filteredModels;
 
+
     public ConfigManager(Text title, Screen parent) {
         super(title);
         this.parent = parent;
@@ -38,22 +39,15 @@ public class ConfigManager extends Screen {
     @Override
     protected void init() {
 
-        // added this line so that the models will load immediately after the API key has been entered and saved into the json.
+        // Refresh models from provider so the latest list is always shown
         LOGGER.info("Refreshing model list from provider...");
         AIPlayer.CONFIG.updateModels();
 
-        if (FabricLoader.getInstance().getEnvironmentType().equals(EnvType.CLIENT)) {
-            AIPlayerClient.CONFIG.updateModels();
+        allModels = AIPlayer.CONFIG.getModelList();
+        if (allModels == null) {
+            allModels = new ArrayList<>();
         }
-
-
-        if (FabricLoader.getInstance().getEnvironmentType().equals(EnvType.CLIENT)) {
-            allModels = AIPlayerClient.CONFIG.getModelList();
-        }
-        else {
-            allModels = AIPlayer.CONFIG.getModelList();
-        }
-        LOGGER.info("Fetched {} models from provider on frontend.", allModels.size());
+        LOGGER.info("Fetched {} models from provider on frontend: {}", allModels.size(), allModels);
         filteredModels = new ArrayList<>(allModels);
 
         // Calculate positions
@@ -77,33 +71,58 @@ public class ConfigManager extends Screen {
 
         dropdownMenuWidget = new DropdownMenuWidget(centerX - fieldWidth / 2, dropdownY, fieldWidth, fieldHeight, Text.of("List of available models"), filteredModels);
         this.dropdownMenuWidget = dropdownMenuWidget;
+        // Register dropdown as both drawable and selectable so it can render and receive input correctly
+        this.addDrawableChild(dropdownMenuWidget);
         this.addSelectableChild(dropdownMenuWidget);
 
-        // Bottom buttons - evenly spaced at bottom
-        int buttonY = this.height - 40;
-        int buttonSpacing = buttonWidth + 20;
-        int totalButtonWidth = buttonSpacing * 5 - 20; // 5 buttons with spacing (added reload button)
-        int buttonsStartX = centerX - totalButtonWidth / 2;
+        // Try to pre-select the currently configured model, or fall back to the first entry.
+        // This value is treated as the "default" model for the active provider until the user changes it.
+        String currentSelected = AIPlayer.CONFIG.getSelectedLanguageModel();
+        if (currentSelected != null && filteredModels.contains(currentSelected)) {
+            // Config already has a valid default for this provider; reflect it in the UI.
+            dropdownMenuWidget.setSelectedOption(currentSelected);
+        } else if (!filteredModels.isEmpty()) {
+            // No valid selection in config: choose the first model from the provider list
+            // as the temporary default for this session, and update the in-memory config.
+            String newDefault = filteredModels.get(0);
+            dropdownMenuWidget.setSelectedOption(newDefault);
+            AIPlayer.CONFIG.setSelectedLanguageModel(newDefault);
+            LOGGER.info("No valid selectedLanguageModel in config; using first provider model as session default: {}", newDefault);
+        }
+
+        // Bottom buttons - evenly spaced at bottom, dynamically centered and sized
+        int buttonY = this.height - 40; // vertical padding from bottom
+        int totalButtons = 5;
+        int buttonSpacing = 8;
+        // Compute a button width that fits the screen, with at least a small margin
+        int availableWidth = this.width - 40; // 20px margin on each side
+        int buttonWidthDynamic = (availableWidth - buttonSpacing * (totalButtons - 1)) / totalButtons;
+        if (buttonWidthDynamic < 70) {
+            // If the screen is very narrow, still keep buttons usable
+            buttonWidthDynamic = 70;
+        }
+        int totalButtonWidth = buttonWidthDynamic * totalButtons + buttonSpacing * (totalButtons - 1);
+        int buttonsStartX = (this.width - totalButtonWidth) / 2;
 
         // API Keys Button
         ButtonWidget apiKeysButton = ButtonWidget.builder(
                 Text.of("API Keys"),
                 (btn) -> Objects.requireNonNull(this.client).setScreen(new APIKeysScreen(Text.of("API Keys"), this))
-        ).dimensions(buttonsStartX, buttonY, buttonWidth, fieldHeight).build();
+        ).dimensions(buttonsStartX, buttonY, buttonWidthDynamic, fieldHeight).build();
         this.addDrawableChild(apiKeysButton);
 
         // Reasoning Log Button
         ButtonWidget reasoningButton = ButtonWidget.builder(
                 Text.of("Reasoning Log"),
                 (btn) -> Objects.requireNonNull(this.client).setScreen(new ReasoningLogScreen(this))
-        ).dimensions(buttonsStartX + buttonSpacing, buttonY, buttonWidth, fieldHeight).build();
+        ).dimensions(buttonsStartX + (buttonWidthDynamic + buttonSpacing), buttonY, buttonWidthDynamic, fieldHeight).build();
         this.addDrawableChild(reasoningButton);
 
         // Reload Models Button
         ButtonWidget reloadButton = ButtonWidget.builder(
                 Text.of("Refresh Models"),
                 (btn) -> this.reloadModels()
-        ).dimensions(buttonsStartX + buttonSpacing * 2, buttonY, buttonWidth, fieldHeight).build();
+        ).dimensions(buttonsStartX + 2 * (buttonWidthDynamic + buttonSpacing), buttonY, buttonWidthDynamic, fieldHeight).build();
         this.addDrawableChild(reloadButton);
 
         // Save Button
@@ -114,40 +133,70 @@ public class ConfigManager extends Screen {
                         SystemToast.create(this.client, SystemToast.Type.NARRATOR_TOGGLE,
                                 Text.of("Settings saved!"), Text.of("Saved settings.")));
             }
-        }).dimensions(buttonsStartX + buttonSpacing * 3, buttonY, buttonWidth, fieldHeight).build();
+        }).dimensions(buttonsStartX + 3 * (buttonWidthDynamic + buttonSpacing), buttonY, buttonWidthDynamic, fieldHeight).build();
         this.addDrawableChild(saveButton);
 
         // Close Button
         ButtonWidget closeButton = ButtonWidget.builder(Text.of("Close"), (btn1) -> this.close())
-                .dimensions(buttonsStartX + buttonSpacing * 4, buttonY, buttonWidth, fieldHeight).build();
+                .dimensions(buttonsStartX + 4 * (buttonWidthDynamic + buttonSpacing), buttonY, buttonWidthDynamic, fieldHeight).build();
         this.addDrawableChild(closeButton);
 
-        // Add dropdown to drawable children
-        this.addDrawableChild(dropdownMenuWidget);
     }
 
     private void reloadModels() {
         LOGGER.info("Reloading model list from provider...");
 
-        // Refresh the local model lists
-        LOGGER.info("Reloaded {} models from provider on frontend.", allModels.size());
-        filteredModels = new ArrayList<>(allModels);
+        // Remember the currently selected option in the dropdown so we can try to keep it.
+        String previouslySelected = dropdownMenuWidget != null ? dropdownMenuWidget.getSelectedOption() : null;
 
-        // Update the dropdown with the new models
+        AIPlayer.CONFIG.updateModels();
+        allModels = AIPlayer.CONFIG.getModelList();
+        if (allModels == null) {
+            allModels = new ArrayList<>();
+        }
+
+        filteredModels = new ArrayList<>(allModels);
         dropdownMenuWidget.updateOptions(filteredModels);
 
-        // Show a toast notification
+        // Try to preserve the previous selection if it still exists in the new list.
+        if (previouslySelected != null && filteredModels.contains(previouslySelected)) {
+            dropdownMenuWidget.setSelectedOption(previouslySelected);
+            AIPlayer.CONFIG.setSelectedLanguageModel(previouslySelected);
+            LOGGER.info("Preserved previously selected model after reload: {}", previouslySelected);
+        } else if (!filteredModels.isEmpty()) {
+            // Fall back to the first model if the previous one no longer exists.
+            String newDefault = filteredModels.get(0);
+            dropdownMenuWidget.setSelectedOption(newDefault);
+            AIPlayer.CONFIG.setSelectedLanguageModel(newDefault);
+            LOGGER.info("Previous selection not available; using first provider model as new default after reload: {}", newDefault);
+        } else {
+            // No models at all; clear the selection in config.
+            AIPlayer.CONFIG.setSelectedLanguageModel("");
+            LOGGER.warn("Model list is empty after reload; cleared selectedLanguageModel in config.");
+        }
+
+        LOGGER.info("Reloaded {} models from provider on frontend: {}", allModels.size(), allModels);
+
+        // Show a toast notification with more context
         if (this.client != null) {
+            String subtitle;
+            if (allModels.isEmpty()) {
+                subtitle = "No models found – check your API key or provider settings";
+            } else {
+                String current = AIPlayer.CONFIG.getSelectedLanguageModel();
+                subtitle = "Found " + allModels.size() + " models; default is now: " + (current != null ? current : "None");
+            }
             this.client.getToastManager().add(
                     SystemToast.create(this.client, SystemToast.Type.NARRATOR_TOGGLE,
                             Text.of("Models Reloaded"),
-                            Text.of("Found " + allModels.size() + " models")));
+                            Text.of(subtitle)));
         }
     }
 
     @Override
     public void render(DrawContext context, int mouseX, int mouseY, float delta) {
-        super.render(context, mouseX, mouseY, delta);
+        // Draw a simple dim background without triggering the blur helper
+        context.fill(0, 0, this.width, this.height, 0xB0000000);
 
         // Color scheme
         int titleColor = 0xFFFFFFFF;    // White
@@ -163,25 +212,38 @@ public class ConfigManager extends Screen {
         int titleWidth = this.textRenderer.getWidth(title);
         context.drawText(this.textRenderer, title, centerX - titleWidth / 2, 20, titleColor, true);
 
-        // Search label - above search field
-        context.drawText(this.textRenderer, "Search Models:", centerX - 150, searchField.getY() - 15, labelColor, true);
+        if (searchField != null) {
+            // Search label - above search field
+            context.drawText(this.textRenderer, "Search Models:", centerX - 150, searchField.getY() - 15, labelColor, true);
+        }
 
-        // Model selection label - above dropdown
-        context.drawText(this.textRenderer, "Select Language Model:", centerX - 150, dropdownMenuWidget.getY() - 15, labelColor, true);
+        if (dropdownMenuWidget != null) {
+            // Model selection label - above dropdown
+            context.drawText(this.textRenderer, "Select Language Model:", centerX - 150, dropdownMenuWidget.getY() - 15, labelColor, true);
 
-        // Current selection info - below dropdown
-        String currentModel = AIPlayer.CONFIG.getSelectedLanguageModel();
-        String currentText = "Currently selected: " + (currentModel != null ? currentModel : "None");
-        context.drawText(this.textRenderer, currentText, centerX - 150, dropdownMenuWidget.getY() + 30, infoColor, true);
+            // Current selection and model count info - positioned lower on the screen
+            int infoBaseY = this.height - 120;
+            String currentModel = AIPlayer.CONFIG.getSelectedLanguageModel();
+            String currentText = "Currently selected: " + (currentModel != null ? currentModel : "None");
+            context.drawText(this.textRenderer, currentText, centerX - 150, infoBaseY, infoColor, true);
 
-        // Model count info - below current selection
-        String countText = "Showing " + filteredModels.size() + " of " + allModels.size() + " models";
-        context.drawText(this.textRenderer, countText, centerX - 150, dropdownMenuWidget.getY() + 45, counterColor, true);
+            String countText = "Showing " + filteredModels.size() + " of " + allModels.size() + " models";
+            context.drawText(this.textRenderer, countText, centerX - 150, infoBaseY + 15, counterColor, true);
+
+            if (allModels.isEmpty()) {
+                String warnText = "No models loaded – open API Keys and verify your settings, then click Refresh Models";
+                int warnWidth = this.textRenderer.getWidth(warnText);
+                context.drawText(this.textRenderer, warnText, centerX - warnWidth / 2, infoBaseY + 30, 0xFFFF5555, true);
+            }
+        }
 
         // Help text at bottom
         String helpText = "Search to filter models • Select a model and click Save";
         int helpWidth = this.textRenderer.getWidth(helpText);
         context.drawText(this.textRenderer, helpText, centerX - helpWidth / 2, this.height - 65, hintColor, true);
+
+        // Finally, render all child widgets (dropdown, text field, buttons) on top of the labels
+        super.render(context, mouseX, mouseY, delta);
     }
 
     private void onSearchChanged(String searchText) {
@@ -214,8 +276,8 @@ public class ConfigManager extends Screen {
         }
 
         System.out.println("Selected model: " + modelName);
+        LOGGER.info("Persisting selected model as default for current provider: {}", modelName);
 
-        AIPlayer.CONFIG.setSelectedLanguageModel(modelName);
         AIPlayer.CONFIG.setSelectedLanguageModel(modelName);
         AIPlayer.CONFIG.save();
 
@@ -232,6 +294,4 @@ public class ConfigManager extends Screen {
             this.client.setScreen(this.parent);
         }
     }
-
-
 }

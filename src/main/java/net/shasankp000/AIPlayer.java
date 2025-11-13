@@ -37,20 +37,68 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.util.concurrent.CompletableFuture;
 
+import net.fabricmc.fabric.api.event.player.UseEntityCallback;
+import net.minecraft.screen.ScreenHandlerType;
+import net.minecraft.util.Identifier;
+import net.shasankp000.ui.BotInventoryAccess;
+import net.minecraft.registry.Registry;
+import net.minecraft.registry.Registries;
+import net.minecraft.resource.featuretoggle.FeatureFlags;
+
 public class AIPlayer implements ModInitializer {
 
     public static final Logger LOGGER = LoggerFactory.getLogger("ai-player");
+    public static final String MOD_ID = "ai-player";
+    public static ScreenHandlerType<BotInventoryAccess.BotInventoryScreenHandler> BOT_INV_HANDLER;
     public static final ManualConfig CONFIG = ManualConfig.load();
     public static MinecraftServer serverInstance = null; // default for now
     public static BertModelManager modelManager;
     public static boolean loadedBERTModelIntoMemory = false;
+    private static final java.util.concurrent.ConcurrentHashMap<java.util.UUID, Long> LAST_OPEN_MS = new java.util.concurrent.ConcurrentHashMap<>();
 
     @Override
     public void onInitialize() {
 
+        // ScreenHandler registration for v2 UI
+        BOT_INV_HANDLER = Registry.register(
+                Registries.SCREEN_HANDLER,
+                Identifier.of(MOD_ID, "bot_inventory"),
+                new ScreenHandlerType<>(BotInventoryAccess.BotInventoryScreenHandler::clientFactory, FeatureFlags.VANILLA_FEATURES)
+        );
+
+        UseEntityCallback.EVENT.register((player, world, hand, entity, hit) -> {
+            if (world.isClient()) return net.minecraft.util.ActionResult.PASS;
+            // Only react once (MAIN_HAND). OFF_HAND callback will return PASS to avoid double-fire.
+            if (hand != net.minecraft.util.Hand.MAIN_HAND) return net.minecraft.util.ActionResult.PASS;
+            if (!(entity instanceof net.minecraft.server.network.ServerPlayerEntity bot)) return net.minecraft.util.ActionResult.PASS;
+
+            // Gesture: either empty main hand OR sneaking (to override item-in-hand use)
+            boolean openGesture = player.isSneaking() || player.getMainHandStack().isEmpty();
+            if (!openGesture) return net.minecraft.util.ActionResult.PASS;
+
+            // Simple debounce per bot to prevent rapid re-open/close edge cases
+            long now = System.currentTimeMillis();
+            java.util.UUID key = bot.getUuid();
+            Long last = LAST_OPEN_MS.getOrDefault(key, 0L);
+            if (now - last < 200) return net.minecraft.util.ActionResult.PASS;
+            LAST_OPEN_MS.put(key, now);
+
+            if (!net.shasankp000.GameAI.services.InventoryAccessPolicy
+                    .canOpen((net.minecraft.server.network.ServerPlayerEntity) player, bot)) {
+                return net.minecraft.util.ActionResult.PASS;
+            }
+
+            boolean ok = net.shasankp000.ui.BotInventoryAccess.openFull(
+                    (net.minecraft.server.network.ServerPlayerEntity) player, bot
+            );
+            return ok ? net.minecraft.util.ActionResult.SUCCESS : net.minecraft.util.ActionResult.PASS;
+        });
+
         LOGGER.info("Hello Fabric world!");
 
         LOGGER.debug("Running on environment type: {}", FabricLoader.getInstance().getEnvironmentType());
+
+
 
         String llmProvider = System.getProperty("aiplayer.llmMode", "ollama");
         System.out.println("Using provider: " + llmProvider);
@@ -72,7 +120,11 @@ public class AIPlayer implements ModInitializer {
 
         modCommandRegistry.register();
         configCommand.register();
-        SQLiteDB.createDB();
+        try {
+            SQLiteDB.createDB();
+        } catch (Exception e) {
+            AIPlayer.LOGGER.error("Failed to initialize AI-Player database; running without DB-backed memory.", e);
+        }
         QTableStorage.setupQTableStorage();
 
         CompletableFuture.runAsync(() -> {

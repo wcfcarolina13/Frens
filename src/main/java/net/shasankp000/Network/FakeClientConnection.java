@@ -15,23 +15,56 @@ import java.net.InetSocketAddress;
 /**
  * Minimal ClientConnection used for server-controlled fake players.
  * Mirrors the behaviour that Carpet injected for its fake-player support.
+ *
+ * NOTE:
+ * In production (obfuscated) environments we *cannot* rely on field names like "channel" or "address",
+ * because those names only exist in the deobfuscated dev runtime.
+ * Instead, we reflect by field *type* (Channel / InetSocketAddress), which is stable across mappings.
  */
 public class FakeClientConnection extends ClientConnection {
 
     public FakeClientConnection(NetworkSide side) {
         super(side);
+
+        // Create a dummy Netty channel and loopback address so that any base-class logic
+        // that expects them to be non-null will be satisfied.
         Channel embedded = new EmbeddedChannel();
-        setChannel("channel", embedded);
-        setChannel("address", new InetSocketAddress("127.0.0.1", 0));
+        setFieldOfType(Channel.class, embedded);
+        setFieldOfType(InetSocketAddress.class, new InetSocketAddress("127.0.0.1", 0));
     }
 
-    private void setChannel(String fieldName, Object value) {
+    /**
+     * Sets the first declared field on ClientConnection whose type is assignable
+     * from the given value's class (e.g., Channel, InetSocketAddress).
+     *
+     * This works in both dev (mapped) and production (obfuscated) environments,
+     * since it does not depend on the field *name*.
+     */
+    private void setFieldOfType(Class<?> targetType, Object value) {
         try {
-            Field field = ClientConnection.class.getDeclaredField(fieldName);
-            field.setAccessible(true);
-            field.set(this, value);
+            Field targetField = null;
+
+            for (Field field : ClientConnection.class.getDeclaredFields()) {
+                if (field.getType().isAssignableFrom(targetType)) {
+                    targetField = field;
+                    break;
+                }
+            }
+
+            if (targetField == null) {
+                throw new IllegalStateException(
+                    "Unable to initialize fake client connection: no field of type " + targetType.getName() +
+                    " found on " + ClientConnection.class.getName()
+                );
+            }
+
+            targetField.setAccessible(true);
+            targetField.set(this, value);
         } catch (ReflectiveOperationException e) {
-            throw new IllegalStateException("Unable to initialize fake client connection", e);
+            throw new IllegalStateException(
+                "Unable to initialize fake client connection (failed to set field of type " +
+                targetType.getName() + ")", e
+            );
         }
     }
 

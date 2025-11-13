@@ -50,10 +50,12 @@ import net.shasankp000.PlayerUtils.*;
 import net.shasankp000.GameAI.skills.SkillManager;
 import net.shasankp000.GameAI.services.BotInventoryStorageService;
 import net.shasankp000.GameAI.services.BotTargetingService;
+import net.shasankp000.GameAI.services.InventoryAccessPolicy;
 import net.shasankp000.GameAI.services.SkillResumeService;
 import net.shasankp000.GameAI.services.TaskService;
 import net.shasankp000.GameAI.skills.SkillContext;
 import net.shasankp000.GameAI.skills.SkillExecutionResult;
+import net.shasankp000.ui.BotInventoryAccess;
 import net.shasankp000.FunctionCaller.FunctionCallerV2;
 import net.shasankp000.ServiceLLMClients.LLMClient;
 import net.shasankp000.ServiceLLMClients.LLMServiceHandler;
@@ -63,6 +65,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.*;
+import net.minecraft.entity.ItemEntity;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -72,8 +75,11 @@ import java.util.stream.Collectors;
 
 import net.minecraft.registry.entry.RegistryEntry;
 import net.minecraft.item.Item;
-import net.minecraft.item.ItemStack;
 import net.minecraft.registry.Registries;
+import net.minecraft.util.Identifier;
+import net.minecraft.entity.player.PlayerInventory;
+import net.minecraft.entity.ItemEntity;
+import net.minecraft.util.math.Vec3d;
 import net.minecraft.util.Identifier;
 import net.minecraft.entity.player.PlayerInventory;
 
@@ -114,22 +120,29 @@ public class modCommandRegistry {
                                 .then(CommandManager.argument("bot_name", StringArgumentType.string())
                                         .then(CommandManager.argument("mode", StringArgumentType.string())
                                                 .executes(context -> {
-
+                                                    String botName = StringArgumentType.getString(context, "bot_name");
                                                     String spawnMode = StringArgumentType.getString(context, "mode");
-
-                                                    spawnBot(context, spawnMode);
-
-
-                                                    return 1;
+                                                    try {
+                                                        LOGGER.info("Executing /bot spawn {} {}", botName, spawnMode);
+                                                        spawnBot(context, spawnMode);
+                                                        LOGGER.info("/bot spawn completed successfully for {} {}", botName, spawnMode);
+                                                        return 1;
+                                                    } catch (Exception e) {
+                                                        LOGGER.error("❌ Exception while executing /bot spawn {} {}", botName, spawnMode, e);
+                                                        context.getSource().sendError(Text.literal(
+                                                                "An internal error occurred while running /bot spawn. Check server log for details."
+                                                        ));
+                                                        return 0;
+                                                    }
                                                 })
                                         )
                                 )
                         )
 
                         .then(literal("inventory")
-                                .executes(context -> executeInventorySummaryTargets(context, null))
+                                .executes(context -> executeInventorySummaryTargetsV2(context, null))
                                 .then(CommandManager.argument("target", StringArgumentType.string())
-                                        .executes(context -> executeInventorySummaryTargets(context,
+                                        .executes(context -> executeInventorySummaryTargetsV2(context,
                                                 StringArgumentType.getString(context, "target"))))
                                 .then(literal("count")
                                         .then(CommandManager.argument("item", StringArgumentType.string())
@@ -828,6 +841,86 @@ public class modCommandRegistry {
 
                                 })
                         )
+                        .then(literal("give")
+                                // /bot give <item> [count]
+                                .then(CommandManager.argument("item", StringArgumentType.string())
+                                        .executes(ctx -> executeGive(ctx, null,
+                                                StringArgumentType.getString(ctx, "item"),
+                                                1))
+                                        .then(CommandManager.argument("count", IntegerArgumentType.integer(1))
+                                                .executes(ctx -> executeGive(ctx, null,
+                                                        StringArgumentType.getString(ctx, "item"),
+                                                        IntegerArgumentType.getInteger(ctx, "count"))))
+                                )
+                                // /bot give <bot> <item> [count]
+                                .then(CommandManager.argument("bot", EntityArgumentType.player())
+                                        .then(CommandManager.argument("item", StringArgumentType.string())
+                                                .executes(ctx -> executeGive(ctx,
+                                                        EntityArgumentType.getPlayer(ctx, "bot"),
+                                                        StringArgumentType.getString(ctx, "item"),
+                                                        1))
+                                                .then(CommandManager.argument("count", IntegerArgumentType.integer(1))
+                                                        .executes(ctx -> executeGive(ctx,
+                                                                EntityArgumentType.getPlayer(ctx, "bot"),
+                                                                StringArgumentType.getString(ctx, "item"),
+                                                                IntegerArgumentType.getInteger(ctx, "count"))))
+                                        )
+                                        // /bot give <bot> <player> <item> [count]
+                                        .then(CommandManager.argument("player", EntityArgumentType.player())
+                                                .then(CommandManager.argument("item", StringArgumentType.string())
+                                                        .executes(ctx -> executeGive(
+                                                                ctx,
+                                                                EntityArgumentType.getPlayer(ctx, "bot"),
+                                                                EntityArgumentType.getPlayer(ctx, "player"),
+                                                                StringArgumentType.getString(ctx, "item"),
+                                                                1
+                                                        ))
+                                                        .then(CommandManager.argument("count", IntegerArgumentType.integer(1))
+                                                                .executes(ctx -> executeGive(
+                                                                        ctx,
+                                                                        EntityArgumentType.getPlayer(ctx, "bot"),
+                                                                        EntityArgumentType.getPlayer(ctx, "player"),
+                                                                        StringArgumentType.getString(ctx, "item"),
+                                                                        IntegerArgumentType.getInteger(ctx, "count")
+                                                                ))
+                                                        )
+                                                )
+                                        )
+                                )
+                        )
+                        .then(literal("open")
+                                .then(CommandManager.argument("alias", StringArgumentType.string())
+                                        .executes(ctx -> {
+                                            ServerCommandSource source = ctx.getSource();
+                                            ServerPlayerEntity viewer = source.getPlayer(); // returns null if console; handle below
+                                            if (viewer == null) {
+                                                source.sendError(Text.literal("Run from a player, not console."));
+                                                return 0;
+                                            }
+
+                                            String alias = StringArgumentType.getString(ctx, "alias");
+                                            // Use existing targeting service if available:
+                                            ServerPlayerEntity bot = source.getServer().getPlayerManager().getPlayer(alias);
+                                            if (bot == null) {
+                                                source.sendError(Text.literal("Bot not found: " + alias));
+                                                return 0;
+                                            }
+
+                                            // Ownership / op check (see Section 3)
+                                            if (!InventoryAccessPolicy.canOpen(viewer, bot)) {
+                                                source.sendError(Text.literal("You don't have permission to open this bot's inventory."));
+                                                return 0;
+                                            }
+
+                                            boolean ok = BotInventoryAccess.openMain(viewer, bot);
+                                            if (!ok) {
+                                                source.sendError(Text.literal("Out of range or wrong dimension."));
+                                                return 0;
+                                            }
+                                            return 1;
+                                        })
+                                )
+                        )
                         .then(CommandManager.argument("inline", StringArgumentType.greedyString())
                                 .executes(context -> executeInlineBotCommand(context, StringArgumentType.getString(context, "inline"))))
             );
@@ -850,210 +943,231 @@ public class modCommandRegistry {
 
 
     private static void spawnBot(CommandContext<ServerCommandSource> context, String spawnMode) {
+        try {
+            MinecraftServer server = context.getSource().getServer(); // gets the minecraft server
+            BlockPos spawnPos = getBlockPos(context);
 
-        MinecraftServer server = context.getSource().getServer(); // gets the minecraft server
-        BlockPos spawnPos = getBlockPos(context);
+            RegistryKey<World> dimType = context.getSource().getWorld().getRegistryKey();
 
-        RegistryKey<World> dimType = context.getSource().getWorld().getRegistryKey();
+            Vec2f facing = context.getSource().getRotation();
 
-        Vec2f facing = context.getSource().getRotation();
+            Vec3d pos = new Vec3d(spawnPos.getX(), spawnPos.getY(), spawnPos.getZ());
 
-        Vec3d pos = new Vec3d(spawnPos.getX(), spawnPos.getY(), spawnPos.getZ());
+            GameMode mode = GameMode.SURVIVAL;
 
-        GameMode mode = GameMode.SURVIVAL;
+            botName = StringArgumentType.getString(context, "bot_name");
 
-        botName = StringArgumentType.getString(context, "bot_name");
+            ServerCommandSource serverSource = server.getCommandSource();
 
-        ServerCommandSource serverSource = server.getCommandSource();
+            LOGGER.info("spawnBot starting: botName={}, mode={}, dimType={}, pos={}, facingYaw={}, facingPitch={}",
+                    botName, spawnMode, dimType.getValue(), pos, facing.y, facing.x);
 
-        ServerPlayerEntity existingBot = server.getPlayerManager().getPlayer(botName);
-        if (existingBot != null) {
-            TaskService.forceAbort(existingBot.getUuid(), "§cSpawning bot '" + botName + "'.");
-        }
-
-
-        if (spawnMode.equals("training")) {
-
-            createFakePlayer.createFake(
-                    botName,
-                    server,
-                    pos,
-                    facing.y,
-                    facing.x,
-                    dimType,
-                    mode,
-                    false
-            );
-
-            ServerWorld spawnWorld = server.getWorld(dimType);
-            if (spawnWorld != null) {
-                BotEventHandler.rememberSpawn(spawnWorld, pos.add(0.5, 0, 0.5), facing.y, facing.x);
+            ServerPlayerEntity existingBot = server.getPlayerManager().getPlayer(botName);
+            if (existingBot != null) {
+                LOGGER.info("spawnBot: existing bot {} found, aborting active tasks", botName);
+                TaskService.forceAbort(existingBot.getUuid(), "§cSpawning bot '" + botName + "'.");
             }
 
-            isTrainingMode = true;
+            if (spawnMode.equals("training")) {
 
-            LOGGER.info("Spawned new bot {}!", botName);
+                LOGGER.info("spawnBot: entering training branch for {}", botName);
 
-            ServerPlayerEntity bot = server.getPlayerManager().getPlayer(botName);
+                createFakePlayer.createFake(
+                        botName,
+                        server,
+                        pos,
+                        facing.y,
+                        facing.x,
+                        dimType,
+                        mode,
+                        false
+                );
 
-            if (bot!=null) {
-
-                Objects.requireNonNull(bot.getAttributeInstance(EntityAttributes.KNOCKBACK_RESISTANCE)).setBaseValue(0.0);
-
-                RespawnHandler.registerRespawnListener(bot);
-                BotEventHandler.registerBot(bot);
-
-                AutoFaceEntity.startAutoFace(bot);
-
-            }
-
-            else {
-                ChatUtils.sendSystemMessage(serverSource, "Error: " + botName + " cannot be spawned");
-            }
-
-            // don't initialize ollama client.
-
-        } else if (spawnMode.equals("play")) {
-            isTrainingMode = false;
-            LOGGER.info("Training mode disabled for play spawn.");
-
-            createFakePlayer.createFake(
-                    botName,
-                    server,
-                    pos,
-                    facing.y,
-                    facing.x,
-                    dimType,
-                    mode,
-                    false
-            );
-
-            ServerWorld spawnWorld = server.getWorld(dimType);
-            if (spawnWorld != null) {
-                BotEventHandler.rememberSpawn(spawnWorld, pos.add(0.5, 0, 0.5), facing.y, facing.x);
-            }
-
-
-
-            LOGGER.info("Spawned new bot {}!", botName);
-
-            ServerPlayerEntity bot = server.getPlayerManager().getPlayer(botName);
-
-            System.out.println("Preparing for connection to language model....");
-
-            if (bot!=null) {
-
-                Objects.requireNonNull(bot.getAttributeInstance(EntityAttributes.KNOCKBACK_RESISTANCE)).setBaseValue(0.0);
-
-                System.out.println("Registering respawn listener....");
-
-                RespawnHandler.registerRespawnListener(bot);
-                BotEventHandler.registerBot(bot);
-
-                ollamaClient.botName = botName; // set the bot's name.
-
-                System.out.println("Set bot's username to " + botName);
-
-                String llmProvider = System.getProperty("aiplayer.llmMode", "ollama");
-
-                System.out.println("Using provider");
-
-                switch (llmProvider) {
-                    case "openai", "gpt", "google", "gemini", "anthropic", "claude", "xAI", "xai", "grok", "custom":
-                        LLMClient llmClient = LLMClientFactory.createClient(llmProvider);
-                        assert llmClient != null;
-
-                        ChatUtils.sendSystemMessage(serverSource, "Please wait while " + botName + " connects to " + llmClient.getProvider() + "'s servers.");
-                        LLMServiceHandler.sendInitialResponse(bot.getCommandSource().withSilent().withMaxLevel(4), llmClient);
-
-                        new Thread(() -> {
-                            while (!LLMServiceHandler.isInitialized) {
-                                try {
-                                    Thread.sleep(500L); // Check every 500ms
-                                } catch (InterruptedException e) {
-                                    LOGGER.error("Ollama client initialization interrupted.");
-                                    Thread.currentThread().interrupt();
-                                    break;
-                                }
-                            }
-
-                            //initialization succeeded, continue:
-                            AutoFaceEntity.startAutoFace(bot);
-
-                            Thread.currentThread().interrupt(); // close this thread.
-
-                        }).start();
-
-                        break;
-
-                    case "ollama":
-                        ChatUtils.sendSystemMessage(serverSource, "Please wait while " + botName + " connects to the language model.");
-                        ollamaClient.initializeOllamaClient();
-
-                        new Thread(() -> {
-                            while (!ollamaClient.isInitialized) {
-                                try {
-                                    Thread.sleep(500L); // Check every 500ms
-                                } catch (InterruptedException e) {
-                                    LOGGER.error("Ollama client initialization interrupted.");
-                                    Thread.currentThread().interrupt();
-                                    break;
-                                }
-                            }
-
-                            //initialization succeeded, continue:
-                            ollamaClient.sendInitialResponse(bot.getCommandSource().withSilent().withMaxLevel(4));
-                            AutoFaceEntity.startAutoFace(bot);
-
-                            Thread.currentThread().interrupt(); // close this thread.
-
-                        }).start();
-
-                        break;
-
-                    default:
-                        LOGGER.warn("Unsupported provider detected. Defaulting to Ollama client");
-                        ChatUtils.sendSystemMessage(serverSource, "Warning! Unsupported provider detected. Defaulting to Ollama client");
-                        ChatUtils.sendSystemMessage(serverSource, "Please wait while " + botName + " connects to the language model.");
-                        ollamaClient.initializeOllamaClient();
-
-                        new Thread(() -> {
-                            while (!ollamaClient.isInitialized) {
-                                try {
-                                    Thread.sleep(500L); // Check every 500ms
-                                } catch (InterruptedException e) {
-                                    LOGGER.error("Ollama client initialization interrupted.");
-                                    Thread.currentThread().interrupt();
-                                    break;
-                                }
-                            }
-
-                            //initialization succeeded, continue:
-                            ollamaClient.sendInitialResponse(bot.getCommandSource().withSilent().withMaxLevel(4));
-                            AutoFaceEntity.startAutoFace(bot);
-
-                            Thread.currentThread().interrupt(); // close this thread.
-
-                        }).start();
-
-                        break;
-
+                ServerWorld spawnWorld = server.getWorld(dimType);
+                if (spawnWorld != null) {
+                    LOGGER.info("spawnBot: remembering spawn for training bot {}", botName);
+                    BotEventHandler.rememberSpawn(spawnWorld, pos.add(0.5, 0, 0.5), facing.y, facing.x);
                 }
 
+                isTrainingMode = true;
+
+                LOGGER.info("Spawned new training bot {}!", botName);
+
+                ServerPlayerEntity bot = server.getPlayerManager().getPlayer(botName);
+
+                if (bot != null) {
+
+                    Objects.requireNonNull(bot.getAttributeInstance(EntityAttributes.KNOCKBACK_RESISTANCE)).setBaseValue(0.0);
+
+                    RespawnHandler.registerRespawnListener(bot);
+                    BotEventHandler.registerBot(bot);
+
+                    AutoFaceEntity.startAutoFace(bot);
+
+                } else {
+                    LOGGER.error("spawnBot: training bot {} was not found after createFake", botName);
+                    ChatUtils.sendSystemMessage(serverSource, "Error: " + botName + " cannot be spawned");
+                }
+
+                // don't initialize ollama client for training mode.
+
+            } else if (spawnMode.equals("play")) {
+                LOGGER.info("spawnBot: entering play branch for {}", botName);
+
+                isTrainingMode = false;
+                LOGGER.info("Training mode disabled for play spawn.");
+
+                LOGGER.info("About to call createFakePlayer.createFake for play bot {}", botName);
+                createFakePlayer.createFake(
+                        botName,
+                        server,
+                        pos,
+                        facing.y,
+                        facing.x,
+                        dimType,
+                        mode,
+                        false
+                );
+                LOGGER.info("Returned from createFakePlayer.createFake for play bot {}", botName);
+
+                ServerWorld spawnWorld = server.getWorld(dimType);
+                if (spawnWorld != null) {
+                    LOGGER.info("spawnBot: remembering spawn for play bot {}", botName);
+                    BotEventHandler.rememberSpawn(spawnWorld, pos.add(0.5, 0, 0.5), facing.y, facing.x);
+                }
+
+                LOGGER.info("Spawned new bot {}!", botName);
+
+                ServerPlayerEntity bot = server.getPlayerManager().getPlayer(botName);
+
+                System.out.println("Preparing for connection to language model....");
+
+                if (bot != null) {
+
+                    Objects.requireNonNull(bot.getAttributeInstance(EntityAttributes.KNOCKBACK_RESISTANCE)).setBaseValue(0.0);
+
+                    System.out.println("Registering respawn listener....");
+
+                    RespawnHandler.registerRespawnListener(bot);
+                    BotEventHandler.registerBot(bot);
+
+                    ollamaClient.botName = botName; // set the bot's name.
+
+                    System.out.println("Set bot's username to " + botName);
+
+                    String llmProvider = System.getProperty("aiplayer.llmMode", "ollama");
+
+                    System.out.println("Using provider: " + llmProvider);
+
+                    switch (llmProvider) {
+                        case "openai", "gpt", "google", "gemini", "anthropic", "claude", "xAI", "xai", "grok", "custom" -> {
+                            LLMClient llmClient = LLMClientFactory.createClient(llmProvider);
+                            if (llmClient == null) {
+                                LOGGER.error("spawnBot: LLMClientFactory returned null for provider {}", llmProvider);
+                                ChatUtils.sendSystemMessage(serverSource,
+                                        "Error: Failed to initialize language model client for provider " + llmProvider + ".");
+                                return;
+                            }
+
+                            ChatUtils.sendSystemMessage(serverSource,
+                                    "Please wait while " + botName + " connects to " + llmClient.getProvider() + "'s servers.");
+                            LLMServiceHandler.sendInitialResponse(bot.getCommandSource().withSilent().withMaxLevel(4), llmClient);
+
+                            new Thread(() -> {
+                                try {
+                                    while (!LLMServiceHandler.isInitialized) {
+                                        try {
+                                            Thread.sleep(500L); // Check every 500ms
+                                        } catch (InterruptedException e) {
+                                            LOGGER.error("LLM service initialization interrupted.", e);
+                                            Thread.currentThread().interrupt();
+                                            return;
+                                        }
+                                    }
+
+                                    // initialization succeeded, continue:
+                                    AutoFaceEntity.startAutoFace(bot);
+                                } catch (Exception e) {
+                                    LOGGER.error("Error in LLM initialization thread for bot {}", botName, e);
+                                }
+                            }, "LLM-Init-" + botName).start();
+                        }
+
+                        case "ollama" -> {
+                            ChatUtils.sendSystemMessage(serverSource,
+                                    "Please wait while " + botName + " connects to the language model.");
+                            ollamaClient.initializeOllamaClient();
+
+                            new Thread(() -> {
+                                try {
+                                    while (!ollamaClient.isInitialized) {
+                                        try {
+                                            Thread.sleep(500L); // Check every 500ms
+                                        } catch (InterruptedException e) {
+                                            LOGGER.error("Ollama client initialization interrupted.", e);
+                                            Thread.currentThread().interrupt();
+                                            return;
+                                        }
+                                    }
+
+                                    // initialization succeeded, continue:
+                                    ollamaClient.sendInitialResponse(bot.getCommandSource().withSilent().withMaxLevel(4));
+                                    AutoFaceEntity.startAutoFace(bot);
+                                } catch (Exception e) {
+                                    LOGGER.error("Error in Ollama initialization thread for bot {}", botName, e);
+                                }
+                            }, "Ollama-Init-" + botName).start();
+                        }
+
+                        default -> {
+                            LOGGER.warn("Unsupported provider detected: {}. Defaulting to Ollama client", llmProvider);
+                            ChatUtils.sendSystemMessage(serverSource,
+                                    "Warning! Unsupported provider detected. Defaulting to Ollama client");
+                            ChatUtils.sendSystemMessage(serverSource,
+                                    "Please wait while " + botName + " connects to the language model.");
+                            ollamaClient.initializeOllamaClient();
+
+                            new Thread(() -> {
+                                try {
+                                    while (!ollamaClient.isInitialized) {
+                                        try {
+                                            Thread.sleep(500L); // Check every 500ms
+                                        } catch (InterruptedException e) {
+                                            LOGGER.error("Ollama client initialization interrupted.", e);
+                                            Thread.currentThread().interrupt();
+                                            return;
+                                        }
+                                    }
+
+                                    // initialization succeeded, continue:
+                                    ollamaClient.sendInitialResponse(bot.getCommandSource().withSilent().withMaxLevel(4));
+                                    AutoFaceEntity.startAutoFace(bot);
+                                } catch (Exception e) {
+                                    LOGGER.error("Error in Ollama initialization thread (default case) for bot {}", botName, e);
+                                }
+                            }, "Ollama-Init-" + botName).start();
+                        }
+                    }
+
+                } else {
+                    LOGGER.error("spawnBot: play bot {} was not found after createFake", botName);
+                    ChatUtils.sendSystemMessage(serverSource, "Error: " + botName + " cannot be spawned");
+                }
+
+            } else {
+                LOGGER.warn("spawnBot: invalid spawn mode '{}' for bot {}", spawnMode, botName);
+                ChatUtils.sendSystemMessage(serverSource, "Invalid spawn mode!");
+                ChatUtils.sendSystemMessage(serverSource,
+                        "Usage: /bot spawn <your bot's name> <spawnMode: training or play>");
             }
 
-
-            else {
-                ChatUtils.sendSystemMessage(serverSource, "Error: " + botName + " cannot be spawned");
-            }
-
+        } catch (Exception e) {
+            LOGGER.error("❌ Fatal error inside spawnBot for /bot spawn {} {}", botName, spawnMode, e);
+            context.getSource().sendError(Text.literal(
+                    "Internal error during bot spawn (see server log)."
+            ));
+            throw e;
         }
-        else {
-            ChatUtils.sendSystemMessage(serverSource, "Invalid spawn mode!");
-            ChatUtils.sendSystemMessage(serverSource, "Usage: /bot spawn <your bot's name> <spawnMode: training or play>");
-        }
-
-
     }
 
 
@@ -1216,23 +1330,337 @@ public class modCommandRegistry {
         ServerPlayerEntity finalBot = bot;
 
         server.execute(() -> {
-            // ✅ Calculate the path (PathNode version)
-            List<PathFinder.PathNode> rawPath = PathFinder.calculatePath(finalBot.getBlockPos(), new BlockPos(x_distance, y_distance, z_distance), world);
+            try {
+                // ✅ Calculate the path (PathNode version)
+                List<PathFinder.PathNode> rawPath = PathFinder.calculatePath(finalBot.getBlockPos(), new BlockPos(x_distance, y_distance, z_distance), world);
 
-            // ✅ Simplify + filter
-            List<PathFinder.PathNode> finalPath = PathFinder.simplifyPath(rawPath, world);
+                // ✅ Simplify + filter
+                List<PathFinder.PathNode> finalPath = PathFinder.simplifyPath(rawPath, world);
 
-            LOGGER.info("Path output: {}", finalPath);
+                LOGGER.info("Path output: {}", finalPath);
 
-            Queue<Segment> segments = convertPathToSegments(finalPath, sprint);
+                Queue<Segment> segments = convertPathToSegments(finalPath, sprint);
 
-            LOGGER.info("Generated segments: {}", segments);
+                LOGGER.info("Generated segments: {}", segments);
 
 
-            // ✅ Trace the path — your tracePath now expects PathNode
-            PathTracer.tracePath(server, botSource, botName, segments, sprint);
-
+                // ✅ Trace the path — your tracePath now expects PathNode
+                PathTracer.tracePath(server, botSource, botName, segments, sprint);
+            } catch (Exception e) {
+                LOGGER.error("An unexpected error occurred in /bot go_to command", e);
+                ChatUtils.sendChatMessages(server.getCommandSource(), "An unexpected error occurred trying to execute that command.");
+            }
         });
+    }
+
+    /**
+     * Formats a single ItemStack for chat, including durability if applicable.
+     */
+    private static String formatItemForChat(ItemStack stack) {
+        if (stack == null || stack.isEmpty()) {
+            return "EMPTY";
+        }
+        String name = stack.getName().getString();
+        int count = stack.getCount();
+
+        // Durability (if damageable)
+        try {
+            if (stack.isDamageable()) {
+                int max = stack.getMaxDamage();
+                int dmg = stack.getDamage();
+                int remaining = Math.max(0, max - dmg);
+                int pct = max > 0 ? Math.round((remaining * 100f) / max) : 100;
+                return name + " ×" + count + " (" + pct + "%)";
+            }
+        } catch (Throwable ignored) {
+            // Be defensive against mapping/version differences
+        }
+        return name + " ×" + count;
+    }
+
+    /**
+     * Sends lines to chat in pages to avoid overflow.
+     */
+    private static void sendPaged(ServerCommandSource source, String header, java.util.List<String> lines) {
+        final int PAGE = 12;
+        if (lines == null || lines.isEmpty()) {
+            ChatUtils.sendChatMessages(source, header + "\n(empty)");
+            return;
+        }
+        int total = lines.size();
+        int pages = (total + PAGE - 1) / PAGE;
+        for (int p = 0; p < pages; p++) {
+            int from = p * PAGE;
+            int to = Math.min(from + PAGE, total);
+            StringBuilder sb = new StringBuilder();
+            if (p == 0) {
+                sb.append(header).append("\n");
+            } else {
+                sb.append(header).append(" (continued)\n");
+            }
+            for (int i = from; i < to; i++) {
+                sb.append(lines.get(i));
+                if (i + 1 < to) sb.append("\n");
+            }
+            ChatUtils.sendChatMessages(source.withSilent().withMaxLevel(4), sb.toString());
+        }
+    }
+
+
+
+    // === Inventory summary to chat (V2, MC 1.21-safe) ===
+    private static int executeInventorySummaryTargetsV2(
+            com.mojang.brigadier.context.CommandContext<net.minecraft.server.command.ServerCommandSource> context,
+            String targetArg
+    ) {
+        net.minecraft.server.command.ServerCommandSource source = context.getSource();
+        net.minecraft.server.network.ServerPlayerEntity bot;
+
+        try {
+            if (targetArg == null || targetArg.isBlank()) {
+                bot = getActiveBotOrThrow(context);
+            } else {
+                bot = source.getServer().getPlayerManager().getPlayer(targetArg);
+            }
+        } catch (Exception e) {
+            source.sendError(net.minecraft.text.Text.literal("No active bot selected."));
+            return 0;
+        }
+
+        if (bot == null) {
+            source.sendError(net.minecraft.text.Text.literal(
+                    "Bot" + (targetArg != null ? " '" + targetArg + "'" : "") + " not found."));
+            return 0;
+        }
+
+        net.minecraft.entity.player.PlayerInventory inv = bot.getInventory();
+        java.util.List<String> lines = new java.util.ArrayList<>();
+
+        // Hotbar (only non-empty, labelled 1..9)
+        lines.add("§6Hotbar§r");
+        boolean anyHotbar = false;
+        for (int i = 0; i < 9; i++) {
+            net.minecraft.item.ItemStack s = inv.getStack(i);
+            if (!s.isEmpty()) {
+                lines.add(" " + (i + 1) + ": " + formatItemForChat(s));
+                anyHotbar = true;
+            }
+        }
+        if (!anyHotbar) {
+            lines.add(" (empty)");
+        }
+
+        // Main (non-empty only)
+        java.util.List<String> main = new java.util.ArrayList<>();
+        for (int i = 9; i <= 35; i++) {
+            net.minecraft.item.ItemStack s = inv.getStack(i);
+            if (!s.isEmpty()) {
+                main.add(formatItemForChat(s));
+            }
+        }
+        if (!main.isEmpty()) {
+            lines.add("§6Main§r");
+            lines.addAll(main);
+        }
+
+        // Armor (1.21-safe via getEquippedStack)
+        lines.add("§6Armor§r");
+        net.minecraft.item.ItemStack head  = bot.getEquippedStack(net.minecraft.entity.EquipmentSlot.HEAD);
+        net.minecraft.item.ItemStack chest = bot.getEquippedStack(net.minecraft.entity.EquipmentSlot.CHEST);
+        net.minecraft.item.ItemStack legs  = bot.getEquippedStack(net.minecraft.entity.EquipmentSlot.LEGS);
+        net.minecraft.item.ItemStack feet  = bot.getEquippedStack(net.minecraft.entity.EquipmentSlot.FEET);
+        lines.add(" Head:  " + (head.isEmpty()  ? "-" : formatItemForChat(head)));
+        lines.add(" Chest: " + (chest.isEmpty() ? "-" : formatItemForChat(chest)));
+        lines.add(" Legs:  " + (legs.isEmpty()  ? "-" : formatItemForChat(legs)));
+        lines.add(" Feet:  " + (feet.isEmpty()  ? "-" : formatItemForChat(feet)));
+
+        // Offhand
+        net.minecraft.item.ItemStack off = bot.getOffHandStack();
+        lines.add("§6Offhand§r " + (off.isEmpty() ? "-" : formatItemForChat(off)));
+
+        String header = "Inventory for " + bot.getName().getString();
+        sendPaged(source, header, lines);
+        return 1;
+    }
+
+    /**
+     * Compatibility overload for command bindings that pass an explicit recipient.
+     * Delegates to the 4-arg version (recipient = invoking player).
+     */
+    private static int executeGive(CommandContext<ServerCommandSource> context,
+                                 ServerPlayerEntity explicitBot,
+                                 ServerPlayerEntity explicitRecipient,
+                                 String itemQuery,
+                                 int requestedCount) {
+        ServerCommandSource source = context.getSource();
+        MinecraftServer server = source.getServer();
+        ServerWorld world = source.getWorld();
+
+        ServerPlayerEntity bot;
+        try {
+            bot = (explicitBot != null) ? explicitBot : getActiveBotOrThrow(context);
+        } catch (Exception e) {
+            source.sendError(Text.literal("No active bot selected."));
+            return 0;
+        }
+        if (bot == null) {
+            source.sendError(Text.literal("Bot not found."));
+            return 0;
+        }
+
+        ServerPlayerEntity recipient = explicitRecipient;
+        if (recipient == null) {
+            try {
+                recipient = source.getPlayer();
+            } catch (Exception e) {
+                // This can happen from console, handled by the next check
+            }
+        }
+        if (recipient == null) {
+            source.sendError(Text.literal("Specify a player when running from console/command blocks."));
+            return 0;
+        }
+
+
+        if (itemQuery == null || itemQuery.isBlank()) {
+            ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withMaxLevel(4),
+                    "You need to specify an item id, e.g., iron_ingot");
+            return 0;
+        }
+
+        Item item = resolveItemFromQuery(itemQuery);
+        if (item == null || item == Items.AIR) {
+            ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withMaxLevel(4),
+                    "I don't recognize that item.");
+            return 0;
+        }
+
+        if (requestedCount <= 0) {
+            requestedCount = 1;
+        }
+
+        PlayerInventory inv = bot.getInventory();
+        List<Integer> candidateSlots = new ArrayList<>();
+        for (int slot = 0; slot < inv.size(); slot++) {
+            if (!inv.getStack(slot).isEmpty() && inv.getStack(slot).isOf(item)) {
+                candidateSlots.add(slot);
+            }
+        }
+
+        if (candidateSlots.isEmpty()) {
+            ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withMaxLevel(4), "I don't have that");
+            return 1;
+        }
+
+        // Sort by: main (0) -> offhand (1) -> hotbar (2), then most damaged first
+        candidateSlots.sort(Comparator.comparingInt((Integer slot) -> {
+            if (slot >= 9 && slot <= 35) return 0; // Main inventory
+            if (slot == 40) return 1; // Offhand
+            if (slot >= 0 && slot <= 8) return 2; // Hotbar
+            return 3; // Armor/other
+        }).thenComparing((a, b) -> {
+            ItemStack sa = inv.getStack(a);
+            ItemStack sb = inv.getStack(b);
+            if (sa.isDamageable() && sb.isDamageable()) {
+                return Integer.compare(sb.getDamage(), sa.getDamage()); // Higher damage first
+            }
+            return 0;
+        }));
+
+        int remaining = requestedCount;
+        List<ItemStack> removed = new ArrayList<>();
+        for (int slot : candidateSlots) {
+            if (remaining <= 0) break;
+            ItemStack cur = inv.getStack(slot);
+            if (cur.isEmpty() || cur.getItem() != item) continue;
+
+            int take = Math.min(remaining, cur.getCount());
+            ItemStack part = inv.removeStack(slot, take);
+            if (!part.isEmpty()) {
+                removed.add(part);
+                remaining -= part.getCount();
+            }
+        }
+
+        if (removed.isEmpty()) {
+            ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withMaxLevel(4), "I don't have that");
+            return 1;
+        }
+
+        int totalGiven = 0;
+        final ServerPlayerEntity finalRecipient = recipient;
+        for (ItemStack stackToDrop : removed) {
+            totalGiven += stackToDrop.getCount();
+            // Drop with owner set to prevent bot re-pickup
+            ItemEntity itemEntity = bot.dropItem(stackToDrop, false, true);
+            if (itemEntity != null) {
+                itemEntity.setOwner(finalRecipient.getUuid());
+                itemEntity.setPickupDelay(40); // Standard delay so player can get it
+                // Throw it towards the player
+                Vec3d dir = new Vec3d(finalRecipient.getX(), finalRecipient.getEyeY(), finalRecipient.getZ())
+                        .subtract(bot.getX(), bot.getEyeY(), bot.getZ()).normalize();
+                itemEntity.setVelocity(dir.multiply(0.35));
+            } else {
+                // Fallback for safety, though dropItem should rarely be null for a valid stack
+                ItemEntity fallbackEntity = new ItemEntity(world, bot.getX(), bot.getEyeY() - 0.3, bot.getZ(), stackToDrop);
+                fallbackEntity.setOwner(finalRecipient.getUuid());
+                fallbackEntity.setPickupDelay(40);
+                Vec3d dir = new Vec3d(finalRecipient.getX(), finalRecipient.getEyeY(), finalRecipient.getZ())
+                        .subtract(bot.getX(), bot.getEyeY(), bot.getZ()).normalize();
+                fallbackEntity.setVelocity(dir.multiply(0.35));
+                world.spawnEntity(fallbackEntity);
+            }
+        }
+
+        String itemName = removed.get(0).getName().getString();
+        ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withMaxLevel(4),
+                "Gave " + totalGiven + " × " + itemName + " to " + recipient.getName().getString());
+
+        return totalGiven;
+    }
+
+    /**
+     * /bot give [<bot>] <item> [count]
+     *
+     * Spec:
+     * - Target recipient is always the command sender (a real player). If run from console/command blocks, error.
+     * - Item resolution:
+     *     - Accepts full or short identifiers, e.g., "minecraft:iron_ingot" or "iron_ingot".
+     *     - Case-insensitive; falls back to "minecraft:" when no namespace is provided.
+     * - Selection policy when removing from bot's inventory:
+     *     1) Prefer MAIN inventory (slots 9..35). HOTBAR (0..8) is lowest priority.
+     *     2) Within the same area, prefer the most damaged stacks first (for damageable items).
+     *     3) Otherwise, by slot order.
+     * - Behavior:
+     *     - If the bot lacks the item: bot says "I don't have that".
+     *     - Otherwise remove up to [count] (default 1) and throw/drop the items toward the player.
+     *     - If [count] exceeds availability, give what is available.
+     */
+    private static int executeGive(CommandContext<ServerCommandSource> context,
+                                 ServerPlayerEntity explicitBot,
+                                 String itemQuery,
+                                 int requestedCount) {
+        ServerCommandSource source = context.getSource();
+        ServerPlayerEntity recipient = null;
+        try { recipient = source.getPlayer(); } catch (Exception ignored) {}
+        if (recipient == null) {
+            source.sendError(Text.literal("Specify a player when running from console/command blocks."));
+            return 0;
+        }
+        return executeGive(context, explicitBot, recipient, itemQuery, requestedCount);
+    }
+
+    /**
+     * Resolve a user query like "minecraft:iron_ingot" or "iron_ingot" to an Item.
+     */
+    private static Item resolveItemFromQuery(String query) {
+        if (query == null) return null;
+        String q = query.trim().toLowerCase(Locale.ROOT);
+        Identifier id = q.contains(":") ? Identifier.tryParse(q) : Identifier.tryParse("minecraft:" + q);
+        if (id != null && Registries.ITEM.containsId(id)) {
+            return Registries.ITEM.get(id);
+        }
+        return null;
     }
 
 
@@ -1304,15 +1732,49 @@ public class modCommandRegistry {
             giveStack(bot, withEnchantments(registryManager, Items.NETHERITE_SHOVEL.getDefaultStack(),
                     new int[]{5, 3},
                     (RegistryKey<Enchantment>[]) new RegistryKey[]{Enchantments.EFFICIENCY, Enchantments.UNBREAKING}));
+            // --- Additional "good" tools for testing: second copies + hoe ---
+            giveStack(bot, withEnchantments(registryManager, Items.NETHERITE_PICKAXE.getDefaultStack(),
+                    new int[]{5, 3, 1},
+                    (RegistryKey<Enchantment>[]) new RegistryKey[]{Enchantments.EFFICIENCY, Enchantments.UNBREAKING, Enchantments.MENDING}));
+            giveStack(bot, withEnchantments(registryManager, Items.NETHERITE_SHOVEL.getDefaultStack(),
+                    new int[]{5, 3, 1},
+                    (RegistryKey<Enchantment>[]) new RegistryKey[]{Enchantments.EFFICIENCY, Enchantments.UNBREAKING, Enchantments.MENDING}));
+            giveStack(bot, withEnchantments(registryManager, Items.NETHERITE_AXE.getDefaultStack(),
+                    new int[]{5, 3, 1},
+                    (RegistryKey<Enchantment>[]) new RegistryKey[]{Enchantments.EFFICIENCY, Enchantments.UNBREAKING, Enchantments.MENDING}));
+            // Add two netherite hoes
+            giveStack(bot, withEnchantments(registryManager, Items.NETHERITE_HOE.getDefaultStack(),
+                    new int[]{5, 3, 1},
+                    (RegistryKey<Enchantment>[]) new RegistryKey[]{Enchantments.EFFICIENCY, Enchantments.UNBREAKING, Enchantments.MENDING}));
+            giveStack(bot, withEnchantments(registryManager, Items.NETHERITE_HOE.getDefaultStack(),
+                    new int[]{5, 3, 1},
+                    (RegistryKey<Enchantment>[]) new RegistryKey[]{Enchantments.EFFICIENCY, Enchantments.UNBREAKING, Enchantments.MENDING}));
             giveStack(bot, new ItemStack(Items.STONE_SHOVEL, 2));
             giveStack(bot, new ItemStack(Items.STONE_HOE, 2));
             giveStack(bot, new ItemStack(Items.STONE_PICKAXE, 2));
             giveStack(bot, new ItemStack(Items.STONE_AXE, 2));
-            giveStack(bot, new ItemStack(Items.FISHING_ROD));
+            giveStack(bot, withEnchantments(registryManager, Items.FISHING_ROD.getDefaultStack(),
+                    new int[]{3, 3, 3, 1},
+                    (RegistryKey<Enchantment>[]) new RegistryKey[]{Enchantments.LURE, Enchantments.LUCK_OF_THE_SEA, Enchantments.UNBREAKING, Enchantments.MENDING}));
+            giveStack(bot, withEnchantments(registryManager, Items.FISHING_ROD.getDefaultStack(),
+                    new int[]{3, 3, 3, 1},
+                    (RegistryKey<Enchantment>[]) new RegistryKey[]{Enchantments.LURE, Enchantments.LUCK_OF_THE_SEA, Enchantments.UNBREAKING, Enchantments.MENDING}));
 
             giveStack(bot, new ItemStack(Items.GOLDEN_CARROT, 64));
             giveStack(bot, new ItemStack(Items.COOKED_BEEF, 64));
             giveStack(bot, new ItemStack(Items.TORCH, 64));
+
+            // --- Utility & building items for quick testing ---
+            giveStack(bot, new ItemStack(Items.CRAFTING_TABLE));
+            giveStack(bot, new ItemStack(Items.FURNACE));
+            giveStack(bot, new ItemStack(Items.CHEST, 2));      // two chests
+            giveStack(bot, new ItemStack(Items.WATER_BUCKET));
+            giveStack(bot, new ItemStack(Items.SHEARS));
+            giveStack(bot, new ItemStack(Items.WHITE_BED));
+            giveStack(bot, new ItemStack(Items.LEAD, 2));       // two leads
+            // Boats are non‑stackable; add twice
+            giveStack(bot, new ItemStack(Items.OAK_BOAT));
+            giveStack(bot, new ItemStack(Items.OAK_BOAT));
 
             armorUtils.autoEquipArmor(bot);
             CombatInventoryManager.ensureCombatLoadout(bot);
@@ -1939,11 +2401,18 @@ public class modCommandRegistry {
             return 0;
         }
         skillExecutor.submit(() -> {
-            SkillExecutionResult result = SkillManager.runSkill(skillName, skillContext);
-            server.execute(() -> {
-                ChatUtils.sendSystemMessage(source, result.message());
-                SkillResumeService.handleCompletion(botUuid, result.success());
-            });
+            try {
+                SkillExecutionResult result = SkillManager.runSkill(skillName, skillContext);
+                server.execute(() -> {
+                    ChatUtils.sendSystemMessage(source, result.message());
+                    SkillResumeService.handleCompletion(botUuid, result.success());
+                });
+            } catch (Exception e) {
+                LOGGER.error("An unexpected error occurred in /bot skill " + skillName, e);
+                server.execute(() -> {
+                    ChatUtils.sendSystemMessage(source, "An unexpected error occurred trying to execute that command.");
+                });
+            }
         });
         return 1;
     }

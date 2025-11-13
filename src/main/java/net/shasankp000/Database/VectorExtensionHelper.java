@@ -63,6 +63,16 @@ public class VectorExtensionHelper {
         return name;
     }
 
+    private static Path stripLibraryExtension(Path lib) {
+        String fileName = lib.getFileName().toString();
+        int dot = fileName.lastIndexOf('.');
+        if (dot > 0) {
+            String withoutExt = fileName.substring(0, dot);
+            return lib.getParent() != null ? lib.getParent().resolve(withoutExt) : Path.of(withoutExt);
+        }
+        return lib;
+    }
+
     public static Path ensureSqliteVecPresent() throws IOException {
         Path configDir = FabricLoader.getInstance().getConfigDir();
         Path vecDir = configDir.resolve("sqlite_vector/sqlite-vec");
@@ -224,7 +234,8 @@ public class VectorExtensionHelper {
     }
     private static void tryLoadExtension(Connection conn, Path lib, String... entrypoints) throws SQLException {
         enableExtensionLoading(conn);
-        final String libPath = lib.toAbsolutePath().toString().replace("\\", "\\\\");
+        Path loadPath = stripLibraryExtension(lib);
+        final String libPath = loadPath.toAbsolutePath().toString().replace("\\", "\\\\");
 
         SQLException last = null;
         for (String ep : entrypoints) {
@@ -254,11 +265,18 @@ public class VectorExtensionHelper {
 
     // ---- Public loaders
     public static void loadSqliteVecExtension(Connection conn, Path vecPath) throws SQLException {
+        LOGGER.info("Attempting to load sqlite-vec from {}", vecPath.toAbsolutePath());
         // try explicit then default
-        tryLoadExtension(conn, vecPath, "sqlite3_vec_init", null);
-        try (Statement st = conn.createStatement();
-             ResultSet rs = st.executeQuery("SELECT vec_version();")) {
-            if (rs.next()) LOGGER.info("✅ sqlite-vec version: {}", rs.getString(1));
+        try {
+            tryLoadExtension(conn, vecPath, "sqlite3_vec_init", null);
+            try (Statement st = conn.createStatement();
+                 ResultSet rs = st.executeQuery("SELECT vec_version();")) {
+                if (rs.next()) LOGGER.info("✅ sqlite-vec version: {}", rs.getString(1));
+            }
+        } catch (SQLException e) {
+            LOGGER.error("❌ Failed to load sqlite-vec extension: {}", e.getMessage());
+            // Re-throw so the caller (SQLiteDB.createDB) can catch it and disable DB features.
+            throw e;
         }
     }
 

@@ -17,6 +17,7 @@ import java.util.Locale;
 public class SQLiteDB {
 
     private static final Logger logger = LoggerFactory.getLogger("ai-player");
+    public static volatile boolean MEMORY_AVAILABLE = false;
 
     private static final String DB_URL = "jdbc:sqlite:" +
             FabricLoader.getInstance().getGameDir().resolve("sqlite_databases/memory_agent.db").toAbsolutePath();
@@ -59,7 +60,8 @@ public class SQLiteDB {
                 logger.info("✅ Linux detected — loading sqlite-vss native extension.");
                 Path vssPath = VectorExtensionHelper.ensureSqliteVssPresent();
                 VectorExtensionHelper.loadSqliteVssExtension(conn, vssPath);
-            } else {
+            }
+            else {
                 // unknown OS: play safe
                 logger.warn("⚠️ Unknown OS — not loading sqlite-vss. Using fallback cosine_distance UDF.");
                 registerCosineDistanceUdf(conn);
@@ -81,18 +83,23 @@ public class SQLiteDB {
                 """;
                 stmt.executeUpdate(createTable);
                 logger.info("✅ Memory table created.");
+                MEMORY_AVAILABLE = true; // Set flag on full success
             }
         } catch (SQLException e) {
             logger.error("❌ DB creation failed: SQLState={}, ErrorCode={}, Message={}",
                     e.getSQLState(), e.getErrorCode(), e.getMessage(), e);
-            throw new RuntimeException(e);
+            // Do not re-throw; allows game to run without DB features.
         } catch (IOException e) {
-            logger.error("❌ Extension setup failed: {}", e.getMessage(), e);
-            throw new RuntimeException(e);
+            logger.error("❌ Extension setup failed; running without vector memory: {}", e.getMessage(), e);
+            // Do not re-throw.
         }
     }
 
     public static void storeMemory(String type, String prompt, String response, List<Double> embedding) {
+        if (!MEMORY_AVAILABLE) {
+            logger.warn("DB not available, skipping memory storage.");
+            return;
+        }
         String sql = """
             INSERT INTO memories (type, prompt, response, embedding)
             VALUES (?, ?, ?, ?);
@@ -119,6 +126,10 @@ public class SQLiteDB {
     }
 
     public static List<Memory> findRelevantMemories(List<Double> queryEmbedding, String typeFilter, int topK) {
+        if (!MEMORY_AVAILABLE) {
+            logger.warn("DB not available, skipping memory search.");
+            return new ArrayList<>();
+        }
         logger.info("Query embedding size: {}", queryEmbedding.size());
 
         List<Memory> results = new ArrayList<>();
@@ -176,6 +187,10 @@ public class SQLiteDB {
     }
 
     public static List<SQLiteDB.Memory> fetchInitialResponse() {
+        if (!MEMORY_AVAILABLE) {
+            logger.warn("DB not available, skipping initial response fetch.");
+            return new ArrayList<>();
+        }
         List<SQLiteDB.Memory> results = new ArrayList<>();
         String sql = """
             SELECT id, type, timestamp, prompt, response, 0.0 AS similarity
@@ -201,7 +216,7 @@ public class SQLiteDB {
             }
         } catch (SQLException e) {
             logger.error("Caught exception while fetching initial response: {}", e.getMessage());
-            throw new RuntimeException(e);
+            // Do not rethrow, just return empty list.
         }
 
         return results;

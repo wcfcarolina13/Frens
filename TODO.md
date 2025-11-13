@@ -1,5 +1,76 @@
 
+
 # Gemini Report 2
+
+## Consolidated TODO (from this report)
+
+### P0 — Stability & Control Flow
+- [ ] **Task lifecycle reset**: `/bot stop` and respawns must abort the active ticket and release the RL loop immediately via `TaskService`. *DoD:* issuing `/bot stop` during any skill halts movement within 1 tick; new command starts without “busy” spam.
+- [ ] **Busy-loop prevention**: Ensure `AutoFaceEntity.isBotMoving` and related flags are always cleared in `finally` blocks; verify no background schedulers re‑latch movement. *DoD:* run a 5‑minute idle RL loop without any “Bot is busy” spam.
+- [ ] **Blocking drop cleanup path**: Skill cleanup calls a synchronous drop sweep (delegating to `DropSweeper`/`MovementService`), then releases the override. *DoD:* after `collect_dirt`, all visible drops within 6 blocks are vacuumed before “job complete”.
+- [ ] **Cooldowns & backoff**: Keep `dropSweepInProgress`, per‑position backoff (~15s), and repeat throttles active so RL tick doesn’t spam navigation. *DoD:* log shows at most one sweep attempt per 3s when items persist.
+
+### P0 — Water, Terrain & Navigation
+- [ ] **Water‑aware pickup**: `MovementService` handles shallow‑water detection and wade/bridge routines; `DropSweeper` delegates all movement to it. *DoD:* staged test with ankle‑deep water succeeds (bridge or wade) with no infinite loops.
+- [ ] **Edge/hole pickup**: When items are one block below an edge, bot hops down safely instead of “sneak vacuum”. *DoD:* bot drops into 1‑block hole to collect item, then climbs out.
+
+### P0 — Persistence & Session Behavior
+- [ ] **Persistent inventory (sessions only)**: Bot retains inventory across world reloads/spawns (not across deaths). *DoD:* equip items, exit world, re‑enter, respawn bot—inventory identical.
+- [ ] **Bot aliases & identity**: Distinct aliases (e.g., Jake vs Bob) preserve inventory/hunger/sleep/XP separately. *DoD:* spawn two aliases; their states remain isolated across sessions.
+- [ ] **Job resume prompts**: On death/leave, job is paused; on rejoin or respawn, bot asks “Should I continue/return?”. *DoD:* chat prompt appears once; user “yes” resumes or performs corpse‑run retrieval.
+
+- [ ] **Per‑bot chat addressing**: Messages to a bot name route to that bot’s memory and response pipeline. *DoD:* “Jake, status?” yields Jake‑specific reply.
+- [ ] **Broadcast commands**: Support targeting all bots (e.g., `allbots`) for skills/commands. *DoD:* issuing a group command affects all active bots once.
+- [x] **Inventory summary to chat**: `/bot inventory <alias>` prints a concise header and grouped slot counts directly in chat (not just logs). *DoD:* Single chat message includes bot name and item summary; no crash on missing alias.
+- [x] **Bot gives items to player**: `/bot give <alias> <item> [count]`. If the bot has the item, it drops/throws the requested count toward the requesting player within range; default count = 1. Selection priority: avoid hotbar first, then prefer most‑damaged stack (when applicable), else the smallest stack. If missing, reply in chat: `I don't have that`. *DoD:* Success/fail message in chat; items appear at player within 2s; respects priority rules.
+  *Status:* Verified 2025-11-12 (plain & namespaced ids; success/unknown/missing paths).
+
+### P0 — Combat Safety
+- [ ] **Creeper evasion**: If unarmed/unarmored, always sprint‑evade creepers; otherwise prefer ranged/melee per kit. *DoD:* bot never stands still near a hissing creeper; records a single red danger alert (4s cooldown).
+
+### P1 — Portals, Boats, Swimming
+- [ ] **Swimming parity**: Bot swims like a player (surface and underwater) without teleport reliance. *DoD:* 20‑block swim to a target item succeeds.
+- [ ] **Boats**: Enter/exit/navigate boats reliably. *DoD:* bot boards, crosses river, disembarks at target without teleport.
+- [ ] **Nether/End portals**: Follow player through portals; support cross‑realm teleport command for stranded bots. *DoD:* escort through Nether portal and recall from other realm via command.
+
+### P1 — Crafting & Utilities
+- [ ] **Test kit for `/equip`**: Running `/equip` gives the bot a standard testing loadout: 2× each of a good pickaxe/shovel/hoe/axe, good fishing rod, boat, lead, crafting table, furnace, 2 chests, water bucket, shears, and a bed. This is a test harness and does not consume player inventory. *DoD:* `/equip` reliably populates the bot’s inventory with the listed items; no duplication beyond intended test run; kit can be toggled on/off via config.
+- [ ] **Crafting basics**: Place and use crafting table, furnace, chest; craft bed, shears, bucket, weapons, tools, torches, sticks, planks, armor. *DoD:* scripted recipe flow succeeds from raw logs to a stone/iron tool.
+- [ ] **Workspace heuristics**: Place crafting table and furnace adjacent; double‑chest placement coalesces correctly. *DoD:* chests merge; workstation blocks end up side‑by‑side.
+
+### P1 — Building & Placement
+- [ ] **Block placement primitives**: Build walls (materials/radius/thickness/height) and basic squares. *DoD:* “build wall radius=5 height=3” yields correct footprint.
+- [ ] **Simple 2‑person house**: Minimal enclosed shelter with door, light, and two beds. *DoD:* house generated in flat test world matches spec.
+
+### P1 — Farming & Husbandry
+- [ ] **Farming loop**: Till soil, collect seeds, plant, harvest, and re‑plant. *DoD:* 5×5 plot cycles once without human aid.
+- [ ] **Water handling**: Collect water and create an infinite source. *DoD:* working 2×2 infinite pool built nearby.
+- [ ] **Animals**: Shear sheep, collect meat, lead animals, and build a fenced pen. *DoD:* two animals penned with leads removed.
+
+### P1 — Woodcutting & Mining
+- [ ] **Tree routines**: Chop trees safely, climb to reach stragglers, return to collect late drops. *DoD:* zero floating logs; all drops collected.
+- [ ] **Strip mining**: Maintain 1‑block safety offset vs sand/gravel/lava; stop/report on cave/precipice/structures. *DoD:* 20‑block strip mine completes; special features reported in chat.
+
+### P1 — Cooking & Survival
+- [ ] **Furnace usage**: Smelt/cook with appropriate fuels. *DoD:* cook raw food and smelt ore in sequence.
+- [ ] **Hunger persistence & eating policy**: Persist hunger across sessions; prefer lowest‑value food first (avoid rotten flesh). *DoD:* bot eats automatically at thresholds and announces hunger states.
+
+### P1 — Sleep & Following
+- [ ] **Sleep integration**: Bot uses a bed so night skip works; warns at sunset and before phantoms if overdue. *DoD:* server night skip succeeds with bot in bed.
+- [ ] **Follow/defend modes**: Bots can follow each other and defend teammates (e.g., `fight_with_me`). *DoD:* two bots follow and assist in combat.
+
+### P2 — PVP & Formations
+- [ ] **Sparring**: Optional sparring with distance constraints. *DoD:* start/stop sparring leaves no lingering “busy” flags.
+- [ ] **Formations**: Line and grid; later archers back, horses flank. *DoD:* bots hold a 5×3 grid while moving to a waypoint.
+
+### P2 — Debug & Telemetry
+- [ ] **Debug toggle**: Runtime toggle to quiet terminal/chat spam while preserving red danger alerts (4s cooldown). *DoD:* `debug off` reduces logs >80% by count.
+
+#### Verification Scenarios (from “Next Steps”)
+- [ ] Stage dirt harvest leaving drops in ankle‑deep water and verify bridge/wade path with `MovementService` logs.
+- [ ] Trigger `/bot stop` mid‑skill and force a respawn; confirm `TaskService` clears ticket, releases override, and accepts new command.
+- [ ] Run a short training loop; confirm RL tick still advances and drop collector doesn’t spam movement.
+
 
 ## Issue: Bot gets stuck in a busy loop and doesn't collect drops.
 
@@ -70,6 +141,9 @@ I have made the following changes to address these issues:
 -   [ ] Trigger `/bot stop` mid-skill and force a respawn to verify `TaskService` clears the ticket, releases the override, and lets a new command start immediately.
 -   [ ] Re-run a short training loop to ensure the RL tick still advances and the drop collector doesn’t spam movement requests.
 
+[x] Chat inventory summary: `/bot inventory <alias>` prints inventory details in chat.
+[x] Bot item handoff: `/bot give <alias> <item> [count]` — bot drops/throws items to the player with the specified priority rules; missing items yield `I don't have that`. (Verified 2025-11-12)
+[ ] Bot item inventory view: Can interact with bot inventories the way you would a chest.
 ## ToDo List
 [ ] Add persistent inventory to the bot, so it'll keep its inventory across game instances and spawning (not not deaths). 
 [ ] Introduce bot aliases (e.g., 'Jake' will have a different inventory, hunger level, sleep level, and experience points level than a different alias such as 'Bob')
