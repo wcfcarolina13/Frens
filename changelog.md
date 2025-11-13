@@ -1,3 +1,4 @@
+- **Fix:** Resolved duplicate class error by removing redundant `BotInventoryScreen.java` file.
 - **Fix:** Resolved a series of compilation errors that were preventing the project from building successfully.
 - **Refactor:** Removed a duplicate `AIPlayerClient` class and introduced a new `BotInventoryScreen` class to handle the bot's inventory GUI.
 - **Temporary Workaround:** Implemented a temporary fix for a rendering issue by using a solid color background for the bot's inventory screen. The original texture-based background was causing a build failure and will be revisited in a future update.

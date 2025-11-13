@@ -1,6 +1,6 @@
 - ## Summary of Changes
 
-- **Removed Duplicate Class:** Deleted the redundant `AIPlayerClient.java` file located in the `GraphicalUserInterface` directory. This file was causing a "duplicate class" compilation error.
+- **Removed Duplicate Class:** Deleted the redundant `BotInventoryScreen.java` file from the `net.shasankp000` directory. This file was causing a "duplicate class" compilation error because a correct version existed in `net.shasankp000.GraphicalUserInterface`.
 
 - **Created `BotInventoryScreen`:** Introduced a new `BotInventoryScreen` class to manage the graphical user interface for the bot's inventory. This class extends `HandledScreen` and is responsible for rendering the inventory screen.
 
