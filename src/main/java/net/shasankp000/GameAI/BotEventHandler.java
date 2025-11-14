@@ -1642,9 +1642,14 @@ public class BotEventHandler {
         }
         BlockPos feet = bot.getBlockPos();
         BlockPos head = feet.up();
-        boolean insideWall = bot.isInsideWall()
-                || !world.getBlockState(feet).getCollisionShape(world, feet).isEmpty()
-                || !world.getBlockState(head).getCollisionShape(world, head).isEmpty();
+        boolean feetSolid = !world.getBlockState(feet).getCollisionShape(world, feet).isEmpty();
+        boolean headSolid = !world.getBlockState(head).getCollisionShape(world, head).isEmpty();
+        boolean insideWall = bot.isInsideWall() || feetSolid || headSolid;
+        boolean hasAirPocket = !headSolid || world.getBlockState(head.up()).getCollisionShape(world, head.up()).isEmpty();
+        if (!insideWall && hasAirPocket) {
+            LAST_SUFFOCATION_ALERT_TICK.remove(bot.getUuid());
+            return false;
+        }
         if (!insideWall) {
             LAST_SUFFOCATION_ALERT_TICK.remove(bot.getUuid());
             return false;

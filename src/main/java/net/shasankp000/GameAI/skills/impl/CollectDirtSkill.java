@@ -32,6 +32,7 @@ import net.shasankp000.GameAI.BotEventHandler;
 import net.shasankp000.GameAI.DropSweeper;
 import net.shasankp000.Entity.AutoFaceEntity;
 import net.shasankp000.EntityUtil;
+import net.shasankp000.ChatUtils.ChatUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -154,6 +155,10 @@ public class CollectDirtSkill implements Skill {
         List<String> optionTokens = getOptionTokens(context.parameters());
         Integer targetDepthY = getOptionalIntParameter(context, "targetDepthY");
         boolean depthMode = targetDepthY != null;
+        boolean stairMode = depthMode && getBooleanParameter(context, "stairsMode", false);
+        if (depthMode) {
+            targetCount = Integer.MAX_VALUE;
+        }
         boolean untilMode = optionTokens.contains("until") && !optionTokens.contains("exact");
         boolean squareMode = optionTokens.contains("square");
 
@@ -186,6 +191,10 @@ public class CollectDirtSkill implements Skill {
         if (depthMode && playerForAbortCheck != null && playerForAbortCheck.getBlockY() <= targetDepthY) {
             return SkillExecutionResult.success("Reached target depth " + targetDepthY + ".");
         }
+        if (depthMode && playerForAbortCheck != null && isWaterlogged(playerForAbortCheck)) {
+            ChatUtils.sendChatMessages(source.withSilent().withMaxLevel(4), "Hit water while digging — pausing depth mining.");
+            return SkillExecutionResult.failure("Depth run paused: water detected.");
+        }
 
         boolean cleanupRequested = playerForAbortCheck != null;
         double cleanupBaseRadius = Math.max(horizontalRadius, DROP_SEARCH_RADIUS);
@@ -204,6 +213,11 @@ public class CollectDirtSkill implements Skill {
             if (loopPlayer != null) {
                 if (depthMode && loopPlayer.getBlockY() <= targetDepthY) {
                     outcome = SkillExecutionResult.success("Reached target depth " + targetDepthY + ".");
+                    break;
+                }
+                if (depthMode && isWaterlogged(loopPlayer)) {
+                    ChatUtils.sendChatMessages(source.withSilent().withMaxLevel(4), "Hit water while digging — pausing depth mining.");
+                    outcome = SkillExecutionResult.failure("Depth run paused: water detected.");
                     break;
                 }
                 if (SkillManager.shouldAbortSkill(loopPlayer)) {
@@ -271,7 +285,8 @@ public class CollectDirtSkill implements Skill {
                     harvestLabel,
                     preferredTool,
                     depthMode,
-                    depthMode
+                    depthMode,
+                    stairMode
             );
 
             lastMessage = result.message();
@@ -851,6 +866,18 @@ public class CollectDirtSkill implements Skill {
         return null;
     }
 
+    private boolean getBooleanParameter(SkillContext context, String key, boolean defaultValue) {
+        Map<String, Object> params = context.parameters();
+        Object value = params.get(key);
+        if (value instanceof Boolean bool) {
+            return bool;
+        }
+        if (value instanceof String str) {
+            return Boolean.parseBoolean(str);
+        }
+        return defaultValue;
+    }
+
     @SuppressWarnings("unchecked")
     private List<String> getOptionTokens(Map<String, Object> parameters) {
         Object raw = parameters.get("options");
@@ -889,9 +916,9 @@ public class CollectDirtSkill implements Skill {
                             9000L
                     );
                 } catch (Exception sweepError) {
-                    LOGGER.warn("Cleanup drop sweep attempt {} failed: {}", attempt + 1, sweepError.getMessage());
-                    break;
-                }
+                LOGGER.warn("Cleanup drop sweep attempt {} failed: {}", attempt + 1, sweepError.getMessage());
+                break;
+            }
                 int remaining = source.getWorld().getEntitiesByClass(
                         net.minecraft.entity.ItemEntity.class,
                         player.getBoundingBox().expand(radius, vertical, radius),
@@ -906,6 +933,19 @@ public class CollectDirtSkill implements Skill {
         } finally {
             BotEventHandler.setExternalOverrideActive(false);
         }
+    }
+
+    private boolean isWaterlogged(ServerPlayerEntity player) {
+        if (player == null) {
+            return false;
+        }
+        if (!(player.getEntityWorld() instanceof ServerWorld world)) {
+            return false;
+        }
+        BlockPos feet = player.getBlockPos();
+        return world.getFluidState(feet).isIn(net.minecraft.registry.tag.FluidTags.WATER)
+                || world.getFluidState(feet.down()).isIn(net.minecraft.registry.tag.FluidTags.WATER)
+                || world.getFluidState(feet.up()).isIn(net.minecraft.registry.tag.FluidTags.WATER);
     }
 
     private Set<Item> resolveTrackedItems() {

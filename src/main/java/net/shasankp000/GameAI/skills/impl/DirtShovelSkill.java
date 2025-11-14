@@ -49,7 +49,6 @@ public final class DirtShovelSkill implements Skill {
     private static final int MAX_TUNNEL_DEPTH = 4;
     private static final int MAX_STAIRS_DEPTH = 8;
     private static final int[] STAIR_VERTICAL_PREFERENCE = new int[]{0, 1, -1};
-    private static final boolean ENABLE_STAIRS_EXPERIMENT = false;
     private static final double MAX_MINING_DISTANCE_SQ = 25.0D;
     private static final long MANUAL_STEP_DELAY_MS = 120L;
 
@@ -73,6 +72,7 @@ public final class DirtShovelSkill implements Skill {
         String preferredTool = extractPreferredTool(context.parameters());
         boolean diggingDown = getBooleanParameter(context, "diggingDown", false);
         boolean allowAnyBlock = getBooleanParameter(context, "allowAnyBlock", false);
+        boolean stairMode = getBooleanParameter(context, "stairsMode", false);
 
         String label = harvestLabel != null ? harvestLabel : "target";
         try {
@@ -94,10 +94,10 @@ public final class DirtShovelSkill implements Skill {
                     SharedStateUtils.setValue(context.sharedState(), "pendingDirtTarget.z", detectedPos.getZ());
                 }
 
-                ApproachPlan approachPlan = computeApproachPlan(player, detectedPos);
+                ApproachPlan approachPlan = computeApproachPlan(player, detectedPos, stairMode);
                 if (approachPlan == null) {
                     LOGGER.debug("Skipping {} no approach available", detectedPos);
-                    if (!SkillPreferences.teleportDuringSkills(player)) {
+                    if (!SkillPreferences.teleportDuringSkills(player) && stairMode) {
                         stairFailure = true;
                     }
                     if (excluded != null) {
@@ -304,7 +304,12 @@ public final class DirtShovelSkill implements Skill {
                 }
             }
             if (!candidates.isEmpty()) {
-                candidates.sort(Comparator.comparingDouble(pos -> origin.getSquaredDistance(pos)));
+                Comparator<BlockPos> comparator = Comparator.comparingDouble(pos -> origin.getSquaredDistance(pos));
+                if (allowAnyBlock) {
+                    comparator = Comparator.<BlockPos>comparingInt(BlockPos::getY)
+                            .thenComparing(comparator);
+                }
+                candidates.sort(comparator);
                 return candidates;
             }
         }
@@ -325,7 +330,7 @@ public final class DirtShovelSkill implements Skill {
                         continue;
                     }
                     boolean sameColumn = dx == 0 && dz == 0;
-                    if (sameColumn && dy <= 0 && !diggingDown) { // Only skip if not explicitly digging down
+                    if ((diggingDown && sameColumn) || (sameColumn && dy <= 0 && !diggingDown)) {
                         continue;
                     }
                     BlockState state = player.getEntityWorld().getBlockState(candidate);
@@ -336,26 +341,29 @@ public final class DirtShovelSkill implements Skill {
                 }
             }
         }
-        candidates.sort(
+        Comparator<BlockPos> comparator =
                 Comparator.<BlockPos>comparingDouble(pos -> -DirtNavigationPolicy.score(origin, pos))
-                        .thenComparingDouble(pos -> origin.getSquaredDistance(pos))
-        );
+                        .thenComparingDouble(pos -> origin.getSquaredDistance(pos));
+        if (diggingDown && allowAnyBlock) {
+            comparator = Comparator.<BlockPos>comparingInt(BlockPos::getY)
+                    .thenComparing(comparator);
+        }
+        candidates.sort(comparator);
         return candidates;
     }
 
-    private ApproachPlan computeApproachPlan(ServerPlayerEntity player, BlockPos target) {
+    private ApproachPlan computeApproachPlan(ServerPlayerEntity player, BlockPos target, boolean stairMode) {
         ApproachPlan localPlan = computeLocalPlan(player, target);
         if (localPlan == null) {
             return null;
         }
-        if (SkillPreferences.teleportDuringSkills(player) || !ENABLE_STAIRS_EXPERIMENT) {
+        if (SkillPreferences.teleportDuringSkills(player) || !stairMode) {
             return localPlan;
         }
         BlockPos start = player.getBlockPos();
         BlockPos entry = localPlan.entryPosition();
         int verticalDistance = Math.abs(start.getY() - entry.getY());
-        boolean requiresStairs = verticalDistance > 1;
-        if (!requiresStairs) {
+        if (verticalDistance <= 1) {
             return localPlan;
         }
         ApproachPlan stairPlan = includeStairPlan(player, target, localPlan);
@@ -837,7 +845,8 @@ public final class DirtShovelSkill implements Skill {
                                         String harvestLabel,
                                         String preferredTool,
                                         boolean diggingDown,
-                                        boolean allowAnyBlock) {
+                                        boolean allowAnyBlock,
+                                        boolean stairMode) {
         Map<String, Object> params = new java.util.HashMap<>();
         params.put("searchRadius", horizontalRadius);
         params.put("verticalRange", verticalRange);
@@ -862,6 +871,9 @@ public final class DirtShovelSkill implements Skill {
         params.put("diggingDown", diggingDown);
         if (allowAnyBlock) {
             params.put("allowAnyBlock", true);
+        }
+        if (stairMode) {
+            params.put("stairsMode", true);
         }
         return execute(new SkillContext(source, sharedState, params));
     }

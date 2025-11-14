@@ -47,9 +47,10 @@ When you target multiple bots (or `all`), the requested count is shared between 
 | `square` | Stay within a square that starts at the bot’s current position. The current radius grows as the skill expands its search. |
 | `until` | Keep working until the bot already holds the requested amount (useful for “top off” jobs). Combine with `exact` to force the exact count instead. |
 | `each` | When you target multiple bots, have each bot satisfy the full count instead of splitting it. |
-| `depth <y>` | New: dig a staircase straight down until the bot reaches the requested Y level (teleport stays off). Example: `/bot skill mining depth -50 Jake`. The bot mines whatever blocks are in the way and stops once its feet are at or below Y = -50. |
+| `depth <y>` | New: carve an offset staircase down to the requested Y level (teleport stays off). Example: `/bot skill mining depth -50 Jake`. The bot mines whatever blocks are in the way, stepping aside before every drop so it never digs directly beneath itself, and stops once its feet are at or below Y = -50. |
+| `stairs` | Combine with `depth` to opt in to the experimental spiral staircase planner (e.g., `/bot skill mining depth -50 stairs Jake`). Leave it off to use the conservative fallback. |
 
-Depth jobs implicitly enable the “digging down” mode so the bot removes whatever blocks are directly beneath it until the target Y level is reached—it ignores ore filters and keeps digging until the goal depth is met. This is a stepping stone toward more advanced “mine to depth, then branch” tasks.
+Depth jobs implicitly enable the “digging down” mode so the bot removes whatever blocks block the stairwell until the target Y level is reached—it ignores ore filters and keeps carving offset steps until the goal depth is met. This is a stepping stone toward more advanced “mine to depth, then branch” tasks.
 
 ---
 

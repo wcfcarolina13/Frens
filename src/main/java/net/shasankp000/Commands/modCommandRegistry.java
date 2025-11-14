@@ -2366,6 +2366,7 @@ public class modCommandRegistry {
         Map<String, Object> params = new HashMap<>();
         Integer count = null;
         Integer depthTarget = null;
+        boolean stairsRequested = false;
         Set<Identifier> targetBlocks = new HashSet<>();
         List<String> options = new ArrayList<>();
         if (rawArgs != null && !rawArgs.isBlank()) {
@@ -2382,6 +2383,10 @@ public class modCommandRegistry {
                         LOGGER.warn("Invalid depth parameter '{}'", depthStr);
                         continue;
                     }
+                }
+                if ("stairs".equalsIgnoreCase(token)) {
+                    stairsRequested = true;
+                    continue;
                 }
                 try {
                     count = Integer.parseInt(token);
@@ -2422,6 +2427,10 @@ public class modCommandRegistry {
                 params.put("targetDepthY", depthTarget);
                 params.put("diggingDown", true);
                 params.put("depthMode", true);
+                params.put("allowAnyBlock", true);
+            }
+            if (stairsRequested) {
+                params.put("stairsMode", true);
             }
         }
         ServerCommandSource source = context.getSource();
