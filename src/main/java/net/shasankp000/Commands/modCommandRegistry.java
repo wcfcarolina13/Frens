@@ -48,6 +48,7 @@ import net.shasankp000.PathFinding.PathTracer;
 import net.shasankp000.PathFinding.Segment;
 import net.shasankp000.PlayerUtils.*;
 import net.shasankp000.GameAI.skills.SkillManager;
+import net.shasankp000.GameAI.skills.SkillPreferences;
 import net.shasankp000.GameAI.services.BotInventoryStorageService;
 import net.shasankp000.GameAI.services.BotTargetingService;
 import net.shasankp000.GameAI.services.InventoryAccessPolicy;
@@ -296,6 +297,21 @@ public class modCommandRegistry {
                                 .executes(context -> executeEquip(context, getActiveBotOrThrow(context)))
                                 .then(CommandManager.argument("bot", EntityArgumentType.player())
                                         .executes(context -> executeEquip(context, EntityArgumentType.getPlayer(context, "bot")))
+                                )
+                        )
+                        .then(literal("config")
+                                .then(literal("teleportDuringSkills")
+                                        .then(CommandManager.argument("mode", StringArgumentType.string())
+                                                .executes(context -> executeTeleportConfig(
+                                                        context,
+                                                        getActiveBotOrThrow(context),
+                                                        parseToggle(StringArgumentType.getString(context, "mode"))))
+                                                .then(CommandManager.argument("bot", EntityArgumentType.player())
+                                                        .executes(context -> executeTeleportConfig(
+                                                                context,
+                                                                EntityArgumentType.getPlayer(context, "bot"),
+                                                                parseToggle(StringArgumentType.getString(context, "mode")))))
+                                        )
                                 )
                         )
                         .then(literal("walk")
@@ -2417,12 +2433,35 @@ public class modCommandRegistry {
         return 1;
     }
 
+    private static int executeTeleportConfig(CommandContext<ServerCommandSource> context,
+                                             ServerPlayerEntity bot,
+                                             boolean enabled) {
+        if (bot == null) {
+            ChatUtils.sendSystemMessage(context.getSource(), "No active bot found. Spawn one with /bot spawn.");
+            return 0;
+        }
+        SkillPreferences.setTeleportDuringSkills(bot.getUuid(), enabled);
+        String state = enabled ? "enabled" : "disabled";
+        ChatUtils.sendSystemMessage(context.getSource(),
+                "Teleport during skill tasks " + state + " for " + bot.getName().getString() + ".");
+        return 1;
+    }
+
     private static boolean parseAssistMode(String raw) throws CommandSyntaxException {
         String normalized = raw.trim().toLowerCase(Locale.ROOT);
         return switch (normalized) {
             case "on", "enable", "enabled", "true", "yes", "y", "fight", "assist", "start" -> true;
             case "off", "disable", "disabled", "false", "no", "n", "stop", "standdown", "standby" -> false;
             default -> throw new SimpleCommandExceptionType(Text.literal("Unknown mode '" + raw + "'. Use on/enable or off/disable.")).create();
+        };
+    }
+
+    private static boolean parseToggle(String raw) throws CommandSyntaxException {
+        String normalized = raw.trim().toLowerCase(Locale.ROOT);
+        return switch (normalized) {
+            case "on", "enable", "enabled", "true", "yes", "y" -> true;
+            case "off", "disable", "disabled", "false", "no", "n" -> false;
+            default -> throw new SimpleCommandExceptionType(Text.literal("Unknown mode '" + raw + "'. Use on/off.")).create();
         };
     }
 

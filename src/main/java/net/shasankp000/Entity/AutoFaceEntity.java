@@ -203,6 +203,10 @@ public class AutoFaceEntity {
 
         keepBotAfloat(bot);
 
+        if (BotEventHandler.rescueFromBurial(bot)) {
+            return;
+        }
+
         List<Entity> nearbyEntities = detectNearbyEntities(bot, BOUNDING_BOX_SIZE);
         hostileEntities = nearbyEntities.stream()
                 .filter(EntityUtil::isHostile)

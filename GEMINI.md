@@ -73,13 +73,8 @@ After making any code or config change, always:
      - The files you touched.
      - The outcome (fixed, partially fixed, investigation only, deferred, etc.).
 
-2. **Update `changelog.md`:**
-   - Add a concise, dated line item:
-     - What changed.
-     - Why it changed (one sentence).
-     - Any important follow-up notes.
-
-Both files must stay in sync with your edits.  
+2. **DO NOT Update `changelog.md`:**
+  
 Do **not** rely on chat history to reconstruct changes.
 
 ---
@@ -112,6 +107,6 @@ At the end of every response where you edit or propose code:
    - Which files you touched.
    - Whether the task is complete or needs follow-up.
 2. Confirm that:
-   - `gemini_report_3.md` and `changelog.md` entries are up to date for this work.
+   - `gemini_report_3.md` entries are up to date for this work.
 3. Suggest the next most logical task.
 4. Ask explicitly: **“Do you want me to continue with this next task?”**

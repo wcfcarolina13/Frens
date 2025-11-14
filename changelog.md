@@ -1,5 +1,5 @@
-- **Fix:** Resolved duplicate class error by removing redundant `BotInventoryScreen.java` file.
-- **Fix:** Resolved a series of compilation errors that were preventing the project from building successfully.
-- **Refactor:** Removed a duplicate `AIPlayerClient` class and introduced a new `BotInventoryScreen` class to handle the bot's inventory GUI.
-- **Temporary Workaround:** Implemented a temporary fix for a rendering issue by using a solid color background for the bot's inventory screen. The original texture-based background was causing a build failure and will be revisited in a future update.
-- **Docs:** Updated the `file_index.md` to reflect the project structure.
+
+- **Inventory GUI refactor:** Removed redundant `BotInventoryScreen.java`, introduced the canonical `BotInventoryScreen` in `GraphicalUserInterface`, and updated `AIPlayerClient` to register it as the bot inventory UI.
+- **Build stability:** Fixed duplicate-class and rendering-related compilation errors that were blocking builds. The bot inventory currently uses a solid background as a temporary workaround for the previous texture issue.
+- **Docs:** Updated `file_index.md` to reflect the current project structure and to include the new `BotInventoryScreen` location.
+- **Mining safety:** Bots now detect when they spawn or tunnel into solid blocks, automatically dig themselves out with the best tool available, and broadcast "I'm suffocating!" if they only have bare hands so players can teleport them to safety. The experimental stair-step planner has been disabled for now so teleport-off mining proceeds with the proven approach while we revisit depth-targeting later.

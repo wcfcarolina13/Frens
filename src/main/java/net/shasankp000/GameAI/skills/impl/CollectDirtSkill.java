@@ -18,6 +18,7 @@ import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Direction;
 import net.minecraft.registry.Registries;
 import net.shasankp000.GameAI.skills.ExplorationMovePolicy;
+import net.shasankp000.GameAI.skills.BlockDropRegistry;
 import net.shasankp000.GameAI.skills.Skill;
 import net.shasankp000.GameAI.skills.SkillContext;
 import net.shasankp000.GameAI.skills.SkillExecutionResult;
@@ -148,6 +149,8 @@ public class CollectDirtSkill implements Skill {
             return SkillExecutionResult.failure(skillName + " paused due to nearby threat.");
         }
 
+        Set<Item> effectiveTrackedItems = resolveTrackedItems();
+
         List<String> optionTokens = getOptionTokens(context.parameters());
         boolean untilMode = optionTokens.contains("until") && !optionTokens.contains("exact");
         boolean squareMode = optionTokens.contains("square");
@@ -161,7 +164,7 @@ public class CollectDirtSkill implements Skill {
         int verticalBoost = 0;
         Set<BlockPos> unreachable = new HashSet<>();
         int explorationAttempts = 0;
-        int baselineHarvestCount = playerForAbortCheck != null ? countInventoryItems(playerForAbortCheck, trackedItems) : 0;
+        int baselineHarvestCount = playerForAbortCheck != null ? countInventoryItems(playerForAbortCheck, effectiveTrackedItems) : 0;
         if (untilMode && baselineHarvestCount >= targetCount) {
             LOGGER.info("{}: initial inventory already meets requested amount ({} >= {}).", skillName, baselineHarvestCount, targetCount);
             return SkillExecutionResult.success("Already holding at least " + targetCount + " " + harvestLabel + " blocks.");
@@ -220,7 +223,7 @@ public class CollectDirtSkill implements Skill {
                 }
             }
             if (loopPlayer != null) {
-                int currentCount = countInventoryItems(loopPlayer, trackedItems);
+                int currentCount = countInventoryItems(loopPlayer, effectiveTrackedItems);
                 int effectiveCollected = untilMode ? currentCount : Math.max(0, currentCount - baselineHarvestCount);
                 if (effectiveCollected > inventoryCollected) {
                     inventoryCollected = effectiveCollected;
@@ -265,7 +268,7 @@ public class CollectDirtSkill implements Skill {
             if (result.success()) {
                 if (loopPlayer != null) {
                     BotActions.selectBestTool(loopPlayer, preferredTool, "sword");
-                    int currentCount = countInventoryItems(loopPlayer, trackedItems);
+                    int currentCount = countInventoryItems(loopPlayer, effectiveTrackedItems);
                     int effectiveCollected = untilMode ? currentCount : Math.max(0, currentCount - baselineHarvestCount);
                     if (effectiveCollected > inventoryCollected) {
                         inventoryCollected = effectiveCollected;
@@ -339,7 +342,7 @@ public class CollectDirtSkill implements Skill {
         if (outcome == null) {
             ServerPlayerEntity finalPlayer = source.getPlayer();
             if (finalPlayer != null) {
-                int finalGain = Math.max(0, countInventoryItems(finalPlayer, trackedItems) - baselineHarvestCount);
+                int finalGain = Math.max(0, countInventoryItems(finalPlayer, effectiveTrackedItems) - baselineHarvestCount);
                 collected = Math.max(collected, finalGain);
             }
 
@@ -376,7 +379,8 @@ public class CollectDirtSkill implements Skill {
         return mentionsHarvestIssue(normalized, "no target block detected")
                 || mentionsHarvestIssue(normalized, "no safe approach")
                 || mentionsHarvestIssue(normalized, "failed to reach target block")
-                || mentionsHarvestIssue(normalized, "too far from target block");
+                || mentionsHarvestIssue(normalized, "too far from target block")
+                || mentionsHarvestIssue(normalized, "safe stair path");
     }
 
     private boolean isUnreachableFailure(String message) {
@@ -385,7 +389,8 @@ public class CollectDirtSkill implements Skill {
         }
         String normalized = message.toLowerCase(Locale.ROOT);
         return mentionsHarvestIssue(normalized, "no safe approach")
-                || mentionsHarvestIssue(normalized, "too far from target block");
+                || mentionsHarvestIssue(normalized, "too far from target block")
+                || mentionsHarvestIssue(normalized, "safe stair path");
     }
 
     private boolean shouldTriggerExploration(String message, int failuresInRow, int collected) {
@@ -841,36 +846,51 @@ public class CollectDirtSkill implements Skill {
                                 double baseRadius,
                                 boolean squareMode,
                                 BlockPos squareCenter) {
-        double radius = Math.max(baseRadius, DROP_SEARCH_RADIUS * 1.5D);
-        if (squareMode && squareCenter != null) {
-            radius = Math.max(radius, baseRadius + 2.0D);
-        }
-        double vertical = Math.max(radius, 6.0D);
-        for (int attempt = 0; attempt < 3; attempt++) {
-            BotEventHandler.collectNearbyDrops(player, radius);
-            try {
-                DropSweeper.sweep(
-                        source.withSilent().withMaxLevel(4),
-                        radius,
-                        vertical,
-                        20,
-                        9000L
-                );
-            } catch (Exception sweepError) {
-                LOGGER.warn("Cleanup drop sweep attempt {} failed: {}", attempt + 1, sweepError.getMessage());
-                break;
+        try {
+            double radius = Math.max(baseRadius, DROP_SEARCH_RADIUS * 1.5D);
+            if (squareMode && squareCenter != null) {
+                radius = Math.max(radius, baseRadius + 2.0D);
             }
-            int remaining = source.getWorld().getEntitiesByClass(
-                    net.minecraft.entity.ItemEntity.class,
-                    player.getBoundingBox().expand(radius, vertical, radius),
-                    item -> !item.isRemoved()
-            ).size();
-            if (remaining <= 0) {
-                break;
+            double vertical = Math.max(radius, 6.0D);
+            for (int attempt = 0; attempt < 3; attempt++) {
+                BotEventHandler.collectNearbyDrops(player, radius);
+                try {
+                    DropSweeper.sweep(
+                            source.withSilent().withMaxLevel(4),
+                            radius,
+                            vertical,
+                            20,
+                            9000L
+                    );
+                } catch (Exception sweepError) {
+                    LOGGER.warn("Cleanup drop sweep attempt {} failed: {}", attempt + 1, sweepError.getMessage());
+                    break;
+                }
+                int remaining = source.getWorld().getEntitiesByClass(
+                        net.minecraft.entity.ItemEntity.class,
+                        player.getBoundingBox().expand(radius, vertical, radius),
+                        item -> !item.isRemoved()
+                ).size();
+                if (remaining <= 0) {
+                    break;
+                }
+                radius += 2.0D;
+                vertical += 2.0D;
             }
-            radius += 2.0D;
-            vertical += 2.0D;
+        } finally {
+            BotEventHandler.setExternalOverrideActive(false);
         }
+    }
+
+    private Set<Item> resolveTrackedItems() {
+        if (targetBlockIds == null || targetBlockIds.isEmpty()) {
+            return trackedItems;
+        }
+        LinkedHashSet<Item> merged = new LinkedHashSet<>(trackedItems);
+        for (Identifier identifier : targetBlockIds) {
+            merged.addAll(BlockDropRegistry.dropsFor(identifier));
+        }
+        return Set.copyOf(merged);
     }
 
     private int countInventoryItems(ServerPlayerEntity player, Set<Item> targets) {

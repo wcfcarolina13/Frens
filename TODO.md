@@ -14,8 +14,7 @@
 - [ ] **Water‑aware pickup**: `MovementService` handles shallow‑water detection and wade/bridge routines; `DropSweeper` delegates all movement to it. *DoD:* staged test with ankle‑deep water succeeds (bridge or wade) with no infinite loops.
 - [ ] **Edge/hole pickup**: When items are one block below an edge, bot hops down safely instead of “sneak vacuum”. *DoD:* bot drops into 1‑block hole to collect item, then climbs out.
 
-### P0 — Persistence & Session Behavior
-- [ ] **Persistent inventory (sessions only)**: Bot retains inventory across world reloads/spawns (not across deaths). *DoD:* equip items, exit world, re‑enter, respawn bot—inventory identical.
+- [x] **Persistent inventory (sessions only)**: Bot retains inventory across world reloads/spawns (not across deaths). *DoD:* equip items, exit world, re-enter, respawn bot—inventory identical.
 - [ ] **Bot aliases & identity**: Distinct aliases (e.g., Jake vs Bob) preserve inventory/hunger/sleep/XP separately. *DoD:* spawn two aliases; their states remain isolated across sessions.
 - [ ] **Job resume prompts**: On death/leave, job is paused; on rejoin or respawn, bot asks “Should I continue/return?”. *DoD:* chat prompt appears once; user “yes” resumes or performs corpse‑run retrieval.
 
@@ -27,6 +26,7 @@
 
 ### P0 — Combat Safety
 - [ ] **Creeper evasion**: If unarmed/unarmored, always sprint‑evade creepers; otherwise prefer ranged/melee per kit. *DoD:* bot never stands still near a hissing creeper; records a single red danger alert (4s cooldown).
+- [ ] **Protected build zones / no-grief halo**: Allow players to mark protected areas (e.g., by placing a special marker block/item and invoking a command while looking at it). Within a configurable cubic radius around each marker, bots must never perform destructive actions (mining, tree chopping, structure modification), but may still move, follow, and fight. *DoD:* strip-mining and collect_* skills refuse to break blocks inside protected regions while still functioning normally outside them.
 
 ### P1 — Portals, Boats, Swimming
 - [ ] **Swimming parity**: Bot swims like a player (surface and underwater) without teleport reliance. *DoD:* 20‑block swim to a target item succeeds.
@@ -150,11 +150,14 @@ I have made the following changes to address these issues:
     - [ ] Ensure shift-click, double-click, and drag interactions in BotInventoryScreen mirror vanilla chest/player inventory behavior when moving items between player and bot.
     - [ ] Add optional quick-action buttons in the bot inventory screen (Sort, Equip Best, Take All, Give All) wired to server-side handlers, keeping them disabled or hidden if permissions fail InventoryAccessPolicy checks.
     - [ ] Wire BotInventoryAccess and InventoryAccessPolicy so opening a bot inventory uses the new chest-like view while still enforcing access rules.
-## ToDo List
-[ ] Add persistent inventory to the bot, so it'll keep its inventory across game instances and spawning (not not deaths). 
-[ ] Introduce bot aliases (e.g., 'Jake' will have a different inventory, hunger level, sleep level, and experience points level than a different alias such as 'Bob')
+[...]
 
 [x] I built and tested, though your last message was incomplete due to hitting my usage limit with Codex. Let's take another look at where you left off, in case the job was not completed. Either way, I did build and test already. I tested with the player entity and it's not possible to hoover up item entities by sneaking up against the edge of a block to pick up something a block below it (in a hole). Therefore, the bot should instead determine if it's a safe block and then hop down toward it. It should drop inside the hole, basically. It appears that one needs to be directly on the surface of the block where the item entity resides in order to pick it up.
+
+
+### Protecting player builds
+[ ] Add a method to define no-destruction zones around player constructs (e.g., place a specific marker block, look at it, and run a command). Within a given cubic radius, bots may not perform destructive tasks like mining, tree cutting, or block breaking, but can still navigate, follow, and fight inside that area.
+
 
 
 To do next:
@@ -222,7 +225,6 @@ To do next:
 [ ] Bot can return to fallen tree area to collect late drops
 
 ### Dealing with mining
-
 [ ] Bot can strip mine (keeps distance of at least 1 block to avoid sand, gravel, or lava)
 [ ] Bot can mine until finding certain things, with a proceed vs report option (in case we want to handle stuff like diamonds on our own)
 [ ] Bot will stop and report if it finds a cave, precipice, ancient city, or any other special structure like a mineshaft or mob spawner

@@ -8,10 +8,11 @@ import net.minecraft.entity.ItemEntity;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.network.packet.s2c.play.PositionFlag;
 import net.minecraft.registry.RegistryKey;
+import net.minecraft.registry.tag.BlockTags;
+import net.minecraft.registry.tag.EntityTypeTags;
 import net.minecraft.server.ServerTask;
 import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.world.ServerWorld;
-import net.minecraft.registry.tag.EntityTypeTags;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Direction;
@@ -92,6 +93,8 @@ public class BotEventHandler {
     private static final double ALLY_DEFENSE_RADIUS = 12.0D;
     private static final Map<UUID, CommandState> COMMAND_STATES = new ConcurrentHashMap<>();
     private static final Map<UUID, Long> LAST_RL_SAMPLE_TICK = new ConcurrentHashMap<>();
+    private static final Map<UUID, Long> LAST_SUFFOCATION_ALERT_TICK = new ConcurrentHashMap<>();
+    private static final long SUFFOCATION_ALERT_COOLDOWN_TICKS = 100L;
     private static volatile boolean externalOverrideActive = false;
     private static volatile boolean pendingBotRespawn = false;
     public enum CombatStyle {
@@ -1627,6 +1630,83 @@ public class BotEventHandler {
 
     private static Vec3d positionOf(Entity entity) {
         return new Vec3d(entity.getX(), entity.getY(), entity.getZ());
+    }
+
+    public static boolean rescueFromBurial(ServerPlayerEntity bot) {
+        if (bot == null || bot.isRemoved()) {
+            return false;
+        }
+        ServerWorld world = bot.getEntityWorld() instanceof ServerWorld serverWorld ? serverWorld : null;
+        if (world == null) {
+            return false;
+        }
+        BlockPos feet = bot.getBlockPos();
+        BlockPos head = feet.up();
+        boolean insideWall = bot.isInsideWall()
+                || !world.getBlockState(feet).getCollisionShape(world, feet).isEmpty()
+                || !world.getBlockState(head).getCollisionShape(world, head).isEmpty();
+        if (!insideWall) {
+            LAST_SUFFOCATION_ALERT_TICK.remove(bot.getUuid());
+            return false;
+        }
+
+        boolean hasTool = ensureRescueTool(bot, world, feet);
+        boolean cleared = BotActions.digOut(bot);
+        if (!hasTool || !cleared) {
+            alertSuffocation(bot);
+        } else {
+            LAST_SUFFOCATION_ALERT_TICK.remove(bot.getUuid());
+        }
+        return true;
+    }
+
+    private static boolean ensureRescueTool(ServerPlayerEntity bot, ServerWorld world, BlockPos center) {
+        List<BlockPos> samples = List.of(center, center.up(), center.down());
+        for (BlockPos sample : samples) {
+            BlockState state = world.getBlockState(sample);
+            String keyword = preferredToolKeyword(state);
+            if (keyword != null && BotActions.selectBestTool(bot, keyword, "sword")) {
+                return true;
+            }
+        }
+        return BotActions.selectBestTool(bot, "pickaxe", "sword")
+                || BotActions.selectBestTool(bot, "shovel", "sword")
+                || BotActions.selectBestTool(bot, "axe", "sword");
+    }
+
+    private static String preferredToolKeyword(BlockState state) {
+        if (state == null || state.isAir()) {
+            return null;
+        }
+        if (state.isIn(BlockTags.PICKAXE_MINEABLE)) {
+            return "pickaxe";
+        }
+        if (state.isIn(BlockTags.SHOVEL_MINEABLE)) {
+            return "shovel";
+        }
+        if (state.isIn(BlockTags.AXE_MINEABLE)) {
+            return "axe";
+        }
+        return null;
+    }
+
+    private static void alertSuffocation(ServerPlayerEntity bot) {
+        if (bot == null) {
+            return;
+        }
+        ServerCommandSource source = bot.getCommandSource();
+        MinecraftServer srv = source != null ? source.getServer() : null;
+        if (srv == null) {
+            return;
+        }
+        UUID uuid = bot.getUuid();
+        long now = srv.getTicks();
+        long last = LAST_SUFFOCATION_ALERT_TICK.getOrDefault(uuid, Long.MIN_VALUE);
+        if (now - last < SUFFOCATION_ALERT_COOLDOWN_TICKS) {
+            return;
+        }
+        ChatUtils.sendChatMessages(source.withSilent().withMaxLevel(4), "I'm suffocating!");
+        LAST_SUFFOCATION_ALERT_TICK.put(uuid, now);
     }
 
     private static void lowerShieldTracking(ServerPlayerEntity bot) {

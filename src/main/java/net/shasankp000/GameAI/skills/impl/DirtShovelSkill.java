@@ -2,16 +2,20 @@ package net.shasankp000.GameAI.skills.impl;
 
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.network.ServerPlayerEntity;
+import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
+import net.minecraft.util.math.Vec3d;
 import net.shasankp000.GameAI.BotActions;
 import net.shasankp000.GameAI.skills.DirtNavigationPolicy;
 import net.shasankp000.GameAI.skills.Skill;
 import net.shasankp000.GameAI.skills.SkillContext;
 import net.shasankp000.GameAI.skills.SkillExecutionResult;
+import net.shasankp000.GameAI.skills.SkillPreferences;
 import net.shasankp000.GameAI.skills.SkillManager;
 import net.shasankp000.PathFinding.GoTo;
 import net.shasankp000.PlayerUtils.MiningTool;
@@ -21,11 +25,16 @@ import net.minecraft.registry.Registries;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.Deque;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
@@ -37,6 +46,12 @@ public final class DirtShovelSkill implements Skill {
     private static final Logger LOGGER = LoggerFactory.getLogger("skill-dirt-shovel");
     private static final int DEFAULT_HORIZONTAL_RADIUS = 6;
     private static final int DEFAULT_VERTICAL_RANGE = 4;
+    private static final int MAX_TUNNEL_DEPTH = 4;
+    private static final int MAX_STAIRS_DEPTH = 8;
+    private static final int[] STAIR_VERTICAL_PREFERENCE = new int[]{0, 1, -1};
+    private static final boolean ENABLE_STAIRS_EXPERIMENT = false;
+    private static final double MAX_MINING_DISTANCE_SQ = 25.0D;
+    private static final long MANUAL_STEP_DELAY_MS = 120L;
 
     @Override
     public String name() {
@@ -65,6 +80,7 @@ public final class DirtShovelSkill implements Skill {
                 return failure(context, "No " + label + " block detected within radius " + horizontalRadius + ".");
             }
 
+            boolean stairFailure = false;
             for (BlockPos detectedPos : candidates) {
                 if (SkillManager.shouldAbortSkill(player)) {
                     LOGGER.warn("dirt_shovel interrupted before targeting {} due to cancellation request.", detectedPos);
@@ -80,6 +96,9 @@ public final class DirtShovelSkill implements Skill {
                 ApproachPlan approachPlan = computeApproachPlan(player, detectedPos);
                 if (approachPlan == null) {
                     LOGGER.debug("Skipping {} no approach available", detectedPos);
+                    if (!SkillPreferences.teleportDuringSkills(player)) {
+                        stairFailure = true;
+                    }
                     if (excluded != null) {
                         excluded.add(detectedPos);
                     }
@@ -87,42 +106,10 @@ public final class DirtShovelSkill implements Skill {
                     continue;
                 }
 
-                if (!approachPlan.blocksToClear().isEmpty()) {
-                    LOGGER.info("Carving approach to {} by clearing {}", detectedPos, approachPlan.blocksToClear());
-                    if (!carveApproach(player, approachPlan)) {
-                        LOGGER.warn("Failed to carve approach blocks {} for {}", approachPlan.blocksToClear(), detectedPos);
-                        if (excluded != null) {
-                            excluded.add(detectedPos);
-                        }
-                        DirtNavigationPolicy.record(originBeforeMove, detectedPos, false);
-                        continue;
-                    }
-                }
-
-                BlockPos approachPos = approachPlan.standPosition();
                 LookController.faceBlock(player, detectedPos);
 
-                BlockPos currentPos = player.getBlockPos();
-                double distanceSqToApproach = currentPos.getSquaredDistance(approachPos);
-                double distanceToApproach = Math.sqrt(distanceSqToApproach);
-                if (distanceSqToApproach > 4.0D) {
-                    LOGGER.info("Navigating to approach position {} (distance {})", approachPos, String.format("%.2f", distanceToApproach));
-                    String goToResult = GoTo.goTo(source, approachPos.getX(), approachPos.getY(), approachPos.getZ(), false);
-                    if (goToResult.toLowerCase().contains("failed")) {
-                        LOGGER.warn("Navigation to {} failed: {}", approachPos, goToResult);
-                        if (excluded != null) {
-                            excluded.add(detectedPos);
-                        }
-                        DirtNavigationPolicy.record(originBeforeMove, detectedPos, false);
-                        continue;
-                    }
-                    currentPos = player.getBlockPos();
-                } else {
-                    LOGGER.info("Approach position {} already within reach (distance {}), skipping navigation", approachPos, String.format("%.2f", distanceToApproach));
-                }
-
-                if (currentPos.getSquaredDistance(detectedPos) > 9.0D) {
-                    LOGGER.warn("Too far from {} after navigation (player at {})", detectedPos, currentPos);
+                if (!prepareApproach(source, player, approachPlan)) {
+                    LOGGER.warn("Failed to prepare approach toward {}", detectedPos);
                     if (excluded != null) {
                         excluded.add(detectedPos);
                     }
@@ -130,7 +117,28 @@ public final class DirtShovelSkill implements Skill {
                     continue;
                 }
 
+                BlockPos currentPos = player.getBlockPos();
+                if (currentPos.getSquaredDistance(detectedPos) > 9.0D) {
+                    LOGGER.warn("Too far from {} after approach preparation (player at {})", detectedPos, currentPos);
+                    if (excluded != null) {
+                        excluded.add(detectedPos);
+                    }
+                    DirtNavigationPolicy.record(originBeforeMove, detectedPos, false);
+                    continue;
+                }
+
+                DirtNavigationPolicy.record(originBeforeMove, detectedPos, true);
+
                 BotActions.selectBestTool(player, preferredTool, "sword");
+
+                if (!isWithinMiningReach(player, detectedPos)) {
+                    LOGGER.warn("Blocked from mining {} because it is outside vanilla reach.", detectedPos);
+                    if (excluded != null) {
+                        excluded.add(detectedPos);
+                    }
+                    DirtNavigationPolicy.record(originBeforeMove, detectedPos, false);
+                    continue;
+                }
                 CompletableFuture<String> miningFuture = CompletableFuture.supplyAsync(() -> {
                     try {
                         return MiningTool.mineBlock(player, detectedPos).get();
@@ -182,10 +190,12 @@ public final class DirtShovelSkill implements Skill {
                     SharedStateUtils.setValue(context.sharedState(), "lastShoveledBlock.z", detectedPos.getZ());
                     SharedStateUtils.setValue(context.sharedState(), "lastShovelStatus", "success");
                 }
-                DirtNavigationPolicy.record(originBeforeMove, detectedPos, true);
                 return SkillExecutionResult.success(result);
             }
 
+            if (stairFailure && !SkillPreferences.teleportDuringSkills(player)) {
+                return failure(context, "No safe stair path to target block without teleport.");
+            }
             return failure(context, "No reachable " + label + " blocks found within radius " + horizontalRadius + ".");
         } catch (Exception e) {
             LOGGER.error("Dirt shovel skill failed", e);
@@ -332,100 +342,465 @@ public final class DirtShovelSkill implements Skill {
     }
 
     private ApproachPlan computeApproachPlan(ServerPlayerEntity player, BlockPos target) {
+        ApproachPlan localPlan = computeLocalPlan(player, target);
+        if (localPlan == null) {
+            return null;
+        }
+        if (SkillPreferences.teleportDuringSkills(player) || !ENABLE_STAIRS_EXPERIMENT) {
+            return localPlan;
+        }
+        BlockPos start = player.getBlockPos();
+        BlockPos entry = localPlan.entryPosition();
+        int verticalDistance = Math.abs(start.getY() - entry.getY());
+        boolean requiresStairs = verticalDistance > 1;
+        if (!requiresStairs) {
+            return localPlan;
+        }
+        ApproachPlan stairPlan = includeStairPlan(player, target, localPlan);
+        return stairPlan != null ? stairPlan : localPlan;
+    }
+
+    private ApproachPlan computeLocalPlan(ServerPlayerEntity player, BlockPos target) {
         List<ApproachPlan> fallbackPlans = new ArrayList<>();
         for (Direction direction : Direction.Type.HORIZONTAL) {
-            ApproachPlan plan = evaluateStandOption(player, target.offset(direction), target.offset(direction).up());
-            if (plan == null) {
-                continue;
+            for (int offset : STAIR_VERTICAL_PREFERENCE) {
+                BlockPos stand = target.offset(direction).add(0, offset, 0);
+                BlockPos support = stand.down();
+                ApproachPlan plan = evaluateStandOption(player, support, stand);
+                if (plan == null) {
+                    plan = evaluateObstructedApproach(player, target, direction, offset);
+                }
+                if (plan == null) {
+                    continue;
+                }
+                if (plan.steps().isEmpty()) {
+                    return plan;
+                }
+                fallbackPlans.add(plan);
             }
-            if (plan.blocksToClear().isEmpty()) {
-                return plan;
-            }
-            fallbackPlans.add(plan);
-        }
-
-        ApproachPlan abovePlan = evaluateStandOption(player, target, target.up());
-        if (abovePlan != null) {
-            if (abovePlan.blocksToClear().isEmpty()) {
-                return abovePlan;
-            }
-            fallbackPlans.add(abovePlan);
         }
 
         if (fallbackPlans.isEmpty()) {
             return null;
         }
-        fallbackPlans.sort(Comparator.comparingInt(plan -> plan.blocksToClear().size()));
+        fallbackPlans.sort(Comparator.comparingInt(plan -> plan.steps().size()));
         return fallbackPlans.get(0);
     }
 
     private ApproachPlan evaluateStandOption(ServerPlayerEntity player, BlockPos support, BlockPos stand) {
+        if (support == null || stand == null) {
+            return null;
+        }
+        if (!isSupportSolid(player, support)) {
+            return null;
+        }
         BlockPos head = stand.up();
-        boolean supportSolid = !isPassable(player, support);
-        if (!supportSolid) {
-            return null;
-        }
-
         boolean standClear = isPassable(player, stand);
-        boolean headClear = isPassable(player, head);
-        if (standClear && headClear) {
-            return new ApproachPlan(stand, Collections.emptyList());
-        }
-
-        List<BlockPos> toClear = new ArrayList<>();
         if (!standClear) {
-            toClear.add(stand);
-        }
-        if (!headClear) {
-            toClear.add(head);
-        }
-        if (toClear.isEmpty()) {
             return null;
         }
-        return new ApproachPlan(stand, List.copyOf(toClear));
+        boolean headClear = isPassable(player, head);
+        if (headClear) {
+            return new ApproachPlan(stand, stand, Collections.emptyList());
+        }
+        ObstructionStep headClearStep = new ObstructionStep(null, head, stand);
+        return new ApproachPlan(stand, stand, List.of(headClearStep));
     }
 
-    private boolean carveApproach(ServerPlayerEntity player, ApproachPlan plan) {
-        for (BlockPos blockPos : plan.blocksToClear()) {
-            if (player.getEntityWorld().getBlockState(blockPos).isAir()) {
-                continue;
-            }
+    private ApproachPlan evaluateObstructedApproach(ServerPlayerEntity player,
+                                                    BlockPos target,
+                                                    Direction direction,
+                                                    int verticalOffset) {
+        BlockPos originStand = target.offset(direction).add(0, verticalOffset, 0);
+        BlockPos originSupport = originStand.down();
+        if (!isSupportSolid(player, originSupport)) {
+            return null;
+        }
 
-            LookController.faceBlock(player, blockPos);
-            CompletableFuture<String> future = MiningTool.mineBlock(player, blockPos);
-            String result;
-            try {
-                result = future.get(6, TimeUnit.SECONDS);
-            } catch (TimeoutException timeout) {
-                future.cancel(true);
-                LOGGER.warn("Clearing block {} timed out", blockPos);
-                return false;
-            } catch (Exception e) {
-                LOGGER.warn("Failed to clear block {} while carving approach", blockPos, e);
-                return false;
+        BlockPos entryPosition = null;
+        int entryDepth = -1;
+        for (int depth = 0; depth <= MAX_TUNNEL_DEPTH; depth++) {
+            BlockPos stand = target.offset(direction, depth + 1).add(0, verticalOffset, 0);
+            BlockPos support = stand.down();
+            if (!isSupportSolid(player, support)) {
+                return null;
             }
+            BlockPos head = stand.up();
+            if (isPassable(player, stand) && isPassable(player, head)) {
+                entryPosition = stand;
+                entryDepth = depth;
+                break;
+            }
+        }
 
-            if (result == null || !result.toLowerCase().contains("complete")) {
-                LOGGER.warn("Clearing block {} reported unsuccessful result: {}", blockPos, result);
+        if (entryPosition == null) {
+            return null;
+        }
+
+        List<ObstructionStep> steps = new ArrayList<>();
+        for (int depth = entryDepth - 1; depth >= 0; depth--) {
+            BlockPos stand = target.offset(direction, depth + 1).add(0, verticalOffset, 0);
+            BlockPos head = stand.up();
+            BlockPos blockToClear = isPassable(player, stand) ? null : stand;
+            BlockPos headToClear = isPassable(player, head) ? null : head;
+            steps.add(new ObstructionStep(blockToClear, headToClear, stand));
+        }
+
+        return new ApproachPlan(entryPosition, originStand, List.copyOf(steps));
+    }
+
+    private ApproachPlan includeStairPlan(ServerPlayerEntity player,
+                                          BlockPos target,
+                                          ApproachPlan basePlan) {
+        BlockPos start = player.getBlockPos();
+        BlockPos entry = basePlan.entryPosition();
+        if (start.equals(entry)) {
+            return basePlan;
+        }
+        List<BlockPos> walkwayNodes = planStairPath(player, start, entry);
+        if (walkwayNodes.isEmpty() && !start.equals(entry)) {
+            LOGGER.warn("Unable to build stair-step path from {} to {} for {}", start, entry, target);
+            return null;
+        }
+        List<ObstructionStep> combined = new ArrayList<>(walkwayNodes.size() + basePlan.steps().size());
+        for (BlockPos node : walkwayNodes) {
+            combined.add(stepForStand(player, node));
+        }
+        combined.addAll(basePlan.steps());
+        return new ApproachPlan(start, basePlan.standPosition(), combined);
+    }
+
+    private List<BlockPos> planStairPath(ServerPlayerEntity player,
+                                         BlockPos start,
+                                         BlockPos goal) {
+        if (start == null || goal == null || player == null) {
+            return List.of();
+        }
+        if (start.equals(goal)) {
+            return List.of();
+        }
+        if (Math.abs(goal.getY() - start.getY()) > MAX_STAIRS_DEPTH) {
+            return List.of();
+        }
+        Deque<BlockPos> frontier = new ArrayDeque<>();
+        Map<BlockPos, BlockPos> parent = new HashMap<>();
+        frontier.add(start);
+        parent.put(start, start);
+        int explored = 0;
+        int maxHorizontalRange = 6;
+        while (!frontier.isEmpty() && explored < 512) {
+            BlockPos current = frontier.pollFirst();
+            explored++;
+            if (current.equals(goal)) {
+                break;
+            }
+            for (BlockPos neighbor : stairNeighbors(player, current)) {
+                if (parent.containsKey(neighbor)) {
+                    continue;
+                }
+                if (Math.abs(neighbor.getX() - start.getX()) > maxHorizontalRange
+                        || Math.abs(neighbor.getZ() - start.getZ()) > maxHorizontalRange) {
+                    continue;
+                }
+                if (Math.abs(neighbor.getY() - start.getY()) > MAX_STAIRS_DEPTH) {
+                    continue;
+                }
+                parent.put(neighbor, current);
+                frontier.addLast(neighbor);
+                if (neighbor.equals(goal)) {
+                    frontier.clear();
+                    break;
+                }
+            }
+        }
+        if (!parent.containsKey(goal)) {
+            return List.of();
+        }
+        List<BlockPos> path = new ArrayList<>();
+        BlockPos cursor = goal;
+        while (!cursor.equals(start)) {
+            path.add(cursor);
+            cursor = parent.get(cursor);
+            if (cursor == null) {
+                return List.of();
+            }
+        }
+        Collections.reverse(path);
+        return path;
+    }
+
+    private List<BlockPos> stairNeighbors(ServerPlayerEntity player, BlockPos current) {
+        List<BlockPos> neighbors = new ArrayList<>();
+        for (Direction direction : Direction.Type.HORIZONTAL) {
+            BlockPos horizontal = current.offset(direction);
+            if (isStandCandidate(player, horizontal)) {
+                neighbors.add(horizontal);
+            }
+            BlockPos up = horizontal.up();
+            if (isStandCandidate(player, up)) {
+                neighbors.add(up);
+            }
+            BlockPos down = horizontal.down();
+            if (isStandCandidate(player, down)) {
+                neighbors.add(down);
+            }
+        }
+        return neighbors;
+    }
+
+    private boolean isStandCandidate(ServerPlayerEntity player, BlockPos stand) {
+        if (player == null || stand == null) {
+            return false;
+        }
+        BlockPos support = stand.down();
+        if (!isSupportSolid(player, support)) {
+            return false;
+        }
+        return canClear(player, stand) && canClear(player, stand.up());
+    }
+
+    private boolean canClear(ServerPlayerEntity player, BlockPos pos) {
+        if (player == null || pos == null) {
+            return false;
+        }
+        if (player.getEntityWorld() instanceof ServerWorld world) {
+            BlockState state = world.getBlockState(pos);
+            if (state.isAir()) {
+                return true;
+            }
+            if (state.isOf(Blocks.BEDROCK)) {
                 return false;
             }
-            if (!player.getEntityWorld().getBlockState(blockPos).isAir()) {
-                LOGGER.warn("Block {} still present after carve attempt", blockPos);
+            return state.getHardness(world, pos) >= 0.0F;
+        }
+        return false;
+    }
+
+    private ObstructionStep stepForStand(ServerPlayerEntity player, BlockPos stand) {
+        BlockPos block = isPassable(player, stand) ? null : stand;
+        BlockPos head = isPassable(player, stand.up()) ? null : stand.up();
+        return new ObstructionStep(block, head, stand);
+    }
+
+    private Direction chooseHorizontalDirection(BlockPos from, BlockPos to) {
+        int dx = Integer.compare(to.getX(), from.getX());
+        int dz = Integer.compare(to.getZ(), from.getZ());
+        if (dx == 0 && dz == 0) {
+            return null;
+        }
+        if (Math.abs(dx) >= Math.abs(dz)) {
+            return dx >= 0 ? Direction.EAST : Direction.WEST;
+        }
+        return dz >= 0 ? Direction.SOUTH : Direction.NORTH;
+    }
+
+    private Direction chooseSpiralDirection(BlockPos from, BlockPos target, int rotation) {
+        Direction primary = chooseHorizontalDirection(from, target);
+        if (primary == null) {
+            primary = Direction.NORTH;
+        }
+        Direction[] order = new Direction[]{primary, primary.rotateYClockwise(), primary.rotateYCounterclockwise(), primary.getOpposite()};
+        return order[Math.floorMod(rotation, order.length)];
+    }
+
+    private boolean prepareApproach(ServerCommandSource source,
+                                    ServerPlayerEntity player,
+                                    ApproachPlan plan) {
+        if (plan == null || player == null) {
+            return false;
+        }
+        if (!moveToPosition(source, player, plan.entryPosition())) {
+            LOGGER.warn("Unable to move to approach entry {}", plan.entryPosition());
+            return false;
+        }
+
+        for (ObstructionStep step : plan.steps()) {
+            if (step.blockToClear() != null && !mineWithinReach(player, step.blockToClear())) {
+                return false;
+            }
+            if (step.headToClear() != null && !mineWithinReach(player, step.headToClear())) {
+                return false;
+            }
+            if (!moveToPosition(source, player, step.destinationStand())) {
+                LOGGER.warn("Failed to advance to cleared tunnel position {}", step.destinationStand());
+                return false;
+            }
+        }
+
+        if (player.getBlockPos().getSquaredDistance(plan.standPosition()) > 4.0D) {
+            if (!moveToPosition(source, player, plan.standPosition())) {
+                LOGGER.warn("Failed final repositioning to {}", plan.standPosition());
                 return false;
             }
         }
         return true;
     }
 
+    private boolean moveToPosition(ServerCommandSource source,
+                                   ServerPlayerEntity player,
+                                   BlockPos destination) {
+        if (player == null || destination == null) {
+            return false;
+        }
+        double distanceSq = player.getBlockPos().getSquaredDistance(destination);
+        if (distanceSq <= 4.0D) {
+            return true;
+        }
+        if (SkillPreferences.teleportDuringSkills(player)) {
+            String goToResult = GoTo.goTo(source, destination.getX(), destination.getY(), destination.getZ(), false);
+            if (!isGoToSuccess(goToResult)) {
+                LOGGER.warn("GoTo navigation to {} failed: {}", destination, goToResult);
+                return false;
+            }
+            double postDistanceSq = player.getBlockPos().getSquaredDistance(destination);
+            if (postDistanceSq > 4.0D && !attemptManualNudge(player, destination)) {
+                LOGGER.warn("GoTo reached {} but remains {} blocks away", player.getBlockPos(), String.format("%.2f", Math.sqrt(postDistanceSq)));
+                return false;
+            }
+            return true;
+        }
+
+        boolean walked = walkManually(player, destination);
+        if (!walked) {
+            LOGGER.warn("Manual walk to {} failed", destination);
+        }
+        return walked;
+    }
+
+    private boolean walkManually(ServerPlayerEntity player, BlockPos destination) {
+        for (int attempt = 0; attempt < 48; attempt++) {
+            BlockPos current = player.getBlockPos();
+            if (current.getSquaredDistance(destination) <= 4.0D) {
+                return true;
+            }
+            Direction stepDirection = chooseStepDirection(current, destination);
+            if (stepDirection == null) {
+                int verticalDelta = destination.getY() - current.getY();
+                if (verticalDelta == 0) {
+                    return true;
+                }
+                BlockPos stand = verticalDelta > 0 ? current.up() : current.down();
+                if (!ensureWalkable(player, stand)) {
+                    return false;
+                }
+                BlockPos targetStand = stand;
+                runOnServerThread(player, () -> {
+                    LookController.faceBlock(player, destination);
+                    if (targetStand.getY() > current.getY()) {
+                        BotActions.jump(player);
+                    } else {
+                        BotActions.moveForward(player);
+                    }
+                });
+            } else {
+                BlockPos nextStand = current.offset(stepDirection);
+                if (!ensureWalkable(player, nextStand)) {
+                    LOGGER.warn("Unable to clear walkway toward {} while walking manually", nextStand);
+                    return false;
+                }
+                BlockPos stepTarget = nextStand;
+                runOnServerThread(player, () -> {
+                    LookController.faceBlock(player, stepTarget);
+                    if (stepTarget.getY() > current.getY()) {
+                        BotActions.jumpForward(player);
+                    } else {
+                        BotActions.moveForward(player);
+                        if (stepTarget.getY() < current.getY()) {
+                            BotActions.moveForward(player);
+                        }
+                    }
+                });
+            }
+
+            try {
+                Thread.sleep(MANUAL_STEP_DELAY_MS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+        }
+        return player.getBlockPos().getSquaredDistance(destination) <= 4.0D;
+    }
+
+    private boolean mineWithinReach(ServerPlayerEntity player, BlockPos blockPos) {
+        if (blockPos == null || player == null) {
+            return true;
+        }
+        if (!isWithinMiningReach(player, blockPos)) {
+            Vec3d target = Vec3d.ofCenter(blockPos);
+            double distance = Math.sqrt(player.squaredDistanceTo(target.x, target.y, target.z));
+            LOGGER.warn("Block {} is out of reach for {} (distance {}).", blockPos, player.getName().getString(),
+                    String.format("%.2f", distance));
+            return false;
+        }
+        LookController.faceBlock(player, blockPos);
+        CompletableFuture<String> future = MiningTool.mineBlock(player, blockPos);
+        try {
+            String result = future.get(6, TimeUnit.SECONDS);
+            if (result == null || !result.toLowerCase().contains("complete")) {
+                LOGGER.warn("Mining {} returned unexpected result: {}", blockPos, result);
+                return false;
+            }
+            if (!player.getEntityWorld().getBlockState(blockPos).isAir()) {
+                LOGGER.warn("{} still present after mining attempt", blockPos);
+                return false;
+            }
+            return true;
+        } catch (TimeoutException timeout) {
+            future.cancel(true);
+            LOGGER.warn("Mining {} timed out", blockPos);
+        } catch (Exception e) {
+            LOGGER.warn("Mining {} failed", blockPos, e);
+        }
+        return false;
+    }
+
+    // latest.log (around 23:45:52) showed repeated "Drop sweep manual nudge failed" warnings when the
+    // tunnel forced the bot into crawl spaces. Ensuring each column has headroom keeps the bot upright.
+    private boolean ensureWalkable(ServerPlayerEntity player, BlockPos stand) {
+        if (player == null || stand == null) {
+            return false;
+        }
+        BlockPos support = stand.down();
+        if (!isSupportSolid(player, support)) {
+            return false;
+        }
+        boolean clear = true;
+        if (!isPassable(player, stand)) {
+            clear &= mineWithinReach(player, stand);
+        }
+        if (!isPassable(player, stand.up())) {
+            clear &= mineWithinReach(player, stand.up());
+        }
+        return clear;
+    }
+
+    private Direction chooseStepDirection(BlockPos current, BlockPos destination) {
+        int dx = Integer.compare(destination.getX(), current.getX());
+        int dz = Integer.compare(destination.getZ(), current.getZ());
+        if (dx == 0 && dz == 0) {
+            return null;
+        }
+        if (Math.abs(dx) >= Math.abs(dz)) {
+            return dx >= 0 ? Direction.EAST : Direction.WEST;
+        }
+        return dz >= 0 ? Direction.SOUTH : Direction.NORTH;
+    }
+
+    private boolean isWithinMiningReach(ServerPlayerEntity player, BlockPos blockPos) {
+        if (player == null || blockPos == null) {
+            return false;
+        }
+        Vec3d target = Vec3d.ofCenter(blockPos);
+        return player.squaredDistanceTo(target.x, target.y, target.z) <= MAX_MINING_DISTANCE_SQ;
+    }
+
     private boolean isPassable(ServerPlayerEntity player, BlockPos pos) {
         return player.getEntityWorld().getBlockState(pos).getCollisionShape(player.getEntityWorld(), pos).isEmpty();
     }
 
-    private boolean isStandable(ServerPlayerEntity player, BlockPos support, BlockPos stand) {
-        BlockPos head = stand.up();
-        return !isPassable(player, support)
-                && isPassable(player, stand)
-                && isPassable(player, head);
+    private boolean isSupportSolid(ServerPlayerEntity player, BlockPos support) {
+        return support != null && !isPassable(player, support);
     }
 
     private boolean matchesTargetBlock(BlockState state, Set<Identifier> targetBlocks) {
@@ -504,6 +879,63 @@ public final class DirtShovelSkill implements Skill {
         return defaultValue;
     }
 
-    private record ApproachPlan(BlockPos standPosition, List<BlockPos> blocksToClear) {
+    private boolean attemptManualNudge(ServerPlayerEntity player, BlockPos destination) {
+        if (player == null || destination == null) {
+            return false;
+        }
+        BlockPos originBlock = player.getBlockPos();
+        for (int attempt = 0; attempt < 3; attempt++) {
+            runOnServerThread(player, () -> {
+                LookController.faceBlock(player, destination);
+                BlockPos currentBlock = player.getBlockPos();
+                int dy = destination.getY() - currentBlock.getY();
+                if (dy > 0) {
+                    BotActions.jumpForward(player);
+                } else {
+                    BotActions.moveForward(player);
+                    if (dy < 0) {
+                        BotActions.moveForward(player);
+                    }
+                }
+            });
+
+            double distanceSq = player.getBlockPos().getSquaredDistance(destination);
+            if (distanceSq <= 4.0D) {
+                return true;
+            }
+        }
+        LOGGER.warn("Manual nudge failed to move the bot away from {}", originBlock);
+        return false;
+    }
+
+    private void runOnServerThread(ServerPlayerEntity player, Runnable action) {
+        if (player == null || action == null) {
+            return;
+        }
+        ServerWorld world = player.getEntityWorld() instanceof ServerWorld serverWorld ? serverWorld : null;
+        MinecraftServer server = world != null ? world.getServer() : null;
+        if (server == null) {
+            action.run();
+            return;
+        }
+        if (server.isOnThread()) {
+            action.run();
+        } else {
+            server.execute(action);
+        }
+    }
+
+    private boolean isGoToSuccess(String result) {
+        if (result == null) {
+            return false;
+        }
+        String lower = result.toLowerCase(Locale.ROOT);
+        return !(lower.contains("failed") || lower.contains("error") || lower.contains("not found"));
+    }
+
+    private record ApproachPlan(BlockPos entryPosition, BlockPos standPosition, List<ObstructionStep> steps) {
+    }
+
+    private record ObstructionStep(BlockPos blockToClear, BlockPos headToClear, BlockPos destinationStand) {
     }
 }
