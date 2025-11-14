@@ -2,11 +2,11 @@ package net.shasankp000;
 
 import net.fabricmc.api.ClientModInitializer;
 import net.minecraft.client.gui.screen.ingame.HandledScreens;
-import net.shasankp000.GraphicalUserInterface.BotInventoryScreen;
+import net.shasankp000.GraphicalUserInterface.BotPlayerInventoryScreen;
 
 public class AIPlayerClient implements ClientModInitializer {
     @Override
     public void onInitializeClient() {
-        HandledScreens.register(AIPlayer.BOT_INV_HANDLER, BotInventoryScreen::new);
+        HandledScreens.register(AIPlayer.BOT_PLAYER_INV_HANDLER, BotPlayerInventoryScreen::new);
     }
 }

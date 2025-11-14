@@ -912,7 +912,7 @@ public class modCommandRegistry {
                                                 return 0;
                                             }
 
-                                            boolean ok = BotInventoryAccess.openMain(viewer, bot);
+                                            boolean ok = BotInventoryAccess.openBotInventory(viewer, bot);
                                             if (!ok) {
                                                 source.sendError(Text.literal("Out of range or wrong dimension."));
                                                 return 0;

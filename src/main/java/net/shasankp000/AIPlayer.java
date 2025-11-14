@@ -49,7 +49,7 @@ public class AIPlayer implements ModInitializer {
 
     public static final Logger LOGGER = LoggerFactory.getLogger("ai-player");
     public static final String MOD_ID = "ai-player";
-    public static ScreenHandlerType<BotInventoryAccess.BotInventoryScreenHandler> BOT_INV_HANDLER;
+    public static ScreenHandlerType<net.shasankp000.ui.BotPlayerInventoryScreenHandler> BOT_PLAYER_INV_HANDLER;
     public static final ManualConfig CONFIG = ManualConfig.load();
     public static MinecraftServer serverInstance = null; // default for now
     public static BertModelManager modelManager;
@@ -59,11 +59,11 @@ public class AIPlayer implements ModInitializer {
     @Override
     public void onInitialize() {
 
-        // ScreenHandler registration for v2 UI
-        BOT_INV_HANDLER = Registry.register(
+        // ScreenHandler registration for bot/player UI
+        BOT_PLAYER_INV_HANDLER = Registry.register(
                 Registries.SCREEN_HANDLER,
-                Identifier.of(MOD_ID, "bot_inventory"),
-                new ScreenHandlerType<>(BotInventoryAccess.BotInventoryScreenHandler::clientFactory, FeatureFlags.VANILLA_FEATURES)
+                Identifier.of(MOD_ID, "bot_player_inventory"),
+                new ScreenHandlerType<>(net.shasankp000.ui.BotPlayerInventoryScreenHandler::clientFactory, FeatureFlags.VANILLA_FEATURES)
         );
 
         UseEntityCallback.EVENT.register((player, world, hand, entity, hit) -> {
@@ -88,7 +88,7 @@ public class AIPlayer implements ModInitializer {
                 return net.minecraft.util.ActionResult.PASS;
             }
 
-            boolean ok = net.shasankp000.ui.BotInventoryAccess.openFull(
+            boolean ok = net.shasankp000.ui.BotInventoryAccess.openBotInventory(
                     (net.minecraft.server.network.ServerPlayerEntity) player, bot
             );
             return ok ? net.minecraft.util.ActionResult.SUCCESS : net.minecraft.util.ActionResult.PASS;
