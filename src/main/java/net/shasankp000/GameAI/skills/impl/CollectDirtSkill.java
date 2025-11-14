@@ -152,6 +152,8 @@ public class CollectDirtSkill implements Skill {
         Set<Item> effectiveTrackedItems = resolveTrackedItems();
 
         List<String> optionTokens = getOptionTokens(context.parameters());
+        Integer targetDepthY = getOptionalIntParameter(context, "targetDepthY");
+        boolean depthMode = targetDepthY != null;
         boolean untilMode = optionTokens.contains("until") && !optionTokens.contains("exact");
         boolean squareMode = optionTokens.contains("square");
 
@@ -181,6 +183,10 @@ public class CollectDirtSkill implements Skill {
             }
         }
 
+        if (depthMode && playerForAbortCheck != null && playerForAbortCheck.getBlockY() <= targetDepthY) {
+            return SkillExecutionResult.success("Reached target depth " + targetDepthY + ".");
+        }
+
         boolean cleanupRequested = playerForAbortCheck != null;
         double cleanupBaseRadius = Math.max(horizontalRadius, DROP_SEARCH_RADIUS);
         SkillExecutionResult outcome = null;
@@ -196,6 +202,10 @@ public class CollectDirtSkill implements Skill {
 
             ServerPlayerEntity loopPlayer = source.getPlayer();
             if (loopPlayer != null) {
+                if (depthMode && loopPlayer.getBlockY() <= targetDepthY) {
+                    outcome = SkillExecutionResult.success("Reached target depth " + targetDepthY + ".");
+                    break;
+                }
                 if (SkillManager.shouldAbortSkill(loopPlayer)) {
                     LOGGER.warn("{} interrupted during iteration {} due to cancellation request.", skillName, attempt + 1);
                     outcome = SkillExecutionResult.failure(skillName + " paused due to nearby threat.");
@@ -260,7 +270,8 @@ public class CollectDirtSkill implements Skill {
                     targetBlockIds,
                     harvestLabel,
                     preferredTool,
-                    false
+                    depthMode,
+                    depthMode
             );
 
             lastMessage = result.message();
@@ -823,6 +834,21 @@ public class CollectDirtSkill implements Skill {
             }
         }
         return defaultValue;
+    }
+
+    private Integer getOptionalIntParameter(SkillContext context, String key) {
+        Map<String, Object> params = context.parameters();
+        Object value = params.get(key);
+        if (value instanceof Number number) {
+            return number.intValue();
+        }
+        if (value instanceof String str) {
+            try {
+                return Integer.parseInt(str);
+            } catch (NumberFormatException ignored) {
+            }
+        }
+        return null;
     }
 
     @SuppressWarnings("unchecked")

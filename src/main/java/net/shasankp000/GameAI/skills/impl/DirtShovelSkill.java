@@ -72,10 +72,11 @@ public final class DirtShovelSkill implements Skill {
         String harvestLabel = extractHarvestLabel(context.parameters());
         String preferredTool = extractPreferredTool(context.parameters());
         boolean diggingDown = getBooleanParameter(context, "diggingDown", false);
+        boolean allowAnyBlock = getBooleanParameter(context, "allowAnyBlock", false);
 
         String label = harvestLabel != null ? harvestLabel : "target";
         try {
-            List<BlockPos> candidates = gatherCandidateDirt(player, horizontalRadius, verticalRange, excluded, squareCenter, squareRadius, targetBlocks, diggingDown);
+            List<BlockPos> candidates = gatherCandidateDirt(player, horizontalRadius, verticalRange, excluded, squareCenter, squareRadius, targetBlocks, diggingDown, allowAnyBlock);
             if (candidates.isEmpty()) {
                 return failure(context, "No " + label + " block detected within radius " + horizontalRadius + ".");
             }
@@ -286,7 +287,8 @@ public final class DirtShovelSkill implements Skill {
                                                BlockPos squareCenter,
                                                Integer squareRadius,
                                                Set<Identifier> targetBlocks,
-                                               boolean diggingDown) {
+                                               boolean diggingDown,
+                                               boolean allowAnyBlock) {
         BlockPos origin = player.getBlockPos();
         List<BlockPos> candidates = new ArrayList<>();
 
@@ -297,7 +299,7 @@ public final class DirtShovelSkill implements Skill {
                     continue;
                 }
                 BlockState state = player.getEntityWorld().getBlockState(candidate);
-                if (matchesTargetBlock(state, targetBlocks)) {
+                if ((allowAnyBlock && !state.isAir()) || matchesTargetBlock(state, targetBlocks)) {
                     candidates.add(candidate);
                 }
             }
@@ -327,7 +329,7 @@ public final class DirtShovelSkill implements Skill {
                         continue;
                     }
                     BlockState state = player.getEntityWorld().getBlockState(candidate);
-                    if (!matchesTargetBlock(state, targetBlocks)) {
+                    if (!allowAnyBlock && !matchesTargetBlock(state, targetBlocks)) {
                         continue;
                     }
                     candidates.add(candidate);
@@ -834,7 +836,8 @@ public final class DirtShovelSkill implements Skill {
                                         Set<Identifier> targetBlocks,
                                         String harvestLabel,
                                         String preferredTool,
-                                        boolean diggingDown) {
+                                        boolean diggingDown,
+                                        boolean allowAnyBlock) {
         Map<String, Object> params = new java.util.HashMap<>();
         params.put("searchRadius", horizontalRadius);
         params.put("verticalRange", verticalRange);
@@ -857,6 +860,9 @@ public final class DirtShovelSkill implements Skill {
             params.put("preferredTool", preferredTool);
         }
         params.put("diggingDown", diggingDown);
+        if (allowAnyBlock) {
+            params.put("allowAnyBlock", true);
+        }
         return execute(new SkillContext(source, sharedState, params));
     }
 

@@ -2365,11 +2365,24 @@ public class modCommandRegistry {
     private static int executeSkill(CommandContext<ServerCommandSource> context, ServerPlayerEntity bot, String skillName, String rawArgs) {
         Map<String, Object> params = new HashMap<>();
         Integer count = null;
+        Integer depthTarget = null;
         Set<Identifier> targetBlocks = new HashSet<>();
         List<String> options = new ArrayList<>();
         if (rawArgs != null && !rawArgs.isBlank()) {
             String[] tokens = rawArgs.trim().split("\\s+");
-            for (String token : tokens) {
+            for (int i = 0; i < tokens.length; i++) {
+                String token = tokens[i];
+                if ("depth".equalsIgnoreCase(token) && i + 1 < tokens.length) {
+                    String depthStr = tokens[++i];
+                    try {
+                        depthTarget = Integer.parseInt(depthStr);
+                        LOGGER.info("Parsed depth target: {}", depthTarget);
+                        continue;
+                    } catch (NumberFormatException ignored) {
+                        LOGGER.warn("Invalid depth parameter '{}'", depthStr);
+                        continue;
+                    }
+                }
                 try {
                     count = Integer.parseInt(token);
                     LOGGER.info("Parsed count: " + count);
@@ -2404,6 +2417,11 @@ public class modCommandRegistry {
             if (!options.isEmpty()) {
                 params.put("options", options);
                 LOGGER.info("Final options in params: " + options);
+            }
+            if (depthTarget != null) {
+                params.put("targetDepthY", depthTarget);
+                params.put("diggingDown", true);
+                params.put("depthMode", true);
             }
         }
         ServerCommandSource source = context.getSource();

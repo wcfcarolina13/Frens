@@ -40,6 +40,17 @@ Arguments are forwarded exactly as you type them (minus the alias token). Each b
 When you target multiple bots (or `all`), the requested count is shared between them; add the keyword `each` if you want every bot to chase the full amount.
 `collect_dirt` will also scoop up gravel, sand, mud, and similar soft blocks whenever pure dirt is out of reach so the bots don’t stall in tight caves.
 
+### Skill Arguments & Modifiers
+
+| Argument | Meaning |
+| --- | --- |
+| `square` | Stay within a square that starts at the bot’s current position. The current radius grows as the skill expands its search. |
+| `until` | Keep working until the bot already holds the requested amount (useful for “top off” jobs). Combine with `exact` to force the exact count instead. |
+| `each` | When you target multiple bots, have each bot satisfy the full count instead of splitting it. |
+| `depth <y>` | New: dig a staircase straight down until the bot reaches the requested Y level (teleport stays off). Example: `/bot skill mining depth -50 Jake`. The bot mines whatever blocks are in the way and stops once its feet are at or below Y = -50. |
+
+Depth jobs implicitly enable the “digging down” mode so the bot removes whatever blocks are directly beneath it until the target Y level is reached—it ignores ore filters and keeps digging until the goal depth is met. This is a stepping stone toward more advanced “mine to depth, then branch” tasks.
+
 ---
 
 ## Inventory Persistence
@@ -68,6 +79,7 @@ Snapshots are keyed by both alias and the bot’s UUID, so Jake and Bob keep the
 | `/bot defend nearby bots <y\|n> [alias\|all]` | Toggle the auto-defend behaviour so a bot (or every bot) will break formation to protect any ally that is attacked within ~12 blocks. Use `y`/`n` and the optional alias just like other commands. |
 | `/bot inventory [alias\|all]` | Summarise the selected bot(s) inventory. |
 | `/bot inventory count <item> [alias\|all]` | Count how many of an item the bot(s) are carrying. |
+| `/bot config teleportDuringSkills on\|off [alias]` | Enable or disable teleport shortcuts while skills are running. Turning it off makes the bot tunnel and stair-step like a human player. |
 
 Most of these subcommands now accept the optional alias/`all` token in the same fashion as the skill command.
 
