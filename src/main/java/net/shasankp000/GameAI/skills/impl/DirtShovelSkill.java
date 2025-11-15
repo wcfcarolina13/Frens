@@ -11,13 +11,17 @@ import net.minecraft.util.Identifier;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
+import net.shasankp000.ChatUtils.ChatUtils;
 import net.shasankp000.GameAI.BotActions;
+import net.shasankp000.GameAI.services.SkillResumeService;
 import net.shasankp000.GameAI.skills.DirtNavigationPolicy;
 import net.shasankp000.GameAI.skills.Skill;
 import net.shasankp000.GameAI.skills.SkillContext;
 import net.shasankp000.GameAI.skills.SkillExecutionResult;
 import net.shasankp000.GameAI.skills.SkillPreferences;
 import net.shasankp000.GameAI.skills.SkillManager;
+import net.shasankp000.GameAI.skills.support.MiningHazardDetector;
+import net.shasankp000.GameAI.skills.support.MiningHazardDetector.Hazard;
 import net.shasankp000.PathFinding.GoTo;
 import net.shasankp000.PlayerUtils.MiningTool;
 import net.shasankp000.FunctionCaller.SharedStateUtils;
@@ -37,6 +41,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Locale;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -74,6 +79,7 @@ public final class DirtShovelSkill implements Skill {
         boolean diggingDown = getBooleanParameter(context, "diggingDown", false);
         boolean allowAnyBlock = getBooleanParameter(context, "allowAnyBlock", false);
         boolean stairMode = getBooleanParameter(context, "stairsMode", false);
+        boolean spiralMode = getBooleanParameter(context, "spiralMode", false);
 
         String label = harvestLabel != null ? harvestLabel : "target";
         try {
@@ -95,7 +101,7 @@ public final class DirtShovelSkill implements Skill {
                     SharedStateUtils.setValue(context.sharedState(), "pendingDirtTarget.z", detectedPos.getZ());
                 }
 
-                ApproachPlan approachPlan = computeApproachPlan(player, detectedPos, stairMode);
+                ApproachPlan approachPlan = computeApproachPlan(player, detectedPos, stairMode, spiralMode);
                 if (approachPlan == null) {
                     LOGGER.debug("Skipping {} no approach available", detectedPos);
                     if (!SkillPreferences.teleportDuringSkills(player) && stairMode) {
@@ -106,6 +112,16 @@ public final class DirtShovelSkill implements Skill {
                     }
                     DirtNavigationPolicy.record(originBeforeMove, detectedPos, false);
                     continue;
+                }
+
+                Optional<Hazard> hazard = MiningHazardDetector.detect(
+                        player,
+                        gatherHazardBlocks(detectedPos, approachPlan),
+                        gatherStepTargets(approachPlan));
+                if (hazard.isPresent()) {
+                    SkillResumeService.flagManualResume(player);
+                    ChatUtils.sendChatMessages(source.withSilent().withMaxLevel(4), hazard.get().chatMessage());
+                    return failure(context, hazard.get().failureMessage());
                 }
 
                 LookController.faceBlock(player, detectedPos);
@@ -359,7 +375,7 @@ public final class DirtShovelSkill implements Skill {
         return candidates;
     }
 
-    private ApproachPlan computeApproachPlan(ServerPlayerEntity player, BlockPos target, boolean stairMode) {
+    private ApproachPlan computeApproachPlan(ServerPlayerEntity player, BlockPos target, boolean stairMode, boolean spiralMode) {
         ApproachPlan localPlan = computeLocalPlan(player, target);
         if (localPlan == null) {
             return null;
@@ -373,7 +389,7 @@ public final class DirtShovelSkill implements Skill {
         if (verticalDistance <= 1) {
             return localPlan;
         }
-        ApproachPlan stairPlan = includeStairPlan(player, target, localPlan);
+        ApproachPlan stairPlan = includeStairPlan(player, target, localPlan, spiralMode);
         return stairPlan != null ? stairPlan : localPlan;
     }
 
@@ -468,13 +484,14 @@ public final class DirtShovelSkill implements Skill {
 
     private ApproachPlan includeStairPlan(ServerPlayerEntity player,
                                           BlockPos target,
-                                          ApproachPlan basePlan) {
+                                          ApproachPlan basePlan,
+                                          boolean spiralMode) {
         BlockPos start = player.getBlockPos();
         BlockPos entry = basePlan.entryPosition();
         if (start.equals(entry)) {
             return basePlan;
         }
-        List<BlockPos> walkwayNodes = planStairPath(player, start, entry);
+        List<BlockPos> walkwayNodes = planStairPath(player, start, entry, spiralMode);
         if (walkwayNodes.isEmpty() && !start.equals(entry)) {
             LOGGER.warn("Unable to build stair-step path from {} to {} for {}", start, entry, target);
             return null;
@@ -489,7 +506,8 @@ public final class DirtShovelSkill implements Skill {
 
     private List<BlockPos> planStairPath(ServerPlayerEntity player,
                                          BlockPos start,
-                                         BlockPos goal) {
+                                         BlockPos goal,
+                                         boolean spiralMode) {
         if (start == null || goal == null || player == null) {
             return List.of();
         }
@@ -504,7 +522,7 @@ public final class DirtShovelSkill implements Skill {
         frontier.add(start);
         parent.put(start, start);
         int explored = 0;
-        int maxHorizontalRange = 6;
+        int maxHorizontalRange = spiralMode ? 3 : 6;
         while (!frontier.isEmpty() && explored < 512) {
             BlockPos current = frontier.pollFirst();
             explored++;
@@ -573,7 +591,12 @@ public final class DirtShovelSkill implements Skill {
         if (!isSupportSolid(player, support)) {
             return false;
         }
-        return canClear(player, stand) && canClear(player, stand.up());
+        for (int offset = 0; offset < 4; offset++) {
+            if (!canClear(player, stand.up(offset))) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private boolean canClear(ServerPlayerEntity player, BlockPos pos) {
@@ -783,13 +806,45 @@ public final class DirtShovelSkill implements Skill {
             return false;
         }
         boolean clear = true;
-        if (!isPassable(player, stand)) {
-            clear &= mineWithinReach(player, stand);
-        }
-        if (!isPassable(player, stand.up())) {
-            clear &= mineWithinReach(player, stand.up());
+        for (int offset = 0; offset < 4; offset++) {
+            BlockPos check = stand.up(offset);
+            if (!isPassable(player, check)) {
+                clear &= mineWithinReach(player, check);
+            }
         }
         return clear;
+    }
+
+    private List<BlockPos> gatherHazardBlocks(BlockPos target, ApproachPlan plan) {
+        List<BlockPos> blocks = new ArrayList<>();
+        if (target != null) {
+            blocks.add(target);
+        }
+        for (ObstructionStep step : plan.steps()) {
+            if (step.blockToClear() != null) {
+                blocks.add(step.blockToClear());
+            }
+            if (step.headToClear() != null) {
+                blocks.add(step.headToClear());
+            }
+        }
+        return blocks;
+    }
+
+    private List<BlockPos> gatherStepTargets(ApproachPlan plan) {
+        List<BlockPos> steps = new ArrayList<>();
+        if (plan.entryPosition() != null) {
+            steps.add(plan.entryPosition());
+        }
+        if (plan.standPosition() != null) {
+            steps.add(plan.standPosition());
+        }
+        for (ObstructionStep step : plan.steps()) {
+            if (step.destinationStand() != null) {
+                steps.add(step.destinationStand());
+            }
+        }
+        return steps;
     }
 
     private Direction chooseStepDirection(BlockPos current, BlockPos destination) {

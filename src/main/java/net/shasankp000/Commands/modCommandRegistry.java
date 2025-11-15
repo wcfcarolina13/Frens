@@ -309,27 +309,27 @@ public class modCommandRegistry {
                         .then(literal("config")
                                 .then(literal("teleportDuringSkills")
                                         .then(CommandManager.argument("mode", StringArgumentType.string())
-                                                .executes(context -> executeTeleportConfig(
+                                                .executes(context -> executeTeleportConfigTargets(
                                                         context,
-                                                        getActiveBotOrThrow(context),
+                                                        null,
                                                         parseToggle(StringArgumentType.getString(context, "mode"))))
-                                                .then(CommandManager.argument("bot", EntityArgumentType.player())
-                                                        .executes(context -> executeTeleportConfig(
+                                                .then(CommandManager.argument("target", StringArgumentType.string())
+                                                        .executes(context -> executeTeleportConfigTargets(
                                                                 context,
-                                                                EntityArgumentType.getPlayer(context, "bot"),
+                                                                StringArgumentType.getString(context, "target"),
                                                                 parseToggle(StringArgumentType.getString(context, "mode")))))
                                         )
                                 )
                                 .then(literal("inventoryFullPause")
                                         .then(CommandManager.argument("mode", StringArgumentType.string())
-                                                .executes(context -> executeInventoryFullConfig(
+                                                .executes(context -> executeInventoryFullConfigTargets(
                                                         context,
-                                                        getActiveBotOrThrow(context),
+                                                        null,
                                                         parseToggle(StringArgumentType.getString(context, "mode"))))
-                                                .then(CommandManager.argument("bot", EntityArgumentType.player())
-                                                        .executes(context -> executeInventoryFullConfig(
+                                                .then(CommandManager.argument("target", StringArgumentType.string())
+                                                        .executes(context -> executeInventoryFullConfigTargets(
                                                                 context,
-                                                                EntityArgumentType.getPlayer(context, "bot"),
+                                                                StringArgumentType.getString(context, "target"),
                                                                 parseToggle(StringArgumentType.getString(context, "mode")))))
                                         )
                                 )
@@ -2166,6 +2166,13 @@ public class modCommandRegistry {
         return 1;
     }
 
+    private static List<ServerPlayerEntity> resolveTargetBots(CommandContext<ServerCommandSource> context, String targetArg) throws CommandSyntaxException {
+        if (targetArg == null) {
+            return List.of(getActiveBotOrThrow(context));
+        }
+        return BotTargetingService.resolve(context.getSource(), targetArg);
+    }
+
     private static int executeFollowTargets(CommandContext<ServerCommandSource> context, String targetArg, ServerPlayerEntity followTarget) throws CommandSyntaxException {
         if (followTarget == null) {
             throw new SimpleCommandExceptionType(Text.literal("Specify a player for the bots to follow.")).create();
@@ -2506,6 +2513,11 @@ public class modCommandRegistry {
             if (stairsRequested) {
                 params.put("stairsMode", true);
             }
+            boolean spiralRequested = options.stream().anyMatch(opt -> "spiral".equalsIgnoreCase(opt));
+            if (spiralRequested) {
+                params.put("spiralMode", true);
+                params.put("stairsMode", true);
+            }
         }
         ServerCommandSource source = context.getSource();
         SkillResumeService.recordExecution(bot, skillName, rawArgs, source);
@@ -2548,6 +2560,23 @@ public class modCommandRegistry {
         return 1;
     }
 
+    private static int executeTeleportConfigTargets(CommandContext<ServerCommandSource> context,
+                                                    String targetArg,
+                                                    boolean enabled) throws CommandSyntaxException {
+        List<ServerPlayerEntity> bots = resolveTargetBots(context, targetArg);
+        boolean isAll = targetArg != null && "all".equalsIgnoreCase(targetArg.trim());
+        int successes = 0;
+        for (ServerPlayerEntity bot : bots) {
+            successes += executeTeleportConfig(context, bot, enabled);
+        }
+        if (!bots.isEmpty()) {
+            String summary = formatBotList(bots, isAll);
+            ChatUtils.sendSystemMessage(context.getSource(),
+                    summary + " now " + (enabled ? "teleport" : "walk") + " during skill tasks.");
+        }
+        return successes;
+    }
+
     private static int executeInventoryFullConfig(CommandContext<ServerCommandSource> context,
                                                   ServerPlayerEntity bot,
                                                   boolean enabled) {
@@ -2560,6 +2589,23 @@ public class modCommandRegistry {
         ChatUtils.sendSystemMessage(context.getSource(),
                 "Inventory-full pause " + state + " for " + bot.getName().getString() + ".");
         return 1;
+    }
+
+    private static int executeInventoryFullConfigTargets(CommandContext<ServerCommandSource> context,
+                                                         String targetArg,
+                                                         boolean enabled) throws CommandSyntaxException {
+        List<ServerPlayerEntity> bots = resolveTargetBots(context, targetArg);
+        boolean isAll = targetArg != null && "all".equalsIgnoreCase(targetArg == null ? "" : targetArg.trim());
+        int successes = 0;
+        for (ServerPlayerEntity bot : bots) {
+            successes += executeInventoryFullConfig(context, bot, enabled);
+        }
+        if (!bots.isEmpty()) {
+            String summary = formatBotList(bots, isAll);
+            ChatUtils.sendSystemMessage(context.getSource(),
+                    summary + " will " + (enabled ? "pause" : "continue") + " when inventories fill.");
+        }
+        return successes;
     }
 
     private static boolean parseAssistMode(String raw) throws CommandSyntaxException {

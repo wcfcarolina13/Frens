@@ -171,7 +171,8 @@ public class CollectDirtSkill implements Skill {
             targetCount = Integer.MAX_VALUE;
         }
         boolean untilMode = optionTokens.contains("until") && !optionTokens.contains("exact");
-        boolean squareMode = optionTokens.contains("square");
+        boolean spiralMode = optionTokens.contains("spiral") || getBooleanParameter(context, "spiralMode", false);
+        boolean squareMode = optionTokens.contains("square") || spiralMode;
 
         int collected = 0;
         int failuresInRow = 0;
@@ -336,6 +337,9 @@ public class CollectDirtSkill implements Skill {
                 moveTowardLoot(source, context.sharedState(), activeSquareCenter != null, activeSquareCenter, effectiveHorizontal);
                 LOGGER.info("{} iteration {} succeeded: {}", skillName, attempt, lastMessage);
             } else {
+                if (result.message() != null && result.message().startsWith("Hazard:")) {
+                    return result;
+                }
                 failuresInRow++;
                 LOGGER.warn("{} iteration {} failed ({} consecutive failures): {}",
                         skillName, attempt, failuresInRow, lastMessage);
