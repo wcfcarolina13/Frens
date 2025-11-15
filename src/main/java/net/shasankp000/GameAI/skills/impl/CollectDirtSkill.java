@@ -71,8 +71,6 @@ public class CollectDirtSkill implements Skill {
     private static final double DROP_SEARCH_RADIUS = 6.0;
     private static final int SPIRAL_RADIUS_LIMIT = 5;
     private static final int STRAIGHT_STAIR_HEADROOM = 4;
-    private static final long STAIR_STEP_DELAY_MS = 120L;
-    private static final int STAIR_STEP_ATTEMPTS = 20;
     private static final int MAX_EXPLORATION_ATTEMPTS_PER_CYCLE = 3;
     private static final int MAX_STALLED_FAILURES = 5;
     private static final List<Item> LAVA_SAFETY_BLOCKS = List.of(
@@ -1006,8 +1004,18 @@ public class CollectDirtSkill implements Skill {
                 return SkillExecutionResult.failure("Staircase paused: unsafe drop detected.");
             }
 
-            if (!moveStraightStairStep(player, stairFoot)) {
-                return SkillExecutionResult.failure("Staircase aborted: failed to advance stairwell.");
+            MovementService.MovementPlan plan =
+                    new MovementService.MovementPlan(MovementService.Mode.DIRECT, stairFoot, stairFoot, null, null, digDirection);
+            MovementService.MovementResult moveResult = MovementService.execute(source, player, plan);
+            if (!moveResult.success()) {
+                return SkillExecutionResult.failure("Staircase aborted: failed to advance stairwell (" + moveResult.detail() + ").");
+            }
+            BlockPos postMove = player.getBlockPos();
+            if (!postMove.equals(stairFoot)) {
+                boolean nudged = attemptManualNudge(player, stairFoot);
+                if (!nudged && !player.getBlockPos().equals(stairFoot)) {
+                    return SkillExecutionResult.failure("Staircase aborted: movement stalled before reaching " + stairFoot + ".");
+                }
             }
             carvedSteps++;
         }
@@ -1028,40 +1036,6 @@ public class CollectDirtSkill implements Skill {
             }
         }
         return List.copyOf(blocks);
-    }
-
-    private boolean moveStraightStairStep(ServerPlayerEntity player, BlockPos destination) {
-        if (player == null || destination == null) {
-            return false;
-        }
-        for (int attempt = 0; attempt < STAIR_STEP_ATTEMPTS; attempt++) {
-            if (SkillManager.shouldAbortSkill(player)) {
-                return false;
-            }
-            if (player.getBlockPos().equals(destination)) {
-                return true;
-            }
-            BlockPos stepTarget = destination;
-            runOnServerThread(player, () -> {
-                LookController.faceBlock(player, stepTarget);
-                BlockPos current = player.getBlockPos();
-                if (stepTarget.getY() > current.getY()) {
-                    BotActions.jumpForward(player);
-                } else {
-                    BotActions.moveForward(player);
-                    if (stepTarget.getY() < current.getY()) {
-                        BotActions.moveForward(player);
-                    }
-                }
-            });
-            try {
-                Thread.sleep(STAIR_STEP_DELAY_MS);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                break;
-            }
-        }
-        return player.getBlockPos().equals(destination);
     }
 
     private boolean mineStraightStairBlock(ServerPlayerEntity player, BlockPos blockPos) {

@@ -254,3 +254,146 @@ To do next:
 
 ### Debug Toggle
 [ ] To improve latency, let's make it possible to toggle off most of the terminal spam
+
+## LLM Personality, Memory, and Command Orchestration
+
+**Phase 0 – Recon & Mac dylib sanity**
+
+- Map current LLM path:
+  - Inspect `NLPProcessor`, `FunctionCaller`, any DJL / `*.dylib` loader, and how chat is wired into skills.
+  - Identify where persistent memory was *supposed* to live (files, SQLite, qtable, etc.).
+- Fix the macOS `.dylib` issue:
+  - Find the code that constructs native library paths (likely double-appending `.dylib` or mangling `java.library.path`).
+  - Make path building idempotent and log the final resolved path once so we can verify it.
+  - Confirm a simple LLM call works again on macOS with no crashes or fallback stubs.
+
+**Phase 1 – Core architecture & toggles**
+
+- Add a central “LLM brain” service:
+  - New class (e.g., `LLMOrchestrator`) that is the *only* way game code talks to the LLM and the persistent memory.
+  - Expose async APIs like `analyzeChat(worldId, botIds, message)` and `proposeActions(...)`.
+- Add configuration / toggles:
+  - Global toggle: `/bot config llm on|off` (per-world), stored under the existing config mechanism.
+  - Per-bot override: `/bot config llm on|off [alias]` so you can have some “dumb” bots.
+  - When disabled, the chat pipeline behaves exactly as today.
+- Wire the orchestrator non-invasively:
+  - Wrap existing chat → NLP entry point rather than replacing it.
+  - Keep all current hard-coded responses and fallbacks; the LLM layer *adds* behavior, it doesn’t own everything.
+
+**Phase 2 – Identity & memory model (world + bot scoped)**
+
+- Define IDs:
+  - `worldId`: derived from the save folder / dimension (e.g., `New World:overworld`).
+  - `botId`: bot UUID (plus human-readable alias).
+- Design storage:
+  - Back memory with a lean on-disk store per world:
+    - Likely SQLite (you already ship `sqlite-vec`) or simple JSON/NDJSON per world under `run/sqlite_memory/<worldId>/` or similar.
+  - Tables/sections:
+    - `bot_profile` (per world+bot: persona description, quirks, backstory hooks).
+    - `player_profile` (per world: preferred name, playstyle notes, recurring topics).
+    - `world_facts` (things found: structures, biomes, memorable events).
+    - `event_log` (recent deaths, discoveries, achievements; used to drive comments).
+- Enforce world isolation:
+  - Orchestrator always passes `worldId`; memory queries are scoped to that world only.
+  - Never open or read memory DBs from other worlds.
+
+**Phase 3 – Personalities (TES-style companions)**
+
+- Persona templates:
+  - Define a small set of archetypes (e.g., “grizzled veteran miner”, “bookish mage”, “chaotic thief”, etc.) as prompt snippets in a data file.
+  - Include tones, favorite topics, reaction patterns, and how they talk about other bots/players.
+- Auto-generate bot quirks:
+  - On first spawn in a world, pick an archetype + roll 2–3 quirks (e.g., “mildly afraid of water”, “obsessed with lapis”, “keeps score vs. Bob”).
+  - Save these in `bot_profile` so they persist for that world.
+- Prompt composition:
+  - When calling the LLM, build a prompt including:
+    - Archetype + quirks.
+    - Compact, recent memory snippets for that world.
+    - Current situation summary (location, current job, nearby bots).
+  - Ensure this coexists with hard-coded lines: the LLM’s job is to generate *free-form* replies and interpretations; skills and warnings still use your existing messages unless asked otherwise.
+
+**Phase 4 – Chat routing, command vs. conversation**
+
+- Chat targeting:
+  - Extend existing parsing so you can address:
+    - Single bot: “Jake, …”, “… Jake?”.
+    - All bots: “all bots …”, “everyone …”, “bots, …”.
+  - Plug this into the orchestrator; it receives the resolved target set.
+- Intent classification:
+  - LLM gets the message + context and returns:
+    - `intentType`: `command`, `small_talk`, `question`, `unknown`.
+    - For `command`: a structured candidate like `skill=mining`, params, target bots, and an estimated confidence.
+- Confirmation rules:
+  - For high-impact skill commands (`collect_dirt`, `mining`, `stripmine`, depth runs, etc.) require confirmation:
+    - Bot responds: “It sounds like you want me to stripmine 12 blocks east. Is that right?” with a short paraphrase.
+    - On player “yes” / “no” / correction, the orchestrator finalizes the action.
+  - For low-risk actions (follow, stop, defend toggle, give/take items) run them directly if confidence is high enough.
+- Non-command chatter:
+  - If `intentType` is not `command`, route to an LLM-generated reply that respects the bot’s personality and memory (or fall back to existing canned responses).
+
+**Phase 5 – Command stringing & queuing**
+
+- Action queue per bot:
+  - Maintain a small queue structure attached to each bot (in shared state or a dedicated manager).
+  - When the LLM interprets a multi-step instruction (“Jake, stripmine 10 blocks, then follow me, then guard the portal”), it:
+    - Breaks it into discrete skill / config commands.
+    - Asks for a single confirmation: “So: A) stripmine 10, B) follow, C) defend the portal—is that right?”
+    - On “yes”, enqueues them in order.
+- Execution integration:
+  - Each queued item is translated into:
+    - A `/bot skill …` invocation (through `SkillManager` / `modCommandRegistry`).
+    - Or a direct config/utility call (`follow`, `stop`, defend toggles).
+  - Bots pop and run the next queued item when the current task completes or aborts.
+
+**Phase 6 – Social awareness & reactive comments**
+
+- Event hooks:
+  - Tap into existing places where you already know about:
+    - Bot deaths (death handler).
+    - Hazard pauses (lava, water, rare ore finds) – you already centralised these.
+    - Skill completions / achievements (stripmine done, depth reached).
+    - Bot spawn / despawn.
+  - Each event:
+    - Writes a short memory record into `event_log`.
+    - Optionally enqueues a “comment opportunity” for nearby bots.
+- Comment generation:
+  - For each opportunity:
+    - Pick 0 or 1 bots to speak (throttle: e.g., max one social comment every N seconds per bot).
+    - Feed the event + persona into the LLM: “Bob just died in lava. You’re Jake; how would you react?”.
+    - Post the line via the existing chat utilities.
+- Throttling / “don’t overdo it”:
+  - Global cooldown per bot for reactive comments.
+  - Event type weights, so deaths/discoveries rank higher than minor annoyances.
+
+**Phase 7 – Performance & safety**
+
+- Asynchronous, off-thread calls:
+  - All LLM calls run on a dedicated executor; orchestration code never blocks the main server thread.
+  - Use strict timeouts (e.g., 300–800 ms) with fallbacks:
+    - On timeout or error, skip the fancy behavior and fall back to minimal, existing commands or canned lines.
+- Offloading model work:
+  - Prefer a local sidecar or lightweight HTTP service (or your existing provider) that the mod talks to via a short RPC.
+  - Keep in-game payloads small (compressed conversation state, recent memory only).
+- Guardrails:
+  - Keep a hard separation between:
+    - “What the LLM *says*” (chat only).
+    - “What the bots *do*” (only through validated, well-typed actions).
+  - Never execute arbitrary LLM text—only structured, whitelisted action objects.
+
+**Phase 8 – Integration, toggling, and non-regression**
+
+- Gradual opt-in:
+  - Start with: LLM off by default, skills unchanged; only enable new features after the toggle.
+  - Add debug logging behind a config flag so we can see classification, proposed actions, and why we asked for confirmation.
+- Compatibility with existing code:
+  - Keep all existing skill codepaths untouched; the LLM layer only decides *when* to trigger them.
+  - Ensure `/bot skill …` still works exactly as before when issued manually.
+- Test passes:
+  - Regression around:
+    - Stripmine and depth mining hazards.
+    - Resume behavior.
+    - Inventory-full pause / continue.
+  - New tests for:
+    - Basic intent detection.
+    - Per-world memory isolation (switch worlds, confirm memories don’t leak).
+    - LLM toggle off: system behaves as today.

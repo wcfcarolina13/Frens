@@ -206,7 +206,7 @@ public final class MiningHazardDetector {
         Block block = state.getBlock();
         String precious = VALUABLE_MESSAGES.get(block);
         if (precious != null) {
-            return hazard(pos, precious, true, "Mining paused: valuable ore detected.");
+            return hazard(pos, precious, true, "Mining paused: " + precious);
         }
         if (CHEST_BLOCKS.contains(block)) {
             return hazard(pos, "I found a chest!", true);
