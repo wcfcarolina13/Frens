@@ -67,6 +67,7 @@ public final class DirtShovelSkill implements Skill {
     public SkillExecutionResult execute(SkillContext context) {
         ServerCommandSource source = context.botSource();
         ServerPlayerEntity player = Objects.requireNonNull(source.getPlayer(), "player");
+        net.shasankp000.GameAI.skills.support.MiningHazardDetector.clear(player);
 
         int horizontalRadius = getIntParameter(context, "searchRadius", DEFAULT_HORIZONTAL_RADIUS);
         int verticalRange = getIntParameter(context, "verticalRange", DEFAULT_VERTICAL_RANGE);

@@ -1,10 +1,12 @@
 package net.shasankp000.GameAI.skills.impl;
 
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
+import net.shasankp000.GameAI.BotActions;
 import net.shasankp000.ChatUtils.ChatUtils;
 import net.shasankp000.GameAI.services.SkillResumeService;
 import net.shasankp000.GameAI.skills.Skill;
@@ -13,7 +15,6 @@ import net.shasankp000.GameAI.skills.SkillExecutionResult;
 import net.shasankp000.GameAI.skills.SkillManager;
 import net.shasankp000.GameAI.skills.support.MiningHazardDetector;
 import net.shasankp000.GameAI.skills.support.MiningHazardDetector.Hazard;
-import net.shasankp000.PathFinding.GoTo;
 import net.shasankp000.PlayerUtils.MiningTool;
 import net.shasankp000.Entity.LookController;
 import org.slf4j.Logger;
@@ -21,6 +22,7 @@ import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
@@ -34,6 +36,8 @@ public final class StripMineSkill implements Skill {
 
     private static final Logger LOGGER = LoggerFactory.getLogger("skill-stripmine");
     private static final int DEFAULT_LENGTH = 8;
+    private static final long STEP_DELAY_MS = 120L;
+    private static final int STEP_ATTEMPTS = 20;
 
     @Override
     public String name() {
@@ -44,15 +48,19 @@ public final class StripMineSkill implements Skill {
     public SkillExecutionResult execute(SkillContext context) {
         ServerCommandSource source = context.botSource();
         ServerPlayerEntity player = Objects.requireNonNull(source.getPlayer(), "player");
+        net.shasankp000.GameAI.skills.support.MiningHazardDetector.clear(player);
         int length = Math.max(1, getIntParameter(context, "count", DEFAULT_LENGTH));
         int completed = 0;
+
+        Direction tunnelDirection = determineTunnelDirection(context, player);
+        Direction finalDirection = tunnelDirection;
+        runOnServerThread(player, () -> LookController.faceBlock(player, player.getBlockPos().offset(finalDirection)));
 
         for (int step = 0; step < length; step++) {
             if (SkillManager.shouldAbortSkill(player)) {
                 return SkillExecutionResult.failure("stripmine paused due to cancellation.");
             }
-            Direction facing = player.getHorizontalFacing();
-            BlockPos footTarget = player.getBlockPos().offset(facing);
+            BlockPos footTarget = player.getBlockPos().offset(tunnelDirection);
 
             List<BlockPos> workVolume = buildCrossSection(footTarget);
             Optional<Hazard> hazard = MiningHazardDetector.detect(player, workVolume, List.of(footTarget));
@@ -91,21 +99,26 @@ public final class StripMineSkill implements Skill {
         if (destination == null) {
             return false;
         }
-        String goToResult = GoTo.goTo(source, destination.getX(), destination.getY(), destination.getZ(), false);
-        if (!isGoToSuccess(goToResult)) {
-            LOGGER.warn("Stripmine GoTo navigation to {} failed: {}", destination, goToResult);
-            return false;
+        for (int attempt = 0; attempt < STEP_ATTEMPTS; attempt++) {
+            if (player.getBlockPos().equals(destination)) {
+                return true;
+            }
+            runOnServerThread(player, () -> {
+                LookController.faceBlock(player, destination);
+                if (destination.getY() > player.getBlockY()) {
+                    BotActions.jumpForward(player);
+                } else {
+                    BotActions.moveForward(player);
+                }
+            });
+            try {
+                Thread.sleep(STEP_DELAY_MS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
+            }
         }
-        double distanceSq = player.getBlockPos().getSquaredDistance(destination);
-        return distanceSq <= 9.0D;
-    }
-
-    private boolean isGoToSuccess(String result) {
-        if (result == null) {
-            return false;
-        }
-        String lower = result.toLowerCase();
-        return !(lower.contains("failed") || lower.contains("error") || lower.contains("not found"));
+        return player.getBlockPos().equals(destination);
     }
 
     private boolean mineBlock(ServerPlayerEntity player, BlockPos blockPos) {
@@ -157,5 +170,50 @@ public final class StripMineSkill implements Skill {
             }
         }
         return defaultValue;
+    }
+
+    private Direction determineTunnelDirection(SkillContext context, ServerPlayerEntity player) {
+        Direction current = player.getHorizontalFacing();
+        Map<String, Object> shared = context.sharedState();
+        if (shared != null) {
+            String key = "stripmine.direction." + player.getUuid();
+            Object stored = shared.get(key);
+            if (stored instanceof String str) {
+                Direction storedDir = parseDirection(str);
+                if (storedDir != null) {
+                    current = storedDir;
+                }
+            }
+            shared.put(key, current.asString());
+        }
+        return current;
+    }
+
+    private Direction parseDirection(String name) {
+        if (name == null) {
+            return null;
+        }
+        for (Direction dir : Direction.Type.HORIZONTAL) {
+            if (dir.asString().equalsIgnoreCase(name)) {
+                return dir;
+            }
+        }
+        return null;
+    }
+
+    private void runOnServerThread(ServerPlayerEntity player, Runnable action) {
+        if (player == null || action == null) {
+            return;
+        }
+        MinecraftServer server = player.getEntityWorld().getServer();
+        if (server == null) {
+            action.run();
+            return;
+        }
+        if (server.isOnThread()) {
+            action.run();
+        } else {
+            server.execute(action);
+        }
     }
 }

@@ -11,3 +11,6 @@
 - **Stripmine skill:** `/bot skill stripmine <length>` cuts a 1×3 tunnel straight ahead, respecting vanilla reach and pausing when hazards (lava, water, drops, chests, mineshafts, or rare ores) are detected. Hazards broadcast a chat warning and require `/bot resume` once cleared.
 - **Spiral depth mode:** The optional `spiral` modifier now keeps stair shafts tight, enforces a 4-block ceiling so decorative stairs can be added later, and inherits all hazard checks from the rest of the mining toolkit.
 - **Hazard detector:** Chest, ore, structure, and precipice detection is shared across every block-breaking skill so they all stop safely with a warning instead of tunnelling blindly into danger.
+- **Resume fixes:** `/bot resume` now replays the saved skill using the calling player’s command source, so the dispatcher accepts the command and the job actually restarts. Once you intentionally resume past a hazard, that exact block won’t immediately halt the bot again.
+- **QoL:** Added `/bot look_player [alias|all]` so you can snap any bot’s view to your player before issuing directional jobs like stripmine or spiral stairs.
+- **Consistency:** When you resume a stripmine run the bot keeps the original tunnel direction instead of re-orienting, and `/bot look_player stop …` releases the attention so you can let bots look forward again.

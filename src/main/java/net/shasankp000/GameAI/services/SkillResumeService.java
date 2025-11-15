@@ -82,7 +82,7 @@ public final class SkillResumeService {
             return;
         }
         if (normalized.equals("yes")) {
-            resume(pending, false);
+            resume(pending, false, sender.getCommandSource());
         } else {
             ChatUtils.sendSystemMessage(pending.source(), "Okay, " + pending.alias() + " will stand down.");
         }
@@ -99,6 +99,7 @@ public final class SkillResumeService {
         }
         AUTO_RESUME_PENDING.add(uuid);
         AWAITING_DECISION.remove(uuid);
+        net.shasankp000.GameAI.skills.support.MiningHazardDetector.clear(bot);
     }
 
     public static void tryAutoResume(ServerPlayerEntity bot) {
@@ -113,7 +114,7 @@ public final class SkillResumeService {
         if (pending == null) {
             return;
         }
-        resume(pending, true);
+        resume(pending, true, pending.source());
         clear(uuid);
     }
 
@@ -139,7 +140,7 @@ public final class SkillResumeService {
         if (pending == null) {
             return false;
         }
-        resume(pending, false);
+        resume(pending, false, requester != null ? requester : pending.source());
         if (requester != null && requester != pending.source()) {
             ChatUtils.sendSystemMessage(requester, "Resuming '" + pending.skillName() + "' for " + pending.alias() + ".");
         }
@@ -147,13 +148,13 @@ public final class SkillResumeService {
         return true;
     }
 
-    private static void resume(PendingSkill pending, boolean autoTriggered) {
-        ServerCommandSource source = pending.source();
+    private static void resume(PendingSkill pending, boolean autoTriggered, ServerCommandSource commandSource) {
+        ServerCommandSource source = commandSource != null ? commandSource : pending.source();
         MinecraftServer server = source.getServer();
         if (server == null) {
             return;
         }
-        StringBuilder command = new StringBuilder("/bot skill ")
+        StringBuilder command = new StringBuilder("bot skill ")
                 .append(pending.skillName());
         if (pending.rawArgs() != null && !pending.rawArgs().isBlank()) {
             command.append(" ").append(pending.rawArgs());
@@ -162,7 +163,14 @@ public final class SkillResumeService {
         String commandLine = command.toString();
         server.execute(() -> {
             try {
-                server.getCommandManager().getDispatcher().execute(commandLine, source);
+                ServerCommandSource execSource = source;
+                if (execSource.getEntity() instanceof ServerPlayerEntity player) {
+                    ServerPlayerEntity refreshed = server.getPlayerManager().getPlayer(player.getUuid());
+                    if (refreshed != null) {
+                        execSource = refreshed.getCommandSource();
+                    }
+                }
+                server.getCommandManager().getDispatcher().execute(commandLine, execSource);
             } catch (com.mojang.brigadier.exceptions.CommandSyntaxException e) {
                 LOGGER.warn("Failed to resume skill '{}' for {}: {}", pending.skillName(), pending.alias(), e.getMessage());
             }

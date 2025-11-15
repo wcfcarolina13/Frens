@@ -17,6 +17,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArraySet;
 
 /**
  * Centralised hazard detection for mining-style skills. Scans the immediate work
@@ -60,6 +63,8 @@ public final class MiningHazardDetector {
 
     private static final int DROP_SCAN_DEPTH = 4;
 
+    private static final Map<UUID, Set<BlockPos>> ACKNOWLEDGED_HAZARDS = new ConcurrentHashMap<>();
+
     private MiningHazardDetector() {
     }
 
@@ -74,8 +79,12 @@ public final class MiningHazardDetector {
             if (target == null) {
                 continue;
             }
+            if (isAcknowledged(bot, target)) {
+                continue;
+            }
             Hazard hazard = inspectBlock(world, target);
             if (hazard != null) {
+                acknowledge(bot, target);
                 return Optional.of(hazard);
             }
         }
@@ -85,6 +94,7 @@ public final class MiningHazardDetector {
                 continue;
             }
             if (isDangerousDrop(world, foot)) {
+                acknowledge(bot, foot);
                 return Optional.of(hazard("That's a big drop."));
             }
         }
@@ -135,6 +145,30 @@ public final class MiningHazardDetector {
 
     private static Hazard hazard(String chat) {
         return new Hazard(chat, "Hazard: " + chat);
+    }
+
+    public static void clear(ServerPlayerEntity bot) {
+        if (bot == null) {
+            return;
+        }
+        ACKNOWLEDGED_HAZARDS.remove(bot.getUuid());
+    }
+
+    private static boolean isAcknowledged(ServerPlayerEntity bot, BlockPos pos) {
+        if (bot == null || pos == null) {
+            return false;
+        }
+        Set<BlockPos> seen = ACKNOWLEDGED_HAZARDS.get(bot.getUuid());
+        return seen != null && seen.contains(pos);
+    }
+
+    private static void acknowledge(ServerPlayerEntity bot, BlockPos pos) {
+        if (bot == null || pos == null) {
+            return;
+        }
+        ACKNOWLEDGED_HAZARDS
+                .computeIfAbsent(bot.getUuid(), uuid -> new CopyOnWriteArraySet<>())
+                .add(pos.toImmutable());
     }
 
     public static record Hazard(String chatMessage, String failureMessage) {

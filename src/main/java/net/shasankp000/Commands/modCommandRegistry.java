@@ -37,6 +37,7 @@ import net.shasankp000.ChatUtils.ChatUtils;
 import net.shasankp000.DangerZoneDetector.DangerZoneDetector;
 import net.shasankp000.Database.QTableExporter;
 import net.shasankp000.Entity.AutoFaceEntity;
+import net.shasankp000.Entity.LookController;
 import net.shasankp000.Entity.RayCasting;
 import net.shasankp000.Entity.RespawnHandler;
 import net.shasankp000.Entity.createFakePlayer;
@@ -192,6 +193,18 @@ public class modCommandRegistry {
                                 .then(CommandManager.argument("target", StringArgumentType.string())
                                         .executes(context -> executeResumeTargets(context,
                                                 StringArgumentType.getString(context, "target"))))
+                        )
+                        .then(literal("look_player")
+                                .executes(context -> executeLookPlayerTargets(context, null, false))
+                                .then(literal("stop")
+                                        .executes(context -> executeLookPlayerTargets(context, null, true))
+                                        .then(CommandManager.argument("target", StringArgumentType.string())
+                                                .executes(context -> executeLookPlayerTargets(context,
+                                                        StringArgumentType.getString(context, "target"), true)))
+                                )
+                                .then(CommandManager.argument("target", StringArgumentType.string())
+                                        .executes(context -> executeLookPlayerTargets(context,
+                                                StringArgumentType.getString(context, "target"), false)))
                         )
                         .then(literal("follow")
                                 .then(literal("stop")
@@ -2163,6 +2176,48 @@ public class modCommandRegistry {
                     "No paused skill to resume for " + bot.getName().getString() + ".");
             return 0;
         }
+        return 1;
+    }
+
+    private static int executeLookPlayerTargets(CommandContext<ServerCommandSource> context,
+                                                String targetArg,
+                                                boolean stop) throws CommandSyntaxException {
+        List<ServerPlayerEntity> bots = resolveTargetBots(context, targetArg);
+        boolean isAll = targetArg != null && "all".equalsIgnoreCase(targetArg == null ? "" : targetArg.trim());
+        ServerPlayerEntity viewer = stop ? null : context.getSource().getPlayer();
+        if (!stop && viewer == null) {
+            throw new SimpleCommandExceptionType(Text.literal("Only players can use /bot look_player.")).create();
+        }
+        int successes = 0;
+        for (ServerPlayerEntity bot : bots) {
+            successes += executeLookPlayer(context, bot, viewer, stop);
+        }
+        if (!bots.isEmpty()) {
+            String summary = formatBotList(bots, isAll);
+            if (stop) {
+                ChatUtils.sendSystemMessage(context.getSource(), summary + " stopped watching you.");
+            } else if (viewer != null) {
+                ChatUtils.sendSystemMessage(context.getSource(), summary + " now looking at " + viewer.getName().getString() + ".");
+            }
+        }
+        return successes;
+    }
+
+    private static int executeLookPlayer(CommandContext<ServerCommandSource> context,
+                                         ServerPlayerEntity bot,
+                                         ServerPlayerEntity viewer,
+                                         boolean stop) {
+        if (bot == null) {
+            return 0;
+        }
+        if (stop) {
+            LookController.faceBlock(bot, bot.getBlockPos().offset(bot.getHorizontalFacing()));
+            return 1;
+        }
+        if (viewer == null) {
+            return 0;
+        }
+        LookController.faceEntity(bot, viewer);
         return 1;
     }
 

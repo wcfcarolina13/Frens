@@ -95,6 +95,7 @@ Snapshots are keyed by both alias and the bot’s UUID, so Jake and Bob keep the
 | `/bot inventory count <item> [alias\|all]` | Count how many of an item the bot(s) are carrying. |
 | `/bot config teleportDuringSkills on\|off [alias]` | Enable or disable teleport shortcuts while skills are running. Turning it off makes the bot tunnel and stair-step like a human player. |
 | `/bot config inventoryFullPause on\|off [alias]` | When enabled, the bot pauses mining as soon as its inventory is full; use `/bot resume` to restart once you clear space. |
+| `/bot look_player [alias\|all]` | Make the selected bot(s) turn to face you. Helpful before starting stairs/stripmine runs so the tunnel goes the way you expect. Add `stop` (e.g., `/bot look_player stop Jake`) to release their attention. |
 
 Most of these subcommands now accept the optional alias/`all` token in the same fashion as the skill command.
 
@@ -109,7 +110,7 @@ Most of these subcommands now accept the optional alias/`all` token in the same 
 - Chatting with the bots no longer interrupts whatever task they’re already performing—the language model runs asynchronously, and the bot only pauses when it actually needs to execute a requested action (and, for resource-intensive jobs, only after you confirm in chat).
 - Jake and Bob answer in distinct voices (Jake = pragmatic engineer, Bob = sardonic ranger) so it’s easier to tell which bot is replying during conversations.
 - Bots automatically wade across shallow rivers now; if they step into water mid-task they’ll keep their heads above the surface and resume the job once danger passes.
-- When a mining job pauses for water, lava, precipices, mineshafts, chests, or a full inventory it now tells you to run `/bot resume <alias>` once the hazard is cleared; this overrides the SkillResumeService flag so you can restart the same skill without retyping all parameters.
+- When a mining job pauses for water, lava, precipices, mineshafts, chests, or a full inventory it now tells you to run `/bot resume <alias>` once the hazard is cleared; this overrides the SkillResumeService flag so you can restart the same skill without retyping all parameters. If you resume anyway, the bot remembers that hazard location so it doesn’t immediately alert on the same block again.
 - Mention multiple bots in chat (e.g., “Jake and Bob, report in” or “all bots follow me”) to address them at once—each will respond without interrupting their current jobs.
 
 Happy testing! If a command reports “No bot found”, ensure you either targeted one previously or appended the alias/`all` token to the invocation.
