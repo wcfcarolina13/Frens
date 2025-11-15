@@ -15,6 +15,7 @@ import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -33,25 +34,43 @@ import java.util.concurrent.TimeoutException;
  */
 public final class MiningHazardDetector {
 
-    private static final Map<Block, String> VALUABLE_MESSAGES = Map.ofEntries(
-            Map.entry(Blocks.DIAMOND_ORE, "I found diamonds!"),
-            Map.entry(Blocks.DEEPSLATE_DIAMOND_ORE, "I found diamonds!"),
-            Map.entry(Blocks.ANCIENT_DEBRIS, "I found ancient debris!"),
-            Map.entry(Blocks.EMERALD_ORE, "I found emeralds!"),
-            Map.entry(Blocks.DEEPSLATE_EMERALD_ORE, "I found emeralds!"),
-            Map.entry(Blocks.GOLD_ORE, "I found gold!"),
-            Map.entry(Blocks.DEEPSLATE_GOLD_ORE, "I found gold!"),
-            Map.entry(Blocks.NETHER_GOLD_ORE, "I found gold!"),
-            Map.entry(Blocks.REDSTONE_ORE, "I found redstone!"),
-            Map.entry(Blocks.DEEPSLATE_REDSTONE_ORE, "I found redstone!"),
-            Map.entry(Blocks.LAPIS_ORE, "I found lapis!"),
-            Map.entry(Blocks.DEEPSLATE_LAPIS_ORE, "I found lapis!"),
-            Map.entry(Blocks.COAL_ORE, "I found coal!"),
-            Map.entry(Blocks.DEEPSLATE_COAL_ORE, "I found coal!"),
-            Map.entry(Blocks.IRON_ORE, "I found iron!"),
-            Map.entry(Blocks.DEEPSLATE_IRON_ORE, "I found iron!"),
-            Map.entry(Blocks.NETHER_QUARTZ_ORE, "I found quartz!")
+    private static final Map<Block, Block> DEEPSLATE_VARIANTS = Map.ofEntries(
+            Map.entry(Blocks.DIAMOND_ORE, Blocks.DEEPSLATE_DIAMOND_ORE),
+            Map.entry(Blocks.EMERALD_ORE, Blocks.DEEPSLATE_EMERALD_ORE),
+            Map.entry(Blocks.GOLD_ORE, Blocks.DEEPSLATE_GOLD_ORE),
+            Map.entry(Blocks.REDSTONE_ORE, Blocks.DEEPSLATE_REDSTONE_ORE),
+            Map.entry(Blocks.LAPIS_ORE, Blocks.DEEPSLATE_LAPIS_ORE),
+            Map.entry(Blocks.COAL_ORE, Blocks.DEEPSLATE_COAL_ORE),
+            Map.entry(Blocks.IRON_ORE, Blocks.DEEPSLATE_IRON_ORE)
     );
+
+    private static final Map<Block, String> VALUABLE_MESSAGES = buildValuableMessages();
+
+    private static Map<Block, String> buildValuableMessages() {
+        Map<Block, String> values = new HashMap<>();
+        registerRare(values, "I found diamonds!", Blocks.DIAMOND_ORE);
+        values.put(Blocks.ANCIENT_DEBRIS, "I found ancient debris!");
+        registerRare(values, "I found emeralds!", Blocks.EMERALD_ORE);
+        registerRare(values, "I found gold!", Blocks.GOLD_ORE);
+        values.put(Blocks.NETHER_GOLD_ORE, "I found gold!");
+        registerRare(values, "I found redstone!", Blocks.REDSTONE_ORE);
+        registerRare(values, "I found lapis!", Blocks.LAPIS_ORE);
+        registerRare(values, "I found coal!", Blocks.COAL_ORE);
+        registerRare(values, "I found iron!", Blocks.IRON_ORE);
+        values.put(Blocks.NETHER_QUARTZ_ORE, "I found quartz!");
+        return Map.copyOf(values);
+    }
+
+    private static void registerRare(Map<Block, String> sink, String message, Block baseOre) {
+        if (sink == null || baseOre == null) {
+            return;
+        }
+        sink.put(baseOre, message);
+        Block deepslate = DEEPSLATE_VARIANTS.get(baseOre);
+        if (deepslate != null) {
+            sink.put(deepslate, message);
+        }
+    }
 
     private static final Set<Block> STRUCTURE_BLOCKS = Set.of(
             Blocks.SPAWNER,

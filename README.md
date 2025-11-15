@@ -45,14 +45,14 @@ When you target multiple bots (or `all`), the requested count is shared between 
 
 | Argument | Meaning |
 | --- | --- |
-| `square` | Stay within a square that starts at the bot’s current position. The current radius grows as the skill expands its search. |
+| `square` | Stay within a square that starts at the bot’s current position. The current radius grows as the skill expands its search. Mutually exclusive with `spiral`. |
 | `until` | Keep working until the bot already holds the requested amount (useful for “top off” jobs). Combine with `exact` to force the exact count instead. |
 | `each` | When you target multiple bots, have each bot satisfy the full count instead of splitting it. |
 | `depth <y>` | New: carve an offset staircase down to the requested Y level (teleport stays off). Example: `/bot skill mining depth -50 Jake`. The bot mines whatever blocks are in the way, stepping aside before every drop so it never digs directly beneath itself, and stops once its feet are at or below Y = -50. |
-| `stairs` | Combine with `depth` to opt in to the experimental spiral staircase planner (e.g., `/bot skill mining depth -50 stairs Jake`). Leave it off to use the conservative fallback. |
-| `spiral` | Tightens the stair radius and keeps a 4-block ceiling so you can place decorative stairs later. Implies `stairs`. |
+| `stairs` | Combine with `depth` to have the bot carve full-height stairwells (4 air blocks of clearance above each tread) while it stripmines toward the target level. |
+| `spiral` | Depth-only modifier that clamps the stair radius to a comfortable spiral (≈5 blocks), enforces the tall ceiling, and automatically enables `stairs`. Cannot be combined with `square`. |
 
-Depth jobs implicitly enable the “digging down” mode so the bot removes whatever blocks block the stairwell until the target Y level is reached—it ignores ore filters and keeps carving offset steps until the goal depth is met. This is a stepping stone toward more advanced “mine to depth, then branch” tasks.
+Depth jobs implicitly enable the “digging down” mode so the bot removes whatever blocks block the stairwell until the target Y level is reached—it ignores ore filters and keeps carving offset steps until the goal depth is met. Add `stairs` if you want each tread to have 4 blocks of headroom, or use `spiral` for a tight-but-roomy spiral descent (it implies `stairs` and replaces `square` because it manages its own radius). This is a stepping stone toward more advanced “mine to depth, then branch” tasks.
 
 ### Stripmine
 
@@ -60,7 +60,7 @@ Depth jobs implicitly enable the “digging down” mode so the bot removes what
 
 - Clears the 1×3 cross-section in front of it, picking the correct tool for each block.
 - Walks forward step-by-step, ensuring the tunnel stays open without digging straight down.
-- Pauses immediately if it spots lava, water, big drops, mineshaft pieces, chests, or valuable ores, then prints a warning telling you to run `/bot resume <alias>` after you deal with the hazard.
+- Pauses immediately if it spots lava, water, big drops, mineshaft pieces, chests, or valuable ores (diamond/emerald/gold/etc., including the deepslate palette), then prints a warning telling you to run `/bot resume <alias>` after you deal with the hazard.
 
 If you skip `<length>`, it defaults to 8 blocks.
 

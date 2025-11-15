@@ -57,6 +57,9 @@ public final class DirtShovelSkill implements Skill {
     private static final int[] STAIR_VERTICAL_PREFERENCE = new int[]{0, 1, -1};
     private static final double MAX_MINING_DISTANCE_SQ = 25.0D;
     private static final long MANUAL_STEP_DELAY_MS = 120L;
+    private static final int STAIR_HEADROOM = 4;
+    private static final int DEFAULT_HEADROOM = 2;
+    private static final int SPIRAL_WALK_RANGE = 5;
 
     @Override
     public String name() {
@@ -444,7 +447,7 @@ public final class DirtShovelSkill implements Skill {
         if (headClear) {
             return new ApproachPlan(stand, stand, Collections.emptyList());
         }
-        ObstructionStep headClearStep = new ObstructionStep(null, head, stand);
+        ObstructionStep headClearStep = new ObstructionStep(null, head, stand, DEFAULT_HEADROOM);
         return new ApproachPlan(stand, stand, List.of(headClearStep));
     }
 
@@ -484,7 +487,7 @@ public final class DirtShovelSkill implements Skill {
             BlockPos head = stand.up();
             BlockPos blockToClear = isPassable(player, stand) ? null : stand;
             BlockPos headToClear = isPassable(player, head) ? null : head;
-            steps.add(new ObstructionStep(blockToClear, headToClear, stand));
+            steps.add(new ObstructionStep(blockToClear, headToClear, stand, DEFAULT_HEADROOM));
         }
 
         return new ApproachPlan(entryPosition, originStand, List.copyOf(steps));
@@ -506,7 +509,7 @@ public final class DirtShovelSkill implements Skill {
         }
         List<ObstructionStep> combined = new ArrayList<>(walkwayNodes.size() + basePlan.steps().size());
         for (BlockPos node : walkwayNodes) {
-            combined.add(stepForStand(player, node));
+            combined.add(stepForStand(player, node, STAIR_HEADROOM));
         }
         combined.addAll(basePlan.steps());
         return new ApproachPlan(start, basePlan.standPosition(), combined);
@@ -530,7 +533,7 @@ public final class DirtShovelSkill implements Skill {
         frontier.add(start);
         parent.put(start, start);
         int explored = 0;
-        int maxHorizontalRange = spiralMode ? 3 : 6;
+        int maxHorizontalRange = spiralMode ? SPIRAL_WALK_RANGE : 6;
         while (!frontier.isEmpty() && explored < 512) {
             BlockPos current = frontier.pollFirst();
             explored++;
@@ -624,10 +627,11 @@ public final class DirtShovelSkill implements Skill {
         return false;
     }
 
-    private ObstructionStep stepForStand(ServerPlayerEntity player, BlockPos stand) {
+    private ObstructionStep stepForStand(ServerPlayerEntity player, BlockPos stand, int headClearance) {
         BlockPos block = isPassable(player, stand) ? null : stand;
         BlockPos head = isPassable(player, stand.up()) ? null : stand.up();
-        return new ObstructionStep(block, head, stand);
+        int clearance = Math.max(DEFAULT_HEADROOM, headClearance);
+        return new ObstructionStep(block, head, stand, clearance);
     }
 
     private Direction chooseHorizontalDirection(BlockPos from, BlockPos to) {
@@ -671,6 +675,10 @@ public final class DirtShovelSkill implements Skill {
             }
             if (!moveToPosition(source, player, step.destinationStand())) {
                 LOGGER.warn("Failed to advance to cleared tunnel position {}", step.destinationStand());
+                return false;
+            }
+            if (!ensureHeadroom(player, step.destinationStand(), step.headClearance())) {
+                LOGGER.warn("Unable to carve {} blocks of headroom at {}", step.headClearance(), step.destinationStand());
                 return false;
             }
         }
@@ -823,6 +831,22 @@ public final class DirtShovelSkill implements Skill {
         return clear;
     }
 
+    private boolean ensureHeadroom(ServerPlayerEntity player, BlockPos stand, int headClearance) {
+        if (player == null || stand == null || headClearance <= DEFAULT_HEADROOM) {
+            return headClearance <= DEFAULT_HEADROOM;
+        }
+        for (int offset = 2; offset < headClearance; offset++) {
+            BlockPos check = stand.up(offset);
+            if (isPassable(player, check)) {
+                continue;
+            }
+            if (!mineWithinReach(player, check)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     private List<BlockPos> gatherHazardBlocks(BlockPos target, ApproachPlan plan) {
         List<BlockPos> blocks = new ArrayList<>();
         if (target != null) {
@@ -834,6 +858,11 @@ public final class DirtShovelSkill implements Skill {
             }
             if (step.headToClear() != null) {
                 blocks.add(step.headToClear());
+            }
+            if (step.headClearance() > DEFAULT_HEADROOM && step.destinationStand() != null) {
+                for (int offset = 2; offset < step.headClearance(); offset++) {
+                    blocks.add(step.destinationStand().up(offset));
+                }
             }
         }
         return blocks;
@@ -917,6 +946,7 @@ public final class DirtShovelSkill implements Skill {
                                         boolean diggingDown,
                                         boolean allowAnyBlock,
                                         boolean stairMode,
+                                        boolean spiralMode,
                                         boolean preserveHazardMemory) {
         Map<String, Object> params = new java.util.HashMap<>();
         params.put("searchRadius", horizontalRadius);
@@ -945,6 +975,9 @@ public final class DirtShovelSkill implements Skill {
         }
         if (stairMode) {
             params.put("stairsMode", true);
+        }
+        if (spiralMode) {
+            params.put("spiralMode", true);
         }
         if (preserveHazardMemory) {
             params.put("preserveHazardMemory", true);
@@ -1028,6 +1061,6 @@ public final class DirtShovelSkill implements Skill {
     private record ApproachPlan(BlockPos entryPosition, BlockPos standPosition, List<ObstructionStep> steps) {
     }
 
-    private record ObstructionStep(BlockPos blockToClear, BlockPos headToClear, BlockPos destinationStand) {
+    private record ObstructionStep(BlockPos blockToClear, BlockPos headToClear, BlockPos destinationStand, int headClearance) {
     }
 }

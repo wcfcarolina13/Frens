@@ -63,6 +63,7 @@ public class CollectDirtSkill implements Skill {
     private static final int EXPLORATION_STEP_RADIUS = 6;
     private static final int EXPLORATION_STEP_VERTICAL = 2;
     private static final double DROP_SEARCH_RADIUS = 6.0;
+    private static final int SPIRAL_RADIUS_LIMIT = 5;
     private static final int MAX_EXPLORATION_ATTEMPTS_PER_CYCLE = 3;
     private static final int MAX_STALLED_FAILURES = 5;
     private static final List<Item> LAVA_SAFETY_BLOCKS = List.of(
@@ -171,13 +172,25 @@ public class CollectDirtSkill implements Skill {
         List<String> optionTokens = getOptionTokens(context.parameters());
         Integer targetDepthY = getOptionalIntParameter(context, "targetDepthY");
         boolean depthMode = targetDepthY != null;
-        boolean stairMode = depthMode && getBooleanParameter(context, "stairsMode", false);
+        boolean stairToken = getBooleanParameter(context, "stairsMode", false);
         if (depthMode) {
             targetCount = Integer.MAX_VALUE;
         }
         boolean untilMode = optionTokens.contains("until") && !optionTokens.contains("exact");
-        boolean spiralMode = optionTokens.contains("spiral") || getBooleanParameter(context, "spiralMode", false);
-        boolean squareMode = optionTokens.contains("square") || spiralMode;
+        boolean squareRequested = optionTokens.contains("square");
+        boolean spiralRequested = optionTokens.contains("spiral") || getBooleanParameter(context, "spiralMode", false);
+        if (spiralRequested && squareRequested) {
+            return SkillExecutionResult.failure("The 'square' and 'spiral' options can't be combined.");
+        }
+        if (spiralRequested && !depthMode) {
+            return SkillExecutionResult.failure("The 'spiral' option only applies to depth mining runs.");
+        }
+        boolean spiralMode = depthMode && spiralRequested;
+        boolean stairMode = depthMode && (stairToken || spiralMode);
+        boolean squareMode = squareRequested || spiralMode;
+        if (spiralMode) {
+            horizontalRadius = Math.min(horizontalRadius, SPIRAL_RADIUS_LIMIT);
+        }
 
         int collected = 0;
         int failuresInRow = 0;
@@ -293,6 +306,9 @@ public class CollectDirtSkill implements Skill {
 
             attempt++;
             int effectiveHorizontal = Math.min(horizontalRadius + radiusBoost, MAX_HORIZONTAL_RADIUS);
+            if (spiralMode) {
+                effectiveHorizontal = Math.min(effectiveHorizontal, SPIRAL_RADIUS_LIMIT);
+            }
             int effectiveVertical = Math.min(verticalRange + verticalBoost, MAX_VERTICAL_RANGE);
 
             LOGGER.info("{} iteration {} (collected {}/{}, radius={}, vertical={})",
@@ -318,6 +334,7 @@ public class CollectDirtSkill implements Skill {
                     depthMode,
                     depthMode,
                     stairMode,
+                    spiralMode,
                     resumeRequested
             );
 
