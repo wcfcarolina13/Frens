@@ -21,6 +21,7 @@ public final class SkillResumeService {
     private static final Map<Object, PendingSkill> PENDING_BY_RESPONDER = new ConcurrentHashMap<>();
     private static final Map<UUID, Boolean> AWAITING_DECISION = new ConcurrentHashMap<>();
     private static final Set<UUID> AUTO_RESUME_PENDING = ConcurrentHashMap.newKeySet();
+    private static final Set<UUID> RESUME_INTENT = ConcurrentHashMap.newKeySet();
 
     private SkillResumeService() {}
 
@@ -99,7 +100,6 @@ public final class SkillResumeService {
         }
         AUTO_RESUME_PENDING.add(uuid);
         AWAITING_DECISION.remove(uuid);
-        net.shasankp000.GameAI.skills.support.MiningHazardDetector.clear(bot);
     }
 
     public static void tryAutoResume(ServerPlayerEntity bot) {
@@ -148,12 +148,20 @@ public final class SkillResumeService {
         return true;
     }
 
+    public static boolean consumeResumeIntent(UUID botUuid) {
+        if (botUuid == null) {
+            return false;
+        }
+        return RESUME_INTENT.remove(botUuid);
+    }
+
     private static void resume(PendingSkill pending, boolean autoTriggered, ServerCommandSource commandSource) {
         ServerCommandSource source = commandSource != null ? commandSource : pending.source();
         MinecraftServer server = source.getServer();
         if (server == null) {
             return;
         }
+        RESUME_INTENT.add(pending.botUuid());
         StringBuilder command = new StringBuilder("bot skill ")
                 .append(pending.skillName());
         if (pending.rawArgs() != null && !pending.rawArgs().isBlank()) {
@@ -173,6 +181,7 @@ public final class SkillResumeService {
                 server.getCommandManager().getDispatcher().execute(commandLine, execSource);
             } catch (com.mojang.brigadier.exceptions.CommandSyntaxException e) {
                 LOGGER.warn("Failed to resume skill '{}' for {}: {}", pending.skillName(), pending.alias(), e.getMessage());
+                RESUME_INTENT.remove(pending.botUuid());
             }
         });
         String reason = autoTriggered ? "Hostiles cleared." : null;

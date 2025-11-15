@@ -36,6 +36,9 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import net.fabricmc.fabric.api.event.player.UseEntityCallback;
 import net.minecraft.screen.ScreenHandlerType;
@@ -55,6 +58,12 @@ public class AIPlayer implements ModInitializer {
     public static BertModelManager modelManager;
     public static boolean loadedBERTModelIntoMemory = false;
     private static final java.util.concurrent.ConcurrentHashMap<java.util.UUID, Long> LAST_OPEN_MS = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final ExecutorService MODEL_EXECUTOR = Executors.newSingleThreadExecutor(r -> {
+        Thread t = new Thread(r, "bert-loader");
+        t.setDaemon(true);
+        return t;
+    });
+    private static final AtomicBoolean MODEL_LOAD_ENQUEUED = new AtomicBoolean(false);
 
     @Override
     public void onInitialize() {
@@ -149,18 +158,7 @@ public class AIPlayer implements ModInitializer {
 
             System.out.println("Server instance is " + serverInstance);
 
-            LOGGER.info("Proceeding to load BERT model into memory");
-
-            // Make BERT optional so the game doesn’t crash if the engine/model isn’t present.
-            try {
-                modelManager.loadModel();
-                loadedBERTModelIntoMemory = true;
-                LOGGER.info("BERT model loaded into memory. It will stay in memory as long as any bot stays active in game.");
-            } catch (Throwable t) {
-                // Catch anything (ModelNotFoundException, runtime wraps, etc.) and keep going.
-                loadedBERTModelIntoMemory = false;
-                LOGGER.warn("⚠️ BERT unavailable (continuing without it): {}", t.toString());
-            }
+            enqueueBertLoad();
         });
 
         ServerLifecycleEvents.SERVER_STOPPING.register(server -> BotPersistenceService.saveAll(server));
@@ -177,6 +175,7 @@ public class AIPlayer implements ModInitializer {
             } catch (IOException e) {
                 LOGGER.error("BERT Model unloading failed!", e);
             }
+            MODEL_LOAD_ENQUEUED.set(false);
         });
 
         ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> {
@@ -251,6 +250,30 @@ public class AIPlayer implements ModInitializer {
                     FunctionCallerV2 functionCaller = new FunctionCallerV2(bot.getCommandSource(), sender.getUuid());
                     functionCaller.run(userPrompt);
                 }
+            }
+        });
+    }
+
+    private static void enqueueBertLoad() {
+        if (!MODEL_LOAD_ENQUEUED.compareAndSet(false, true)) {
+            return;
+        }
+        LOGGER.info("Queueing asynchronous BERT model load...");
+        CompletableFuture.runAsync(() -> {
+            LOGGER.info("Proceeding to load BERT model into memory");
+            try {
+                modelManager.loadModel();
+                loadedBERTModelIntoMemory = true;
+                LOGGER.info("BERT model loaded into memory. It will stay in memory as long as any bot stays active in game.");
+            } catch (Throwable t) {
+                loadedBERTModelIntoMemory = false;
+                LOGGER.warn("⚠️ BERT unavailable (continuing without it): {}", t.toString());
+            }
+        }, MODEL_EXECUTOR).whenComplete((ignored, error) -> {
+            if (error != null) {
+                LOGGER.warn("Asynchronous BERT load failed: {}", error.getMessage());
+                loadedBERTModelIntoMemory = false;
+                MODEL_LOAD_ENQUEUED.set(false);
             }
         });
     }

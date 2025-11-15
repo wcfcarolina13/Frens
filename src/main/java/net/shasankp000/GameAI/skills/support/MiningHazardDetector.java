@@ -3,23 +3,29 @@ package net.shasankp000.GameAI.skills.support;
 import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
+import net.minecraft.block.entity.BarrelBlockEntity;
 import net.minecraft.block.entity.BlockEntity;
 import net.minecraft.block.entity.ChestBlockEntity;
-import net.minecraft.block.entity.BarrelBlockEntity;
 import net.minecraft.fluid.FluidState;
 import net.minecraft.registry.tag.FluidTags;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Direction;
 
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArraySet;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 /**
  * Centralised hazard detection for mining-style skills. Scans the immediate work
@@ -42,6 +48,8 @@ public final class MiningHazardDetector {
             Map.entry(Blocks.DEEPSLATE_LAPIS_ORE, "I found lapis!"),
             Map.entry(Blocks.COAL_ORE, "I found coal!"),
             Map.entry(Blocks.DEEPSLATE_COAL_ORE, "I found coal!"),
+            Map.entry(Blocks.IRON_ORE, "I found iron!"),
+            Map.entry(Blocks.DEEPSLATE_IRON_ORE, "I found iron!"),
             Map.entry(Blocks.NETHER_QUARTZ_ORE, "I found quartz!")
     );
 
@@ -61,44 +69,107 @@ public final class MiningHazardDetector {
             Blocks.BARREL
     );
 
-    private static final int DROP_SCAN_DEPTH = 4;
+    private static final Set<Block> GEODE_BLOCKS = Set.of(
+            Blocks.AMETHYST_BLOCK,
+            Blocks.BUDDING_AMETHYST,
+            Blocks.AMETHYST_CLUSTER,
+            Blocks.LARGE_AMETHYST_BUD,
+            Blocks.MEDIUM_AMETHYST_BUD,
+            Blocks.SMALL_AMETHYST_BUD,
+            Blocks.CALCITE
+    );
 
-    private static final Map<UUID, Set<BlockPos>> ACKNOWLEDGED_HAZARDS = new ConcurrentHashMap<>();
+    private static final int DROP_SCAN_DEPTH = 4;
+    private static final long WARNING_COOLDOWN_MS = 1_500L;
+
+    private static final Map<UUID, Set<BlockPos>> ACKNOWLEDGED_BLOCKERS = new ConcurrentHashMap<>();
+    private static final Map<UUID, Set<BlockPos>> WARNED_HAZARDS = new ConcurrentHashMap<>();
+    private static final Map<UUID, Long> LAST_WARNING_TS = new ConcurrentHashMap<>();
+    private static final DetectionResult NO_HAZARDS = new DetectionResult(Optional.empty(), List.of());
 
     private MiningHazardDetector() {
     }
 
-    public static Optional<Hazard> detect(ServerPlayerEntity bot,
-                                          List<BlockPos> breakTargets,
-                                          List<BlockPos> stepTargets) {
+    public static DetectionResult detect(ServerPlayerEntity bot,
+                                         List<BlockPos> breakTargets,
+                                         List<BlockPos> stepTargets) {
         if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
-            return Optional.empty();
+            return NO_HAZARDS;
         }
+        MinecraftServer server = world.getServer();
+        if (server == null) {
+            return NO_HAZARDS;
+        }
+        if (server.isOnThread()) {
+            return detectInternal(bot, world, breakTargets, stepTargets);
+        }
+        CompletableFuture<DetectionResult> future = new CompletableFuture<>();
+        server.execute(() -> {
+            try {
+                future.complete(detectInternal(bot, world, breakTargets, stepTargets));
+            } catch (Exception e) {
+                future.completeExceptionally(e);
+            }
+        });
+        try {
+            return future.get(200, TimeUnit.MILLISECONDS);
+        } catch (TimeoutException timeout) {
+            future.cancel(true);
+            return NO_HAZARDS;
+        } catch (Exception e) {
+            return NO_HAZARDS;
+        }
+    }
+
+    private static DetectionResult detectInternal(ServerPlayerEntity bot,
+                                                  ServerWorld world,
+                                                  List<BlockPos> breakTargets,
+                                                  List<BlockPos> stepTargets) {
         List<BlockPos> inspection = breakTargets == null ? List.of() : breakTargets;
+        List<BlockPos> steps = stepTargets == null ? List.of() : stepTargets;
+        Hazard blocking = null;
         for (BlockPos target : inspection) {
             if (target == null) {
                 continue;
             }
-            if (isAcknowledged(bot, target)) {
+            if (isBlockerAcknowledged(bot, target)) {
                 continue;
             }
-            Hazard hazard = inspectBlock(world, target);
-            if (hazard != null) {
-                acknowledge(bot, target);
-                return Optional.of(hazard);
+            Hazard found = inspectBlock(world, target);
+            if (found != null) {
+                acknowledgeBlocker(bot, target);
+                blocking = found;
+                break;
             }
         }
-        List<BlockPos> steps = stepTargets == null ? List.of() : stepTargets;
-        for (BlockPos foot : steps) {
-            if (foot == null) {
-                continue;
-            }
-            if (isDangerousDrop(world, foot)) {
-                acknowledge(bot, foot);
-                return Optional.of(hazard("That's a big drop."));
+        if (blocking == null) {
+            for (BlockPos foot : steps) {
+                if (foot == null) {
+                    continue;
+                }
+                if (!isBlockerAcknowledged(bot, foot)) {
+                    Hazard hazard = inspectBlock(world, foot);
+                    if (hazard != null) {
+                        acknowledgeBlocker(bot, foot);
+                        blocking = hazard;
+                        break;
+                    }
+                }
+                if (isDangerousDrop(world, foot)) {
+                    acknowledgeBlocker(bot, foot);
+                    blocking = hazard(foot, "That's a big drop.", true);
+                    break;
+                }
             }
         }
-        return Optional.empty();
+        if (blocking != null) {
+            return new DetectionResult(Optional.of(blocking), List.of());
+        }
+        List<Hazard> adjacentWarnings = collectAdjacentHazards(bot, world, inspection, steps);
+        if (adjacentWarnings.isEmpty()) {
+            return NO_HAZARDS;
+        }
+        return new DetectionResult(Optional.empty(), adjacentWarnings);
     }
 
     private static Hazard inspectBlock(ServerWorld world, BlockPos pos) {
@@ -108,25 +179,28 @@ public final class MiningHazardDetector {
         }
         FluidState fluid = world.getFluidState(pos);
         if (fluid.isIn(FluidTags.LAVA)) {
-            return hazard("There's lava ahead.");
+            return hazard(pos, "There's lava ahead.", true);
         }
         if (fluid.isIn(FluidTags.WATER)) {
-            return hazard("There's water ahead.");
+            return hazard(pos, "There's water ahead.", true);
         }
         Block block = state.getBlock();
         String precious = VALUABLE_MESSAGES.get(block);
         if (precious != null) {
-            return hazard(precious);
+            return hazard(pos, precious, true);
         }
         if (CHEST_BLOCKS.contains(block)) {
-            return hazard("I found a chest!");
+            return hazard(pos, "I found a chest!", true);
         }
         BlockEntity be = world.getBlockEntity(pos);
         if (be instanceof ChestBlockEntity || be instanceof BarrelBlockEntity) {
-            return hazard("I found a chest!");
+            return hazard(pos, "I found a chest!", true);
+        }
+        if (GEODE_BLOCKS.contains(block)) {
+            return hazard(pos, "I found an amethyst geode!", true);
         }
         if (STRUCTURE_BLOCKS.contains(block)) {
-            return hazard("I found a structure.");
+            return hazard(pos, "I found a structure.", true);
         }
         return null;
     }
@@ -143,34 +217,118 @@ public final class MiningHazardDetector {
         return true;
     }
 
-    private static Hazard hazard(String chat) {
-        return new Hazard(chat, "Hazard: " + chat);
+    private static Hazard hazard(BlockPos pos, String chat, boolean blocking) {
+        BlockPos immutable = pos != null ? pos.toImmutable() : null;
+        String failure = blocking ? "Hazard: " + chat : null;
+        return new Hazard(chat, failure, immutable, blocking);
     }
 
     public static void clear(ServerPlayerEntity bot) {
         if (bot == null) {
             return;
         }
-        ACKNOWLEDGED_HAZARDS.remove(bot.getUuid());
+        UUID uuid = bot.getUuid();
+        ACKNOWLEDGED_BLOCKERS.remove(uuid);
+        WARNED_HAZARDS.remove(uuid);
+        LAST_WARNING_TS.remove(uuid);
     }
 
-    private static boolean isAcknowledged(ServerPlayerEntity bot, BlockPos pos) {
+    private static boolean isBlockerAcknowledged(ServerPlayerEntity bot, BlockPos pos) {
         if (bot == null || pos == null) {
             return false;
         }
-        Set<BlockPos> seen = ACKNOWLEDGED_HAZARDS.get(bot.getUuid());
+        Set<BlockPos> seen = ACKNOWLEDGED_BLOCKERS.get(bot.getUuid());
         return seen != null && seen.contains(pos);
     }
 
-    private static void acknowledge(ServerPlayerEntity bot, BlockPos pos) {
+    private static void acknowledgeBlocker(ServerPlayerEntity bot, BlockPos pos) {
         if (bot == null || pos == null) {
             return;
         }
-        ACKNOWLEDGED_HAZARDS
+        ACKNOWLEDGED_BLOCKERS
                 .computeIfAbsent(bot.getUuid(), uuid -> new CopyOnWriteArraySet<>())
                 .add(pos.toImmutable());
     }
 
-    public static record Hazard(String chatMessage, String failureMessage) {
+    private static List<Hazard> collectAdjacentHazards(ServerPlayerEntity bot,
+                                                       ServerWorld world,
+                                                       List<BlockPos> breakTargets,
+                                                       List<BlockPos> stepTargets) {
+        if (bot == null || world == null) {
+            return List.of();
+        }
+        Set<BlockPos> primaries = new java.util.HashSet<>();
+        if (breakTargets != null) {
+            for (BlockPos target : breakTargets) {
+                if (target != null) {
+                    primaries.add(target.toImmutable());
+                }
+            }
+        }
+        if (stepTargets != null) {
+            for (BlockPos target : stepTargets) {
+                if (target != null) {
+                    primaries.add(target.toImmutable());
+                }
+            }
+        }
+        if (primaries.isEmpty()) {
+            return List.of();
+        }
+        LinkedHashSet<BlockPos> neighbors = new LinkedHashSet<>();
+        for (BlockPos primary : primaries) {
+            for (Direction dir : Direction.values()) {
+                BlockPos neighbor = primary.offset(dir);
+                if (primaries.contains(neighbor)) {
+                    continue;
+                }
+                neighbors.add(neighbor);
+            }
+        }
+        if (neighbors.isEmpty()) {
+            return List.of();
+        }
+        List<Hazard> warnings = new ArrayList<>();
+        for (BlockPos neighbor : neighbors) {
+            if (isBlockerAcknowledged(bot, neighbor)) {
+                continue;
+            }
+            Hazard hazard = inspectBlock(world, neighbor);
+            if (hazard == null) {
+                continue;
+            }
+            if (!registerWarning(bot, neighbor)) {
+                continue;
+            }
+            warnings.add(hazard(neighbor, hazard.chatMessage(), false));
+        }
+        if (warnings.isEmpty()) {
+            return List.of();
+        }
+        return List.copyOf(warnings);
+    }
+
+    private static boolean registerWarning(ServerPlayerEntity bot, BlockPos pos) {
+        if (bot == null || pos == null) {
+            return false;
+        }
+        UUID uuid = bot.getUuid();
+        long now = System.currentTimeMillis();
+        Long last = LAST_WARNING_TS.get(uuid);
+        if (last != null && now - last < WARNING_COOLDOWN_MS) {
+            return false;
+        }
+        Set<BlockPos> warned = WARNED_HAZARDS.computeIfAbsent(uuid, id -> new CopyOnWriteArraySet<>());
+        if (!warned.add(pos.toImmutable())) {
+            return false;
+        }
+        LAST_WARNING_TS.put(uuid, now);
+        return true;
+    }
+
+    public static record Hazard(String chatMessage, String failureMessage, BlockPos location, boolean blocking) {
+    }
+
+    public static record DetectionResult(Optional<Hazard> blockingHazard, List<Hazard> adjacentWarnings) {
     }
 }

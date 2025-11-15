@@ -22,6 +22,7 @@ import net.shasankp000.GameAI.skills.SkillPreferences;
 import net.shasankp000.GameAI.skills.SkillManager;
 import net.shasankp000.GameAI.skills.support.MiningHazardDetector;
 import net.shasankp000.GameAI.skills.support.MiningHazardDetector.Hazard;
+import net.shasankp000.GameAI.skills.support.MiningHazardDetector.DetectionResult;
 import net.shasankp000.PathFinding.GoTo;
 import net.shasankp000.PlayerUtils.MiningTool;
 import net.shasankp000.FunctionCaller.SharedStateUtils;
@@ -41,7 +42,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Locale;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -67,7 +67,11 @@ public final class DirtShovelSkill implements Skill {
     public SkillExecutionResult execute(SkillContext context) {
         ServerCommandSource source = context.botSource();
         ServerPlayerEntity player = Objects.requireNonNull(source.getPlayer(), "player");
-        net.shasankp000.GameAI.skills.support.MiningHazardDetector.clear(player);
+        boolean preserveHazards = getBooleanParameter(context, "preserveHazardMemory", false);
+        boolean resumeRequested = preserveHazards || SkillResumeService.consumeResumeIntent(player.getUuid());
+        if (!resumeRequested) {
+            net.shasankp000.GameAI.skills.support.MiningHazardDetector.clear(player);
+        }
 
         int horizontalRadius = getIntParameter(context, "searchRadius", DEFAULT_HORIZONTAL_RADIUS);
         int verticalRange = getIntParameter(context, "verticalRange", DEFAULT_VERTICAL_RANGE);
@@ -115,14 +119,17 @@ public final class DirtShovelSkill implements Skill {
                     continue;
                 }
 
-                Optional<Hazard> hazard = MiningHazardDetector.detect(
+                DetectionResult detection = MiningHazardDetector.detect(
                         player,
                         gatherHazardBlocks(detectedPos, approachPlan),
                         gatherStepTargets(approachPlan));
-                if (hazard.isPresent()) {
+                detection.adjacentWarnings().forEach(adjacent ->
+                        ChatUtils.sendChatMessages(source.withSilent().withMaxLevel(4), adjacent.chatMessage()));
+                if (detection.blockingHazard().isPresent()) {
+                    Hazard hazard = detection.blockingHazard().get();
                     SkillResumeService.flagManualResume(player);
-                    ChatUtils.sendChatMessages(source.withSilent().withMaxLevel(4), hazard.get().chatMessage());
-                    return failure(context, hazard.get().failureMessage());
+                    ChatUtils.sendChatMessages(source.withSilent().withMaxLevel(4), hazard.chatMessage());
+                    return failure(context, hazard.failureMessage());
                 }
 
                 LookController.faceBlock(player, detectedPos);
@@ -909,7 +916,8 @@ public final class DirtShovelSkill implements Skill {
                                         String preferredTool,
                                         boolean diggingDown,
                                         boolean allowAnyBlock,
-                                        boolean stairMode) {
+                                        boolean stairMode,
+                                        boolean preserveHazardMemory) {
         Map<String, Object> params = new java.util.HashMap<>();
         params.put("searchRadius", horizontalRadius);
         params.put("verticalRange", verticalRange);
@@ -937,6 +945,9 @@ public final class DirtShovelSkill implements Skill {
         }
         if (stairMode) {
             params.put("stairsMode", true);
+        }
+        if (preserveHazardMemory) {
+            params.put("preserveHazardMemory", true);
         }
         return execute(new SkillContext(source, sharedState, params));
     }

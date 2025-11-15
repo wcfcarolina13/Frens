@@ -15,6 +15,7 @@ import net.shasankp000.GameAI.skills.SkillExecutionResult;
 import net.shasankp000.GameAI.skills.SkillManager;
 import net.shasankp000.GameAI.skills.support.MiningHazardDetector;
 import net.shasankp000.GameAI.skills.support.MiningHazardDetector.Hazard;
+import net.shasankp000.GameAI.skills.support.MiningHazardDetector.DetectionResult;
 import net.shasankp000.PlayerUtils.MiningTool;
 import net.shasankp000.Entity.LookController;
 import org.slf4j.Logger;
@@ -24,7 +25,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -48,7 +48,10 @@ public final class StripMineSkill implements Skill {
     public SkillExecutionResult execute(SkillContext context) {
         ServerCommandSource source = context.botSource();
         ServerPlayerEntity player = Objects.requireNonNull(source.getPlayer(), "player");
-        net.shasankp000.GameAI.skills.support.MiningHazardDetector.clear(player);
+        boolean resumeRequested = SkillResumeService.consumeResumeIntent(player.getUuid());
+        if (!resumeRequested) {
+            net.shasankp000.GameAI.skills.support.MiningHazardDetector.clear(player);
+        }
         int length = Math.max(1, getIntParameter(context, "count", DEFAULT_LENGTH));
         int completed = 0;
 
@@ -63,14 +66,23 @@ public final class StripMineSkill implements Skill {
             BlockPos footTarget = player.getBlockPos().offset(tunnelDirection);
 
             List<BlockPos> workVolume = buildCrossSection(footTarget);
-            Optional<Hazard> hazard = MiningHazardDetector.detect(player, workVolume, List.of(footTarget));
-            if (hazard.isPresent()) {
+            DetectionResult detection = MiningHazardDetector.detect(player, workVolume, List.of(footTarget));
+            if (SkillManager.shouldAbortSkill(player)) {
+                return SkillExecutionResult.failure("stripmine paused due to cancellation.");
+            }
+            detection.adjacentWarnings().forEach(hazard ->
+                    ChatUtils.sendChatMessages(player.getCommandSource().withSilent().withMaxLevel(4), hazard.chatMessage()));
+            if (detection.blockingHazard().isPresent()) {
+                Hazard hazard = detection.blockingHazard().get();
                 SkillResumeService.flagManualResume(player);
-                ChatUtils.sendChatMessages(source.withSilent().withMaxLevel(4), hazard.get().chatMessage());
-                return SkillExecutionResult.failure(hazard.get().failureMessage());
+                ChatUtils.sendChatMessages(player.getCommandSource().withSilent().withMaxLevel(4), hazard.chatMessage());
+                return SkillExecutionResult.failure(hazard.failureMessage());
             }
 
             for (BlockPos block : workVolume) {
+                if (SkillManager.shouldAbortSkill(player)) {
+                    return SkillExecutionResult.failure("stripmine paused due to cancellation.");
+                }
                 if (!player.getEntityWorld().getBlockState(block).isAir()) {
                     if (!mineBlock(player, block)) {
                         return SkillExecutionResult.failure("Stripmine aborted: unable to clear corridor.");
@@ -78,7 +90,13 @@ public final class StripMineSkill implements Skill {
                 }
             }
 
+            if (SkillManager.shouldAbortSkill(player)) {
+                return SkillExecutionResult.failure("stripmine paused due to cancellation.");
+            }
             if (!moveTo(source, player, footTarget)) {
+                if (SkillManager.shouldAbortSkill(player)) {
+                    return SkillExecutionResult.failure("stripmine paused due to cancellation.");
+                }
                 return SkillExecutionResult.failure("Stripmine aborted: failed to advance tunnel.");
             }
             completed++;
@@ -100,6 +118,9 @@ public final class StripMineSkill implements Skill {
             return false;
         }
         for (int attempt = 0; attempt < STEP_ATTEMPTS; attempt++) {
+            if (SkillManager.shouldAbortSkill(player)) {
+                return false;
+            }
             if (player.getBlockPos().equals(destination)) {
                 return true;
             }
@@ -125,6 +146,9 @@ public final class StripMineSkill implements Skill {
         if (blockPos == null) {
             return true;
         }
+        if (SkillManager.shouldAbortSkill(player)) {
+            return false;
+        }
         if (!isWithinReach(player, blockPos)) {
             Vec3d target = Vec3d.ofCenter(blockPos);
             double distance = Math.sqrt(player.squaredDistanceTo(target.x, target.y, target.z));
@@ -134,19 +158,38 @@ public final class StripMineSkill implements Skill {
         }
         LookController.faceBlock(player, blockPos);
         CompletableFuture<String> future = MiningTool.mineBlock(player, blockPos);
-        try {
-            String result = future.get(6, TimeUnit.SECONDS);
-            if (result == null || !result.toLowerCase().contains("complete")) {
-                LOGGER.warn("Mining {} returned unexpected result: {}", blockPos, result);
+        long deadline = System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(6);
+        while (System.currentTimeMillis() < deadline) {
+            if (SkillManager.shouldAbortSkill(player)) {
+                future.cancel(true);
                 return false;
             }
-            return player.getEntityWorld().getBlockState(blockPos).isAir();
-        } catch (TimeoutException timeout) {
-            future.cancel(true);
-            LOGGER.warn("Mining {} timed out", blockPos);
-        } catch (Exception e) {
-            LOGGER.warn("Mining {} failed", blockPos, e);
+            long remaining = deadline - System.currentTimeMillis();
+            long waitWindow = Math.min(remaining, 200L);
+            try {
+                String result = future.get(waitWindow, TimeUnit.MILLISECONDS);
+                if (result == null || !result.toLowerCase().contains("complete")) {
+                    LOGGER.warn("Mining {} returned unexpected result: {}", blockPos, result);
+                    return false;
+                }
+                if (!player.getEntityWorld().getBlockState(blockPos).isAir()) {
+                    LOGGER.warn("{} still present after mining attempt", blockPos);
+                    return false;
+                }
+                return true;
+            } catch (TimeoutException timeout) {
+                // keep waiting while polling for cancellation
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                future.cancel(true);
+                return false;
+            } catch (Exception e) {
+                LOGGER.warn("Mining {} failed", blockPos, e);
+                return false;
+            }
         }
+        future.cancel(true);
+        LOGGER.warn("Mining {} timed out", blockPos);
         return false;
     }
 

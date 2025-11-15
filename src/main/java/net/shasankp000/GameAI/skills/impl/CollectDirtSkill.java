@@ -156,7 +156,11 @@ public class CollectDirtSkill implements Skill {
         DirtShovelSkill shovelSkill = new DirtShovelSkill();
         ServerCommandSource source = context.botSource();
         ServerPlayerEntity playerForAbortCheck = source.getPlayer();
-        net.shasankp000.GameAI.skills.support.MiningHazardDetector.clear(playerForAbortCheck);
+        boolean resumeRequested = playerForAbortCheck != null
+                && SkillResumeService.consumeResumeIntent(playerForAbortCheck.getUuid());
+        if (!resumeRequested) {
+            net.shasankp000.GameAI.skills.support.MiningHazardDetector.clear(playerForAbortCheck);
+        }
         if (playerForAbortCheck != null && SkillManager.shouldAbortSkill(playerForAbortCheck)) {
             LOGGER.warn("{} aborted before starting due to external cancellation request.", skillName);
             return SkillExecutionResult.failure(skillName + " paused due to nearby threat.");
@@ -313,7 +317,8 @@ public class CollectDirtSkill implements Skill {
                     preferredTool,
                     depthMode,
                     depthMode,
-                    stairMode
+                    stairMode,
+                    resumeRequested
             );
 
             lastMessage = result.message();
