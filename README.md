@@ -40,6 +40,7 @@ Examples:
 Arguments are forwarded exactly as you type them (minus the alias token). Each bot runs the skill in its own task, so multiple bots can execute the same skill concurrently.  
 When you target multiple bots (or `all`), the requested count is shared between them; add the keyword `each` if you want every bot to chase the full amount.
 `collect_dirt` will also scoop up gravel, sand, mud, and similar soft blocks whenever pure dirt is out of reach so the bots don’t stall in tight caves.
+With the LLM layer toggled on, you can also address bots in plain chat (“`Jake mine a tunnel`”, “`all bots follow me`”) and they’ll respond in character before asking for confirmation on risky requests.
 
 ### Skill Arguments & Modifiers
 
@@ -96,6 +97,8 @@ Snapshots are keyed by both alias and the bot’s UUID, so Jake and Bob keep the
 | `/bot config teleportDuringSkills on\|off [alias]` | Enable or disable teleport shortcuts while skills are running. Turning it off makes the bot tunnel and stair-step like a human player. |
 | `/bot config inventoryFullPause on\|off [alias]` | When enabled, the bot pauses mining as soon as its inventory is full; use `/bot resume` to restart once you clear space. |
 | `/bot look_player [alias\|all]` | Make the selected bot(s) turn to face you. Helpful before starting stairs/stripmine runs so the tunnel goes the way you expect. Add `stop` (e.g., `/bot look_player stop Jake`) to release their attention. |
+| `/bot config llm world on\|off` | Enable or disable the LLM/personality layer for the current world (off by default so legacy behaviour remains). |
+| `/bot config llm bot <alias> on\|off` | Override the LLM toggle for a specific bot if you only want some companions to chat in free-form language. |
 
 Most of these subcommands now accept the optional alias/`all` token in the same fashion as the skill command.
 

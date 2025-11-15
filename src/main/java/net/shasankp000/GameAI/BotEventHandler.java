@@ -454,6 +454,21 @@ public class BotEventHandler {
         return candidate != null && REGISTERED_BOTS.contains(candidate.getUuid());
     }
 
+    public static List<ServerPlayerEntity> getRegisteredBots(MinecraftServer fallback) {
+        MinecraftServer srv = server != null ? server : fallback;
+        if (srv == null) {
+            return List.of();
+        }
+        List<ServerPlayerEntity> bots = new ArrayList<>();
+        for (UUID uuid : REGISTERED_BOTS) {
+            ServerPlayerEntity player = srv.getPlayerManager().getPlayer(uuid);
+            if (player != null) {
+                bots.add(player);
+            }
+        }
+        return bots;
+    }
+
     private static State initializeBotState(QTable qTable) {
         State initialState = null;
 

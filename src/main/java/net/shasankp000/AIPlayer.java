@@ -22,6 +22,7 @@ import net.shasankp000.GameAI.BotEventHandler;
 import net.shasankp000.GameAI.services.SkillResumeService;
 import net.shasankp000.FunctionCaller.FunctionCallerV2;
 import net.shasankp000.GameAI.services.BotPersistenceService;
+import net.shasankp000.GameAI.llm.LLMOrchestrator;
 
 import net.shasankp000.Database.QTableStorage;
 import net.shasankp000.Entity.AutoFaceEntity;
@@ -35,6 +36,10 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -228,6 +233,24 @@ public class AIPlayer implements ModInitializer {
 
             SkillResumeService.handleChat(sender, raw);
 
+            ChatTarget target = resolveChatTargets(raw);
+            if (!target.bots().isEmpty()) {
+                boolean handled = false;
+                for (ServerPlayerEntity bot : target.bots()) {
+                    if (target.prompt().isEmpty()) {
+                        continue;
+                    }
+                    handled |= LLMOrchestrator.handleChat(
+                            bot,
+                            bot.getCommandSource().withSilent().withMaxLevel(4),
+                            sender.getUuid(),
+                            target.prompt());
+                }
+                if (handled) {
+                    return;
+                }
+            }
+
             // New logic starts here
             String[] parts = raw.split(" ");
             if (parts.length < 2) {
@@ -276,5 +299,60 @@ public class AIPlayer implements ModInitializer {
                 MODEL_LOAD_ENQUEUED.set(false);
             }
         });
+    }
+
+    private static ChatTarget resolveChatTargets(String raw) {
+        if (serverInstance == null || raw == null) {
+            return new ChatTarget(List.of(), "");
+        }
+        String trimmed = raw.trim();
+        if (trimmed.isEmpty()) {
+            return new ChatTarget(List.of(), "");
+        }
+        String[] tokens = trimmed.split("\\s+");
+        if (tokens.length < 2) {
+            return new ChatTarget(List.of(), "");
+        }
+        List<ServerPlayerEntity> bots = BotEventHandler.getRegisteredBots(serverInstance);
+        if (bots.isEmpty()) {
+            return new ChatTarget(List.of(), "");
+        }
+        String first = normalizeToken(tokens[0]);
+        String second = tokens.length > 1 ? normalizeToken(tokens[1]) : "";
+        int consumed = 0;
+        List<ServerPlayerEntity> targets = new ArrayList<>();
+        if (!first.isEmpty()) {
+            if (first.equals("allbots") || first.equals("bots") || (first.equals("all") && second.equals("bots"))) {
+                targets.addAll(bots);
+                consumed = first.equals("all") && second.equals("bots") ? 2 : 1;
+            } else {
+                for (ServerPlayerEntity bot : bots) {
+                    if (normalizeToken(bot.getName().getString()).equals(first)) {
+                        targets.add(bot);
+                        consumed = 1;
+                        break;
+                    }
+                }
+            }
+        }
+        if (targets.isEmpty()) {
+            return new ChatTarget(List.of(), "");
+        }
+        if (consumed >= tokens.length) {
+            return new ChatTarget(targets, "");
+        }
+        String prompt = String.join(" ", Arrays.copyOfRange(tokens, consumed, tokens.length)).trim();
+        return new ChatTarget(targets, prompt);
+    }
+
+    private static String normalizeToken(String token) {
+        if (token == null) {
+            return "";
+        }
+        String cleaned = token.replaceAll("[^a-zA-Z0-9]", "");
+        return cleaned.toLowerCase(Locale.ROOT);
+    }
+
+    private record ChatTarget(List<ServerPlayerEntity> bots, String prompt) {
     }
 }

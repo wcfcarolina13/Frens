@@ -280,7 +280,7 @@ To do next:
   - Wrap existing chat → NLP entry point rather than replacing it.
   - Keep all current hard-coded responses and fallbacks; the LLM layer *adds* behavior, it doesn’t own everything.
 
-**Phase 2 – Identity & memory model (world + bot scoped)**
+**Phase 2 – Identity & memory model (world + bot scoped)** *(in progress: personas + per-world JSON memory store live; remaining work: richer intent-classification feedback and memory summaries for command confirmations)*
 
 - Define IDs:
   - `worldId`: derived from the save folder / dimension (e.g., `New World:overworld`).

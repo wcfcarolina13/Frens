@@ -208,14 +208,10 @@ public class LLMServiceHandler {
         });
     }
 
-    /**
-     * Routes the user's intent to the appropriate function (RAG, FunctionCaller, etc.).
-     *
-     * @param message The user's message.
-     * @param botSource The bot's command source.
-     * @param playerUUID The player's UUID.
-     * @throws Exception if an error occurs during intent routing.
-     */
+    public static void routeFromOrchestrator(String message, ServerCommandSource botSource, UUID playerUUID, LLMClient client) throws Exception {
+        routeIntent(message, botSource, playerUUID, client);
+    }
+
     private static void routeIntent(String message, ServerCommandSource botSource, UUID playerUUID, LLMClient client) throws Exception {
         NLPProcessor.Intent intent = NLPProcessor.getIntention(message);
 

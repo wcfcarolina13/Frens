@@ -22,3 +22,4 @@
 - **Startup smoothness:** The BERT NLP model now loads on a background thread when the server starts, so world creation/login is no longer blocked for several seconds while DJL initializes.
 - **QoL:** Added `/bot look_player [alias|all]` so you can snap any bot’s view to your player before issuing directional jobs like stripmine or spiral stairs.
 - **Consistency:** When you resume a stripmine run the bot keeps the original tunnel direction instead of re-orienting, and `/bot look_player stop …` releases the attention so you can let bots look forward again.
+- **LLM groundwork:** Added `/bot config llm world …` and `/bot config llm bot …` toggles, a per-world persona/memory store that gives each bot Elder Scrolls-style quirks, and a chat parser that lets you address “Jake …” or “all bots …” directly. When the toggle is on, the bots route conversational requests through the LLM before falling back to the traditional skill commands.

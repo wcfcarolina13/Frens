@@ -29,6 +29,7 @@ import net.minecraft.text.Text;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import net.shasankp000.CommandUtils;
+import net.shasankp000.GameAI.llm.LLMOrchestrator;
 import net.minecraft.util.math.Vec2f;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.GameMode;
@@ -138,6 +139,35 @@ public class modCommandRegistry {
                                                         return 0;
                                                     }
                                                 })
+                                        )
+                                )
+                        )
+                        .then(literal("llm")
+                                .then(literal("world")
+                                        .then(CommandManager.argument("mode", StringArgumentType.string())
+                                                .executes(context -> {
+                                                    boolean enabled = parseToggle(StringArgumentType.getString(context, "mode"));
+                                                    String key = context.getSource().getServer().getSaveProperties().getLevelName()
+                                                            + ":" + context.getSource().getWorld().getRegistryKey().getValue();
+                                                    LLMOrchestrator.setWorldEnabled(key, enabled);
+                                                    ChatUtils.sendSystemMessage(context.getSource(),
+                                                            "LLM world toggle set to " + (enabled ? "on" : "off"));
+                                                    return 1;
+                                                })
+                                        )
+                                )
+                                .then(literal("bot")
+                                        .then(CommandManager.argument("bot", EntityArgumentType.player())
+                                                .then(CommandManager.argument("mode", StringArgumentType.string())
+                                                        .executes(context -> {
+                                                            boolean enabled = parseToggle(StringArgumentType.getString(context, "mode"));
+                                                            ServerPlayerEntity bot = EntityArgumentType.getPlayer(context, "bot");
+                                                            LLMOrchestrator.setBotEnabled(bot.getUuid(), enabled);
+                                                            ChatUtils.sendSystemMessage(context.getSource(),
+                                                                    bot.getName().getString() + " LLM set to " + (enabled ? "on" : "off"));
+                                                            return 1;
+                                                        })
+                                                )
                                         )
                                 )
                         )

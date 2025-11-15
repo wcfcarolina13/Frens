@@ -49,7 +49,7 @@ public class ManualConfig {
      */
     private ManualConfig() {
         // Initialize with default values
-        this.selectedLanguageModel = null;
+        this.selectedLanguageModel = System.getProperty("aiplayer.llmModel", null);
     }
 
     /**
@@ -281,6 +281,9 @@ public class ManualConfig {
 
     public void setSelectedLanguageModel(String selectedLanguageModel) {
         this.selectedLanguageModel = selectedLanguageModel;
+        if (selectedLanguageModel != null) {
+            System.setProperty("aiplayer.llmModel", selectedLanguageModel);
+        }
     }
 
     public String getLlmMode() {

@@ -73,6 +73,23 @@ public class VectorExtensionHelper {
         return lib;
     }
 
+    private static Path normalizeLibraryPath(Path candidate) {
+        if (candidate == null) {
+            return candidate;
+        }
+        String fileName = candidate.getFileName().toString();
+        String suffix = libSuffix();
+        if (isMac()) {
+            String lower = fileName.toLowerCase(Locale.ENGLISH);
+            String doubleSuffix = suffix + suffix;
+            while (lower.endsWith(doubleSuffix.toLowerCase(Locale.ENGLISH))) {
+                fileName = fileName.substring(0, fileName.length() - suffix.length());
+                lower = fileName.toLowerCase(Locale.ENGLISH);
+            }
+        }
+        return candidate.getParent() != null ? candidate.getParent().resolve(fileName) : Path.of(fileName);
+    }
+
     public static Path ensureSqliteVecPresent() throws IOException {
         Path configDir = FabricLoader.getInstance().getConfigDir();
         Path vecDir = configDir.resolve("sqlite_vector/sqlite-vec");
@@ -235,7 +252,8 @@ public class VectorExtensionHelper {
     private static void tryLoadExtension(Connection conn, Path lib, String... entrypoints) throws SQLException {
         enableExtensionLoading(conn);
         Path loadPath = stripLibraryExtension(lib);
-        final String libPath = loadPath.toAbsolutePath().toString().replace("\\", "\\\\");
+        Path normalized = normalizeLibraryPath(loadPath);
+        final String libPath = normalized.toAbsolutePath().toString().replace("\\", "\\\\");
 
         SQLException last = null;
         for (String ep : entrypoints) {
