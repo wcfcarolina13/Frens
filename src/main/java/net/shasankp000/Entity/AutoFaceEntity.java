@@ -311,15 +311,14 @@ public class AutoFaceEntity {
             }
 
             double distanceToHostileEntity = 0.0;
-            try {
-                Entity closestHostile = hostileEntities.stream()
-                        .min(Comparator.comparingDouble(e -> e.squaredDistanceTo(bot)))
-                        .orElseThrow();
+            Entity closestHostile = hostileEntities.stream()
+                    .min(Comparator.comparingDouble(e -> e.squaredDistanceTo(bot)))
+                    .orElse(null);
+            if (closestHostile != null) {
                 distanceToHostileEntity = Math.sqrt(closestHostile.squaredDistanceTo(bot));
-                LOGGER.debug("Closest hostile entity: " + closestHostile.getName().getString()
-                        + " at distance: " + distanceToHostileEntity);
-            } catch (Exception e) {
-                LOGGER.warn("An exception occurred while calculating detecting hostile entities nearby", e);
+                LOGGER.debug("Closest hostile entity: {} at distance {}", closestHostile.getName().getString(), distanceToHostileEntity);
+            } else {
+                LOGGER.debug("Danger zone triggered but no hostile entity present.");
             }
 
             if (PathTracer.BotSegmentManager.getBotMovementStatus() || isBotMoving || isBotExecutingTask()) {

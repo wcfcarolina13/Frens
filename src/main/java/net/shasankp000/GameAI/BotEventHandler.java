@@ -6,8 +6,11 @@ import net.minecraft.component.DataComponentTypes;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.ItemEntity;
 import net.minecraft.entity.LivingEntity;
+import net.minecraft.entity.damage.DamageSource;
+import net.minecraft.entity.damage.DamageTypes;
 import net.minecraft.network.packet.s2c.play.PositionFlag;
 import net.minecraft.registry.RegistryKey;
+import net.minecraft.registry.RegistryKeys;
 import net.minecraft.registry.tag.BlockTags;
 import net.minecraft.registry.tag.EntityTypeTags;
 import net.minecraft.server.ServerTask;
@@ -95,6 +98,7 @@ public class BotEventHandler {
     private static final Map<UUID, Long> LAST_RL_SAMPLE_TICK = new ConcurrentHashMap<>();
     private static final Map<UUID, Long> LAST_SUFFOCATION_ALERT_TICK = new ConcurrentHashMap<>();
     private static final long SUFFOCATION_ALERT_COOLDOWN_TICKS = 100L;
+    private static long lastBurialScanTick = Long.MIN_VALUE;
     private static volatile boolean externalOverrideActive = false;
     private static volatile boolean pendingBotRespawn = false;
     public enum CombatStyle {
@@ -873,7 +877,7 @@ public class BotEventHandler {
             boolean threatDetected = assessImmediateThreat(bot);
             if (!threatDetected) {
                 LOGGER.info("Bot enclosed without active threats; attempting dig-out routine.");
-                boolean cleared = BotActions.digOut(bot);
+                boolean cleared = BotActions.digOut(bot, true);
                 if (cleared) {
                     failedBlockBreakAttempts = 0;
                     lastKnownPosition = new Vec3d(bot.getX(), bot.getY(), bot.getZ());
@@ -945,6 +949,8 @@ public class BotEventHandler {
 
         ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withMaxLevel(4),
                 bot.getName().getString() + " has regrouped and is ready to re-engage.");
+
+        rescueFromBurial(bot);
     }
 
     public static void ensureRespawnHandled(ServerPlayerEntity bot) {
@@ -1645,10 +1651,11 @@ public class BotEventHandler {
         boolean feetSolid = !world.getBlockState(feet).getCollisionShape(world, feet).isEmpty();
         boolean headSolid = !world.getBlockState(head).getCollisionShape(world, head).isEmpty();
         boolean insideWall = bot.isInsideWall() || feetSolid || headSolid;
-        boolean hasAirPocket = !headSolid || world.getBlockState(head.up()).getCollisionShape(world, head.up()).isEmpty();
-        if (!insideWall && hasAirPocket) {
-            LAST_SUFFOCATION_ALERT_TICK.remove(bot.getUuid());
-            return false;
+        if (bot.hurtTime > 0 && bot.hurtTime < 10) {
+            insideWall = true;
+        }
+        if (!insideWall && tookRecentSuffocation(bot)) {
+            insideWall = true;
         }
         if (!insideWall) {
             LAST_SUFFOCATION_ALERT_TICK.remove(bot.getUuid());
@@ -1656,13 +1663,22 @@ public class BotEventHandler {
         }
 
         boolean hasTool = ensureRescueTool(bot, world, feet);
-        boolean cleared = BotActions.digOut(bot);
+        boolean cleared = BotActions.digOut(bot, true);
         if (!hasTool || !cleared) {
             alertSuffocation(bot);
         } else {
             LAST_SUFFOCATION_ALERT_TICK.remove(bot.getUuid());
         }
         return true;
+    }
+
+    private static boolean tookRecentSuffocation(ServerPlayerEntity bot) {
+        DamageSource recent = bot.getRecentDamageSource();
+        if (recent == null) {
+            return false;
+        }
+        RegistryKey<net.minecraft.entity.damage.DamageType> inWall = DamageTypes.IN_WALL;
+        return recent.isOf(inWall);
     }
 
     private static boolean ensureRescueTool(ServerPlayerEntity bot, ServerWorld world, BlockPos center) {
@@ -1712,6 +1728,23 @@ public class BotEventHandler {
         }
         ChatUtils.sendChatMessages(source.withSilent().withMaxLevel(4), "I'm suffocating!");
         LAST_SUFFOCATION_ALERT_TICK.put(uuid, now);
+    }
+
+    public static void tickBurialRescue(MinecraftServer server) {
+        if (server == null || REGISTERED_BOTS.isEmpty()) {
+            return;
+        }
+        long now = server.getTicks();
+        if (lastBurialScanTick == now) {
+            return;
+        }
+        lastBurialScanTick = now;
+        for (UUID uuid : REGISTERED_BOTS) {
+            ServerPlayerEntity candidate = server.getPlayerManager().getPlayer(uuid);
+            if (candidate != null && candidate.isAlive()) {
+                rescueFromBurial(candidate);
+            }
+        }
     }
 
     private static void lowerShieldTracking(ServerPlayerEntity bot) {

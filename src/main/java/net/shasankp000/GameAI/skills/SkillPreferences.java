@@ -14,6 +14,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public final class SkillPreferences {
 
     private static final Map<UUID, Boolean> TELEPORT_PREFS = new ConcurrentHashMap<>();
+    private static final Map<UUID, Boolean> PAUSE_ON_FULL_INV = new ConcurrentHashMap<>();
 
     private SkillPreferences() {
     }
@@ -40,6 +41,31 @@ public final class SkillPreferences {
             TELEPORT_PREFS.remove(uuid);
         } else {
             TELEPORT_PREFS.put(uuid, Boolean.FALSE);
+        }
+    }
+
+    public static boolean pauseOnFullInventory(ServerPlayerEntity player) {
+        if (player == null) {
+            return false;
+        }
+        return pauseOnFullInventory(player.getUuid());
+    }
+
+    public static boolean pauseOnFullInventory(UUID uuid) {
+        if (uuid == null) {
+            return false;
+        }
+        return PAUSE_ON_FULL_INV.getOrDefault(uuid, Boolean.FALSE);
+    }
+
+    public static void setPauseOnFullInventory(UUID uuid, boolean enabled) {
+        if (uuid == null) {
+            return;
+        }
+        if (enabled) {
+            PAUSE_ON_FULL_INV.put(uuid, Boolean.TRUE);
+        } else {
+            PAUSE_ON_FULL_INV.remove(uuid);
         }
     }
 }

@@ -1,11 +1,13 @@
 package net.shasankp000.GameAI;
 
 import net.minecraft.block.BlockState;
+import net.minecraft.block.Blocks;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.mob.HostileEntity;
 import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.item.BlockItem;
+import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
 import net.minecraft.server.network.ServerPlayerEntity;
@@ -22,12 +24,14 @@ import net.minecraft.util.math.Vec3d;
 
 
 import java.util.Comparator;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.function.Predicate;
 
 /**
  * Minimal action executor that replaces the old Carpet "player" commands.
@@ -133,7 +137,7 @@ public final class BotActions {
                 selectHotbarSlot(bot, slot);
                 return true;
             }
-            if (fallbackSlot == -1) {
+            if (fallbackSlot == -1 && (avoidKeyword == null || !key.contains(avoidKeyword))) {
                 fallbackSlot = slot;
             }
         }
@@ -156,7 +160,7 @@ public final class BotActions {
                 preferredSlot = slot;
                 break;
             }
-            if (preferredSlot == -1 && preferKeyword == null) {
+            if (preferredSlot == -1 && preferKeyword == null && (avoidKeyword == null || !key.contains(avoidKeyword))) {
                 preferredSlot = slot;
             }
         }
@@ -219,7 +223,7 @@ public final class BotActions {
     public static boolean breakBlockAhead(ServerPlayerEntity bot) {
         ServerWorld world = bot.getCommandSource().getWorld();
         BlockPos targetPos = getRelativeBlockPos(bot, 1, 0);
-        if (!world.getBlockState(targetPos).isAir() && canBreak(world, targetPos, bot)) {
+        if (!world.getBlockState(targetPos).isAir() && canBreak(world, targetPos, bot, false)) {
             boolean success = breakBlock(world, targetPos, bot);
             if (success) {
                 return true;
@@ -228,7 +232,7 @@ public final class BotActions {
 
         // Try the block above-front if the direct block was air (stair carving)
         BlockPos upperPos = getRelativeBlockPos(bot, 1, 1);
-        if (!world.getBlockState(upperPos).isAir() && canBreak(world, upperPos, bot)) {
+        if (!world.getBlockState(upperPos).isAir() && canBreak(world, upperPos, bot, false)) {
             boolean success = breakBlock(world, upperPos, bot);
             if (success) {
                 return true;
@@ -282,6 +286,10 @@ public final class BotActions {
     }
 
     public static boolean placeBlockAt(ServerPlayerEntity bot, BlockPos target) {
+        return placeBlockAt(bot, target, Collections.emptyList());
+    }
+
+    public static boolean placeBlockAt(ServerPlayerEntity bot, BlockPos target, List<Item> prioritizedBlocks) {
         ServerWorld world = bot.getCommandSource().getWorld();
         if (world == null || target == null) {
             return false;
@@ -289,11 +297,13 @@ public final class BotActions {
         if (!world.getBlockState(target).isAir() && world.getFluidState(target).isEmpty()) {
             return false;
         }
-        int slot = findPlaceableHotbarSlot(bot);
+        int slot = findPreferredBlockItemSlot(bot, prioritizedBlocks);
         if (slot == -1) {
             return false;
         }
-        ItemStack stack = bot.getInventory().getStack(slot);
+        PlayerInventory inventory = bot.getInventory();
+        slot = ensureHotbarAccess(bot, inventory, slot);
+        ItemStack stack = inventory.getStack(slot);
         if (!(stack.getItem() instanceof BlockItem blockItem)) {
             return false;
         }
@@ -306,7 +316,7 @@ public final class BotActions {
         if (placed) {
             stack.decrement(1);
             if (stack.isEmpty()) {
-                bot.getInventory().setStack(slot, ItemStack.EMPTY);
+                inventory.setStack(slot, ItemStack.EMPTY);
             }
             bot.swingHand(Hand.MAIN_HAND, true);
             return true;
@@ -323,6 +333,10 @@ public final class BotActions {
     }
 
     public static boolean digOut(ServerPlayerEntity bot) {
+        return digOut(bot, false);
+    }
+
+    public static boolean digOut(ServerPlayerEntity bot, boolean forceBreak) {
         ServerWorld world = bot.getCommandSource().getWorld();
         if (world == null) {
             return false;
@@ -337,19 +351,19 @@ public final class BotActions {
                 origin.up(2)
         };
         for (BlockPos target : verticalTargets) {
-            brokeAny |= breakBlock(world, target, bot);
+            brokeAny |= breakBlock(world, target, bot, forceBreak);
         }
 
         for (Direction direction : Direction.Type.HORIZONTAL) {
             BlockPos horizontal = origin.offset(direction);
-            brokeAny |= breakBlock(world, horizontal, bot);
-            brokeAny |= breakBlock(world, horizontal.up(), bot);
+            brokeAny |= breakBlock(world, horizontal, bot, forceBreak);
+            brokeAny |= breakBlock(world, horizontal.up(), bot, forceBreak);
         }
 
         return brokeAny;
     }
 
-    private static boolean canBreak(ServerWorld world, BlockPos pos, ServerPlayerEntity bot) {
+    private static boolean canBreak(ServerWorld world, BlockPos pos, ServerPlayerEntity bot, boolean forceBreak) {
         BlockState state = world.getBlockState(pos);
         if (state.isAir() || state.isOf(net.minecraft.block.Blocks.BEDROCK)) {
             return false;
@@ -358,6 +372,10 @@ public final class BotActions {
         float hardness = state.getHardness(world, pos);
         if (hardness < 0) {
             return false;
+        }
+
+        if (forceBreak) {
+            return hardness <= 5.0f && !state.isAir() && !state.isOf(Blocks.BEDROCK);
         }
 
         ItemStack tool = bot.getMainHandStack();
@@ -379,7 +397,11 @@ public final class BotActions {
     }
 
     private static boolean breakBlock(ServerWorld world, BlockPos pos, ServerPlayerEntity bot) {
-        if (!canBreak(world, pos, bot)) {
+        return breakBlock(world, pos, bot, false);
+    }
+
+    private static boolean breakBlock(ServerWorld world, BlockPos pos, ServerPlayerEntity bot, boolean forceBreak) {
+        if (!canBreak(world, pos, bot, forceBreak)) {
             return false;
         }
         boolean success = world.breakBlock(pos, true, bot);
@@ -550,6 +572,40 @@ public final class BotActions {
         return -1;
     }
 
+    private static int findPreferredBlockItemSlot(ServerPlayerEntity bot, List<Item> prioritizedBlocks) {
+        PlayerInventory inventory = bot.getInventory();
+        if (prioritizedBlocks != null) {
+            for (Item item : prioritizedBlocks) {
+                int slot = findBlockItemSlot(inventory, stack -> stack.isOf(item));
+                if (slot != -1) {
+                    return slot;
+                }
+            }
+        }
+        return findBlockItemSlot(inventory, stack -> true);
+    }
+
+    private static int findBlockItemSlot(PlayerInventory inventory, Predicate<ItemStack> predicate) {
+        for (int i = 0; i < inventory.size(); i++) {
+            ItemStack stack = inventory.getStack(i);
+            if (!stack.isEmpty() && stack.getItem() instanceof BlockItem && predicate.test(stack)) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    private static int ensureHotbarAccess(ServerPlayerEntity bot, PlayerInventory inventory, int slot) {
+        if (slot < 9) {
+            return slot;
+        }
+        int target = findEmptyHotbarSlot(inventory);
+        if (target == -1) {
+            target = 0;
+        }
+        swapInventoryStacks(inventory, slot, target);
+        return target;
+    }
 
 
 

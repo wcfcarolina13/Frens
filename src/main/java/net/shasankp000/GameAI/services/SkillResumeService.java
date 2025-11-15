@@ -117,6 +117,36 @@ public final class SkillResumeService {
         clear(uuid);
     }
 
+    public static void flagManualResume(ServerPlayerEntity bot) {
+        if (bot == null) {
+            return;
+        }
+        UUID uuid = bot.getUuid();
+        if (uuid == null) {
+            return;
+        }
+        if (!LAST_SKILL_BY_BOT.containsKey(uuid)) {
+            return;
+        }
+        AWAITING_DECISION.put(uuid, Boolean.TRUE);
+    }
+
+    public static boolean manualResume(ServerCommandSource requester, UUID botUuid) {
+        if (botUuid == null) {
+            return false;
+        }
+        PendingSkill pending = LAST_SKILL_BY_BOT.get(botUuid);
+        if (pending == null) {
+            return false;
+        }
+        resume(pending, false);
+        if (requester != null && requester != pending.source()) {
+            ChatUtils.sendSystemMessage(requester, "Resuming '" + pending.skillName() + "' for " + pending.alias() + ".");
+        }
+        clear(botUuid);
+        return true;
+    }
+
     private static void resume(PendingSkill pending, boolean autoTriggered) {
         ServerCommandSource source = pending.source();
         MinecraftServer server = source.getServer();

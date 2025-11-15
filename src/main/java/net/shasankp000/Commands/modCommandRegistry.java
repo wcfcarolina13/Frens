@@ -7,6 +7,7 @@ import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import com.mojang.brigadier.exceptions.SimpleCommandExceptionType;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
+import net.minecraft.block.BlockState;
 import net.minecraft.command.argument.BlockPosArgumentType;
 import net.minecraft.command.argument.EntityArgumentType;
 import net.minecraft.entity.attribute.EntityAttributes;
@@ -186,6 +187,12 @@ public class modCommandRegistry {
                                         .executes(context -> executeStopTargets(context,
                                                 StringArgumentType.getString(context, "target"))))
                         )
+                        .then(literal("resume")
+                                .executes(context -> executeResumeTargets(context, (String) null))
+                                .then(CommandManager.argument("target", StringArgumentType.string())
+                                        .executes(context -> executeResumeTargets(context,
+                                                StringArgumentType.getString(context, "target"))))
+                        )
                         .then(literal("follow")
                                 .then(literal("stop")
                                         .executes(context -> executeFollowStopTargets(context, null))
@@ -308,6 +315,19 @@ public class modCommandRegistry {
                                                         parseToggle(StringArgumentType.getString(context, "mode"))))
                                                 .then(CommandManager.argument("bot", EntityArgumentType.player())
                                                         .executes(context -> executeTeleportConfig(
+                                                                context,
+                                                                EntityArgumentType.getPlayer(context, "bot"),
+                                                                parseToggle(StringArgumentType.getString(context, "mode")))))
+                                        )
+                                )
+                                .then(literal("inventoryFullPause")
+                                        .then(CommandManager.argument("mode", StringArgumentType.string())
+                                                .executes(context -> executeInventoryFullConfig(
+                                                        context,
+                                                        getActiveBotOrThrow(context),
+                                                        parseToggle(StringArgumentType.getString(context, "mode"))))
+                                                .then(CommandManager.argument("bot", EntityArgumentType.player())
+                                                        .executes(context -> executeInventoryFullConfig(
                                                                 context,
                                                                 EntityArgumentType.getPlayer(context, "bot"),
                                                                 parseToggle(StringArgumentType.getString(context, "mode")))))
@@ -1700,112 +1720,127 @@ public class modCommandRegistry {
         }
     }
 
-    private static void equipDefaultLoadout(MinecraftServer server, ServerPlayerEntity bot) {
+    private static void equipDefaultLoadout(MinecraftServer server, ServerPlayerEntity bot, ServerPlayerEntity commander) {
         if (server == null || bot == null) {
             return;
         }
 
-        server.execute(() -> {
+        Runnable equipTask = () -> {
             DynamicRegistryManager.Immutable registryManager = server.getRegistryManager();
-
             giveStack(bot, withEnchantments(registryManager, Items.DIAMOND_SWORD.getDefaultStack(),
                     new int[]{5, 3},
-                    (RegistryKey<Enchantment>[]) new RegistryKey[]{Enchantments.SHARPNESS, Enchantments.UNBREAKING}));
+                    (RegistryKey<Enchantment>[]) new RegistryKey[]{Enchantments.SHARPNESS, Enchantments.UNBREAKING}), commander);
 
             giveStack(bot, withEnchantments(registryManager, Items.BOW.getDefaultStack(),
                     new int[]{5, 3, 1},
-                    (RegistryKey<Enchantment>[]) new RegistryKey[]{Enchantments.POWER, Enchantments.UNBREAKING, Enchantments.INFINITY}));
-            giveStack(bot, new ItemStack(Items.ARROW, 64));
-            giveStack(bot, new ItemStack(Items.SPECTRAL_ARROW, 32));
+                    (RegistryKey<Enchantment>[]) new RegistryKey[]{Enchantments.POWER, Enchantments.UNBREAKING, Enchantments.INFINITY}), commander);
+            giveStack(bot, new ItemStack(Items.ARROW, 64), commander);
+            giveStack(bot, new ItemStack(Items.SPECTRAL_ARROW, 32), commander);
 
             giveStack(bot, withEnchantments(registryManager, Items.CROSSBOW.getDefaultStack(),
                     new int[]{3, 3},
-                    (RegistryKey<Enchantment>[]) new RegistryKey[]{Enchantments.QUICK_CHARGE, Enchantments.UNBREAKING}));
+                    (RegistryKey<Enchantment>[]) new RegistryKey[]{Enchantments.QUICK_CHARGE, Enchantments.UNBREAKING}), commander);
 
             giveStack(bot, withEnchantments(registryManager, Items.SHIELD.getDefaultStack(),
                     new int[]{3},
-                    (RegistryKey<Enchantment>[]) new RegistryKey[]{Enchantments.UNBREAKING}));
+                    (RegistryKey<Enchantment>[]) new RegistryKey[]{Enchantments.UNBREAKING}), commander);
 
             giveStack(bot, withEnchantments(registryManager, Items.NETHERITE_CHESTPLATE.getDefaultStack(),
                     new int[]{4, 3},
-                    (RegistryKey<Enchantment>[]) new RegistryKey[]{Enchantments.PROTECTION, Enchantments.UNBREAKING}));
+                    (RegistryKey<Enchantment>[]) new RegistryKey[]{Enchantments.PROTECTION, Enchantments.UNBREAKING}), commander);
             giveStack(bot, withEnchantments(registryManager, Items.NETHERITE_HELMET.getDefaultStack(),
                     new int[]{4, 3, 3},
-                    (RegistryKey<Enchantment>[]) new RegistryKey[]{Enchantments.PROTECTION, Enchantments.RESPIRATION, Enchantments.UNBREAKING}));
+                    (RegistryKey<Enchantment>[]) new RegistryKey[]{Enchantments.PROTECTION, Enchantments.RESPIRATION, Enchantments.UNBREAKING}), commander);
             giveStack(bot, withEnchantments(registryManager, Items.NETHERITE_LEGGINGS.getDefaultStack(),
                     new int[]{4, 3},
-                    (RegistryKey<Enchantment>[]) new RegistryKey[]{Enchantments.PROTECTION, Enchantments.UNBREAKING}));
+                    (RegistryKey<Enchantment>[]) new RegistryKey[]{Enchantments.PROTECTION, Enchantments.UNBREAKING}), commander);
             giveStack(bot, withEnchantments(registryManager, Items.NETHERITE_BOOTS.getDefaultStack(),
                     new int[]{4, 4, 3},
-                    (RegistryKey<Enchantment>[]) new RegistryKey[]{Enchantments.PROTECTION, Enchantments.FEATHER_FALLING, Enchantments.UNBREAKING}));
+                    (RegistryKey<Enchantment>[]) new RegistryKey[]{Enchantments.PROTECTION, Enchantments.FEATHER_FALLING, Enchantments.UNBREAKING}), commander);
 
             giveStack(bot, withEnchantments(registryManager, Items.NETHERITE_PICKAXE.getDefaultStack(),
                     new int[]{5, 3, 1},
-                    (RegistryKey<Enchantment>[]) new RegistryKey[]{Enchantments.EFFICIENCY, Enchantments.UNBREAKING, Enchantments.MENDING}));
+                    (RegistryKey<Enchantment>[]) new RegistryKey[]{Enchantments.EFFICIENCY, Enchantments.UNBREAKING, Enchantments.MENDING}), commander);
             giveStack(bot, withEnchantments(registryManager, Items.NETHERITE_AXE.getDefaultStack(),
                     new int[]{5, 3},
-                    (RegistryKey<Enchantment>[]) new RegistryKey[]{Enchantments.SHARPNESS, Enchantments.UNBREAKING}));
+                    (RegistryKey<Enchantment>[]) new RegistryKey[]{Enchantments.SHARPNESS, Enchantments.UNBREAKING}), commander);
             giveStack(bot, withEnchantments(registryManager, Items.NETHERITE_SHOVEL.getDefaultStack(),
                     new int[]{5, 3},
-                    (RegistryKey<Enchantment>[]) new RegistryKey[]{Enchantments.EFFICIENCY, Enchantments.UNBREAKING}));
+                    (RegistryKey<Enchantment>[]) new RegistryKey[]{Enchantments.EFFICIENCY, Enchantments.UNBREAKING}), commander);
             // --- Additional "good" tools for testing: second copies + hoe ---
             giveStack(bot, withEnchantments(registryManager, Items.NETHERITE_PICKAXE.getDefaultStack(),
                     new int[]{5, 3, 1},
-                    (RegistryKey<Enchantment>[]) new RegistryKey[]{Enchantments.EFFICIENCY, Enchantments.UNBREAKING, Enchantments.MENDING}));
+                    (RegistryKey<Enchantment>[]) new RegistryKey[]{Enchantments.EFFICIENCY, Enchantments.UNBREAKING, Enchantments.MENDING}), commander);
             giveStack(bot, withEnchantments(registryManager, Items.NETHERITE_SHOVEL.getDefaultStack(),
                     new int[]{5, 3, 1},
-                    (RegistryKey<Enchantment>[]) new RegistryKey[]{Enchantments.EFFICIENCY, Enchantments.UNBREAKING, Enchantments.MENDING}));
+                    (RegistryKey<Enchantment>[]) new RegistryKey[]{Enchantments.EFFICIENCY, Enchantments.UNBREAKING, Enchantments.MENDING}), commander);
             giveStack(bot, withEnchantments(registryManager, Items.NETHERITE_AXE.getDefaultStack(),
                     new int[]{5, 3, 1},
-                    (RegistryKey<Enchantment>[]) new RegistryKey[]{Enchantments.EFFICIENCY, Enchantments.UNBREAKING, Enchantments.MENDING}));
+                    (RegistryKey<Enchantment>[]) new RegistryKey[]{Enchantments.EFFICIENCY, Enchantments.UNBREAKING, Enchantments.MENDING}), commander);
             // Add two netherite hoes
             giveStack(bot, withEnchantments(registryManager, Items.NETHERITE_HOE.getDefaultStack(),
                     new int[]{5, 3, 1},
-                    (RegistryKey<Enchantment>[]) new RegistryKey[]{Enchantments.EFFICIENCY, Enchantments.UNBREAKING, Enchantments.MENDING}));
+                    (RegistryKey<Enchantment>[]) new RegistryKey[]{Enchantments.EFFICIENCY, Enchantments.UNBREAKING, Enchantments.MENDING}), commander);
             giveStack(bot, withEnchantments(registryManager, Items.NETHERITE_HOE.getDefaultStack(),
                     new int[]{5, 3, 1},
-                    (RegistryKey<Enchantment>[]) new RegistryKey[]{Enchantments.EFFICIENCY, Enchantments.UNBREAKING, Enchantments.MENDING}));
-            giveStack(bot, new ItemStack(Items.STONE_SHOVEL, 2));
-            giveStack(bot, new ItemStack(Items.STONE_HOE, 2));
-            giveStack(bot, new ItemStack(Items.STONE_PICKAXE, 2));
-            giveStack(bot, new ItemStack(Items.STONE_AXE, 2));
+                    (RegistryKey<Enchantment>[]) new RegistryKey[]{Enchantments.EFFICIENCY, Enchantments.UNBREAKING, Enchantments.MENDING}), commander);
             giveStack(bot, withEnchantments(registryManager, Items.FISHING_ROD.getDefaultStack(),
                     new int[]{3, 3, 3, 1},
-                    (RegistryKey<Enchantment>[]) new RegistryKey[]{Enchantments.LURE, Enchantments.LUCK_OF_THE_SEA, Enchantments.UNBREAKING, Enchantments.MENDING}));
+                    (RegistryKey<Enchantment>[]) new RegistryKey[]{Enchantments.LURE, Enchantments.LUCK_OF_THE_SEA, Enchantments.UNBREAKING, Enchantments.MENDING}), commander);
             giveStack(bot, withEnchantments(registryManager, Items.FISHING_ROD.getDefaultStack(),
                     new int[]{3, 3, 3, 1},
-                    (RegistryKey<Enchantment>[]) new RegistryKey[]{Enchantments.LURE, Enchantments.LUCK_OF_THE_SEA, Enchantments.UNBREAKING, Enchantments.MENDING}));
+                    (RegistryKey<Enchantment>[]) new RegistryKey[]{Enchantments.LURE, Enchantments.LUCK_OF_THE_SEA, Enchantments.UNBREAKING, Enchantments.MENDING}), commander);
 
-            giveStack(bot, new ItemStack(Items.GOLDEN_CARROT, 64));
-            giveStack(bot, new ItemStack(Items.COOKED_BEEF, 64));
-            giveStack(bot, new ItemStack(Items.TORCH, 64));
+            giveStack(bot, new ItemStack(Items.GOLDEN_CARROT, 64), commander);
+            giveStack(bot, new ItemStack(Items.COOKED_BEEF, 64), commander);
+            giveStack(bot, new ItemStack(Items.TORCH, 64), commander);
+            giveStack(bot, new ItemStack(Items.SPONGE, 64), commander);
+            giveStack(bot, new ItemStack(Items.SCAFFOLDING, 64), commander);
 
             // --- Utility & building items for quick testing ---
-            giveStack(bot, new ItemStack(Items.CRAFTING_TABLE));
-            giveStack(bot, new ItemStack(Items.FURNACE));
-            giveStack(bot, new ItemStack(Items.CHEST, 2));      // two chests
-            giveStack(bot, new ItemStack(Items.WATER_BUCKET));
-            giveStack(bot, new ItemStack(Items.SHEARS));
-            giveStack(bot, new ItemStack(Items.WHITE_BED));
-            giveStack(bot, new ItemStack(Items.LEAD, 2));       // two leads
+            giveStack(bot, new ItemStack(Items.CRAFTING_TABLE), commander);
+            giveStack(bot, new ItemStack(Items.FURNACE), commander);
+            giveStack(bot, new ItemStack(Items.CHEST, 2), commander);      // two chests
+            giveStack(bot, new ItemStack(Items.WATER_BUCKET), commander);
+            giveStack(bot, new ItemStack(Items.SHEARS), commander);
+            giveStack(bot, new ItemStack(Items.WHITE_BED), commander);
+            giveStack(bot, new ItemStack(Items.LEAD, 2), commander);       // two leads
             // Boats are non‑stackable; add twice
-            giveStack(bot, new ItemStack(Items.OAK_BOAT));
-            giveStack(bot, new ItemStack(Items.OAK_BOAT));
+            giveStack(bot, new ItemStack(Items.OAK_BOAT), commander);
+            giveStack(bot, new ItemStack(Items.OAK_BOAT), commander);
 
             armorUtils.autoEquipArmor(bot);
             CombatInventoryManager.ensureCombatLoadout(bot);
 
             ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withMaxLevel(4),
                     "Loadout equipped! Stay sharp out there.");
-        });
+        };
+
+        if (server.isOnThread()) {
+            equipTask.run();
+        } else {
+            server.execute(equipTask);
+        }
     }
 
     private static void giveStack(ServerPlayerEntity bot, ItemStack stack) {
+        giveStack(bot, stack, null);
+    }
+
+    private static void giveStack(ServerPlayerEntity bot, ItemStack stack, ServerPlayerEntity owner) {
         if (stack.isEmpty()) {
             return;
         }
-        if (!bot.getInventory().insertStack(stack.copy())) {
-            bot.dropItem(stack, false);
+        ItemStack copy = stack.copy();
+        boolean inserted = bot.getInventory().insertStack(copy);
+        if (inserted && copy.isEmpty()) {
+            return;
+        }
+        if (!copy.isEmpty()) {
+            ItemEntity drop = bot.dropItem(copy, false, false);
+            if (drop != null && owner != null) {
+                drop.setOwner(owner.getUuid());
+            }
         }
     }
 
@@ -1853,7 +1888,12 @@ public class modCommandRegistry {
     }
 
     private static int executeEquip(CommandContext<ServerCommandSource> context, ServerPlayerEntity bot) {
-        equipDefaultLoadout(context.getSource().getServer(), bot);
+        ServerPlayerEntity commander = null;
+        try {
+            commander = context.getSource().getPlayer();
+        } catch (Exception ignored) {
+        }
+        equipDefaultLoadout(context.getSource().getServer(), bot, commander);
         ChatUtils.sendSystemMessage(context.getSource(), "Equipping loadout on " + bot.getName().getString() + ".");
         return 1;
     }
@@ -2090,6 +2130,40 @@ public class modCommandRegistry {
             ChatUtils.sendSystemMessage(context.getSource(), summary + " " + verb + " stopped.");
         }
         return successes;
+    }
+
+    private static int executeResumeTargets(CommandContext<ServerCommandSource> context, String targetArg) throws CommandSyntaxException {
+        List<ServerPlayerEntity> bots = BotTargetingService.resolve(context.getSource(), targetArg);
+        boolean isAll = targetArg != null && "all".equalsIgnoreCase(targetArg.trim());
+        return executeResumeTargets(context, bots, isAll);
+    }
+
+    private static int executeResumeTargets(CommandContext<ServerCommandSource> context,
+                                            List<ServerPlayerEntity> bots,
+                                            boolean isAll) {
+        int successes = 0;
+        for (ServerPlayerEntity bot : bots) {
+            successes += executeResume(context, bot);
+        }
+        if (successes > 0) {
+            String summary = formatBotList(bots, isAll);
+            String verb = (isAll || bots.size() > 1) ? "have" : "has";
+            ChatUtils.sendSystemMessage(context.getSource(), summary + " " + verb + " been queued to resume.");
+        }
+        return successes;
+    }
+
+    private static int executeResume(CommandContext<ServerCommandSource> context, ServerPlayerEntity bot) {
+        if (bot == null) {
+            return 0;
+        }
+        boolean resumed = SkillResumeService.manualResume(context.getSource(), bot.getUuid());
+        if (!resumed) {
+            ChatUtils.sendSystemMessage(context.getSource(),
+                    "No paused skill to resume for " + bot.getName().getString() + ".");
+            return 0;
+        }
+        return 1;
     }
 
     private static int executeFollowTargets(CommandContext<ServerCommandSource> context, String targetArg, ServerPlayerEntity followTarget) throws CommandSyntaxException {
@@ -2474,6 +2548,20 @@ public class modCommandRegistry {
         return 1;
     }
 
+    private static int executeInventoryFullConfig(CommandContext<ServerCommandSource> context,
+                                                  ServerPlayerEntity bot,
+                                                  boolean enabled) {
+        if (bot == null) {
+            ChatUtils.sendSystemMessage(context.getSource(), "No active bot found. Spawn one with /bot spawn.");
+            return 0;
+        }
+        SkillPreferences.setPauseOnFullInventory(bot.getUuid(), enabled);
+        String state = enabled ? "enabled" : "disabled";
+        ChatUtils.sendSystemMessage(context.getSource(),
+                "Inventory-full pause " + state + " for " + bot.getName().getString() + ".");
+        return 1;
+    }
+
     private static boolean parseAssistMode(String raw) throws CommandSyntaxException {
         String normalized = raw.trim().toLowerCase(Locale.ROOT);
         return switch (normalized) {
@@ -2518,12 +2606,71 @@ public class modCommandRegistry {
     }
 
     private static @NotNull BlockPos getBlockPos(CommandContext<ServerCommandSource> context) {
-        ServerPlayerEntity player = context.getSource().getPlayer(); // gets the player who executed the command
-
-
-        // Set spawn location for the second player
-        assert player != null;
+        ServerPlayerEntity player = context.getSource().getPlayer();
+        ServerWorld world = context.getSource().getWorld();
+        if (player == null || world == null) {
+            return BlockPos.ORIGIN;
+        }
+        BlockPos safe = findForwardSpawn(world, player);
+        if (safe != null) {
+            return safe;
+        }
         return new BlockPos((int) player.getX() + 5, (int) player.getY(), (int) player.getZ());
+    }
+
+    private static BlockPos findForwardSpawn(ServerWorld world, ServerPlayerEntity player) {
+        Vec3d eye = player.getEyePos();
+        Vec3d look = player.getRotationVec(1.0F).normalize();
+        if (look.lengthSquared() < 1.0E-4) {
+            look = new Vec3d(player.getHorizontalFacing().getOffsetX(), 0, player.getHorizontalFacing().getOffsetZ());
+        }
+
+        Direction facing = player.getHorizontalFacing();
+        Direction left = facing.rotateYCounterclockwise();
+        List<BlockPos> samples = new ArrayList<>();
+
+        for (int dist = 2; dist <= 8; dist++) {
+            Vec3d baseVec = eye.add(look.multiply(dist));
+            BlockPos base = BlockPos.ofFloored(baseVec.x, player.getBlockY(), baseVec.z);
+            samples.add(base);
+            samples.add(base.offset(left));
+            samples.add(base.offset(left.getOpposite()));
+        }
+        samples.add(player.getBlockPos());
+
+        for (BlockPos candidate : samples) {
+            BlockPos safe = findSafeColumn(world, candidate);
+            if (safe != null) {
+                return safe;
+            }
+        }
+        return null;
+    }
+
+    private static BlockPos findSafeColumn(ServerWorld world, BlockPos base) {
+        for (int dy = 2; dy >= -3; dy--) {
+            BlockPos candidate = base.up(dy);
+            if (isSpawnable(world, candidate)) {
+                return candidate;
+            }
+        }
+        return null;
+    }
+
+    private static boolean isSpawnable(ServerWorld world, BlockPos feet) {
+        BlockState feetState = world.getBlockState(feet);
+        BlockState headState = world.getBlockState(feet.up());
+        if (!feetState.getCollisionShape(world, feet).isEmpty()) {
+            return false;
+        }
+        if (!headState.getCollisionShape(world, feet.up()).isEmpty()) {
+            return false;
+        }
+        if (!world.getFluidState(feet).isEmpty() || !world.getFluidState(feet.up()).isEmpty()) {
+            return false;
+        }
+        BlockState floor = world.getBlockState(feet.down());
+        return !floor.getCollisionShape(world, feet.down()).isEmpty();
     }
 
 }

@@ -2,6 +2,7 @@ package net.shasankp000.GameAI.skills.impl;
 
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
+import net.minecraft.block.BlockEntityProvider;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.network.ServerPlayerEntity;
@@ -292,13 +293,16 @@ public final class DirtShovelSkill implements Skill {
         BlockPos origin = player.getBlockPos();
         List<BlockPos> candidates = new ArrayList<>();
 
-        if (diggingDown) {
+        if (diggingDown && !allowAnyBlock) {
             for (int dy = -1; dy >= -verticalRange; dy--) {
                 BlockPos candidate = origin.add(0, dy, 0);
                 if (excluded != null && excluded.contains(candidate)) {
                     continue;
                 }
                 BlockState state = player.getEntityWorld().getBlockState(candidate);
+                if (state.getBlock() instanceof BlockEntityProvider) {
+                    continue;
+                }
                 if ((allowAnyBlock && !state.isAir()) || matchesTargetBlock(state, targetBlocks)) {
                     candidates.add(candidate);
                 }
@@ -334,6 +338,9 @@ public final class DirtShovelSkill implements Skill {
                         continue;
                     }
                     BlockState state = player.getEntityWorld().getBlockState(candidate);
+                    if (state.getBlock() instanceof BlockEntityProvider) {
+                        continue;
+                    }
                     if (!allowAnyBlock && !matchesTargetBlock(state, targetBlocks)) {
                         continue;
                     }

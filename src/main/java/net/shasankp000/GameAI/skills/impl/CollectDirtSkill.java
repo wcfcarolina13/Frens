@@ -2,6 +2,7 @@ package net.shasankp000.GameAI.skills.impl;
 
 import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
+import net.minecraft.block.BlockState;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.ItemEntity;
 import net.minecraft.entity.player.PlayerInventory;
@@ -16,16 +17,19 @@ import net.minecraft.util.Identifier;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Direction;
+import net.minecraft.util.math.Vec3d;
 import net.minecraft.registry.Registries;
 import net.shasankp000.GameAI.skills.ExplorationMovePolicy;
 import net.shasankp000.GameAI.skills.BlockDropRegistry;
 import net.shasankp000.GameAI.skills.Skill;
 import net.shasankp000.GameAI.skills.SkillContext;
 import net.shasankp000.GameAI.skills.SkillExecutionResult;
+import net.shasankp000.GameAI.skills.SkillPreferences;
 import net.shasankp000.Entity.LookController;
 import net.shasankp000.GameAI.BotActions;
 import net.shasankp000.GameAI.services.MovementService;
 import net.shasankp000.GameAI.skills.SkillManager;
+import net.shasankp000.GameAI.services.SkillResumeService;
 import net.shasankp000.FunctionCaller.SharedStateUtils;
 import net.shasankp000.PathFinding.GoTo;
 import net.shasankp000.GameAI.BotEventHandler;
@@ -61,6 +65,13 @@ public class CollectDirtSkill implements Skill {
     private static final double DROP_SEARCH_RADIUS = 6.0;
     private static final int MAX_EXPLORATION_ATTEMPTS_PER_CYCLE = 3;
     private static final int MAX_STALLED_FAILURES = 5;
+    private static final List<Item> LAVA_SAFETY_BLOCKS = List.of(
+            Items.COBBLESTONE,
+            Items.COBBLED_DEEPSLATE,
+            Items.STONE,
+            Items.DEEPSLATE,
+            Items.DEEPSLATE_BRICKS
+    );
     private static final Logger LOGGER = LoggerFactory.getLogger("skill-collect-dirt");
 
     private final String skillName;
@@ -191,9 +202,16 @@ public class CollectDirtSkill implements Skill {
         if (depthMode && playerForAbortCheck != null && playerForAbortCheck.getBlockY() <= targetDepthY) {
             return SkillExecutionResult.success("Reached target depth " + targetDepthY + ".");
         }
-        if (depthMode && playerForAbortCheck != null && isWaterlogged(playerForAbortCheck)) {
-            ChatUtils.sendChatMessages(source.withSilent().withMaxLevel(4), "Hit water while digging — pausing depth mining.");
-            return SkillExecutionResult.failure("Depth run paused: water detected.");
+        if (playerForAbortCheck != null) {
+            if (handleInventoryFull(playerForAbortCheck, source)) {
+                return SkillExecutionResult.failure("Mining paused: inventory full.");
+            }
+            if (handleWaterHazard(playerForAbortCheck, source)) {
+                return SkillExecutionResult.failure("Mining paused: water flooded the dig site.");
+            }
+            if (handleLavaHazard(playerForAbortCheck, source)) {
+                return SkillExecutionResult.failure("Mining paused: lava detected.");
+            }
         }
 
         boolean cleanupRequested = playerForAbortCheck != null;
@@ -215,9 +233,16 @@ public class CollectDirtSkill implements Skill {
                     outcome = SkillExecutionResult.success("Reached target depth " + targetDepthY + ".");
                     break;
                 }
-                if (depthMode && isWaterlogged(loopPlayer)) {
-                    ChatUtils.sendChatMessages(source.withSilent().withMaxLevel(4), "Hit water while digging — pausing depth mining.");
-                    outcome = SkillExecutionResult.failure("Depth run paused: water detected.");
+                if (handleInventoryFull(loopPlayer, source)) {
+                    outcome = SkillExecutionResult.failure("Mining paused: inventory full.");
+                    break;
+                }
+                if (handleWaterHazard(loopPlayer, source)) {
+                    outcome = SkillExecutionResult.failure("Mining paused: water flooded the dig site.");
+                    break;
+                }
+                if (handleLavaHazard(loopPlayer, source)) {
+                    outcome = SkillExecutionResult.failure("Mining paused: lava detected.");
                     break;
                 }
                 if (SkillManager.shouldAbortSkill(loopPlayer)) {
@@ -935,7 +960,7 @@ public class CollectDirtSkill implements Skill {
         }
     }
 
-    private boolean isWaterlogged(ServerPlayerEntity player) {
+    private boolean isTouchingWater(ServerPlayerEntity player) {
         if (player == null) {
             return false;
         }
@@ -944,8 +969,125 @@ public class CollectDirtSkill implements Skill {
         }
         BlockPos feet = player.getBlockPos();
         return world.getFluidState(feet).isIn(net.minecraft.registry.tag.FluidTags.WATER)
-                || world.getFluidState(feet.down()).isIn(net.minecraft.registry.tag.FluidTags.WATER)
                 || world.getFluidState(feet.up()).isIn(net.minecraft.registry.tag.FluidTags.WATER);
+    }
+
+    private boolean isInventoryFull(ServerPlayerEntity player) {
+        if (player == null) {
+            return false;
+        }
+        PlayerInventory inventory = player.getInventory();
+        if (inventory.getEmptySlot() != -1) {
+            return false;
+        }
+        for (int i = 0; i < inventory.size(); i++) {
+            ItemStack stack = inventory.getStack(i);
+            if (stack.isEmpty()) {
+                return false;
+            }
+            if (stack.getCount() < stack.getMaxCount()) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private boolean handleWaterHazard(ServerPlayerEntity player, ServerCommandSource source) {
+        if (!isTouchingWater(player)) {
+            return false;
+        }
+        SkillResumeService.flagManualResume(player);
+        String alias = player.getName().getString();
+        ChatUtils.sendChatMessages(source.withSilent().withMaxLevel(4),
+                "Water flooded the dig site — pausing. Use /bot resume " + alias + " when it's clear.");
+        BotActions.moveBackward(player);
+        if (player.isOnGround()) {
+            BotActions.jump(player);
+        }
+        BotActions.stop(player);
+        return true;
+    }
+
+    private boolean handleLavaHazard(ServerPlayerEntity player, ServerCommandSource source) {
+        LavaThreat threat = detectLavaThreat(player);
+        if (threat == null) {
+            return false;
+        }
+        SkillResumeService.flagManualResume(player);
+        boolean plugged = false;
+        if (threat.plugPosition() != null) {
+            plugged = BotActions.placeBlockAt(player, threat.plugPosition(), LAVA_SAFETY_BLOCKS);
+        }
+        retreatFromHazard(player, threat.direction());
+        String message = plugged
+                ? "Lava ahead! Plugged it and backing away."
+                : "Lava ahead! Retreating to stay safe.";
+        message += " Use /bot resume " + player.getName().getString() + " when it's safe.";
+        ChatUtils.sendChatMessages(source.withSilent().withMaxLevel(4), message);
+        return true;
+    }
+
+    private boolean handleInventoryFull(ServerPlayerEntity player, ServerCommandSource source) {
+        if (player == null || source == null) {
+            return false;
+        }
+        if (!SkillPreferences.pauseOnFullInventory(player)) {
+            return false;
+        }
+        if (!isInventoryFull(player)) {
+            return false;
+        }
+        SkillResumeService.flagManualResume(player);
+        ChatUtils.sendChatMessages(source.withSilent().withMaxLevel(4),
+                "Inventory full — pausing mining. Clear space and run /bot resume " + player.getName().getString() + ".");
+        BotActions.stop(player);
+        return true;
+    }
+
+    private void retreatFromHazard(ServerPlayerEntity player, Direction dangerDirection) {
+        if (player == null || dangerDirection == null) {
+            return;
+        }
+        Vec3d pos = new Vec3d(player.getX(), player.getY(), player.getZ());
+        Vec3d target = pos.add(
+                dangerDirection.getOpposite().getOffsetX() * 3,
+                0,
+                dangerDirection.getOpposite().getOffsetZ() * 3
+        );
+        BotActions.moveToward(player, target, 3.0D);
+        if (player.isOnGround()) {
+            BotActions.jump(player);
+        }
+        BotActions.stop(player);
+    }
+
+    private LavaThreat detectLavaThreat(ServerPlayerEntity player) {
+        if (player == null || !(player.getEntityWorld() instanceof ServerWorld world)) {
+            return null;
+        }
+        BlockPos feet = player.getBlockPos();
+        for (Direction direction : Direction.Type.HORIZONTAL) {
+            BlockPos adjacent = feet.offset(direction);
+            if (isLava(world, adjacent) || isLava(world, adjacent.up())) {
+                return new LavaThreat(direction, null);
+            }
+            if (isPassable(world, adjacent)) {
+                BlockPos ahead = adjacent.offset(direction);
+                if (isLava(world, ahead) || isLava(world, ahead.up())) {
+                    return new LavaThreat(direction, adjacent);
+                }
+            }
+        }
+        return null;
+    }
+
+    private boolean isLava(ServerWorld world, BlockPos pos) {
+        return world.getFluidState(pos).isIn(net.minecraft.registry.tag.FluidTags.LAVA);
+    }
+
+    private boolean isPassable(ServerWorld world, BlockPos pos) {
+        BlockState state = world.getBlockState(pos);
+        return state.getCollisionShape(world, pos).isEmpty() && world.getFluidState(pos).isEmpty();
     }
 
     private Set<Item> resolveTrackedItems() {
@@ -976,6 +1118,8 @@ public class CollectDirtSkill implements Skill {
         }
         return total;
     }
+
+    private record LavaThreat(Direction direction, BlockPos plugPosition) {}
 
     private boolean isOnSurface(ServerPlayerEntity player) {
         if (player == null) {

@@ -218,6 +218,7 @@ public class AIPlayer implements ModInitializer {
         });
 
         ServerTickEvents.END_SERVER_TICK.register(BotPersistenceService::onServerTick);
+        ServerTickEvents.END_SERVER_TICK.register(BotEventHandler::tickBurialRescue);
 
         ServerMessageEvents.CHAT_MESSAGE.register((message, sender, params) -> {
             String raw = message.getContent().getString();
