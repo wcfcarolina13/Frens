@@ -37,6 +37,10 @@ import net.shasankp000.GameAI.DropSweeper;
 import net.shasankp000.Entity.AutoFaceEntity;
 import net.shasankp000.EntityUtil;
 import net.shasankp000.ChatUtils.ChatUtils;
+import net.shasankp000.GameAI.skills.support.MiningHazardDetector;
+import net.shasankp000.GameAI.skills.support.MiningHazardDetector.DetectionResult;
+import net.shasankp000.GameAI.skills.support.MiningHazardDetector.Hazard;
+import net.shasankp000.PlayerUtils.MiningTool;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -50,6 +54,8 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 public class CollectDirtSkill implements Skill {
 
@@ -64,6 +70,9 @@ public class CollectDirtSkill implements Skill {
     private static final int EXPLORATION_STEP_VERTICAL = 2;
     private static final double DROP_SEARCH_RADIUS = 6.0;
     private static final int SPIRAL_RADIUS_LIMIT = 5;
+    private static final int STRAIGHT_STAIR_HEADROOM = 4;
+    private static final long STAIR_STEP_DELAY_MS = 120L;
+    private static final int STAIR_STEP_ATTEMPTS = 20;
     private static final int MAX_EXPLORATION_ATTEMPTS_PER_CYCLE = 3;
     private static final int MAX_STALLED_FAILURES = 5;
     private static final List<Item> LAVA_SAFETY_BLOCKS = List.of(
@@ -177,20 +186,13 @@ public class CollectDirtSkill implements Skill {
             targetCount = Integer.MAX_VALUE;
         }
         boolean untilMode = optionTokens.contains("until") && !optionTokens.contains("exact");
-        boolean squareRequested = optionTokens.contains("square");
+        boolean squareMode = optionTokens.contains("square");
         boolean spiralRequested = optionTokens.contains("spiral") || getBooleanParameter(context, "spiralMode", false);
-        if (spiralRequested && squareRequested) {
-            return SkillExecutionResult.failure("The 'square' and 'spiral' options can't be combined.");
+        if (spiralRequested) {
+            return SkillExecutionResult.failure("The 'spiral' staircase mode is temporarily disabled. Use 'stairs' for the straight staircase.");
         }
-        if (spiralRequested && !depthMode) {
-            return SkillExecutionResult.failure("The 'spiral' option only applies to depth mining runs.");
-        }
-        boolean spiralMode = depthMode && spiralRequested;
-        boolean stairMode = depthMode && (stairToken || spiralMode);
-        boolean squareMode = squareRequested || spiralMode;
-        if (spiralMode) {
-            horizontalRadius = Math.min(horizontalRadius, SPIRAL_RADIUS_LIMIT);
-        }
+        boolean spiralMode = false;
+        boolean stairMode = depthMode && stairToken;
 
         int collected = 0;
         int failuresInRow = 0;
@@ -231,6 +233,10 @@ public class CollectDirtSkill implements Skill {
             if (handleLavaHazard(playerForAbortCheck, source)) {
                 return SkillExecutionResult.failure("Mining paused: lava detected.");
             }
+        }
+
+        if (depthMode && stairMode && playerForAbortCheck != null) {
+            return runStraightStaircase(context, source, playerForAbortCheck, targetDepthY);
         }
 
         boolean cleanupRequested = playerForAbortCheck != null;
@@ -306,9 +312,6 @@ public class CollectDirtSkill implements Skill {
 
             attempt++;
             int effectiveHorizontal = Math.min(horizontalRadius + radiusBoost, MAX_HORIZONTAL_RADIUS);
-            if (spiralMode) {
-                effectiveHorizontal = Math.min(effectiveHorizontal, SPIRAL_RADIUS_LIMIT);
-            }
             int effectiveVertical = Math.min(verticalRange + verticalBoost, MAX_VERTICAL_RANGE);
 
             LOGGER.info("{} iteration {} (collected {}/{}, radius={}, vertical={})",
@@ -943,6 +946,210 @@ public class CollectDirtSkill implements Skill {
             return tokens;
         }
         return List.of();
+    }
+
+    private SkillExecutionResult runStraightStaircase(SkillContext context,
+                                                      ServerCommandSource source,
+                                                      ServerPlayerEntity player,
+                                                      int targetDepthY) {
+        if (player == null) {
+            return SkillExecutionResult.failure("No bot available for staircase mode.");
+        }
+        if (player.getBlockY() <= targetDepthY) {
+            return SkillExecutionResult.success("Reached target depth " + targetDepthY + ".");
+        }
+        Direction digDirection = determineStraightStairDirection(context, player);
+        runOnServerThread(player, () -> LookController.faceBlock(player, player.getBlockPos().offset(digDirection)));
+
+        int carvedSteps = 0;
+        while (player.getBlockY() > targetDepthY) {
+            if (SkillManager.shouldAbortSkill(player)) {
+                return SkillExecutionResult.failure(skillName + " paused due to nearby threat.");
+            }
+            if (handleInventoryFull(player, source)) {
+                return SkillExecutionResult.failure("Mining paused: inventory full.");
+            }
+            if (handleWaterHazard(player, source)) {
+                return SkillExecutionResult.failure("Mining paused: water flooded the dig site.");
+            }
+            if (handleLavaHazard(player, source)) {
+                return SkillExecutionResult.failure("Mining paused: lava detected.");
+            }
+
+            BlockPos currentFeet = player.getBlockPos();
+            BlockPos forward = currentFeet.offset(digDirection);
+            BlockPos stairFoot = forward.down();
+            List<BlockPos> workVolume = buildStraightStairVolume(forward, stairFoot);
+            DetectionResult detection = MiningHazardDetector.detect(player, workVolume, List.of(stairFoot));
+            detection.adjacentWarnings().forEach(warning ->
+                    ChatUtils.sendChatMessages(player.getCommandSource().withSilent().withMaxLevel(4), warning.chatMessage()));
+            if (detection.blockingHazard().isPresent()) {
+                Hazard hazard = detection.blockingHazard().get();
+                SkillResumeService.flagManualResume(player);
+                ChatUtils.sendChatMessages(player.getCommandSource().withSilent().withMaxLevel(4), hazard.chatMessage());
+                return SkillExecutionResult.failure(hazard.failureMessage());
+            }
+
+            for (BlockPos block : workVolume) {
+                if (player.getEntityWorld().getBlockState(block).isAir()) {
+                    continue;
+                }
+                if (!mineStraightStairBlock(player, block)) {
+                    return SkillExecutionResult.failure("Staircase aborted: unable to clear the stairwell.");
+                }
+            }
+
+            BlockPos support = stairFoot.down();
+            if (!hasSolidSupport(player, support)) {
+                SkillResumeService.flagManualResume(player);
+                ChatUtils.sendChatMessages(player.getCommandSource().withSilent().withMaxLevel(4), "There's a drop ahead.");
+                return SkillExecutionResult.failure("Staircase paused: unsafe drop detected.");
+            }
+
+            if (!moveStraightStairStep(player, stairFoot)) {
+                return SkillExecutionResult.failure("Staircase aborted: failed to advance stairwell.");
+            }
+            carvedSteps++;
+        }
+
+        return SkillExecutionResult.success("Carved " + carvedSteps + " stair steps down to Y=" + player.getBlockY() + ".");
+    }
+
+    private List<BlockPos> buildStraightStairVolume(BlockPos forward, BlockPos stairFoot) {
+        LinkedHashSet<BlockPos> blocks = new LinkedHashSet<>();
+        if (forward != null) {
+            for (int i = 0; i < STRAIGHT_STAIR_HEADROOM; i++) {
+                blocks.add(forward.up(i));
+            }
+        }
+        if (stairFoot != null) {
+            for (int i = 0; i < STRAIGHT_STAIR_HEADROOM; i++) {
+                blocks.add(stairFoot.up(i));
+            }
+        }
+        return List.copyOf(blocks);
+    }
+
+    private boolean moveStraightStairStep(ServerPlayerEntity player, BlockPos destination) {
+        if (player == null || destination == null) {
+            return false;
+        }
+        for (int attempt = 0; attempt < STAIR_STEP_ATTEMPTS; attempt++) {
+            if (SkillManager.shouldAbortSkill(player)) {
+                return false;
+            }
+            if (player.getBlockPos().equals(destination)) {
+                return true;
+            }
+            BlockPos stepTarget = destination;
+            runOnServerThread(player, () -> {
+                LookController.faceBlock(player, stepTarget);
+                BlockPos current = player.getBlockPos();
+                if (stepTarget.getY() > current.getY()) {
+                    BotActions.jumpForward(player);
+                } else {
+                    BotActions.moveForward(player);
+                    if (stepTarget.getY() < current.getY()) {
+                        BotActions.moveForward(player);
+                    }
+                }
+            });
+            try {
+                Thread.sleep(STAIR_STEP_DELAY_MS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+        }
+        return player.getBlockPos().equals(destination);
+    }
+
+    private boolean mineStraightStairBlock(ServerPlayerEntity player, BlockPos blockPos) {
+        if (player == null || blockPos == null) {
+            return true;
+        }
+        if (!isWithinStraightReach(player, blockPos)) {
+            return false;
+        }
+        LookController.faceBlock(player, blockPos);
+        CompletableFuture<String> future = MiningTool.mineBlock(player, blockPos);
+        long deadline = System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(6);
+        while (System.currentTimeMillis() < deadline) {
+            if (SkillManager.shouldAbortSkill(player)) {
+                future.cancel(true);
+                return false;
+            }
+            long waitWindow = Math.min(200L, deadline - System.currentTimeMillis());
+            try {
+                String result = future.get(waitWindow, TimeUnit.MILLISECONDS);
+                if (result == null || !result.toLowerCase(Locale.ROOT).contains("complete")) {
+                    LOGGER.warn("Mining {} returned unexpected result: {}", blockPos, result);
+                    return false;
+                }
+                if (!player.getEntityWorld().getBlockState(blockPos).isAir()) {
+                    LOGGER.warn("{} still present after mining attempt", blockPos);
+                    return false;
+                }
+                return true;
+            } catch (TimeoutException timeout) {
+                // continue polling
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                future.cancel(true);
+                return false;
+            } catch (Exception e) {
+                LOGGER.warn("Mining {} failed", blockPos, e);
+                future.cancel(true);
+                return false;
+            }
+        }
+        future.cancel(true);
+        LOGGER.warn("Mining {} timed out", blockPos);
+        return false;
+    }
+
+    private boolean isWithinStraightReach(ServerPlayerEntity player, BlockPos blockPos) {
+        if (player == null || blockPos == null) {
+            return false;
+        }
+        Vec3d center = Vec3d.ofCenter(blockPos);
+        return player.squaredDistanceTo(center.x, center.y, center.z) <= 25.0D;
+    }
+
+    private boolean hasSolidSupport(ServerPlayerEntity player, BlockPos support) {
+        if (player == null || support == null) {
+            return false;
+        }
+        return !player.getEntityWorld().getBlockState(support).getCollisionShape(player.getEntityWorld(), support).isEmpty();
+    }
+
+    private Direction determineStraightStairDirection(SkillContext context, ServerPlayerEntity player) {
+        Direction current = player.getHorizontalFacing();
+        Map<String, Object> shared = context.sharedState();
+        if (shared != null) {
+            String key = "collectDirt.depth.direction." + player.getUuid();
+            Object stored = shared.get(key);
+            if (stored instanceof String str) {
+                Direction remembered = parseDirection(str);
+                if (remembered != null) {
+                    current = remembered;
+                }
+            }
+            shared.put(key, current.asString());
+        }
+        return current;
+    }
+
+    private Direction parseDirection(String name) {
+        if (name == null) {
+            return null;
+        }
+        for (Direction dir : Direction.Type.HORIZONTAL) {
+            if (dir.asString().equalsIgnoreCase(name)) {
+                return dir;
+            }
+        }
+        return null;
     }
 
 

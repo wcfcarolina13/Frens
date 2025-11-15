@@ -206,7 +206,7 @@ public final class MiningHazardDetector {
         Block block = state.getBlock();
         String precious = VALUABLE_MESSAGES.get(block);
         if (precious != null) {
-            return hazard(pos, precious, true);
+            return hazard(pos, precious, true, "Mining paused: valuable ore detected.");
         }
         if (CHEST_BLOCKS.contains(block)) {
             return hazard(pos, "I found a chest!", true);
@@ -237,8 +237,14 @@ public final class MiningHazardDetector {
     }
 
     private static Hazard hazard(BlockPos pos, String chat, boolean blocking) {
+        return hazard(pos, chat, blocking, null);
+    }
+
+    private static Hazard hazard(BlockPos pos, String chat, boolean blocking, String failureOverride) {
         BlockPos immutable = pos != null ? pos.toImmutable() : null;
-        String failure = blocking ? "Hazard: " + chat : null;
+        String failure = blocking
+                ? (failureOverride != null ? failureOverride : "Hazard: " + chat)
+                : null;
         return new Hazard(chat, failure, immutable, blocking);
     }
 
