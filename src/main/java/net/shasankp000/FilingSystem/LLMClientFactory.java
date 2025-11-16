@@ -5,12 +5,24 @@ import net.shasankp000.ServiceLLMClients.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.Locale;
+
 public class LLMClientFactory {
 
     private static final Logger LOGGER = LoggerFactory.getLogger("llm-client-factory");
 
     public static LLMClient createClient(String mode) {
-        return switch (mode) {
+        if (AIPlayer.CONFIG == null) {
+            LOGGER.error("AIPlayer config not initialized; cannot create LLM client.");
+            return null;
+        }
+
+        String normalized = (mode == null || mode.isBlank())
+                ? System.getProperty("aiplayer.llmMode", "ollama")
+                : mode.trim();
+        normalized = normalized.toLowerCase(Locale.ROOT);
+
+        return switch (normalized) {
             case "openai", "gpt" -> {
                 if (AIPlayer.CONFIG.getOpenAIKey().isEmpty()) {
                     LOGGER.error("OpenAI API key not set in config!");
@@ -66,13 +78,10 @@ public class LLMClientFactory {
                     AIPlayer.CONFIG.getCustomApiUrl()
                 );
             }
-            case "ollama" -> {
-                // NOTE: Ollama setup is currently handled elsewhere.
-                // Once we have the Ollama client class/signature, we can construct it here, e.g.:
-                // yield new OllamaClient(AIPlayer.CONFIG.getOllamaBaseUrl(), AIPlayer.CONFIG.getSelectedLanguageModel());
-                LOGGER.info("Using Ollama backend; client is handled outside LLMClientFactory for mode '{}'", mode);
-                yield null;
-            }
+            case "ollama" -> new OllamaLocalClient(
+                    AIPlayer.CONFIG.getOllamaBaseUrl(),
+                    AIPlayer.CONFIG.getSelectedLanguageModel()
+            );
             default -> {
                 LOGGER.error("Unknown LLM mode '{}'; no client created", mode);
                 yield null;

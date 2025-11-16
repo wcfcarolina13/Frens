@@ -428,6 +428,7 @@ public class BotEventHandler {
             rememberSpawn(serverWorld, new Vec3d(candidate.getX(), candidate.getY(), candidate.getZ()), candidate.getYaw(), candidate.getPitch());
         }
         pendingBotRespawn = false;
+        net.shasankp000.GameAI.services.BotControlApplier.applyToBot(candidate);
     }
 
     public static void unregisterBot(ServerPlayerEntity bot) {

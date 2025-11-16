@@ -240,6 +240,7 @@ public class CollectDirtSkill implements Skill {
         boolean cleanupRequested = playerForAbortCheck != null;
         double cleanupBaseRadius = Math.max(horizontalRadius, DROP_SEARCH_RADIUS);
         SkillExecutionResult outcome = null;
+        boolean[] reachedTarget = new boolean[]{false};
 
         try {
 
@@ -358,7 +359,21 @@ public class CollectDirtSkill implements Skill {
                 if (activeSquareCenter != null && context.sharedState() != null) {
                     SharedStateUtils.setValue(context.sharedState(), "collectDirt.square.radius", effectiveHorizontal);
                 }
+
+                if (collected < targetCount && shouldForcePauseForFullInventory(loopPlayer, source)) {
+                    outcome = SkillExecutionResult.failure("Inventory full — collected " + collected + " out of " + targetCount + ". Clear space and run /bot resume " + loopPlayer.getName().getString() + ".");
+                    break;
+                }
+
                 moveTowardLoot(source, context.sharedState(), activeSquareCenter != null, activeSquareCenter, effectiveHorizontal);
+                if (loopPlayer != null) {
+                    int updatedCount = countInventoryItems(loopPlayer, effectiveTrackedItems);
+                    int updatedEffective = untilMode ? updatedCount : Math.max(0, updatedCount - baselineHarvestCount);
+                    if (updatedEffective > inventoryCollected) {
+                        inventoryCollected = updatedEffective;
+                    }
+                    collected = Math.max(collected, inventoryCollected);
+                }
                 LOGGER.info("{} iteration {} succeeded: {}", skillName, attempt, lastMessage);
             } else {
                 if (result.message() != null && result.message().startsWith("Hazard:")) {
@@ -425,16 +440,18 @@ public class CollectDirtSkill implements Skill {
                 collected = Math.max(collected, finalGain);
             }
 
+            reachedTarget[0] = collected >= targetCount;
             if (collected < targetCount) {
                 String failureMsg = lastMessage.isEmpty()
                         ? "Unable to collect the requested amount of " + harvestLabel + "."
                         : lastMessage;
                 failureMsg += " Collected " + collected + " out of " + targetCount + " requested.";
                 LOGGER.warn("{} finished early with {} {} gathered after {} attempts (runtime {} ms)",
-                        skillName, collected, harvestLabel, attempt, System.currentTimeMillis() - startTime);
+                    skillName, collected, harvestLabel, attempt, System.currentTimeMillis() - startTime);
                 outcome = SkillExecutionResult.failure(failureMsg);
             } else {
-                String summary = "Collected " + collected + " " + harvestLabel + " block" + (collected == 1 ? "" : "s") + ".";
+                int reported = Math.min(collected, targetCount);
+                String summary = "Collected " + reported + " " + harvestLabel + " block" + (reported == 1 ? "" : "s") + ".";
                 LOGGER.info("{} completed: {} (runtime {} ms, attempts {}, failures in a row {})",
                         skillName, summary, System.currentTimeMillis() - startTime, attempt, failuresInRow);
                 outcome = SkillExecutionResult.success(summary);
@@ -444,8 +461,13 @@ public class CollectDirtSkill implements Skill {
         return outcome;
         } finally {
             ServerPlayerEntity cleanupPlayer = source.getPlayer();
-            if (cleanupRequested && cleanupPlayer != null && !SkillManager.shouldAbortSkill(cleanupPlayer)) {
+            boolean inventoryFull = cleanupPlayer != null && isInventoryFull(cleanupPlayer);
+            if (cleanupRequested && cleanupPlayer != null && !SkillManager.shouldAbortSkill(cleanupPlayer) && !inventoryFull && !reachedTarget[0]) {
                 runDropCleanup(source, cleanupPlayer, cleanupBaseRadius, squareMode, squareCenter);
+            } else if (cleanupPlayer != null && inventoryFull) {
+                LOGGER.info("{} skipping drop cleanup because inventory is full.", skillName);
+                ChatUtils.sendChatMessages(source.withSilent().withMaxLevel(4),
+                        "I'm out of inventory space, so I'll leave the remaining drops where they fell.");
             }
         }
     }
@@ -1133,6 +1155,10 @@ public class CollectDirtSkill implements Skill {
                                 boolean squareMode,
                                 BlockPos squareCenter) {
         try {
+            if (isInventoryFull(player)) {
+                LOGGER.info("Drop cleanup skipped because {} inventory is full.", player.getName().getString());
+                return;
+            }
             double radius = Math.max(baseRadius, DROP_SEARCH_RADIUS * 1.5D);
             if (squareMode && squareCenter != null) {
                 radius = Math.max(radius, baseRadius + 2.0D);
@@ -1240,6 +1266,20 @@ public class CollectDirtSkill implements Skill {
             return false;
         }
         if (!SkillPreferences.pauseOnFullInventory(player)) {
+            return false;
+        }
+        if (!isInventoryFull(player)) {
+            return false;
+        }
+        SkillResumeService.flagManualResume(player);
+        ChatUtils.sendChatMessages(source.withSilent().withMaxLevel(4),
+                "Inventory full — pausing mining. Clear space and run /bot resume " + player.getName().getString() + ".");
+        BotActions.stop(player);
+        return true;
+    }
+
+    private boolean shouldForcePauseForFullInventory(ServerPlayerEntity player, ServerCommandSource source) {
+        if (player == null || source == null) {
             return false;
         }
         if (!isInventoryFull(player)) {

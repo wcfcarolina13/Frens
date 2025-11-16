@@ -4,6 +4,7 @@ import net.minecraft.util.math.BlockPos;
 
 import java.util.List;
 import java.util.Set;
+import java.util.stream.Collectors;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -295,5 +296,13 @@ public class ToolRegistry {
                     }
             )
     );
+
+    private static final Set<String> TOOL_NAME_SET = TOOLS.stream()
+            .map(Tool::name)
+            .collect(Collectors.toUnmodifiableSet());
+
+    public static boolean isKnownTool(String name) {
+        return name != null && TOOL_NAME_SET.contains(name);
+    }
 
 }

@@ -67,10 +67,11 @@ public class configNetworkManager {
 
             // Run the config update on the server thread
             context.server().execute(() -> {
-                AIPlayer.CONFIG.setSelectedLanguageModel(newConfigData);
+                ConfigJsonUtil.applyConfigJson(newConfigData);
                 AIPlayer.CONFIG.save();
                 ServerCommandSource serverCommandSource = server.getCommandSource().withSilent().withMaxLevel(4);
                 ChatUtils.sendSystemMessage(serverCommandSource, "Config saved to server successfully!");
+                net.shasankp000.GameAI.services.BotControlApplier.applyPersistentSettings(server);
             });
         });
     }

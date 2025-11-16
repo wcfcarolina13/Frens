@@ -1,17 +1,15 @@
 package net.shasankp000.ChatUtils.Helper;
 
 import io.github.amithkoujalgi.ollama4j.core.OllamaAPI;
-import io.github.amithkoujalgi.ollama4j.core.models.chat.OllamaChatRequestBuilder;
-import io.github.amithkoujalgi.ollama4j.core.models.chat.OllamaChatRequestModel;
-import io.github.amithkoujalgi.ollama4j.core.models.chat.OllamaChatResult;
-import io.github.amithkoujalgi.ollama4j.core.models.chat.OllamaChatMessageRole;
 import io.github.amithkoujalgi.ollama4j.core.types.OllamaModelType;
+import net.shasankp000.AIPlayer;
 import net.minecraft.server.command.ServerCommandSource;
 import net.shasankp000.ChatUtils.ChatUtils;
 import net.shasankp000.ChatUtils.NLPProcessor;
 import net.shasankp000.Database.SQLiteDB;
 import net.shasankp000.OllamaClient.ollamaClient;
 import net.shasankp000.Overlay.ThinkingStateManager;
+import net.shasankp000.FilingSystem.LLMClientFactory;
 import net.shasankp000.ServiceLLMClients.LLMClient;
 import net.shasankp000.WebSearch.WebSearchTool;
 import net.shasankp000.Commands.modCommandRegistry;
@@ -25,9 +23,17 @@ import java.util.regex.Pattern;
 public class RAG2 {
 
     private static final Logger logger = LoggerFactory.getLogger("ai-player");
-    private static final OllamaAPI ollamaAPI = new OllamaAPI("http://localhost:11434");
     private static final Pattern THINK_BLOCK = Pattern.compile("<think>([\\s\\S]*?)</think>");
     private static final int TOP_K = 5;
+
+    private static OllamaAPI createOllamaApi() {
+        String baseUrl = (AIPlayer.CONFIG != null)
+                ? AIPlayer.CONFIG.getOllamaBaseUrl()
+                : "http://127.0.0.1:11434";
+        OllamaAPI api = new OllamaAPI(baseUrl);
+        api.setRequestTimeoutSeconds(120);
+        return api;
+    }
 
     private static String buildPrompt() {
         return "You are a context-aware Minecraft player named " + modCommandRegistry.botName + """
@@ -130,11 +136,16 @@ public class RAG2 {
 
 
     public static void run(String userPrompt, ServerCommandSource botSource, NLPProcessor.Intent intent, LLMClient client) {
-        ollamaAPI.setRequestTimeoutSeconds(120);
-        logger.info("⚡ RAG v2: Running with intent = {} and using provider: {}", intent, client);
+        if (client == null) {
+            logger.warn("⚠️ RAG v2 invoked without an LLM client; aborting.");
+            ChatUtils.sendChatMessages(botSource, "LLM backend unavailable. Please double-check /bot llm settings.");
+            return;
+        }
+        logger.info("⚡ RAG v2: Running with intent = {} using provider {}", intent, client.getProvider());
 
         try {
-            List<Double> queryEmbedding = ollamaAPI.generateEmbeddings(OllamaModelType.NOMIC_EMBED_TEXT, userPrompt);
+            OllamaAPI embeddingApi = createOllamaApi();
+            List<Double> queryEmbedding = embeddingApi.generateEmbeddings(OllamaModelType.NOMIC_EMBED_TEXT, userPrompt);
 
             StringBuilder contextBuilder = new StringBuilder();
 
@@ -193,126 +204,20 @@ public class RAG2 {
     // overloaded method for the existing ollama client to work with.
 
     public static void run(String userPrompt, ServerCommandSource botSource, NLPProcessor.Intent intent) {
-
-        ollamaAPI.setRequestTimeoutSeconds(120);
-
-        logger.info("⚡ RAG v2: Running with intent = {}", intent);
-
-
-        try {
-
-            List<Double> queryEmbedding = ollamaAPI.generateEmbeddings(OllamaModelType.NOMIC_EMBED_TEXT, userPrompt);
-
-
-
-            StringBuilder contextBuilder = new StringBuilder();
-
-
-
-            if (intent == NLPProcessor.Intent.ASK_INFORMATION) {
-
-                ChatUtils.sendChatMessages(botSource, "Running web search....");
-
-                String bestAnswer = getBestContextAnswer(userPrompt, queryEmbedding);
-
-
-
-                if (bestAnswer.equalsIgnoreCase("❌ No relevant info found.")) {
-
-                    ChatUtils.sendChatMessages(botSource, "No info found. Either there is no info on this topic or my web search tool is not working properly. Please report this to developer!");
-
-                }
-
-                else {
-
-                    ChatUtils.sendChatMessages(botSource, "Web search complete.");
-
-                }
-
-
-
-                contextBuilder.append("Web/Local best answer:\n").append(bestAnswer).append("\n\n");
-
-
-
-            } else {
-
-            // 🤝 Just normal local vector recall
-
-                List<SQLiteDB.Memory> localMemories = SQLiteDB.findRelevantMemories(queryEmbedding, "conversation", TOP_K);
-
-                contextBuilder.append("Relevant conversations:\n");
-
-                for (SQLiteDB.Memory m : localMemories) {
-
-                    contextBuilder.append("- Prompt: ").append(m.prompt()).append("\n");
-
-                    contextBuilder.append(" Response: ").append(m.response()).append("\n");
-
-                    contextBuilder.append(" Similarity: ").append(m.similarity()).append("\n\n");
-
-                }
-
-            }
-
-
-
-             // 🗃️ Add relevant events in all cases
-
-            List<SQLiteDB.Memory> events = SQLiteDB.findRelevantMemories(queryEmbedding, "event", TOP_K);
-
-            contextBuilder.append("Relevant events:\n");
-
-            for (SQLiteDB.Memory m : events) {
-
-                contextBuilder.append("- Prompt: ").append(m.prompt()).append("\n");
-
-                contextBuilder.append(" Response: ").append(m.response()).append("\n");
-
-                contextBuilder.append(" Similarity: ").append(m.similarity()).append("\n\n");
-
-            }
-
-
-
-            // ✨ Final LLM prompt
-
-            OllamaChatRequestModel requestModel = OllamaChatRequestBuilder.getInstance("qwen3:8b")
-
-                    .withMessage(OllamaChatMessageRole.SYSTEM, buildPrompt())
-
-                    .withMessage(OllamaChatMessageRole.USER, "Context:\n" + contextBuilder)
-
-                    .withMessage(OllamaChatMessageRole.USER, "User prompt:\n" + userPrompt)
-
-                    .build();
-
-
-
-            OllamaChatResult result = ollamaAPI.chat(requestModel);
-
-            String finalResponse = result.getResponse();
-
-            ollamaClient.processLLMOutput(finalResponse, botSource.getName(), botSource);
-
-
-            // 🔒 Always store final response
-
-            SQLiteDB.storeMemory("conversation", userPrompt, finalResponse, queryEmbedding);
-
-
-
-            logger.info("✅ RAG v2 finished with intent-aware strategy.");
-
-
-
-        } catch (Exception e) {
-
-            logger.error("❌ RAG v2 failed: {}", e.getMessage(), e);
-
-            ChatUtils.sendChatMessages(botSource, "Sorry, I couldn't find enough context. Please try again!");
-
+        String provider = "ollama";
+        if (AIPlayer.CONFIG != null && AIPlayer.CONFIG.getLlmMode() != null && !AIPlayer.CONFIG.getLlmMode().isBlank()) {
+            provider = AIPlayer.CONFIG.getLlmMode();
+        } else {
+            provider = System.getProperty("aiplayer.llmMode", "ollama");
         }
 
+        LLMClient client = LLMClientFactory.createClient(provider);
+        if (client == null) {
+            logger.warn("⚠️ Unable to create LLM client for provider '{}'", provider);
+            ChatUtils.sendChatMessages(botSource, "LLM backend is not configured yet. Try /configman or /bot llm to set it up.");
+            return;
+        }
+
+        run(userPrompt, botSource, intent, client);
     }
 }

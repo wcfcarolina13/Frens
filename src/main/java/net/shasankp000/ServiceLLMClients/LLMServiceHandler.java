@@ -10,6 +10,9 @@ import net.shasankp000.ChatUtils.Helper.RAG2;
 import net.shasankp000.ChatUtils.NLPProcessor;
 import net.shasankp000.Exception.intentMisclassification;
 import net.shasankp000.FunctionCaller.FunctionCallerV2;
+import net.shasankp000.GameAI.llm.LLMActionQueue;
+import net.shasankp000.GameAI.llm.LLMJobTracker;
+import net.shasankp000.FilingSystem.LLMClientFactory;
 import net.shasankp000.Overlay.ThinkingStateManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -217,6 +220,26 @@ public class LLMServiceHandler {
 
         LOGGER.info("📨 Received intent: {}", intent);
 
+        ServerPlayerEntity botEntity = botSource.getPlayer();
+        if (intent == NLPProcessor.Intent.REQUEST_ACTION
+                && botEntity != null
+                && LLMJobTracker.getActiveJob(botEntity.getUuid()).isPresent()) {
+        LLMActionQueue.enqueue(botEntity.getUuid(), playerUUID, message);
+        String job = LLMJobTracker.getActiveJob(botEntity.getUuid())
+                .map(LLMJobTracker.Job::description)
+                .orElse("my current job");
+        int queued = LLMActionQueue.size(botEntity.getUuid());
+        String position = queued > 0 ? " (#" + queued + " in queue)" : "";
+        ChatUtils.sendChatMessages(botSource, "I'm still working on " + job + ". I'll queue that request next" + position + ".");
+            return;
+        }
+        maybeReservePendingJob(botSource, playerUUID, message, intent);
+
+        if (botEntity != null && isStatusRequest(message)) {
+            net.shasankp000.GameAI.llm.LLMStatusReporter.respond(botSource, playerUUID);
+            return;
+        }
+
 
         switch (intent) {
             case GENERAL_CONVERSATION, ASK_INFORMATION -> {
@@ -232,8 +255,12 @@ public class LLMServiceHandler {
                 BOT_TASK_POOL.submit(() -> {
                     Thread.currentThread().setName("LLM-Function-Caller-Worker");
                     LOGGER.info("🧵 Started FunctionCallerV2 worker thread");
-                    new FunctionCallerV2(botSource, playerUUID);
-                    FunctionCallerV2.run(message, client);
+                    try {
+                        new FunctionCallerV2(botSource, playerUUID);
+                        FunctionCallerV2.run(message, client, true);
+                    } finally {
+                        FunctionCallerV2.clearContext();
+                    }
                     LOGGER.info("✅ Finished FunctionCallerV2 worker thread");
                 });
             }
@@ -257,8 +284,12 @@ public class LLMServiceHandler {
                     BOT_TASK_POOL.submit(() -> {
                         Thread.currentThread().setName("LLM-Function-Caller-Retry-Worker");
                         LOGGER.info("🧵 Started FunctionCallerV2 retry worker thread");
-                        new FunctionCallerV2(botSource, playerUUID);
-                        FunctionCallerV2.run(message);
+                        try {
+                            new FunctionCallerV2(botSource, playerUUID);
+                            FunctionCallerV2.run(message, client, true);
+                        } finally {
+                            FunctionCallerV2.clearContext();
+                        }
                         LOGGER.info("✅ Finished FunctionCallerV2 retry worker thread");
                     });
                 } else {
@@ -271,5 +302,79 @@ public class LLMServiceHandler {
 
     private static NLPProcessor.Intent retryIntentLLM(String message) {
         return NLPProcessor.getIntentionFromLLM(message);
+    }
+
+    public static void runQueuedCommand(ServerCommandSource botSource, UUID commanderId, String message) {
+        MinecraftServer server = botSource.getServer();
+        if (server == null) {
+            return;
+        }
+        server.execute(() -> {
+            try {
+                String provider = System.getProperty("aiplayer.llmMode", "ollama");
+                LLMClient client = LLMClientFactory.createClient(provider);
+                routeIntent(message, botSource, commanderId, client);
+            } catch (Exception e) {
+                LOGGER.error("Failed to run queued command '{}': {}", message, e.getMessage(), e);
+                ChatUtils.sendChatMessages(botSource, "Queued request failed. Please repeat it.");
+            }
+        });
+    }
+
+    private static boolean isStatusRequest(String message) {
+        if (message == null) {
+            return false;
+        }
+        String normalized = message.toLowerCase(Locale.ROOT);
+        return normalized.contains("status")
+                || normalized.contains("what are you doing")
+                || normalized.contains("progress")
+                || normalized.contains("how's the job")
+                || normalized.contains("report in");
+    }
+
+    private static void maybeReservePendingJob(ServerCommandSource botSource,
+                                               UUID commanderId,
+                                               String message,
+                                               NLPProcessor.Intent intent) {
+        if (intent != NLPProcessor.Intent.REQUEST_ACTION || botSource == null || message == null) {
+            return;
+        }
+        ServerPlayerEntity bot = botSource.getPlayer();
+        if (bot == null
+                || !isLikelyLongRunningAction(message)
+                || LLMJobTracker.getActiveJob(bot.getUuid()).isPresent()) {
+            return;
+        }
+        LOGGER.info("Reserving job for {}: {}", bot.getName().getString(), message);
+        LLMJobTracker.reserveJob(bot.getUuid(), commanderId, summarizePendingCommand(message));
+    }
+
+    private static boolean isLikelyLongRunningAction(String message) {
+        if (message == null) {
+            return false;
+        }
+        String normalized = message.toLowerCase(Locale.ROOT);
+        return normalized.contains("mine")
+                || normalized.contains("gather")
+                || normalized.contains("collect")
+                || normalized.contains("stripmine")
+                || normalized.contains("strip-mine")
+                || normalized.contains("dig")
+                || normalized.contains("harvest")
+                || normalized.contains("drop sweep")
+                || normalized.contains("dropsweep")
+                || normalized.contains("drop-sweep");
+    }
+
+    private static String summarizePendingCommand(String message) {
+        if (message == null) {
+            return "processing your previous command";
+        }
+        String trimmed = message.trim();
+        if (trimmed.length() > 60) {
+            trimmed = trimmed.substring(0, 57) + "...";
+        }
+        return "processing \"" + trimmed + "\"";
     }
 }

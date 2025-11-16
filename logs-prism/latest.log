@@ -1,0 +1,959 @@
+[00:35:04] [main/INFO]: Loading Minecraft 1.21.10 with Fabric Loader 0.17.3
+[00:35:04] [ForkJoinPool-1-worker-1/WARN]: Mod com_github_fasterxml_jackson-core uses the version jackson-core-2.17.2 which isn't compatible with Loader's extended semantic version format (Could not parse version number component 'jackson'!), SemVer is recommended for reliably evaluating dependencies and prioritizing newer version
+[00:35:04] [ForkJoinPool-1-worker-9/WARN]: Mod com_github_fasterxml_jackson-datatype-jsr310 uses the version jackson-datatype-jsr310-2.8.4 which isn't compatible with Loader's extended semantic version format (Could not parse version number component 'jackson'!), SemVer is recommended for reliably evaluating dependencies and prioritizing newer version
+[00:35:04] [ForkJoinPool-1-worker-2/WARN]: Mod com_github_fasterxml_jackson-annotations uses the version jackson-annotations-2.17.2 which isn't compatible with Loader's extended semantic version format (Could not parse version number component 'jackson'!), SemVer is recommended for reliably evaluating dependencies and prioritizing newer version
+[00:35:04] [ForkJoinPool-1-worker-1/WARN]: Mod com_github_fasterxml_jackson-databind uses the version jackson-databind-2.17.2 which isn't compatible with Loader's extended semantic version format (Could not parse version number component 'jackson'!), SemVer is recommended for reliably evaluating dependencies and prioritizing newer version
+[00:35:06] [main/INFO]: Loading 79 mods:
+	- ai-player 1.0.6-release+1.21.10
+	   |-- ai_djl_api 0.33.0
+	   |-- ai_djl_huggingface_tokenizers 0.33.0
+	   |-- ai_djl_pytorch_pytorch-engine 0.33.0
+	   |-- ai_djl_pytorch_pytorch-model-zoo 0.33.0
+	   |-- ai_djl_pytorch_pytorch-native-cpu_linux-x86_64 2.5.1
+	   |-- ai_djl_pytorch_pytorch-native-cpu_osx-aarch64 2.5.1
+	   |-- ai_djl_pytorch_pytorch-native-cpu_win-x86_64 2.5.1
+	   |-- com_github_amithkoujalgi_ollama4j 1.0.77
+	   |-- com_github_fasterxml_jackson-annotations jackson-annotations-2.17.2
+	   |-- com_github_fasterxml_jackson-core jackson-core-2.17.2
+	   |-- com_github_fasterxml_jackson-databind jackson-databind-2.17.2
+	   |-- com_github_fasterxml_jackson-datatype-jsr310 jackson-datatype-jsr310-2.8.4
+	   |-- org_apache_commons_commons-compress 1.28.0
+	   |-- org_apache_commons_commons-math3 3.6.1
+	   |-- org_apache_opennlp_opennlp-tools 2.5.5
+	   |-- org_jsoup_jsoup 1.21.1
+	   \-- org_xerial_sqlite-jdbc 3.50.2.0
+	- carpet 1.4.188+v251016
+	- distanthorizons 2.3.6-b
+	   |-- fabric-api-base 1.0.0+14b92d896f
+	   |-- fabric-command-api-v2 2.4.0+c0ab2d5d6f
+	   |-- fabric-entity-events-v1 2.1.13+fde3702c6f
+	   |-- fabric-key-binding-api-v1 1.1.1+b3ba9c486f
+	   |-- fabric-lifecycle-events-v1 2.6.9+33df5e6e6f
+	   |-- fabric-rendering-v1 16.0.2+91152d886f
+	   |-- fabric-resource-loader-v0 3.2.3+3388a3b26f
+	   |-- fabric-resource-loader-v1 1.0.3+8cc86c156f
+	   \-- fabric-screen-api-v1 3.1.0+9c82a7986f
+	- entityculling 1.9.2
+	   |-- transition 1.0.6
+	   \-- trender 1.0.7
+	- fabric-api 0.136.0+1.21.10
+	   |-- fabric-api-lookup-api-v1 1.6.106+d17682156f
+	   |-- fabric-biome-api-v1 16.1.0+c2417d4f6f
+	   |-- fabric-block-api-v1 1.1.5+d17682156f
+	   |-- fabric-block-view-api-v2 1.0.34+e4fd1b926f
+	   |-- fabric-content-registries-v0 10.2.4+b6a242646f
+	   |-- fabric-convention-tags-v1 2.1.48+7f945d5b6f
+	   |-- fabric-convention-tags-v2 2.16.0+552403eb6f
+	   |-- fabric-crash-report-info-v1 0.3.18+33df5e6e6f
+	   |-- fabric-data-attachment-api-v1 1.8.30+68e881bd6f
+	   |-- fabric-data-generation-api-v1 23.2.24+d8b85ef16f
+	   |-- fabric-dimensions-v1 4.0.22+38b9cc196f
+	   |-- fabric-events-interaction-v0 4.0.36+5ba217126f
+	   |-- fabric-game-rule-api-v1 1.1.1+e47eaae56f
+	   |-- fabric-item-api-v1 11.5.9+9bce411b6f
+	   |-- fabric-item-group-api-v1 4.2.25+86b3ae576f
+	   |-- fabric-loot-api-v2 3.0.65+3f89f5a56f
+	   |-- fabric-loot-api-v3 2.0.12+d17682156f
+	   |-- fabric-message-api-v1 6.1.7+3154c1c86f
+	   |-- fabric-model-loading-api-v1 6.0.2+3ffd6ef06f
+	   |-- fabric-networking-api-v1 5.1.0+b095d8db6f
+	   |-- fabric-object-builder-api-v1 21.1.26+9bce411b6f
+	   |-- fabric-particles-v1 4.2.3+a0ee59a46f
+	   |-- fabric-recipe-api-v1 8.1.27+d17682156f
+	   |-- fabric-registry-sync-v0 6.1.42+679c8c5c6f
+	   |-- fabric-renderer-api-v1 7.2.0+3706cdf36f
+	   |-- fabric-renderer-indigo 4.1.1+d7df91576f
+	   |-- fabric-rendering-fluids-v1 3.1.38+86b3ae576f
+	   |-- fabric-resource-conditions-api-v1 5.0.28+33df5e6e6f
+	   |-- fabric-screen-handler-api-v1 1.3.151+d17682156f
+	   |-- fabric-serialization-api-v1 1.0.0+d857c9766f
+	   |-- fabric-sound-api-v1 1.0.45+328a75ba6f
+	   |-- fabric-tag-api-v1 1.2.11+2fa446b26f
+	   |-- fabric-transfer-api-v1 6.0.15+79ec2c126f
+	   \-- fabric-transitive-access-wideners-v1 6.5.3+41eb43436f
+	- fabricloader 0.17.3
+	   \-- mixinextras 0.5.0
+	- immediatelyfast 1.13.1+1.21.10
+	   \-- net_lenni0451_reflect 1.3.4
+	- iris 1.9.6+mc1.21.9
+	   |-- io_github_douira_glsl-transformer 3.0.0-pre3
+	   |-- org_anarres_jcpp 1.4.14
+	   \-- org_antlr_antlr4-runtime 4.13.1
+	- java 21
+	- lithium 0.20.0+mc1.21.10
+	- minecraft 1.21.10
+	- sodium 0.7.2+mc1.21.10
+	   |-- fabric-api-base 1.0.0+14b92d896f
+	   |-- fabric-lifecycle-events-v1 2.6.9+33df5e6e6f
+	   |-- fabric-rendering-v1 16.0.2+91152d886f
+	   |-- fabric-resource-loader-v0 3.2.3+3388a3b26f
+	   \-- fabric-resource-loader-v1 1.0.3+8cc86c156f
+[00:35:06] [main/INFO]: SpongePowered MIXIN Subsystem Version=0.8.7 Source=file:/Users/roti/Library/Application%20Support/PrismLauncher/libraries/net/fabricmc/sponge-mixin/0.16.5+mixin.0.8.7/sponge-mixin-0.16.5+mixin.0.8.7.jar Service=Knot/Fabric Env=CLIENT
+[00:35:06] [main/INFO]: Compatibility level set to JAVA_17
+[00:35:06] [main/INFO]: Compatibility level set to JAVA_21
+[00:35:06] [main/WARN]: Reference map 'iris.refmap.json' for mixins.iris.json could not be read. If this is a development environment you can ignore this message
+[00:35:06] [main/WARN]: Reference map 'iris-fabric.refmap.json' for mixins.iris.fabric.json could not be read. If this is a development environment you can ignore this message
+[00:35:06] [main/WARN]: Reference map 'iris.refmap.json' for mixins.iris.fantastic.json could not be read. If this is a development environment you can ignore this message
+[00:35:06] [main/WARN]: Reference map 'iris.refmap.json' for mixins.iris.vertexformat.json could not be read. If this is a development environment you can ignore this message
+[00:35:06] [main/WARN]: Reference map 'iris.refmap.json' for mixins.iris.bettermipmaps.json could not be read. If this is a development environment you can ignore this message
+[00:35:06] [main/WARN]: Reference map 'iris.refmap.json' for mixins.iris.compat.sodium.json could not be read. If this is a development environment you can ignore this message
+[00:35:06] [main/WARN]: Reference map 'iris.refmap.json' for mixins.iris.fixes.maxfpscrash.json could not be read. If this is a development environment you can ignore this message
+[00:35:06] [main/INFO]: Loaded configuration file for Lithium: 163 options available, 0 override(s) found.
+[00:35:06] [main/INFO]: Loaded configuration file for Sodium: 42 options available, 1 override(s) found
+[00:35:06] [main/WARN]: Force-disabling mixin 'features.render.world.sky.FogRendererMixin' as rule 'mixin.features.render.world.sky' (added by mods [iris]) disables it and children
+[00:35:06] [main/WARN]: Force-disabling mixin 'features.render.world.sky.ClientLevelMixin' as rule 'mixin.features.render.world.sky' (added by mods [iris]) disables it and children
+[00:35:06] [main/WARN]: Force-disabling mixin 'features.render.world.sky.LevelRendererMixin' as rule 'mixin.features.render.world.sky' (added by mods [iris]) disables it and children
+[00:35:06] [main/INFO]: Searching for graphics cards...
+[00:35:06] [main/INFO]: Initializing MixinExtras via com.llamalad7.mixinextras.service.MixinExtrasServiceImpl(version=0.5.0).
+[00:35:07] [Datafixer Bootstrap/INFO]: 278 Datafixer optimizations took 231 milliseconds
+[00:35:10] [Render thread/INFO]: Environment: Environment[sessionHost=https://sessionserver.mojang.com, servicesHost=https://api.minecraftservices.com, profilesHost=https://api.mojang.com, name=PROD]
+[00:35:10] [Render thread/INFO]: Setting user: RotiWokeman
+[00:35:10] [Render thread/INFO]: Detecting launcher environment...
+[00:35:10] [Render thread/INFO]: Game directory: /Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft
+[00:35:10] [Render thread/INFO]: User home: /Users/roti
+[00:35:10] [Render thread/INFO]: OS: mac os x
+[00:35:10] [Render thread/INFO]: Detected launcher: Prism Launcher
+[00:35:10] [Render thread/INFO]: Hello Fabric world!
+[00:35:10] [Render thread/INFO]: [STDOUT]: Using provider: ollama
+[00:35:10] [Render thread/INFO]: [STDOUT]: === ALL SYSTEM PROPERTIES ===
+[00:35:10] [Render thread/INFO]: [STDOUT]: aiplayer.llmMode = ollama
+[00:35:10] [Render thread/INFO]: [STDOUT]: === END DEBUG ===
+[00:35:12] [Render thread/INFO]: ✅ sqlite-vec already present at: /Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/config/sqlite_vector/sqlite-vec/vector0.dylib
+[00:35:12] [Render thread/INFO]: Attempting to load sqlite-vec from /Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/config/sqlite_vector/sqlite-vec/vector0.dylib
+[00:35:12] [Render thread/INFO]: 🔗 Loading /Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/config/sqlite_vector/sqlite-vec/vector0 with entrypoint sqlite3_vec_init
+[00:35:12] [Render thread/INFO]: ✅ sqlite-vec version: v0.1.6
+[00:35:12] [Render thread/WARN]: ⚠️ macOS detected — skipping sqlite-vss (avoids OpenMP/libomp conflicts). Using fallback cosine_distance UDF.
+[00:35:12] [Render thread/INFO]: ✅ Registered fallback cosine_distance UDF on current connection.
+[00:35:12] [Render thread/INFO]: ✅ Memory table created.
+[00:35:12] [Render thread/INFO]: Setting up Q-table storage...
+[00:35:12] [Render thread/INFO]: Launcher: Prism Launcher
+Game Directory: /Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft
+User Home: /Users/roti
+User Name: roti
+OS: Mac OS X
+
+[00:35:12] [Render thread/INFO]: ✅ Q-table storage directory exists: /Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/qtable_storage
+[00:35:12] [ForkJoinPool.commonPool-worker-1/INFO]: [STDOUT]: ℹ️ ai_search_config.json already exists, no setup needed.
+[00:35:12] [ForkJoinPool.commonPool-worker-1/INFO]: BERT model files already exist! Skipping download....
+[00:35:12] [ForkJoinPool.commonPool-worker-1/INFO]: CART files already exist! Skipping download....
+[00:35:12] [ForkJoinPool.commonPool-worker-1/INFO]: OpenNLP model files already exist! Skipping download....
+[00:35:12] [ForkJoinPool.commonPool-worker-1/INFO]: LIDSNet model files already exist! Skipping download....
+[00:35:12] [ForkJoinPool.commonPool-worker-1/WARN]: Error, file /Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/config/ai-player/NLPModels/distilbert-finetuned-intent-torchscript.zip doesn't exist for extraction! Ignore if already extracted previously.
+[00:35:12] [ForkJoinPool.commonPool-worker-1/WARN]: Error, file /Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/config/ai-player/NLPModels/cart.zip doesn't exist for extraction! Ignore if already extracted previously.
+[00:35:12] [ForkJoinPool.commonPool-worker-1/WARN]: Error, file /Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/config/ai-player/NLPModels/cart.zip doesn't exist for extraction! Ignore if already extracted previously.
+[00:35:12] [Render thread/INFO]: Initializing Distant Horizons client, firing DhApiBeforeDhInitEvent...
+[00:35:14] [ForkJoinPool.commonPool-worker-1/INFO]: [STDOUT]: NLP model deployment task complete
+[00:35:14] [Render thread/INFO]: Distant Horizons, Version: 2.3.6-b
+[00:35:14] [Render thread/INFO]: Registering Fabric Client Events
+[00:35:14] [Render thread/INFO]: Registering Fabric Server Events
+[00:35:14] [Render thread/INFO]: Registered mod compatibility accessor for: [Sodium-Fabric].
+[00:35:14] [Render thread/INFO]: Registered mod compatibility accessor for: [iris].
+[00:35:14] [Render thread/INFO]: Initialising config for [DistantHorizons]
+[00:35:14] [Render thread/INFO]: [DistantHorizons] Config initialised
+[00:35:14] [Render thread/INFO]: Distant Horizons client Initialized.
+[00:35:14] [Render thread/INFO]: [Indigo] Different rendering plugin detected; not applying Indigo.
+[00:35:14] [Render thread/INFO]: [STDOUT]: [LibGui] Initializing Client...
+[00:35:14] [Render thread/INFO]: Queuing DH event binding...
+[00:35:14] [Render thread/ERROR]: Couldn't load distanthorizons pack metadata: Pack declares support for version newer than 64, but is missing mandatory fields min_format and max_format
+[00:35:14] [Render thread/ERROR]: Couldn't load entityculling pack metadata: Pack declares support for version newer than 64, but is missing mandatory fields min_format and max_format
+[00:35:15] [Render thread/ERROR]: Couldn't load trender pack metadata: Pack declares support for version newer than 64, but is missing mandatory fields min_format and max_format
+[00:35:15] [Render thread/INFO]: Backend library: LWJGL version 3.3.3-snapshot
+[00:35:15] [ForkJoinPool.commonPool-worker-1/WARN]: [Iris Update Check] This version doesn't have an update index, skipping.
+[00:35:17] [DH-ApplyConfigPresetTimer/INFO]: changing preset to: MEDIUM
+[00:35:17] [DH-ApplyConfigPresetTimer/INFO]: changing preset to: BALANCED
+[00:35:17] [DH-ApplyConfigPresetTimer/INFO]: preset active: BALANCED
+[00:35:17] [DH-ApplyConfigPresetTimer/INFO]: preset active: MEDIUM
+[00:35:18] [Render thread/INFO]: Initializing ImmediatelyFast 1.13.1+1.21.10 on Apple M2 Pro (Apple) with OpenGL 4.1 Metal - 89.4
+[00:35:18] [Render thread/INFO]: Found Iris/Oculus 1.9.6+mc1.21.9. Enabling compatibility.
+[00:35:18] [Render thread/INFO]: Debug functionality is disabled.
+[00:35:18] [Render thread/INFO]: DSA support not detected.
+[00:35:18] [Render thread/INFO]: OpenGL Vendor: Apple
+[00:35:18] [Render thread/INFO]: OpenGL Renderer: Apple M2 Pro
+[00:35:18] [Render thread/INFO]: OpenGL Version: 4.1 Metal - 89.4
+[00:35:18] [Render thread/INFO]: Using optional rendering extensions: 
+[00:35:18] [Render thread/ERROR]: Couldn't load distanthorizons pack metadata: Pack declares support for version newer than 64, but is missing mandatory fields min_format and max_format
+[00:35:18] [Render thread/ERROR]: Couldn't load entityculling pack metadata: Pack declares support for version newer than 64, but is missing mandatory fields min_format and max_format
+[00:35:18] [Render thread/ERROR]: Couldn't load trender pack metadata: Pack declares support for version newer than 64, but is missing mandatory fields min_format and max_format
+[00:35:18] [Render thread/INFO]: Hardware information:
+[00:35:18] [Render thread/INFO]: CPU: 10x Apple M2 Pro
+[00:35:18] [Render thread/INFO]: GPU: Apple M2 Pro (Supports OpenGL 4.1 Metal - 89.4)
+[00:35:18] [Render thread/INFO]: OS: Mac OS X (15.6.1)
+[00:35:18] [Render thread/INFO]: Reloading ResourceManager: vanilla, fabric, ai-player, carpet, distanthorizons, entityculling, fabric-api, fabric-api-base, fabric-api-lookup-api-v1, fabric-biome-api-v1, fabric-block-api-v1, fabric-block-view-api-v2, fabric-command-api-v2, fabric-content-registries-v0, fabric-convention-tags-v1, fabric-convention-tags-v2, fabric-crash-report-info-v1, fabric-data-attachment-api-v1, fabric-data-generation-api-v1, fabric-dimensions-v1, fabric-entity-events-v1, fabric-events-interaction-v0, fabric-game-rule-api-v1, fabric-item-api-v1, fabric-item-group-api-v1, fabric-key-binding-api-v1, fabric-lifecycle-events-v1, fabric-loot-api-v2, fabric-loot-api-v3, fabric-message-api-v1, fabric-model-loading-api-v1, fabric-networking-api-v1, fabric-object-builder-api-v1, fabric-particles-v1, fabric-recipe-api-v1, fabric-registry-sync-v0, fabric-renderer-api-v1, fabric-renderer-indigo, fabric-rendering-fluids-v1, fabric-rendering-v1, fabric-resource-conditions-api-v1, fabric-resource-loader-v0, fabric-resource-loader-v1, fabric-screen-api-v1, fabric-screen-handler-api-v1, fabric-serialization-api-v1, fabric-sound-api-v1, fabric-tag-api-v1, fabric-transfer-api-v1, fabric-transitive-access-wideners-v1, fabricloader, immediatelyfast, iris, lithium, org_apache_commons_commons-math3, sodium, trender
+[00:35:18] [Render thread/INFO]: Running Delayed setup...
+[00:35:18] [Render thread/INFO]: Delayed setup complete, firing DhApiAfterDhInitEvent event...
+[00:35:18] [Render thread/INFO]: DH Ready, binding Iris event handlers...
+[00:35:18] [Render thread/INFO]: DH Iris events bound.
+[00:35:18] [Worker-Main-4/INFO]: Found unifont_all_no_pua-16.0.03.hex, loading
+[00:35:18] [Worker-Main-2/INFO]: Found unifont_pua-16.0.03.hex, loading
+[00:35:18] [Worker-Main-8/INFO]: Found unifont_jp_patch-16.0.03.hex, loading
+[00:35:18] [Render thread/INFO]: Profile: HIGH (+0 options changed by user)
+[00:35:19] [Render thread/INFO]: Using shaderpack: ComplementaryReimagined_r5.6.1
+[00:35:20] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/rendertype_entity_shadow and FS minecraft:core/rendertype_entity_shadow. Log output: WARNING: Could not find vertex shader attribute 'UV1' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'Normal' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'UV2' to match BindAttributeLocation request.
+
+[00:35:20] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/rendertype_text_background_see_through and FS minecraft:core/rendertype_text_background_see_through. Log output: WARNING: Could not find vertex shader attribute 'UV2' to match BindAttributeLocation request.
+
+[00:35:20] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/terrain and FS minecraft:core/terrain. Log output: WARNING: Could not find vertex shader attribute 'Normal' to match BindAttributeLocation request.
+
+[00:35:20] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/entity and FS minecraft:core/entity. Log output: WARNING: Could not find vertex shader attribute 'UV2' to match BindAttributeLocation request.
+
+[00:35:20] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/terrain and FS minecraft:core/terrain. Log output: WARNING: Could not find vertex shader attribute 'Normal' to match BindAttributeLocation request.
+
+[00:35:20] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/rendertype_text_intensity_see_through and FS minecraft:core/rendertype_text_intensity_see_through. Log output: WARNING: Could not find vertex shader attribute 'UV2' to match BindAttributeLocation request.
+
+[00:35:20] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/entity and FS minecraft:core/entity. Log output: WARNING: Output of vertex shader 'overlayColor' not read by fragment shader
+
+[00:35:20] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/entity and FS minecraft:core/entity. Log output: WARNING: Could not find vertex shader attribute 'Normal' to match BindAttributeLocation request.
+WARNING: Output of vertex shader 'overlayColor' not read by fragment shader
+
+[00:35:20] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/rendertype_entity_alpha and FS minecraft:core/rendertype_entity_alpha. Log output: WARNING: Could not find vertex shader attribute 'Normal' to match BindAttributeLocation request.
+WARNING: Output of vertex shader 'texCoord1' not read by fragment shader
+WARNING: Output of vertex shader 'texCoord2' not read by fragment shader
+
+[00:35:20] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/entity and FS minecraft:core/entity. Log output: WARNING: Output of vertex shader 'overlayColor' not read by fragment shader
+
+[00:35:20] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/entity and FS minecraft:core/entity. Log output: WARNING: Could not find vertex shader attribute 'Normal' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'UV2' to match BindAttributeLocation request.
+WARNING: Output of vertex shader 'overlayColor' not read by fragment shader
+
+[00:35:20] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/entity and FS minecraft:core/entity. Log output: WARNING: Could not find vertex shader attribute 'Normal' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'UV2' to match BindAttributeLocation request.
+WARNING: Output of vertex shader 'overlayColor' not read by fragment shader
+
+[00:35:20] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/rendertype_text_see_through and FS minecraft:core/rendertype_text_see_through. Log output: WARNING: Could not find vertex shader attribute 'UV2' to match BindAttributeLocation request.
+
+[00:35:20] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/rendertype_beacon_beam and FS minecraft:core/rendertype_beacon_beam. Log output: WARNING: Could not find vertex shader attribute 'Normal' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'UV2' to match BindAttributeLocation request.
+
+[00:35:20] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/terrain and FS minecraft:core/terrain. Log output: WARNING: Could not find vertex shader attribute 'Normal' to match BindAttributeLocation request.
+
+[00:35:20] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/terrain and FS minecraft:core/terrain. Log output: WARNING: Could not find vertex shader attribute 'Normal' to match BindAttributeLocation request.
+
+[00:35:20] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/rendertype_crumbling and FS minecraft:core/rendertype_crumbling. Log output: WARNING: Could not find vertex shader attribute 'Normal' to match BindAttributeLocation request.
+WARNING: Output of vertex shader 'texCoord2' not read by fragment shader
+
+[00:35:20] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/entity and FS minecraft:core/entity. Log output: WARNING: Output of vertex shader 'overlayColor' not read by fragment shader
+
+[00:35:20] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/entity and FS minecraft:core/entity. Log output: WARNING: Output of vertex shader 'overlayColor' not read by fragment shader
+
+[00:35:20] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/terrain and FS minecraft:core/terrain. Log output: WARNING: Could not find vertex shader attribute 'Normal' to match BindAttributeLocation request.
+
+[00:35:20] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/rendertype_beacon_beam and FS minecraft:core/rendertype_beacon_beam. Log output: WARNING: Could not find vertex shader attribute 'Normal' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'UV2' to match BindAttributeLocation request.
+
+[00:35:20] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/terrain and FS minecraft:core/terrain. Log output: WARNING: Could not find vertex shader attribute 'Normal' to match BindAttributeLocation request.
+
+[00:35:20] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/rendertype_item_entity_translucent_cull and FS minecraft:core/rendertype_item_entity_translucent_cull. Log output: WARNING: Output of vertex shader 'texCoord1' not read by fragment shader
+WARNING: Output of vertex shader 'texCoord2' not read by fragment shader
+
+[00:35:20] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/rendertype_translucent_moving_block and FS minecraft:core/rendertype_translucent_moving_block. Log output: WARNING: Could not find vertex shader attribute 'Normal' to match BindAttributeLocation request.
+
+[00:35:20] [Render thread/INFO]: OpenAL initialized on device MacBook Pro Speakers
+[00:35:20] [Render thread/INFO]: Sound engine started
+[00:35:20] [Render thread/INFO]: Created: 512x256x0 minecraft:textures/atlas/particles.png-atlas
+[00:35:20] [Render thread/INFO]: Created: 128x64x0 minecraft:textures/atlas/decorated_pot.png-atlas
+[00:35:20] [Render thread/INFO]: Created: 2048x1024x0 minecraft:textures/atlas/armor_trims.png-atlas
+[00:35:20] [Render thread/INFO]: Created: 512x256x0 minecraft:textures/atlas/paintings.png-atlas
+[00:35:20] [Render thread/INFO]: Created: 512x512x0 minecraft:textures/atlas/shield_patterns.png-atlas
+[00:35:20] [Render thread/INFO]: Created: 1024x512x4 minecraft:textures/atlas/blocks.png-atlas
+[00:35:20] [Render thread/INFO]: Created: 512x256x0 minecraft:textures/atlas/chest.png-atlas
+[00:35:20] [Render thread/INFO]: Created: 512x512x0 minecraft:textures/atlas/banner_patterns.png-atlas
+[00:35:20] [Render thread/INFO]: Created: 512x256x0 minecraft:textures/atlas/beds.png-atlas
+[00:35:20] [Render thread/INFO]: Created: 1024x512x0 minecraft:textures/atlas/gui.png-atlas
+[00:35:20] [Render thread/INFO]: Created: 64x64x0 minecraft:textures/atlas/map_decorations.png-atlas
+[00:35:20] [Render thread/INFO]: Created: 256x256x0 minecraft:textures/atlas/signs.png-atlas
+[00:35:20] [Render thread/INFO]: Created: 512x256x0 minecraft:textures/atlas/shulker_boxes.png-atlas
+[00:35:20] [Render thread/INFO]: Checking for Distant Horizons update
+[00:35:20] [Render thread/INFO]: Distant Horizons already up to date.
+[00:35:20] [Render thread/INFO]: Creating pipeline for dimension minecraft:overworld
+[00:35:20] [Render thread/WARN]: Program link log for centerDepthSmooth: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'mc_midTexCoord' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'UV0' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'iris_Entity' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'mc_Entity' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'Position' to match BindAttributeLocation request.
+
+[00:35:21] [Render thread/WARN]: Program link log for deferred1: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'mc_midTexCoord' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'iris_Entity' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'mc_Entity' to match BindAttributeLocation request.
+WARNING: Output of vertex shader 'iris_FogFragCoord' not read by fragment shader
+WARNING: Output of vertex shader 'eastVec' not read by fragment shader
+
+[00:35:21] [Render thread/WARN]: Program link log for composite: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'mc_midTexCoord' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'iris_Entity' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'mc_Entity' to match BindAttributeLocation request.
+WARNING: Output of vertex shader 'iris_FogFragCoord' not read by fragment shader
+
+[00:35:21] [Render thread/WARN]: Program link log for composite1: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'mc_midTexCoord' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'iris_Entity' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'mc_Entity' to match BindAttributeLocation request.
+WARNING: Output of vertex shader 'iris_FogFragCoord' not read by fragment shader
+
+[00:35:21] [Render thread/WARN]: Program link log for composite3: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'mc_midTexCoord' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'UV0' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'iris_Entity' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'mc_Entity' to match BindAttributeLocation request.
+WARNING: Output of vertex shader 'iris_FogFragCoord' not read by fragment shader
+
+[00:35:21] [Render thread/WARN]: Program link log for composite4: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'mc_midTexCoord' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'iris_Entity' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'mc_Entity' to match BindAttributeLocation request.
+WARNING: Output of vertex shader 'iris_FogFragCoord' not read by fragment shader
+
+[00:35:21] [Render thread/WARN]: Program link log for composite5: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'mc_midTexCoord' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'iris_Entity' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'mc_Entity' to match BindAttributeLocation request.
+WARNING: Output of vertex shader 'iris_FogFragCoord' not read by fragment shader
+
+[00:35:21] [Render thread/WARN]: Program link log for composite6: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'mc_midTexCoord' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'iris_Entity' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'mc_Entity' to match BindAttributeLocation request.
+WARNING: Output of vertex shader 'iris_FogFragCoord' not read by fragment shader
+
+[00:35:21] [Render thread/WARN]: Program link log for composite7: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'mc_midTexCoord' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'iris_Entity' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'mc_Entity' to match BindAttributeLocation request.
+WARNING: Output of vertex shader 'iris_FogFragCoord' not read by fragment shader
+
+[00:35:21] [Render thread/WARN]: Program link log for final: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'mc_midTexCoord' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'iris_Entity' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'mc_Entity' to match BindAttributeLocation request.
+WARNING: Output of vertex shader 'iris_FogFragCoord' not read by fragment shader
+
+[00:35:21] [Render thread/WARN]: Type is VERTEX
+[00:35:21] [Render thread/WARN]: Type is FRAGMENT
+[00:35:21] [Render thread/WARN]: Type is VERTEX
+[00:35:21] [Render thread/WARN]: Type is FRAGMENT
+[00:35:21] [Render thread/WARN]: Type is VERTEX
+[00:35:21] [Render thread/WARN]: Type is FRAGMENT
+[00:35:24] [Render thread/WARN]: Program link log for sodium:chunk_shader_for_shadow: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttributeLocation request.
+WARNING: Output of vertex shader 'iris_FogFragCoord' not read by fragment shader
+
+[00:35:24] [Render thread/WARN]: Program link log for sodium:chunk_shader_for_shadow_cutout: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttributeLocation request.
+WARNING: Output of vertex shader 'iris_FogFragCoord' not read by fragment shader
+
+[00:35:24] [Render thread/WARN]: Program link log for sodium:chunk_shader_for_shadow_trans: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttributeLocation request.
+WARNING: Output of vertex shader 'iris_FogFragCoord' not read by fragment shader
+
+[00:35:24] [Render thread/WARN]: Program link log for sodium:chunk_shader_for_terrain: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttributeLocation request.
+WARNING: Output of vertex shader 'iris_FogFragCoord' not read by fragment shader
+
+[00:35:24] [Render thread/WARN]: Program link log for sodium:chunk_shader_for_terrain_cutout: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttributeLocation request.
+WARNING: Output of vertex shader 'iris_FogFragCoord' not read by fragment shader
+
+[00:35:24] [Render thread/WARN]: Program link log for sodium:chunk_shader_for_translucent: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttributeLocation request.
+WARNING: Output of vertex shader 'iris_FogFragCoord' not read by fragment shader
+
+[00:35:24] [Render thread/WARN]: Program link log for colorSpaceFragment: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'mc_midTexCoord' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'UV0' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'iris_Entity' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'mc_Entity' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'Position' to match BindAttributeLocation request.
+WARNING: Output of vertex shader 'uv' not read by fragment shader
+
+[00:36:03] [Render thread/INFO]: Loaded 1461 recipes
+[00:36:03] [Render thread/INFO]: Loaded 1574 advancements
+[00:36:03] [Render thread/INFO]: Applied 0 biome modifications to 0 of 65 new biomes in 654.3 μs
+[00:36:03] [Server thread/INFO]: Started DhWorld of type CLIENT_SERVER
+[00:36:03] [Server thread/INFO]: Starting integrated minecraft server version 1.21.10
+[00:36:03] [Server thread/INFO]: Generating keypair
+[00:36:04] [DH-Full Data Migration Thread[0]/INFO]: Attempting to migrate data sources for: [minecraft:overworld]-[/Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/saves/New World/data]...
+[00:36:04] [DH-Full Data Migration Thread[0]/INFO]: Found [0] data sources that need migration.
+[00:36:04] [Server thread/INFO]: Started DhClientServerLevel for [Wrapped{ServerLevel[New World]@minecraft:overworld}] at [[LocalSaveStructure@(/Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/saves/New World/data)]].
+[00:36:04] [DH-Full Data Migration Thread[0]/INFO]: No migration necessary.
+[00:36:04] [DH-Full Data Migration Thread[0]/INFO]: Attempting to migrate data sources for: [minecraft:the_end]-[/Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/saves/New World/DIM1/data]...
+[00:36:04] [DH-Full Data Migration Thread[0]/INFO]: Found [0] data sources that need migration.
+[00:36:04] [DH-Full Data Migration Thread[0]/INFO]: No migration necessary.
+[00:36:04] [Server thread/INFO]: Started DhClientServerLevel for [Wrapped{ServerLevel[New World]@minecraft:the_end}] at [[LocalSaveStructure@(/Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/saves/New World/data;/Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/saves/New World/DIM1/data)]].
+[00:36:04] [DH-Full Data Migration Thread[0]/INFO]: Attempting to migrate data sources for: [minecraft:the_nether]-[/Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/saves/New World/DIM-1/data]...
+[00:36:04] [DH-Full Data Migration Thread[0]/INFO]: Found [0] data sources that need migration.
+[00:36:04] [DH-Full Data Migration Thread[0]/INFO]: No migration necessary.
+[00:36:04] [Server thread/INFO]: Started DhClientServerLevel for [Wrapped{ServerLevel[New World]@minecraft:the_nether}] at [[LocalSaveStructure@(/Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/saves/New World/data;/Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/saves/New World/DIM1/data;/Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/saves/New World/DIM-1/data)]].
+[00:36:04] [Server thread/INFO]: Loading 0 persistent chunks...
+[00:36:04] [Server thread/INFO]: Preparing spawn area: 16%
+[00:36:04] [Server thread/INFO]: Server instance stored!
+[00:36:04] [Server thread/INFO]: [STDOUT]: Server instance is net.minecraft.class_1132@48748771
+[00:36:04] [Server thread/INFO]: Queueing asynchronous BERT model load...
+[00:36:04] [bert-loader/INFO]: Proceeding to load BERT model into memory
+[00:36:04] [Server thread/INFO]: LLM world toggle for New World:minecraft:overworld set to true
+[00:36:04] [Server thread/INFO]: Executing /bot spawn Bob training
+[00:36:04] [Server thread/INFO]: spawnBot starting: botName=Bob, mode=training, dimType=minecraft:overworld, pos=(-15.0, 64.0, 7.0), facingYaw=-0.0, facingPitch=-153.43495
+[00:36:04] [Server thread/INFO]: spawnBot: entering training branch for Bob
+[00:36:04] [Server thread/INFO]: [STDOUT]: Existing Bot Profiles: {Jake=e01f59a8-aebb-4eed-9a56-bc36f8507228, Bob=17c3d366-025a-4751-ac14-fdd43ffebae2}
+[00:36:04] [Server thread/INFO]: [STDOUT]: Using existing GameProfile: GameProfile[id=17c3d366-025a-4751-ac14-fdd43ffebae2, name=Bob, properties={}]
+[00:36:05] [Server thread/INFO]: Bob[/127.0.0.1:0] logged in with entity id 1 at (0.0, 0.0, 0.0)
+[00:36:05] [Server thread/INFO]: Resolved PlayerManager#loadPlayerData via method_14600[class net.minecraft.class_11560]
+[00:36:05] [Server thread/INFO]: Resolved PlayerManager#savePlayerData via method_14577[class net.minecraft.class_3222]
+[00:36:05] [Server thread/INFO]: Resolved PlayerConfigEntry(GameProfile) constructor.
+[00:36:05] [Server thread/INFO]: Restored fakeplayer 'Bob' using PlayerManager.
+[00:36:05] [Server thread/INFO]: Loaded inventory for fakeplayer 'Bob' from bob_17c3d366-025a-4751-ac14-fdd43ffebae2.nbt
+[00:36:05] [Server thread/INFO]: Player [Bob] joined.
+[00:36:05] [Server thread/INFO]: Bob joined the game
+[00:36:05] [Server thread/INFO]: Restored fakeplayer 'Bob' using PlayerManager.
+[00:36:05] [Server thread/INFO]: Loaded inventory for fakeplayer 'Bob' from bob_17c3d366-025a-4751-ac14-fdd43ffebae2.nbt
+[00:36:05] [Server thread/INFO]: spawnBot: remembering spawn for training bot Bob
+[00:36:05] [Server thread/INFO]: Spawned new training bot Bob!
+[00:36:05] [Server thread/INFO]: LLM bot toggle for 17c3d366-025a-4751-ac14-fdd43ffebae2 set to true
+[00:36:05] [Server thread/ERROR]: ❌ Error loading Q-table from /Users/roti/.minecraft/qtable_storage/qtable.bin: writing aborted; java.io.NotSerializableException: net.minecraft.server.network.ServerPlayerEntity
+[00:36:05] [Server thread/WARN]: ❌ Failed to load Q-table from /Users/roti/.minecraft/qtable_storage/qtable.bin: writing aborted; java.io.NotSerializableException: net.minecraft.server.network.ServerPlayerEntity
+[00:36:05] [Server thread/ERROR]: ❌ Error loading Q-table from /Users/roti/minecraft_data/qtable_storage/qtable.bin: writing aborted; java.io.NotSerializableException: net.minecraft.server.network.ServerPlayerEntity
+[00:36:05] [Server thread/WARN]: ❌ Failed to load Q-table from /Users/roti/minecraft_data/qtable_storage/qtable.bin: writing aborted; java.io.NotSerializableException: net.minecraft.server.network.ServerPlayerEntity
+[00:36:05] [Server thread/ERROR]: ❌ Error loading Q-table from /var/folders/_t/5vq116m55tl1yx1y5gkstsdh0000gn/T/minecraft_ai_player/qtable_storage/qtable.bin: writing aborted; java.io.NotSerializableException: net.minecraft.server.network.ServerPlayerEntity
+[00:36:05] [Server thread/WARN]: ❌ Failed to load Q-table from /var/folders/_t/5vq116m55tl1yx1y5gkstsdh0000gn/T/minecraft_ai_player/qtable_storage/qtable.bin: writing aborted; java.io.NotSerializableException: net.minecraft.server.network.ServerPlayerEntity
+[00:36:05] [Server thread/INFO]: 📝 No existing Q-table found, creating new one
+[00:36:05] [Server thread/INFO]: /bot spawn completed successfully for Bob training
+[00:36:05] [Server thread/INFO]: Executing /bot spawn Jake training
+[00:36:05] [Server thread/INFO]: spawnBot starting: botName=Jake, mode=training, dimType=minecraft:overworld, pos=(-14.0, 64.0, 5.0), facingYaw=-0.0, facingPitch=26.565052
+[00:36:05] [Server thread/INFO]: spawnBot: entering training branch for Jake
+[00:36:05] [Server thread/INFO]: [STDOUT]: Existing Bot Profiles: {Jake=e01f59a8-aebb-4eed-9a56-bc36f8507228, Bob=17c3d366-025a-4751-ac14-fdd43ffebae2}
+[00:36:05] [Server thread/INFO]: [STDOUT]: Using existing GameProfile: GameProfile[id=e01f59a8-aebb-4eed-9a56-bc36f8507228, name=Jake, properties={}]
+[00:36:05] [Server thread/INFO]: Jake[/127.0.0.1:0] logged in with entity id 2 at (0.0, 0.0, 0.0)
+[00:36:05] [Server thread/INFO]: Restored fakeplayer 'Jake' using PlayerManager.
+[00:36:05] [Server thread/INFO]: Loaded inventory for fakeplayer 'Jake' from jake_e01f59a8-aebb-4eed-9a56-bc36f8507228.nbt
+[00:36:05] [Server thread/INFO]: Player [Jake] joined.
+[00:36:05] [Server thread/INFO]: Jake joined the game
+[00:36:05] [Server thread/INFO]: Restored fakeplayer 'Jake' using PlayerManager.
+[00:36:05] [Server thread/INFO]: Loaded inventory for fakeplayer 'Jake' from jake_e01f59a8-aebb-4eed-9a56-bc36f8507228.nbt
+[00:36:05] [Server thread/INFO]: spawnBot: remembering spawn for training bot Jake
+[00:36:05] [Server thread/INFO]: Spawned new training bot Jake!
+[00:36:05] [Server thread/INFO]: LLM bot toggle for e01f59a8-aebb-4eed-9a56-bc36f8507228 set to true
+[00:36:05] [Server thread/ERROR]: ❌ Error loading Q-table from /Users/roti/.minecraft/qtable_storage/qtable.bin: writing aborted; java.io.NotSerializableException: net.minecraft.server.network.ServerPlayerEntity
+[00:36:05] [Server thread/WARN]: ❌ Failed to load Q-table from /Users/roti/.minecraft/qtable_storage/qtable.bin: writing aborted; java.io.NotSerializableException: net.minecraft.server.network.ServerPlayerEntity
+[00:36:05] [Server thread/ERROR]: ❌ Error loading Q-table from /Users/roti/minecraft_data/qtable_storage/qtable.bin: writing aborted; java.io.NotSerializableException: net.minecraft.server.network.ServerPlayerEntity
+[00:36:05] [Server thread/WARN]: ❌ Failed to load Q-table from /Users/roti/minecraft_data/qtable_storage/qtable.bin: writing aborted; java.io.NotSerializableException: net.minecraft.server.network.ServerPlayerEntity
+[00:36:05] [Server thread/ERROR]: ❌ Error loading Q-table from /var/folders/_t/5vq116m55tl1yx1y5gkstsdh0000gn/T/minecraft_ai_player/qtable_storage/qtable.bin: writing aborted; java.io.NotSerializableException: net.minecraft.server.network.ServerPlayerEntity
+[00:36:05] [Server thread/WARN]: ❌ Failed to load Q-table from /var/folders/_t/5vq116m55tl1yx1y5gkstsdh0000gn/T/minecraft_ai_player/qtable_storage/qtable.bin: writing aborted; java.io.NotSerializableException: net.minecraft.server.network.ServerPlayerEntity
+[00:36:05] [Server thread/INFO]: 📝 No existing Q-table found, creating new one
+[00:36:05] [Server thread/INFO]: /bot spawn completed successfully for Jake training
+[00:36:05] [Server thread/INFO]: DH TerraFirmaCraft detection: false
+[00:36:05] [Server thread/INFO]: ================WORLD_GEN_STEP_INITING=============
+[00:36:05] [Server thread/INFO]: Batch Chunk Generator initialized
+[00:36:05] [Server thread/INFO]: Creating world gen queue
+[00:36:05] [Server thread/INFO]: Created world gen queue
+[00:36:05] [Server thread/INFO]: Set world gen queue for level [minecraft:overworld].
+[00:36:05] [Server thread/INFO]: Changing view distance to 12, from 10
+[00:36:05] [Server thread/INFO]: Changing simulation distance to 12, from 0
+[00:36:06] [Server thread/INFO]: Loading 0 chunks for player spawn...
+[00:36:06] [Server thread/INFO]: Preparing spawn area: 16%
+[00:36:06] [Server thread/INFO]: Preparing spawn area: 16%
+[00:36:06] [Server thread/INFO]: Preparing spawn area: 16%
+[00:36:06] [Server thread/INFO]: Time elapsed: 1696 ms
+[00:36:06] [Server thread/INFO]: RotiWokeman[local:E:8d0f1284] logged in with entity id 85 at (-11.60176756879951, 64.0, 6.475227594509771)
+[00:36:06] [Server thread/INFO]: Player [RotiWokeman] joined.
+[00:36:06] [Server thread/INFO]: RotiWokeman joined the game
+[00:36:06] [Render thread/INFO]: Loading client level [Wrapped{ClientLevel@ceh4rbi6e0gru@minecraft:overworld}]-[ceh4rbi6e0gru@minecraft:overworld].
+[00:36:06] [Render thread/INFO]: Loaded [0] waiting chunk wrappers.
+[00:36:06] [Render thread/INFO]: Reloading pipeline on dimension change: minecraft:overworld => minecraft:overworld
+[00:36:06] [Render thread/INFO]: Destroying pipeline minecraft:overworld
+[00:36:06] [Render thread/INFO]: Creating pipeline for dimension minecraft:overworld
+[00:36:06] [Render thread/WARN]: Program link log for centerDepthSmooth: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'mc_midTexCoord' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'UV0' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'iris_Entity' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'mc_Entity' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'Position' to match BindAttributeLocation request.
+
+[00:36:06] [Render thread/WARN]: Program link log for deferred1: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'mc_midTexCoord' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'iris_Entity' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'mc_Entity' to match BindAttributeLocation request.
+WARNING: Output of vertex shader 'iris_FogFragCoord' not read by fragment shader
+WARNING: Output of vertex shader 'eastVec' not read by fragment shader
+
+[00:36:06] [Render thread/WARN]: Program link log for composite: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'mc_midTexCoord' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'iris_Entity' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'mc_Entity' to match BindAttributeLocation request.
+WARNING: Output of vertex shader 'iris_FogFragCoord' not read by fragment shader
+
+[00:36:06] [Render thread/WARN]: Program link log for composite1: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'mc_midTexCoord' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'iris_Entity' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'mc_Entity' to match BindAttributeLocation request.
+WARNING: Output of vertex shader 'iris_FogFragCoord' not read by fragment shader
+
+[00:36:06] [Render thread/WARN]: Program link log for composite3: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'mc_midTexCoord' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'UV0' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'iris_Entity' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'mc_Entity' to match BindAttributeLocation request.
+WARNING: Output of vertex shader 'iris_FogFragCoord' not read by fragment shader
+
+[00:36:06] [Render thread/WARN]: Program link log for composite4: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'mc_midTexCoord' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'iris_Entity' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'mc_Entity' to match BindAttributeLocation request.
+WARNING: Output of vertex shader 'iris_FogFragCoord' not read by fragment shader
+
+[00:36:06] [Render thread/WARN]: Program link log for composite5: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'mc_midTexCoord' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'iris_Entity' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'mc_Entity' to match BindAttributeLocation request.
+WARNING: Output of vertex shader 'iris_FogFragCoord' not read by fragment shader
+
+[00:36:06] [Render thread/WARN]: Program link log for composite6: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'mc_midTexCoord' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'iris_Entity' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'mc_Entity' to match BindAttributeLocation request.
+WARNING: Output of vertex shader 'iris_FogFragCoord' not read by fragment shader
+
+[00:36:06] [Render thread/WARN]: Program link log for composite7: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'mc_midTexCoord' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'iris_Entity' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'mc_Entity' to match BindAttributeLocation request.
+WARNING: Output of vertex shader 'iris_FogFragCoord' not read by fragment shader
+
+[00:36:06] [Render thread/WARN]: Program link log for final: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'mc_midTexCoord' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'iris_Entity' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'mc_Entity' to match BindAttributeLocation request.
+WARNING: Output of vertex shader 'iris_FogFragCoord' not read by fragment shader
+
+[00:36:08] [bert-loader/INFO]: [STDOUT]: Loading:     100% |████████████████████████████████████████|
+[00:36:08] [Render thread/WARN]: Program link log for sodium:chunk_shader_for_shadow: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttributeLocation request.
+WARNING: Output of vertex shader 'iris_FogFragCoord' not read by fragment shader
+
+[00:36:08] [bert-loader/INFO]: Ignore mismatching platform from: jar:file:/Users/roti/Library/Application%20Support/PrismLauncher/instances/1.21.10/minecraft/.fabric/processedMods/ai_djl_pytorch_pytorch-native-cp86_64-2.5.1-4fc5a0b86a123205.jar!/native/lib/pytorch.properties
+[00:36:08] [bert-loader/INFO]: Found matching platform from: jar:file:/Users/roti/Library/Application%20Support/PrismLauncher/instances/1.21.10/minecraft/.fabric/processedMods/ai_djl_pytorch_pytorch-native-cprch64-2.5.1-19906839836eeb80.jar!/native/lib/pytorch.properties
+[00:36:08] [bert-loader/INFO]: Ignore mismatching platform from: jar:file:/Users/roti/Library/Application%20Support/PrismLauncher/instances/1.21.10/minecraft/.fabric/processedMods/ai_djl_pytorch_pytorch-native-cp86_64-2.5.1-7f4cd6ea5a383f15.jar!/native/lib/pytorch.properties
+[00:36:08] [Render thread/WARN]: Program link log for sodium:chunk_shader_for_shadow_cutout: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttributeLocation request.
+WARNING: Output of vertex shader 'iris_FogFragCoord' not read by fragment shader
+
+[00:36:08] [Render thread/WARN]: Program link log for sodium:chunk_shader_for_shadow_trans: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttributeLocation request.
+WARNING: Output of vertex shader 'iris_FogFragCoord' not read by fragment shader
+
+[00:36:08] [Render thread/WARN]: Program link log for sodium:chunk_shader_for_terrain: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttributeLocation request.
+WARNING: Output of vertex shader 'iris_FogFragCoord' not read by fragment shader
+
+[00:36:08] [Render thread/WARN]: Program link log for sodium:chunk_shader_for_terrain_cutout: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttributeLocation request.
+WARNING: Output of vertex shader 'iris_FogFragCoord' not read by fragment shader
+
+[00:36:08] [Render thread/WARN]: Program link log for sodium:chunk_shader_for_translucent: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttributeLocation request.
+WARNING: Output of vertex shader 'iris_FogFragCoord' not read by fragment shader
+
+[00:36:08] [Render thread/WARN]: Program link log for colorSpaceFragment: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'mc_midTexCoord' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'UV0' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'iris_Entity' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'mc_Entity' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'Position' to match BindAttributeLocation request.
+WARNING: Output of vertex shader 'uv' not read by fragment shader
+
+[00:36:08] [Render thread/INFO]: Started 4 worker threads
+[00:36:08] [bert-loader/INFO]: PyTorch graph executor optimizer is enabled, this may impact your inference latency and throughput. See: https://docs.djl.ai/master/docs/development/inference_performance_optimization.html#graph-executor-optimization
+[00:36:08] [bert-loader/INFO]: Number of inter-op threads is 10
+[00:36:08] [bert-loader/INFO]: Number of intra-op threads is 6
+[00:36:08] [Render thread/INFO]: Loading client level [Wrapped{ClientLevel@ceh4rbi6e0gru@minecraft:overworld}]-[ceh4rbi6e0gru@minecraft:overworld].
+[00:36:08] [Render thread/INFO]: Loaded [0] waiting chunk wrappers.
+[00:36:08] [Render thread/INFO]: Loaded 217 advancements
+[00:36:08] [Render thread/WARN]: Error while parsing the block ID map entry for "block.10104":
+[00:36:08] [Render thread/WARN]: - The block minecraft:stone_slab has no property with the name variant, ignoring!
+[00:36:08] [Render thread/INFO]: Stopping worker threads
+[00:36:08] [Render thread/INFO]: Started 4 worker threads
+[00:36:08] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/screenquad and FS minecraft:core/blit_screen. Log output: WARNING: Could not find vertex shader attribute 'UV0' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'Position' to match BindAttributeLocation request.
+
+[00:36:08] [bert-loader/INFO]: Found matching platform from: jar:file:/Users/roti/Library/Application%20Support/PrismLauncher/instances/1.21.10/minecraft/.fabric/processedMods/ai_djl_huggingface_tokenizers-0.33.0-5d541ec46a4ba9bb.jar!/native/lib/tokenizers.properties
+[00:36:08] [Render thread/INFO]: Loading shader with type: [35633]
+[00:36:08] [Render thread/INFO]: Shader loaded sucessfully.
+[00:36:08] [Render thread/INFO]: Loading shader with type: [35632]
+[00:36:08] [Render thread/INFO]: Shader loaded sucessfully.
+[00:36:08] [Render thread/INFO]: Loading shader with type: [35633]
+[00:36:08] [Render thread/INFO]: Shader loaded sucessfully.
+[00:36:08] [Render thread/INFO]: Loading shader with type: [35632]
+[00:36:08] [Render thread/INFO]: Shader loaded sucessfully.
+[00:36:08] [bert-loader/WARN]: maxLength is not explicitly specified, use modelMaxLength: 512
+[00:36:08] [bert-loader/INFO]: [STDOUT]: Model loaded successfully and ready for inference.
+[00:36:08] [bert-loader/INFO]: BERT model loaded into memory. It will stay in memory as long as any bot stays active in game.
+[00:36:08] [Render thread/INFO]: Creating GLProxy... If this is the last message you see there must have been an OpenGL error.
+[00:36:08] [Render thread/INFO]: Lod Render OpenGL version [4.1 Metal - 89.4].
+[00:36:08] [Render thread/INFO]: minecraftGlCapabilities:
+Your OpenGL support:
+openGL version 3.2+: [true] <- REQUIRED
+Vertex Attribute Buffer Binding: [false] <- optional improvement
+Buffer Storage: [false] <- optional improvement
+
+[00:36:08] [Render thread/INFO]: This GPU doesn't support Buffer Storage (OpenGL 4.4), falling back to using other methods.
+[00:36:08] [Render thread/INFO]: GPU Vendor [APPLE] with OS [macOS], Preferred upload method is [DATA].
+[00:36:08] [Render thread/INFO]: GLProxy creation successful. OpenGL smiles upon you this day.
+[00:36:08] [Render thread/INFO]: Resizing Dynamic Transforms UBO, capacity limit of 2 reached during a single frame. New capacity will be 4.
+[00:36:08] [Render thread/INFO]: Setting up renderer
+[00:36:08] [Render thread/INFO]: Loading shader with type: [35633]
+[00:36:08] [Render thread/INFO]: Shader loaded sucessfully.
+[00:36:08] [Render thread/INFO]: Loading shader with type: [35632]
+[00:36:08] [Render thread/INFO]: Shader loaded sucessfully.
+[00:36:08] [Render thread/INFO]: Vertex Attribute (pre GL43) completed.
+[00:36:08] [Render thread/INFO]: Renderer setup complete
+[00:36:08] [Render thread/ERROR]: Unexpected; somehow the Opaque + Translucent pass ran with shaders on.
+[00:36:08] [Render thread/WARN]: There have been reports of instanced rendering causing crashes on macOS when Sodium is present. Instanced rendering can be disabled via the DH config.
+[00:36:08] [Render thread/INFO]: Loading shader with type: [35633]
+[00:36:08] [Render thread/INFO]: Shader loaded sucessfully.
+[00:36:08] [Render thread/INFO]: Loading shader with type: [35632]
+[00:36:08] [Render thread/INFO]: Shader loaded sucessfully.
+[00:36:08] [Render thread/INFO]: Vertex Attribute (pre GL43) completed.
+[00:36:08] [Render thread/INFO]: Loading shader with type: [35633]
+[00:36:08] [Render thread/INFO]: Shader loaded sucessfully.
+[00:36:08] [Render thread/INFO]: Loading shader with type: [35632]
+[00:36:08] [Render thread/INFO]: Shader loaded sucessfully.
+[00:36:08] [Render thread/INFO]: Vertex Attribute (pre GL43) completed.
+[00:36:09] [Render thread/INFO]: Resizing Dynamic Transforms UBO, capacity limit of 4 reached during a single frame. New capacity will be 8.
+[00:36:09] [Render thread/INFO]: Resizing Dynamic Transforms UBO, capacity limit of 8 reached during a single frame. New capacity will be 16.
+[00:36:12] [Render thread/INFO]: Fetched 4 models from provider on frontend: [qwen2.5:7b, qwen3:8b, llama3:8b, nomic-embed-text:latest]
+[00:36:12] [Server thread/INFO]: Saving and pausing game...
+[00:36:12] [Server thread/INFO]: Saving chunks for level 'ServerLevel[New World]'/minecraft:overworld
+[00:36:12] [Server thread/INFO]: Saving chunks for level 'ServerLevel[New World]'/minecraft:the_end
+[00:36:12] [Server thread/INFO]: Saving chunks for level 'ServerLevel[New World]'/minecraft:the_nether
+[00:36:28] [Render thread/INFO]: Fetched 4 models from provider on frontend: [qwen2.5:7b, qwen3:8b, llama3:8b, nomic-embed-text:latest]
+[00:36:35] [Server thread/INFO]: Sending chat message (withDelay=true): 'Processing your message, please wait.'
+[00:36:35] [Server thread/INFO]: Message split into 1 parts
+[00:36:35] [Server thread/INFO]: [Not Secure] <RotiWokeman> Bob collect 5 dirt
+[00:36:35] [Server thread/INFO]: Broadcasting message part 0: 'Processing your message, please wait.' from source: Bob
+[00:36:35] [Server thread/INFO]: [Not Secure] [Bob] Processing your message, please wait.
+[00:36:35] [pool-7-thread-1/INFO]: [STDOUT]: Loading tree from: cart_tree.json
+[00:36:35] [pool-7-thread-1/INFO]: [STDOUT]: Loading labels from: cart_class_labels.json
+[00:36:35] [pool-7-thread-1/INFO]: [STDOUT]: Loading vocab from: cart_vectorizer_vocab.json
+[00:36:35] [Render thread/INFO]: [CHAT] <RotiWokeman> Bob collect 5 dirt
+[00:36:35] [Render thread/INFO]: [System] [CHAT] [Bob] Processing your message, please wait.
+[00:36:35] [pool-7-thread-1/INFO]: BERT predicted: REQUEST_ACTION with confidence: 3.189964771270752
+[00:36:35] [pool-7-thread-1/INFO]: CART predicted: REQUEST_ACTION with confidence: 0.7115
+[00:36:36] [pool-7-thread-1/WARN]: Simple repository pointing to a non-archive file.
+[00:36:36] [pool-7-thread-1/INFO]: [STDOUT]: Loading:     100% |████████████████████████████████████████|
+[00:36:36] [pool-7-thread-1/INFO]: [STDOUT]: LIDSNet model loaded successfully and ready for inference.
+[00:36:36] [pool-7-thread-1/INFO]: Asking model: {
+  "model" : "llama3:8b",
+  "stream" : false,
+  "messages" : [ {
+    "role" : "user",
+    "content" : "You are a final Intent Decision Resolver for a Minecraft AI mod. Your task is to read below the outputs and confidences from six intent classifiers and fairly deduce the player's intent out of the three intents: GENERAL_CONVERSATION: Just chatting, ASK_INFORMATION: Requesting information regarding something, REQUEST_ACTION: Requesting an action to be executed.Decide between: REQUEST_ACTION, ASK_INFORMATION, GENERAL_CONVERSATION. You should output only either the three of these based on your reasoning and the output should be the exact same as the labels, otherwise the output resolver will fail.\n- Player message: \"collect 5 dirt\"\n- BERT: REQUEST_ACTION (3.19)\n- Main CART: REQUEST_ACTION (0.71)\n- LIDSNet: REQUEST_ACTION (89.29)\n\nYour decision: Reply ONLY with one of REQUEST_ACTION, ASK_INFORMATION, GENERAL_CONVERSATION. If truly ambiguous, return UNSPECIFIED. No further explanation.Also, do keep in mind that these classifiers are very experimental, so often they might return outputs which totally goes against your intuition, such as misclassifying a GENERAL_ACTION as REQUEST_ACTION or ASK_INFORMATION, or vice versa. In such instances, DO NOT OVERTHINK, DO NOT TRUST THE CLASSIFIERS and just go with what intent the input best fits according to you and return only the intent, not anything else",
+    "images" : null
+  } ]
+}
+[00:36:38] [Server thread/INFO]: Sending chat message (withDelay=true): 'Processing your message, please wait.'
+[00:36:38] [Server thread/INFO]: Message split into 1 parts
+[00:36:38] [Server thread/INFO]: [Not Secure] <RotiWokeman> Jake mine 5 stone
+[00:36:38] [Server thread/INFO]: Broadcasting message part 0: 'Processing your message, please wait.' from source: Jake
+[00:36:38] [pool-7-thread-2/INFO]: [STDOUT]: Loading tree from: cart_tree.json
+[00:36:38] [Server thread/INFO]: [Not Secure] [Jake] Processing your message, please wait.
+[00:36:38] [pool-7-thread-2/INFO]: [STDOUT]: Loading labels from: cart_class_labels.json
+[00:36:38] [pool-7-thread-2/INFO]: [STDOUT]: Loading vocab from: cart_vectorizer_vocab.json
+[00:36:38] [Render thread/INFO]: [CHAT] <RotiWokeman> Jake mine 5 stone
+[00:36:38] [Render thread/INFO]: [System] [CHAT] [Jake] Processing your message, please wait.
+[00:36:39] [pool-7-thread-2/INFO]: BERT predicted: REQUEST_ACTION with confidence: 3.0243306159973145
+[00:36:39] [pool-7-thread-2/INFO]: CART predicted: REQUEST_ACTION with confidence: 0.7115
+[00:36:39] [pool-7-thread-2/INFO]: Asking model: {
+  "model" : "llama3:8b",
+  "stream" : false,
+  "messages" : [ {
+    "role" : "user",
+    "content" : "You are a final Intent Decision Resolver for a Minecraft AI mod. Your task is to read below the outputs and confidences from six intent classifiers and fairly deduce the player's intent out of the three intents: GENERAL_CONVERSATION: Just chatting, ASK_INFORMATION: Requesting information regarding something, REQUEST_ACTION: Requesting an action to be executed.Decide between: REQUEST_ACTION, ASK_INFORMATION, GENERAL_CONVERSATION. You should output only either the three of these based on your reasoning and the output should be the exact same as the labels, otherwise the output resolver will fail.\n- Player message: \"mine 5 stone\"\n- BERT: REQUEST_ACTION (3.02)\n- Main CART: REQUEST_ACTION (0.71)\n- LIDSNet: REQUEST_ACTION (76.29)\n\nYour decision: Reply ONLY with one of REQUEST_ACTION, ASK_INFORMATION, GENERAL_CONVERSATION. If truly ambiguous, return UNSPECIFIED. No further explanation.Also, do keep in mind that these classifiers are very experimental, so often they might return outputs which totally goes against your intuition, such as misclassifying a GENERAL_ACTION as REQUEST_ACTION or ASK_INFORMATION, or vice versa. In such instances, DO NOT OVERTHINK, DO NOT TRUST THE CLASSIFIERS and just go with what intent the input best fits according to you and return only the intent, not anything else",
+    "images" : null
+  } ]
+}
+[00:36:41] [pool-7-thread-1/INFO]: Model response: {
+  "response" : "REQUEST_ACTION",
+  "httpStatusCode" : 200,
+  "responseTime" : 4988
+}
+[00:36:41] [pool-7-thread-1/INFO]: [STDOUT]: Answer: REQUEST_ACTION
+[00:36:41] [pool-7-thread-1/INFO]: [STDOUT]: Loading tree from: cart_tree.json
+[00:36:41] [pool-7-thread-1/INFO]: [STDOUT]: Loading labels from: cart_class_labels.json
+[00:36:41] [pool-7-thread-1/INFO]: [STDOUT]: Loading vocab from: cart_vectorizer_vocab.json
+[00:36:41] [pool-7-thread-1/INFO]: BERT predicted: REQUEST_ACTION with confidence: 3.189964771270752
+[00:36:41] [pool-7-thread-1/INFO]: CART predicted: REQUEST_ACTION with confidence: 0.7115
+[00:36:41] [pool-7-thread-1/INFO]: Asking model: {
+  "model" : "llama3:8b",
+  "stream" : false,
+  "messages" : [ {
+    "role" : "user",
+    "content" : "You are a final Intent Decision Resolver for a Minecraft AI mod. Your task is to read below the outputs and confidences from six intent classifiers and fairly deduce the player's intent out of the three intents: GENERAL_CONVERSATION: Just chatting, ASK_INFORMATION: Requesting information regarding something, REQUEST_ACTION: Requesting an action to be executed.Decide between: REQUEST_ACTION, ASK_INFORMATION, GENERAL_CONVERSATION. You should output only either the three of these based on your reasoning and the output should be the exact same as the labels, otherwise the output resolver will fail.\n- Player message: \"collect 5 dirt\"\n- BERT: REQUEST_ACTION (3.19)\n- Main CART: REQUEST_ACTION (0.71)\n- LIDSNet: REQUEST_ACTION (89.29)\n\nYour decision: Reply ONLY with one of REQUEST_ACTION, ASK_INFORMATION, GENERAL_CONVERSATION. If truly ambiguous, return UNSPECIFIED. No further explanation.Also, do keep in mind that these classifiers are very experimental, so often they might return outputs which totally goes against your intuition, such as misclassifying a GENERAL_ACTION as REQUEST_ACTION or ASK_INFORMATION, or vice versa. In such instances, DO NOT OVERTHINK, DO NOT TRUST THE CLASSIFIERS and just go with what intent the input best fits according to you and return only the intent, not anything else",
+    "images" : null
+  } ]
+}
+[00:36:41] [pool-7-thread-2/INFO]: Model response: {
+  "response" : "REQUEST_ACTION",
+  "httpStatusCode" : 200,
+  "responseTime" : 2738
+}
+[00:36:41] [pool-7-thread-2/INFO]: [STDOUT]: Answer: REQUEST_ACTION
+[00:36:41] [pool-7-thread-2/INFO]: [STDOUT]: Loading tree from: cart_tree.json
+[00:36:41] [pool-7-thread-2/INFO]: [STDOUT]: Loading labels from: cart_class_labels.json
+[00:36:41] [pool-7-thread-2/INFO]: [STDOUT]: Loading vocab from: cart_vectorizer_vocab.json
+[00:36:41] [pool-7-thread-2/INFO]: BERT predicted: REQUEST_ACTION with confidence: 3.0243306159973145
+[00:36:41] [pool-7-thread-2/INFO]: CART predicted: REQUEST_ACTION with confidence: 0.7115
+[00:36:42] [pool-7-thread-2/INFO]: Asking model: {
+  "model" : "llama3:8b",
+  "stream" : false,
+  "messages" : [ {
+    "role" : "user",
+    "content" : "You are a final Intent Decision Resolver for a Minecraft AI mod. Your task is to read below the outputs and confidences from six intent classifiers and fairly deduce the player's intent out of the three intents: GENERAL_CONVERSATION: Just chatting, ASK_INFORMATION: Requesting information regarding something, REQUEST_ACTION: Requesting an action to be executed.Decide between: REQUEST_ACTION, ASK_INFORMATION, GENERAL_CONVERSATION. You should output only either the three of these based on your reasoning and the output should be the exact same as the labels, otherwise the output resolver will fail.\n- Player message: \"mine 5 stone\"\n- BERT: REQUEST_ACTION (3.02)\n- Main CART: REQUEST_ACTION (0.71)\n- LIDSNet: REQUEST_ACTION (76.29)\n\nYour decision: Reply ONLY with one of REQUEST_ACTION, ASK_INFORMATION, GENERAL_CONVERSATION. If truly ambiguous, return UNSPECIFIED. No further explanation.Also, do keep in mind that these classifiers are very experimental, so often they might return outputs which totally goes against your intuition, such as misclassifying a GENERAL_ACTION as REQUEST_ACTION or ASK_INFORMATION, or vice versa. In such instances, DO NOT OVERTHINK, DO NOT TRUST THE CLASSIFIERS and just go with what intent the input best fits according to you and return only the intent, not anything else",
+    "images" : null
+  } ]
+}
+[00:36:42] [pool-7-thread-1/INFO]: Model response: {
+  "response" : "REQUEST_ACTION",
+  "httpStatusCode" : 200,
+  "responseTime" : 1590
+}
+[00:36:42] [pool-7-thread-1/INFO]: [STDOUT]: Answer: REQUEST_ACTION
+[00:36:42] [pool-7-thread-1/INFO]: 📨 Received intent: REQUEST_ACTION
+[00:36:42] [pool-7-thread-1/INFO]: Reserving job for Bob: collect 5 dirt
+[00:36:42] [LLM-Function-Caller-Worker/INFO]: 🧵 Started FunctionCallerV2 worker thread
+[00:36:42] [LLM-Function-Caller-Worker/INFO]: Asking model: {
+  "model" : "llama3:8b",
+  "stream" : false,
+  "messages" : [ {
+    "role" : "system",
+    "content" : "You are a first-principles reasoning **function-caller AI agent** for a Minecraft bot.\n\nPersona & Voice\n- You embody the following persona: Bob is a dry-humoured veteran ranger. He sounds a little weary but dependable, sprinkles in the occasional sardonic remark, and keeps things grounded in reality.\n- Speak like an adult adventurer in a serious RPG setting—confident, grounded, and never cutesy.\n- Each bot keeps its own voice. Stay consistent between replies.\n\nConversation vs Command\n- When the player is merely chatting, asking questions, or does not require an action, respond with JSON of the form {\"conversation\": \"<your reply>\"} and nothing else.\n- When the player requests an action, return either a single function call or a pipeline as described below.\n- You may include {\"clarification\": \"...\"} when you genuinely need more detail.\n\nConfirmation Policy\n- **Only** request confirmation for resource-intensive jobs (mining, gathering, farming, bulk hauling, etc.).\n- Use the fields {\"requiresConfirmation\": true, \"confirmationPrompt\": \"...\"} to ask before executing that pipeline.\n- Never ask for confirmation when the player wants to stop, follow, navigate, defend, or issue other immediate tactical orders.\n\n---\n\nKey Principles\n\n1. **Use only the tools you have.**\nDo not hallucinate new tools. Each tool has clear parameters, a purpose, and trade-offs.\n\n2. **Use the fewest tools possible.**\nWhen a single tool is enough, use it.\nWhen multiple tools must be chained, output them as a pipeline in the correct order.\n\n3. **Focus on action verbs.**\nPlayer prompts contain action verbs that reveal intent: go, walk, navigate, check, search, mine, approach, align, harvest, etcetera.\nAlways match these to the most relevant tools.\n\n4. **Use $placeholders for shared state.**\nIf a step depends on output from a previous step, use `$lastDetectedBlock.x` (etc.).\nThe runtime will substitute these dynamically.\n\n---\n\nExecution Loop\n\nAfter each step, you will be given the output of the previous function.\nYou must decide what to do next:\n- Continue with the remaining steps in the pipeline.\n- Retry the same function with adjusted parameters.\n- Abandon the current pipeline and create a completely new pipeline.\n\n---\n\n### **Examples**\n\n✅ **Conversation only:**\n{ \"conversation\": \"Nothing unusual on my patrol. Want me to scout the ridge next?\" }\n\n✅ **Retry:**\nIf the previous function failed or needs adjustments, output:\n{\n  \"functionName\": \"goTo\",\n  \"parameters\": [\n    { \"parameterName\": \"x\", \"parameterValue\": \"12\" },\n    { \"parameterName\": \"y\", \"parameterValue\": \"65\" },\n    { \"parameterName\": \"z\", \"parameterValue\": \"-20\" },\n    { \"parameterName\": \"sprint\", \"parameterValue\": \"false\" }\n  ]\n}\n\n✅ Rebuild pipeline:\nIf the plan must change completely, output:\n{\n  \"pipeline\": [\n    {\n      \"functionName\": \"detectBlocks\",\n      \"parameters\": [\n        { \"parameterName\": \"blockType\", \"parameterValue\": \"stone\" }\n      ]\n    },\n    {\n      \"functionName\": \"goTo\",\n      \"parameters\": [\n        { \"parameterName\": \"x\", \"parameterValue\": \"$lastDetectedBlock.x\" },\n        { \"parameterName\": \"y\", \"parameterValue\": \"$lastDetectedBlock.y\" },\n        { \"parameterName\": \"z\", \"parameterValue\": \"$lastDetectedBlock.z\" },\n        { \"parameterName\": \"sprint\", \"parameterValue\": \"true\" }\n      ]\n    }\n  ]\n}\n\n---\n\nWhen to chain tools:\n\nFor example if the player outputs: \"Can you fetch me some wood?\" or \"Can you mine some iron?\" or \"Can you plant the wheat seeds from the chest?\"\n\nThese type of requests are requests which involve multi-step actions, each action chained in a particular order.\n\nTo fulfill these type of requests you need to chain the tools you have at your disposal in a specific order by understanding what each tool does and how each tool works.\n\n---\n\nHow you must output:\n\nIf you only need to use one tool, output in this JSON format.\n\n{\n  \"functionName\": \"searchBlock\",\n  \"parameters\": [\n    { \"parameterName\": \"direction\", \"parameterValue\": \"front\" }\n  ]\n}\n\nIf you need multiple tools in a sequence, output as follows:\n\n{\n  \"pipeline\": [\n    {\n\nYou will be provided with additional context information of the minecraft bot you are controlling. Use that information well to carefully plan your approach.\n\nYour role is to analyze player prompts carefully and decide which tool or sequence of tools best accomplishes the task.\nYou must output your decision strictly as JSON, following the required schema.\n\n---\n\nKey Principles\n\n1. **Use only the tools you have.**\nDo not hallucinate new tools. Each tool has clear parameters, a purpose, and trade-offs.\n\n2. **Use the fewest tools possible.**\nWhen a single tool is enough, use it.\nWhen multiple tools must be chained, output them as a pipeline in the correct order.\n\n3. **Focus on action verbs.**\nPlayer prompts contain action verbs that reveal intent: go, walk, navigate, check, search, mine, approach, align, harvest, etcetera.\nAlways match these to the most relevant tools.\n\n4. **Use $placeholders for shared state.**\nIf a step depends on output from a previous step, use `$lastDetectedBlock.x` (etc.).\nThe runtime will substitute these dynamically.\n\n---\n\nExecution Loop\n\nAfter each step, you will be given the output of the previous function.\nYou must decide what to do next:\n- Continue with the remaining steps in the pipeline.\n- Retry the same function with adjusted parameters.\n- Abandon the current pipeline and create a completely new pipeline.\n\n---\n\n### **Examples**\n\n✅ **Continue:**\nIf you are satisfied, do nothing — the next step will execute automatically.\n\n✅ **Retry:**\nIf the previous function failed or needs adjustments, output:\n{\n  \"functionName\": \"goTo\",\n  \"parameters\": [\n    { \"parameterName\": \"x\", \"parameterValue\": \"12\" },\n    { \"parameterName\": \"y\", \"parameterValue\": \"65\" },\n    { \"parameterName\": \"z\", \"parameterValue\": \"-20\" },\n    { \"parameterName\": \"sprint\", \"parameterValue\": \"false\" }\n  ]\n}\n\n✅ Rebuild pipeline:\nIf the plan must change completely, output:\n{\n  \"pipeline\": [\n    {\n      \"functionName\": \"detectBlocks\",\n      \"parameters\": [\n        { \"parameterName\": \"blockType\", \"parameterValue\": \"stone\" }\n      ]\n    },\n    {\n      \"functionName\": \"goTo\",\n      \"parameters\": [\n        { \"parameterName\": \"x\", \"parameterValue\": \"$lastDetectedBlock.x\" },\n        { \"parameterName\": \"y\", \"parameterValue\": \"$lastDetectedBlock.y\" },\n        { \"parameterName\": \"z\", \"parameterValue\": \"$lastDetectedBlock.z\" },\n        { \"parameterName\": \"sprint\", \"parameterValue\": \"true\" }\n      ]\n    }\n  ]\n}\n\n---\n\nWhen to chain tools:\n\nFor example if the player outputs: \"Can you fetch me some wood?\" or \"Can you mine some iron?\" or \"Can you plant the wheat seeds from the chest?\"\n\nThese type of requests are requests which involve multi-step actions, each action chained in a particular order.\n\nTo fulfill these type of requests you need to chain the tools you have at your disposal in a specific order by understanding what each tool does and how each tool works.\n\n---\n\nHow you must output:\n\nIf you only need to use one tool, output in this JSON format.\n\n{\n  \"functionName\": \"searchBlock\",\n  \"parameters\": [\n    { \"parameterName\": \"direction\", \"parameterValue\": \"front\" }\n  ]\n}\n\nIf you need multiple tools in a sequence, output as follows:\n\n{\n  \"pipeline\": [\n    {\n      \"functionName\": \"searchBlock\",\n      \"parameters\": [\n        { \"parameterName\": \"direction\", \"parameterValue\": \"front\" }\n      ]\n    },\n    {\n      \"functionName\": \"goTo\",\n      \"parameters\": [\n        { \"parameterName\": \"x\", \"parameterValue\": \"$lastDetectedBlock.x\" },\n        { \"parameterName\": \"y\", \"parameterValue\": \"$lastDetectedBlock.y\" },\n        { \"parameterName\": \"z\", \"parameterValue\": \"$lastDetectedBlock.z\" }\n      ]\n    }\n  ]\n}\n\n---\n\nREMEMBER:\n\n✅ Always use $placeholders when a step depends on values returned by a previous step. The pipeline executor will resolve these placeholders dynamically with the correct output from the previous step.\n\n✅ Always use the \" + PARAMETER_NAME_KEY + \" and \" + PARAMETER_VALUE_KEY + \" fields exactly — do not rename them.\n\n✅ Do not output any extra words, explanations, or formatting — only valid JSON.\n\n===\n\nFinal reminders:\n\n✅ Only output valid JSON.\n\n✅ Do not output any other text.\n\n✅ Do not change field names.\n\n✅ Be logical — always use the simplest pipeline that fully achieves the goal.\n\n✅ The runtime will parse your JSON exactly as you return it.\n\n---\n\nIf the prompt is ambiguous, choose the minimal safe path or ask for clarification.\n\nIf you cannot confidently select the correct tools because the prompt is ambiguous or incomplete,\ndo NOT guess.\n\nInstead, output JSON like this:\n\n{\n  \"clarification\": \"Could you please clarify which type of block I should search for?\"\n}\n\nYour clarification should be concise, specific, and related to Minecraft context.\n\n✅ Never output any other words — only valid JSON.\n\n✅ The runtime will deliver your clarification question to the player and wait for their answer.\n\n✅ After receiving the answer, decide on how you should continue things from there onwards. If you again need more clarification, ask again.\n\n---\n\nAvailable Tools\n\nBelow is your list of tools, each with its name, description, required parameters and the key names:\n\n{\"functions\":[{\"description\":\"Uses the path finder and path tracer to navigate to a given x y z coordinate.\\nStops within ~3 blocks of the target due to inertia-based carpet bot control.\\n\",\"name\":\"goTo\",\"parameters\":[{\"required\":true,\"description\":\"X coordinate to go to.\",\"name\":\"x\"},{\"required\":true,\"description\":\"Y coordinate to go to.\",\"name\":\"y\"},{\"required\":true,\"description\":\"Z coordinate to go to.\",\"name\":\"z\"},{\"required\":true,\"description\":\"Boolean flag for sprint mode.\",\"name\":\"sprint\"}]},{\"description\":\"Raycasts to find the first block of the given type in front of the bot.\\nIf found, stores its coordinates in shared state for chaining.\\n\",\"name\":\"detectBlocks\",\"parameters\":[{\"required\":true,\"description\":\"Target block\\u0027s name.\",\"name\":\"blockType\"}]},{\"description\":\"Turns the bot to face a new direction based on the parameters (a side of the bot). Unlike the look method, this method only rotates the bot to face 3 of it\\u0027s sides, i.e the left, right or it\\u0027s back.\",\"name\":\"turn\",\"parameters\":[{\"required\":true,\"description\":\"Direction to turn. Valid: \\u0027left\\u0027, \\u0027right\\u0027, \\u0027back\\u0027.\",\"name\":\"direction\"}]},{\"description\":\"Rotates the bot to look in a specified cardinal direction (north, south, east, west).\\n\",\"name\":\"look\",\"parameters\":[{\"required\":true,\"description\":\"Direction to look. Valid: \\u0027north\\u0027, \\u0027south\\u0027, \\u0027east\\u0027, \\u0027west\\u0027.\",\"name\":\"cardinalDirection\"}]},{\"description\":\"Mines the block at the given coordinates.\\n\",\"name\":\"mineBlock\",\"parameters\":[{\"required\":true,\"description\":\"Target block X coordinate.\",\"name\":\"targetX\"},{\"required\":true,\"description\":\"Target block Y coordinate.\",\"name\":\"targetY\"},{\"required\":true,\"description\":\"Target block Z coordinate.\",\"name\":\"targetZ\"}]},{\"description\":\"Detects and chops wood blocks of a specified tree type. This is a composite tool.\\n\",\"name\":\"chopWood\",\"parameters\":[{\"required\":true,\"description\":\"Type of tree to chop (e.g., \\u0027oak_log\\u0027, \\u0027birch_log\\u0027).\",\"name\":\"treeType\"}]},{\"description\":\"Retrieves the bot\\u0027s current oxygen (air) level.\\n\",\"name\":\"getOxygenLevel\",\"parameters\":[{\"required\":true,\"description\":\"No parameters needed.\",\"name\":\"None\"}]},{\"description\":\"Detects and shovels dirt blocks. This is a composite tool.\\n\",\"name\":\"shovelDirt\",\"parameters\":[]},{\"description\":\"Detects dirt blocks and cultivates them with a hoe. This is a composite tool.\\n\",\"name\":\"cultivateLand\",\"parameters\":[{\"required\":true,\"description\":\"Target block X coordinate.\",\"name\":\"targetX\"},{\"required\":true,\"description\":\"Target block Y coordinate.\",\"name\":\"targetY\"},{\"required\":true,\"description\":\"Target block Z coordinate.\",\"name\":\"targetZ\"}]},{\"description\":\"Gets the bot\\u0027s hunger level.\\n\",\"name\":\"getHungerLevel\",\"parameters\":[{\"required\":true,\"description\":\"No parameters needed.\",\"name\":\"None\"}]},{\"description\":\"Gets the bot\\u0027s health level (hearts).\\n\",\"name\":\"getHealthLevel\",\"parameters\":[{\"required\":true,\"description\":\"No parameters needed.\",\"name\":\"None\"}]},{\"description\":\"Searches the web for the input query via an automatically pre-configured provider. Meant to be used as a standalone method and not in a pipeline.\\n\",\"name\":\"webSearch\",\"parameters\":[{\"required\":true,\"description\":\"You need to understand the user\\u0027s input and put in a search query accordingly in here.\",\"name\":\"Query\"}]},{\"description\":\"Sets the bot to follow the specified player.\",\"name\":\"followPlayer\",\"parameters\":[{\"required\":true,\"description\":\"Name of the player to follow.\",\"name\":\"playerName\"}]},{\"description\":\"Orders the bot to guard its current area.\",\"name\":\"guardArea\",\"parameters\":[{\"required\":true,\"description\":\"Guard radius in blocks (optional).\",\"name\":\"radius\"}]},{\"description\":\"Makes the bot stay at its current location.\",\"name\":\"stayPut\",\"parameters\":[{\"required\":true,\"description\":\"No parameters needed.\",\"name\":\"None\"}]},{\"description\":\"Sends the bot back to its base location.\",\"name\":\"returnToBase\",\"parameters\":[{\"required\":true,\"description\":\"No parameters needed.\",\"name\":\"None\"}]},{\"description\":\"Toggles whether the bot assists allies in combat.\",\"name\":\"toggleAssist\",\"parameters\":[{\"required\":true,\"description\":\"Use \\u0027on\\u0027 or \\u0027off\\u0027.\",\"name\":\"mode\"}]},{\"description\":\"Executes a named skill with optional arguments. This is a generic skill runner.\\n\",\"name\":\"runSkill\",\"parameters\":[{\"required\":true,\"description\":\"The name of the skill to run (e.g., \\u0027collect_dirt\\u0027, \\u0027mining\\u0027).\",\"name\":\"skillName\"},{\"required\":true,\"description\":\"Optional: The number of items to collect.\",\"name\":\"count\"},{\"required\":true,\"description\":\"Optional: Comma-separated list of block IDs to target (e.g., \\u0027minecraft:stone,minecraft:cobblestone\\u0027).\",\"name\":\"targetBlockIds\"},{\"required\":true,\"description\":\"Optional: The maximum number of failures before giving up.\",\"name\":\"maxFails\"},{\"required\":true,\"description\":\"Optional: Additional options for the skill, as a single string (e.g., \\u0027until square\\u0027).\",\"name\":\"options\"}]}]}\n\n    And the correct placeholders to use per tool: \n\n\n    {runSkill=[lastSkillResult.message], cultivateLand=[lastCultivateStatus], goTo=[botPosition.x, botPosition.y, botPosition.z], faceBlock=[facing.yaw, facing.pitch], chopWood=[lastChopStatus], mineBlock=[lastMineStatus], getHungerLevel=[hungerLevel], detectBlocks=[lastDetectedBlock.x, lastDetectedBlock.y, lastDetectedBlock.z], getOxygenLevel=[oxygenLevel], look=[facing.direction, facing.facing, facing.axis], turn=[facing.direction, facing.facing, facing.axis], getHealthLevel=[healthLevel], chartPathToBlock=[finalBlockPos.x, finalBlockPos.y, finalBlockPos.z], faceEntity=[facing.entityName]}\n     Do remember to add a placeholder symbol: $ in front of each parameter name when designing the pipeline json.\n\nBot's context information:\nBot current state:\n- Position: (-15, 64, 7)\n- Facing: north (axis: z)- Selected Item: Stone Pickaxe\n- Nearby Blocks: [Dirt, Dirt, Grass Block]\n- Health: 20\n- Hunger: 20\n- Oxygen: 300\n- Immediate surroundings:\n • east: snow\n • south: snow\n • north: snow\n • west: snow\n • up: air\n • down: grass_block\n",
+    "images" : null
+  }, {
+    "role" : "user",
+    "content" : "collect 5 dirt",
+    "images" : null
+  } ]
+}
+[00:36:43] [pool-7-thread-2/INFO]: Model response: {
+  "response" : "REQUEST_ACTION",
+  "httpStatusCode" : 200,
+  "responseTime" : 1617
+}
+[00:36:43] [pool-7-thread-2/INFO]: [STDOUT]: Answer: REQUEST_ACTION
+[00:36:43] [pool-7-thread-2/INFO]: 📨 Received intent: REQUEST_ACTION
+[00:36:43] [pool-7-thread-2/INFO]: Reserving job for Jake: mine 5 stone
+[00:36:43] [LLM-Function-Caller-Worker/INFO]: 🧵 Started FunctionCallerV2 worker thread
+[00:36:43] [LLM-Function-Caller-Worker/INFO]: Asking model: {
+  "model" : "llama3:8b",
+  "stream" : false,
+  "messages" : [ {
+    "role" : "system",
+    "content" : "You are a first-principles reasoning **function-caller AI agent** for a Minecraft bot.\n\nPersona & Voice\n- You embody the following persona: Jake is a pragmatic field engineer. He speaks in concise, confident sentences, focuses on plans and logistics, and prefers to keep emotions out of the conversation.\n- Speak like an adult adventurer in a serious RPG setting—confident, grounded, and never cutesy.\n- Each bot keeps its own voice. Stay consistent between replies.\n\nConversation vs Command\n- When the player is merely chatting, asking questions, or does not require an action, respond with JSON of the form {\"conversation\": \"<your reply>\"} and nothing else.\n- When the player requests an action, return either a single function call or a pipeline as described below.\n- You may include {\"clarification\": \"...\"} when you genuinely need more detail.\n\nConfirmation Policy\n- **Only** request confirmation for resource-intensive jobs (mining, gathering, farming, bulk hauling, etc.).\n- Use the fields {\"requiresConfirmation\": true, \"confirmationPrompt\": \"...\"} to ask before executing that pipeline.\n- Never ask for confirmation when the player wants to stop, follow, navigate, defend, or issue other immediate tactical orders.\n\n---\n\nKey Principles\n\n1. **Use only the tools you have.**\nDo not hallucinate new tools. Each tool has clear parameters, a purpose, and trade-offs.\n\n2. **Use the fewest tools possible.**\nWhen a single tool is enough, use it.\nWhen multiple tools must be chained, output them as a pipeline in the correct order.\n\n3. **Focus on action verbs.**\nPlayer prompts contain action verbs that reveal intent: go, walk, navigate, check, search, mine, approach, align, harvest, etcetera.\nAlways match these to the most relevant tools.\n\n4. **Use $placeholders for shared state.**\nIf a step depends on output from a previous step, use `$lastDetectedBlock.x` (etc.).\nThe runtime will substitute these dynamically.\n\n---\n\nExecution Loop\n\nAfter each step, you will be given the output of the previous function.\nYou must decide what to do next:\n- Continue with the remaining steps in the pipeline.\n- Retry the same function with adjusted parameters.\n- Abandon the current pipeline and create a completely new pipeline.\n\n---\n\n### **Examples**\n\n✅ **Conversation only:**\n{ \"conversation\": \"Nothing unusual on my patrol. Want me to scout the ridge next?\" }\n\n✅ **Retry:**\nIf the previous function failed or needs adjustments, output:\n{\n  \"functionName\": \"goTo\",\n  \"parameters\": [\n    { \"parameterName\": \"x\", \"parameterValue\": \"12\" },\n    { \"parameterName\": \"y\", \"parameterValue\": \"65\" },\n    { \"parameterName\": \"z\", \"parameterValue\": \"-20\" },\n    { \"parameterName\": \"sprint\", \"parameterValue\": \"false\" }\n  ]\n}\n\n✅ Rebuild pipeline:\nIf the plan must change completely, output:\n{\n  \"pipeline\": [\n    {\n      \"functionName\": \"detectBlocks\",\n      \"parameters\": [\n        { \"parameterName\": \"blockType\", \"parameterValue\": \"stone\" }\n      ]\n    },\n    {\n      \"functionName\": \"goTo\",\n      \"parameters\": [\n        { \"parameterName\": \"x\", \"parameterValue\": \"$lastDetectedBlock.x\" },\n        { \"parameterName\": \"y\", \"parameterValue\": \"$lastDetectedBlock.y\" },\n        { \"parameterName\": \"z\", \"parameterValue\": \"$lastDetectedBlock.z\" },\n        { \"parameterName\": \"sprint\", \"parameterValue\": \"true\" }\n      ]\n    }\n  ]\n}\n\n---\n\nWhen to chain tools:\n\nFor example if the player outputs: \"Can you fetch me some wood?\" or \"Can you mine some iron?\" or \"Can you plant the wheat seeds from the chest?\"\n\nThese type of requests are requests which involve multi-step actions, each action chained in a particular order.\n\nTo fulfill these type of requests you need to chain the tools you have at your disposal in a specific order by understanding what each tool does and how each tool works.\n\n---\n\nHow you must output:\n\nIf you only need to use one tool, output in this JSON format.\n\n{\n  \"functionName\": \"searchBlock\",\n  \"parameters\": [\n    { \"parameterName\": \"direction\", \"parameterValue\": \"front\" }\n  ]\n}\n\nIf you need multiple tools in a sequence, output as follows:\n\n{\n  \"pipeline\": [\n    {\n\nYou will be provided with additional context information of the minecraft bot you are controlling. Use that information well to carefully plan your approach.\n\nYour role is to analyze player prompts carefully and decide which tool or sequence of tools best accomplishes the task.\nYou must output your decision strictly as JSON, following the required schema.\n\n---\n\nKey Principles\n\n1. **Use only the tools you have.**\nDo not hallucinate new tools. Each tool has clear parameters, a purpose, and trade-offs.\n\n2. **Use the fewest tools possible.**\nWhen a single tool is enough, use it.\nWhen multiple tools must be chained, output them as a pipeline in the correct order.\n\n3. **Focus on action verbs.**\nPlayer prompts contain action verbs that reveal intent: go, walk, navigate, check, search, mine, approach, align, harvest, etcetera.\nAlways match these to the most relevant tools.\n\n4. **Use $placeholders for shared state.**\nIf a step depends on output from a previous step, use `$lastDetectedBlock.x` (etc.).\nThe runtime will substitute these dynamically.\n\n---\n\nExecution Loop\n\nAfter each step, you will be given the output of the previous function.\nYou must decide what to do next:\n- Continue with the remaining steps in the pipeline.\n- Retry the same function with adjusted parameters.\n- Abandon the current pipeline and create a completely new pipeline.\n\n---\n\n### **Examples**\n\n✅ **Continue:**\nIf you are satisfied, do nothing — the next step will execute automatically.\n\n✅ **Retry:**\nIf the previous function failed or needs adjustments, output:\n{\n  \"functionName\": \"goTo\",\n  \"parameters\": [\n    { \"parameterName\": \"x\", \"parameterValue\": \"12\" },\n    { \"parameterName\": \"y\", \"parameterValue\": \"65\" },\n    { \"parameterName\": \"z\", \"parameterValue\": \"-20\" },\n    { \"parameterName\": \"sprint\", \"parameterValue\": \"false\" }\n  ]\n}\n\n✅ Rebuild pipeline:\nIf the plan must change completely, output:\n{\n  \"pipeline\": [\n    {\n      \"functionName\": \"detectBlocks\",\n      \"parameters\": [\n        { \"parameterName\": \"blockType\", \"parameterValue\": \"stone\" }\n      ]\n    },\n    {\n      \"functionName\": \"goTo\",\n      \"parameters\": [\n        { \"parameterName\": \"x\", \"parameterValue\": \"$lastDetectedBlock.x\" },\n        { \"parameterName\": \"y\", \"parameterValue\": \"$lastDetectedBlock.y\" },\n        { \"parameterName\": \"z\", \"parameterValue\": \"$lastDetectedBlock.z\" },\n        { \"parameterName\": \"sprint\", \"parameterValue\": \"true\" }\n      ]\n    }\n  ]\n}\n\n---\n\nWhen to chain tools:\n\nFor example if the player outputs: \"Can you fetch me some wood?\" or \"Can you mine some iron?\" or \"Can you plant the wheat seeds from the chest?\"\n\nThese type of requests are requests which involve multi-step actions, each action chained in a particular order.\n\nTo fulfill these type of requests you need to chain the tools you have at your disposal in a specific order by understanding what each tool does and how each tool works.\n\n---\n\nHow you must output:\n\nIf you only need to use one tool, output in this JSON format.\n\n{\n  \"functionName\": \"searchBlock\",\n  \"parameters\": [\n    { \"parameterName\": \"direction\", \"parameterValue\": \"front\" }\n  ]\n}\n\nIf you need multiple tools in a sequence, output as follows:\n\n{\n  \"pipeline\": [\n    {\n      \"functionName\": \"searchBlock\",\n      \"parameters\": [\n        { \"parameterName\": \"direction\", \"parameterValue\": \"front\" }\n      ]\n    },\n    {\n      \"functionName\": \"goTo\",\n      \"parameters\": [\n        { \"parameterName\": \"x\", \"parameterValue\": \"$lastDetectedBlock.x\" },\n        { \"parameterName\": \"y\", \"parameterValue\": \"$lastDetectedBlock.y\" },\n        { \"parameterName\": \"z\", \"parameterValue\": \"$lastDetectedBlock.z\" }\n      ]\n    }\n  ]\n}\n\n---\n\nREMEMBER:\n\n✅ Always use $placeholders when a step depends on values returned by a previous step. The pipeline executor will resolve these placeholders dynamically with the correct output from the previous step.\n\n✅ Always use the \" + PARAMETER_NAME_KEY + \" and \" + PARAMETER_VALUE_KEY + \" fields exactly — do not rename them.\n\n✅ Do not output any extra words, explanations, or formatting — only valid JSON.\n\n===\n\nFinal reminders:\n\n✅ Only output valid JSON.\n\n✅ Do not output any other text.\n\n✅ Do not change field names.\n\n✅ Be logical — always use the simplest pipeline that fully achieves the goal.\n\n✅ The runtime will parse your JSON exactly as you return it.\n\n---\n\nIf the prompt is ambiguous, choose the minimal safe path or ask for clarification.\n\nIf you cannot confidently select the correct tools because the prompt is ambiguous or incomplete,\ndo NOT guess.\n\nInstead, output JSON like this:\n\n{\n  \"clarification\": \"Could you please clarify which type of block I should search for?\"\n}\n\nYour clarification should be concise, specific, and related to Minecraft context.\n\n✅ Never output any other words — only valid JSON.\n\n✅ The runtime will deliver your clarification question to the player and wait for their answer.\n\n✅ After receiving the answer, decide on how you should continue things from there onwards. If you again need more clarification, ask again.\n\n---\n\nAvailable Tools\n\nBelow is your list of tools, each with its name, description, required parameters and the key names:\n\n{\"functions\":[{\"description\":\"Uses the path finder and path tracer to navigate to a given x y z coordinate.\\nStops within ~3 blocks of the target due to inertia-based carpet bot control.\\n\",\"name\":\"goTo\",\"parameters\":[{\"required\":true,\"description\":\"X coordinate to go to.\",\"name\":\"x\"},{\"required\":true,\"description\":\"Y coordinate to go to.\",\"name\":\"y\"},{\"required\":true,\"description\":\"Z coordinate to go to.\",\"name\":\"z\"},{\"required\":true,\"description\":\"Boolean flag for sprint mode.\",\"name\":\"sprint\"}]},{\"description\":\"Raycasts to find the first block of the given type in front of the bot.\\nIf found, stores its coordinates in shared state for chaining.\\n\",\"name\":\"detectBlocks\",\"parameters\":[{\"required\":true,\"description\":\"Target block\\u0027s name.\",\"name\":\"blockType\"}]},{\"description\":\"Turns the bot to face a new direction based on the parameters (a side of the bot). Unlike the look method, this method only rotates the bot to face 3 of it\\u0027s sides, i.e the left, right or it\\u0027s back.\",\"name\":\"turn\",\"parameters\":[{\"required\":true,\"description\":\"Direction to turn. Valid: \\u0027left\\u0027, \\u0027right\\u0027, \\u0027back\\u0027.\",\"name\":\"direction\"}]},{\"description\":\"Rotates the bot to look in a specified cardinal direction (north, south, east, west).\\n\",\"name\":\"look\",\"parameters\":[{\"required\":true,\"description\":\"Direction to look. Valid: \\u0027north\\u0027, \\u0027south\\u0027, \\u0027east\\u0027, \\u0027west\\u0027.\",\"name\":\"cardinalDirection\"}]},{\"description\":\"Mines the block at the given coordinates.\\n\",\"name\":\"mineBlock\",\"parameters\":[{\"required\":true,\"description\":\"Target block X coordinate.\",\"name\":\"targetX\"},{\"required\":true,\"description\":\"Target block Y coordinate.\",\"name\":\"targetY\"},{\"required\":true,\"description\":\"Target block Z coordinate.\",\"name\":\"targetZ\"}]},{\"description\":\"Detects and chops wood blocks of a specified tree type. This is a composite tool.\\n\",\"name\":\"chopWood\",\"parameters\":[{\"required\":true,\"description\":\"Type of tree to chop (e.g., \\u0027oak_log\\u0027, \\u0027birch_log\\u0027).\",\"name\":\"treeType\"}]},{\"description\":\"Retrieves the bot\\u0027s current oxygen (air) level.\\n\",\"name\":\"getOxygenLevel\",\"parameters\":[{\"required\":true,\"description\":\"No parameters needed.\",\"name\":\"None\"}]},{\"description\":\"Detects and shovels dirt blocks. This is a composite tool.\\n\",\"name\":\"shovelDirt\",\"parameters\":[]},{\"description\":\"Detects dirt blocks and cultivates them with a hoe. This is a composite tool.\\n\",\"name\":\"cultivateLand\",\"parameters\":[{\"required\":true,\"description\":\"Target block X coordinate.\",\"name\":\"targetX\"},{\"required\":true,\"description\":\"Target block Y coordinate.\",\"name\":\"targetY\"},{\"required\":true,\"description\":\"Target block Z coordinate.\",\"name\":\"targetZ\"}]},{\"description\":\"Gets the bot\\u0027s hunger level.\\n\",\"name\":\"getHungerLevel\",\"parameters\":[{\"required\":true,\"description\":\"No parameters needed.\",\"name\":\"None\"}]},{\"description\":\"Gets the bot\\u0027s health level (hearts).\\n\",\"name\":\"getHealthLevel\",\"parameters\":[{\"required\":true,\"description\":\"No parameters needed.\",\"name\":\"None\"}]},{\"description\":\"Searches the web for the input query via an automatically pre-configured provider. Meant to be used as a standalone method and not in a pipeline.\\n\",\"name\":\"webSearch\",\"parameters\":[{\"required\":true,\"description\":\"You need to understand the user\\u0027s input and put in a search query accordingly in here.\",\"name\":\"Query\"}]},{\"description\":\"Sets the bot to follow the specified player.\",\"name\":\"followPlayer\",\"parameters\":[{\"required\":true,\"description\":\"Name of the player to follow.\",\"name\":\"playerName\"}]},{\"description\":\"Orders the bot to guard its current area.\",\"name\":\"guardArea\",\"parameters\":[{\"required\":true,\"description\":\"Guard radius in blocks (optional).\",\"name\":\"radius\"}]},{\"description\":\"Makes the bot stay at its current location.\",\"name\":\"stayPut\",\"parameters\":[{\"required\":true,\"description\":\"No parameters needed.\",\"name\":\"None\"}]},{\"description\":\"Sends the bot back to its base location.\",\"name\":\"returnToBase\",\"parameters\":[{\"required\":true,\"description\":\"No parameters needed.\",\"name\":\"None\"}]},{\"description\":\"Toggles whether the bot assists allies in combat.\",\"name\":\"toggleAssist\",\"parameters\":[{\"required\":true,\"description\":\"Use \\u0027on\\u0027 or \\u0027off\\u0027.\",\"name\":\"mode\"}]},{\"description\":\"Executes a named skill with optional arguments. This is a generic skill runner.\\n\",\"name\":\"runSkill\",\"parameters\":[{\"required\":true,\"description\":\"The name of the skill to run (e.g., \\u0027collect_dirt\\u0027, \\u0027mining\\u0027).\",\"name\":\"skillName\"},{\"required\":true,\"description\":\"Optional: The number of items to collect.\",\"name\":\"count\"},{\"required\":true,\"description\":\"Optional: Comma-separated list of block IDs to target (e.g., \\u0027minecraft:stone,minecraft:cobblestone\\u0027).\",\"name\":\"targetBlockIds\"},{\"required\":true,\"description\":\"Optional: The maximum number of failures before giving up.\",\"name\":\"maxFails\"},{\"required\":true,\"description\":\"Optional: Additional options for the skill, as a single string (e.g., \\u0027until square\\u0027).\",\"name\":\"options\"}]}]}\n\n    And the correct placeholders to use per tool: \n\n\n    {runSkill=[lastSkillResult.message], cultivateLand=[lastCultivateStatus], goTo=[botPosition.x, botPosition.y, botPosition.z], faceBlock=[facing.yaw, facing.pitch], chopWood=[lastChopStatus], mineBlock=[lastMineStatus], getHungerLevel=[hungerLevel], detectBlocks=[lastDetectedBlock.x, lastDetectedBlock.y, lastDetectedBlock.z], getOxygenLevel=[oxygenLevel], look=[facing.direction, facing.facing, facing.axis], turn=[facing.direction, facing.facing, facing.axis], getHealthLevel=[healthLevel], chartPathToBlock=[finalBlockPos.x, finalBlockPos.y, finalBlockPos.z], faceEntity=[facing.entityName]}\n     Do remember to add a placeholder symbol: $ in front of each parameter name when designing the pipeline json.\n\nBot's context information:\nBot current state:\n- Position: (-14, 64, 5)\n- Facing: south (axis: z)- Selected Item: Stone Pickaxe\n- Nearby Blocks: [Dirt, Dirt, Grass Block]\n- Health: 20\n- Hunger: 20\n- Oxygen: 300\n- Immediate surroundings:\n • east: snow\n • south: snow\n • north: snow\n • west: snow\n • up: air\n • down: grass_block\n",
+    "images" : null
+  }, {
+    "role" : "user",
+    "content" : "mine 5 stone",
+    "images" : null
+  } ]
+}
+[00:36:51] [Server thread/INFO]: Saved inventory for fakeplayer 'Bob' to bob_17c3d366-025a-4751-ac14-fdd43ffebae2.nbt
+[00:36:51] [Server thread/INFO]: Saved inventory for fakeplayer 'Jake' to jake_e01f59a8-aebb-4eed-9a56-bc36f8507228.nbt
+[00:36:54] [DH-Phantom Array Recycler Thread[0]/WARN]: Pool: [Render Reducer]. Unable to find checkout for phantom reference [java.lang.ref.PhantomReference@1baa4c8a], arrays will need to be recreated.
+[00:37:04] [LLM-Function-Caller-Worker/INFO]: Model response: {
+  "response" : "{ \"functionName\": \"cultivateLand\", \"parameters\": [ { \"parameterName\": \"targetX\", \"parameterValue\": \"-15\" }, { \"parameterName\": \"targetY\", \"parameterValue\": \"64\" }, { \"parameterName\": \"targetZ\", \"parameterValue\": \"7\" } ] }",
+  "httpStatusCode" : 200,
+  "responseTime" : 21797
+}
+[00:37:04] [LLM-Function-Caller-Worker/INFO]: Raw LLM Response: { "functionName": "cultivateLand", "parameters": [ { "parameterName": "targetX", "parameterValue": "-15" }, { "parameterName": "targetY", "parameterValue": "64" }, { "parameterName": "targetZ", "parameterValue": "7" } ] }
+[00:37:04] [LLM-Function-Caller-Worker/INFO]: Extracted JSON: { "functionName": "cultivateLand", "parameters": [ { "parameterName": "targetX", "parameterValue": "-15" }, { "parameterName": "targetY", "parameterValue": "64" }, { "parameterName": "targetZ", "parameterValue": "7" } ] }
+[00:37:04] [LLM-Function-Caller-Worker/INFO]: ✅ Finished FunctionCallerV2 worker thread
+[00:37:04] [pool-13-thread-1/INFO]: Cleaned JSON Response: { "functionName":"cultivateLand","parameters":[ { "parameterName":"targetX","parameterValue":"-15" },{ "parameterName":"targetY","parameterValue":"64" },{ "parameterName":"targetZ","parameterValue":"7" }] }
+[00:37:04] [pool-13-thread-1/INFO]: Converted single-tool resource command into runSkill payload: {"functionName":"runSkill","parameters":[{"parameterName":"skillName","parameterValue":"collect_dirt"},{"parameterName":"count","parameterValue":"5"},{"parameterName":"targetBlockIds","parameterValue":"minecraft:dirt,minecraft:coarse_dirt,minecraft:rooted_dirt,minecraft:grass_block"}]}
+[00:37:04] [pool-13-thread-1/INFO]: Sending chat message (withDelay=true): 'Should I go ahead with runSkill? (yes/no)'
+[00:37:04] [pool-13-thread-1/INFO]: Message split into 1 parts
+[00:37:04] [Server thread/INFO]: Broadcasting message part 0: 'Should I go ahead with runSkill? (yes/no)' from source: Bob
+[00:37:04] [Server thread/INFO]: [Not Secure] [Bob] Should I go ahead with runSkill? (yes/no)
+[00:37:04] [Render thread/INFO]: [System] [CHAT] [Bob] Should I go ahead with runSkill? (yes/no)
+[00:37:13] [Server thread/INFO]: Sending chat message (withDelay=true): 'On it.'
+[00:37:13] [Server thread/INFO]: Message split into 1 parts
+[00:37:13] [Server thread/INFO]: [Not Secure] <RotiWokeman> Bob yes
+[00:37:13] [Server thread/INFO]: Broadcasting message part 0: 'On it.' from source: Bob
+[00:37:13] [pool-13-thread-2/INFO]: Cleaned JSON Response: { "functionName":"cultivateLand","parameters":[ { "parameterName":"targetX","parameterValue":"-15" },{ "parameterName":"targetY","parameterValue":"64" },{ "parameterName":"targetZ","parameterValue":"7" }] }
+[00:37:13] [Server thread/INFO]: [Not Secure] [Bob] On it.
+[00:37:13] [pool-13-thread-2/INFO]: Converted single-tool resource command into runSkill payload: {"functionName":"runSkill","parameters":[{"parameterName":"skillName","parameterValue":"collect_dirt"},{"parameterName":"count","parameterValue":"5"},{"parameterName":"targetBlockIds","parameterValue":"minecraft:dirt,minecraft:coarse_dirt,minecraft:rooted_dirt,minecraft:grass_block"}]}
+[00:37:13] [pool-13-thread-2/INFO]: External override activated; pausing training loop.
+[00:37:13] [pool-13-thread-2/INFO]: 📴 Pausing training loop for external command
+[00:37:13] [pool-13-thread-2/INFO]: All movement tasks flushed
+[00:37:13] [pool-13-thread-2/INFO]: Executing: runSkill with {skillName=collect_dirt, targetBlockIds=minecraft:dirt,minecraft:coarse_dirt,minecraft:rooted_dirt,minecraft:grass_block, count=5}
+[00:37:13] [ForkJoinPool.commonPool-worker-2/INFO]: Calling method: runSkill with skillName=collect_dirt count=5 targetBlockIds=minecraft:dirt,minecraft:coarse_dirt,minecraft:rooted_dirt,minecraft:grass_block maxFails= options=
+[00:37:13] [ForkJoinPool.commonPool-worker-2/INFO]: [STDOUT]: Running skill: collect_dirt with count: 5, targetBlockIds: minecraft:dirt,minecraft:coarse_dirt,minecraft:rooted_dirt,minecraft:grass_block, maxFails: , options: 
+[00:37:13] [pool-13-thread-2/INFO]: External override cleared; training loop may resume.
+[00:37:13] [Render thread/INFO]: [CHAT] <RotiWokeman> Bob yes
+[00:37:13] [Render thread/INFO]: [System] [CHAT] [Bob] On it.
+[00:37:21] [Server thread/INFO]: Saved inventory for fakeplayer 'Bob' to bob_17c3d366-025a-4751-ac14-fdd43ffebae2.nbt
+[00:37:21] [Server thread/INFO]: Saved inventory for fakeplayer 'Jake' to jake_e01f59a8-aebb-4eed-9a56-bc36f8507228.nbt
+[00:37:23] [LLM-Function-Caller-Worker/INFO]: Model response: {
+  "response" : "{\"functionName\": \"mineBlock\", \"parameters\": [{\"parameterName\": \"targetX\", \"parameterValue\": \"-14\"}, {\"parameterName\": \"targetY\", \"parameterValue\": \"64\"}, {\"parameterName\": \"targetZ\", \"parameterValue\": \"5\"}]}",
+  "httpStatusCode" : 200,
+  "responseTime" : 39434
+}
+[00:37:23] [LLM-Function-Caller-Worker/INFO]: Raw LLM Response: {"functionName": "mineBlock", "parameters": [{"parameterName": "targetX", "parameterValue": "-14"}, {"parameterName": "targetY", "parameterValue": "64"}, {"parameterName": "targetZ", "parameterValue": "5"}]}
+[00:37:23] [LLM-Function-Caller-Worker/INFO]: Extracted JSON: {"functionName": "mineBlock", "parameters": [{"parameterName": "targetX", "parameterValue": "-14"}, {"parameterName": "targetY", "parameterValue": "64"}, {"parameterName": "targetZ", "parameterValue": "5"}]}
+[00:37:23] [LLM-Function-Caller-Worker/INFO]: ✅ Finished FunctionCallerV2 worker thread
+[00:37:23] [pool-13-thread-3/INFO]: Cleaned JSON Response: {"functionName":"mineBlock","parameters":[{"parameterName":"targetX","parameterValue":"-14"},{"parameterName":"targetY","parameterValue":"64"},{"parameterName":"targetZ","parameterValue":"5"}]}
+[00:37:23] [pool-13-thread-3/INFO]: Converted single-tool resource command into runSkill payload: {"functionName":"runSkill","parameters":[{"parameterName":"skillName","parameterValue":"mining"},{"parameterName":"count","parameterValue":"5"},{"parameterName":"targetBlockIds","parameterValue":"minecraft:stone,minecraft:cobblestone"}]}
+[00:37:23] [pool-13-thread-3/INFO]: Sending chat message (withDelay=true): 'Should I go ahead with runSkill? (yes/no)'
+[00:37:23] [pool-13-thread-3/INFO]: Message split into 1 parts
+[00:37:23] [Server thread/INFO]: Broadcasting message part 0: 'Should I go ahead with runSkill? (yes/no)' from source: Jake
+[00:37:23] [Server thread/INFO]: [Not Secure] [Jake] Should I go ahead with runSkill? (yes/no)
+[00:37:23] [Render thread/INFO]: [System] [CHAT] [Jake] Should I go ahead with runSkill? (yes/no)
+[00:37:26] [Server thread/INFO]: Sending chat message (withDelay=true): 'On it.'
+[00:37:26] [Server thread/INFO]: Message split into 1 parts
+[00:37:26] [Server thread/INFO]: [Not Secure] <RotiWokeman> Jake yes
+[00:37:26] [Server thread/INFO]: Broadcasting message part 0: 'On it.' from source: Jake
+[00:37:26] [pool-13-thread-4/INFO]: Cleaned JSON Response: {"functionName":"mineBlock","parameters":[{"parameterName":"targetX","parameterValue":"-14"},{"parameterName":"targetY","parameterValue":"64"},{"parameterName":"targetZ","parameterValue":"5"}]}
+[00:37:26] [Server thread/INFO]: [Not Secure] [Jake] On it.
+[00:37:26] [pool-13-thread-4/INFO]: Converted single-tool resource command into runSkill payload: {"functionName":"runSkill","parameters":[{"parameterName":"skillName","parameterValue":"mining"},{"parameterName":"count","parameterValue":"5"},{"parameterName":"targetBlockIds","parameterValue":"minecraft:stone,minecraft:cobblestone"}]}
+[00:37:26] [pool-13-thread-4/INFO]: External override activated; pausing training loop.
+[00:37:26] [pool-13-thread-4/INFO]: 📴 Pausing training loop for external command
+[00:37:26] [pool-13-thread-4/INFO]: All movement tasks flushed
+[00:37:26] [pool-13-thread-4/INFO]: Executing: runSkill with {skillName=mining, targetBlockIds=minecraft:stone,minecraft:cobblestone, count=5}
+[00:37:26] [ForkJoinPool.commonPool-worker-2/INFO]: Calling method: runSkill with skillName=mining count=5 targetBlockIds=minecraft:stone,minecraft:cobblestone maxFails= options=
+[00:37:26] [ForkJoinPool.commonPool-worker-2/INFO]: [STDOUT]: Running skill: mining with count: 5, targetBlockIds: minecraft:stone,minecraft:cobblestone, maxFails: , options: 
+[00:37:26] [pool-13-thread-4/INFO]: External override cleared; training loop may resume.
+[00:37:26] [Render thread/INFO]: [CHAT] <RotiWokeman> Jake yes
+[00:37:26] [Render thread/INFO]: [System] [CHAT] [Jake] On it.
+[00:37:33] [Render thread/INFO]: Resizing Dynamic Transforms UBO, capacity limit of 16 reached during a single frame. New capacity will be 32.
+[00:37:37] [Server thread/INFO]: [RotiWokeman: Set the time to 1000]
+[00:37:37] [Render thread/INFO]: [System] [CHAT] Set the time to 1000
+[00:37:51] [Server thread/INFO]: Saved inventory for fakeplayer 'Bob' to bob_17c3d366-025a-4751-ac14-fdd43ffebae2.nbt
+[00:37:51] [Server thread/INFO]: Saved inventory for fakeplayer 'Jake' to jake_e01f59a8-aebb-4eed-9a56-bc36f8507228.nbt
+[00:37:57] [Server thread/INFO]: Saving and pausing game...
+[00:37:57] [Server thread/INFO]: Saving chunks for level 'ServerLevel[New World]'/minecraft:overworld
+[00:37:57] [Server thread/INFO]: Saving chunks for level 'ServerLevel[New World]'/minecraft:the_end
+[00:37:57] [Server thread/INFO]: Saving chunks for level 'ServerLevel[New World]'/minecraft:the_nether
+[00:37:58] [Render thread/INFO]: Client on ClientOnly mode disconnecting.
+[00:37:58] [Render thread/INFO]: Unloading level [minecraft:the_nether].
+[00:37:58] [Netty Server IO #1/INFO]: Player [RotiWokeman] disconnected.
+[00:37:58] [Server thread/INFO]: RotiWokeman lost connection: Disconnected
+[00:37:58] [Server thread/INFO]: RotiWokeman left the game
+[00:37:59] [Server thread/INFO]: Stopping singleplayer server as player logged out
+[00:37:59] [Server thread/INFO]: saveAll invoked, persisted 0 fakeplayer(s).
+[00:37:59] [Server thread/INFO]: Stopping server
+[00:37:59] [Server thread/INFO]: Saving players
+[00:37:59] [Server thread/INFO]: Saving worlds
+[00:37:59] [Server thread/INFO]: Saving chunks for level 'ServerLevel[New World]'/minecraft:overworld
+[00:37:59] [Server thread/INFO]: Saving chunks for level 'ServerLevel[New World]'/minecraft:the_end
+[00:37:59] [Server thread/INFO]: Saving chunks for level 'ServerLevel[New World]'/minecraft:the_nether
+[00:37:59] [Server thread/INFO]: ThreadedAnvilChunkStorage (New World): All chunks are saved
+[00:37:59] [Server thread/INFO]: ThreadedAnvilChunkStorage (DIM1): All chunks are saved
+[00:37:59] [Server thread/INFO]: ThreadedAnvilChunkStorage (DIM-1): All chunks are saved
+[00:37:59] [Server thread/INFO]: ThreadedAnvilChunkStorage: All dimensions are saved
+[00:37:59] [Server thread/INFO]: Unloading level DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:overworld}
+[00:37:59] [Server thread/INFO]: Shutting down ClientRenderState
+[00:37:59] [Server thread/INFO]: Shutting down LodRenderer...
+[00:37:59] [Server thread/INFO]: Queuing Renderer Cleanup for main render thread
+[00:37:59] [Server thread/INFO]: Shutting down LodQuadTree...
+[00:37:59] [Server thread/INFO]: Finished shutting down LodQuadTree
+[00:37:59] [Server thread/INFO]: Finished shutting down LodRenderer
+[00:37:59] [Server thread/INFO]: Shutting down LodQuadTree...
+[00:37:59] [Server thread/INFO]: Finished shutting down LodQuadTree
+[00:37:59] [Server thread/INFO]: Closing world gen queue
+[00:37:59] [Server thread/INFO]: Closing WorldGenerationQueue...
+[00:37:59] [Server thread/INFO]: Awaiting world generator thread pool termination...
+[00:37:59] [DH-Cleanup Thread[0]/INFO]: waiting for [0] futures before closing render cache...
+[00:37:59] [DH-Cleanup Thread[0]/INFO]: waiting for [0] futures before closing render cache...
+[00:37:59] [Render thread/INFO]: Closing [GeneratedFullDataSourceProvider] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:the_nether}].
+[00:37:59] [Render thread/INFO]: Closing [FullDataSourceProviderV1] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:the_nether}].
+[00:37:59] [DH-Parent Update Queue [minecraft:the_nether] Thread[0]/INFO]: Update thread [DH-Parent Update Queue [minecraft:the_nether] Thread[0]] terminated.
+[00:37:59] [Render thread/INFO]: Closing database connection: [jdbc:dh_sqlite:/Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/saves/New World/DIM-1/data/DistantHorizons.sqlite]...
+[00:37:59] [Render thread/INFO]: Finished closing database connection: [jdbc:dh_sqlite:/Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/saves/New World/DIM-1/data/DistantHorizons.sqlite]
+[00:37:59] [Render thread/INFO]: Closed DHLevel for [Wrapped{ServerLevel[New World]@minecraft:the_nether}].
+[00:37:59] [Render thread/INFO]: Closing [GeneratedFullDataSourceProvider] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:the_nether}].
+[00:37:59] [Render thread/INFO]: Closing [FullDataSourceProviderV1] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:the_nether}].
+[00:37:59] [Render thread/INFO]: Closed DhClientServerLevel for Wrapped{ServerLevel[New World]@minecraft:the_nether}
+[00:37:59] [Render thread/INFO]: Unloading level [minecraft:the_end].
+[00:37:59] [Render thread/INFO]: Closing [GeneratedFullDataSourceProvider] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:the_end}].
+[00:37:59] [Render thread/INFO]: Closing [FullDataSourceProviderV1] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:the_end}].
+[00:37:59] [DH-Parent Update Queue [minecraft:the_end] Thread[0]/INFO]: Update thread [DH-Parent Update Queue [minecraft:the_end] Thread[0]] terminated.
+[00:37:59] [Render thread/INFO]: Closing database connection: [jdbc:dh_sqlite:/Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/saves/New World/DIM1/data/DistantHorizons.sqlite]...
+[00:37:59] [Render thread/INFO]: Finished closing database connection: [jdbc:dh_sqlite:/Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/saves/New World/DIM1/data/DistantHorizons.sqlite]
+[00:37:59] [Render thread/INFO]: Closed DHLevel for [Wrapped{ServerLevel[New World]@minecraft:the_end}].
+[00:37:59] [Render thread/INFO]: Closing [GeneratedFullDataSourceProvider] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:the_end}].
+[00:37:59] [Render thread/INFO]: Closing [FullDataSourceProviderV1] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:the_end}].
+[00:37:59] [Render thread/INFO]: Closed DhClientServerLevel for Wrapped{ServerLevel[New World]@minecraft:the_end}
+[00:37:59] [Render thread/INFO]: Unloading level [minecraft:overworld].
+[00:38:00] [Render thread/INFO]: Closing [GeneratedFullDataSourceProvider] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:overworld}].
+[00:38:00] [Render thread/INFO]: Closing [FullDataSourceProviderV1] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:overworld}].
+[00:38:00] [Render thread/INFO]: Closing database connection: [jdbc:dh_sqlite:/Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/saves/New World/data/DistantHorizons.sqlite]...
+[00:38:00] [Render thread/INFO]: Finished closing database connection: [jdbc:dh_sqlite:/Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/saves/New World/data/DistantHorizons.sqlite]
+[00:38:00] [Render thread/INFO]: Closed DHLevel for [Wrapped{ServerLevel[New World]@minecraft:overworld}].
+[00:38:00] [DH-Parent Update Queue [minecraft:overworld] Thread[0]/INFO]: Update thread [DH-Parent Update Queue [minecraft:overworld] Thread[0]] terminated.
+[00:38:00] [Render thread/INFO]: Closing [GeneratedFullDataSourceProvider] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:overworld}].
+[00:38:00] [Render thread/INFO]: Closing [FullDataSourceProviderV1] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:overworld}].
+[00:38:00] [Render thread/INFO]: Closed DhClientServerLevel for Wrapped{ServerLevel[New World]@minecraft:overworld}
+[00:38:00] [Render thread/INFO]: Closed DhWorld of type CLIENT_SERVER
+[00:38:00] [Render thread/INFO]: Unloading level [minecraft:the_nether].
+[00:38:00] [Render thread/INFO]: Closing [GeneratedFullDataSourceProvider] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:the_nether}].
+[00:38:00] [Render thread/INFO]: Closing [FullDataSourceProviderV1] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:the_nether}].
+[00:38:00] [Render thread/INFO]: Closed DHLevel for [Wrapped{ServerLevel[New World]@minecraft:the_nether}].
+[00:38:00] [Render thread/INFO]: Closing [GeneratedFullDataSourceProvider] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:the_nether}].
+[00:38:00] [Render thread/INFO]: Closing [FullDataSourceProviderV1] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:the_nether}].
+[00:38:00] [Render thread/INFO]: Closed DhClientServerLevel for Wrapped{ServerLevel[New World]@minecraft:the_nether}
+[00:38:00] [Render thread/INFO]: Unloading level [minecraft:the_end].
+[00:38:00] [Render thread/INFO]: Closing [GeneratedFullDataSourceProvider] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:the_end}].
+[00:38:00] [Render thread/INFO]: Closing [FullDataSourceProviderV1] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:the_end}].
+[00:38:00] [Render thread/INFO]: Closed DHLevel for [Wrapped{ServerLevel[New World]@minecraft:the_end}].
+[00:38:01] [Render thread/INFO]: Closing [GeneratedFullDataSourceProvider] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:the_end}].
+[00:38:01] [Render thread/INFO]: Closing [FullDataSourceProviderV1] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:the_end}].
+[00:38:01] [Render thread/INFO]: Closed DhClientServerLevel for Wrapped{ServerLevel[New World]@minecraft:the_end}
+[00:38:01] [Render thread/INFO]: Unloading level [minecraft:overworld].
+[00:38:01] [Render thread/INFO]: Closing [GeneratedFullDataSourceProvider] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:overworld}].
+[00:38:01] [Render thread/INFO]: Closing [FullDataSourceProviderV1] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:overworld}].
+[00:38:01] [Render thread/INFO]: Closed DHLevel for [Wrapped{ServerLevel[New World]@minecraft:overworld}].
+[00:38:01] [Render thread/INFO]: Closing [GeneratedFullDataSourceProvider] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:overworld}].
+[00:38:01] [Render thread/INFO]: Closing [FullDataSourceProviderV1] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:overworld}].
+[00:38:01] [Render thread/INFO]: Closed DhClientServerLevel for Wrapped{ServerLevel[New World]@minecraft:overworld}
+[00:38:01] [Render thread/INFO]: Closed DhWorld of type CLIENT_SERVER
+[00:38:01] [Render thread/INFO]: Shutting down PriorityTaskPicker thread pool...
+[00:38:01] [Server thread/INFO]: BatchGenerator shutting down...
+[00:38:01] [Render thread/INFO]: Closing all [0] database connections...
+[00:38:01] [Server thread/INFO]: BatchGenerationEnvironment shutting down...
+[00:38:01] [Server thread/INFO]: Canceling in progress generation event futures...
+[00:38:01] [Server thread/INFO]: BatchGenerationEnvironment shutdown complete.
+[00:38:01] [Server thread/INFO]: Finished closing WorldGenerationQueue
+[00:38:01] [Server thread/INFO]: Closing [GeneratedFullDataSourceProvider] for level: [DhClientServerLevel{ceh4rbi6e0gru@minecraft:overworld}].
+[00:38:01] [Server thread/INFO]: Closing [FullDataSourceProviderV1] for level: [DhClientServerLevel{ceh4rbi6e0gru@minecraft:overworld}].
+[00:38:01] [Server thread/INFO]: Closed DHLevel for [Wrapped{ServerLevel[New World]@minecraft:overworld}].
+[00:38:01] [Server thread/INFO]: Closing [GeneratedFullDataSourceProvider] for level: [DhClientServerLevel{ceh4rbi6e0gru@minecraft:overworld}].
+[00:38:01] [Server thread/INFO]: Closing [FullDataSourceProviderV1] for level: [DhClientServerLevel{ceh4rbi6e0gru@minecraft:overworld}].
+[00:38:01] [Server thread/INFO]: Closed DhClientServerLevel for Wrapped{ServerLevel[New World]@minecraft:overworld}
+[00:38:01] [Server thread/INFO]: [STDOUT]: Unloading model from memory...
+[00:38:02] [Server thread/INFO]: [STDOUT]: Model unloaded successfully.
+[00:38:02] [Server thread/INFO]: [STDOUT]: Unloaded BERT Model from memory
+[00:38:02] [Render thread/INFO]: Unloading client level [ClientLevelWrapper]-[ceh4rbi6e0gru@minecraft:overworld].
+[00:38:02] [Render thread/INFO]: Stopping worker threads
+[00:38:03] [Render thread/INFO]: Stopping!
+[00:38:03] [CullThread/INFO]: [STDOUT]: Shutting down culling task!

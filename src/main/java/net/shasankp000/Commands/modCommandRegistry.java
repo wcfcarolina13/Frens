@@ -43,6 +43,8 @@ import net.shasankp000.Entity.RayCasting;
 import net.shasankp000.Entity.RespawnHandler;
 import net.shasankp000.Entity.createFakePlayer;
 import net.shasankp000.FilingSystem.LLMClientFactory;
+import net.shasankp000.FilingSystem.ManualConfig;
+import net.shasankp000.AIPlayer;
 import net.shasankp000.GameAI.BotEventHandler;
 import net.shasankp000.OllamaClient.ollamaClient;
 import net.shasankp000.PathFinding.ChartPathToBlock;
@@ -375,6 +377,14 @@ public class modCommandRegistry {
                                                                 StringArgumentType.getString(context, "target"),
                                                                 parseToggle(StringArgumentType.getString(context, "mode")))))
                                         )
+                                )
+                                .then(literal("owner")
+                                        .then(CommandManager.argument("alias", StringArgumentType.string())
+                                                .then(CommandManager.argument("player", EntityArgumentType.player())
+                                                        .executes(context -> executeSetOwner(
+                                                                context,
+                                                                StringArgumentType.getString(context, "alias"),
+                                                                EntityArgumentType.getPlayer(context, "player")))))
                                 )
                         )
                         .then(literal("walk")
@@ -1080,6 +1090,10 @@ public class modCommandRegistry {
 
                     RespawnHandler.registerRespawnListener(bot);
                     BotEventHandler.registerBot(bot);
+                    ServerPlayerEntity owner = context.getSource().getEntity() instanceof ServerPlayerEntity player ? player : null;
+                    if (owner != null) {
+                        AIPlayer.CONFIG.ensureOwner(botName, owner.getUuid(), owner.getName().getString());
+                    }
 
                     AutoFaceEntity.startAutoFace(bot);
 
@@ -1129,6 +1143,10 @@ public class modCommandRegistry {
 
                     RespawnHandler.registerRespawnListener(bot);
                     BotEventHandler.registerBot(bot);
+                    ServerPlayerEntity owner = context.getSource().getEntity() instanceof ServerPlayerEntity player ? player : null;
+                    if (owner != null) {
+                        AIPlayer.CONFIG.ensureOwner(botName, owner.getUuid(), owner.getName().getString());
+                    }
 
                     ollamaClient.botName = botName; // set the bot's name.
 
@@ -2737,16 +2755,25 @@ public class modCommandRegistry {
     }
 
     private static @NotNull BlockPos getBlockPos(CommandContext<ServerCommandSource> context) {
-        ServerPlayerEntity player = context.getSource().getPlayer();
-        ServerWorld world = context.getSource().getWorld();
-        if (player == null || world == null) {
-            return BlockPos.ORIGIN;
+        ServerCommandSource source = context.getSource();
+        ServerPlayerEntity player = source.getEntity() instanceof ServerPlayerEntity sp ? sp : null;
+        ServerWorld world = source.getWorld();
+        if (player != null && world != null) {
+            BlockPos safe = findForwardSpawn(world, player);
+            if (safe != null) {
+                return safe;
+            }
+            return new BlockPos((int) player.getX() + 5, (int) player.getY(), (int) player.getZ());
         }
-        BlockPos safe = findForwardSpawn(world, player);
-        if (safe != null) {
-            return safe;
+        Vec3d basePos = source.getPosition();
+        BlockPos target = BlockPos.ofFloored(basePos.x, basePos.y, basePos.z);
+        if (world != null) {
+            BlockPos safe = findSafeColumn(world, target);
+            if (safe != null) {
+                return safe;
+            }
         }
-        return new BlockPos((int) player.getX() + 5, (int) player.getY(), (int) player.getZ());
+        return target;
     }
 
     private static BlockPos findForwardSpawn(ServerWorld world, ServerPlayerEntity player) {
@@ -2804,4 +2831,14 @@ public class modCommandRegistry {
         return !floor.getCollisionShape(world, feet.down()).isEmpty();
     }
 
+    private static int executeSetOwner(CommandContext<ServerCommandSource> context, String alias, ServerPlayerEntity owner) throws CommandSyntaxException {
+        if (alias == null || alias.isBlank()) {
+            throw new SimpleCommandExceptionType(Text.literal("Alias cannot be empty")).create();
+        }
+        ManualConfig.BotOwnership ownership = new ManualConfig.BotOwnership(owner.getUuid().toString(), owner.getName().getString());
+        AIPlayer.CONFIG.setOwner(alias, ownership);
+        AIPlayer.CONFIG.save();
+        ChatUtils.sendSystemMessage(context.getSource(), "Set owner of " + alias + " to " + owner.getName().getString());
+        return 1;
+    }
 }

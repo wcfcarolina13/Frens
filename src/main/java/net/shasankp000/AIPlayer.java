@@ -11,8 +11,10 @@ import net.fabricmc.fabric.api.message.v1.ServerMessageEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.shasankp000.ChatUtils.BERTModel.BertModelManager;
+import net.shasankp000.ChatUtils.ChatUtils;
 import net.shasankp000.ChatUtils.NLPProcessor;
 import net.shasankp000.Commands.configCommand;
 import net.shasankp000.Commands.modCommandRegistry;
@@ -164,6 +166,7 @@ public class AIPlayer implements ModInitializer {
             System.out.println("Server instance is " + serverInstance);
 
             enqueueBertLoad();
+            net.shasankp000.GameAI.services.BotControlApplier.applyPersistentSettings(server);
         });
 
         ServerLifecycleEvents.SERVER_STOPPING.register(server -> BotPersistenceService.saveAll(server));
@@ -181,6 +184,7 @@ public class AIPlayer implements ModInitializer {
                 LOGGER.error("BERT Model unloading failed!", e);
             }
             MODEL_LOAD_ENQUEUED.set(false);
+            net.shasankp000.GameAI.services.BotControlApplier.resetSession();
         });
 
         ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> {
@@ -240,9 +244,11 @@ public class AIPlayer implements ModInitializer {
                     if (target.prompt().isEmpty()) {
                         continue;
                     }
+                    ServerCommandSource botSource = bot.getCommandSource().withSilent().withMaxLevel(4);
+                    ChatUtils.sendChatMessages(botSource, "Processing your message, please wait.");
                     handled |= LLMOrchestrator.handleChat(
                             bot,
-                            bot.getCommandSource().withSilent().withMaxLevel(4),
+                            botSource,
                             sender.getUuid(),
                             target.prompt());
                 }
@@ -271,7 +277,11 @@ public class AIPlayer implements ModInitializer {
 
                 if (intent == NLPProcessor.Intent.REQUEST_ACTION) {
                     FunctionCallerV2 functionCaller = new FunctionCallerV2(bot.getCommandSource(), sender.getUuid());
-                    functionCaller.run(userPrompt);
+                    try {
+                        functionCaller.run(userPrompt);
+                    } finally {
+                        FunctionCallerV2.clearContext();
+                    }
                 }
             }
         });
@@ -310,32 +320,45 @@ public class AIPlayer implements ModInitializer {
             return new ChatTarget(List.of(), "");
         }
         String[] tokens = trimmed.split("\\s+");
-        if (tokens.length < 2) {
+        if (tokens.length == 0) {
             return new ChatTarget(List.of(), "");
         }
         List<ServerPlayerEntity> bots = BotEventHandler.getRegisteredBots(serverInstance);
         if (bots.isEmpty()) {
             return new ChatTarget(List.of(), "");
         }
-        String first = normalizeToken(tokens[0]);
-        String second = tokens.length > 1 ? normalizeToken(tokens[1]) : "";
-        int consumed = 0;
+        int consumed = -1;
         List<ServerPlayerEntity> targets = new ArrayList<>();
-        if (!first.isEmpty()) {
-            if (first.equals("allbots") || first.equals("bots") || (first.equals("all") && second.equals("bots"))) {
+        for (int i = 0; i < tokens.length; i++) {
+            String current = normalizeToken(tokens[i]);
+            if (current.isEmpty()) {
+                continue;
+            }
+            if (current.equals("allbots") || current.equals("bots")) {
                 targets.addAll(bots);
-                consumed = first.equals("all") && second.equals("bots") ? 2 : 1;
-            } else {
-                for (ServerPlayerEntity bot : bots) {
-                    if (normalizeToken(bot.getName().getString()).equals(first)) {
-                        targets.add(bot);
-                        consumed = 1;
-                        break;
-                    }
+                consumed = i + 1;
+                break;
+            }
+            if (current.equals("all") && i + 1 < tokens.length) {
+                String next = normalizeToken(tokens[i + 1]);
+                if (next.equals("bots")) {
+                    targets.addAll(bots);
+                    consumed = i + 2;
+                    break;
                 }
             }
+            for (ServerPlayerEntity bot : bots) {
+                if (normalizeToken(bot.getName().getString()).equals(current)) {
+                    targets.add(bot);
+                    consumed = i + 1;
+                    break;
+                }
+            }
+            if (!targets.isEmpty()) {
+                break;
+            }
         }
-        if (targets.isEmpty()) {
+        if (targets.isEmpty() || consumed < 0) {
             return new ChatTarget(List.of(), "");
         }
         if (consumed >= tokens.length) {

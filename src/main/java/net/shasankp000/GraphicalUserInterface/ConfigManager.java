@@ -12,7 +12,9 @@ import net.minecraft.text.Text;
 import net.shasankp000.AIPlayer;
 import net.shasankp000.AIPlayerClient;
 import net.shasankp000.GraphicalUserInterface.Widgets.DropdownMenuWidget;
+import net.shasankp000.GraphicalUserInterface.BotControlScreen;
 import net.shasankp000.Network.configNetworkManager;
+import net.shasankp000.Network.ConfigJsonUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -29,6 +31,8 @@ public class ConfigManager extends Screen {
     private TextFieldWidget searchField;
     private List<String> allModels;
     private List<String> filteredModels;
+    private int footerTopY = 0;
+    private static long lastModelRefreshMs = 0L;
 
 
     public ConfigManager(Text title, Screen parent) {
@@ -39,11 +43,13 @@ public class ConfigManager extends Screen {
     @Override
     protected void init() {
 
-        // Refresh models from provider so the latest list is always shown
-        LOGGER.info("Refreshing model list from provider...");
-        AIPlayer.CONFIG.updateModels();
+        List<String> cached = AIPlayer.CONFIG.getModelList();
+        if (cached == null || cached.isEmpty()) {
+            refreshModelList();
+            cached = AIPlayer.CONFIG.getModelList();
+        }
 
-        allModels = AIPlayer.CONFIG.getModelList();
+        allModels = cached;
         if (allModels == null) {
             allModels = new ArrayList<>();
         }
@@ -90,60 +96,85 @@ public class ConfigManager extends Screen {
             LOGGER.info("No valid selectedLanguageModel in config; using first provider model as session default: {}", newDefault);
         }
 
-        // Bottom buttons - evenly spaced at bottom, dynamically centered and sized
-        int buttonY = this.height - 40; // vertical padding from bottom
-        int totalButtons = 5;
-        int buttonSpacing = 8;
-        // Compute a button width that fits the screen, with at least a small margin
-        int availableWidth = this.width - 40; // 20px margin on each side
-        int buttonWidthDynamic = (availableWidth - buttonSpacing * (totalButtons - 1)) / totalButtons;
-        if (buttonWidthDynamic < 70) {
-            // If the screen is very narrow, still keep buttons usable
-            buttonWidthDynamic = 70;
-        }
-        int totalButtonWidth = buttonWidthDynamic * totalButtons + buttonSpacing * (totalButtons - 1);
-        int buttonsStartX = (this.width - totalButtonWidth) / 2;
-
-        // API Keys Button
-        ButtonWidget apiKeysButton = ButtonWidget.builder(
+        java.util.List<ButtonWidget> footerButtons = new java.util.ArrayList<>();
+        footerButtons.add(ButtonWidget.builder(
                 Text.of("API Keys"),
                 (btn) -> Objects.requireNonNull(this.client).setScreen(new APIKeysScreen(Text.of("API Keys"), this))
-        ).dimensions(buttonsStartX, buttonY, buttonWidthDynamic, fieldHeight).build();
-        this.addDrawableChild(apiKeysButton);
-
-        // Reasoning Log Button
-        ButtonWidget reasoningButton = ButtonWidget.builder(
+        ).dimensions(0, 0, 80, fieldHeight).build());
+        footerButtons.add(ButtonWidget.builder(
                 Text.of("Reasoning Log"),
                 (btn) -> Objects.requireNonNull(this.client).setScreen(new ReasoningLogScreen(this))
-        ).dimensions(buttonsStartX + (buttonWidthDynamic + buttonSpacing), buttonY, buttonWidthDynamic, fieldHeight).build();
-        this.addDrawableChild(reasoningButton);
-
-        // Reload Models Button
-        ButtonWidget reloadButton = ButtonWidget.builder(
+        ).dimensions(0, 0, 80, fieldHeight).build());
+        footerButtons.add(ButtonWidget.builder(
+                Text.of("Bot Controls"),
+                (btn) -> Objects.requireNonNull(this.client).setScreen(new BotControlScreen(this))
+        ).dimensions(0, 0, 80, fieldHeight).build());
+        footerButtons.add(ButtonWidget.builder(
                 Text.of("Refresh Models"),
                 (btn) -> this.reloadModels()
-        ).dimensions(buttonsStartX + 2 * (buttonWidthDynamic + buttonSpacing), buttonY, buttonWidthDynamic, fieldHeight).build();
-        this.addDrawableChild(reloadButton);
-
-        // Save Button
-        ButtonWidget saveButton = ButtonWidget.builder(Text.of("Save"), (btn1) -> {
+        ).dimensions(0, 0, 80, fieldHeight).build());
+        footerButtons.add(ButtonWidget.builder(Text.of("Save"), (btn1) -> {
             this.saveToFile();
             if (this.client != null) {
                 this.client.getToastManager().add(
                         SystemToast.create(this.client, SystemToast.Type.NARRATOR_TOGGLE,
                                 Text.of("Settings saved!"), Text.of("Saved settings.")));
             }
-        }).dimensions(buttonsStartX + 3 * (buttonWidthDynamic + buttonSpacing), buttonY, buttonWidthDynamic, fieldHeight).build();
-        this.addDrawableChild(saveButton);
+        }).dimensions(0, 0, 80, fieldHeight).build());
+        footerButtons.add(ButtonWidget.builder(Text.of("Close"), (btn1) -> this.close())
+                .dimensions(0, 0, 80, fieldHeight).build());
+        layoutButtons(footerButtons, fieldHeight);
+    }
 
-        // Close Button
-        ButtonWidget closeButton = ButtonWidget.builder(Text.of("Close"), (btn1) -> this.close())
-                .dimensions(buttonsStartX + 4 * (buttonWidthDynamic + buttonSpacing), buttonY, buttonWidthDynamic, fieldHeight).build();
-        this.addDrawableChild(closeButton);
+    private void layoutButtons(java.util.List<ButtonWidget> buttons, int buttonHeight) {
+        if (buttons.isEmpty()) {
+            return;
+        }
+        int availableWidth = Math.max(80, this.width - 40);
+        int spacing = 8;
+        int minButtonWidth = 80;
+        int buttonsPerRow = Math.min(buttons.size(),
+                Math.max(1, (availableWidth + spacing) / (minButtonWidth + spacing)));
+        int rows = (int) Math.ceil(buttons.size() / (double) buttonsPerRow);
+        int rowSpacing = 10;
+        int totalHeight = rows * buttonHeight + (rows - 1) * rowSpacing;
+        int startY = Math.max(40, this.height - 20 - totalHeight);
+        this.footerTopY = startY;
 
+        int index = 0;
+        for (int row = 0; row < rows; row++) {
+            int remaining = buttons.size() - index;
+            int columns = Math.min(buttonsPerRow, remaining);
+            int rowButtonWidth = Math.max(minButtonWidth,
+                    (availableWidth - spacing * (columns - 1)) / columns);
+            int rowWidth = columns * rowButtonWidth + spacing * (columns - 1);
+            int rowStartX = (this.width - rowWidth) / 2;
+            for (int col = 0; col < columns; col++) {
+                ButtonWidget button = buttons.get(index++);
+                int x = rowStartX + col * (rowButtonWidth + spacing);
+                int y = startY + row * (buttonHeight + rowSpacing);
+                button.setX(x);
+                button.setY(y);
+                button.setWidth(rowButtonWidth);
+                button.setHeight(buttonHeight);
+                this.addDrawableChild(button);
+            }
+        }
+    }
+
+    private void refreshModelList() {
+        long now = System.currentTimeMillis();
+        if (now - lastModelRefreshMs < 10_000) {
+            LOGGER.info("Skipping model refresh; last refresh was less than 10s ago.");
+            return;
+        }
+        lastModelRefreshMs = now;
+        LOGGER.info("Refreshing model list from provider...");
+        AIPlayer.CONFIG.updateModels();
     }
 
     private void reloadModels() {
+        refreshModelList();
         LOGGER.info("Reloading model list from provider...");
 
         // Remember the currently selected option in the dropdown so we can try to keep it.
@@ -222,7 +253,8 @@ public class ConfigManager extends Screen {
             context.drawText(this.textRenderer, "Select Language Model:", centerX - 150, dropdownMenuWidget.getY() - 15, labelColor, true);
 
             // Current selection and model count info - positioned lower on the screen
-            int infoBaseY = this.height - 120;
+            int footerGuard = footerTopY > 0 ? footerTopY - 60 : this.height - 160;
+            int infoBaseY = Math.min(footerGuard, dropdownMenuWidget.getY() + dropdownMenuWidget.getHeight() + 40);
             String currentModel = AIPlayer.CONFIG.getSelectedLanguageModel();
             String currentText = "Currently selected: " + (currentModel != null ? currentModel : "None");
             context.drawText(this.textRenderer, currentText, centerX - 150, infoBaseY, infoColor, true);
@@ -239,8 +271,18 @@ public class ConfigManager extends Screen {
 
         // Help text at bottom
         String helpText = "Search to filter models • Select a model and click Save";
-        int helpWidth = this.textRenderer.getWidth(helpText);
-        context.drawText(this.textRenderer, helpText, centerX - helpWidth / 2, this.height - 65, hintColor, true);
+        int helpY = footerTopY > 0 ? Math.min(this.height - 65, footerTopY - 20) : this.height - 65;
+        if (dropdownMenuWidget != null) {
+            helpY = Math.max(helpY, dropdownMenuWidget.getY() + dropdownMenuWidget.getHeight() + 50);
+        }
+        int maxWidth = this.width - 40;
+        java.util.List<net.minecraft.text.OrderedText> wrapped = this.textRenderer.wrapLines(net.minecraft.text.Text.of(helpText), maxWidth);
+        int lineY = helpY;
+        for (net.minecraft.text.OrderedText line : wrapped) {
+            int lineWidth = this.textRenderer.getWidth(line);
+            context.drawText(this.textRenderer, line, centerX - lineWidth / 2, lineY, hintColor, true);
+            lineY += this.textRenderer.fontHeight + 2;
+        }
 
         // Finally, render all child widgets (dropdown, text field, buttons) on top of the labels
         super.render(context, mouseX, mouseY, delta);
@@ -281,7 +323,7 @@ public class ConfigManager extends Screen {
         AIPlayer.CONFIG.setSelectedLanguageModel(modelName);
         AIPlayer.CONFIG.save();
 
-        configNetworkManager.sendSaveConfigPacket(modelName);
+        configNetworkManager.sendSaveConfigPacket(ConfigJsonUtil.configToJson());
 
         close();
         assert this.client != null;

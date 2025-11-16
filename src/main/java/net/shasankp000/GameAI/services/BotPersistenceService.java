@@ -4,8 +4,11 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.PlayerConfigEntry;
 import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.network.ServerPlayerEntity;
+import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.WorldSavePath;
+import net.shasankp000.AIPlayer;
 import net.shasankp000.Entity.createFakePlayer;
+import net.shasankp000.FilingSystem.ManualConfig;
 import net.shasankp000.GameAI.BotEventHandler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -175,6 +178,7 @@ public final class BotPersistenceService {
         try {
             SAVE_PLAYER_DATA.invoke(server.getPlayerManager(), bot);
             LOGGER.debug("Persisted fakeplayer '{}' via PlayerManager ({})", bot.getName().getString(), reason);
+            recordSpawnData(bot);
             return true;
         } catch (Exception e) {
             LOGGER.warn("PlayerManager save failed for fakeplayer '{}' ({}): {}", bot.getName().getString(), reason, e.getMessage());
@@ -271,5 +275,30 @@ public final class BotPersistenceService {
             LOGGER.warn("Failed to instantiate PlayerConfigEntry for '{}': {}", bot.getName().getString(), e.getMessage());
         }
         return null;
+    }
+
+    private static void recordSpawnData(ServerPlayerEntity bot) {
+        if (bot == null || AIPlayer.CONFIG == null) {
+            return;
+        }
+        MinecraftServer server = extractServer(bot);
+        if (server == null) {
+            return;
+        }
+        ServerWorld world = bot.getCommandSource().getWorld();
+        if (world == null && server != null) {
+            world = server.getOverworld();
+        }
+        String dimensionId = world.getRegistryKey().getValue().toString();
+        ManualConfig.BotSpawn spawn = new ManualConfig.BotSpawn(
+                dimensionId,
+                bot.getX(),
+                bot.getY(),
+                bot.getZ(),
+                bot.getYaw(),
+                bot.getPitch()
+        );
+        AIPlayer.CONFIG.setBotSpawn(bot.getName().getString(), spawn);
+        AIPlayer.CONFIG.save();
     }
 }

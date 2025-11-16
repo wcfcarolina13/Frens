@@ -38,9 +38,28 @@ Examples:
 - `/bot skill stripmine 12 Jake` – Jake carves a straight 1×3 tunnel forward for 12 blocks.
 
 Arguments are forwarded exactly as you type them (minus the alias token). Each bot runs the skill in its own task, so multiple bots can execute the same skill concurrently.  
+
+---
+
+## Persistent Bot Controls (`/configMan`)
+
+- Run `/configMan` and open the **Bot Controls** tab to toggle session-level behaviors.  
+- Per-bot toggles include:
+  - **Auto Spawn + Mode:** Automatically run `/bot spawn <alias> training|play` when a world loads.
+  - **Teleport During Skills:** Mirrors `bot config teleportDuringSkills …`.
+  - **Inventory Pause:** Mirrors `bot config inventoryFullPause …`.
+  - **LLM Bot Toggle:** Same as `bot llm bot <alias> on/off`.
+- Each row now sits inside a scrollable panel that displays both the bot alias and its owner so you can see which profile you’re editing. The `default` row is a fallback for bots without entries. Hover any toggle to see a quick explainer (for example, “Pause Inv” reminds you that jobs must be resumed with `/bot resume <alias>`).
+- A global **LLM World Toggle** mirrors `bot llm world on/off` so you can keep worlds LLM-enabled without reissuing chat commands.
+- Ownership can be reassigned with `/bot config owner <alias> <player>`; the config UI simply reflects those assignments. When you spawn a brand-new bot, ownership defaults to the player who issued `/bot spawn`.
+- Bot spawn locations are preserved between sessions. When auto-spawn is enabled the bot reappears at its last saved position (dimension, rotation, etc.), not world spawn.
+
+All settings are saved to `settings.json5`, synced to the server, and re-applied every session—no more manual command spam when you start a new world.
 When you target multiple bots (or `all`), the requested count is shared between them; add the keyword `each` if you want every bot to chase the full amount.
 `collect_dirt` will also scoop up gravel, sand, mud, and similar soft blocks whenever pure dirt is out of reach so the bots don’t stall in tight caves.
-With the LLM layer toggled on, you can also address bots in plain chat (“`Jake mine a tunnel`”, “`all bots follow me`”) and they’ll respond in character before asking for confirmation on risky requests.
+With the LLM layer toggled on, you can also address bots in plain chat (“`Jake mine a tunnel`”, “`all bots follow me`”) and they’ll respond in character before asking for confirmation on risky requests. Requests like “collect 5 cobblestone” or “grab some dirt” automatically translate to the closest supported skill (mining, stripmine, collect_dirt, etc.) so the bot can launch the real job without you typing `/bot skill …`. After you confirm, the bot announces the job in chat (“On it — mining 5 cobblestone…”) and reports when it’s done (or why it paused) so you always know what it’s working on.
+
+You can also chain natural-language jobs: If you issue a second command while a bot is busy, it queues that request and runs it automatically once the current job ends. Ask “Jake status?” at any time to get a personality-flavoured update that includes the active job, queued tasks, and the last completed assignment.
 
 ### Skill Arguments & Modifiers
 
