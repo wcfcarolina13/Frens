@@ -83,6 +83,7 @@ import net.shasankp000.PathFinding.ChartPathToBlock;
 import net.shasankp000.PathFinding.GoTo;
 import net.shasankp000.PathFinding.PathTracer;
 import net.shasankp000.PlayerUtils.*;
+import net.shasankp000.GameAI.services.TaskService;
 import net.shasankp000.ServiceLLMClients.LLMClient;
 import net.shasankp000.ServiceLLMClients.LLMServiceHandler;
 import net.shasankp000.Commands.modCommandRegistry;
@@ -599,80 +600,48 @@ public class FunctionCallerV2 {
         }
 
         /** runSkill: generic skill runner **/
-        private static SkillExecutionResult runSkill(String skillName, String countStr, String targetBlockIdsStr, String maxFailsStr, String optionsStr) {
-            System.out.println("Running skill: " + skillName + " with count: " + countStr + ", targetBlockIds: " + targetBlockIdsStr + ", maxFails: " + maxFailsStr + ", options: " + optionsStr);
+        private static void runSkill(String skillName, String countStr, String targetBlockIdsStr, String maxFailsStr, String optionsStr) {
             if (currentBotSource() == null) {
-                String message = "Bot not found.";
-                getFunctionOutput(message);
-                return SkillExecutionResult.failure(message);
+                getFunctionOutput("Bot not found.");
+                return;
             }
+
+            ServerPlayerEntity bot = currentBotSource().getPlayer();
+            if (bot == null) {
+                getFunctionOutput("Bot entity not found.");
+                return;
+            }
+
+            Optional<TaskService.TaskTicket> ticketOpt = TaskService.beginSkill(skillName, bot.getCommandSource(), bot.getUuid());
+            if (ticketOpt.isEmpty()) {
+                getFunctionOutput(bot.getName().getString() + " is busy and cannot start the skill.");
+                return;
+            }
+
+            getFunctionOutput("Task '" + skillName + "' started.");
+            TaskService.TaskTicket ticket = ticketOpt.get();
+            boolean success = false;
             try {
                 Map<String, Object> params = new HashMap<>();
-
-                // Parse count
-                if (countStr != null && !countStr.isBlank()) {
-                    try {
-                        params.put("count", Integer.parseInt(countStr));
-                    } catch (NumberFormatException ignored) { /* Ignore if not a number */ }
-                }
-
-                // Parse targetBlockIds
+                if (countStr != null && !countStr.isBlank()) params.put("count", Integer.parseInt(countStr));
                 if (targetBlockIdsStr != null && !targetBlockIdsStr.isBlank()) {
                     Set<Identifier> targetBlockIds = new HashSet<>();
                     for (String id : targetBlockIdsStr.split(",")) {
                         Identifier identifier = Identifier.tryParse(id.trim());
-                        if (identifier != null) {
-                            targetBlockIds.add(identifier);
-                        }
+                        if (identifier != null) targetBlockIds.add(identifier);
                     }
-                    if (!targetBlockIds.isEmpty()) {
-                        params.put("targetBlocks", targetBlockIds);
-                    }
+                    if (!targetBlockIds.isEmpty()) params.put("targetBlocks", targetBlockIds);
                 }
+                if (maxFailsStr != null && !maxFailsStr.isBlank()) params.put("maxFails", Integer.parseInt(maxFailsStr));
+                if (optionsStr != null && !optionsStr.isBlank()) params.put("options", List.of(optionsStr.split("\\s+")));
 
-                // Parse maxFails
-                if (maxFailsStr != null && !maxFailsStr.isBlank()) {
-                    try {
-                        params.put("maxFails", Integer.parseInt(maxFailsStr));
-                    } catch (NumberFormatException ignored) { /* Ignore if not a number */ }
-                }
-
-                // Parse options
-                if (optionsStr != null && !optionsStr.isBlank()) {
-                    List<String> options = new ArrayList<>();
-                    for (String option : optionsStr.split("\\s+")) {
-                        if (!option.isBlank()) {
-                            options.add(option.toLowerCase(Locale.ROOT));
-                        }
-                    }
-                    if (!options.isEmpty()) {
-                        params.put("options", options);
-                    }
-                }
-
-                ServerPlayerEntity bot = currentBotSource().getPlayer();
-                if (bot != null) {
-                    SkillResumeService.recordExecution(bot, skillName, summarizeSkillParams(params), currentBotSource());
-                }
-
-                SkillExecutionResult result = SkillManager.runSkill(
-                        skillName,
-                        new SkillContext(currentBotSource(), sharedState, params)
-                );
-                getFunctionOutput(result.message());
-                if (bot != null) {
-                    SkillResumeService.handleCompletion(bot.getUuid(), result.success());
-                }
-                return result;
+                SkillContext skillContext = new SkillContext(bot.getCommandSource(), sharedState, params);
+                SkillExecutionResult result = SkillManager.runSkill(skillName, skillContext);
+                success = result.success();
             } catch (Exception e) {
                 logger.error("Error executing skill '{}': ", skillName, e);
-                ServerPlayerEntity bot = currentBotSource() != null ? currentBotSource().getPlayer() : null;
-                if (bot != null) {
-                    SkillResumeService.handleCompletion(bot.getUuid(), false);
-                }
-                String message = "Failed to run skill '" + skillName + "': " + e.getMessage();
-                getFunctionOutput(message);
-                return SkillExecutionResult.failure(message);
+            } finally {
+                TaskService.complete(ticket, success);
             }
         }
 
@@ -2588,27 +2557,7 @@ public class FunctionCallerV2 {
                     String options = resolvePlaceholder(paramMap.getOrDefault("options", ""));
                     logger.info("Calling method: runSkill with skillName={} count={} targetBlockIds={} maxFails={} options={}", skillName, count, targetBlockIds, maxFails, options);
                     maybeAnnounceRunSkill(paramMap);
-                    SkillExecutionResult skillResult = Tools.runSkill(skillName, count, targetBlockIds, maxFails, options);
-                    ServerCommandSource activeSource = currentBotSource();
-                    ServerPlayerEntity bot = activeSource != null ? activeSource.getPlayer() : null;
-                    if (bot != null) {
-                        boolean success = skillResult != null && skillResult.success();
-                        String message = (skillResult != null && skillResult.message() != null)
-                                ? skillResult.message()
-                                : "";
-                        if (message.isBlank()) {
-                            message = success
-                                    ? "Finished running " + skillName + "."
-                                    : "Couldn't finish " + skillName + ".";
-                        }
-                        logger.info("Skill '{}' completed for {} (success={} message='{}')",
-                                skillName, bot.getName().getString(), success, message);
-                        LLMJobTracker.completeJob(bot.getUuid(), success, message);
-                        deliverConversation(message);
-                        triggerNextQueuedCommand(activeSource);
-                    } else if (skillResult != null && skillResult.message() != null) {
-                        deliverConversation(skillResult.message());
-                    }
+                    Tools.runSkill(skillName, count, targetBlockIds, maxFails, options);
                 }
                 default -> logger.warn("Unknown function: {}", functionName);
             }
