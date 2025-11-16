@@ -69,33 +69,25 @@ import net.shasankp000.GameAI.BotEventHandler;
 import net.shasankp000.GameAI.State;
 
 import net.shasankp000.GameAI.BotActions;
+import net.shasankp000.GameAI.llm.LLMJobTracker;
+import net.shasankp000.GameAI.llm.LLMActionQueue;
 import net.shasankp000.GameAI.skills.SkillContext;
 import net.shasankp000.GameAI.skills.SkillExecutionResult;
 import net.shasankp000.GameAI.skills.SkillManager;
-
+import net.shasankp000.GameAI.services.SkillResumeService;
 import net.shasankp000.Database.OldSQLiteDB;
-
 import net.shasankp000.Entity.AutoFaceEntity;
-
 import net.shasankp000.Entity.LookController;
-
 import net.shasankp000.Overlay.ThinkingStateManager;
-
 import net.shasankp000.PathFinding.ChartPathToBlock;
-
 import net.shasankp000.PathFinding.GoTo;
-
 import net.shasankp000.PathFinding.PathTracer;
-
 import net.shasankp000.PlayerUtils.*;
-
 import net.shasankp000.ServiceLLMClients.LLMClient;
+import net.shasankp000.ServiceLLMClients.LLMServiceHandler;
 import net.shasankp000.Commands.modCommandRegistry;
-
 import net.shasankp000.WebSearch.WebSearchTool;
-
 import org.slf4j.Logger;
-
 import org.slf4j.LoggerFactory;
 
 import static net.shasankp000.ChatUtils.Helper.JsonUtils.cleanJsonString;
@@ -104,8 +96,8 @@ public class FunctionCallerV2 {
 
     private static final Logger logger = LoggerFactory.getLogger("function-caller");
 
-    private static ServerCommandSource botSource = null;
-
+    private static final ThreadLocal<ServerCommandSource> ACTIVE_BOT_SOURCE = ThreadLocal.withInitial(() -> null);
+    private static final ThreadLocal<UUID> ACTIVE_PLAYER_UUID = ThreadLocal.withInitial(() -> null);
     private static final String DB_URL = "jdbc:sqlite:" + "./sqlite_databases/" + "memory_agent.db";
 
     private static final String host = "http://localhost:11434/";
@@ -118,7 +110,18 @@ public class FunctionCallerV2 {
 
     private static final Map<String, Object> sharedState = new ConcurrentHashMap<>();  // Updated to Map<String, Object>
 
-    private static UUID playerUUID;
+    private static ServerCommandSource currentBotSource() {
+        return ACTIVE_BOT_SOURCE.get();
+    }
+
+    private static UUID currentPlayerUUID() {
+        return ACTIVE_PLAYER_UUID.get();
+    }
+
+    public static void clearContext() {
+        ACTIVE_BOT_SOURCE.remove();
+        ACTIVE_PLAYER_UUID.remove();
+    }
 
 
 
@@ -147,11 +150,40 @@ public class FunctionCallerV2 {
     );
     private static final Set<String> AFFIRMATIVE_RESPONSES = Set.of("yes", "y", "yeah", "yep", "sure", "affirmative", "do it", "go", "confirm");
     private static final Set<String> NEGATIVE_RESPONSES = Set.of("no", "n", "nope", "nah", "stop", "cancel", "hold", "wait");
+    private static final Set<String> RESOURCE_COLLECTION_ALIASES = Set.of(
+            "collectresources",
+            "collectresource",
+            "collectblocks",
+            "collectmaterials",
+            "gatherresources",
+            "gatherresource",
+            "gatherblocks",
+            "gathermaterials"
+    );
+    private static final Map<String, ResourceSkillMapping> RESOURCE_MAPPINGS = buildResourceMappings();
+    private static final Set<String> KNOWN_SKILLS = Set.of(
+            "collect_dirt",
+            "dirt_shovel",
+            "mining",
+            "stripmine",
+            "drop_sweep"
+    );
+    private static final Set<String> HIGH_IMPACT_SKILLS = Set.of(
+            "collect_dirt",
+            "mining",
+            "stripmine",
+            "drop_sweep"
+    );
+    private static final Set<String> RESOURCE_KEYWORDS = Set.of(
+            "stone", "cobblestone", "cobble", "deepslate", "andesite", "diorite", "granite",
+            "tuff", "ore", "coal", "iron", "gold", "copper", "lapis", "diamond", "emerald",
+            "sand", "gravel", "dirt"
+    );
 
     public FunctionCallerV2(ServerCommandSource botSource, UUID playerUUID) {
-        FunctionCallerV2.botSource = botSource;
+        ACTIVE_BOT_SOURCE.set(botSource);
+        ACTIVE_PLAYER_UUID.set(playerUUID);
         ollamaAPI.setRequestTimeoutSeconds(90);
-        FunctionCallerV2.playerUUID = playerUUID;
     }
 
     public static Map<String, Object> getSharedState() {
@@ -187,6 +219,39 @@ public class FunctionCallerV2 {
         }
     }
 
+    private record ResourceSkillMapping(String skillName, String blockIds) {
+    }
+
+    private static Map<String, ResourceSkillMapping> buildResourceMappings() {
+        Map<String, ResourceSkillMapping> map = new LinkedHashMap<>();
+        map.put("dirt", new ResourceSkillMapping("collect_dirt", "minecraft:dirt,minecraft:coarse_dirt,minecraft:rooted_dirt,minecraft:grass_block"));
+        map.put("coarse dirt", new ResourceSkillMapping("collect_dirt", "minecraft:coarse_dirt"));
+        map.put("grass", new ResourceSkillMapping("collect_dirt", "minecraft:grass_block"));
+        map.put("mud", new ResourceSkillMapping("collect_dirt", "minecraft:mud"));
+        map.put("sand", new ResourceSkillMapping("collect_dirt", "minecraft:sand"));
+        map.put("gravel", new ResourceSkillMapping("collect_dirt", "minecraft:gravel"));
+        map.put("stone", new ResourceSkillMapping("mining", "minecraft:stone,minecraft:cobblestone"));
+        map.put("cobblestone", new ResourceSkillMapping("mining", "minecraft:cobblestone"));
+        map.put("cobble", new ResourceSkillMapping("mining", "minecraft:cobblestone"));
+        map.put("deepslate", new ResourceSkillMapping("mining", "minecraft:deepslate,minecraft:cobbled_deepslate"));
+        map.put("cobbled deepslate", new ResourceSkillMapping("mining", "minecraft:cobbled_deepslate"));
+        map.put("andesite", new ResourceSkillMapping("mining", "minecraft:andesite"));
+        map.put("diorite", new ResourceSkillMapping("mining", "minecraft:diorite"));
+        map.put("granite", new ResourceSkillMapping("mining", "minecraft:granite"));
+        map.put("tuff", new ResourceSkillMapping("mining", "minecraft:tuff"));
+        map.put("coal", new ResourceSkillMapping("mining", "minecraft:coal_ore,minecraft:deepslate_coal_ore"));
+        map.put("iron", new ResourceSkillMapping("mining", "minecraft:iron_ore,minecraft:deepslate_iron_ore"));
+        map.put("copper", new ResourceSkillMapping("mining", "minecraft:copper_ore,minecraft:deepslate_copper_ore"));
+        map.put("gold", new ResourceSkillMapping("mining", "minecraft:gold_ore,minecraft:deepslate_gold_ore"));
+        map.put("lapis", new ResourceSkillMapping("mining", "minecraft:lapis_ore,minecraft:deepslate_lapis_ore"));
+        map.put("redstone", new ResourceSkillMapping("mining", "minecraft:redstone_ore,minecraft:deepslate_redstone_ore"));
+        map.put("diamond", new ResourceSkillMapping("mining", "minecraft:diamond_ore,minecraft:deepslate_diamond_ore"));
+        map.put("emerald", new ResourceSkillMapping("mining", "minecraft:emerald_ore,minecraft:deepslate_emerald_ore"));
+        map.put("quartz", new ResourceSkillMapping("mining", "minecraft:nether_quartz_ore"));
+        map.put("nether quartz", new ResourceSkillMapping("mining", "minecraft:nether_quartz_ore"));
+        return Collections.unmodifiableMap(map);
+    }
+
     private static String getCurrentDateandTime() {
         DateTimeFormatter dtf = DateTimeFormatter.ofPattern("yyyy/MM/dd HH:mm:ss");
         LocalDateTime now = LocalDateTime.now();
@@ -197,22 +262,58 @@ public class FunctionCallerV2 {
         functionOutput = String.valueOf(method);
     }
 
+    private static void submitWithContext(Runnable runnable) {
+        ServerCommandSource source = currentBotSource();
+        UUID commander = currentPlayerUUID();
+        executor.submit(() -> {
+            ACTIVE_BOT_SOURCE.set(source);
+            ACTIVE_PLAYER_UUID.set(commander);
+            try {
+                runnable.run();
+            } finally {
+                ACTIVE_BOT_SOURCE.remove();
+                ACTIVE_PLAYER_UUID.remove();
+            }
+        });
+    }
+
+    private static void runWithContext(ServerCommandSource source, UUID commanderId, Runnable runnable) {
+        ServerCommandSource previousSource = currentBotSource();
+        UUID previousCommander = currentPlayerUUID();
+        ACTIVE_BOT_SOURCE.set(source);
+        ACTIVE_PLAYER_UUID.set(commanderId);
+        try {
+            runnable.run();
+        } finally {
+            if (previousSource != null) {
+                ACTIVE_BOT_SOURCE.set(previousSource);
+            } else {
+                ACTIVE_BOT_SOURCE.remove();
+            }
+            if (previousCommander != null) {
+                ACTIVE_PLAYER_UUID.set(previousCommander);
+            } else {
+                ACTIVE_PLAYER_UUID.remove();
+            }
+        }
+    }
+
     private static class Tools {
         /** goTo tool: path finder + tracer **/
         private static void goTo(int x, int y, int z, boolean sprint) {
             System.out.println("Going to coordinates: " + x + ", " + y + ", " + z + " | Sprint: " + sprint);
-            if (botSource == null) {
+            if (currentBotSource() == null) {
                 System.out.println("Bot not found.");
                 getFunctionOutput("Bot not found.");
                 return;
             }
             try {
                 // ✅ Call the method and wait for result
-                String result = GoTo.goTo(botSource, x, y, z, sprint);
+                String result = GoTo.goTo(currentBotSource(), x, y, z, sprint);
                 // ✅ Ensure we have a valid result for parsing
                 if (result == null || result.trim().isEmpty()) {
                     // Fallback: get current bot position
-                    ServerPlayerEntity bot = botSource.getPlayer();
+                    ServerPlayerEntity bot = currentBotSource().getPlayer();
                     if (bot != null) {
                         BlockPos pos = bot.getBlockPos();
                         result = String.format("Bot position - x: %d y: %d z: %d",
@@ -229,19 +330,19 @@ public class FunctionCallerV2 {
         /** chartPathToBlock: final positioning **/
         private static void chartPathToBlock(int targetX, int targetY, int targetZ, String blockType) {
             System.out.println("Charting path to block at: " + targetX + ", " + targetY + ", " + targetZ + " | BlockType: " + blockType);
-            getFunctionOutput(ChartPathToBlock.chart(Objects.requireNonNull(botSource.getPlayer()), new BlockPos(targetX, targetY, targetZ), blockType));
+            getFunctionOutput(ChartPathToBlock.chart(Objects.requireNonNull(currentBotSource().getPlayer()), new BlockPos(targetX, targetY, targetZ), blockType));
         }
 
         /** faceBlock: look at block **/
         private static void faceBlock(int targetX, int targetY, int targetZ) {
             System.out.println("Facing block at: " + targetX + ", " + targetY + ", " + targetZ);
-            getFunctionOutput(LookController.faceBlock(Objects.requireNonNull(botSource.getPlayer()), new BlockPos(targetX, targetY, targetZ)));
+            getFunctionOutput(LookController.faceBlock(Objects.requireNonNull(currentBotSource().getPlayer()), new BlockPos(targetX, targetY, targetZ)));
         }
 
         /** faceEntity: look at entity **/
         private static void faceEntity(int targetX, int targetY, int targetZ) {
             System.out.println("Facing entity at: " + targetX + ", " + targetY + ", " + targetZ);
-            ServerPlayerEntity bot = Objects.requireNonNull(botSource.getPlayer());
+            ServerPlayerEntity bot = Objects.requireNonNull(currentBotSource().getPlayer());
             // Get the world
             var world = bot.getEntityWorld();
             // Create a small bounding box around the coordinates to find nearby entities
@@ -265,13 +366,13 @@ public class FunctionCallerV2 {
         /** detectBlocks: raycast with block type filter **/
         private static void detectBlocks(String blockType) {
             System.out.println("Detecting blocks of type: " + blockType);
-            if (botSource == null || botSource.getPlayer() == null) {
+            if (currentBotSource() == null || currentBotSource().getPlayer() == null) {
                 getFunctionOutput("Bot not found.");
                 return;
             }
             try {
                 BlockPos outputPos = blockDetectionUnit.detectBlocks(
-                        Objects.requireNonNull(botSource.getPlayer()), blockType);
+                        Objects.requireNonNull(currentBotSource().getPlayer()), blockType);
                 String output;
                 if (outputPos == null) {
                     output = "Block not found!";
@@ -292,33 +393,33 @@ public class FunctionCallerV2 {
         /** turn: change torso facing direction **/
         private static void turn(String direction) {
             System.out.println("Turning to: " + direction);
-            MinecraftServer server = botSource.getServer();
-            String botName = botSource.getName();
+            MinecraftServer server = currentBotSource().getServer();
+            String botName = currentBotSource().getName();
             if (server == null) {
                 getFunctionOutput("Server unavailable. Cannot execute turn command.");
                 return;
             }
-            CommandUtils.run(botSource, "player " + botName + " turn " + direction);
-            getFunctionOutput("Now facing " + direction + " which is in " + Objects.requireNonNull(botSource.getPlayer()).getFacing().asString() + " in " + Objects.requireNonNull(botSource.getPlayer()).getFacing().getAxis().asString() + " axis.");
+            CommandUtils.run(currentBotSource(), "player " + botName + " turn " + direction);
+            getFunctionOutput("Now facing " + direction + " which is in " + Objects.requireNonNull(currentBotSource().getPlayer()).getFacing().asString() + " in " + Objects.requireNonNull(currentBotSource().getPlayer()).getFacing().getAxis().asString() + " axis.");
         }
 
         /** look: change head facing direction **/
         private static void look(String cardinalDirection) {
             System.out.println("Looking at: " + cardinalDirection);
-            MinecraftServer server = botSource.getServer();
-            String botName = botSource.getName();
+            MinecraftServer server = currentBotSource().getServer();
+            String botName = currentBotSource().getName();
             if (server == null) {
                 getFunctionOutput("Server unavailable. Cannot execute look command.");
                 return;
             }
-            CommandUtils.run(botSource, "player " + botName + " look " + cardinalDirection);
-            getFunctionOutput("Now facing cardinal direction: " + Objects.requireNonNull(botSource.getPlayer()).getFacing().asString() + " which is in " + Objects.requireNonNull(botSource.getPlayer()).getFacing().getAxis().asString() + " axis.");
+            CommandUtils.run(currentBotSource(), "player " + botName + " look " + cardinalDirection);
+            getFunctionOutput("Now facing cardinal direction: " + Objects.requireNonNull(currentBotSource().getPlayer()).getFacing().asString() + " which is in " + Objects.requireNonNull(currentBotSource().getPlayer()).getFacing().getAxis().asString() + " axis.");
         }
 
         /** mineBlock: break block **/
         private static void mineBlock(int targetX, int targetY, int targetZ) {
             System.out.println("Mining block at: " + targetX + ", " + targetY + ", " + targetZ);
-            if (botSource == null || botSource.getPlayer() == null) {
+            if (currentBotSource() == null || currentBotSource().getPlayer() == null) {
                 getFunctionOutput("Bot not found.");
                 return;
             }
@@ -327,7 +428,7 @@ public class FunctionCallerV2 {
                 CompletableFuture<String> miningFuture = CompletableFuture.supplyAsync(() -> {
                     try {
                         return MiningTool.mineBlock(
-                                Objects.requireNonNull(botSource.getPlayer()),
+                                Objects.requireNonNull(currentBotSource().getPlayer()),
                                 new BlockPos(targetX, targetY, targetZ)
                         ).get();
                     } catch (Exception e) {
@@ -347,24 +448,24 @@ public class FunctionCallerV2 {
         /** getOxygenLevel: report air level **/
         private static void getOxygenLevel() {
             System.out.println("Getting oxygen level...");
-            getFunctionOutput("Oxygen Level: " + getPlayerOxygen.getBotOxygenLevel(Objects.requireNonNull(botSource.getPlayer())));
+            getFunctionOutput("Oxygen Level: " + getPlayerOxygen.getBotOxygenLevel(Objects.requireNonNull(currentBotSource().getPlayer())));
         }
 
         /** getHungerLevel: report hunger **/
         private static void getHungerLevel() {
             System.out.println("Getting hunger level...");
-            getFunctionOutput("Hunger Level: " + getPlayerHunger.getBotHungerLevel(Objects.requireNonNull(botSource.getPlayer())));
+            getFunctionOutput("Hunger Level: " + getPlayerHunger.getBotHungerLevel(Objects.requireNonNull(currentBotSource().getPlayer())));
         }
 
         /** getHealthLevel: report health **/
         private static void getHealthLevel() {
             System.out.println("Getting health level...");
-            getFunctionOutput("Remaining hearts: " + getHealth.getBotHealthLevel(Objects.requireNonNull(botSource.getPlayer())));
+            getFunctionOutput("Remaining hearts: " + getHealth.getBotHealthLevel(Objects.requireNonNull(currentBotSource().getPlayer())));
         }
 
         private static void followPlayer(String targetName) {
-            ServerPlayerEntity bot = Objects.requireNonNull(botSource.getPlayer());
-            MinecraftServer server = botSource.getServer();
+            ServerPlayerEntity bot = Objects.requireNonNull(currentBotSource().getPlayer());
+            MinecraftServer server = currentBotSource().getServer();
             if (server == null) {
                 getFunctionOutput("Server unavailable.");
                 return;
@@ -375,25 +476,25 @@ public class FunctionCallerV2 {
         }
 
         private static void guardArea(double radius) {
-            ServerPlayerEntity bot = Objects.requireNonNull(botSource.getPlayer());
+            ServerPlayerEntity bot = Objects.requireNonNull(currentBotSource().getPlayer());
             String result = BotEventHandler.setGuardMode(bot, radius);
             getFunctionOutput(result);
         }
 
         private static void stayPut() {
-            ServerPlayerEntity bot = Objects.requireNonNull(botSource.getPlayer());
+            ServerPlayerEntity bot = Objects.requireNonNull(currentBotSource().getPlayer());
             String result = BotEventHandler.setStayMode(bot);
             getFunctionOutput(result);
         }
 
         private static void returnToBase() {
-            ServerPlayerEntity bot = Objects.requireNonNull(botSource.getPlayer());
+            ServerPlayerEntity bot = Objects.requireNonNull(currentBotSource().getPlayer());
             String result = BotEventHandler.setReturnToBase(bot);
             getFunctionOutput(result);
         }
 
         private static void toggleAssist(String modeRaw) {
-            ServerPlayerEntity bot = Objects.requireNonNull(botSource.getPlayer());
+            ServerPlayerEntity bot = Objects.requireNonNull(currentBotSource().getPlayer());
             String normalized = modeRaw == null ? "on" : modeRaw.toLowerCase(Locale.ROOT);
             boolean enable;
             switch (normalized) {
@@ -411,25 +512,25 @@ public class FunctionCallerV2 {
 
         private static void sendMessageToChat(String message) {
             System.out.println("Sending message to chat...");
-            ChatUtils.sendChatMessages(botSource, message);
+            ChatUtils.sendChatMessages(currentBotSource(), message);
         }
 
         /** cultivateLand: cultivate a dirt block **/
         private static void cultivateLand(int targetX, int targetY, int targetZ) {
             System.out.println("Cultivating land at: " + targetX + ", " + targetY + ", " + targetZ);
-            if (botSource == null || botSource.getPlayer() == null) {
+            if (currentBotSource() == null || currentBotSource().getPlayer() == null) {
                 getFunctionOutput("Bot not found.");
                 return;
             }
             try {
                 // 1. Go to the block
-                String goToResult = GoTo.goTo(botSource, targetX, targetY, targetZ, false);
+                String goToResult = GoTo.goTo(currentBotSource(), targetX, targetY, targetZ, false);
                 if (goToResult.contains("Failed")) {
                     getFunctionOutput("Failed to go to block: " + goToResult);
                     return;
                 }
                 // 2. Use hoe on the block
-                boolean useHoeResult = BotActions.useHoe(Objects.requireNonNull(botSource.getPlayer()), new BlockPos(targetX, targetY, targetZ));
+                boolean useHoeResult = BotActions.useHoe(Objects.requireNonNull(currentBotSource().getPlayer()), new BlockPos(targetX, targetY, targetZ));
                 getFunctionOutput(String.valueOf(useHoeResult));
             } catch (Exception e) {
                 logger.error("Error in cultivateLand: ", e);
@@ -440,20 +541,20 @@ public class FunctionCallerV2 {
         /** chopWood: chop a wood block **/
         private static void chopWood(String treeType) {
             System.out.println("Chopping wood of type: " + treeType);
-            if (botSource == null || botSource.getPlayer() == null) {
+            if (currentBotSource() == null || currentBotSource().getPlayer() == null) {
                 getFunctionOutput("Bot not found.");
                 return;
             }
             try {
                 // 1. Detect the block
-                blockDetectionUnit.detectBlocks(Objects.requireNonNull(botSource.getPlayer()), treeType);
+                blockDetectionUnit.detectBlocks(Objects.requireNonNull(currentBotSource().getPlayer()), treeType);
                 BlockPos detectedPos = (BlockPos) SharedStateUtils.getValue(sharedState, "lastDetectedBlock.pos");
                 if (detectedPos == null) {
                     getFunctionOutput("No " + treeType + " found.");
                     return;
                 }
                 // 2. Go to the block
-                String goToResult = GoTo.goTo(botSource, detectedPos.getX(), detectedPos.getY(), detectedPos.getZ(), false);
+                String goToResult = GoTo.goTo(currentBotSource(), detectedPos.getX(), detectedPos.getY(), detectedPos.getZ(), false);
                 if (goToResult.contains("Failed")) {
                     getFunctionOutput("Failed to go to block: " + goToResult);
                     return;
@@ -462,7 +563,7 @@ public class FunctionCallerV2 {
                 CompletableFuture<String> miningFuture = CompletableFuture.supplyAsync(() -> {
                     try {
                         return MiningTool.mineBlock(
-                                Objects.requireNonNull(botSource.getPlayer()),
+                                Objects.requireNonNull(currentBotSource().getPlayer()),
                                 detectedPos
                         ).get();
                     } catch (Exception e) {
@@ -481,14 +582,14 @@ public class FunctionCallerV2 {
         /** shovelDirt: detect and mine dirt block **/
         private static void shovelDirt() {
             System.out.println("Shoveling dirt via skill manager...");
-            if (botSource == null) {
+            if (currentBotSource() == null) {
                 getFunctionOutput("Bot not found.");
                 return;
             }
             try {
                 SkillExecutionResult result = SkillManager.runSkill(
                         "dirt_shovel",
-                        new SkillContext(botSource, sharedState)
+                        new SkillContext(currentBotSource(), sharedState)
                 );
                 getFunctionOutput(result.message());
             } catch (Exception e) {
@@ -498,11 +599,12 @@ public class FunctionCallerV2 {
         }
 
         /** runSkill: generic skill runner **/
-        private static void runSkill(String skillName, String countStr, String targetBlockIdsStr, String maxFailsStr, String optionsStr) {
+        private static SkillExecutionResult runSkill(String skillName, String countStr, String targetBlockIdsStr, String maxFailsStr, String optionsStr) {
             System.out.println("Running skill: " + skillName + " with count: " + countStr + ", targetBlockIds: " + targetBlockIdsStr + ", maxFails: " + maxFailsStr + ", options: " + optionsStr);
-            if (botSource == null) {
-                getFunctionOutput("Bot not found.");
-                return;
+            if (currentBotSource() == null) {
+                String message = "Bot not found.";
+                getFunctionOutput(message);
+                return SkillExecutionResult.failure(message);
             }
             try {
                 Map<String, Object> params = new HashMap<>();
@@ -548,15 +650,39 @@ public class FunctionCallerV2 {
                     }
                 }
 
+                ServerPlayerEntity bot = currentBotSource().getPlayer();
+                if (bot != null) {
+                    SkillResumeService.recordExecution(bot, skillName, summarizeSkillParams(params), currentBotSource());
+                }
+
                 SkillExecutionResult result = SkillManager.runSkill(
                         skillName,
-                        new SkillContext(botSource, sharedState, params)
+                        new SkillContext(currentBotSource(), sharedState, params)
                 );
                 getFunctionOutput(result.message());
+                if (bot != null) {
+                    SkillResumeService.handleCompletion(bot.getUuid(), result.success());
+                }
+                return result;
             } catch (Exception e) {
                 logger.error("Error executing skill '{}': ", skillName, e);
-                getFunctionOutput("Failed to run skill '" + skillName + "': " + e.getMessage());
+                ServerPlayerEntity bot = currentBotSource() != null ? currentBotSource().getPlayer() : null;
+                if (bot != null) {
+                    SkillResumeService.handleCompletion(bot.getUuid(), false);
+                }
+                String message = "Failed to run skill '" + skillName + "': " + e.getMessage();
+                getFunctionOutput(message);
+                return SkillExecutionResult.failure(message);
             }
+        }
+
+        private static String summarizeSkillParams(Map<String, Object> params) {
+            if (params == null || params.isEmpty()) {
+                return "LLM";
+            }
+            StringBuilder builder = new StringBuilder("LLM");
+            params.forEach((key, value) -> builder.append(" ").append(key).append("=").append(value));
+            return builder.toString();
         }
     }
 
@@ -704,11 +830,11 @@ public class FunctionCallerV2 {
             
             Your role is to analyze player prompts carefully and decide which tool or sequence of tools best accomplishes the task. 
             You must output your decision strictly as JSON, following the required schema.
-            
+
             ---
-            
+
             Key Principles
-            
+
             1. **Use only the tools you have.** 
             Do not hallucinate new tools. Each tool has clear parameters, a purpose, and trade-offs.
             
@@ -786,9 +912,9 @@ public class FunctionCallerV2 {
             To fulfill these type of requests you need to chain the tools you have at your disposal in a specific order by understanding what each tool does and how each tool works.
             
             ---
-            
+
             How you must output:
-            
+
             If you only need to use one tool, output in this JSON format.
             
             {
@@ -879,10 +1005,10 @@ public class FunctionCallerV2 {
     }
 
     private static String resolvePersona() {
-        if (botSource == null) {
+        if (currentBotSource() == null) {
             return DEFAULT_PERSONA;
         }
-        String name = botSource.getName();
+        String name = currentBotSource().getName();
         if (name == null) {
             return DEFAULT_PERSONA;
         }
@@ -954,8 +1080,8 @@ public class FunctionCallerV2 {
             sb.append("\n");
         } else {
             // first time call.
-            assert botSource.getPlayer() != null;
-            Direction facingDir = botSource.getPlayer().getFacing();
+            assert currentBotSource().getPlayer() != null;
+            Direction facingDir = currentBotSource().getPlayer().getFacing();
             sb.append("- Facing: ").append(facingDir.asString());
             sb.append(" (axis: ").append(facingDir.getAxis().asString()).append(")");
         }
@@ -994,13 +1120,291 @@ public class FunctionCallerV2 {
         return sb.toString();
     }
 
+    private static JsonObject normalizePayload(JsonObject payload, String userInput) {
+        if (payload == null) {
+            return null;
+        }
+        if (payload.has(FUNCTION_NAME_KEY)) {
+            return normalizeFunctionCall(payload, userInput);
+        }
+        if (payload.has(PIPELINE_KEY)) {
+            JsonArray steps = payload.getAsJsonArray(PIPELINE_KEY);
+            JsonArray normalized = new JsonArray();
+            for (JsonElement element : steps) {
+                JsonObject normalizedStep = normalizeFunctionCall(element.getAsJsonObject(), userInput);
+                if (normalizedStep == null) {
+                    return null;
+                }
+                normalized.add(normalizedStep);
+            }
+            payload.add(PIPELINE_KEY, normalized);
+        }
+        return payload;
+    }
+
+    private static JsonObject normalizeFunctionCall(JsonObject functionPayload, String userInput) {
+        if (functionPayload == null || !functionPayload.has(FUNCTION_NAME_KEY)) {
+            return functionPayload;
+        }
+        String fnName = functionPayload.get(FUNCTION_NAME_KEY).getAsString();
+        if ("runSkill".equalsIgnoreCase(fnName)) {
+            JsonObject normalized = normalizeRunSkillPayload(functionPayload, userInput);
+            if (normalized == null) {
+                return null;
+            }
+            functionPayload = normalized;
+        }
+        if (ToolRegistry.isKnownTool(fnName)) {
+            return functionPayload;
+        }
+        String aliasKey = fnName.trim().toLowerCase(Locale.ROOT);
+        JsonObject converted = null;
+        if (RESOURCE_COLLECTION_ALIASES.contains(aliasKey)) {
+            converted = convertResourceCollectionCall(functionPayload, userInput);
+        }
+        if (converted == null) {
+            logger.warn("FunctionCallerV2: LLM requested unknown tool '{}'", fnName);
+            if (!RESOURCE_COLLECTION_ALIASES.contains(aliasKey)) {
+                deliverConversation("I don't have a '" + fnName + "' tool yet. Try asking for mining, stripmine, follow, or other known skills.");
+            }
+            return null;
+        }
+        copyMetadata(functionPayload, converted);
+        return converted;
+    }
+
+    private static JsonObject convertResourceCollectionCall(JsonObject sourcePayload, String userInput) {
+        String resource = extractParameterValue(sourcePayload, "resourceType");
+        ResourceSkillMapping mapping = inferResourceMapping(resource, userInput);
+        if (mapping == null) {
+            String target = (resource == null || resource.isBlank()) ? "that resource" : ("'" + resource + "'");
+            deliverConversation("I'm not sure which skill collects " + target + " yet. Try asking for dirt, stone, or strip mining explicitly.");
+            return null;
+        }
+        JsonObject normalized = new JsonObject();
+        normalized.addProperty(FUNCTION_NAME_KEY, "runSkill");
+        JsonArray params = new JsonArray();
+        params.add(buildParameter("skillName", mapping.skillName()));
+
+        String quantity = extractParameterValue(sourcePayload, "quantity");
+        if (quantity != null && !quantity.isBlank()) {
+            params.add(buildParameter("count", quantity));
+        }
+        if (mapping.blockIds() != null && !mapping.blockIds().isBlank()) {
+            params.add(buildParameter("targetBlockIds", mapping.blockIds()));
+        }
+        normalized.add(PARAMETERS_KEY, params);
+        return normalized;
+    }
+
+    private static JsonObject normalizeRunSkillPayload(JsonObject payload, String userInput) {
+        String skillName = extractParameterValue(payload, "skillName");
+        if (skillName != null && isKnownSkill(skillName)) {
+            return payload;
+        }
+        ResourceSkillMapping mapping = inferResourceMapping(skillName, userInput);
+        if (mapping == null) {
+            if (skillName != null && !skillName.isBlank()) {
+                deliverConversation("I don't know the '" + skillName + "' skill yet. Try asking me to mine, stripmine, or collect dirt.");
+            } else {
+                deliverConversation("Let me know which resource to gather so I can pick the right skill.");
+            }
+            return null;
+        }
+        replaceOrAddParameter(payload, "skillName", mapping.skillName());
+        if (mapping.blockIds() != null && !mapping.blockIds().isBlank()) {
+            String existing = extractParameterValue(payload, "targetBlockIds");
+            String merged = mergeCsv(existing, mapping.blockIds());
+            replaceOrAddParameter(payload, "targetBlockIds", merged);
+        }
+        return payload;
+    }
+
+    private static void maybeAnnounceRunSkill(Map<String, String> paramMap) {
+        if (currentBotSource() == null || currentPlayerUUID() == null) {
+            return;
+        }
+        ServerPlayerEntity bot = currentBotSource().getPlayer();
+        if (bot == null) {
+            return;
+        }
+        String summary = buildRunSkillSummary(paramMap);
+        if (summary == null || summary.isBlank()) {
+            return;
+        }
+        deliverConversation("On it — " + summary + ".");
+        LLMJobTracker.startJob(bot.getUuid(), currentPlayerUUID(), summary);
+    }
+
+    private static String buildRunSkillSummary(Map<String, String> paramMap) {
+        if (paramMap == null) {
+            return null;
+        }
+        String skill = normalizeKey(paramMap.get("skillName"));
+        if (skill == null) {
+            return null;
+        }
+        String count = paramMap.get("count");
+        String countText = (count == null || count.isBlank()) ? "some" : count;
+        return switch (skill) {
+            case "mining" -> "mine " + countText + " " + describeBlocks(paramMap.get("targetBlockIds"), "blocks");
+            case "collect_dirt" -> "gather " + countText + " dirt blocks";
+            case "stripmine" -> "stripmine " + countText + " blocks ahead";
+            case "drop_sweep" -> "sweep up drops nearby";
+            default -> null;
+        };
+    }
+
+    private static String describeBlocks(String csv, String fallback) {
+        if (csv == null || csv.isBlank()) {
+            return fallback;
+        }
+        String human = humanizeBlockList(csv);
+        return human.isBlank() ? fallback : human;
+    }
+
+    private static String humanizeBlockList(String csv) {
+        LinkedHashSet<String> names = new LinkedHashSet<>();
+        for (String raw : csv.split(",")) {
+            String trimmed = raw.trim();
+            if (trimmed.isEmpty()) {
+                continue;
+            }
+            int colon = trimmed.indexOf(':');
+            String base = colon >= 0 ? trimmed.substring(colon + 1) : trimmed;
+            names.add(base.replace('_', ' '));
+        }
+        if (names.isEmpty()) {
+            return "";
+        }
+        if (names.size() == 1) {
+            return names.iterator().next();
+        }
+        StringBuilder builder = new StringBuilder();
+        int i = 0;
+        int size = names.size();
+        for (String name : names) {
+            if (i > 0) {
+                builder.append(i == size - 1 ? " and " : ", ");
+            }
+            builder.append(name);
+            i++;
+        }
+        return builder.toString();
+    }
+
+    private static ResourceSkillMapping inferResourceMapping(String explicitResource, String userInput) {
+        ResourceSkillMapping mapping = lookupResourceMapping(explicitResource);
+        if (mapping != null) {
+            return mapping;
+        }
+        return lookupResourceMapping(userInput);
+    }
+
+    private static ResourceSkillMapping lookupResourceMapping(String text) {
+        String normalized = normalizeKey(text);
+        if (normalized == null || normalized.isBlank()) {
+            return null;
+        }
+        ResourceSkillMapping direct = RESOURCE_MAPPINGS.get(normalized);
+        if (direct != null) {
+            return direct;
+        }
+        for (Map.Entry<String, ResourceSkillMapping> entry : RESOURCE_MAPPINGS.entrySet()) {
+            if (normalized.contains(entry.getKey())) {
+                return entry.getValue();
+            }
+        }
+        return null;
+    }
+
+    private static String extractParameterValue(JsonObject payload, String parameterName) {
+        if (payload == null || !payload.has(PARAMETERS_KEY)) {
+            return null;
+        }
+        JsonArray params = payload.getAsJsonArray(PARAMETERS_KEY);
+        for (JsonElement element : params) {
+            JsonObject paramObj = element.getAsJsonObject();
+            if (!paramObj.has(PARAMETER_NAME_KEY)) {
+                continue;
+            }
+            if (parameterName.equalsIgnoreCase(paramObj.get(PARAMETER_NAME_KEY).getAsString())) {
+                JsonElement valueElement = paramObj.get(PARAMETER_VALUE_KEY);
+                return valueElement == null ? null : valueElement.getAsString();
+            }
+        }
+        return null;
+    }
+
+    private static JsonObject buildParameter(String name, String value) {
+        JsonObject param = new JsonObject();
+        param.addProperty(PARAMETER_NAME_KEY, name);
+        param.addProperty(PARAMETER_VALUE_KEY, value);
+        return param;
+    }
+
+    private static void copyMetadata(JsonObject source, JsonObject target) {
+        for (Map.Entry<String, JsonElement> entry : source.entrySet()) {
+            String key = entry.getKey();
+            if (FUNCTION_NAME_KEY.equals(key) || PARAMETERS_KEY.equals(key)) {
+                continue;
+            }
+            target.add(key, entry.getValue());
+        }
+    }
+
+    private static String normalizeKey(String raw) {
+        return raw == null ? null : raw.trim().toLowerCase(Locale.ROOT);
+    }
+
+    private static boolean isKnownSkill(String name) {
+        if (name == null) {
+            return false;
+        }
+        return KNOWN_SKILLS.contains(name.trim().toLowerCase(Locale.ROOT));
+    }
+
+    private static void replaceOrAddParameter(JsonObject payload, String name, String value) {
+        if (!payload.has(PARAMETERS_KEY)) {
+            payload.add(PARAMETERS_KEY, new JsonArray());
+        }
+        JsonArray params = payload.getAsJsonArray(PARAMETERS_KEY);
+        for (JsonElement element : params) {
+            JsonObject paramObj = element.getAsJsonObject();
+            if (paramObj.has(PARAMETER_NAME_KEY) && name.equalsIgnoreCase(paramObj.get(PARAMETER_NAME_KEY).getAsString())) {
+                paramObj.addProperty(PARAMETER_VALUE_KEY, value);
+                return;
+            }
+        }
+        params.add(buildParameter(name, value));
+    }
+
+    private static String mergeCsv(String current, String addition) {
+        LinkedHashSet<String> values = new LinkedHashSet<>();
+        addCsv(values, current);
+        addCsv(values, addition);
+        return values.isEmpty() ? "" : String.join(",", values);
+    }
+
+    private static void addCsv(Set<String> target, String csv) {
+        if (csv == null) {
+            return;
+        }
+        for (String part : csv.split(",")) {
+            String trimmed = part.trim();
+            if (!trimmed.isEmpty()) {
+                target.add(trimmed);
+            }
+        }
+    }
+
     public static void run(String userPrompt) {
         ollamaAPI.setRequestTimeoutSeconds(600);
         OllamaChatRequestBuilder builder = OllamaChatRequestBuilder.getInstance(selectedLM);
         String systemPrompt = FunctionCallerV2.buildPrompt(toolBuilder());
         String response;
-        State initialState = BotEventHandler.createInitialState(botSource.getPlayer());
-        InternalMap map = new InternalMap(botSource.getPlayer(), 1, 1); // 1-block radius in all directions
+        State initialState = BotEventHandler.createInitialState(currentBotSource().getPlayer());
+        InternalMap map = new InternalMap(currentBotSource().getPlayer(), 1, 1); // 1-block radius in all directions
         map.updateMap();
         // If method returns Map<String, String>
         Map<String, String> surroundingsStr = map.summarizeSurroundings();
@@ -1021,16 +1425,21 @@ public class FunctionCallerV2 {
             logger.info("Raw LLM Response: {}", response);
             String jsonPart = extractJson(response);
             logger.info("Extracted JSON: {}", jsonPart);
+            executeFunction(userPrompt, jsonPart, null, true);
         } catch (Exception e) {
             logger.error("Error in Function Caller (Ollama): {}", e.getMessage(), e);
         }
     }
 
     public static void run(String userPrompt, LLMClient client) {
+        run(userPrompt, client, false);
+    }
+
+    public static void run(String userPrompt, LLMClient client, boolean expectAction) {
         String systemPrompt = FunctionCallerV2.buildPrompt(toolBuilder());
         String response;
-        State initialState = BotEventHandler.createInitialState(botSource.getPlayer());
-        InternalMap map = new InternalMap(botSource.getPlayer(), 1, 1); // 1-block radius in all directions
+        State initialState = BotEventHandler.createInitialState(currentBotSource().getPlayer());
+        InternalMap map = new InternalMap(currentBotSource().getPlayer(), 1, 1); // 1-block radius in all directions
         map.updateMap();
         // If method returns Map<String, String>
         Map<String, String> surroundingsStr = map.summarizeSurroundings();
@@ -1046,30 +1455,85 @@ public class FunctionCallerV2 {
             logger.info("Raw LLM Response: {}", response);
             String jsonPart = extractJson(response);
             logger.info("Extracted JSON: {}", jsonPart);
-            executeFunction(userPrompt, jsonPart, client);
+            executeFunction(userPrompt, jsonPart, client, expectAction);
         } catch (Exception e) {
             logger.error("Error in Function Caller (LLMClient): {}", e.getMessage(), e);
         }
     }
 
     private static String extractJson(String response) {
-        // Try to locate either a JSON object or array
-        int objStart = response.indexOf("{");
-        int objEnd = response.lastIndexOf("}") + 1;
-        int arrStart = response.indexOf("[");
-        int arrEnd = response.lastIndexOf("]") + 1;
-        // Try full JSON object (most likely case)
+        if (response == null) {
+            return "{}";
+        }
+        String trimmed = response.trim();
+
+        String candidate = extractObjectContaining(trimmed, "\"functionName\"");
+        if (candidate == null) {
+            candidate = extractObjectContaining(trimmed, "\"pipeline\"");
+        }
+        if (candidate == null) {
+            candidate = extractObjectContaining(trimmed, "\"conversation\"");
+        }
+        if (candidate != null && isValidJson(candidate)) {
+            return candidate;
+        }
+
+        int objStart = trimmed.indexOf("{");
+        int objEnd = trimmed.lastIndexOf("}") + 1;
         if (objStart != -1 && objEnd != -1 && objEnd > objStart) {
-            String candidate = response.substring(objStart, objEnd);
-            if (isValidJson(candidate)) return candidate;
+            String fallback = trimmed.substring(objStart, objEnd);
+            if (isValidJson(fallback)) {
+                return fallback;
+            }
         }
-        // Try JSON array (secondary fallback)
+
+        int arrStart = trimmed.indexOf("[");
+        int arrEnd = trimmed.lastIndexOf("]") + 1;
         if (arrStart != -1 && arrEnd != -1 && arrEnd > arrStart) {
-            String candidate = response.substring(arrStart, arrEnd);
-            if (isValidJson(candidate)) return candidate;
+            String arrayCandidate = trimmed.substring(arrStart, arrEnd);
+            if (isValidJson(arrayCandidate)) {
+                return arrayCandidate;
+            }
         }
+
         logger.error("❌ Could not extract valid JSON from response:\n{}", response);
         return "{}";
+    }
+
+    private static String extractObjectContaining(String text, String marker) {
+        int idx = text.indexOf(marker);
+        if (idx == -1) {
+            return null;
+        }
+        int start = text.lastIndexOf('{', idx);
+        if (start == -1) {
+            return null;
+        }
+        return sliceJsonObject(text, start);
+    }
+
+    private static String sliceJsonObject(String text, int start) {
+        int depth = 0;
+        boolean inString = false;
+        char prev = 0;
+        for (int i = start; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (c == '"' && prev != '\\') {
+                inString = !inString;
+            }
+            if (!inString) {
+                if (c == '{') {
+                    depth++;
+                } else if (c == '}') {
+                    depth--;
+                    if (depth == 0) {
+                        return text.substring(start, i + 1);
+                    }
+                }
+            }
+            prev = c;
+        }
+        return null;
     }
 
     private static boolean isValidJson(String json) {
@@ -1088,8 +1552,8 @@ public class FunctionCallerV2 {
         }
         PathTracer.flushAllMovementTasks();
         AutoFaceEntity.isBotMoving = false;
-        if (botSource != null) {
-            ServerPlayerEntity player = botSource.getPlayer();
+        if (currentBotSource() != null) {
+            ServerPlayerEntity player = currentBotSource().getPlayer();
             if (player != null) {
                 BotActions.stop(player);
             }
@@ -1098,30 +1562,64 @@ public class FunctionCallerV2 {
 
 
 
-    private static void executeFunction(String userInput, String response) {
-        executeFunctionInternal(userInput, response, null, false);
+    private static void executeFunction(String userInput, String response, boolean expectAction) {
+        executeFunctionInternal(userInput, response, null, false, expectAction);
     }
 
-    private static void executeFunction(String userInput, String response, LLMClient client) {
-        executeFunctionInternal(userInput, response, client, false);
+    private static void executeFunction(String userInput, String response, LLMClient client, boolean expectAction) {
+        executeFunctionInternal(userInput, response, client, false, expectAction);
     }
 
 
 
 
 
-    private static void executeFunctionInternal(String userInput, String response, LLMClient client, boolean fromConfirmation) {
+    private static void executeFunctionInternal(String userInput, String response, LLMClient client, boolean fromConfirmation, boolean expectAction) {
         try {
-            executor.submit(() -> {
+            submitWithContext(() -> {
                 String cleanedResponse = cleanJsonString(response);
                 logger.info("Cleaned JSON Response: {}", cleanedResponse);
                 JsonReader reader = new JsonReader(new StringReader(cleanedResponse));
                 reader.setLenient(true);
                 JsonObject jsonObject = JsonParser.parseReader(reader).getAsJsonObject();
 
-                if (jsonObject.has("conversation")) {
-                    deliverConversation(jsonObject.get("conversation").getAsString());
+                jsonObject = normalizePayload(jsonObject, userInput);
+                if (jsonObject == null) {
+                    logger.warn("LLM payload normalization failed; skipping execution.");
+                    deliverConversation("I lost track of that request. Could you repeat what you need?");
+                    failActiveJob("Normalization failed for last action request.");
                     return;
+                }
+
+                if (jsonObject.has("conversation")) {
+                    String convo = jsonObject.get("conversation").getAsString();
+                    if (expectAction) {
+                        logger.warn("LLM returned conversation when action was expected: {}", convo);
+                        deliverConversation("I'm still figuring out the steps for that. Could you restate the command or be more specific?");
+                        failActiveJob("LLM returned small talk instead of an action.");
+                    } else {
+                        deliverConversation(convo);
+                    }
+                    return;
+                }
+
+                if (expectAction && isResourceJob(userInput) && jsonObject.has(PIPELINE_KEY)) {
+                    JsonObject converted = convertResourcePipeline(jsonObject, userInput);
+                    if (converted != null) {
+                        jsonObject = converted;
+                    }
+                }
+
+                if (expectAction && isResourceJob(userInput) && jsonObject.has(FUNCTION_NAME_KEY) && !requestsRunSkillOrPipeline(jsonObject)) {
+                    JsonObject converted = convertResourceFunction(jsonObject, userInput);
+                    if (converted != null) {
+                        jsonObject = converted;
+                    } else {
+                        logger.warn("Resource request '{}' produced tool-only payload: {}", userInput, jsonObject);
+                        deliverConversation("Let me restate that. Tell me what resource you need and how many, so I can plan the full job.");
+                        failActiveJob("LLM only returned tool stubs; awaiting clearer request.");
+                        return;
+                    }
                 }
 
                 if (!fromConfirmation && requiresConfirmation(jsonObject)) {
@@ -1172,8 +1670,10 @@ public class FunctionCallerV2 {
                     }
                 } else if (jsonObject.has(CLARIFICATION_KEY)) {
                     String clarification = jsonObject.get(CLARIFICATION_KEY).getAsString();
-                    ChatContextManager.setPendingClarification(playerUUID, userInput, clarification, botSource.getName());
+                    ChatContextManager.setPendingClarification(currentPlayerUUID(), userInput, clarification, currentBotSource().getName());
+                    failActiveJob("Awaiting clarification from commander.");
                 } else {
+                    failActiveJob("LLM returned an unusable payload.");
                     throw new IllegalStateException("Response must have either " + FUNCTION_NAME_KEY + " or " + PIPELINE_KEY + ".");
                 }
             });
@@ -1212,11 +1712,44 @@ public class FunctionCallerV2 {
         System.out.println("[FunctionCaller] Cleanup complete. movementStatus=" + moving);
     }
 
-    private static void deliverConversation(String reply) {
-        if (botSource == null || reply == null || reply.isBlank()) {
+    private static void triggerNextQueuedCommand(ServerCommandSource source) {
+        if (source == null) {
             return;
         }
-        ChatUtils.sendChatMessages(botSource.withSilent().withMaxLevel(4), reply.trim());
+        ServerPlayerEntity bot = source.getPlayer();
+        if (bot == null) {
+            return;
+        }
+        LLMActionQueue.QueuedCommand queued = LLMActionQueue.poll(bot.getUuid()).orElse(null);
+        if (queued == null) {
+            return;
+        }
+        ChatUtils.sendChatMessages(source.withSilent().withMaxLevel(4),
+                "Queued request: \"" + queued.message() + "\"");
+        LLMServiceHandler.runQueuedCommand(source, queued.commanderId(), queued.message());
+    }
+
+    private static void failActiveJob(String failureMessage) {
+        if (currentBotSource() == null) {
+            return;
+        }
+        ServerPlayerEntity bot = currentBotSource().getPlayer();
+        if (bot == null) {
+            return;
+        }
+        if (LLMJobTracker.getActiveJob(bot.getUuid()).isEmpty()) {
+            return;
+        }
+        LLMJobTracker.completeJob(bot.getUuid(), false, failureMessage);
+        SkillResumeService.handleCompletion(bot.getUuid(), false);
+        triggerNextQueuedCommand(currentBotSource());
+    }
+
+    private static void deliverConversation(String reply) {
+        if (currentBotSource() == null || reply == null || reply.isBlank()) {
+            return;
+        }
+        ChatUtils.sendChatMessages(currentBotSource().withSilent().withMaxLevel(4), reply.trim());
     }
 
     private static boolean requiresConfirmation(JsonObject payload) {
@@ -1224,13 +1757,20 @@ public class FunctionCallerV2 {
             return true;
         }
         if (payload.has(FUNCTION_NAME_KEY)) {
-            return CONFIRMATION_FUNCTIONS.contains(payload.get(FUNCTION_NAME_KEY).getAsString());
+            String function = payload.get(FUNCTION_NAME_KEY).getAsString();
+            if ("runSkill".equalsIgnoreCase(function)) {
+                String skill = normalizeKey(extractParameterValue(payload, "skillName"));
+                if (skill != null && HIGH_IMPACT_SKILLS.contains(skill)) {
+                    return true;
+                }
+            }
+            return CONFIRMATION_FUNCTIONS.contains(function);
         }
         if (payload.has(PIPELINE_KEY)) {
             JsonArray steps = payload.getAsJsonArray(PIPELINE_KEY);
             for (JsonElement element : steps) {
                 JsonObject step = element.getAsJsonObject();
-                if (step.has(FUNCTION_NAME_KEY) && CONFIRMATION_FUNCTIONS.contains(step.get(FUNCTION_NAME_KEY).getAsString())) {
+                if (requiresConfirmation(step)) {
                     return true;
                 }
             }
@@ -1239,7 +1779,7 @@ public class FunctionCallerV2 {
     }
 
     private static boolean maybeRequestConfirmation(String userInput, JsonObject payload, String cleanedJson) {
-        if (playerUUID == null) {
+        if (currentPlayerUUID() == null) {
             return false;
         }
         String prompt = payload.has("confirmationPrompt")
@@ -1248,8 +1788,8 @@ public class FunctionCallerV2 {
         if (!prompt.toLowerCase(Locale.ROOT).contains("yes")) {
             prompt = prompt + " (yes/no)";
         }
-        ChatContextManager.setPendingConfirmation(playerUUID,
-                new ConfirmationState(botSource != null ? botSource.getName() : "Bot", userInput, prompt, cleanedJson));
+        ChatContextManager.setPendingConfirmation(currentPlayerUUID(),
+                new ConfirmationState(currentBotSource() != null ? currentBotSource().getName() : "Bot", userInput, prompt, cleanedJson));
         deliverConversation(prompt);
         return true;
     }
@@ -1279,21 +1819,43 @@ public class FunctionCallerV2 {
     }
 
     public static boolean tryHandleConfirmation(UUID commanderId, String playerMessage) {
-        ConfirmationState state = ChatContextManager.getPendingConfirmation(commanderId);
+        Map<String, ConfirmationState> pending = ChatContextManager.snapshotConfirmations(commanderId);
+        if (pending.isEmpty()) {
+            return false;
+        }
+        AliasToken aliasToken = extractAliasToken(playerMessage, pending);
+        ConfirmationState state;
+        if (aliasToken != null) {
+            state = pending.get(aliasToken.normalizedAlias());
+            if (state == null) {
+                return false;
+            }
+        } else {
+            state = ChatContextManager.getPendingConfirmation(commanderId, null);
+        }
         if (state == null) {
             return false;
         }
-        Boolean decision = parseDecision(playerMessage);
-        if (decision == null) {
-            deliverConversation("Give me a quick yes or no so I know whether to proceed.");
+        String responsePortion = stripAliasToken(playerMessage, aliasToken);
+        ServerPlayerEntity bot = findBotByName(state.botName);
+        if (bot == null) {
+            ChatContextManager.clearPendingConfirmation(commanderId, state.botName);
             return true;
         }
-        ChatContextManager.clearPendingConfirmation(commanderId);
+        ServerCommandSource botSource = bot.getCommandSource().withSilent().withMaxLevel(4);
+        Boolean decision = parseDecision(responsePortion);
+        if (decision == null) {
+            ChatUtils.sendChatMessages(botSource, "Give me a quick yes or no so I know whether to proceed.");
+            return true;
+        }
+        ChatContextManager.clearPendingConfirmation(commanderId, state.botName);
         if (decision) {
-            deliverConversation("On it.");
-            executeFunctionInternal(state.originalMessage, state.payloadJson, null, true);
+            ChatUtils.sendChatMessages(botSource, "On it.");
+            runWithContext(botSource, commanderId,
+                    () -> executeFunctionInternal(state.originalMessage, state.payloadJson, null, true, true));
         } else {
-            deliverConversation("Understood. I'll hold off for now.");
+            ChatUtils.sendChatMessages(botSource, "Understood. I'll hold off for now.");
+            runWithContext(botSource, commanderId, () -> failActiveJob("Commander canceled the job."));
         }
         return true;
     }
@@ -1303,13 +1865,207 @@ public class FunctionCallerV2 {
             return null;
         }
         String normalized = message.trim().toLowerCase(Locale.ROOT);
-        if (AFFIRMATIVE_RESPONSES.contains(normalized)) {
-            return true;
+        if (normalized.isEmpty()) {
+            return null;
         }
-        if (NEGATIVE_RESPONSES.contains(normalized)) {
-            return false;
+        String[] tokens = normalized.split("\\s+");
+        for (String token : tokens) {
+            String cleaned = token.replaceAll("[^a-z]", "");
+            if (cleaned.isEmpty()) {
+                continue;
+            }
+            if (AFFIRMATIVE_RESPONSES.contains(cleaned)) {
+                return true;
+            }
+            if (NEGATIVE_RESPONSES.contains(cleaned)) {
+                return false;
+            }
         }
         return null;
+    }
+
+    private static AliasToken extractAliasToken(String message, Map<String, ConfirmationState> pending) {
+        if (message == null || message.isBlank() || pending == null || pending.isEmpty()) {
+            return null;
+        }
+        String trimmed = message.trim();
+        int breakIndex = findAliasBreakIndex(trimmed);
+        if (breakIndex <= 0) {
+            return null;
+        }
+        String rawToken = trimmed.substring(0, breakIndex);
+        String sanitized = rawToken.replaceAll("^[^A-Za-z0-9]+|[^A-Za-z0-9]+$", "");
+        if (sanitized.isEmpty()) {
+            return null;
+        }
+        String normalized = sanitized.toLowerCase(Locale.ROOT);
+        if (!pending.containsKey(normalized)) {
+            return null;
+        }
+        return new AliasToken(rawToken, normalized);
+    }
+
+    private static int findAliasBreakIndex(String text) {
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (Character.isWhitespace(c)) {
+                return i;
+            }
+            if (c == ':' || c == ',' || c == ';' || c == '-') {
+                return i + 1;
+            }
+        }
+        return -1;
+    }
+
+    private static String stripAliasToken(String message, AliasToken token) {
+        if (message == null) {
+            return "";
+        }
+        String trimmed = message.trim();
+        if (token == null) {
+            return trimmed;
+        }
+        if (trimmed.length() <= token.rawToken().length()) {
+            return "";
+        }
+        String remainder = trimmed.substring(token.rawToken().length()).trim();
+        remainder = remainder.replaceFirst("^[,:;-]+", "").trim();
+        return remainder;
+    }
+
+    private static ServerPlayerEntity findBotByName(String name) {
+        if (name == null || name.isBlank()) {
+            return null;
+        }
+        MinecraftServer server = AIPlayer.serverInstance;
+        if (server == null) {
+            return null;
+        }
+        return server.getPlayerManager().getPlayer(name);
+    }
+
+    private record AliasToken(String rawToken, String normalizedAlias) {
+    }
+
+    private static boolean isResourceJob(String message) {
+        if (message == null) {
+            return false;
+        }
+        String normalized = message.toLowerCase(Locale.ROOT);
+        if (!(normalized.contains("mine") || normalized.contains("collect") || normalized.contains("gather") || normalized.contains("dig"))) {
+            return false;
+        }
+        for (String keyword : RESOURCE_KEYWORDS) {
+            if (normalized.contains(keyword)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean requestsRunSkillOrPipeline(JsonObject payload) {
+        if (payload == null) {
+            return false;
+        }
+        if (payload.has(FUNCTION_NAME_KEY)) {
+            return "runSkill".equalsIgnoreCase(payload.get(FUNCTION_NAME_KEY).getAsString());
+        }
+        return false;
+    }
+
+    private static JsonObject convertResourcePipeline(JsonObject payload, String userInput) {
+        JsonArray steps = payload.getAsJsonArray(PIPELINE_KEY);
+        if (steps == null || steps.isEmpty()) {
+            return null;
+        }
+        Set<String> supported = Set.of("goTo", "detectBlocks", "mineBlock");
+        int mineBlocks = 0;
+        for (JsonElement element : steps) {
+            JsonObject step = element.getAsJsonObject();
+            String fn = step.has(FUNCTION_NAME_KEY) ? step.get(FUNCTION_NAME_KEY).getAsString() : "";
+            if (!supported.contains(fn)) {
+                return null;
+            }
+            if ("mineBlock".equals(fn)) {
+                mineBlocks++;
+            }
+        }
+        if (mineBlocks == 0) {
+            return null;
+        }
+        ResourceSkillMapping mapping = inferResourceMapping(null, userInput);
+        if (mapping == null) {
+            mapping = RESOURCE_MAPPINGS.get("stone");
+        }
+        if (mapping == null) {
+            return null;
+        }
+        JsonObject normalized = new JsonObject();
+        normalized.addProperty(FUNCTION_NAME_KEY, "runSkill");
+        JsonArray params = new JsonArray();
+        params.add(buildParameter("skillName", mapping.skillName()));
+        int count = extractCountFromMessage(userInput);
+        if (count <= 0) {
+            count = mineBlocks;
+        }
+        params.add(buildParameter("count", String.valueOf(count)));
+        if (mapping.blockIds() != null && !mapping.blockIds().isBlank()) {
+            params.add(buildParameter("targetBlockIds", mapping.blockIds()));
+        }
+        normalized.add(PARAMETERS_KEY, params);
+        JsonArray convertedSteps = new JsonArray();
+        convertedSteps.add(normalized.deepCopy());
+        payload.add(PIPELINE_KEY, convertedSteps);
+        logger.info("Converted resource pipeline into single runSkill step: {}", normalized);
+        return normalized;
+    }
+
+    private static JsonObject convertResourceFunction(JsonObject payload, String userInput) {
+        if (payload == null || !payload.has(FUNCTION_NAME_KEY)) {
+            return null;
+        }
+        String fn = payload.get(FUNCTION_NAME_KEY).getAsString();
+        Set<String> convertible = Set.of("mineBlock", "detectBlocks", "gatherResource", "cultivateLand");
+        if (convertible.stream().noneMatch(name -> name.equalsIgnoreCase(fn))) {
+            return null;
+        }
+        ResourceSkillMapping mapping = inferResourceMapping(null, userInput);
+        if (mapping == null) {
+            mapping = RESOURCE_MAPPINGS.get("stone");
+        }
+        if (mapping == null) {
+            return null;
+        }
+        JsonObject normalized = new JsonObject();
+        normalized.addProperty(FUNCTION_NAME_KEY, "runSkill");
+        JsonArray params = new JsonArray();
+        params.add(buildParameter("skillName", mapping.skillName()));
+        int count = extractCountFromMessage(userInput);
+        if (count <= 0) {
+            count = 1;
+        }
+        params.add(buildParameter("count", String.valueOf(count)));
+        if (mapping.blockIds() != null && !mapping.blockIds().isBlank()) {
+            params.add(buildParameter("targetBlockIds", mapping.blockIds()));
+        }
+        normalized.add(PARAMETERS_KEY, params);
+        logger.info("Converted single-tool resource command into runSkill payload: {}", normalized);
+        return normalized;
+    }
+
+    private static int extractCountFromMessage(String message) {
+        if (message == null) {
+            return 0;
+        }
+        Matcher matcher = Pattern.compile("(\\d+)").matcher(message);
+        if (matcher.find()) {
+            try {
+                return Integer.parseInt(matcher.group(1));
+            } catch (NumberFormatException ignored) {
+            }
+        }
+        return 0;
     }
 
     private static void runPipelineLoopInternal(JsonArray pipeline, LLMClient client) {
@@ -1352,8 +2108,8 @@ public class FunctionCallerV2 {
                         + "\n\nExecution failed at step: " + functionName
                         + "\nCause: One or more placeholders could not be resolved from shared state.";
                 try {
-                    State initialState = BotEventHandler.createInitialState(botSource.getPlayer());
-                    InternalMap map = new InternalMap(botSource.getPlayer(), 1, 1);
+                    State initialState = BotEventHandler.createInitialState(currentBotSource().getPlayer());
+                    InternalMap map = new InternalMap(currentBotSource().getPlayer(), 1, 1);
                     map.updateMap();
                     // If method returns Map<String, String>
                     Map<String, String> surroundingsStr = map.summarizeSurroundings();
@@ -1394,7 +2150,7 @@ public class FunctionCallerV2 {
                     } else if (llmResponseObj.has(CLARIFICATION_KEY)) {
                         logger.info("LLM requested clarification. Relaying to player.");
                         String clarification = llmResponseObj.get(CLARIFICATION_KEY).getAsString();
-                        ChatContextManager.setPendingClarification(playerUUID, "A recent action failed.", clarification, botSource.getName());
+                        ChatContextManager.setPendingClarification(currentPlayerUUID(), "A recent action failed.", clarification, currentBotSource().getName());
                         // sendMessageToPlayer(clarification); // Removed as per refactoring
                         break;
                     } else {
@@ -1424,7 +2180,7 @@ public class FunctionCallerV2 {
             }
 
             // Get bot entity
-            ServerPlayerEntity bot = botSource.getPlayer();
+            ServerPlayerEntity bot = currentBotSource().getPlayer();
             if (bot == null) {
                 logger.error("Bot entity not found for verification");
                 continue;
@@ -1453,8 +2209,8 @@ public class FunctionCallerV2 {
                         + "\nFunction output: " + functionOutput
                         + "\nVerification details: " + result.data;
                 try {
-                    State initialState = BotEventHandler.createInitialState(botSource.getPlayer());
-                    InternalMap map = new InternalMap(botSource.getPlayer(), 1, 1);
+                    State initialState = BotEventHandler.createInitialState(currentBotSource().getPlayer());
+                    InternalMap map = new InternalMap(currentBotSource().getPlayer(), 1, 1);
                     map.updateMap();
                     // If method returns Map<String, String>
                     Map<String, String> surroundingsStr = map.summarizeSurroundings();
@@ -1494,7 +2250,7 @@ public class FunctionCallerV2 {
                     } else if (llmResponseObj.has(CLARIFICATION_KEY)) {
                         logger.info("LLM requested clarification. Relaying to player.");
                         String clarification = llmResponseObj.get(CLARIFICATION_KEY).getAsString();
-                        ChatContextManager.setPendingClarification(playerUUID, "A recent action failed.", clarification, botSource.getName());
+                        ChatContextManager.setPendingClarification(currentPlayerUUID(), "A recent action failed.", clarification, currentBotSource().getName());
                         // sendMessageToPlayer(clarification); // Removed as per refactoring
                         break;
                     } else {
@@ -1831,7 +2587,28 @@ public class FunctionCallerV2 {
                     String maxFails = resolvePlaceholder(paramMap.getOrDefault("maxFails", ""));
                     String options = resolvePlaceholder(paramMap.getOrDefault("options", ""));
                     logger.info("Calling method: runSkill with skillName={} count={} targetBlockIds={} maxFails={} options={}", skillName, count, targetBlockIds, maxFails, options);
-                    Tools.runSkill(skillName, count, targetBlockIds, maxFails, options);
+                    maybeAnnounceRunSkill(paramMap);
+                    SkillExecutionResult skillResult = Tools.runSkill(skillName, count, targetBlockIds, maxFails, options);
+                    ServerCommandSource activeSource = currentBotSource();
+                    ServerPlayerEntity bot = activeSource != null ? activeSource.getPlayer() : null;
+                    if (bot != null) {
+                        boolean success = skillResult != null && skillResult.success();
+                        String message = (skillResult != null && skillResult.message() != null)
+                                ? skillResult.message()
+                                : "";
+                        if (message.isBlank()) {
+                            message = success
+                                    ? "Finished running " + skillName + "."
+                                    : "Couldn't finish " + skillName + ".";
+                        }
+                        logger.info("Skill '{}' completed for {} (success={} message='{}')",
+                                skillName, bot.getName().getString(), success, message);
+                        LLMJobTracker.completeJob(bot.getUuid(), success, message);
+                        deliverConversation(message);
+                        triggerNextQueuedCommand(activeSource);
+                    } else if (skillResult != null && skillResult.message() != null) {
+                        deliverConversation(skillResult.message());
+                    }
                 }
                 default -> logger.warn("Unknown function: {}", functionName);
             }
