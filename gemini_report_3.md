@@ -779,6 +779,74 @@ Created centralized healing/hunger service with:
 
 **Verification:** Build successful. `/bot stop` should now terminate actively running tasks.
 
+---
+
+## Session 2025-01-17 13:31 — Checkpoint: Work Direction, Torch Placement, Hunger System Complete
+
+**Summary:** This checkpoint finalizes several major features for bot mining operations:
+
+**Features Added:**
+1. **Work Direction Persistence (`WorkDirectionService`):**
+   - Bots now store their initial facing direction when starting directional mining jobs (stripmine, stairs, depth mining)
+   - Direction maintained throughout job, even across pause/resume cycles
+   - Added `/bot reset_direction <alias>` command to reset stored direction for next job
+   - Prevents bot from mining in random directions when player rotates
+
+2. **Automatic Torch Placement (`TorchPlacer`):**
+   - Bots automatically place torches during mining when light levels drop below 7
+   - Torches placed on walls perpendicular to mining path every 6 blocks
+   - Handles torches in both hotbar and main inventory (auto-swaps if needed)
+   - Bot announces "ran out of torches!" and pauses if no torches available
+   - Torches remain stable on walls, not destroyed during continued mining
+
+3. **Hunger and Healing System (`HealingService`):**
+   - New `/bot heal <alias>` command forces bot to eat food immediately until fully satiated
+   - Prioritizes least valuable food items, skips items with negative side effects (rotten flesh, etc)
+   - Automatic hunger management with status announcements at thresholds:
+     - 75% hunger (15): auto-eat
+     - 50% hunger (10): "I'm hungry"
+     - 25% hunger (5): "I'm starving"
+     - 10% hunger (2): "I'll die if I don't eat!"
+   - Auto-eat when health drops below 75% (15/20 HP) to enable regeneration
+   - 30-second cooldown on warning messages to prevent spam
+
+4. **Job Pause/Resume Fixes:**
+   - Fixed jobs properly pausing (not terminating) when encountering rare ores or hazards
+   - `/bot resume <alias>` now correctly resumes paused jobs with memory of previously discovered rares intact
+   - Jobs only terminate on explicit `/bot stop` commands or completion
+   - Added `recordExecution()` call to enable resume functionality
+   - Split `clear()` and `clearAll()` in `MiningHazardDetector` for proper memory management
+
+5. **Stop Command Improvements:**
+   - Fixed `/bot stop all` and `/bot stop <alias>` to work correctly even when bot is actively mid-job
+   - Tasks now immediately terminate instead of continuing until natural completion
+   - Fixed ticket removal timing in `TaskService` to allow abort detection
+
+**Files Created:**
+- `src/main/java/net/shasankp000/GameAI/services/WorkDirectionService.java`
+- `src/main/java/net/shasankp000/GameAI/services/HealingService.java`
+- `src/main/java/net/shasankp000/GameAI/skills/support/TorchPlacer.java`
+
+**Files Modified:**
+- `src/main/java/net/shasankp000/Commands/modCommandRegistry.java` - Added heal and reset_direction commands
+- `src/main/java/net/shasankp000/GameAI/skills/impl/StripMineSkill.java` - Integrated torch placement and work direction
+- `src/main/java/net/shasankp000/GameAI/skills/impl/CollectDirtSkill.java` - Integrated torch placement for staircases
+- `src/main/java/net/shasankp000/GameAI/skills/support/MiningHazardDetector.java` - Fixed ore discovery memory
+- `src/main/java/net/shasankp000/GameAI/services/TaskService.java` - Fixed abort detection
+- `src/main/java/net/shasankp000/Entity/AutoFaceEntity.java` - Integrated HealingService
+- `README.md` - Updated with new commands and behavior tips
+- `changelog.md` - Documented all changes
+- `file_index.md` - Updated service listings and timestamp
+
+**Git Commit:** aa4eee4 - "Add work direction persistence, torch placement, hunger management, and healing"
+
+**Outcome:** Bots now have significantly improved mining operations with automatic lighting, persistent work directions, intelligent hunger management, and reliable pause/resume functionality. All features tested and verified working.
+
+**Next Steps (from TODO.md):**
+- Implement protected zones for base safety
+- Add block breaking exclusion lists
+- Test all features in extended mining sessions
+
 
 
 
