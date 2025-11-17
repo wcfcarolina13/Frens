@@ -472,7 +472,32 @@ public final class BotActions {
             dz = Math.cos(yawRad) * distance;
         }
 
-        bot.refreshPositionAndAngles(bot.getX() + dx, bot.getY(), bot.getZ() + dz, bot.getYaw(), bot.getPitch());
+        double newX = bot.getX() + dx;
+        double newY = bot.getY();
+        double newZ = bot.getZ() + dz;
+        
+        // Check if destination has clearance (feet and head blocks)
+        ServerWorld world = bot.getEntityWorld() instanceof ServerWorld sw ? sw : null;
+        if (world != null && !hasMovementClearance(world, new BlockPos((int)Math.floor(newX), (int)Math.floor(newY), (int)Math.floor(newZ)))) {
+            // Destination blocked - don't move to avoid suffocation
+            return;
+        }
+        
+        bot.refreshPositionAndAngles(newX, newY, newZ, bot.getYaw(), bot.getPitch());
+    }
+    
+    /**
+     * Checks if a position has clearance for the bot (2 blocks tall).
+     * Prevents bot from moving into walls that would cause suffocation.
+     */
+    private static boolean hasMovementClearance(ServerWorld world, BlockPos pos) {
+        BlockState feet = world.getBlockState(pos);
+        BlockState head = world.getBlockState(pos.up());
+        
+        // Allow if both feet and head positions are passable
+        // Air, water, lava (bot can handle), and other non-solid blocks
+        return (feet.isAir() || !feet.blocksMovement()) && 
+               (head.isAir() || !head.blocksMovement());
     }
 
     private static int findEmptyHotbarSlot(PlayerInventory inventory) {

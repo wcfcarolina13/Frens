@@ -1,3 +1,122 @@
+## Session 2025-11-17 18:09 — Prevention: Movement Clearance Checks
+
+### Summary
+Added proactive clearance checking to prevent bot from walking into walls that would cause suffocation damage. Bot now checks destination before moving.
+
+### User Question
+"How should we avoid it taking damage from wall collision that it inflicts upon itself?"
+
+### Analysis
+The P0 fix addressed the RESPONSE to suffocation (targeted 1-block breaking), but we should also prevent the CAUSE (bot walking into walls).
+
+**Causes of bot entering walls:**
+1. `moveRelative()` directly sets position without collision check
+2. Teleport commands may place bot in solid blocks
+3. Spawn locations may be obstructed
+4. Pathfinding may walk into blocks
+5. Block placement around bot
+
+### Solution: Layered Defense
+
+**Layer 1: Prevention (NEW)**
+- Check clearance BEFORE moving
+- Added `hasMovementClearance()` method
+- Checks both feet and head blocks at destination
+- If blocked, abort movement (don't enter wall)
+
+**Layer 2: Recovery (Already Implemented)**
+- IF bot does take suffocation damage (spawn, teleport, lag)
+- Break 1 block (head or feet) to escape
+- Gentle, targeted response
+
+### Implementation
+
+**Movement Clearance Check:**
+```java
+private static void moveRelative(...) {
+    // Calculate new position
+    double newX = bot.getX() + dx;
+    double newY = bot.getY();
+    double newZ = bot.getZ() + dz;
+    
+    // Check clearance at destination
+    BlockPos destPos = new BlockPos((int)Math.floor(newX), 
+                                     (int)Math.floor(newY), 
+                                     (int)Math.floor(newZ));
+    if (!hasMovementClearance(world, destPos)) {
+        return; // Blocked - don't move
+    }
+    
+    // Safe to move
+    bot.refreshPositionAndAngles(newX, newY, newZ, ...);
+}
+
+private static boolean hasMovementClearance(ServerWorld world, BlockPos pos) {
+    BlockState feet = world.getBlockState(pos);
+    BlockState head = world.getBlockState(pos.up());
+    
+    // Both feet and head must be passable
+    return (feet.isAir() || !feet.blocksMovement()) && 
+           (head.isAir() || !head.blocksMovement());
+}
+```
+
+### Expected Behavior
+
+**Before:**
+- Bot walks into walls
+- Takes suffocation damage
+- Breaks block to escape (now 1 block instead of 11)
+
+**After:**
+- Bot STOPS before entering wall (prevention)
+- Avoids suffocation damage entirely
+- Only breaks blocks if spawned/teleported into wall (rare)
+
+### Edge Cases Handled
+
+**Passable blocks:**
+- Air: Passable
+- Water/Lava: Passable (bot can handle fluids)
+- Tall grass, flowers: Passable (!blocksMovement())
+- Solid stone, dirt, etc.: NOT passable (blocks movement)
+
+**Spawn/Teleport:**
+- Prevention doesn't apply (position set directly)
+- Recovery layer handles these cases
+- Bot breaks 1 block to escape if stuck
+
+**Pathfinding:**
+- GoTo.java uses separate logic
+- May need similar clearance checks (future work)
+- For now, recovery layer catches issues
+
+### Files Modified
+
+- `BotActions.java`:
+  - Updated `moveRelative()` with clearance check
+  - Added `hasMovementClearance()` helper method
+  - Prevents bot from walking into walls
+
+### Benefits
+
+1. **Prevents most suffocation** - Bot won't walk into walls
+2. **Avoids unnecessary damage** - No health loss from bad movement
+3. **Cleaner behavior** - Bot stops at obstacles instead of pushing through
+4. **Layered safety** - Prevention + recovery = robust solution
+
+### Future Enhancements
+
+**Could add later:**
+1. Clearance check for teleport destinations (find nearby safe spot)
+2. Pathfinding integration (GoTo.java clearance awareness)
+3. Spawn location validation (ensure 2-block clearance)
+4. Pre-emptive block clearing (detect stuck BEFORE damage)
+
+For now, movement prevention + damage recovery provides solid protection.
+
+---
+
 ## Session 2025-11-17 18:04 — P0 Fixes Implemented: Targeted Suffocation & Inventory Cooldown
 
 ### Summary
