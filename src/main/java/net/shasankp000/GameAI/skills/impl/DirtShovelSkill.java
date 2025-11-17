@@ -1,5 +1,6 @@
 package net.shasankp000.GameAI.skills.impl;
 
+import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
 import net.minecraft.block.BlockEntityProvider;
@@ -169,6 +170,14 @@ public final class DirtShovelSkill implements Skill {
                     DirtNavigationPolicy.record(originBeforeMove, detectedPos, false);
                     continue;
                 }
+                
+                // Check if this block is a torch BEFORE mining
+                BlockState preMinedState = player.getEntityWorld().getBlockState(detectedPos);
+                Block preMinedBlock = preMinedState.getBlock();
+                boolean wasTorch = preMinedBlock == Blocks.TORCH || preMinedBlock == Blocks.WALL_TORCH ||
+                                  preMinedBlock == Blocks.SOUL_TORCH || preMinedBlock == Blocks.SOUL_WALL_TORCH ||
+                                  preMinedBlock == Blocks.REDSTONE_TORCH || preMinedBlock == Blocks.REDSTONE_WALL_TORCH;
+                
                 CompletableFuture<String> miningFuture = CompletableFuture.supplyAsync(() -> {
                     try {
                         return MiningTool.mineBlock(player, detectedPos).get();
@@ -208,6 +217,11 @@ public final class DirtShovelSkill implements Skill {
                     }
                     DirtNavigationPolicy.record(originBeforeMove, detectedPos, false);
                     continue;
+                }
+                
+                // If we just mined a torch, replace it immediately to keep area lit
+                if (wasTorch) {
+                    TorchPlacer.replaceTorchAt(player, detectedPos);
                 }
                 
                 // Place torch if area is dark (for generic mining, not depth/stair modes)

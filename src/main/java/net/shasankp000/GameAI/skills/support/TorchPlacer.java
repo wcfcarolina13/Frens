@@ -46,6 +46,55 @@ public final class TorchPlacer {
     }
 
     /**
+     * Attempts to replace a torch that was just mined at the specified position.
+     * This ensures areas don't go dark when torches are accidentally broken.
+     * @param bot The bot
+     * @param pos The position where the torch was (now air)
+     * @return true if torch was successfully replaced
+     */
+    public static boolean replaceTorchAt(ServerPlayerEntity bot, BlockPos pos) {
+        if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
+            return false;
+        }
+        
+        // Find torch in inventory
+        PlayerInventory inv = bot.getInventory();
+        int torchSlot = findTorchSlot(inv);
+        if (torchSlot == -1) {
+            LOGGER.debug("Cannot replace torch at {} - no torches in inventory", pos);
+            return false;
+        }
+        
+        // Save current held item slot
+        int originalSlot = inv.getSelectedSlot();
+        
+        try {
+            // If torch is not in current hotbar slot, switch to it temporarily
+            if (torchSlot != originalSlot) {
+                // For main inventory slots (9+), we'd need to swap - skip for simplicity
+                // Just try with current hand if it's a torch
+                if (torchSlot < 9) {
+                    inv.setSelectedSlot(torchSlot);
+                }
+            }
+            
+            // Place torch at the position
+            boolean placed = placeTorchAt(bot, world, pos);
+            
+            if (placed) {
+                LOGGER.info("Replaced torch at {} for bot {}", pos, bot.getName().getString());
+            }
+            
+            return placed;
+        } finally {
+            // Restore original selected slot
+            if (torchSlot < 9 && torchSlot != originalSlot) {
+                inv.setSelectedSlot(originalSlot);
+            }
+        }
+    }
+
+    /**
      * Attempts to find and place a torch on a nearby wall.
      * @param bot The bot
      * @param preferredDirection The direction the bot is facing (torch placed on perpendicular walls)

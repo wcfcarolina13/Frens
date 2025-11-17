@@ -1292,18 +1292,21 @@ public class CollectDirtSkill implements Skill {
             return false;
         }
         PlayerInventory inventory = player.getInventory();
-        if (inventory.getEmptySlot() != -1) {
-            return false;
-        }
-        for (int i = 0; i < inventory.size(); i++) {
+        
+        // Less strict check: consider inventory "full" if fewer than 3 empty slots
+        // This is more practical for mining where partial stacks are common
+        int emptyCount = 0;
+        for (int i = 0; i < 36; i++) { // Main inventory slots (0-35)
             ItemStack stack = inventory.getStack(i);
             if (stack.isEmpty()) {
-                return false;
-            }
-            if (stack.getCount() < stack.getMaxCount()) {
-                return false;
+                emptyCount++;
+                if (emptyCount >= 3) {
+                    return false; // Still has 3+ empty slots, not full
+                }
             }
         }
+        
+        // Fewer than 3 empty slots = inventory is full enough to warn/pause
         return true;
     }
 

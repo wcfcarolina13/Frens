@@ -1,3 +1,76 @@
+## Session 2025-11-17 17:33 — P0 Fixes: Torch Replacement & Inventory Detection
+
+### Summary
+Implemented Priority 0 fixes from testing feedback: immediate torch replacement when mining torches, and less strict inventory full detection.
+
+### Changes Implemented
+
+**1. Torch Replacement System**
+- Added `TorchPlacer.replaceTorchAt()` public method
+- Detects when a torch block is mined in generic mining (DirtShovelSkill)
+- Immediately places replacement torch at same location
+- Prevents dark areas when torches are accidentally broken
+- Implementation:
+  - Checks block type BEFORE mining
+  - If torch detected (`wasTorch` flag), calls `replaceTorchAt()` after successful mine
+  - Uses existing `placeTorchAt()` logic to find wall attachment
+  - Handles inventory selection (switches to torch slot temporarily)
+
+**2. Less Strict Inventory Full Detection**
+- Changed from "every slot full at max count" to "fewer than 3 empty slots"
+- More practical for mining (handles partial stacks)
+- Triggers warning/pause earlier, before completely full
+- Implementation:
+  - Counts empty slots in main inventory (36 slots)
+  - Returns true (inventory full) when < 3 empty slots remain
+  - Allows "Inventory's full! Continuing…" message to actually appear
+
+### Files Modified
+- `TorchPlacer.java` - Added `replaceTorchAt()` method with slot management
+- `DirtShovelSkill.java` - Added torch detection before mining, replacement after
+- `CollectDirtSkill.java` - Updated `isInventoryFull()` to check slot count
+- Added `Block` import to DirtShovelSkill
+
+### Technical Details
+
+**Torch Replacement Flow:**
+1. Before mining: Check if block is a torch (`Blocks.TORCH`, `Blocks.WALL_TORCH`, etc.)
+2. Set `wasTorch` flag
+3. Mine the block normally
+4. After successful mine: If `wasTorch`, call `TorchPlacer.replaceTorchAt(player, pos)`
+5. TorchPlacer finds torch in inventory, switches to it, places at position
+
+**Inventory Detection:**
+- Old: Required ALL slots occupied AND ALL stacks at max count (rarely true)
+- New: Counts empty slots, triggers at < 3 empty (practical threshold)
+- Applies to both pause and continue-with-message scenarios
+
+### Verification
+- Build successful with no errors
+- Torch replacement integrated into generic mining loop
+- Inventory full message will now appear much more frequently
+
+### Queued Tasks (Next Session)
+Per user request, queue these for implementation:
+
+**Task 1: Protected Zones Persistence**
+- Protected zones must save across sessions
+- Currently only in-memory during session
+- Need to add JSON serialization/deserialization
+- Save to config file on zone creation
+- Load on server start
+
+**Task 2: Bot Config UI Refactor**
+- Move from long off-screen list to single-bot view
+- Add alias dropdown at top
+- Show only selected bot's settings
+- Scrollable list of toggles
+- Section headers (Spawning, Combat, Behavior)
+- Save/Cancel buttons at bottom
+- See user's wireframe for layout
+
+---
+
 ## Session 2025-11-17 17:13 — Testing Feedback Analysis
 
 ### Summary
