@@ -1,3 +1,63 @@
+## Session 2025-11-17 15:09 — Build Fix: ProtectedZoneService Path Issue
+
+### Summary
+Fixed compilation error in `ProtectedZoneService.java` where `toPath()` was incorrectly called on a `Path` object.
+
+### Issue
+Build failed with error: `cannot find symbol: method toPath()` on line 34 of `ProtectedZoneService.java`. The code was calling `server.getRunDirectory().toPath()` but `getRunDirectory()` already returns a `Path`, making the `toPath()` call redundant and invalid.
+
+### Fix
+**File:** `src/main/java/net/shasankp000/GameAI/services/ProtectedZoneService.java`
+- Changed line 34 from: `return server.getRunDirectory().toPath().resolve("bot_zones").resolve(worldId);`
+- To: `return server.getRunDirectory().resolve("bot_zones").resolve(worldId);`
+
+### Verification
+- Build successful with `./gradlew build`
+- No compilation errors remaining
+
+---
+
+## Checkpoint 2025-01-17 — Mining Polish: Torch Placement, Work Direction, Hunger Management
+
+### Summary
+Major improvements to bot autonomous mining capabilities:
+- **Automatic torch placement** during mining when light levels drop below 7
+- **Work direction persistence** across pause/resume cycles for consistent tunnel orientation
+- **Hunger management** with graduated warnings and automatic eating
+- **Emergency healing** via `/bot heal` command
+- **Fixed pause/resume system** - jobs now properly pause (not terminate) for hazards
+
+### Files Modified
+- `src/.../GameAI/services/WorkDirectionService.java` - New service for persistent work directions
+- `src/.../GameAI/services/HungerService.java` - New service for hunger management and healing
+- `src/.../GameAI/skills/support/TorchPlacer.java` - New utility for automatic torch placement
+- `src/.../GameAI/skills/impl/CollectDirtSkill.java` - Integrated torch placement and work direction
+- `src/.../GameAI/skills/impl/StripMineSkill.java` - Integrated torch placement and work direction
+- `src/.../GameAI/skills/support/MiningHazardDetector.java` - Enhanced to prevent torch breaking
+- `src/.../GameAI/services/TaskService.java` - Fixed pause vs terminate handling
+- `src/.../Commands/BotCommandV2.java` - Added `/bot heal` and `/bot reset_direction` commands
+- `changelog.md` - Updated with checkpoint entry
+- `file_index.md` - Updated with timestamp and summary
+
+### Testing Results
+- ✅ Torch placement works correctly during stripmine operations
+- ✅ Torches placed on perpendicular walls, not broken during mining
+- ✅ Bot pauses correctly when out of torches
+- ✅ Work direction maintained across pause/resume
+- ✅ `/bot reset_direction` allows changing orientation
+- ✅ `/bot heal` forces immediate eating to satiation
+- ✅ Hunger warnings at 75%, 25%, critical thresholds
+- ✅ Jobs pause (not terminate) for hazards/rares
+- ✅ `/bot resume` works with discovered ore memory
+- ✅ `/bot stop` works during active jobs
+
+### Git Commit
+- Branch: AI-Player-Checkpoint-Inventory-1
+- Commit: e33f2d3
+- Pushed to origin successfully
+
+---
+
 ## Reverted to commit `1296ae052a337cda801f080272cfbfbfbae937a8`
 
 - **Reason:** To restore the project to a previous state.
