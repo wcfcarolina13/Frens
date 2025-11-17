@@ -13,6 +13,7 @@ import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
+import net.shasankp000.GameAI.services.ProtectedZoneService;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -197,6 +198,15 @@ public final class MiningHazardDetector {
         if (state.isAir()) {
             return null;
         }
+        
+        // Check if position is in a protected zone
+        if (ProtectedZoneService.isProtected(pos, world, null)) {
+            ProtectedZoneService.ProtectedZone zone = ProtectedZoneService.getZoneAt(pos, world);
+            String zoneName = zone != null ? zone.getLabel() : "protected area";
+            return hazard(pos, "This is a protected zone (" + zoneName + ").", true, 
+                    "Cannot break blocks in protected zone: " + zoneName);
+        }
+        
         FluidState fluid = world.getFluidState(pos);
         if (fluid.isIn(FluidTags.LAVA)) {
             return hazard(pos, "There's lava ahead.", true);

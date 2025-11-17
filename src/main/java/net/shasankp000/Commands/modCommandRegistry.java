@@ -58,6 +58,7 @@ import net.shasankp000.GameAI.services.BotInventoryStorageService;
 import net.shasankp000.GameAI.services.BotTargetingService;
 import net.shasankp000.GameAI.services.HealingService;
 import net.shasankp000.GameAI.services.InventoryAccessPolicy;
+import net.shasankp000.GameAI.services.ProtectedZoneService;
 import net.shasankp000.GameAI.services.SkillResumeService;
 import net.shasankp000.GameAI.services.TaskService;
 import net.shasankp000.GameAI.services.WorkDirectionService;
@@ -240,6 +241,26 @@ public class modCommandRegistry {
                                         .then(CommandManager.argument("target", StringArgumentType.string())
                                                 .executes(context -> executeDirectionReset(context,
                                                         StringArgumentType.getString(context, "target"))))
+                                )
+                        )
+                        .then(literal("zone")
+                                .then(literal("protect")
+                                        .then(CommandManager.argument("radius", IntegerArgumentType.integer(1, 100))
+                                                .executes(context -> executeZoneProtect(context,
+                                                        IntegerArgumentType.getInteger(context, "radius"), null))
+                                                .then(CommandManager.argument("label", StringArgumentType.string())
+                                                        .executes(context -> executeZoneProtect(context,
+                                                                IntegerArgumentType.getInteger(context, "radius"),
+                                                                StringArgumentType.getString(context, "label"))))
+                                        )
+                                )
+                                .then(literal("remove")
+                                        .then(CommandManager.argument("label", StringArgumentType.string())
+                                                .executes(context -> executeZoneRemove(context,
+                                                        StringArgumentType.getString(context, "label"))))
+                                )
+                                .then(literal("list")
+                                        .executes(context -> executeZoneList(context))
                                 )
                         )
                         .then(literal("look_player")
@@ -2898,6 +2919,87 @@ public class modCommandRegistry {
         AIPlayer.CONFIG.setOwner(alias, ownership);
         AIPlayer.CONFIG.save();
         ChatUtils.sendSystemMessage(context.getSource(), "Set owner of " + alias + " to " + owner.getName().getString());
+        return 1;
+    }
+
+    private static int executeZoneProtect(CommandContext<ServerCommandSource> context, int radius, String label) throws CommandSyntaxException {
+        ServerCommandSource source = context.getSource();
+        ServerPlayerEntity player = source.getPlayerOrThrow();
+        ServerWorld world = source.getWorld();
+        
+        // Get the block the player is looking at using raycast
+        Vec3d eyePos = player.getEyePos();
+        Vec3d lookVec = player.getRotationVec(1.0F);
+        Vec3d endVec = eyePos.add(lookVec.multiply(5.0));
+        
+        var hitResult = world.raycast(new net.minecraft.world.RaycastContext(
+                eyePos,
+                endVec,
+                net.minecraft.world.RaycastContext.ShapeType.OUTLINE,
+                net.minecraft.world.RaycastContext.FluidHandling.NONE,
+                player
+        ));
+        
+        if (hitResult.getType() != net.minecraft.util.hit.HitResult.Type.BLOCK) {
+            source.sendError(Text.literal("Look at a block to mark as the zone center (within 5 blocks)."));
+            return 0;
+        }
+        
+        BlockPos targetPos = ((net.minecraft.util.hit.BlockHitResult)hitResult).getBlockPos();
+        
+        // Generate label if not provided
+        final String zoneLabel = (label == null || label.isBlank()) 
+                ? ProtectedZoneService.generateLabel(world) 
+                : label;
+        
+        // Create the zone
+        boolean success = ProtectedZoneService.createZone(world, targetPos, radius, zoneLabel, player);
+        if (!success) {
+            source.sendError(Text.literal("Failed to create zone. Label '" + zoneLabel + "' may already exist."));
+            return 0;
+        }
+        
+        final BlockPos finalPos = targetPos;
+        source.sendFeedback(() -> Text.literal("§aCreated protected zone '" + zoneLabel + "' at " + 
+                finalPos.toShortString() + " with radius " + radius + 
+                "\n§7Bots will not break blocks in this area."), false);
+        return 1;
+    }
+
+    private static int executeZoneRemove(CommandContext<ServerCommandSource> context, String label) throws CommandSyntaxException {
+        ServerCommandSource source = context.getSource();
+        ServerPlayerEntity player = source.getPlayerOrThrow();
+        ServerWorld world = source.getWorld();
+        boolean isAdmin = source.hasPermissionLevel(2);
+        
+        boolean success = ProtectedZoneService.removeZone(world, label, player, isAdmin);
+        if (!success) {
+            source.sendError(Text.literal("Zone '" + label + "' not found or you don't have permission to remove it."));
+            return 0;
+        }
+        
+        source.sendFeedback(() -> Text.literal("§aRemoved protected zone '" + label + "'"), false);
+        return 1;
+    }
+
+    private static int executeZoneList(CommandContext<ServerCommandSource> context) throws CommandSyntaxException {
+        ServerCommandSource source = context.getSource();
+        ServerWorld world = source.getWorld();
+        
+        List<ProtectedZoneService.ProtectedZone> zones = ProtectedZoneService.listZones(world);
+        if (zones.isEmpty()) {
+            source.sendFeedback(() -> Text.literal("§eNo protected zones in this world."), false);
+            return 1;
+        }
+        
+        source.sendFeedback(() -> Text.literal("§6Protected Zones in " + world.getRegistryKey().getValue() + ":"), false);
+        for (ProtectedZoneService.ProtectedZone zone : zones) {
+            BlockPos center = zone.getCenter();
+            source.sendFeedback(() -> Text.literal(
+                    "§7- §a" + zone.getLabel() + "§7: center=" + center.toShortString() + 
+                    ", radius=" + zone.getRadius() + ", owner=" + zone.getOwnerName()), false);
+        }
+        
         return 1;
     }
 }

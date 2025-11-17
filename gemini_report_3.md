@@ -1,3 +1,46 @@
+## Session 2025-11-17 15:12 — Protected Zones Implementation
+
+### Summary
+Implemented protected zones system to prevent bots from breaking blocks in designated areas. Players can mark regions where bots cannot perform destructive actions.
+
+### Features Added
+**Protected Zone Commands:**
+- `/bot zone protect <radius> [label]` - Look at a block and mark it as center of a protected zone
+- `/bot zone remove <label>` - Remove a protected zone (owner or admin only)
+- `/bot zone list` - List all protected zones in current world
+
+**Protection Behavior:**
+- Bots refuse to break blocks inside protected zones during all mining operations
+- Works with stripmine, depth mining, collect_dirt, and all other block-breaking skills
+- Protection enforced via `MiningHazardDetector` centralized hazard checking
+- Bot announces "This is a protected zone (zone-name)" when encountering protection
+- Jobs pause (not terminate) when hitting protected areas
+
+**Persistence:**
+- Zones saved per-world to `run/bot_zones/<worldId>/protected_zones.json`
+- Zones persist across server restarts
+- Each zone stores: label, center position, radius, owner UUID, owner name, creation timestamp
+
+### Files Modified
+- `src/.../Commands/modCommandRegistry.java` - Added zone commands and import for ProtectedZoneService
+- `src/.../GameAI/skills/support/MiningHazardDetector.java` - Added protected zone check in inspectBlock()
+- `src/.../GameAI/services/ProtectedZoneService.java` - Fixed compilation error (already existed from previous session)
+
+### Implementation Details
+The protection check runs early in `MiningHazardDetector.inspectBlock()`, before checking for ores, chests, or structures. This ensures:
+- All mining skills automatically respect protected zones without individual modifications
+- Consistent behavior across different job types
+- Clear failure messages that include the zone name
+
+Zone creation uses player's raycast (looking at block within 5 blocks) to mark the center, making it intuitive to protect specific areas.
+
+### Verification
+- Build successful with no errors
+- Commands properly registered under `/bot zone` namespace
+- Protection integrated into central hazard detection system
+
+---
+
 ## Session 2025-11-17 15:09 — Build Fix: ProtectedZoneService Path Issue
 
 ### Summary
