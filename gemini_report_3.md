@@ -1,3 +1,132 @@
+## Session 2025-11-17 18:15 — Drop Sweep: Always Terminate When Inventory Full
+
+### Summary
+Added strict inventory checking to drop_sweep skill. The skill now ALWAYS terminates when inventory is full (fewer than 3 empty slots) with an appropriate chat message.
+
+### User Request
+"drop-sweep should always terminate when inventory is full, with an appropriate chat message."
+
+### Problem
+Drop sweep could continue running when inventory was full, attempting to collect items that couldn't be picked up. This wasted time and could cause confusion.
+
+### Solution
+Added `isInventoryFull()` check at two key points in the drop sweep loop:
+
+**Check 1: At start of each pass**
+- Before attempting DropSweeper.sweep()
+- Prevents unnecessary sweeping when full
+- Early termination saves time
+
+**Check 2: Before each targeted item pickup**
+- Checks inventory before attempting to collect each residual item
+- Prevents picking up items that will fail
+- Terminates as soon as full
+
+### Implementation
+
+**Inventory Check Method:**
+```java
+private boolean isInventoryFull(ServerPlayerEntity player) {
+    PlayerInventory inventory = player.getInventory();
+    
+    // Consider inventory "full" if fewer than 3 empty slots
+    int emptyCount = 0;
+    for (int i = 0; i < 36; i++) { // Main inventory (0-35)
+        if (inventory.getStack(i).isEmpty()) {
+            emptyCount++;
+            if (emptyCount >= 3) {
+                return false; // 3+ empty = not full
+            }
+        }
+    }
+    return true; // < 3 empty = full
+}
+```
+
+**Termination Points:**
+
+1. **Start of each pass:**
+```java
+if (isInventoryFull(bot)) {
+    String msg = String.format("Inventory is full! Collected %d items across %d pass(es). Terminating drop_sweep.",
+            collectedCount, pass);
+    bot.sendMessage(Text.literal(msg), false);
+    return SkillExecutionResult.success(msg);
+}
+```
+
+2. **Before each pickup:**
+```java
+for (ItemEntity item : residual) {
+    if (isInventoryFull(bot)) {
+        String msg = String.format("Inventory is full! Collected %d items. Terminating drop_sweep.",
+                collectedCount);
+        bot.sendMessage(Text.literal(msg), false);
+        return SkillExecutionResult.success(msg);
+    }
+    // ... collect item
+}
+```
+
+### Behavior
+
+**When inventory becomes full:**
+1. Check detects < 3 empty slots
+2. Skill terminates immediately
+3. Chat message sent to player: "Inventory is full! Collected X items. Terminating drop_sweep."
+4. Returns SUCCESS (not failure - inventory full is expected)
+
+**Message variants:**
+- At pass start: "Collected X items across Y pass(es)"
+- During pickup: "Collected X items"
+- Both indicate drop_sweep terminated due to full inventory
+
+### Why "< 3 empty slots"?
+
+**Threshold reasoning:**
+- Mining/collecting produces many partial stacks
+- 1-2 empty slots = practically full
+- 3+ empty slots = still room to work
+- Same threshold as other mining skills (CollectDirtSkill)
+- Consistency across skill system
+
+### Expected Results
+
+**Drop sweep now:**
+1. Checks inventory at start of each pass
+2. Checks inventory before each item pickup
+3. Terminates IMMEDIATELY when < 3 empty slots
+4. Always sends chat message explaining termination
+5. Never continues when full (strict enforcement)
+
+**No more:**
+- Running with full inventory
+- Attempting to pick up items that can't fit
+- Silent termination (message always sent)
+- Wasted sweeping attempts when full
+
+### Files Modified
+
+- `DropSweepSkill.java`:
+  - Added PlayerInventory and ItemStack imports
+  - Added Text import for chat messages
+  - Added isInventoryFull() method
+  - Added inventory check at pass start
+  - Added inventory check before each pickup
+  - Both checks terminate with chat message
+
+### Testing Notes
+
+**Test scenarios:**
+1. Start drop_sweep with empty inventory → should complete normally
+2. Start drop_sweep with nearly full inventory → should terminate with message
+3. Fill inventory during drop_sweep → should terminate when full
+4. Check message appears in chat
+
+Build successful, ready for testing.
+
+---
+
 ## Session 2025-11-17 18:09 — Prevention: Movement Clearance Checks
 
 ### Summary

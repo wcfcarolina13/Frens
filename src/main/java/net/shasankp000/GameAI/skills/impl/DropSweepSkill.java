@@ -1,9 +1,12 @@
 package net.shasankp000.GameAI.skills.impl;
 
+import net.minecraft.entity.player.PlayerInventory;
+import net.minecraft.item.ItemStack;
 import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.entity.ItemEntity;
+import net.minecraft.text.Text;
 import net.minecraft.util.math.BlockPos;
 import net.shasankp000.GameAI.BotActions;
 import net.shasankp000.GameAI.BotEventHandler;
@@ -78,6 +81,16 @@ public SkillExecutionResult execute(SkillContext context) {
                     LOGGER.warn("drop_sweep aborted during pass {} due to cancellation request.", pass + 1);
                     return SkillExecutionResult.failure("drop_sweep paused due to nearby threat.");
                 }
+                
+                // Check if inventory is full - ALWAYS terminate drop_sweep if full
+                if (isInventoryFull(bot)) {
+                    String invFullMsg = String.format(Locale.ROOT,
+                            "Inventory is full! Collected %d items across %d pass(es). Terminating drop_sweep.",
+                            collectedCount, pass);
+                    LOGGER.info("drop_sweep terminated due to full inventory: {}", invFullMsg);
+                    bot.sendMessage(Text.literal(invFullMsg), false);
+                    return SkillExecutionResult.success(invFullMsg);
+                }
 
                 if (reuseRecent) {
                     BotEventHandler.collectNearbyDrops(bot, effectiveRadius);
@@ -109,6 +122,17 @@ public SkillExecutionResult execute(SkillContext context) {
                         LOGGER.warn("drop_sweep aborted during targeted pickup due to cancellation request.");
                         return SkillExecutionResult.failure("drop_sweep paused due to nearby threat.");
                     }
+                    
+                    // Check inventory before attempting each item pickup
+                    if (isInventoryFull(bot)) {
+                        String invFullMsg = String.format(Locale.ROOT,
+                                "Inventory is full! Collected %d items. Terminating drop_sweep.",
+                                collectedCount);
+                        LOGGER.info("drop_sweep terminated during pickup due to full inventory: {}", invFullMsg);
+                        bot.sendMessage(Text.literal(invFullMsg), false);
+                        return SkillExecutionResult.success(invFullMsg);
+                    }
+                    
                     boolean collected = collectSingleDrop(source, bot, item);
                     if (collected) {
                         collectedCount++;
@@ -265,5 +289,31 @@ private void sleepQuietly(long millis) {
             return Boolean.parseBoolean(str);
         }
         return defaultValue;
+    }
+    
+    /**
+     * Check if bot's inventory is full (fewer than 3 empty slots).
+     * Drop sweep always terminates when inventory is full.
+     */
+    private boolean isInventoryFull(ServerPlayerEntity player) {
+        if (player == null) {
+            return false;
+        }
+        PlayerInventory inventory = player.getInventory();
+        
+        // Consider inventory "full" if fewer than 3 empty slots
+        int emptyCount = 0;
+        for (int i = 0; i < 36; i++) { // Main inventory slots (0-35)
+            ItemStack stack = inventory.getStack(i);
+            if (stack.isEmpty()) {
+                emptyCount++;
+                if (emptyCount >= 3) {
+                    return false; // Still has 3+ empty slots, not full
+                }
+            }
+        }
+        
+        // Fewer than 3 empty slots = inventory is full
+        return true;
     }
 }
