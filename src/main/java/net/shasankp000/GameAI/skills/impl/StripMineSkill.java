@@ -9,6 +9,7 @@ import net.minecraft.util.math.Vec3d;
 import net.shasankp000.GameAI.BotActions;
 import net.shasankp000.ChatUtils.ChatUtils;
 import net.shasankp000.GameAI.services.SkillResumeService;
+import net.shasankp000.GameAI.services.WorkDirectionService;
 import net.shasankp000.GameAI.skills.Skill;
 import net.shasankp000.GameAI.skills.SkillContext;
 import net.shasankp000.GameAI.skills.SkillExecutionResult;
@@ -16,6 +17,7 @@ import net.shasankp000.GameAI.skills.SkillManager;
 import net.shasankp000.GameAI.skills.support.MiningHazardDetector;
 import net.shasankp000.GameAI.skills.support.MiningHazardDetector.Hazard;
 import net.shasankp000.GameAI.skills.support.MiningHazardDetector.DetectionResult;
+import net.shasankp000.GameAI.skills.support.TorchPlacer;
 import net.shasankp000.PlayerUtils.MiningTool;
 import net.shasankp000.Entity.LookController;
 import org.slf4j.Logger;
@@ -25,6 +27,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -38,6 +41,7 @@ public final class StripMineSkill implements Skill {
     private static final int DEFAULT_LENGTH = 8;
     private static final long STEP_DELAY_MS = 120L;
     private static final int STEP_ATTEMPTS = 20;
+    private static final int TORCH_CHECK_INTERVAL = 8; // Check for torch placement every 8 blocks
 
     @Override
     public String name() {
@@ -63,6 +67,7 @@ public final class StripMineSkill implements Skill {
             if (SkillManager.shouldAbortSkill(player)) {
                 return SkillExecutionResult.failure("stripmine paused due to cancellation.");
             }
+            
             BlockPos footTarget = player.getBlockPos().offset(tunnelDirection);
 
             List<BlockPos> workVolume = buildCrossSection(footTarget);
@@ -100,8 +105,21 @@ public final class StripMineSkill implements Skill {
                 return SkillExecutionResult.failure("Stripmine aborted: failed to advance tunnel.");
             }
             completed++;
+            
+            // Place torch AFTER moving (every 6 blocks)
+            if (completed % 6 == 0 && TorchPlacer.shouldPlaceTorch(player)) {
+                TorchPlacer.PlacementResult torchResult = TorchPlacer.placeTorch(player, tunnelDirection);
+                if (torchResult == TorchPlacer.PlacementResult.NO_TORCHES) {
+                    SkillResumeService.flagManualResume(player);
+                    ChatUtils.sendChatMessages(player.getCommandSource().withSilent().withMaxLevel(4), 
+                            "Ran out of torches!");
+                    return SkillExecutionResult.failure("Stripmine paused: out of torches. Provide torches and /bot resume.");
+                }
+            }
         }
 
+        // Job completed successfully - clear all hazard state including discovered rares
+        MiningHazardDetector.clearAll(player);
         return SkillExecutionResult.success("Stripmine cleared " + completed + " blocks.");
     }
 
@@ -216,20 +234,31 @@ public final class StripMineSkill implements Skill {
     }
 
     private Direction determineTunnelDirection(SkillContext context, ServerPlayerEntity player) {
-        Direction current = player.getHorizontalFacing();
-        Map<String, Object> shared = context.sharedState();
-        if (shared != null) {
-            String key = "stripmine.direction." + player.getUuid();
-            Object stored = shared.get(key);
-            if (stored instanceof String str) {
-                Direction storedDir = parseDirection(str);
-                if (storedDir != null) {
-                    current = storedDir;
-                }
-            }
-            shared.put(key, current.asString());
+        // Try to get stored work direction first
+        Optional<Direction> stored = WorkDirectionService.getDirection(player.getUuid());
+        if (stored.isPresent()) {
+            LOGGER.info("Using stored work direction {} for bot {}", stored.get().asString(), player.getName().getString());
+            return stored.get();
         }
-        return current;
+        
+        // If no stored direction, capture from command issuer (the player who issued the command)
+        // The context should contain the issuer's facing direction when the command was started
+        Direction commandIssuerFacing = null;
+        Object directionParam = context.parameters().get("direction");
+        if (directionParam instanceof Direction dir) {
+            commandIssuerFacing = dir;
+        } else if (directionParam instanceof String dirStr) {
+            commandIssuerFacing = parseDirection(dirStr);
+        }
+        
+        // Fallback to bot's current facing if no direction parameter provided
+        Direction workDirection = commandIssuerFacing != null ? commandIssuerFacing : player.getHorizontalFacing();
+        
+        // Store this direction for future jobs
+        WorkDirectionService.setDirection(player.getUuid(), workDirection);
+        LOGGER.info("Captured initial work direction {} for bot {}", workDirection.asString(), player.getName().getString());
+        
+        return workDirection;
     }
 
     private Direction parseDirection(String name) {

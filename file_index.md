@@ -2,6 +2,8 @@
 
 This document provides an index of all the files in the AI-Player-checkpoint project, with a short description of each file and its purpose.
 
+**Last Updated:** 2025-01-17
+
 ## Root Directory
 
 -   `.gitattributes`: Specifies attributes for pathnames in Git. Enforces line endings for script files.
@@ -10,15 +12,18 @@ This document provides an index of all the files in the AI-Player-checkpoint pro
 -   `changelog.md`: A log of changes for each version of the project. Used to track progress and new features.
 -   `CUSTOM_PROVIDERS.md`: Documentation on how to use custom OpenAI-compatible providers.
 -   `eula.txt`: End User License Agreement for Minecraft. Must be set to `true` to run a Minecraft server.
--   `GEMINI.md`: Contains instructions and context for the Gemini CLI agent.
+-   `file_index.md`: This file. An index of all project files with descriptions.
+-   `GEMINI.md`: Instructions and workflow rules for the Gemini Code Assist CLI agent. Defines task scoping, documentation requirements, and code editing expectations.
+-   `gemini_report.md`: Historical session report from earlier Gemini CLI work (archived).
+-   `gemini_report_3.md`: Current Gemini CLI session report. Documents all code changes, bug fixes, and decisions made during CLI-assisted development.
 -   `gradle.properties`: Project-specific Gradle settings. Defines versions for Minecraft, mappings, loader, and the mod itself.
 -   `gradlew`: Unix/Linux shell script to run the Gradle wrapper. Allows building the project without installing Gradle.
 -   `gradlew.bat`: Windows batch script to run the Gradle wrapper. Allows building the project without installing Gradle.
 -   `LICENSE`: MIT License file for the project.
 -   `old_changelogs.md`: Contains changelogs for older versions of the project.
--   `README.md`: Provides a guide to the commands available in the mod.
+-   `README.md`: Provides a comprehensive guide to all available commands, configuration, and usage of the AI Player mod.
 -   `settings.gradle`: Gradle settings script. Includes plugin management repositories.
--   `TODO.md`: A list of tasks and features to be implemented in the project.
+-   `TODO.md`: A detailed list of tasks, features, and improvements to be implemented in the project. Includes priorities and design notes.
 
 ## Gradle
 
@@ -35,36 +40,49 @@ This document provides an index of all the files in the AI-Player-checkpoint pro
 -   `CommandUtils.java`: A utility class for commands.
 -   `EntityUtil.java`: A utility class for working with entities.
 
-#### AI
+#### AI and LLM
 
 -   `GameAI/RLAgent.java`: The reinforcement learning agent. It implements the Q-learning algorithm to enable the bot to learn from its actions.
 -   `GameAI/BotActions.java`: A minimal action executor that directly manipulates the server-side player, allowing training steps to take effect without the Carpet mod.
--   `GameAI/BotEventHandler.java`: The main event handler for the bot. It orchestrates the bot's behavior based on environmental triggers and game state.
+-   `GameAI/BotEventHandler.java`: The main event handler for the bot. It orchestrates the bot's behavior based on environmental triggers and game state. Manages follow mode, external override states, and training loop coordination.
 -   `GameAI/StateActions.java`: Defines the possible actions the bot can take in the game.
 -   `GameAI/DropSweeper.java`: A utility that walks the bot over to nearby item entities to gather drops from recent tasks.
 -   `GameAI/State.java`: Represents the state of the bot and its environment at a given moment. Used as input for the reinforcement learning algorithm.
 -   `GameAI/ActionHoldTracker.java`: Tracks repeated invocations of movement/mining actions to differentiate between sustained key holds and single taps for reward calculation.
+-   `GameAI/llm/LLMActionQueue.java`: Queue management for LLM-requested actions. Handles sequential execution of bot commands from language model responses.
+-   `GameAI/llm/LLMJobTracker.java`: Tracks active LLM jobs and their execution status. Monitors job lifecycle and completion.
+-   `GameAI/llm/LLMOrchestrator.java`: Main coordinator for LLM-based bot control. Routes player requests to appropriate LLM services and manages response handling.
+-   `GameAI/llm/LLMStatusReporter.java`: Provides status updates and feedback for LLM-driven operations. Reports job progress to players.
+-   `GameAI/llm/MemoryStore.java`: Persistent memory storage for LLM context. Maintains conversation history and bot knowledge across sessions.
 -   `GameAI/Knowledge/OreYLevelKnowledge.java`: A knowledge base that stores information about the optimal Y-levels for finding different ores.
 -   `GameAI/Knowledge/BlockMetadata.java`: A data class representing the metadata for a single block.
 -   `GameAI/Knowledge/BlockKnowledgeRetriever.java`: A utility to look up and suggest block information from the `BlockKnowledgeBase`.
 -   `GameAI/Knowledge/BlockKnowledgeBase.java`: A knowledge base that stores metadata about blocks, such as hardness, preferred tools, and drops.
--   `GameAI/skills/impl/CollectDirtSkill.java`: A skill for collecting dirt-like blocks.
+-   `GameAI/skills/impl/CollectDirtSkill.java`: Comprehensive multi-modal mining skill. Handles dirt collection, stone mining, and staircase excavation. Includes support for inventory management, hazard detection, torch placement, and directional mining with work direction persistence.
+-   `GameAI/skills/impl/StripMineSkill.java`: Implements strip mining (horizontal tunneling) with configurable tunnel length. Supports work direction persistence, ore detection pausing, resume capability, torch placement, and hazard avoidance.
 -   `GameAI/skills/impl/DropSweepSkill.java`: A standalone drop collection skill that uses the `DropSweeper` utility.
 -   `GameAI/skills/impl/DirtShovelSkill.java`: A skill for using a shovel to dig dirt-like blocks.
 -   `GameAI/skills/impl/MiningSkill.java`: A skill for collecting stone-like blocks using pickaxes.
+-   `GameAI/skills/support/MiningHazardDetector.java`: Detects hazards during mining operations including lava, water, valuable ores, and chests. Implements discovered ore tracking to prevent duplicate announcements during resumed jobs. Provides separate `clear()` and `clearAll()` methods to manage hazard memory persistence.
+-   `GameAI/skills/support/TorchPlacer.java`: Handles automatic torch placement during mining operations. Checks light levels, manages torch inventory across hotbar and main inventory, finds suitable wall positions perpendicular to movement direction, and places torches offset from the main mining path to prevent destruction.
 -   `GameAI/skills/ExplorationMovePolicy.java`: Tracks the historical success rate of exploratory reposition steps to bias movement toward offsets that previously worked.
 -   `GameAI/skills/Skill.java`: An interface for all skills that the bot can perform.
 -   `GameAI/skills/DirtNavigationPolicy.java`: A lightweight reinforcement tracker for dirt navigation outcomes.
--   `GameAI/skills/SkillManager.java`: Manages the registration and execution of skills.
+-   `GameAI/skills/BlockDropRegistry.java`: Registry for tracking what items blocks drop when broken. Used for skill planning and resource evaluation.
+-   `GameAI/skills/SkillPreferences.java`: Stores bot preferences for skill behavior (e.g., preferred mining directions, tool choices).
+-   `GameAI/skills/SkillManager.java`: Manages the registration and execution of skills. Handles skill lifecycle, abort detection, and drop sweeping after skill completion.
 -   `GameAI/skills/SkillExecutionResult.java`: A data class representing the result of a skill execution, including success status and a message.
 -   `GameAI/skills/SkillContext.java`: A data class that holds the context for a skill execution, including the bot's command source and shared state.
 -   `GameAI/services/BotInventoryStorageService.java`: A service to save and load the bot's inventory to and from NBT files.
 -   `GameAI/services/BotPersistenceService.java`: Delegates persistence of fake player aliases to vanilla's `PlayerManager`, avoiding the need to chase internal API changes.
--   `GameAI/services/SkillResumeService.java`: Manages the pausing and resuming of skills, for example, when a bot dies and needs to continue its task after respawning.
--   `GameAI/services/BotTargetingService.java`: A shared helper for resolving fake player command targets.
--   `GameAI/services/MovementService.java`: A shared navigation helper that plans direct, wading, or bridge-assisted approaches for the bot.
--   `GameAI/services/InventoryAccessPolicy.java`: A service to check if a player has permission to open a bot's inventory.
--   `GameAI/services/TaskService.java`: A global task lifecycle tracker that replaces ad-hoc session flags for skills.
+-   `GameAI/services/BotTargetingService.java`: Manages combat targeting for bots. Tracks target entities and handles target selection logic.
+-   `GameAI/services/BotControlApplier.java`: Low-level service that applies movement and control inputs to bot entities.
+-   `GameAI/services/InventoryAccessPolicy.java`: Defines and enforces policies for player access to bot inventories. Controls who can view/modify bot items.
+-   `GameAI/services/MovementService.java`: High-level movement coordination service. Handles pathfinding, navigation, and movement command execution.
+-   `GameAI/services/SkillResumeService.java`: Manages skill pause and resume functionality. Tracks pending skills, handles manual resume requests, death recovery prompts, and auto-resume logic. Records skill execution details to enable resuming paused jobs.
+-   `GameAI/services/TaskService.java`: Task queue and lifecycle management. Handles async skill execution, task abortion, cancellation reasons, and task state tracking.
+-   `GameAI/services/WorkDirectionService.java`: Manages persistent work directions for directional mining skills. Stores initial facing direction when jobs start and provides commands to reset direction. Ensures bots maintain consistent mining orientation across job pauses/resumes.
+-   `GameAI/services/HungerService.java`: Manages bot hunger and automatic eating. Monitors hunger levels, announces hunger status at thresholds (75%, 25%, critical), handles automatic eating when health is low, and provides forced eating via heal command.
 
 #### Chat
 

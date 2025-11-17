@@ -612,15 +612,6 @@ public class FunctionCallerV2 {
                 return;
             }
 
-            Optional<TaskService.TaskTicket> ticketOpt = TaskService.beginSkill(skillName, bot.getCommandSource(), bot.getUuid());
-            if (ticketOpt.isEmpty()) {
-                getFunctionOutput(bot.getName().getString() + " is busy and cannot start the skill.");
-                return;
-            }
-
-            getFunctionOutput("Task '" + skillName + "' started.");
-            TaskService.TaskTicket ticket = ticketOpt.get();
-            boolean success = false;
             try {
                 Map<String, Object> params = new HashMap<>();
                 if (countStr != null && !countStr.isBlank()) params.put("count", Integer.parseInt(countStr));
@@ -637,11 +628,10 @@ public class FunctionCallerV2 {
 
                 SkillContext skillContext = new SkillContext(bot.getCommandSource(), sharedState, params);
                 SkillExecutionResult result = SkillManager.runSkill(skillName, skillContext);
-                success = result.success();
+                getFunctionOutput(result.message());
             } catch (Exception e) {
                 logger.error("Error executing skill '{}': ", skillName, e);
-            } finally {
-                TaskService.complete(ticket, success);
+                getFunctionOutput("Failed to execute skill '" + skillName + "': " + e.getMessage());
             }
         }
 

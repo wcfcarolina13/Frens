@@ -162,6 +162,40 @@ I have made the following changes to address these issues:
 
 To do next:
 
+[x] **CRITICAL: Multiple task execution bug** - Not a bug; tasks run sequentially on thread pool (verified in logs)
+[x] **Mining skill ignores targetCount parameter** - Fixed with parameter parsing restoration
+[x] **Depth mining stops at 10 blocks instead of reaching target depth** - Fixed (line 185 sets targetCount=Integer.MAX_VALUE)
+[x] **Tool selection not defaulting to best available** - Fixed; now searches entire inventory and swaps best tool to hotbar
+[x] **Direction persistence across stripmine jobs** - Fixed; WorkDirectionService stores direction, `/bot direction reset` command added
+
+[x] **Rare ore discovery - no pause/resume loop** - Bot announces ores but doesn't pause on every discovery
+    - When rare ore found during mining, bot announces it in chat only ONCE per position
+    - Bot remembers ores discovered during current job session
+    - Bot continues mining past already-discovered ores without re-announcing
+    - DISCOVERED_RARES map tracks positions seen this session, cleared only when new job starts
+    - Adjacent warnings report ores without blocking the job
+    
+[x] **Torch placement during stripmine/stairs** - Place torches automatically when dark
+    - Check light level periodically during stripmine or stair-building (every 8 blocks)
+    - When light level drops below threshold (7), place torch on perpendicular wall
+    - Search inventory for normal torches (minecraft:torch)
+    - If no torches available: pause job, announce "Ran out of torches!" in chat
+    - Player must `/bot resume` after providing torches to continue
+    - Torches placed on walls to avoid blocking bot's path
+    - Works for both StripMineSkill and CollectDirtSkill staircase mode
+    
+[ ] **Protected zones - no block breaking** - Command to create no-grief regions
+    - `/bot zone protect <radius>` while looking at a block to mark it as center
+    - Creates cubic protected zone around marker position
+    - Bots refuse to break blocks in protected zones (mining, tree chopping, any destructive action)
+    - Bots can still move, follow, fight in protected zones
+    - Protected zone list persists across sessions
+    - `/bot zone list` shows all protected zones
+    - `/bot zone remove <x> <y> <z>` removes protection at coordinates
+    - Ensure chests, barrels, spawners are NEVER broken by bots (hardcoded in exclusion list)
+    - Check MiningHazardDetector already blocks chests (CHEST_BLOCKS - verified present)
+
+
 [ ] Ensure when using chat, you can talk to individual bots by using their name and get responses based on that bot's unique memory files.
 [ ] Ensure bot stops jobs if it respawns or if you leave the server, but it will return to its previous location once you spawn it back in on your next session. It will say "I died, should I return?" so ther player can send it to collect its dropped items and continue previous job. Alternatively, if you've re-entered the world, it'll say "Ah, you're back. Should I continue?" to continue its previous job.
 [ ] Ensure you can use commands or assign skills to individual bots but ALSO all bots at the same time (probably just "allbots")

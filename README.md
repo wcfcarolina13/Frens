@@ -107,8 +107,10 @@ Snapshots are keyed by both alias and the bot’s UUID, so Jake and Bob keep the
 | Command | Purpose |
 | --- | --- |
 | `/bot spawn <alias> training` | Spawn a fake player at your position. |
-| `/bot stop [alias\|all]` | Abort the active task and movement for the target bots. |
-| `/bot resume [alias\|all]` | Restart the last skill that paused due to danger (water/lava/full inventory). |
+| `/bot stop [alias\|all]` | Abort the active task and movement for the target bots. Works even when bot is actively mid-job. |
+| `/bot resume [alias\|all]` | Restart the last skill that paused due to danger (water/lava/rare ores/full inventory). |
+| `/bot heal [alias\|all]` | Force bot to eat food immediately until fully satiated. Prioritizes least valuable food and skips items with negative effects. |
+| `/bot reset_direction [alias\|all]` | Reset stored work direction. Next mining job will use bot's current facing direction. |
 | `/bot follow [alias\|all] [player|bot]` | Make one or more bots follow you (default), another player, or even another bot. |
 | `/bot defend nearby bots <y\|n> [alias\|all]` | Toggle the auto-defend behaviour so a bot (or every bot) will break formation to protect any ally that is attacked within ~12 blocks. Use `y`/`n` and the optional alias just like other commands. |
 | `/bot inventory [alias\|all]` | Summarise the selected bot(s) inventory. |
@@ -132,7 +134,9 @@ Most of these subcommands now accept the optional alias/`all` token in the same 
 - Chatting with the bots no longer interrupts whatever task they’re already performing—the language model runs asynchronously, and the bot only pauses when it actually needs to execute a requested action (and, for resource-intensive jobs, only after you confirm in chat).
 - Jake and Bob answer in distinct voices (Jake = pragmatic engineer, Bob = sardonic ranger) so it’s easier to tell which bot is replying during conversations.
 - Bots automatically wade across shallow rivers now; if they step into water mid-task they’ll keep their heads above the surface and resume the job once danger passes.
-- When a mining job pauses for water, lava, precipices, mineshafts, chests, or a full inventory it now tells you to run `/bot resume <alias>` once the hazard is cleared; this overrides the SkillResumeService flag so you can restart the same skill without retyping all parameters. If you resume anyway, the bot remembers that hazard location so it doesn’t immediately alert on the same block again.
+- When a mining job pauses for water, lava, precipices, mineshafts, chests, rare ores, or a full inventory it now tells you to run `/bot resume <alias>` once the hazard is cleared; this overrides the SkillResumeService flag so you can restart the same skill without retyping all parameters. If you resume anyway, the bot remembers that hazard location so it doesn’t immediately alert on the same block again.
 - Mention multiple bots in chat (e.g., “Jake and Bob, report in” or “all bots follow me”) to address them at once—each will respond without interrupting their current jobs.
-
+- Bots automatically eat when hunger drops below 75% (announcing "I'm hungry"), become more urgent at 25% ("I'm starving"), and critical at final hunger bar ("I'll die if I don't eat!"). Use `/bot heal <alias>` to force immediate eating.
+- Bots place torches automatically during mining when light levels drop below 7. Torches are placed on perpendicular walls to avoid breaking during mining. If out of torches, bot announces "ran out of torches!" and pauses.
+- Mining jobs now maintain work direction across pause/resume cycles. Use `/bot reset_direction <alias>` to change the direction for the next job.
 Happy testing! If a command reports “No bot found”, ensure you either targeted one previously or appended the alias/`all` token to the invocation.

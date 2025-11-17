@@ -1,3 +1,21 @@
+## Unreleased
+
+### Added
+- **Work direction persistence:** Bots now store their initial facing direction when starting directional mining jobs (stripmine, stairs, depth mining) and maintain that direction throughout the job, even across pause/resume cycles. Added `/bot reset_direction <alias>` command to reset stored direction for next job.
+- **Torch placement:** Bots now automatically place torches during mining operations when light levels drop below 7. Torches are placed on walls perpendicular to the mining path to avoid breaking them during continued work. Bot announces "ran out of torches!" and pauses if no torches are available in inventory.
+- **Job pause/resume fixes:** Bots now properly pause jobs (rather than terminating) when encountering rare ores or hazards. `/bot resume <alias>` correctly resumes the paused job with memory of previously discovered rares intact. Jobs only terminate on explicit `/bot stop` commands or completion.
+- **Emergency healing:** New `/bot heal <alias>` command forces bot to eat food immediately, prioritizing least valuable food items and skipping items with negative side effects. Bot eats until fully satiated.
+- **Hunger management:** Bots now auto-eat at 75% hunger (with "I'm hungry" message), become more urgent at 25% ("I'm starving"), and critical at final hunger bar ("I'll die if I don't eat!"). Bot automatically eats when health drops below 75%.
+- **Stop command improvements:** `/bot stop all` and `/bot stop <alias>` now work correctly even when bot is actively mid-job, immediately terminating the current task.
+
+### Fixed
+- Fixed torch placement destroying torches immediately after placing them - torches now placed offset from mining path
+- Fixed resume command not finding paused jobs - jobs now correctly maintain pause state
+- Fixed bots breaking their own torch placements during mining operations
+- Fixed `/bot stop` only working when jobs were paused rather than during active execution
+
+### Reverted
+- Reverted to commit `1296ae052a337cda801f080272cfbfbfbae937a8` to restore the project to a previous state.
 
 - **Inventory GUI refactor:** Removed redundant `BotInventoryScreen.java`, introduced the canonical `BotInventoryScreen` in `GraphicalUserInterface`, and updated `AIPlayerClient` to register it as the bot inventory UI.
 - **Config toggles:** `/configMan` now includes a “Bot Controls” tab where you can persistently toggle auto-spawn mode (training/play), teleportDuringSkills, inventory-full pauses, and per-bot/per-world LLM enablement. These preferences sync to the server, apply automatically when bots spawn, and auto-run `/bot spawn <alias> <mode>` on world load so you no longer need to re-enter the console commands each session.

@@ -18,6 +18,7 @@ import net.shasankp000.ChatUtils.ChatUtils;
 import net.shasankp000.Database.QTable;
 import net.shasankp000.GameAI.BotActions;
 import net.shasankp000.GameAI.BotEventHandler;
+import net.shasankp000.GameAI.services.HealingService;
 import net.shasankp000.GameAI.services.TaskService;
 import net.shasankp000.GameAI.services.SkillResumeService;
 import net.shasankp000.GameAI.RLAgent;
@@ -216,7 +217,8 @@ public class AutoFaceEntity {
             lastHostileTick = server.getTicks();
         }
 
-        if (CombatInventoryManager.tryConsumeIfNeeded(bot, hostileEntities)) {
+        // Use HealingService for automatic eating
+        if (HealingService.autoEat(bot)) {
             return;
         }
 

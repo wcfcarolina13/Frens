@@ -56,9 +56,11 @@ import net.shasankp000.GameAI.skills.SkillManager;
 import net.shasankp000.GameAI.skills.SkillPreferences;
 import net.shasankp000.GameAI.services.BotInventoryStorageService;
 import net.shasankp000.GameAI.services.BotTargetingService;
+import net.shasankp000.GameAI.services.HealingService;
 import net.shasankp000.GameAI.services.InventoryAccessPolicy;
 import net.shasankp000.GameAI.services.SkillResumeService;
 import net.shasankp000.GameAI.services.TaskService;
+import net.shasankp000.GameAI.services.WorkDirectionService;
 import net.shasankp000.GameAI.skills.SkillContext;
 import net.shasankp000.GameAI.skills.SkillExecutionResult;
 import net.shasankp000.ui.BotInventoryAccess;
@@ -225,6 +227,20 @@ public class modCommandRegistry {
                                 .then(CommandManager.argument("target", StringArgumentType.string())
                                         .executes(context -> executeResumeTargets(context,
                                                 StringArgumentType.getString(context, "target"))))
+                        )
+                        .then(literal("heal")
+                                .executes(context -> executeHealTargets(context, (String) null))
+                                .then(CommandManager.argument("target", StringArgumentType.string())
+                                        .executes(context -> executeHealTargets(context,
+                                                StringArgumentType.getString(context, "target"))))
+                        )
+                        .then(literal("direction")
+                                .then(literal("reset")
+                                        .executes(context -> executeDirectionReset(context, (String) null))
+                                        .then(CommandManager.argument("target", StringArgumentType.string())
+                                                .executes(context -> executeDirectionReset(context,
+                                                        StringArgumentType.getString(context, "target"))))
+                                )
                         )
                         .then(literal("look_player")
                                 .executes(context -> executeLookPlayerTargets(context, null, false))
@@ -2227,6 +2243,59 @@ public class modCommandRegistry {
         return 1;
     }
 
+    private static int executeHealTargets(CommandContext<ServerCommandSource> context, String targetArg) throws CommandSyntaxException {
+        List<ServerPlayerEntity> bots = BotTargetingService.resolve(context.getSource(), targetArg);
+        boolean isAll = targetArg != null && "all".equalsIgnoreCase(targetArg.trim());
+        return executeHealTargets(context, bots, isAll);
+    }
+
+    private static int executeHealTargets(CommandContext<ServerCommandSource> context,
+                                          List<ServerPlayerEntity> bots,
+                                          boolean isAll) {
+        int successes = 0;
+        for (ServerPlayerEntity bot : bots) {
+            if (HealingService.healBot(bot)) {
+                successes++;
+            }
+        }
+        if (successes == 0 && !bots.isEmpty()) {
+            ChatUtils.sendSystemMessage(context.getSource(), "None of the targeted bots could eat.");
+        }
+        return successes;
+    }
+
+    private static int executeDirectionReset(CommandContext<ServerCommandSource> context, String targetArg) throws CommandSyntaxException {
+        List<ServerPlayerEntity> targets = BotTargetingService.resolve(context.getSource(), targetArg);
+        return executeDirectionReset(context, targets, "allbots".equalsIgnoreCase(targetArg));
+    }
+
+    private static int executeDirectionReset(CommandContext<ServerCommandSource> context,
+                                             List<ServerPlayerEntity> bots,
+                                             boolean isAll) {
+        int successes = 0;
+        for (ServerPlayerEntity bot : bots) {
+            if (bot == null) {
+                continue;
+            }
+            boolean wasReset = WorkDirectionService.resetDirection(bot.getUuid());
+            if (wasReset) {
+                successes++;
+            }
+        }
+        if (successes > 0) {
+            String summary = formatBotList(bots, isAll);
+            String verb = (isAll || bots.size() > 1) ? "have" : "has";
+            ChatUtils.sendSystemMessage(context.getSource(), 
+                    summary + " " + verb + " had work direction reset. Next job will use current facing.");
+        } else if (!bots.isEmpty()) {
+            String summary = formatBotList(bots, isAll);
+            String verb = (isAll || bots.size() > 1) ? "have" : "has";
+            ChatUtils.sendSystemMessage(context.getSource(),
+                    summary + " " + verb + " no stored work direction.");
+        }
+        return successes;
+    }
+
     private static int executeLookPlayerTargets(CommandContext<ServerCommandSource> context,
                                                 String targetArg,
                                                 boolean stop) throws CommandSyntaxException {
@@ -2548,30 +2617,91 @@ public class modCommandRegistry {
 
     private static int executeSkill(CommandContext<ServerCommandSource> context, ServerPlayerEntity bot, String skillName, String rawArgs) {
         Map<String, Object> params = new HashMap<>();
-        // ... (parameter parsing logic remains the same)
+        Integer count = null;
+        Integer depthTarget = null;
+        boolean stairsRequested = false;
+        Set<Identifier> targetBlocks = new HashSet<>();
+        List<String> options = new ArrayList<>();
+        
+        if (rawArgs != null && !rawArgs.isBlank()) {
+            String[] tokens = rawArgs.trim().split("\\s+");
+            for (int i = 0; i < tokens.length; i++) {
+                String token = tokens[i];
+                if ("depth".equalsIgnoreCase(token) && i + 1 < tokens.length) {
+                    String depthStr = tokens[++i];
+                    try {
+                        depthTarget = Integer.parseInt(depthStr);
+                        LOGGER.info("Parsed depth target: {}", depthTarget);
+                        continue;
+                    } catch (NumberFormatException ignored) {
+                        LOGGER.warn("Invalid depth parameter '{}'", depthStr);
+                        continue;
+                    }
+                }
+                if ("stairs".equalsIgnoreCase(token)) {
+                    stairsRequested = true;
+                    continue;
+                }
+                try {
+                    count = Integer.parseInt(token);
+                    LOGGER.info("Parsed count: " + count);
+                    continue;
+                } catch (NumberFormatException ignored) {
+                }
+
+                Identifier id = Identifier.tryParse(token);
+                if (id != null && Registries.BLOCK.containsId(id)) {
+                    targetBlocks.add(id);
+                    LOGGER.info("Parsed target block (direct ID): " + id);
+                } else {
+                    id = Identifier.tryParse("minecraft:" + token);
+                    if (id != null && Registries.BLOCK.containsId(id)) {
+                        targetBlocks.add(id);
+                        LOGGER.info("Parsed target block (minecraft: prefix): " + id);
+                    } else {
+                        options.add(token.toLowerCase(Locale.ROOT));
+                        LOGGER.info("Parsed option: " + token.toLowerCase(Locale.ROOT));
+                    }
+                }
+            }
+
+            if (count != null) {
+                params.put("count", count);
+            }
+            if (depthTarget != null) {
+                params.put("targetDepthY", depthTarget);
+            }
+            if (stairsRequested) {
+                params.put("stairsMode", true);
+            }
+            if (!targetBlocks.isEmpty()) {
+                params.put("targetBlocks", targetBlocks);
+            }
+            if (!options.isEmpty()) {
+                params.put("options", options);
+            }
+        }
 
         ServerCommandSource source = context.getSource();
         UUID botUuid = bot.getUuid();
+        
+        // Record skill execution for resume capability
+        SkillResumeService.recordExecution(bot, skillName, rawArgs, source);
+        
+        // Capture command issuer's facing direction for directional skills (stripmine, etc.)
+        if (source.getPlayer() != null) {
+            Direction issuerFacing = source.getPlayer().getHorizontalFacing();
+            params.put("direction", issuerFacing);
+        }
 
         skillExecutor.submit(() -> {
-            Optional<TaskService.TaskTicket> ticketOpt = TaskService.beginSkill(skillName, source, botUuid);
-            if (ticketOpt.isEmpty()) {
-                source.getServer().execute(() -> ChatUtils.sendSystemMessage(source, bot.getName().getString() + " is busy and cannot start the skill."));
-                return;
-            }
-
-            TaskService.TaskTicket ticket = ticketOpt.get();
-            boolean success = false;
             try {
                 SkillContext skillContext = new SkillContext(bot.getCommandSource(), FunctionCallerV2.getSharedState(), params);
                 SkillExecutionResult result = SkillManager.runSkill(skillName, skillContext);
-                success = result.success();
                 source.getServer().execute(() -> ChatUtils.sendSystemMessage(source, result.message()));
             } catch (Exception e) {
                 LOGGER.error("An unexpected error occurred in /bot skill " + skillName, e);
                 source.getServer().execute(() -> ChatUtils.sendSystemMessage(source, "An unexpected error occurred trying to execute that command."));
-            } finally {
-                TaskService.complete(ticket, success);
             }
         });
 

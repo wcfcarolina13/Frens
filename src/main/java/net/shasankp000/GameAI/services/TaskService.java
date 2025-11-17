@@ -166,7 +166,7 @@ public final class TaskService {
             finalState = State.ABORTED;
         }
         ticket.setState(finalState);
-        ACTIVE.remove(key(ticket.botUuid()), ticket);
+        ACTIVE.remove(key(ticket.botUuid()));
         LOGGER.info("Task '{}' finished with state {}", ticket.name(), finalState);
     }
 
@@ -222,6 +222,7 @@ public final class TaskService {
                     : "§cHalting current task.");
             LOGGER.warn("Task '{}' aborted: {}", ticket.name(), ticket.cancelReason());
         }
-        ACTIVE.remove(key(ticket.botUuid()), ticket);
+        // Don't remove ticket from ACTIVE here - let skill detect cancelRequest and finish naturally
+        // Ticket will be removed when task completes in finishTask()
     }
 }

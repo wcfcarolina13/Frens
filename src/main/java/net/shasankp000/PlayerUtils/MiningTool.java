@@ -7,6 +7,7 @@ import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.util.Hand;
 import net.minecraft.util.math.BlockPos;
 import net.shasankp000.Entity.LookController;
+import net.shasankp000.GameAI.skills.SkillManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -96,6 +97,15 @@ public class MiningTool {
                     cleanup.run();
                     return;
                 }
+                
+                // Check if skill was aborted
+                if (SkillManager.shouldAbortSkill(bot)) {
+                    LOGGER.info("Mining aborted for {} at {}", bot.getName().getString(), targetBlockPos);
+                    miningResult.complete("⚠️ Mining aborted.");
+                    cleanup.run();
+                    return;
+                }
+                
                 try {
                     BlockState currentState = bot.getEntityWorld().getBlockState(targetBlockPos);
                     if (currentState.isAir()) {

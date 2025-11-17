@@ -28,6 +28,7 @@ import net.shasankp000.GameAI.skills.SkillPreferences;
 import net.shasankp000.Entity.LookController;
 import net.shasankp000.GameAI.BotActions;
 import net.shasankp000.GameAI.services.MovementService;
+import net.shasankp000.GameAI.services.TaskService;
 import net.shasankp000.GameAI.skills.SkillManager;
 import net.shasankp000.GameAI.services.SkillResumeService;
 import net.shasankp000.FunctionCaller.SharedStateUtils;
@@ -40,6 +41,7 @@ import net.shasankp000.ChatUtils.ChatUtils;
 import net.shasankp000.GameAI.skills.support.MiningHazardDetector;
 import net.shasankp000.GameAI.skills.support.MiningHazardDetector.DetectionResult;
 import net.shasankp000.GameAI.skills.support.MiningHazardDetector.Hazard;
+import net.shasankp000.GameAI.skills.support.TorchPlacer;
 import net.shasankp000.PlayerUtils.MiningTool;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -249,7 +251,8 @@ public class CollectDirtSkill implements Skill {
         while (collected < targetCount
                 && failuresInRow < currentMaxFails
                 && System.currentTimeMillis() - startTime < MAX_RUNTIME_MILLIS
-                && !Thread.currentThread().isInterrupted()) {
+                && !Thread.currentThread().isInterrupted()
+                && !TaskService.isAbortRequested(source.getPlayer() != null ? source.getPlayer().getUuid() : null)) {
 
             ServerPlayerEntity loopPlayer = source.getPlayer();
             if (loopPlayer != null) {
@@ -395,32 +398,55 @@ public class CollectDirtSkill implements Skill {
                     LOGGER.info("{} expanding search to radius={} vertical={} after message '{}'",
                             skillName, horizontalRadius + radiusBoost, verticalRange + verticalBoost, lastMessage);
                 }
+                
+                // Auto-enable stair digging for mining when repeatedly failing to find target blocks on surface
+                if (!stairMode && !depthMode && skillName.equals("mining") && failuresInRow >= 3 
+                        && lastMessage != null && lastMessage.contains("No") && lastMessage.contains("block")) {
+                    LOGGER.info("{} auto-enabling stair-dig mode after {} failures to find target blocks", skillName, failuresInRow);
+                    stairMode = true;
+                    depthMode = true;
+                    targetDepthY = source.getPlayer() != null ? source.getPlayer().getBlockY() - 30 : null;
+                    if (targetDepthY != null) {
+                        LOGGER.info("{} will dig stairs down to Y={}", skillName, targetDepthY);
+                    }
+                }
+                
                 if (explorationAttempts < MAX_EXPLORATION_ATTEMPTS_PER_CYCLE
                         && shouldTriggerExploration(lastMessage, failuresInRow, collected)) {
                     LOGGER.info("{} attempting exploration step after failure '{}'", skillName, lastMessage);
                     BlockPos preExplorePos = source.getPlayer() != null ? source.getPlayer().getBlockPos() : null;
-                    if (attemptExplorationStep(source, context.sharedState(), activeSquareCenter != null, activeSquareCenter, effectiveHorizontal)) {
+                    boolean explorationSucceeded = attemptExplorationStep(source, context.sharedState(), activeSquareCenter != null, activeSquareCenter, effectiveHorizontal);
+                    
+                    // Only reset failures if bot actually moved significantly
+                    boolean botActuallyMoved = false;
+                    BlockPos postExplorePos = null;
+                    if (explorationSucceeded && source.getPlayer() != null && preExplorePos != null) {
+                        postExplorePos = source.getPlayer().getBlockPos();
+                        botActuallyMoved = postExplorePos != null && postExplorePos.getSquaredDistance(preExplorePos) > 4;
+                    }
+                    
+                    if (botActuallyMoved) {
                         failuresInRow = 0;
                         radiusBoost = Math.max(0, radiusBoost - HORIZONTAL_RADIUS_STEP);
                         verticalBoost = Math.max(0, verticalBoost - VERTICAL_RANGE_STEP);
-                        if (source.getPlayer() != null && preExplorePos != null) {
-                            BlockPos postExplorePos = source.getPlayer().getBlockPos();
-                            if (postExplorePos != null && postExplorePos.getSquaredDistance(preExplorePos) > 1) {
-                                int cleared = unreachable.size();
-                                unreachable.clear();
-                                LOGGER.info("{} exploration cleared {} unreachable targets after relocation", skillName, cleared);
-                            }
-                        } else {
-                            int cleared = unreachable.size();
-                            unreachable.clear();
-                            LOGGER.info("{} exploration cleared {} unreachable targets after relocation (player lookup unavailable)", skillName, cleared);
-                        }
+                        int cleared = unreachable.size();
+                        unreachable.clear();
+                        double distance = postExplorePos != null && preExplorePos != null 
+                                ? Math.sqrt(postExplorePos.getSquaredDistance(preExplorePos)) : 0.0;
+                        LOGGER.info("{} exploration cleared {} unreachable targets after moving {} blocks", 
+                                skillName, cleared, String.format("%.1f", distance));
                         LOGGER.info("{} exploration step succeeded; retrying search.", skillName);
                         startTime = System.currentTimeMillis();
                         explorationAttempts = 0;
                         continue;
+                    } else if (explorationSucceeded) {
+                        LOGGER.warn("{} exploration returned success but bot didn't move significantly - counting as failure", skillName);
+                        failuresInRow++; // Increment instead of reset since bot didn't actually relocate
                     }
-                    explorationAttempts++;
+                    
+                    if (!explorationSucceeded) {
+                        explorationAttempts++;
+                    }
                 }
 
                 boolean hitSearchCeiling = horizontalRadius + radiusBoost >= MAX_HORIZONTAL_RADIUS
@@ -986,6 +1012,7 @@ public class CollectDirtSkill implements Skill {
             if (SkillManager.shouldAbortSkill(player)) {
                 return SkillExecutionResult.failure(skillName + " paused due to nearby threat.");
             }
+            
             if (handleInventoryFull(player, source)) {
                 return SkillExecutionResult.failure("Mining paused: inventory full.");
             }
@@ -1040,6 +1067,17 @@ public class CollectDirtSkill implements Skill {
                 }
             }
             carvedSteps++;
+            
+            // Place torch AFTER carving (every 6 steps)
+            if (carvedSteps % 6 == 0 && TorchPlacer.shouldPlaceTorch(player)) {
+                TorchPlacer.PlacementResult torchResult = TorchPlacer.placeTorch(player, digDirection);
+                if (torchResult == TorchPlacer.PlacementResult.NO_TORCHES) {
+                    SkillResumeService.flagManualResume(player);
+                    ChatUtils.sendChatMessages(player.getCommandSource().withSilent().withMaxLevel(4), 
+                            "Ran out of torches!");
+                    return SkillExecutionResult.failure("Staircase paused: out of torches. Provide torches and /bot resume.");
+                }
+            }
         }
 
         return SkillExecutionResult.success("Carved " + carvedSteps + " stair steps down to Y=" + player.getBlockY() + ".");

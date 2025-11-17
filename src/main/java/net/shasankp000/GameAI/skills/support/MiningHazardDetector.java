@@ -102,6 +102,7 @@ public final class MiningHazardDetector {
     private static final long WARNING_COOLDOWN_MS = 1_500L;
 
     private static final Map<UUID, Set<BlockPos>> ACKNOWLEDGED_BLOCKERS = new ConcurrentHashMap<>();
+    private static final Map<UUID, Set<BlockPos>> DISCOVERED_RARES = new ConcurrentHashMap<>();
     private static final Map<UUID, Set<BlockPos>> WARNED_HAZARDS = new ConcurrentHashMap<>();
     private static final Map<UUID, Long> LAST_WARNING_TS = new ConcurrentHashMap<>();
     private static final DetectionResult NO_HAZARDS = new DetectionResult(Optional.empty(), List.of());
@@ -206,6 +207,7 @@ public final class MiningHazardDetector {
         Block block = state.getBlock();
         String precious = VALUABLE_MESSAGES.get(block);
         if (precious != null) {
+            // Ores should pause the job for player inspection
             return hazard(pos, precious, true, "Mining paused: " + precious);
         }
         if (CHEST_BLOCKS.contains(block)) {
@@ -254,6 +256,22 @@ public final class MiningHazardDetector {
         }
         UUID uuid = bot.getUuid();
         ACKNOWLEDGED_BLOCKERS.remove(uuid);
+        // DON'T clear DISCOVERED_RARES - those persist across pauses within the same job
+        WARNED_HAZARDS.remove(uuid);
+        LAST_WARNING_TS.remove(uuid);
+    }
+    
+    /**
+     * Clears ALL state for a bot, including discovered rares.
+     * Should only be called when a job is completely stopped or finished.
+     */
+    public static void clearAll(ServerPlayerEntity bot) {
+        if (bot == null) {
+            return;
+        }
+        UUID uuid = bot.getUuid();
+        ACKNOWLEDGED_BLOCKERS.remove(uuid);
+        DISCOVERED_RARES.remove(uuid);
         WARNED_HAZARDS.remove(uuid);
         LAST_WARNING_TS.remove(uuid);
     }
@@ -322,6 +340,10 @@ public final class MiningHazardDetector {
             if (hazard == null) {
                 continue;
             }
+            // Only announce ores if they have at least one exposed face (adjacent to air)
+            if (!hasExposedFace(world, neighbor)) {
+                continue;
+            }
             if (!registerWarning(bot, neighbor)) {
                 continue;
             }
@@ -338,6 +360,13 @@ public final class MiningHazardDetector {
             return false;
         }
         UUID uuid = bot.getUuid();
+        
+        // Check if this rare was already discovered this job session
+        Set<BlockPos> rares = DISCOVERED_RARES.get(uuid);
+        if (rares != null && rares.contains(pos)) {
+            return false; // Already reported this rare
+        }
+        
         long now = System.currentTimeMillis();
         Long last = LAST_WARNING_TS.get(uuid);
         if (last != null && now - last < WARNING_COOLDOWN_MS) {
@@ -347,8 +376,31 @@ public final class MiningHazardDetector {
         if (!warned.add(pos.toImmutable())) {
             return false;
         }
+        
+        // Mark as discovered for this job session
+        DISCOVERED_RARES.computeIfAbsent(uuid, id -> new CopyOnWriteArraySet<>())
+                .add(pos.toImmutable());
+        
         LAST_WARNING_TS.put(uuid, now);
         return true;
+    }
+
+    /**
+     * Checks if a block has at least one face exposed to air.
+     * Used to avoid announcing ores that are completely buried.
+     */
+    private static boolean hasExposedFace(ServerWorld world, BlockPos pos) {
+        if (world == null || pos == null) {
+            return false;
+        }
+        // Check all 6 directions - if any adjacent block is air, the ore is exposed
+        for (Direction dir : Direction.values()) {
+            BlockPos adjacent = pos.offset(dir);
+            if (world.getBlockState(adjacent).isAir()) {
+                return true;
+            }
+        }
+        return false;
     }
 
     public static record Hazard(String chatMessage, String failureMessage, BlockPos location, boolean blocking) {
