@@ -74,6 +74,7 @@ public final class BotControlApplier {
         }
         SkillPreferences.setTeleportDuringSkills(bot.getUuid(), settings.isTeleportDuringSkills());
         SkillPreferences.setPauseOnFullInventory(bot.getUuid(), settings.isPauseOnFullInventory());
+        SkillPreferences.setTeleportDuringDropSweep(bot.getUuid(), settings.isTeleportDuringDropSweep());
         LLMOrchestrator.setBotEnabled(bot.getUuid(), settings.isLlmEnabled());
     }
 

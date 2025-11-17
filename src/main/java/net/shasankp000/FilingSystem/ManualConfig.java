@@ -501,6 +501,7 @@ public class ManualConfig {
         private String spawnMode = "training";
         private boolean teleportDuringSkills = true;
         private boolean pauseOnFullInventory;
+        private boolean teleportDuringDropSweep = false;
         private boolean llmEnabled = true;
 
         public boolean isAutoSpawn() {
@@ -538,6 +539,14 @@ public class ManualConfig {
 
         public void setPauseOnFullInventory(boolean pauseOnFullInventory) {
             this.pauseOnFullInventory = pauseOnFullInventory;
+        }
+
+        public boolean isTeleportDuringDropSweep() {
+            return teleportDuringDropSweep;
+        }
+
+        public void setTeleportDuringDropSweep(boolean teleportDuringDropSweep) {
+            this.teleportDuringDropSweep = teleportDuringDropSweep;
         }
 
         public boolean isLlmEnabled() {

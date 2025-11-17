@@ -129,13 +129,18 @@ public class BotControlScreen extends Screen {
                 .build(0, 0, buttonWidth, 20, Text.of("Pause Inv"), (button, value) -> {});
         pause.setTooltip(Tooltip.of(Text.of("Pause the job when the inventory is full; resume with /bot resume.")));
         this.addDrawableChild(pause);
+        
+        CyclingButtonWidget<Boolean> dropTeleport = CyclingButtonWidget.onOffBuilder(settings.isTeleportDuringDropSweep())
+                .build(0, 0, buttonWidth, 20, Text.of("Drop TP"), (button, value) -> {});
+        dropTeleport.setTooltip(Tooltip.of(Text.of("Allow teleports when collecting drops after mining.")));
+        this.addDrawableChild(dropTeleport);
 
         CyclingButtonWidget<Boolean> llm = CyclingButtonWidget.onOffBuilder(settings.isLlmEnabled())
                 .build(0, 0, buttonWidth, 20, Text.of("LLM Bot"), (button, value) -> {});
         llm.setTooltip(Tooltip.of(Text.of("Enable natural-language control for this bot.")));
         this.addDrawableChild(llm);
 
-        return new Row(alias, title, subtitle, helper, autoSpawn, spawnMode, teleport, pause, llm);
+        return new Row(alias, title, subtitle, helper, autoSpawn, spawnMode, teleport, pause, dropTeleport, llm);
     }
 
     private void saveSettings() {
@@ -147,6 +152,7 @@ public class BotControlScreen extends Screen {
             settings.setSpawnMode(row.spawnMode.getValue());
             settings.setTeleportDuringSkills(row.teleport.getValue());
             settings.setPauseOnFullInventory(row.inventoryPause.getValue());
+            settings.setTeleportDuringDropSweep(row.dropTeleport.getValue());
             settings.setLlmEnabled(row.llmEnabled.getValue());
         }
         config.save();
@@ -170,7 +176,7 @@ public class BotControlScreen extends Screen {
             tipY += this.textRenderer.fontHeight;
         }
         int headerY = worldToggle != null ? worldToggle.getY() + 18 : 50;
-        String[] headers = {"Auto Spawn", "Mode", "Teleport", "Pause Inv", "LLM Bot"};
+        String[] headers = {"Auto Spawn", "Mode", "Teleport", "Pause Inv", "Drop TP", "LLM Bot"};
         int columnWidth = layout.buttonWidth();
         int startX = layout.startX();
         int spacing = layout.spacing();
@@ -269,6 +275,7 @@ public class BotControlScreen extends Screen {
         final CyclingButtonWidget<String> spawnMode;
         final CyclingButtonWidget<Boolean> teleport;
         final CyclingButtonWidget<Boolean> inventoryPause;
+        final CyclingButtonWidget<Boolean> dropTeleport;
         final CyclingButtonWidget<Boolean> llmEnabled;
         private int textZoneHeight = MIN_TEXT_ZONE;
         private int totalHeight = MIN_TEXT_ZONE + BUTTON_HEIGHT + BUTTON_SECTION_PADDING * 2;
@@ -281,6 +288,7 @@ public class BotControlScreen extends Screen {
             CyclingButtonWidget<String> spawnMode,
             CyclingButtonWidget<Boolean> teleport,
             CyclingButtonWidget<Boolean> inventoryPause,
+            CyclingButtonWidget<Boolean> dropTeleport,
             CyclingButtonWidget<Boolean> llmEnabled) {
             this.alias = alias;
             this.title = title;
@@ -290,6 +298,7 @@ public class BotControlScreen extends Screen {
             this.spawnMode = spawnMode;
             this.teleport = teleport;
             this.inventoryPause = inventoryPause;
+            this.dropTeleport = dropTeleport;
             this.llmEnabled = llmEnabled;
         }
 
@@ -332,9 +341,14 @@ public class BotControlScreen extends Screen {
             inventoryPause.setX(startX + (buttonWidth + spacing) * 3);
             inventoryPause.setY(buttonY);
             inventoryPause.setWidth(buttonWidth);
+            
+            dropTeleport.visible = visible;
+            dropTeleport.setX(startX + (buttonWidth + spacing) * 4);
+            dropTeleport.setY(buttonY);
+            dropTeleport.setWidth(buttonWidth);
 
             llmEnabled.visible = visible;
-            llmEnabled.setX(startX + (buttonWidth + spacing) * 4);
+            llmEnabled.setX(startX + (buttonWidth + spacing) * 5);
             llmEnabled.setY(buttonY);
             llmEnabled.setWidth(buttonWidth);
         }

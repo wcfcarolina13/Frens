@@ -59,6 +59,24 @@ public final class StripMineSkill implements Skill {
         if (!resumeRequested) {
             net.shasankp000.GameAI.skills.support.MiningHazardDetector.clear(player);
         }
+        
+        // Check if resuming from a paused position
+        Optional<BlockPos> pausePos = WorkDirectionService.getPausePosition(player.getUuid());
+        if (resumeRequested && pausePos.isPresent()) {
+            BlockPos resumeTarget = pausePos.get();
+            LOGGER.info("Stripmine resuming - navigating back to pause position {}", resumeTarget.toShortString());
+            ChatUtils.sendChatMessages(source.withSilent().withMaxLevel(4), 
+                    "Returning to mining position...");
+            
+            // Navigate back to pause position
+            if (!moveTo(source, player, resumeTarget)) {
+                LOGGER.warn("Failed to return to pause position {}", resumeTarget.toShortString());
+                ChatUtils.sendChatMessages(source.withSilent().withMaxLevel(4), 
+                        "Couldn't return to exact position, continuing from here.");
+            }
+            WorkDirectionService.clearPausePosition(player.getUuid());
+        }
+        
         int length = Math.max(1, getIntParameter(context, "count", DEFAULT_LENGTH));
         int completed = 0;
 
@@ -82,6 +100,8 @@ public final class StripMineSkill implements Skill {
                     ChatUtils.sendChatMessages(player.getCommandSource().withSilent().withMaxLevel(4), hazard.chatMessage()));
             if (detection.blockingHazard().isPresent()) {
                 Hazard hazard = detection.blockingHazard().get();
+                // Store current position for resume
+                WorkDirectionService.setPausePosition(player.getUuid(), player.getBlockPos());
                 SkillResumeService.flagManualResume(player);
                 ChatUtils.sendChatMessages(player.getCommandSource().withSilent().withMaxLevel(4), hazard.chatMessage());
                 return SkillExecutionResult.failure(hazard.failureMessage());

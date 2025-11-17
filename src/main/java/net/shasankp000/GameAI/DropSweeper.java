@@ -11,6 +11,7 @@ import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Vec3d;
 import net.shasankp000.GameAI.BotActions;
 import net.shasankp000.GameAI.services.MovementService;
+import net.shasankp000.GameAI.skills.SkillPreferences;
 import net.shasankp000.Entity.LookController;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -54,6 +55,27 @@ public final class DropSweeper {
             LOGGER.debug("Drop sweep skipped: no server world on source.");
             return;
         }
+
+        // Store original teleport preference and set drop sweep preference
+        boolean originalTeleport = SkillPreferences.teleportDuringSkills(player);
+        boolean dropSweepTeleport = SkillPreferences.teleportDuringDropSweep(player);
+        SkillPreferences.setTeleportDuringSkills(player.getUuid(), dropSweepTeleport);
+        
+        try {
+            performSweep(source, player, world, horizontalRadius, verticalRange, maxTargets, maxDurationMillis);
+        } finally {
+            // Restore original teleport preference
+            SkillPreferences.setTeleportDuringSkills(player.getUuid(), originalTeleport);
+        }
+    }
+
+    private static void performSweep(ServerCommandSource source,
+                                     ServerPlayerEntity player,
+                                     ServerWorld world,
+                                     double horizontalRadius,
+                                     double verticalRange,
+                                     int maxTargets,
+                                     long maxDurationMillis) {
 
         long deadline = maxDurationMillis > 0 ? System.currentTimeMillis() + maxDurationMillis : Long.MAX_VALUE;
         int attempts = 0;

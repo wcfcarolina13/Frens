@@ -8,13 +8,13 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Holds lightweight, in-memory per-bot preferences that influence how skills behave. Currently
- * this only tracks whether the bot may teleport during skill execution, but the structure can be
- * extended for future toggles as well.
+ * this tracks teleport settings, inventory pause behavior, and drop collection preferences.
  */
 public final class SkillPreferences {
 
     private static final Map<UUID, Boolean> TELEPORT_PREFS = new ConcurrentHashMap<>();
     private static final Map<UUID, Boolean> PAUSE_ON_FULL_INV = new ConcurrentHashMap<>();
+    private static final Map<UUID, Boolean> TELEPORT_DROP_SWEEP = new ConcurrentHashMap<>();
 
     private SkillPreferences() {
     }
@@ -66,6 +66,31 @@ public final class SkillPreferences {
             PAUSE_ON_FULL_INV.put(uuid, Boolean.TRUE);
         } else {
             PAUSE_ON_FULL_INV.remove(uuid);
+        }
+    }
+
+    public static boolean teleportDuringDropSweep(ServerPlayerEntity player) {
+        if (player == null) {
+            return false; // Default to no teleport for drop sweeps
+        }
+        return teleportDuringDropSweep(player.getUuid());
+    }
+
+    public static boolean teleportDuringDropSweep(UUID uuid) {
+        if (uuid == null) {
+            return false; // Default to no teleport for drop sweeps
+        }
+        return TELEPORT_DROP_SWEEP.getOrDefault(uuid, Boolean.FALSE);
+    }
+
+    public static void setTeleportDuringDropSweep(UUID uuid, boolean enabled) {
+        if (uuid == null) {
+            return;
+        }
+        if (enabled) {
+            TELEPORT_DROP_SWEEP.put(uuid, Boolean.TRUE);
+        } else {
+            TELEPORT_DROP_SWEEP.remove(uuid);
         }
     }
 }

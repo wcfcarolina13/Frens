@@ -31,6 +31,7 @@ import net.shasankp000.GameAI.services.MovementService;
 import net.shasankp000.GameAI.services.TaskService;
 import net.shasankp000.GameAI.skills.SkillManager;
 import net.shasankp000.GameAI.services.SkillResumeService;
+import net.shasankp000.GameAI.services.WorkDirectionService;
 import net.shasankp000.FunctionCaller.SharedStateUtils;
 import net.shasankp000.PathFinding.GoTo;
 import net.shasankp000.GameAI.BotEventHandler;
@@ -1004,6 +1005,28 @@ public class CollectDirtSkill implements Skill {
         if (player.getBlockY() <= targetDepthY) {
             return SkillExecutionResult.success("Reached target depth " + targetDepthY + ".");
         }
+        
+        // Check if resuming from a paused position
+        Optional<BlockPos> pausePos = WorkDirectionService.getPausePosition(player.getUuid());
+        if (pausePos.isPresent()) {
+            BlockPos resumeTarget = pausePos.get();
+            LOGGER.info("Stairs mode resuming - navigating back to pause position {}", resumeTarget.toShortString());
+            ChatUtils.sendChatMessages(source.withSilent().withMaxLevel(4), 
+                    "Returning to staircase position...");
+            
+            Direction digDirection = determineStraightStairDirection(context, player);
+            MovementService.MovementPlan plan = new MovementService.MovementPlan(
+                    MovementService.Mode.DIRECT, resumeTarget, resumeTarget, null, null, digDirection);
+            MovementService.MovementResult movement = MovementService.execute(source, player, plan);
+            
+            if (!movement.success() || !player.getBlockPos().equals(resumeTarget)) {
+                LOGGER.warn("Failed to return to pause position {}, continuing from current location", resumeTarget.toShortString());
+                ChatUtils.sendChatMessages(source.withSilent().withMaxLevel(4), 
+                        "Couldn't return to exact position, continuing from here.");
+            }
+            WorkDirectionService.clearPausePosition(player.getUuid());
+        }
+        
         Direction digDirection = determineStraightStairDirection(context, player);
         runOnServerThread(player, () -> LookController.faceBlock(player, player.getBlockPos().offset(digDirection)));
 
@@ -1032,6 +1055,8 @@ public class CollectDirtSkill implements Skill {
                     ChatUtils.sendChatMessages(player.getCommandSource().withSilent().withMaxLevel(4), warning.chatMessage()));
             if (detection.blockingHazard().isPresent()) {
                 Hazard hazard = detection.blockingHazard().get();
+                // Store current position for resume (stairs mode)
+                WorkDirectionService.setPausePosition(player.getUuid(), player.getBlockPos());
                 SkillResumeService.flagManualResume(player);
                 ChatUtils.sendChatMessages(player.getCommandSource().withSilent().withMaxLevel(4), hazard.chatMessage());
                 return SkillExecutionResult.failure(hazard.failureMessage());
