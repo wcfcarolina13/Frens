@@ -1,3 +1,111 @@
+## Session 2025-11-17 17:48 — Testing Feedback Analysis: Critical Issues Identified
+
+### Summary
+Investigated user testing feedback on P0 fixes. Confirmed root causes for block explosions (suffocation system), inventory message spam, and ongoing torch breakage. User was correct about suffocation being the cause of drop_sweep block breaking.
+
+### Issues Confirmed via Log Analysis & Code Review
+
+**1. Block Explosions = Suffocation System (CRITICAL)**
+- Located in `BotEventHandler.java` line 1682: `BotActions.digOut(bot, true)`
+- `digOut()` breaks UP TO 11 BLOCKS: 3 vertical + 8 horizontal positions
+- Triggers on ANY wall collision, not just damage
+- With `forceBreak=true`, breaks blocks up to hardness 5.0f (stone, etc.)
+- This is what causes "wildly breaking blocks" during drop_sweep movement
+- **User's diagnosis was correct**: overly aggressive suffocation response
+
+**2. Inventory Message Spam (CONFIRMED)**  
+- Log shows: "Inventory's full! Continuing…" appears 5 times in 2 seconds
+- Called on EVERY block mine when inventory is full
+- No cooldown or state tracking implemented
+- Less strict detection works (triggers appropriately), but spams
+
+**3. Torch Breaking (ONGOING)**
+- Replacement works but timing/positioning issues remain
+- Bot mines torch → moves forward → replacement happens (too late)
+- Torch placed at same position → bot immediately re-mines it
+- Need offset placement (1-2 blocks behind) + micro-pause
+
+### Root Cause Analysis
+
+**Suffocation System Issues:**
+```java
+// Current aggressive behavior:
+public static boolean digOut(ServerPlayerEntity bot, boolean forceBreak) {
+    // Breaks origin, up, up(2) - 3 blocks
+    // Breaks all 4 horizontal directions + their up positions - 8 blocks  
+    // Total: 11 blocks broken on ANY wall collision
+}
+```
+
+**Should be:**
+- Only break block causing suffocation DAMAGE (IN_WALL damage type)
+- Start with head block (most common suffocation point)
+- Fall back to feet block if still suffocating
+- Don't break blocks just from collision
+
+**Inventory Spam:**
+- `handleInventoryFull()` has no cooldown timer
+- Called in mining loop for every block
+- Needs 5-second cooldown between messages
+
+**Torch Placement:**
+- Current: Replace at exact same position
+- Needed: Place 1-2 blocks behind bot's movement direction
+- Add 100ms pause after placement
+
+### Proposed Fixes (Prioritized)
+
+**P0 - Critical (Implement Immediately):**
+
+1. **Targeted Suffocation Response**
+   - Replace `digOut()` with `handleSuffocationDamage()`
+   - Only break if taking IN_WALL damage
+   - Break head block first, then feet if needed
+   - Select appropriate tool before breaking
+   - Files: `BotEventHandler.java`, `BotActions.java`
+
+2. **Inventory Message Cooldown**
+   - Add `LAST_INVENTORY_FULL_MESSAGE` map with timestamps
+   - 5-second cooldown between messages
+   - Clear timestamp when inventory has space again
+   - Files: `CollectDirtSkill.java`, other mining skills
+
+**P1 - Important (Next Session):**
+
+3. **Torch Placement Offset**
+   - Calculate 1-2 blocks behind bot's facing direction
+   - Place torch at behind position (not current)
+   - Add 100ms pause after placement
+   - Files: `DirtShovelSkill.java`, `TorchPlacer.java`
+
+### Files Requiring Changes
+
+**For Suffocation Fix:**
+- `BotEventHandler.java` - Lines 1665-1690 (suffocation detection and response)
+- `BotActions.java` - Lines 335-400 (digOut method and helpers)
+
+**For Inventory Spam Fix:**
+- `CollectDirtSkill.java` - `handleInventoryFull()` method
+- Possibly `DirtShovelSkill.java` and `StripMineSkill.java` if same pattern
+
+**For Torch Improvement:**
+- `DirtShovelSkill.java` - Torch replacement logic after mining
+- `TorchPlacer.java` - Possibly add offset placement variant
+
+### Updated TESTING_FEEDBACK_ANALYSIS.md
+- Detailed evidence from logs and code
+- Root cause explanations with code snippets
+- Proposed fix implementations
+- Testing checklist for validation
+
+### Next Steps
+Awaiting user direction:
+- Implement P0 fixes now (suffocation + inventory spam)?
+- Queue torch improvement for next session?
+- Or prioritize protected zones / config UI refactor?
+
+---
+
 ## Session 2025-11-17 17:33 — P0 Fixes: Torch Replacement & Inventory Detection
 
 ### Summary
