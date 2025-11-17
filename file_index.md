@@ -2,7 +2,7 @@
 
 This document provides an index of all the files in the AI-Player-checkpoint project, with a short description of each file and its purpose.
 
-**Last Updated:** 2025-01-17
+**Last Updated:** 2025-01-17 (Checkpoint: Mining polish with torch placement, work direction persistence, hunger management, and improved pause/resume)
 
 ## Root Directory
 

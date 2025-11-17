@@ -1,4 +1,4 @@
-## Unreleased
+## 2025-01-17 - Checkpoint: Mining Polish & Autonomous Systems
 
 ### Added
 - **Work direction persistence:** Bots now store their initial facing direction when starting directional mining jobs (stripmine, stairs, depth mining) and maintain that direction throughout the job, even across pause/resume cycles. Added `/bot reset_direction <alias>` command to reset stored direction for next job.
@@ -13,6 +13,14 @@
 - Fixed resume command not finding paused jobs - jobs now correctly maintain pause state
 - Fixed bots breaking their own torch placements during mining operations
 - Fixed `/bot stop` only working when jobs were paused rather than during active execution
+
+### Improvements
+- Torch placement now finds perpendicular walls intelligently (left or right of mining direction)
+- Work direction service ensures consistent tunnel orientation across multiple mining sessions
+- Hunger service provides graduated warnings and automatic eating based on health thresholds
+- Task service properly handles job termination vs pause states for all abort scenarios
+
+## Unreleased
 
 ### Reverted
 - Reverted to commit `1296ae052a337cda801f080272cfbfbfbae937a8` to restore the project to a previous state.
