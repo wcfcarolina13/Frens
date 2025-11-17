@@ -2,6 +2,7 @@ package net.shasankp000.GameAI;
 
 import net.shasankp000.EntityUtil;
 import net.minecraft.block.BlockState;
+import net.minecraft.block.Blocks;
 import net.minecraft.component.DataComponentTypes;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.ItemEntity;
@@ -1662,30 +1663,49 @@ public class BotEventHandler {
         if (world == null) {
             return false;
         }
-        BlockPos feet = bot.getBlockPos();
-        BlockPos head = feet.up();
-        boolean feetSolid = !world.getBlockState(feet).getCollisionShape(world, feet).isEmpty();
-        boolean headSolid = !world.getBlockState(head).getCollisionShape(world, head).isEmpty();
-        boolean insideWall = bot.isInsideWall() || feetSolid || headSolid;
-        if (bot.hurtTime > 0 && bot.hurtTime < 10) {
-            insideWall = true;
-        }
-        if (!insideWall && tookRecentSuffocation(bot)) {
-            insideWall = true;
-        }
-        if (!insideWall) {
+        
+        // Only intervene if bot is actively taking suffocation damage
+        // Don't break blocks just from collision/proximity
+        boolean takingSuffocationDamage = tookRecentSuffocation(bot);
+        if (!takingSuffocationDamage) {
             LAST_SUFFOCATION_ALERT_TICK.remove(bot.getUuid());
             return false;
         }
 
-        boolean hasTool = ensureRescueTool(bot, world, feet);
-        boolean cleared = BotActions.digOut(bot, true);
+        // Targeted response: break only the block causing suffocation
+        BlockPos feet = bot.getBlockPos();
+        BlockPos head = feet.up();
+        boolean hasTool = ensureRescueTool(bot, world, head);
+        boolean cleared = breakSuffocatingBlock(bot, world, head, feet);
+        
         if (!hasTool || !cleared) {
             alertSuffocation(bot);
         } else {
             LAST_SUFFOCATION_ALERT_TICK.remove(bot.getUuid());
         }
         return true;
+    }
+    
+    /**
+     * Breaks only the specific block causing suffocation, not surrounding blocks.
+     * Tries head position first (most common), then feet if still suffocating.
+     */
+    private static boolean breakSuffocatingBlock(ServerPlayerEntity bot, ServerWorld world, BlockPos head, BlockPos feet) {
+        // Try breaking head block first (most common suffocation point)
+        BlockState headState = world.getBlockState(head);
+        if (!headState.isAir() && !headState.isOf(Blocks.BEDROCK)) {
+            if (BotActions.breakBlockAt(bot, head, true)) {
+                return true;
+            }
+        }
+        
+        // If head is clear but still suffocating, try feet
+        BlockState feetState = world.getBlockState(feet);
+        if (!feetState.isAir() && !feetState.isOf(Blocks.BEDROCK)) {
+            return BotActions.breakBlockAt(bot, feet, true);
+        }
+        
+        return false;
     }
 
     private static boolean tookRecentSuffocation(ServerPlayerEntity bot) {

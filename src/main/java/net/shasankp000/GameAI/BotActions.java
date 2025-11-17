@@ -362,6 +362,22 @@ public final class BotActions {
 
         return brokeAny;
     }
+    
+    /**
+     * Breaks a specific block at the given position.
+     * Used for targeted suffocation relief - breaks only the block causing damage.
+     * @param bot The bot
+     * @param pos The position of the block to break
+     * @param forceBreak If true, breaks blocks up to hardness 5.0 even without proper tool
+     * @return true if block was broken
+     */
+    public static boolean breakBlockAt(ServerPlayerEntity bot, BlockPos pos, boolean forceBreak) {
+        ServerWorld world = bot.getEntityWorld() instanceof ServerWorld sw ? sw : null;
+        if (world == null) {
+            return false;
+        }
+        return breakBlock(world, pos, bot, forceBreak);
+    }
 
     private static boolean canBreak(ServerWorld world, BlockPos pos, ServerPlayerEntity bot, boolean forceBreak) {
         BlockState state = world.getBlockState(pos);

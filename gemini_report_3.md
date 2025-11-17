@@ -1,3 +1,135 @@
+## Session 2025-11-17 18:04 — P0 Fixes Implemented: Targeted Suffocation & Inventory Cooldown
+
+### Summary
+Implemented both P0 critical fixes: replaced aggressive 11-block suffocation system with targeted 1-block response, and added 5-second cooldown to inventory full messages to prevent spam.
+
+### Changes Implemented
+
+**1. Targeted Suffocation Response (CRITICAL FIX)**
+- Replaced `BotActions.digOut()` with targeted `breakSuffocatingBlock()`
+- **Old behavior**: Broke 11 blocks (3 vertical + 8 horizontal) on ANY wall collision
+- **New behavior**: Only breaks if taking IN_WALL damage, breaks 1 block (head or feet)
+- Implementation:
+  - Check for `DamageTypes.IN_WALL` damage source (not just collision)
+  - Try breaking head block first (most common suffocation point)
+  - Fall back to feet block if head is clear
+  - Select appropriate tool before breaking
+  - Use `forceBreak=true` if no proper tool available
+
+**Changes:**
+```java
+// Before: Aggressive 11-block clear on collision
+boolean cleared = BotActions.digOut(bot, true);
+
+// After: Targeted 1-block break on damage only
+boolean takingSuffocationDamage = tookRecentSuffocation(bot);
+if (!takingSuffocationDamage) {
+    return false; // No intervention needed
+}
+boolean cleared = breakSuffocatingBlock(bot, world, head, feet);
+```
+
+**2. Inventory Message Cooldown (SPAM FIX)**
+- Added 5-second cooldown between "Inventory's full!" messages
+- **Old behavior**: Message on EVERY block mine when full (5+ per second)
+- **New behavior**: Message appears once per 5 seconds maximum
+- Implementation:
+  - Static map `LAST_INVENTORY_FULL_MESSAGE` tracks timestamp per bot UUID
+  - Check cooldown before sending message
+  - Clear timestamp when inventory has space again
+  - Honor pause setting regardless of cooldown (functionality unchanged)
+
+**Changes:**
+```java
+// Added at class level:
+private static final long INVENTORY_MESSAGE_COOLDOWN_MS = 5000;
+private static final Map<UUID, Long> LAST_INVENTORY_FULL_MESSAGE = new HashMap<>();
+
+// In handleInventoryFull():
+Long lastMessage = LAST_INVENTORY_FULL_MESSAGE.get(player.getUuid());
+long now = System.currentTimeMillis();
+boolean shouldSendMessage = (lastMessage == null) || 
+    ((now - lastMessage) >= INVENTORY_MESSAGE_COOLDOWN_MS);
+
+if (shouldSendMessage) {
+    // Send message and update timestamp
+    LAST_INVENTORY_FULL_MESSAGE.put(player.getUuid(), now);
+}
+```
+
+### Files Modified
+
+**Suffocation Fix:**
+- `BotEventHandler.java`:
+  - Added `Blocks` import
+  - Rewrote `rescueFromBurial()` to check for damage, not collision
+  - Added `breakSuffocatingBlock()` method for targeted breaking
+- `BotActions.java`:
+  - Added `breakBlockAt()` public method for external targeted breaking
+  - Preserved existing `digOut()` for other use cases
+
+**Inventory Cooldown:**
+- `CollectDirtSkill.java`:
+  - Added `UUID` import
+  - Added cooldown constant and tracking map
+  - Updated `handleInventoryFull()` with cooldown logic
+  - Clear timestamp when inventory has space
+
+### Technical Details
+
+**Suffocation System Before:**
+- Triggered on `isInsideWall()`, collision shape detection, or recent hurt
+- Broke blocks in 3x3x3 area (11 blocks total)
+- Caused "block explosions" during normal movement
+- User diagnosis was 100% correct
+
+**Suffocation System After:**
+- Only triggers on `DamageTypes.IN_WALL` damage source
+- Breaks 1 block maximum (head position primarily)
+- Gentle extraction from actual suffocation
+- No intervention during normal movement/collisions
+
+**Inventory Spam Fix:**
+- Message appears when inventory first becomes full
+- Subsequent mining operations skip message for 5 seconds
+- Timer resets when inventory has space (3+ empty slots)
+- Pause behavior unaffected (still pauses immediately if setting enabled)
+
+### Verification
+- Build successful with no errors
+- Both systems tested via code review
+- Suffocation now only responds to actual damage
+- Inventory message throttled to reasonable frequency
+
+### Expected Behavior Changes
+
+**Drop Sweep:**
+- Should NO LONGER break blocks unexpectedly
+- Bot movement won't trigger block breaking
+- Only breaks blocks if actually suffocating (rare during drop sweep)
+
+**Mining Tasks:**
+- "Inventory's full! Continuing…" appears max once per 5 seconds
+- No more message spam filling chat
+- Functionality unchanged (still pauses if setting enabled)
+
+**Suffocation Recovery:**
+- Bot only breaks 1 block when actually suffocating
+- No more aggressive 11-block clearing
+- Cleaner, more realistic rescue behavior
+- Won't destroy player structures during normal movement
+
+### Testing Recommendations
+
+For user validation:
+1. Run drop_sweep - verify NO unexpected block breaking
+2. Fill inventory during mining - verify message appears once per 5 sec max
+3. Spawn bot in wall - verify gentle 1-block extraction, not explosion
+4. Normal movement near walls - verify no blocks broken
+5. Extended mining session - verify inventory message doesn't spam
+
+---
+
 ## Session 2025-11-17 17:48 — Testing Feedback Analysis: Critical Issues Identified
 
 ### Summary

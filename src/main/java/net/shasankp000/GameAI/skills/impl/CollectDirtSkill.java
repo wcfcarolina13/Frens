@@ -49,6 +49,7 @@ import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -56,6 +57,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -76,6 +78,9 @@ public class CollectDirtSkill implements Skill {
     private static final int STRAIGHT_STAIR_HEADROOM = 4;
     private static final int MAX_EXPLORATION_ATTEMPTS_PER_CYCLE = 3;
     private static final int MAX_STALLED_FAILURES = 5;
+    private static final long INVENTORY_MESSAGE_COOLDOWN_MS = 5000; // 5 seconds between messages
+    
+    private static final Map<UUID, Long> LAST_INVENTORY_FULL_MESSAGE = new HashMap<>();
     private static final List<Item> LAVA_SAFETY_BLOCKS = List.of(
             Items.COBBLESTONE,
             Items.COBBLED_DEEPSLATE,
@@ -1351,18 +1356,32 @@ public class CollectDirtSkill implements Skill {
         }
         boolean shouldPause = SkillPreferences.pauseOnFullInventory(player);
         if (!isInventoryFull(player)) {
+            // Inventory has space again - clear cooldown
+            LAST_INVENTORY_FULL_MESSAGE.remove(player.getUuid());
             return false;
         }
+        
+        // Check cooldown to prevent spam
+        Long lastMessage = LAST_INVENTORY_FULL_MESSAGE.get(player.getUuid());
+        long now = System.currentTimeMillis();
+        boolean shouldSendMessage = (lastMessage == null) || ((now - lastMessage) >= INVENTORY_MESSAGE_COOLDOWN_MS);
+        
         if (shouldPause) {
-            SkillResumeService.flagManualResume(player);
-            ChatUtils.sendChatMessages(source.withSilent().withMaxLevel(4),
-                    "Inventory full — pausing mining. Clear space and run /bot resume " + player.getName().getString() + ".");
-            BotActions.stop(player);
+            if (shouldSendMessage) {
+                SkillResumeService.flagManualResume(player);
+                ChatUtils.sendChatMessages(source.withSilent().withMaxLevel(4),
+                        "Inventory full — pausing mining. Clear space and run /bot resume " + player.getName().getString() + ".");
+                BotActions.stop(player);
+                LAST_INVENTORY_FULL_MESSAGE.put(player.getUuid(), now);
+            }
             return true;
         } else {
-            // Continuing despite full inventory
-            ChatUtils.sendChatMessages(source.withSilent().withMaxLevel(4),
-                    "Inventory's full! Continuing…");
+            // Continuing despite full inventory - send message if cooldown allows
+            if (shouldSendMessage) {
+                ChatUtils.sendChatMessages(source.withSilent().withMaxLevel(4),
+                        "Inventory's full! Continuing…");
+                LAST_INVENTORY_FULL_MESSAGE.put(player.getUuid(), now);
+            }
             return false;
         }
     }
