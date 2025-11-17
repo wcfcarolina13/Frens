@@ -1,3 +1,65 @@
+## Session 2025-11-17 16:23 — Mining Improvements Part 1: Torch Protection & Inventory Messages
+
+### Summary
+Enhanced torch protection during mining and improved user feedback for inventory management.
+
+### Issues Fixed
+
+**1. Torch Destruction - Additional Safety Layers**
+- Problem: Torches still being destroyed despite previous fixes
+- Root cause: Work volume loops checked for air but didn't skip torches before calling mine methods
+- Fix: Added torch checks in BOTH the work volume iteration AND the mine methods
+- Implementation:
+  - CollectDirtSkill line 1040+: Added torch check in stairstepping work volume loop before calling mineStraightStairBlock
+  - StripMineSkill line 90+: Added torch check in stripmine work volume loop before calling mineBlock
+  - Both loops now check if block is a torch and skip it (continue) instead of attempting to mine
+  - This creates double protection: once at loop level, once at method level
+
+**2. Inventory Full Continuing Message**
+- Problem: When "pause on full inventory" is toggled OFF, no feedback when inventory fills
+- Fix: Modified `handleInventoryFull()` in CollectDirtSkill
+- Behavior: 
+  - If pause toggle is ON: "Inventory full — pausing mining. Clear space and run /bot resume"
+  - If pause toggle is OFF: "Inventory's full! Continuing…"
+- This provides user feedback in both cases
+
+**3. Position Tracking for Resume (Infrastructure Added)**
+- Added pause position storage to WorkDirectionService
+- New methods: `setPausePosition()`, `getPausePosition()`, `clearPausePosition()`
+- Stores BlockPos per bot UUID for directional jobs (stripmine, stairs)
+- Infrastructure ready for integration (next step: use in StripMineSkill and stair mode)
+
+### Files Modified
+- `CollectDirtSkill.java` - Added torch skip in stairstepping loop, improved inventory message
+- `StripMineSkill.java` - Added torch skip in stripmine loop
+- `WorkDirectionService.java` - Added BlockPos import, pause position storage methods
+- `gemini_report_3.md` - Documented changes
+
+### Technical Details
+**Torch Protection Strategy:**
+- Layer 1: Check in work volume loop (before mine attempt)
+- Layer 2: Check in mine method itself (mineStraightStairBlock, mineBlock)
+- Both layers check all torch types: TORCH, WALL_TORCH, SOUL_TORCH, SOUL_WALL_TORCH, REDSTONE_TORCH, REDSTONE_WALL_TORCH
+- Torches are skipped (treated as already clear) rather than mined
+
+**Position Storage:**
+- Uses ConcurrentHashMap for thread-safe per-bot storage
+- BlockPos stored as immutable
+- Will be integrated with pause/resume flow in next update
+
+### Remaining Tasks
+- Integrate pause position into StripMineSkill and stairs mode resume logic
+- Check MovementService teleport handling for drop sweeps
+- Add config UI toggle for drop sweep teleportation
+- Investigate square mode behavior (requires in-game testing)
+
+### Verification
+- Build successful with no errors
+- Double-layer torch protection in both mining modes
+- Inventory feedback works for both pause/continue scenarios
+
+---
+
 ## Session 2025-11-17 15:18 — Mining Skills Debug: Torch Preservation & Placement
 
 ### Summary

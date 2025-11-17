@@ -91,10 +91,19 @@ public final class StripMineSkill implements Skill {
                 if (SkillManager.shouldAbortSkill(player)) {
                     return SkillExecutionResult.failure("stripmine paused due to cancellation.");
                 }
-                if (!player.getEntityWorld().getBlockState(block).isAir()) {
-                    if (!mineBlock(player, block)) {
-                        return SkillExecutionResult.failure("Stripmine aborted: unable to clear corridor.");
-                    }
+                BlockState state = player.getEntityWorld().getBlockState(block);
+                if (state.isAir()) {
+                    continue;
+                }
+                // Skip torches - extra safety layer
+                Block blockType = state.getBlock();
+                if (blockType == Blocks.TORCH || blockType == Blocks.WALL_TORCH || 
+                    blockType == Blocks.SOUL_TORCH || blockType == Blocks.SOUL_WALL_TORCH ||
+                    blockType == Blocks.REDSTONE_TORCH || blockType == Blocks.REDSTONE_WALL_TORCH) {
+                    continue;
+                }
+                if (!mineBlock(player, block)) {
+                    return SkillExecutionResult.failure("Stripmine aborted: unable to clear corridor.");
                 }
             }
 

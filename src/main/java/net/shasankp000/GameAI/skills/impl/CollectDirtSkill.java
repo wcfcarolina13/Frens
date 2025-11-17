@@ -1038,7 +1038,15 @@ public class CollectDirtSkill implements Skill {
             }
 
             for (BlockPos block : workVolume) {
-                if (player.getEntityWorld().getBlockState(block).isAir()) {
+                BlockState state = player.getEntityWorld().getBlockState(block);
+                if (state.isAir()) {
+                    continue;
+                }
+                // Skip torches at this level too - extra safety
+                Block blockType = state.getBlock();
+                if (blockType == Blocks.TORCH || blockType == Blocks.WALL_TORCH || 
+                    blockType == Blocks.SOUL_TORCH || blockType == Blocks.SOUL_WALL_TORCH ||
+                    blockType == Blocks.REDSTONE_TORCH || blockType == Blocks.REDSTONE_WALL_TORCH) {
                     continue;
                 }
                 if (!mineStraightStairBlock(player, block)) {
@@ -1313,17 +1321,22 @@ public class CollectDirtSkill implements Skill {
         if (player == null || source == null) {
             return false;
         }
-        if (!SkillPreferences.pauseOnFullInventory(player)) {
-            return false;
-        }
+        boolean shouldPause = SkillPreferences.pauseOnFullInventory(player);
         if (!isInventoryFull(player)) {
             return false;
         }
-        SkillResumeService.flagManualResume(player);
-        ChatUtils.sendChatMessages(source.withSilent().withMaxLevel(4),
-                "Inventory full — pausing mining. Clear space and run /bot resume " + player.getName().getString() + ".");
-        BotActions.stop(player);
-        return true;
+        if (shouldPause) {
+            SkillResumeService.flagManualResume(player);
+            ChatUtils.sendChatMessages(source.withSilent().withMaxLevel(4),
+                    "Inventory full — pausing mining. Clear space and run /bot resume " + player.getName().getString() + ".");
+            BotActions.stop(player);
+            return true;
+        } else {
+            // Continuing despite full inventory
+            ChatUtils.sendChatMessages(source.withSilent().withMaxLevel(4),
+                    "Inventory's full! Continuing…");
+            return false;
+        }
     }
 
     private boolean shouldForcePauseForFullInventory(ServerPlayerEntity player, ServerCommandSource source) {
