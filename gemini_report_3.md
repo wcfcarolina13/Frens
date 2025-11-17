@@ -1,3 +1,64 @@
+## Session 2025-11-17 17:13 — Testing Feedback Analysis
+
+### Summary
+Analyzed user testing feedback and latest.log to diagnose remaining issues. Created detailed analysis document and identified root causes.
+
+### Issues Identified
+
+**1. Torch Breaking Without Replacement**
+- Root cause: Bot breaks torches that aren't in its placement pattern (e.g., player-placed or previously broken)
+- Current behavior: Torch placement only happens at intervals (every 6 steps) or based on darkness checks
+- Problem: If bot breaks a torch between placement intervals, area stays dark
+- Solution needed: Immediate torch replacement when mining a torch block
+
+**2. Climbing vs Teleporting**
+- Log shows y=14 → y=15 movement during drop sweep
+- Investigation: NO climbing code exists in codebase
+- Conclusion: Movement is normal vanilla step-up/jump (1 block is allowed)
+- Drop sweep teleport: Config may not show new field (old format), needs UI save to persist
+
+**3. Drop Sweep Breaking Blocks**
+- Investigated: DropSweepSkill and DropSweeper have NO block-breaking code
+- Only use MovementService for navigation
+- Possible causes: User seeing previous mining task blocks, or misinterpreted behavior
+- Needs verification: Confirm MovementService/GoTo don't break blocks
+
+**4. Inventory Full Message Missing**
+- Root cause: `isInventoryFull()` is too strict
+- Requires: Every slot non-empty AND every stack at max count
+- Reality: Mining creates partial stacks, rarely reaches this threshold
+- Solution needed: Less strict check (e.g., < 3 empty slots or >90% full)
+
+**5. Config Persistence**
+- Log shows old config format without `teleportDuringDropSweep` field
+- Likely: User needs to open config UI and SAVE to persist new fields
+- Code is correct, just needs config file regeneration
+
+### Files Created
+- `TESTING_FEEDBACK_ANALYSIS.md` - Detailed analysis with evidence, root causes, and proposed fixes
+
+### Recommended Action Plan
+Based on severity and user impact:
+
+**Priority 0 (Do Immediately):**
+1. Add immediate torch replacement when mining torch blocks
+2. Fix inventory full detection to be less strict
+
+**Priority 1 (Important):**
+3. Verify MovementService doesn't break blocks during drop sweep
+4. Add logging to confirm drop sweep teleport setting loads correctly
+
+**Priority 2 (Nice to Have):**
+5. Add periodic darkness checks in tunneling for extra safety
+
+### Next Steps
+Awaiting user direction on:
+- Which fixes to implement first
+- Whether to implement all P0 fixes now
+- Any additional clarification needed on behaviors observed
+
+---
+
 ## Session 2025-11-17 16:29 — Mining Improvements Part 2: Position Resume & Drop Sweep Config
 
 ### Summary
