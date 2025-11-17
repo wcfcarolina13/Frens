@@ -1102,6 +1102,16 @@ public class CollectDirtSkill implements Skill {
         if (player == null || blockPos == null) {
             return true;
         }
+        
+        // Skip torches - don't break the lights we placed
+        BlockState state = player.getEntityWorld().getBlockState(blockPos);
+        Block block = state.getBlock();
+        if (block == Blocks.TORCH || block == Blocks.WALL_TORCH || 
+            block == Blocks.SOUL_TORCH || block == Blocks.SOUL_WALL_TORCH ||
+            block == Blocks.REDSTONE_TORCH || block == Blocks.REDSTONE_WALL_TORCH) {
+            return true; // Skip torches, treat as already cleared
+        }
+        
         if (!isWithinStraightReach(player, blockPos)) {
             return false;
         }

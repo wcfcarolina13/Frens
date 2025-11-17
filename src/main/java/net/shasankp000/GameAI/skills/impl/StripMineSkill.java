@@ -1,5 +1,8 @@
 package net.shasankp000.GameAI.skills.impl;
 
+import net.minecraft.block.Block;
+import net.minecraft.block.BlockState;
+import net.minecraft.block.Blocks;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.network.ServerPlayerEntity;
@@ -164,6 +167,16 @@ public final class StripMineSkill implements Skill {
         if (blockPos == null) {
             return true;
         }
+        
+        // Skip torches - don't break the lights we placed
+        BlockState state = player.getEntityWorld().getBlockState(blockPos);
+        Block block = state.getBlock();
+        if (block == Blocks.TORCH || block == Blocks.WALL_TORCH || 
+            block == Blocks.SOUL_TORCH || block == Blocks.SOUL_WALL_TORCH ||
+            block == Blocks.REDSTONE_TORCH || block == Blocks.REDSTONE_WALL_TORCH) {
+            return true; // Skip torches, treat as already cleared
+        }
+        
         if (SkillManager.shouldAbortSkill(player)) {
             return false;
         }

@@ -1,3 +1,62 @@
+## Session 2025-11-17 15:18 — Mining Skills Debug: Torch Preservation & Placement
+
+### Summary
+Fixed multiple issues with mining skills related to torch handling and placement across different mining modes.
+
+### Issues Fixed
+
+**1. Torch Destruction in Stairstepping**
+- Problem: Bots were breaking torches they had just placed during depth mining with stairs mode
+- Root cause: `mineStraightStairBlock()` in CollectDirtSkill didn't check if blocks were torches before mining
+- Fix: Added torch type checking before mining - skips all torch variants (TORCH, WALL_TORCH, SOUL variants, REDSTONE variants)
+- File: `CollectDirtSkill.java` line 1101+
+
+**2. Torch Destruction in Stripmine**
+- Problem: Same issue - stripmining broke placed torches
+- Root cause: `mineBlock()` in StripMineSkill didn't check for torches
+- Fix: Added same torch type checking before mining
+- File: `StripMineSkill.java` added imports and torch check in `mineBlock()` method
+
+**3. Generic Mining Lacks Torch Placement**
+- Problem: General `/bot skill mining stone` didn't place torches, only depth/stairstepping modes did
+- Root cause: Torch placement was only in stairstepping logic, not in general block mining loop
+- Fix: Added torch placement after each successful block mine in DirtShovelSkill's main mining loop
+- Behavior: Checks light level after every broken block, places torch if dark (using TorchPlacer.shouldPlaceTorch())
+- Non-blocking: If out of torches, logs but doesn't fail job (torches optional for generic mining)
+- File: `DirtShovelSkill.java` added TorchPlacer import and placement logic after line 211
+
+**4. Deepslate Variants Already Covered**
+- Checked: `MiningSkill.java` already includes COBBLED_DEEPSLATE and DEEPSLATE in both TARGET_ITEMS and TARGET_BLOCKS
+- Checked: `MiningHazardDetector.java` DEEPSLATE_VARIANTS map includes all ore variants (GOLD_ORE -> DEEPSLATE_GOLD_ORE, etc.)
+- Checked: `registerRare()` method adds both base and deepslate variants to VALUABLE_MESSAGES
+- Verified: Deepslate gold ore IS in the protection list and should pause mining jobs
+- Note: DirtShovelSkill already calls MiningHazardDetector.detect() so hazard detection is active
+
+**5. Square Mode (Needs Testing)**
+- Reviewed code: squareMode flag is parsed and passed through correctly
+- Enforcement: Multiple `isWithinSquare()` checks exist for drop targeting, exploration, and navigation
+- The square constraint logic appears intact but user reported it's not working - may need in-game testing to verify actual behavior
+
+### Files Modified
+- `src/.../GameAI/skills/impl/CollectDirtSkill.java` - Added torch avoidance in stair block mining
+- `src/.../GameAI/skills/impl/StripMineSkill.java` - Added torch avoidance, imports for Block/BlockState/Blocks
+- `src/.../GameAI/skills/impl/DirtShovelSkill.java` - Added torch placement for general mining, TorchPlacer import
+
+### Technical Details
+Torch types checked: TORCH, WALL_TORCH, SOUL_TORCH, SOUL_WALL_TORCH, REDSTONE_TORCH, REDSTONE_WALL_TORCH. When encountered, these blocks are skipped (treated as already cleared) rather than mined.
+
+For general mining, torch placement is conditional on:
+- Not in stair mode or spiral mode (those have their own torch logic)
+- TorchPlacer.shouldPlaceTorch() returns true (checks light level < 7)
+- Attempts placement after each successfully mined block
+
+### Verification
+- Build successful with no errors
+- All torch types properly excluded from mining in both stair and stripmine modes
+- Generic mining now places torches based on light levels
+
+---
+
 ## Session 2025-11-17 15:12 — Protected Zones Implementation
 
 ### Summary

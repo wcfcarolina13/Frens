@@ -23,6 +23,7 @@ import net.shasankp000.GameAI.skills.SkillManager;
 import net.shasankp000.GameAI.skills.support.MiningHazardDetector;
 import net.shasankp000.GameAI.skills.support.MiningHazardDetector.Hazard;
 import net.shasankp000.GameAI.skills.support.MiningHazardDetector.DetectionResult;
+import net.shasankp000.GameAI.skills.support.TorchPlacer;
 import net.shasankp000.PathFinding.GoTo;
 import net.shasankp000.PlayerUtils.MiningTool;
 import net.shasankp000.FunctionCaller.SharedStateUtils;
@@ -207,6 +208,16 @@ public final class DirtShovelSkill implements Skill {
                     }
                     DirtNavigationPolicy.record(originBeforeMove, detectedPos, false);
                     continue;
+                }
+                
+                // Place torch if area is dark (for generic mining, not depth/stair modes)
+                if (!stairMode && !spiralMode && TorchPlacer.shouldPlaceTorch(player)) {
+                    Direction facing = player.getHorizontalFacing();
+                    TorchPlacer.PlacementResult torchResult = TorchPlacer.placeTorch(player, facing);
+                    if (torchResult == TorchPlacer.PlacementResult.NO_TORCHES) {
+                        // Just log, don't fail the job - torches are optional for generic mining
+                        LOGGER.info("Out of torches during generic mining at {}", detectedPos);
+                    }
                 }
 
                 if (context.sharedState() != null) {
