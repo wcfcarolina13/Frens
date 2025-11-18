@@ -1268,33 +1268,13 @@ public class CollectDirtSkill implements Skill {
             return SkillExecutionResult.success("Walking forward");
         }
         
-        // 2. Clear 5 blocks of headroom ABOVE the step block (don't mine the step itself!)
-        for (int h = 1; h <= 5; h++) {
-            BlockPos clearPos = stepBlock.up(h);
-            BlockState state = world.getBlockState(clearPos);
-            
-            if (!state.isAir()) {
-                Block blockType = state.getBlock();
-                // Skip torches
-                if (blockType == Blocks.TORCH || blockType == Blocks.WALL_TORCH || 
-                    blockType == Blocks.SOUL_TORCH || blockType == Blocks.SOUL_WALL_TORCH ||
-                    blockType == Blocks.REDSTONE_TORCH || blockType == Blocks.REDSTONE_WALL_TORCH) {
-                    continue;
-                }
-                
-                if (!mineStraightStairBlock(player, clearPos)) {
-                    LOGGER.warn("Could not clear headroom block at {}, continuing anyway", clearPos.toShortString());
-                }
-            }
-        }
-        
-        // 3. Walk toward the step block until close enough to jump
+        // 2. Walk toward the step block until close enough to mine it
         int beforeY = player.getBlockY();
         BlockPos horizontalTarget = new BlockPos(stepBlock.getX(), feet.getY(), stepBlock.getZ());
         Vec3d targetVec = Vec3d.ofBottomCenter(horizontalTarget);
         final BlockPos finalStepBlock = stepBlock;
         
-        // If we're far from the step, walk closer first (no jumping yet)
+        // Walk closer until within mining reach (closer than 1.8 blocks horizontally)
         double distanceToStep = Math.sqrt(player.squaredDistanceTo(targetVec));
         while (distanceToStep > 1.8) {
             runOnServerThread(player, () -> {
@@ -1317,6 +1297,28 @@ public class CollectDirtSkill implements Skill {
                 break;
             }
             distanceToStep = newDistance;
+        }
+        
+        // 3. Now that we're close, clear headroom: break the step block itself AND 5 blocks above it
+        //    This ensures we carve a tunnel tall enough to walk through after jumping
+        for (int h = 0; h <= 5; h++) {
+            BlockPos clearPos = stepBlock.up(h);
+            BlockState state = world.getBlockState(clearPos);
+            
+            if (!state.isAir()) {
+                Block blockType = state.getBlock();
+                // Skip torches
+                if (blockType == Blocks.TORCH || blockType == Blocks.WALL_TORCH || 
+                    blockType == Blocks.SOUL_TORCH || blockType == Blocks.SOUL_WALL_TORCH ||
+                    blockType == Blocks.REDSTONE_TORCH || blockType == Blocks.REDSTONE_WALL_TORCH) {
+                    continue;
+                }
+                
+                // Mine the block - bot is now close enough
+                if (!mineStraightStairBlock(player, clearPos)) {
+                    LOGGER.warn("Could not clear headroom block at {}, continuing anyway", clearPos.toShortString());
+                }
+            }
         }
         
         // 4. Now jump onto the step block
