@@ -76,7 +76,9 @@ public final class SkillManager {
         } finally {
             boolean abortRequested = TaskService.isAbortRequested(botUuid);
             try {
-                if (botPlayer != null && !abortRequested) {
+                // Only perform post-task drop_sweep if inventory isn't full
+                // This prevents attempting collection when there's no space
+                if (botPlayer != null && !abortRequested && !isInventoryFull(botPlayer)) {
                     DropSweeper.sweep(
                             context.botSource().withSilent().withMaxLevel(4),
                             DROP_SWEEP_RADIUS,
@@ -84,6 +86,8 @@ public final class SkillManager {
                             DROP_SWEEP_MAX_TARGETS,
                             DROP_SWEEP_MAX_DURATION_MS
                     );
+                } else if (botPlayer != null && !abortRequested && isInventoryFull(botPlayer)) {
+                    LOGGER.info("Skipping post-task drop_sweep for '{}' - inventory full", name);
                 }
             } catch (Exception sweepError) {
                 LOGGER.warn("Drop sweep after skill '{}' failed: {}", name, sweepError.getMessage(), sweepError);
@@ -108,5 +112,12 @@ public final class SkillManager {
     public static boolean requestSkillPause(ServerPlayerEntity bot, String reason) {
         UUID uuid = bot != null ? bot.getUuid() : null;
         return TaskService.requestPause(uuid, reason);
+    }
+
+    private static boolean isInventoryFull(ServerPlayerEntity player) {
+        if (player == null) {
+            return false;
+        }
+        return player.getInventory().getEmptySlot() == -1;
     }
 }

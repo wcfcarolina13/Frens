@@ -52,6 +52,10 @@ public final class SkillResumeService {
         return botUuid != null && Boolean.TRUE.equals(AWAITING_DECISION.get(botUuid));
     }
 
+    public static boolean hasResumeIntent(UUID botUuid) {
+        return botUuid != null && RESUME_INTENT.contains(botUuid);
+    }
+
     public static void handleDeath(ServerPlayerEntity bot) {
         PendingSkill pending = LAST_SKILL_BY_BOT.get(bot.getUuid());
         if (pending == null) {

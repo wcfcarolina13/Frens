@@ -10,6 +10,7 @@ import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
 import net.fabricmc.fabric.api.message.v1.ServerMessageEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.fabricmc.loader.api.FabricLoader;
+import net.minecraft.entity.damage.DamageTypes;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.network.ServerPlayerEntity;
@@ -42,7 +43,9 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -71,6 +74,14 @@ public class AIPlayer implements ModInitializer {
         return t;
     });
     private static final AtomicBoolean MODEL_LOAD_ENQUEUED = new AtomicBoolean(false);
+    
+    // Track bots that need spawn escape checks
+    private static final ConcurrentHashMap<UUID, SpawnEscapeCheck> SPAWN_ESCAPE_CHECKS = new ConcurrentHashMap<>();
+    
+    private static class SpawnEscapeCheck {
+        int ticksWaited = 0;
+        int attemptsRemaining = 5;
+    }
 
     @Override
     public void onInitialize() {
@@ -167,6 +178,12 @@ public class AIPlayer implements ModInitializer {
 
             enqueueBertLoad();
             net.shasankp000.GameAI.services.BotControlApplier.applyPersistentSettings(server);
+            
+            // Load protected zones for all worlds
+            server.getWorlds().forEach(world -> {
+                String worldId = world.getRegistryKey().getValue().toString();
+                net.shasankp000.GameAI.services.ProtectedZoneService.loadZones(server, worldId);
+            });
         });
 
         ServerLifecycleEvents.SERVER_STOPPING.register(server -> BotPersistenceService.saveAll(server));
@@ -190,11 +207,46 @@ public class AIPlayer implements ModInitializer {
         ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> {
             ServerPlayerEntity player = handler.player;
             BotPersistenceService.onBotJoin(player);
+            
+            // Check if bot spawned in a wall and needs to dig out
+            if (BotEventHandler.isRegisteredBot(player)) {
+                // Use a scheduled task that runs on the server thread (sync)
+                // This avoids Thread.sleep() issues and ensures proper timing
+                scheduleSpawnEscapeCheck(server, player);
+            }
         });
 
         ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> {
             ServerPlayerEntity player = handler.player;
             BotPersistenceService.onBotDisconnect(player);
+        });
+
+        // Register damage event to handle suffocation immediately
+        ServerLivingEntityEvents.ALLOW_DAMAGE.register((entity, source, amount) -> {
+            if (entity instanceof ServerPlayerEntity serverPlayer && BotEventHandler.isRegisteredBot(serverPlayer)) {
+                // If bot is taking IN_WALL damage, try to escape immediately
+                // BUT: skip aggressive escape if bot is in ascent mode (digging upward)
+                if (source.isOf(DamageTypes.IN_WALL)) {
+                    if (net.shasankp000.GameAI.services.TaskService.isInAscentMode(serverPlayer.getUuid())) {
+                        // In ascent mode - let the bot handle it naturally, don't aggressively break blocks
+                        LOGGER.debug("Bot {} taking IN_WALL damage during ascent - skipping aggressive escape", 
+                                    serverPlayer.getName().getString());
+                    } else {
+                        LOGGER.warn("Bot {} taking IN_WALL damage - attempting immediate escape", 
+                                   serverPlayer.getName().getString());
+                        // Schedule escape attempt for next tick (don't block damage event)
+                        MinecraftServer server = serverPlayer.getCommandSource().getServer();
+                        if (server != null) {
+                            server.execute(() -> {
+                                if (!serverPlayer.isRemoved()) {
+                                    BotEventHandler.checkAndEscapeSuffocation(serverPlayer);
+                                }
+                            });
+                        }
+                    }
+                }
+            }
+            return true; // Allow the damage
         });
 
         ServerLivingEntityEvents.AFTER_DEATH.register((entity, damageSource) -> {
@@ -227,6 +279,7 @@ public class AIPlayer implements ModInitializer {
 
         ServerTickEvents.END_SERVER_TICK.register(BotPersistenceService::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(BotEventHandler::tickBurialRescue);
+        ServerTickEvents.END_SERVER_TICK.register(AIPlayer::processSpawnEscapeChecks);
 
         ServerMessageEvents.CHAT_MESSAGE.register((message, sender, params) -> {
             String raw = message.getContent().getString();
@@ -374,6 +427,63 @@ public class AIPlayer implements ModInitializer {
         }
         String cleaned = token.replaceAll("[^a-zA-Z0-9]", "");
         return cleaned.toLowerCase(Locale.ROOT);
+    }
+
+    /**
+     * Schedules a tick-based escape check for bots that spawn inside walls.
+     * Uses the server tick event to check periodically without blocking.
+     */
+    private static void scheduleSpawnEscapeCheck(MinecraftServer server, ServerPlayerEntity bot) {
+        SPAWN_ESCAPE_CHECKS.put(bot.getUuid(), new SpawnEscapeCheck());
+    }
+    
+    /**
+     * Processes pending spawn escape checks. Called every server tick.
+     */
+    private static void processSpawnEscapeChecks(MinecraftServer server) {
+        if (SPAWN_ESCAPE_CHECKS.isEmpty()) {
+            return;
+        }
+        
+        SPAWN_ESCAPE_CHECKS.entrySet().removeIf(entry -> {
+            UUID botId = entry.getKey();
+            SpawnEscapeCheck check = entry.getValue();
+            
+            ServerPlayerEntity bot = (ServerPlayerEntity) server.getPlayerManager().getPlayer(botId);
+            if (bot == null || bot.isRemoved()) {
+                return true; // Remove check - bot is gone
+            }
+            
+            check.ticksWaited++;
+            
+            // Start checking after 20 ticks (1 second) to let spawn complete
+            if (check.ticksWaited < 20) {
+                return false; // Keep checking
+            }
+            
+            // Try escape every 10 ticks (0.5 seconds)
+            if ((check.ticksWaited - 20) % 10 == 0 && check.attemptsRemaining > 0) {
+                check.attemptsRemaining--;
+                int attemptNum = 5 - check.attemptsRemaining;
+                
+                if (BotEventHandler.checkAndEscapeSuffocation(bot)) {
+                    LOGGER.info("Bot {} escaped suffocation on attempt {}", bot.getName().getString(), attemptNum);
+                    return true; // Success - remove check
+                }
+                
+                if (check.attemptsRemaining == 0) {
+                    LOGGER.warn("Bot {} failed to escape after 5 attempts", bot.getName().getString());
+                    return true; // Give up - remove check
+                }
+            }
+            
+            // Stop after 70 ticks (3.5 seconds) total
+            if (check.ticksWaited > 70) {
+                return true; // Timeout - remove check
+            }
+            
+            return false; // Keep checking
+        });
     }
 
     private record ChatTarget(List<ServerPlayerEntity> bots, String prompt) {

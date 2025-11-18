@@ -32,6 +32,12 @@ public final class BotInventoryStorageService {
     private static final String KEY_INVENTORY = "Inventory";
     private static final String KEY_SLOT = "Slot";
     private static final String KEY_STACK = "Stack";
+    private static final String KEY_HEALTH = "Health";
+    private static final String KEY_FOOD = "FoodLevel";
+    private static final String KEY_SATURATION = "FoodSaturation";
+    private static final String KEY_XP = "XpLevel";
+    private static final String KEY_XP_PROGRESS = "XpProgress";
+    private static final String KEY_TOTAL_XP = "XpTotal";
 
     private static final Pattern SAFE_NAME = Pattern.compile("[^a-z0-9-_]+");
 
@@ -85,6 +91,14 @@ public final class BotInventoryStorageService {
         root.putString(KEY_UUID, bot.getUuidAsString());
         root.putInt(KEY_SELECTED_SLOT, inventory.getSelectedSlot());
         root.put(KEY_INVENTORY, items);
+        
+        // Save player stats (health, hunger, XP)
+        root.putFloat(KEY_HEALTH, bot.getHealth());
+        root.putInt(KEY_FOOD, bot.getHungerManager().getFoodLevel());
+        root.putFloat(KEY_SATURATION, bot.getHungerManager().getSaturationLevel());
+        root.putInt(KEY_XP, bot.experienceLevel);
+        root.putFloat(KEY_XP_PROGRESS, bot.experienceProgress);
+        root.putInt(KEY_TOTAL_XP, bot.totalExperience);
 
         try {
             net.minecraft.nbt.NbtIo.writeCompressed(root, path);
@@ -145,7 +159,16 @@ public final class BotInventoryStorageService {
         });
 
         inventory.markDirty();
-        LOGGER.info("Loaded inventory for fakeplayer '{}' from {}", bot.getName().getString(), path.getFileName());
+        
+        // Restore player stats (health, hunger, XP)
+        root.getFloat(KEY_HEALTH).ifPresent(bot::setHealth);
+        root.getInt(KEY_FOOD).ifPresent(bot.getHungerManager()::setFoodLevel);
+        root.getFloat(KEY_SATURATION).ifPresent(bot.getHungerManager()::setSaturationLevel);
+        root.getInt(KEY_XP).ifPresent(xp -> bot.experienceLevel = xp);
+        root.getFloat(KEY_XP_PROGRESS).ifPresent(progress -> bot.experienceProgress = progress);
+        root.getInt(KEY_TOTAL_XP).ifPresent(total -> bot.totalExperience = total);
+        
+        LOGGER.info("Loaded inventory and stats for fakeplayer '{}' from {}", bot.getName().getString(), path.getFileName());
         return true;
     }
 

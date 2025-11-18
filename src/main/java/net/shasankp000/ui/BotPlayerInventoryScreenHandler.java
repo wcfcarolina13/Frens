@@ -11,6 +11,7 @@ import net.minecraft.screen.ScreenHandler;
 import net.minecraft.screen.slot.Slot;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.shasankp000.AIPlayer;
+import net.shasankp000.GameAI.services.BotInventoryStorageService;
 
 /**
  * Screen handler that mirrors the vanilla player inventory for both bot and viewer.
@@ -166,5 +167,11 @@ public class BotPlayerInventoryScreenHandler extends ScreenHandler {
     public void onClosed(PlayerEntity player) {
         super.onClosed(player);
         botInventory.onClose(player);
+        
+        // Save bot inventory immediately when screen is closed
+        // This prevents inventory desync when player quickly leaves and rejoins
+        if (botRef != null && !botRef.isRemoved()) {
+            BotInventoryStorageService.save(botRef);
+        }
     }
 }

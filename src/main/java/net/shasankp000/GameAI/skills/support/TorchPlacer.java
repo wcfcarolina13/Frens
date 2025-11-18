@@ -16,7 +16,8 @@ import net.minecraft.world.LightType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.Optional;
+import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Handles torch placement for bots during mining operations.
@@ -27,6 +28,10 @@ public final class TorchPlacer {
     private static final Logger LOGGER = LoggerFactory.getLogger("torch-placer");
     private static final int LIGHT_THRESHOLD = 7;
     private static final int TORCH_SPACING = 8; // Place torches every 8 blocks
+    
+    // Track recently broken torch positions to avoid re-breaking
+    private static final Map<UUID, Set<BlockPos>> RECENTLY_PLACED_TORCHES = new ConcurrentHashMap<>();
+    private static final long TORCH_PROTECTION_MS = 5000; // Protect torches for 5 seconds after placement
 
     private TorchPlacer() {
     }
@@ -43,6 +48,42 @@ public final class TorchPlacer {
         BlockPos pos = bot.getBlockPos();
         int lightLevel = world.getLightLevel(LightType.BLOCK, pos);
         return lightLevel < LIGHT_THRESHOLD;
+    }
+    
+    /**
+     * Checks if a block position has a recently placed torch that should be protected.
+     * @param botId The bot's UUID
+     * @param pos The position to check
+     * @return true if this position has a protected torch
+     */
+    public static boolean hasProtectedTorch(UUID botId, BlockPos pos) {
+        Set<BlockPos> protectedTorches = RECENTLY_PLACED_TORCHES.get(botId);
+        return protectedTorches != null && protectedTorches.contains(pos);
+    }
+    
+    /**
+     * Registers a torch as recently placed for protection.
+     * @param botId The bot's UUID
+     * @param pos The torch position
+     */
+    private static void registerPlacedTorch(UUID botId, BlockPos pos) {
+        RECENTLY_PLACED_TORCHES.computeIfAbsent(botId, k -> ConcurrentHashMap.newKeySet()).add(pos);
+        
+        // Schedule removal after protection period
+        new Thread(() -> {
+            try {
+                Thread.sleep(TORCH_PROTECTION_MS);
+                Set<BlockPos> torches = RECENTLY_PLACED_TORCHES.get(botId);
+                if (torches != null) {
+                    torches.remove(pos);
+                    if (torches.isEmpty()) {
+                        RECENTLY_PLACED_TORCHES.remove(botId);
+                    }
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }).start();
     }
 
     /**
@@ -82,6 +123,7 @@ public final class TorchPlacer {
             boolean placed = placeTorchAt(bot, world, pos);
             
             if (placed) {
+                registerPlacedTorch(bot.getUuid(), pos);
                 LOGGER.info("Replaced torch at {} for bot {}", pos, bot.getName().getString());
             }
             
@@ -157,6 +199,7 @@ public final class TorchPlacer {
             // Place the torch
             boolean placed = placeTorchAt(bot, world, targetPos);
             if (placed) {
+                registerPlacedTorch(bot.getUuid(), targetPos);
                 LOGGER.info("Placed torch at {} for bot {}", targetPos, bot.getName().getString());
                 return PlacementResult.SUCCESS;
             }
@@ -184,6 +227,23 @@ public final class TorchPlacer {
         // Try perpendicular walls (left and right of facing direction)
         Direction[] walls = getPerpendicularDirections(facing);
         
+        // First, try placing torch 1 block BEHIND the bot (safer - bot won't mine it immediately)
+        BlockPos behind = center.offset(facing.getOpposite());
+        
+        // Check walls adjacent to the behind position
+        for (Direction wallDir : walls) {
+            BlockPos wallBlock = behind.offset(wallDir);
+            BlockState wallState = world.getBlockState(wallBlock);
+            BlockState behindState = world.getBlockState(behind);
+            
+            // If there's a wall and the behind position is air, place torch there
+            if (!wallState.isAir() && wallState.isSolidBlock(world, wallBlock) && behindState.isAir()) {
+                LOGGER.debug("Found wall at {} for torch placement behind bot at {}", wallBlock, behind);
+                return Optional.of(behind); // Place torch 1 block behind bot
+            }
+        }
+        
+        // If behind position doesn't work, try adjacent to bot position
         for (Direction wallDir : walls) {
             // Check if there's a solid wall directly adjacent to the bot
             BlockPos wallBlock = center.offset(wallDir);

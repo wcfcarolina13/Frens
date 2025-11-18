@@ -185,20 +185,64 @@ public class CollectDirtSkill implements Skill {
         Set<Item> effectiveTrackedItems = resolveTrackedItems();
 
         List<String> optionTokens = getOptionTokens(context.parameters());
-        Integer targetDepthY = getOptionalIntParameter(context, "targetDepthY");
-        boolean depthMode = targetDepthY != null;
-        boolean stairToken = getBooleanParameter(context, "stairsMode", false);
-        if (depthMode) {
+        
+        // New ascent/descent parameters
+        Integer ascentBlocks = getOptionalIntParameter(context, "ascentBlocks");
+        Integer ascentTargetY = getOptionalIntParameter(context, "ascentTargetY");
+        Integer descentBlocks = getOptionalIntParameter(context, "descentBlocks");
+        Integer descentTargetY = getOptionalIntParameter(context, "descentTargetY");
+        
+        boolean ascentMode = (ascentBlocks != null || ascentTargetY != null);
+        boolean descentMode = (descentBlocks != null || descentTargetY != null);
+        
+        // Calculate target Y for ascent/descent
+        if (ascentMode && ascentBlocks != null) {
+            targetCount = Integer.MAX_VALUE;
+        } else if (descentMode && descentBlocks != null) {
+            targetCount = Integer.MAX_VALUE;
+        } else if (ascentMode && ascentTargetY != null) {
+            targetCount = Integer.MAX_VALUE;
+        } else if (descentMode && descentTargetY != null) {
             targetCount = Integer.MAX_VALUE;
         }
+        
         boolean untilMode = optionTokens.contains("until") && !optionTokens.contains("exact");
         boolean squareMode = optionTokens.contains("square");
         boolean spiralRequested = optionTokens.contains("spiral") || getBooleanParameter(context, "spiralMode", false);
         if (spiralRequested) {
-            return SkillExecutionResult.failure("The 'spiral' staircase mode is temporarily disabled. Use 'stairs' for the straight staircase.");
+            return SkillExecutionResult.failure("The 'spiral' staircase mode is temporarily disabled. Use 'ascent' or 'descent' commands.");
         }
         boolean spiralMode = false;
-        boolean stairMode = depthMode && stairToken;
+
+        // Handle ascent mode
+        if (ascentMode && playerForAbortCheck != null) {
+            int targetY;
+            if (ascentBlocks != null) {
+                targetY = playerForAbortCheck.getBlockY() + ascentBlocks;
+                LOGGER.info("Ascent mode: climbing from Y={} to Y={} (+{} blocks)", 
+                           playerForAbortCheck.getBlockY(), targetY, ascentBlocks);
+            } else {
+                targetY = ascentTargetY;
+                LOGGER.info("Ascent mode: climbing from Y={} to Y={}", 
+                           playerForAbortCheck.getBlockY(), targetY);
+            }
+            return runAscent(context, source, playerForAbortCheck, targetY);
+        }
+
+        // Handle descent mode
+        if (descentMode && playerForAbortCheck != null) {
+            int targetY;
+            if (descentBlocks != null) {
+                targetY = playerForAbortCheck.getBlockY() - descentBlocks;
+                LOGGER.info("Descent mode: descending from Y={} to Y={} (-{} blocks)", 
+                           playerForAbortCheck.getBlockY(), targetY, descentBlocks);
+            } else {
+                targetY = descentTargetY;
+                LOGGER.info("Descent mode: descending from Y={} to Y={}", 
+                           playerForAbortCheck.getBlockY(), targetY);
+            }
+            return runDescent(context, source, playerForAbortCheck, targetY);
+        }
 
         int collected = 0;
         int failuresInRow = 0;
@@ -226,9 +270,6 @@ public class CollectDirtSkill implements Skill {
             }
         }
 
-        if (depthMode && playerForAbortCheck != null && playerForAbortCheck.getBlockY() <= targetDepthY) {
-            return SkillExecutionResult.success("Reached target depth " + targetDepthY + ".");
-        }
         if (playerForAbortCheck != null) {
             if (handleInventoryFull(playerForAbortCheck, source)) {
                 return SkillExecutionResult.failure("Mining paused: inventory full.");
@@ -239,10 +280,6 @@ public class CollectDirtSkill implements Skill {
             if (handleLavaHazard(playerForAbortCheck, source)) {
                 return SkillExecutionResult.failure("Mining paused: lava detected.");
             }
-        }
-
-        if (depthMode && stairMode && playerForAbortCheck != null) {
-            return runStraightStaircase(context, source, playerForAbortCheck, targetDepthY);
         }
 
         boolean cleanupRequested = playerForAbortCheck != null;
@@ -262,10 +299,6 @@ public class CollectDirtSkill implements Skill {
 
             ServerPlayerEntity loopPlayer = source.getPlayer();
             if (loopPlayer != null) {
-                if (depthMode && loopPlayer.getBlockY() <= targetDepthY) {
-                    outcome = SkillExecutionResult.success("Reached target depth " + targetDepthY + ".");
-                    break;
-                }
                 if (handleInventoryFull(loopPlayer, source)) {
                     outcome = SkillExecutionResult.failure("Mining paused: inventory full.");
                     break;
@@ -342,9 +375,9 @@ public class CollectDirtSkill implements Skill {
                     targetBlockIds,
                     harvestLabel,
                     preferredTool,
-                    depthMode,
-                    depthMode,
-                    stairMode,
+                    false, // depthMode - not used in main loop anymore
+                    false, // depthMode - not used in main loop anymore  
+                    false, // stairMode - not used in main loop anymore
                     spiralMode,
                     resumeRequested
             );
@@ -405,17 +438,8 @@ public class CollectDirtSkill implements Skill {
                             skillName, horizontalRadius + radiusBoost, verticalRange + verticalBoost, lastMessage);
                 }
                 
-                // Auto-enable stair digging for mining when repeatedly failing to find target blocks on surface
-                if (!stairMode && !depthMode && skillName.equals("mining") && failuresInRow >= 3 
-                        && lastMessage != null && lastMessage.contains("No") && lastMessage.contains("block")) {
-                    LOGGER.info("{} auto-enabling stair-dig mode after {} failures to find target blocks", skillName, failuresInRow);
-                    stairMode = true;
-                    depthMode = true;
-                    targetDepthY = source.getPlayer() != null ? source.getPlayer().getBlockY() - 30 : null;
-                    if (targetDepthY != null) {
-                        LOGGER.info("{} will dig stairs down to Y={}", skillName, targetDepthY);
-                    }
-                }
+                // Auto-enable stair digging is disabled - use explicit ascent/descent commands instead
+                // Legacy auto-enable code removed to avoid conflicts with new ascent/descent system
                 
                 if (explorationAttempts < MAX_EXPLORATION_ATTEMPTS_PER_CYCLE
                         && shouldTriggerExploration(lastMessage, failuresInRow, collected)) {
@@ -1000,24 +1024,26 @@ public class CollectDirtSkill implements Skill {
         return List.of();
     }
 
-    private SkillExecutionResult runStraightStaircase(SkillContext context,
-                                                      ServerCommandSource source,
-                                                      ServerPlayerEntity player,
-                                                      int targetDepthY) {
+    // ==================== DESCENT METHOD (Restored from working version) ====================
+    
+    private SkillExecutionResult runDescent(SkillContext context,
+                                           ServerCommandSource source,
+                                           ServerPlayerEntity player,
+                                           int targetDepthY) {
         if (player == null) {
-            return SkillExecutionResult.failure("No bot available for staircase mode.");
+            return SkillExecutionResult.failure("No bot available for descent.");
         }
         if (player.getBlockY() <= targetDepthY) {
-            return SkillExecutionResult.success("Reached target depth " + targetDepthY + ".");
+            return SkillExecutionResult.success("Already at or below target depth " + targetDepthY + ".");
         }
         
         // Check if resuming from a paused position
         Optional<BlockPos> pausePos = WorkDirectionService.getPausePosition(player.getUuid());
         if (pausePos.isPresent()) {
             BlockPos resumeTarget = pausePos.get();
-            LOGGER.info("Stairs mode resuming - navigating back to pause position {}", resumeTarget.toShortString());
+            LOGGER.info("Descent resuming - navigating back to pause position {}", resumeTarget.toShortString());
             ChatUtils.sendChatMessages(source.withSilent().withMaxLevel(4), 
-                    "Returning to staircase position...");
+                    "Returning to descent position...");
             
             Direction digDirection = determineStraightStairDirection(context, player);
             MovementService.MovementPlan plan = new MovementService.MovementPlan(
@@ -1060,7 +1086,6 @@ public class CollectDirtSkill implements Skill {
                     ChatUtils.sendChatMessages(player.getCommandSource().withSilent().withMaxLevel(4), warning.chatMessage()));
             if (detection.blockingHazard().isPresent()) {
                 Hazard hazard = detection.blockingHazard().get();
-                // Store current position for resume (stairs mode)
                 WorkDirectionService.setPausePosition(player.getUuid(), player.getBlockPos());
                 SkillResumeService.flagManualResume(player);
                 ChatUtils.sendChatMessages(player.getCommandSource().withSilent().withMaxLevel(4), hazard.chatMessage());
@@ -1072,7 +1097,6 @@ public class CollectDirtSkill implements Skill {
                 if (state.isAir()) {
                     continue;
                 }
-                // Skip torches at this level too - extra safety
                 Block blockType = state.getBlock();
                 if (blockType == Blocks.TORCH || blockType == Blocks.WALL_TORCH || 
                     blockType == Blocks.SOUL_TORCH || blockType == Blocks.SOUL_WALL_TORCH ||
@@ -1080,7 +1104,7 @@ public class CollectDirtSkill implements Skill {
                     continue;
                 }
                 if (!mineStraightStairBlock(player, block)) {
-                    return SkillExecutionResult.failure("Staircase aborted: unable to clear the stairwell.");
+                    return SkillExecutionResult.failure("Descent aborted: unable to clear the stairwell.");
                 }
             }
 
@@ -1088,38 +1112,250 @@ public class CollectDirtSkill implements Skill {
             if (!hasSolidSupport(player, support)) {
                 SkillResumeService.flagManualResume(player);
                 ChatUtils.sendChatMessages(player.getCommandSource().withSilent().withMaxLevel(4), "There's a drop ahead.");
-                return SkillExecutionResult.failure("Staircase paused: unsafe drop detected.");
+                return SkillExecutionResult.failure("Descent paused: unsafe drop detected.");
             }
 
             MovementService.MovementPlan plan =
                     new MovementService.MovementPlan(MovementService.Mode.DIRECT, stairFoot, stairFoot, null, null, digDirection);
             MovementService.MovementResult moveResult = MovementService.execute(source, player, plan);
             if (!moveResult.success()) {
-                return SkillExecutionResult.failure("Staircase aborted: failed to advance stairwell (" + moveResult.detail() + ").");
+                return SkillExecutionResult.failure("Descent aborted: failed to advance (" + moveResult.detail() + ").");
             }
             BlockPos postMove = player.getBlockPos();
             if (!postMove.equals(stairFoot)) {
                 boolean nudged = attemptManualNudge(player, stairFoot);
                 if (!nudged && !player.getBlockPos().equals(stairFoot)) {
-                    return SkillExecutionResult.failure("Staircase aborted: movement stalled before reaching " + stairFoot + ".");
+                    return SkillExecutionResult.failure("Descent aborted: movement stalled before reaching " + stairFoot + ".");
                 }
             }
             carvedSteps++;
             
-            // Place torch AFTER carving (every 6 steps)
+            // Place torch every 6 steps
             if (carvedSteps % 6 == 0 && TorchPlacer.shouldPlaceTorch(player)) {
                 TorchPlacer.PlacementResult torchResult = TorchPlacer.placeTorch(player, digDirection);
                 if (torchResult == TorchPlacer.PlacementResult.NO_TORCHES) {
                     SkillResumeService.flagManualResume(player);
                     ChatUtils.sendChatMessages(player.getCommandSource().withSilent().withMaxLevel(4), 
                             "Ran out of torches!");
-                    return SkillExecutionResult.failure("Staircase paused: out of torches. Provide torches and /bot resume.");
+                    return SkillExecutionResult.failure("Descent paused: out of torches. Provide torches and /bot resume.");
                 }
             }
         }
 
-        return SkillExecutionResult.success("Carved " + carvedSteps + " stair steps down to Y=" + player.getBlockY() + ".");
+        return SkillExecutionResult.success("Descended " + carvedSteps + " steps to Y=" + player.getBlockY() + ".");
     }
+    
+    // ==================== ASCENT METHOD (Walk-and-jump upward) ====================
+    
+    private SkillExecutionResult runAscent(SkillContext context,
+                                          ServerCommandSource source,
+                                          ServerPlayerEntity player,
+                                          int targetY) {
+        if (player == null) {
+            return SkillExecutionResult.failure("No bot available for ascent.");
+        }
+        if (player.getBlockY() >= targetY) {
+            return SkillExecutionResult.success("Already at or above target Y=" + targetY + ".");
+        }
+        
+        // Mark bot as in ascent mode to disable aggressive in-wall damage handling
+        TaskService.setAscentMode(player.getUuid(), true);
+        
+        try {
+            Direction direction = determineStraightStairDirection(context, player);
+            runOnServerThread(player, () -> LookController.faceBlock(player, player.getBlockPos().offset(direction)));
+            
+            BotActions.selectBestTool(player, preferredTool, "sword");
+            
+            LOGGER.info("Starting ascent from Y={} to Y={} in direction {}", 
+                    player.getBlockY(), targetY, direction);
+            
+            long startTime = System.currentTimeMillis();
+            int steps = 0;
+            int maxSteps = Math.abs(targetY - player.getBlockY()) * 5; // Generous limit
+            
+            while (player.getBlockY() < targetY && 
+                   System.currentTimeMillis() - startTime < MAX_RUNTIME_MILLIS && 
+                   steps < maxSteps) {
+                
+                // Safety checks
+                if (SkillManager.shouldAbortSkill(player)) {
+                    WorkDirectionService.setPausePosition(player.getUuid(), player.getBlockPos());
+                    return SkillExecutionResult.failure(skillName + " paused due to nearby threat.");
+            }
+            if (handleInventoryFull(player, source)) {
+                WorkDirectionService.setPausePosition(player.getUuid(), player.getBlockPos());
+                return SkillExecutionResult.failure("Mining paused: inventory full.");
+            }
+            if (handleWaterHazard(player, source)) {
+                WorkDirectionService.setPausePosition(player.getUuid(), player.getBlockPos());
+                return SkillExecutionResult.failure("Mining paused: water flooded the area.");
+            }
+            if (handleLavaHazard(player, source)) {
+                WorkDirectionService.setPausePosition(player.getUuid(), player.getBlockPos());
+                return SkillExecutionResult.failure("Mining paused: lava detected.");
+            }
+            
+            // Execute one upward step
+            SkillExecutionResult stepResult = executeUpwardStep(player, direction, source);
+            if (!stepResult.success()) {
+                WorkDirectionService.setPausePosition(player.getUuid(), player.getBlockPos());
+                return stepResult;
+            }
+            
+            steps++;
+            
+            // Place torch every 6 steps
+            if (steps % 6 == 0 && TorchPlacer.shouldPlaceTorch(player)) {
+                TorchPlacer.PlacementResult torchResult = TorchPlacer.placeTorch(player, direction);
+                if (torchResult == TorchPlacer.PlacementResult.NO_TORCHES) {
+                    SkillResumeService.flagManualResume(player);
+                    WorkDirectionService.setPausePosition(player.getUuid(), player.getBlockPos());
+                    ChatUtils.sendChatMessages(player.getCommandSource().withSilent().withMaxLevel(4), 
+                            "Ran out of torches!");
+                    return SkillExecutionResult.failure("Ascent paused: out of torches.");
+                }
+            }
+        }
+        
+        if (player.getBlockY() >= targetY) {
+            LOGGER.info("Ascent complete after {} steps, final Y={}", steps, player.getBlockY());
+            return SkillExecutionResult.success("Reached target Y=" + targetY + " after " + steps + " steps.");
+        }
+        
+        if (steps >= maxSteps) {
+            WorkDirectionService.setPausePosition(player.getUuid(), player.getBlockPos());
+            return SkillExecutionResult.failure("Reached step limit without completing ascent.");
+        }
+        
+        WorkDirectionService.setPausePosition(player.getUuid(), player.getBlockPos());
+        return SkillExecutionResult.failure("Timed out after " + steps + " steps.");
+        } finally {
+            // Always clear ascent mode flag when method exits
+            TaskService.setAscentMode(player.getUuid(), false);
+        }
+    }
+    
+    private SkillExecutionResult executeUpwardStep(ServerPlayerEntity player, Direction direction, ServerCommandSource source) {
+        BlockPos feet = player.getBlockPos();
+        ServerWorld world = (ServerWorld) player.getEntityWorld();
+        
+        // 1. Find next step-up block (search forward 1-8 blocks for solid block at Y+1)
+        BlockPos stepBlock = null;
+        for (int distance = 1; distance <= 8; distance++) {
+            BlockPos candidate = feet.offset(direction, distance).up();
+            BlockState state = world.getBlockState(candidate);
+            if (!state.isAir() && !state.getCollisionShape(world, candidate).isEmpty()) {
+                stepBlock = candidate;
+                LOGGER.debug("Found step-up block at {} (distance {})", stepBlock.toShortString(), distance);
+                break;
+            }
+        }
+        
+        if (stepBlock == null) {
+            // No step found - walk forward on flat ground to find one
+            LOGGER.debug("No step-up block found within 8 blocks - walking forward");
+            runOnServerThread(player, () -> {
+                LookController.faceBlock(player, feet.offset(direction, 3));
+                BotActions.moveForwardStep(player, 1.0);
+            });
+            try {
+                Thread.sleep(400);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            runOnServerThread(player, () -> BotActions.stop(player));
+            return SkillExecutionResult.success("Walking forward");
+        }
+        
+        // 2. Clear 5 blocks of headroom ABOVE the step block (don't mine the step itself!)
+        for (int h = 1; h <= 5; h++) {
+            BlockPos clearPos = stepBlock.up(h);
+            BlockState state = world.getBlockState(clearPos);
+            
+            if (!state.isAir()) {
+                Block blockType = state.getBlock();
+                // Skip torches
+                if (blockType == Blocks.TORCH || blockType == Blocks.WALL_TORCH || 
+                    blockType == Blocks.SOUL_TORCH || blockType == Blocks.SOUL_WALL_TORCH ||
+                    blockType == Blocks.REDSTONE_TORCH || blockType == Blocks.REDSTONE_WALL_TORCH) {
+                    continue;
+                }
+                
+                if (!mineStraightStairBlock(player, clearPos)) {
+                    LOGGER.warn("Could not clear headroom block at {}, continuing anyway", clearPos.toShortString());
+                }
+            }
+        }
+        
+        // 3. Walk toward the step block until close enough to jump
+        int beforeY = player.getBlockY();
+        BlockPos horizontalTarget = new BlockPos(stepBlock.getX(), feet.getY(), stepBlock.getZ());
+        Vec3d targetVec = Vec3d.ofBottomCenter(horizontalTarget);
+        final BlockPos finalStepBlock = stepBlock;
+        
+        // If we're far from the step, walk closer first (no jumping yet)
+        double distanceToStep = Math.sqrt(player.squaredDistanceTo(targetVec));
+        while (distanceToStep > 1.8) {
+            runOnServerThread(player, () -> {
+                LookController.faceBlock(player, finalStepBlock);
+                BotActions.moveForwardStep(player, 1.0);
+            });
+            
+            try {
+                Thread.sleep(400);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return SkillExecutionResult.failure("Interrupted while walking to step.");
+            }
+            
+            runOnServerThread(player, () -> BotActions.stop(player));
+            
+            double newDistance = Math.sqrt(player.squaredDistanceTo(targetVec));
+            if (newDistance >= distanceToStep) {
+                // Not making progress walking
+                break;
+            }
+            distanceToStep = newDistance;
+        }
+        
+        // 4. Now jump onto the step block
+        for (int attempt = 1; attempt <= 5; attempt++) {
+            runOnServerThread(player, () -> {
+                LookController.faceBlock(player, finalStepBlock);
+                BotActions.moveForwardStep(player, 0.5);
+                BotActions.jump(player);
+            });
+            
+            try {
+                Thread.sleep(500);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return SkillExecutionResult.failure("Interrupted during jump.");
+            }
+            
+            runOnServerThread(player, () -> BotActions.stop(player));
+            
+            int afterY = player.getBlockY();
+            if (afterY > beforeY) {
+                LOGGER.info("Successfully climbed from Y={} to Y={} (attempt {})", beforeY, afterY, attempt);
+                return SkillExecutionResult.success("Climbed step");
+            }
+            
+            // If we went DOWN instead of up, that's okay - recalculate and continue
+            if (afterY < beforeY) {
+                LOGGER.debug("Fell from Y={} to Y={} - will recalculate next step", beforeY, afterY);
+                return SkillExecutionResult.success("Position adjusted");
+            }
+            
+            LOGGER.debug("Climb attempt {} failed: beforeY={}, afterY={}", attempt, beforeY, afterY);
+        }
+        
+        // Didn't climb after 5 attempts, but don't fail - just report and continue
+        LOGGER.warn("Did not climb after 5 attempts, Y remains at {}", player.getBlockY());
+        return SkillExecutionResult.success("No progress - will retry");
+    }
+    
 
     private List<BlockPos> buildStraightStairVolume(BlockPos forward, BlockPos stairFoot) {
         LinkedHashSet<BlockPos> blocks = new LinkedHashSet<>();

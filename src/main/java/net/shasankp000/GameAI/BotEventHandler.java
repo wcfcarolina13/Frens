@@ -9,6 +9,7 @@ import net.minecraft.entity.ItemEntity;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.damage.DamageSource;
 import net.minecraft.entity.damage.DamageTypes;
+import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.network.packet.s2c.play.PositionFlag;
 import net.minecraft.registry.RegistryKey;
 import net.minecraft.registry.RegistryKeys;
@@ -37,6 +38,8 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.shasankp000.Entity.FaceClosestEntity;
 import net.shasankp000.LauncherDetection.LauncherEnvironment;
+
+import java.util.ArrayList;
 import net.shasankp000.PlayerUtils.*;
 import net.shasankp000.WorldUitls.GetTime;
 import net.shasankp000.Entity.EntityDetails;
@@ -1687,25 +1690,249 @@ public class BotEventHandler {
     }
     
     /**
+     * Proactively checks if bot is stuck in blocks and escapes without waiting for damage.
+     * Called on spawn/join to handle cases where bot spawns inside walls.
+     * Uses multiple strategies to ensure successful escape.
+     */
+    public static boolean checkAndEscapeSuffocation(ServerPlayerEntity bot) {
+        if (bot == null || bot.isRemoved()) {
+            LOGGER.debug("checkAndEscapeSuffocation: bot is null or removed");
+            return false;
+        }
+        ServerWorld world = bot.getEntityWorld() instanceof ServerWorld serverWorld ? serverWorld : null;
+        if (world == null) {
+            LOGGER.debug("checkAndEscapeSuffocation: world is null");
+            return false;
+        }
+        
+        BlockPos feet = bot.getBlockPos();
+        BlockPos head = feet.up();
+        
+        // Check ALL surrounding blocks, not just head/feet (bot might be crawling or blocks causing damage elsewhere)
+        List<BlockPos> checkPositions = List.of(
+            feet,              // Feet level
+            head,              // Head level  
+            feet.north(),      // Adjacent blocks at feet
+            feet.south(),
+            feet.east(),
+            feet.west(),
+            head.north(),      // Adjacent blocks at head
+            head.south(),
+            head.east(),
+            head.west()
+        );
+        
+        boolean anyBlocked = false;
+        BlockPos blockedPos = null;
+        for (BlockPos pos : checkPositions) {
+            BlockState state = world.getBlockState(pos);
+            // Check for any solid block (not just movement-blocking) that could cause IN_WALL damage
+            if (!state.isAir() && !state.isOf(Blocks.BEDROCK) && (state.blocksMovement() || state.isSolidBlock(world, pos))) {
+                anyBlocked = true;
+                blockedPos = pos;
+                LOGGER.info("Found blocking block at {}: {}", pos.toShortString(), state.getBlock().getName().getString());
+                break;
+            }
+        }
+        
+        if (!anyBlocked) {
+            LOGGER.info("Bot {} is clear - no suffocation detected (checked {} positions)", 
+                       bot.getName().getString(), checkPositions.size());
+            return false; // Bot is not suffocating
+        }
+        
+        LOGGER.warn("Bot {} is stuck in blocks at {}! Attempting escape", 
+                    bot.getName().getString(), blockedPos.toShortString());
+        
+        // Build list of ALL surrounding blocks to break (3x3x3 cube around bot)
+        List<BlockPos> blocksToBreak = new ArrayList<>();
+        for (int x = -1; x <= 1; x++) {
+            for (int y = -1; y <= 1; y++) {
+                for (int z = -1; z <= 1; z++) {
+                    BlockPos pos = feet.add(x, y, z);
+                    BlockState state = world.getBlockState(pos);
+                    if (!state.isAir() && state.blocksMovement() && !state.isOf(Blocks.BEDROCK)) {
+                        blocksToBreak.add(pos);
+                    }
+                }
+            }
+        }
+        
+        LOGGER.info("Found {} blocking blocks around bot - attempting to break all", blocksToBreak.size());
+        
+        // Try to break ALL surrounding blocks
+        boolean escaped = false;
+        int broken = 0;
+        for (BlockPos pos : blocksToBreak) {
+            BlockState state = world.getBlockState(pos);
+            String keyword = preferredToolKeyword(state);
+            if (keyword != null) {
+                BotActions.selectBestTool(bot, keyword, "sword");
+            }
+            
+            if (BotActions.breakBlockAt(bot, pos, true)) {
+                broken++;
+                LOGGER.info("Broke block {} at {} ({}/{})", 
+                           state.getBlock().getName().getString(), 
+                           pos.toShortString(), broken, blocksToBreak.size());
+                
+                // Check if we've freed the bot
+                if (broken >= 2) {  // After breaking 2 blocks, check if clear
+                    try {
+                        Thread.sleep(100); // Let blocks update
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                    
+                    boolean stillBlocked = false;
+                    for (BlockPos checkPos : checkPositions) {
+                        BlockState checkState = world.getBlockState(checkPos);
+                        if (!checkState.isAir() && checkState.blocksMovement() && !checkState.isOf(Blocks.BEDROCK)) {
+                            stillBlocked = true;
+                            break;
+                        }
+                    }
+                    
+                    if (!stillBlocked) {
+                        escaped = true;
+                        LOGGER.info("Bot {} is now clear after breaking {} blocks", bot.getName().getString(), broken);
+                        break;
+                    }
+                }
+            }
+        }
+        
+        if (escaped || broken > 0) {
+            LOGGER.info("Bot {} successfully escaped by breaking {} blocks", bot.getName().getString(), broken);
+            return true;
+        }
+        
+        LOGGER.error("Bot {} could NOT escape - failed to break any blocks", bot.getName().getString());
+        alertSuffocation(bot);
+        return false;
+    }
+    
+    /**
      * Breaks only the specific block causing suffocation, not surrounding blocks.
      * Tries head position first (most common), then feet if still suffocating.
      */
     private static boolean breakSuffocatingBlock(ServerPlayerEntity bot, ServerWorld world, BlockPos head, BlockPos feet) {
         // Try breaking head block first (most common suffocation point)
         BlockState headState = world.getBlockState(head);
-        if (!headState.isAir() && !headState.isOf(Blocks.BEDROCK)) {
+        if (!headState.isAir() && !headState.isOf(Blocks.BEDROCK) && headState.blocksMovement()) {
+            // Select best tool for this block
+            String keyword = preferredToolKeyword(headState);
+            if (keyword != null) {
+                BotActions.selectBestTool(bot, keyword, "sword");
+            }
+            
             if (BotActions.breakBlockAt(bot, head, true)) {
+                LOGGER.info("Bot {} broke head block {} to escape suffocation", 
+                            bot.getName().getString(), headState.getBlock().getName().getString());
                 return true;
             }
         }
         
-        // If head is clear but still suffocating, try feet
+        // If head is clear or couldn't break it, check feet
         BlockState feetState = world.getBlockState(feet);
-        if (!feetState.isAir() && !feetState.isOf(Blocks.BEDROCK)) {
-            return BotActions.breakBlockAt(bot, feet, true);
+        if (!feetState.isAir() && !feetState.isOf(Blocks.BEDROCK) && feetState.blocksMovement()) {
+            // Select best tool for this block
+            String keyword = preferredToolKeyword(feetState);
+            if (keyword != null) {
+                BotActions.selectBestTool(bot, keyword, "sword");
+            }
+            
+            if (BotActions.breakBlockAt(bot, feet, true)) {
+                LOGGER.info("Bot {} broke feet block {} to escape suffocation", 
+                            bot.getName().getString(), feetState.getBlock().getName().getString());
+                return true;
+            }
         }
         
         return false;
+    }
+    
+    /**
+     * Attempts to break adjacent blocks around the bot to create escape space.
+     */
+    private static boolean breakAdjacentBlocks(ServerPlayerEntity bot, ServerWorld world, BlockPos center) {
+        // Check horizontal directions first (most common escape routes)
+        BlockPos[] directions = {
+            center.north(),
+            center.south(),
+            center.east(),
+            center.west(),
+            center.up(),
+            center.down()
+        };
+        
+        for (BlockPos pos : directions) {
+            BlockState state = world.getBlockState(pos);
+            if (!state.isAir() && !state.isOf(Blocks.BEDROCK) && state.blocksMovement()) {
+                String keyword = preferredToolKeyword(state);
+                if (keyword != null) {
+                    BotActions.selectBestTool(bot, keyword, "sword");
+                }
+                
+                if (BotActions.breakBlockAt(bot, pos, true)) {
+                    LOGGER.info("Bot {} broke adjacent block {} to escape", 
+                                bot.getName().getString(), state.getBlock().getName().getString());
+                    return true;
+                }
+            }
+        }
+        
+        return false;
+    }
+    
+    /**
+     * Last resort: force-break blocks using bare hands if necessary.
+     */
+    private static boolean forceBreakSuffocatingBlocks(ServerPlayerEntity bot, ServerWorld world, BlockPos head, BlockPos feet) {
+        // Force-break with whatever is in hand (including bare hands)
+        // Try breaking head
+        BlockState headState = world.getBlockState(head);
+        if (!headState.isAir() && !headState.isOf(Blocks.BEDROCK)) {
+            if (BotActions.breakBlockAt(bot, head, true)) {
+                LOGGER.info("Force-broke head block to escape suffocation");
+                return true;
+            }
+        }
+        
+        // Try breaking feet
+        BlockState feetState = world.getBlockState(feet);
+        if (!feetState.isAir() && !feetState.isOf(Blocks.BEDROCK)) {
+            if (BotActions.breakBlockAt(bot, feet, true)) {
+                LOGGER.info("Force-broke feet block to escape suffocation");
+                return true;
+            }
+        }
+        
+        return false;
+    }
+    
+    /**
+     * Ensures bot has headspace clearance before allowing it to stand from crawling position.
+     * Prevents damage from standing up into solid blocks.
+     */
+    public static boolean ensureHeadspaceClearance(ServerPlayerEntity bot) {
+        if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
+            return false;
+        }
+        
+        BlockPos head = bot.getBlockPos().up();
+        BlockState headState = world.getBlockState(head);
+        
+        // If head position is not clear, keep crawling (don't stand up)
+        if (!headState.isAir() && headState.blocksMovement()) {
+            // Break the block above if possible
+            if (!headState.isOf(Blocks.BEDROCK)) {
+                return BotActions.breakBlockAt(bot, head, false);
+            }
+            return false;
+        }
+        
+        return true; // Safe to stand
     }
 
     private static boolean tookRecentSuffocation(ServerPlayerEntity bot) {
@@ -1713,8 +1940,7 @@ public class BotEventHandler {
         if (recent == null) {
             return false;
         }
-        RegistryKey<net.minecraft.entity.damage.DamageType> inWall = DamageTypes.IN_WALL;
-        return recent.isOf(inWall);
+        return recent.isOf(DamageTypes.IN_WALL);
     }
 
     private static boolean ensureRescueTool(ServerPlayerEntity bot, ServerWorld world, BlockPos center) {
@@ -1779,6 +2005,12 @@ public class BotEventHandler {
             ServerPlayerEntity candidate = server.getPlayerManager().getPlayer(uuid);
             if (candidate != null && candidate.isAlive()) {
                 rescueFromBurial(candidate);
+                
+                // Also check if bot is crawling and can stand up
+                if (candidate.isCrawling() || candidate.isSwimming()) {
+                    // Ensure headspace is clear before standing
+                    ensureHeadspaceClearance(candidate);
+                }
             }
         }
     }

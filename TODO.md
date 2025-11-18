@@ -1,8 +1,242 @@
 
 
-# Gemini Report 2
+# AI-Player TODO
 
-## Consolidated TODO (from this report)
+## Critical Issues (P0)
+
+### 1. Bot Stats Not Persisting on Respawn
+**Status:** NEW  
+**Priority:** P0 - Critical  
+**Last Updated:** 2025-11-18 04:43
+
+**Problem:**
+When using `/bot spawn <alias> training`, the bot's stats (health, level, hunger) are reset instead of being restored from saved state.
+
+**Expected Behavior:**
+Bot should remember and restore stats like health, experience level, and hunger across respawns (just like inventory is now persisted).
+
+**Investigation Needed:**
+- Check where stats are saved (same file as inventory?)
+- Verify stats are being loaded on respawn
+- Ensure stats restoration happens before bot is spawned
+
+**Files to Review:**
+- Bot spawn command handler
+- Inventory persistence code (for reference)
+- NBT save/load methods
+
+---
+
+### 2. Upward Stairs Implementation Issues
+**Status:** ACTIVE - Over-Complicated  
+**Priority:** P0 - Critical  
+**Last Updated:** 2025-11-18 04:43
+
+**Problem:**
+Bot is failing at upward stair tasks with confusing behavior:
+- Skipping blocks (mining 2 levels up instead of 1)
+- Bailing when it shouldn't
+- Not following controller-player's facing direction
+- Sometimes mining downward during upward task
+
+**User Clarification (2025-11-18 02:41):**
+"When making stairs, say there's a solid wall of thick blocks ahead. It should mine 3 blocks above the first block, leaving that first block. Then, it hops onto that block and mines 3 blocks above the next block. In this way, it tunnels upward, stepping up one block at a time."
+
+**Current Issues from Logs (2025-11-18 04:43):**
+```
+[22:40:56] Upward stairs: current Y=-3, target Y=7
+[22:40:56] Mining 5 blocks in work volume
+[22:40:56] Upward stairs: forward is air, gap depth = 1
+[22:40:59] ERROR: Upward stairs failed to increase Y! Last=-3, Current=-3
+[22:40:59] Bot Jake is stuck in blocks! Attempting escape
+```
+
+**Required Behavior:**
+1. Start in controller-player's facing direction and MAINTAIN IT
+2. Mine 3 blocks above current position (leaving floor block)
+3. Jump onto that floor block (up 1 level only)
+4. Repeat until target Y reached
+5. No block placement needed when mining through solid wall
+6. Only place blocks if gap >1 (missing floor blocks)
+
+**Files to Review:**
+- `CollectDirtSkill.java` - upward stair logic
+- Movement/pathfinding for upward stairs
+
+---
+
+### 3. Bot Not Breaking Free When Spawned in Walls
+**Status:** MOSTLY FIXED - Needs Expansion  
+**Priority:** P0 - Critical  
+**Last Updated:** 2025-11-18 02:23
+
+**Recent Success:**
+Bot now correctly breaks obstructing blocks if spawned inside them!
+
+**Remaining Issue:**
+Need to expand breaking area to all 4 corners from head to feet to ensure complete freedom.
+
+**Files to Review:**
+- `BotEventHandler.java` - escape logic
+- Block breaking area calculation
+
+---
+
+## Completed (Recent Sessions)
+
+### Session 2025-11-18 02:23
+- ✅ **Breaking Free When Spawned in Walls** - Bot now breaks obstructing blocks successfully
+- ✅ **Upward Stairs Direction** - Bot begins in correct direction (partial fix)
+
+### Session 2025-11-17
+- ✅ **Inventory Persistence** - Fixed race condition, now saves immediately on screen close
+- ✅ **Mining Block Sync** - Added retry mechanism for server-client sync delays
+- ✅ **Post-Task Safety** - Added suffocation check after all task completions
+- ✅ **Drop Sweep** - No longer breaks blocks, only collects items
+- ✅ **Inventory Full Message** - Now appears appropriately with less strict detection
+- ✅ **Torch Protection** - Enhanced with double-layer checks
+- ✅ **Torch Replacement** - Replaces broken torches during mining
+
+---
+
+## High Priority (P1)
+
+### Protected Zones Persistence
+**Status:** Not Started  
+**Complexity:** Medium
+
+Protected zones need to persist across server restarts.
+
+**Requirements:**
+- Save to JSON on creation/modification
+- Load on server start
+- Track: position, radius, creator, timestamp, dimension
+
+**Files:**
+- `MiningHazardDetector.java`
+- `ManualConfig.java`
+- Startup initialization code
+
+---
+
+### Bot Config UI Refactor
+**Status:** Not Started  
+**Complexity:** High
+
+Current UI shows all bots in long list. Need single-bot view with dropdown.
+
+**Design:**
+- Alias dropdown at top
+- Scrollable settings grouped by category (Spawning, Movement, Inventory, AI)
+- Save/Cancel buttons at bottom
+- Only affects selected bot
+
+**Files:**
+- `BotControlScreen.java` (major refactor)
+
+---
+
+## Medium Priority (P2)
+
+### Inventory & Items
+- [ ] Bot item inventory view (chest-like interface)
+- [ ] Equipped section visible (armor, main hand, offhand)
+- [ ] Backpack grid (27-slot)
+- [ ] Hotbar row (9-slot)
+- [ ] Shift-click, double-click, drag support
+- [ ] Quick-action buttons (Sort, Equip Best, Take All, Give All)
+
+### Navigation & Movement
+- [ ] Swimming parity (surface and underwater)
+- [ ] Boat support (enter, exit, navigate)
+- [ ] Portal following (Nether, End)
+- [ ] Cross-realm teleport command
+- [ ] Water-aware pickup (wade/bridge)
+- [ ] Edge/hole pickup (hop down safely)
+
+### Combat & Safety
+- [ ] Creeper evasion (sprint away when unarmed)
+- [ ] Protected build zones (no-grief areas)
+- [ ] Follow/defend modes
+- [ ] Fight with teammates
+
+### Crafting & Building
+- [ ] Place and use crafting table, furnace, chest
+- [ ] Craft common items (bed, tools, weapons, armor)
+- [ ] Build walls (specified materials, dimensions)
+- [ ] Simple 2-person house
+- [ ] Block placement primitives
+
+### Farming & Survival
+- [ ] Till soil, plant seeds, harvest, replant
+- [ ] Create infinite water source
+- [ ] Animal husbandry (shear, collect meat, pen animals)
+- [ ] Furnace usage with various fuels
+- [ ] Hunger persistence and smart eating
+- [ ] Sleep integration (bed usage, warnings)
+
+### Mining & Resource Gathering
+- [ ] Tree chopping (safe climbing, late drop collection)
+- [ ] Strip mining with safety offset (sand, gravel, lava)
+- [ ] Cave/structure detection and reporting
+- [ ] Water encounter handling
+
+---
+
+## Low Priority (P3)
+
+### Multi-Bot Features
+- [ ] Per-bot chat addressing
+- [ ] Broadcast commands (allbots)
+- [ ] Bot aliases with separate identities
+- [ ] Job resume prompts on death/rejoin
+
+### Advanced Combat
+- [ ] PVP sparring mode
+- [ ] Army formations (line, grid)
+- [ ] Archer positioning
+- [ ] Horse flank maneuvers
+
+### Quality of Life
+- [ ] Debug toggle (reduce terminal spam)
+- [ ] Test kit command (`/equip` for testing loadout)
+- [ ] Command queuing (multi-step instructions)
+
+---
+
+## LLM Integration (Future)
+
+See detailed plan in old TODO.md sections:
+- Phase 0: Recon & Mac dylib fix
+- Phase 1: Core architecture & toggles
+- Phase 2: Identity & memory model (in progress)
+- Phase 3: Personalities (TES-style)
+- Phase 4: Chat routing
+- Phase 5: Command queuing
+- Phase 6: Social awareness
+- Phase 7: Performance & safety
+- Phase 8: Integration & testing
+
+---
+
+## Notes
+
+### Task Lifecycle
+- `/bot stop` and respawns abort active tickets via TaskService
+- RL loop releases immediately
+- Skills check abort flag during execution
+
+### Drop Collection
+- Post-skill cleanup uses DropSweeper
+- Manual drop_sweep skill separate from automatic cleanup
+- Cooldowns prevent spam (4s for sweeps, 15s per position)
+
+### Mining Safety
+- Hazard detection centralised in MiningHazardDetector
+- Protected zones block mining
+- Rare ore announcements (once per position per session)
+- Torch placement every 6 blocks when dark
+- Resume system tracks discovered ores
 
 ### P0 — Stability & Control Flow
 - [ ] **Task lifecycle reset**: `/bot stop` and respawns must abort the active ticket and release the RL loop immediately via `TaskService`. *DoD:* issuing `/bot stop` during any skill halts movement within 1 tick; new command starts without “busy” spam.

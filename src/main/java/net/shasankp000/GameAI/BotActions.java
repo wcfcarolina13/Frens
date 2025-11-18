@@ -463,6 +463,7 @@ public final class BotActions {
         float yaw = bot.getYaw();
         double dx;
         double dz;
+
         if (customDirection) {
             dx = dirX * distance;
             dz = dirZ * distance;
@@ -472,17 +473,43 @@ public final class BotActions {
             dz = Math.cos(yawRad) * distance;
         }
 
-        double newX = bot.getX() + dx;
-        double newY = bot.getY();
-        double newZ = bot.getZ() + dz;
-        
-        // Check if destination has clearance (feet and head blocks)
+        double baseX = bot.getX();
+        double baseY = bot.getY();
+        double baseZ = bot.getZ();
+
+        double newX = baseX + dx;
+        double newY = baseY;
+        double newZ = baseZ + dz;
+
+        // Try to move; allow a 1-block step up or down for stairs rather than treating it as a hard collision.
         ServerWorld world = bot.getEntityWorld() instanceof ServerWorld sw ? sw : null;
-        if (world != null && !hasMovementClearance(world, new BlockPos((int)Math.floor(newX), (int)Math.floor(newY), (int)Math.floor(newZ)))) {
-            // Destination blocked - don't move to avoid suffocation
-            return;
+        if (world != null) {
+            BlockPos targetPos = new BlockPos(
+                    MathHelper.floor(newX),
+                    MathHelper.floor(newY),
+                    MathHelper.floor(newZ)
+            );
+
+            // If direct move is blocked, first attempt a 1-block step up.
+            if (!hasMovementClearance(world, targetPos)) {
+                BlockPos stepUpPos = targetPos.up();
+                if (hasMovementClearance(world, stepUpPos)) {
+                    newY += 1.0;
+                    targetPos = stepUpPos;
+                } else {
+                    // If step up fails, attempt a gentle 1-block step down (walking off a stair edge).
+                    BlockPos stepDownPos = targetPos.down();
+                    if (hasMovementClearance(world, stepDownPos)) {
+                        newY -= 1.0;
+                        targetPos = stepDownPos;
+                    } else {
+                        // No safe step up or down -> don't move to avoid suffocation/clipping.
+                        return;
+                    }
+                }
+            }
         }
-        
+
         bot.refreshPositionAndAngles(newX, newY, newZ, bot.getYaw(), bot.getPitch());
     }
     

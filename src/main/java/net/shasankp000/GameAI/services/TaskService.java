@@ -108,9 +108,24 @@ public final class TaskService {
 
     private static final UUID GLOBAL_KEY = new UUID(0L, 0L);
     private static final Map<UUID, TaskTicket> ACTIVE = new ConcurrentHashMap<>();
+    private static final Map<UUID, Boolean> IN_ASCENT_MODE = new ConcurrentHashMap<>();
 
     private static UUID key(UUID botUuid) {
         return botUuid != null ? botUuid : GLOBAL_KEY;
+    }
+
+    public static void setAscentMode(UUID botUuid, boolean inAscent) {
+        if (botUuid != null) {
+            if (inAscent) {
+                IN_ASCENT_MODE.put(botUuid, true);
+            } else {
+                IN_ASCENT_MODE.remove(botUuid);
+            }
+        }
+    }
+
+    public static boolean isInAscentMode(UUID botUuid) {
+        return botUuid != null && IN_ASCENT_MODE.getOrDefault(botUuid, false);
     }
 
     public static Optional<TaskTicket> beginSkill(String skillName,
@@ -168,6 +183,36 @@ public final class TaskService {
         ticket.setState(finalState);
         ACTIVE.remove(key(ticket.botUuid()));
         LOGGER.info("Task '{}' finished with state {}", ticket.name(), finalState);
+        
+        // After task completion, check if bot is stuck in blocks and needs rescue
+        // This is important for mining tasks that may leave bot positioned inside blocks
+        ServerCommandSource source = ticket.source();
+        if (source != null) {
+            MinecraftServer server = source.getServer();
+            if (server != null) {
+                ServerPlayerEntity bot = server.getPlayerManager().getPlayer(ticket.botUuid());
+                if (bot != null && !bot.isRemoved()) {
+                    LOGGER.info("Scheduling post-task safety check for bot {} after task '{}'", 
+                               bot.getName().getString(), ticket.name());
+                    // Schedule check for next tick to ensure task cleanup is complete
+                    server.execute(() -> {
+                        if (!bot.isRemoved()) {
+                            LOGGER.info("Running post-task safety check for bot {} at position {}", 
+                                       bot.getName().getString(), bot.getBlockPos().toShortString());
+                            BotEventHandler.checkAndEscapeSuffocation(bot);
+                        } else {
+                            LOGGER.warn("Bot was removed before post-task safety check could run");
+                        }
+                    });
+                } else {
+                    LOGGER.warn("Could not schedule post-task safety check - bot not found or removed");
+                }
+            } else {
+                LOGGER.warn("Could not schedule post-task safety check - server is null");
+            }
+        } else {
+            LOGGER.warn("Could not schedule post-task safety check - source is null");
+        }
     }
 
     public static void forceAbort(String reason) {

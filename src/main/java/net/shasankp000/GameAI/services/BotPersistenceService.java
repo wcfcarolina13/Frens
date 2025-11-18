@@ -20,6 +20,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.HashSet;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -59,7 +60,16 @@ public final class BotPersistenceService {
             LOGGER.info("No persisted state for fakeplayer '{}'; starting fresh.", bot.getName().getString());
         }
 
-        BotInventoryStorageService.load(bot);
+        // Schedule inventory load for next tick to ensure vanilla restoration completes first
+        server.execute(() -> {
+            if (!bot.isRemoved()) {
+                boolean loaded = BotInventoryStorageService.load(bot);
+                if (loaded) {
+                    LOGGER.info("Loaded persisted inventory for fakeplayer '{}'", bot.getName().getString());
+                }
+            }
+        });
+        
         LAST_SAVE_TICK.put(bot.getUuid(), server.getTicks());
     }
 
@@ -80,17 +90,20 @@ public final class BotPersistenceService {
         if (!(bot instanceof createFakePlayer) || server == null) {
             return;
         }
-        // Mirror "drop on death" by removing the persisted snapshot.
+        
+        // ALWAYS WIPE INVENTORY ON DEATH (vanilla behavior)
+        // Both aliased and temporary bots lose inventory when they die
         Path path = resolvePlayerDataPath(server, bot);
         if (path != null) {
             try {
                 Files.deleteIfExists(path);
-                LOGGER.info("Cleared persisted state for fakeplayer '{}' after death.", bot.getName().getString());
+                LOGGER.info("Cleared persisted state for fakeplayer '{}' after death (vanilla behavior).", bot.getName().getString());
             } catch (IOException e) {
                 LOGGER.warn("Unable to clear persisted state for fakeplayer '{}': {}", bot.getName().getString(), e.getMessage());
             }
         }
         BotInventoryStorageService.delete(bot);
+        
         SkillResumeService.handleDeath(bot);
         LAST_SAVE_TICK.remove(bot.getUuid());
     }

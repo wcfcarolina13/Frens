@@ -207,6 +207,12 @@ public final class MiningHazardDetector {
                     "Cannot break blocks in protected zone: " + zoneName);
         }
         
+        // Check if this is a torch (protect torches from accidental breaking)
+        Block block = state.getBlock();
+        if (block == Blocks.TORCH || block == Blocks.WALL_TORCH || block == Blocks.SOUL_TORCH || block == Blocks.SOUL_WALL_TORCH) {
+            return hazard(pos, "This is a torch.", true, "Cannot break placed torches");
+        }
+        
         FluidState fluid = world.getFluidState(pos);
         if (fluid.isIn(FluidTags.LAVA)) {
             return hazard(pos, "There's lava ahead.", true);
@@ -214,7 +220,6 @@ public final class MiningHazardDetector {
         if (fluid.isIn(FluidTags.WATER)) {
             return hazard(pos, "There's water ahead.", true);
         }
-        Block block = state.getBlock();
         String precious = VALUABLE_MESSAGES.get(block);
         if (precious != null) {
             // Ores should pause the job for player inspection

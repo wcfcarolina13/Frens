@@ -2639,8 +2639,10 @@ public class modCommandRegistry {
     private static int executeSkill(CommandContext<ServerCommandSource> context, ServerPlayerEntity bot, String skillName, String rawArgs) {
         Map<String, Object> params = new HashMap<>();
         Integer count = null;
-        Integer depthTarget = null;
-        boolean stairsRequested = false;
+        Integer ascentBlocks = null;
+        Integer ascentTargetY = null;
+        Integer descentBlocks = null;
+        Integer descentTargetY = null;
         Set<Identifier> targetBlocks = new HashSet<>();
         List<String> options = new ArrayList<>();
         
@@ -2648,21 +2650,59 @@ public class modCommandRegistry {
             String[] tokens = rawArgs.trim().split("\\s+");
             for (int i = 0; i < tokens.length; i++) {
                 String token = tokens[i];
-                if ("depth".equalsIgnoreCase(token) && i + 1 < tokens.length) {
-                    String depthStr = tokens[++i];
+                
+                // Check for ascent (relative: climb UP by N blocks)
+                if ("ascent".equalsIgnoreCase(token) && i + 1 < tokens.length) {
+                    String numStr = tokens[++i];
                     try {
-                        depthTarget = Integer.parseInt(depthStr);
-                        LOGGER.info("Parsed depth target: {}", depthTarget);
+                        ascentBlocks = Math.abs(Integer.parseInt(numStr)); // Always positive
+                        LOGGER.info("Parsed ascent: climb UP by {} blocks", ascentBlocks);
                         continue;
                     } catch (NumberFormatException ignored) {
-                        LOGGER.warn("Invalid depth parameter '{}'", depthStr);
+                        LOGGER.warn("Invalid ascent parameter '{}'", numStr);
                         continue;
                     }
                 }
-                if ("stairs".equalsIgnoreCase(token)) {
-                    stairsRequested = true;
-                    continue;
+                
+                // Check for ascent-y (absolute: climb UP to Y=N)
+                if ("ascent-y".equalsIgnoreCase(token) && i + 1 < tokens.length) {
+                    String numStr = tokens[++i];
+                    try {
+                        ascentTargetY = Integer.parseInt(numStr);
+                        LOGGER.info("Parsed ascent-y: climb UP to Y={}", ascentTargetY);
+                        continue;
+                    } catch (NumberFormatException ignored) {
+                        LOGGER.warn("Invalid ascent-y parameter '{}'", numStr);
+                        continue;
+                    }
                 }
+                
+                // Check for descent (relative: dig DOWN by N blocks)
+                if ("descent".equalsIgnoreCase(token) && i + 1 < tokens.length) {
+                    String numStr = tokens[++i];
+                    try {
+                        descentBlocks = Math.abs(Integer.parseInt(numStr)); // Always positive
+                        LOGGER.info("Parsed descent: dig DOWN by {} blocks", descentBlocks);
+                        continue;
+                    } catch (NumberFormatException ignored) {
+                        LOGGER.warn("Invalid descent parameter '{}'", numStr);
+                        continue;
+                    }
+                }
+                
+                // Check for descent-y (absolute: dig DOWN to Y=N)
+                if ("descent-y".equalsIgnoreCase(token) && i + 1 < tokens.length) {
+                    String numStr = tokens[++i];
+                    try {
+                        descentTargetY = Integer.parseInt(numStr);
+                        LOGGER.info("Parsed descent-y: dig DOWN to Y={}", descentTargetY);
+                        continue;
+                    } catch (NumberFormatException ignored) {
+                        LOGGER.warn("Invalid descent-y parameter '{}'", numStr);
+                        continue;
+                    }
+                }
+                
                 try {
                     count = Integer.parseInt(token);
                     LOGGER.info("Parsed count: " + count);
@@ -2689,11 +2729,17 @@ public class modCommandRegistry {
             if (count != null) {
                 params.put("count", count);
             }
-            if (depthTarget != null) {
-                params.put("targetDepthY", depthTarget);
+            if (ascentBlocks != null) {
+                params.put("ascentBlocks", ascentBlocks);
             }
-            if (stairsRequested) {
-                params.put("stairsMode", true);
+            if (ascentTargetY != null) {
+                params.put("ascentTargetY", ascentTargetY);
+            }
+            if (descentBlocks != null) {
+                params.put("descentBlocks", descentBlocks);
+            }
+            if (descentTargetY != null) {
+                params.put("descentTargetY", descentTargetY);
             }
             if (!targetBlocks.isEmpty()) {
                 params.put("targetBlocks", targetBlocks);
