@@ -626,6 +626,13 @@ public class FunctionCallerV2 {
                 if (maxFailsStr != null && !maxFailsStr.isBlank()) params.put("maxFails", Integer.parseInt(maxFailsStr));
                 if (optionsStr != null && !optionsStr.isBlank()) params.put("options", List.of(optionsStr.split("\\s+")));
 
+                // Inject issuerFacing + lockDirection for directional mining/ascent skills
+                if (!params.containsKey("issuerFacing") && ("collect_dirt".equals(skillName) || "mining".equals(skillName) || "stripmine".equals(skillName))) {
+                    params.put("issuerFacing", bot.getHorizontalFacing().asString());
+                }
+                if (!params.containsKey("lockDirection") && ("collect_dirt".equals(skillName) || "mining".equals(skillName) || "stripmine".equals(skillName))) {
+                    params.put("lockDirection", true); // default lock to preserve continuity
+                }
                 SkillContext skillContext = new SkillContext(bot.getCommandSource(), sharedState, params);
                 SkillExecutionResult result = SkillManager.runSkill(skillName, skillContext);
                 getFunctionOutput(result.message());
