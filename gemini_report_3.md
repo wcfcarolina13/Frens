@@ -48,6 +48,8 @@
 
 - Facing fix: Use issuing player yaw (issuerYaw) for precise orientation; removed default lockDirection and added issuerYaw propagation. Files: FunctionCallerV2.java, CollectDirtSkill.java, StripMineSkill.java.
 
+- Compile fix: replaced bot.getServer() with bot.getCommandSource().getServer() in FunctionCallerV2 (missing method). Files: FunctionCallerV2.java.
+
 - Outcome: Bot reliably walks to step, clears step + 8 blocks headroom, and ascends without obstruction in tests. Marking feature functional.
 
 

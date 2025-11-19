@@ -628,7 +628,7 @@ public class FunctionCallerV2 {
 
                 // Inject issuerFacing + lockDirection for directional mining/ascent skills
                 if (("collect_dirt".equals(skillName) || "mining".equals(skillName) || "stripmine".equals(skillName))) {
-                    ServerPlayerEntity issuer = currentPlayerUUID() != null ? bot.getServer().getPlayerManager().getPlayer(currentPlayerUUID()) : null;
+                    ServerPlayerEntity issuer = currentPlayerUUID() != null ? bot.getCommandSource().getServer().getPlayerManager().getPlayer(currentPlayerUUID()) : null;
                     if (issuer != null) {
                         params.put("issuerFacing", issuer.getHorizontalFacing().asString());
                         params.put("issuerYaw", issuer.getYaw());
