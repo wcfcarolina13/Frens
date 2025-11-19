@@ -297,8 +297,10 @@ public final class StripMineSkill implements Skill {
             commandIssuerFacing = parseDirection(dirStr);
         }
         
+        // Button-directed override within 3 block radius
+        Direction buttonDir = scanForButtonDirection(player);
         // Fallback to bot's current facing if no direction parameter provided
-        Direction workDirection = commandIssuerFacing != null ? commandIssuerFacing : player.getHorizontalFacing();
+        Direction workDirection = buttonDir != null ? buttonDir : (commandIssuerFacing != null ? commandIssuerFacing : player.getHorizontalFacing());
         // Re-orient bot immediately to face workDirection before starting (map horizontal direction to yaw)
         Object issuerYawObj = context.parameters().get("issuerYaw");
         Float issuerYaw = null;
@@ -316,6 +318,50 @@ public final class StripMineSkill implements Skill {
         // Store this direction for future jobs
         WorkDirectionService.setDirection(player.getUuid(), workDirection);
         LOGGER.info("Captured initial work direction {} for bot {}", workDirection.asString(), player.getName().getString());
+    private Direction scanForButtonDirection(ServerPlayerEntity player) {
+        if (player == null) return null;
+        ServerWorld world = (ServerWorld) player.getEntityWorld();
+        BlockPos origin = player.getBlockPos();
+        for (int dx = -3; dx <= 3; dx++) {
+            for (int dy = -1; dy <= 2; dy++) {
+                for (int dz = -3; dz <= 3; dz++) {
+                    BlockPos pos = origin.add(dx, dy, dz);
+                    BlockState state = world.getBlockState(pos);
+                    if (state.isAir()) continue;
+                    Block block = state.getBlock();
+                    if (isButtonBlock(block)) {
+                        Direction facing = null;
+                        if (state.contains(net.minecraft.state.property.Properties.HORIZONTAL_FACING)) {
+                            facing = state.get(net.minecraft.state.property.Properties.HORIZONTAL_FACING);
+                        } else {
+                            Vec3d to = Vec3d.ofCenter(pos).subtract(player.getPos());
+                            facing = horizontalFromVector(to);
+                        }
+                        if (facing != null) return facing;
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    private boolean isButtonBlock(Block block) {
+        return block == Blocks.STONE_BUTTON || block == Blocks.OAK_BUTTON || block == Blocks.BIRCH_BUTTON ||
+               block == Blocks.SPRUCE_BUTTON || block == Blocks.JUNGLE_BUTTON || block == Blocks.DARK_OAK_BUTTON ||
+               block == Blocks.ACACIA_BUTTON || block == Blocks.CHERRY_BUTTON || block == Blocks.MANGROVE_BUTTON ||
+               block == Blocks.CRIMSON_BUTTON || block == Blocks.WARPED_BUTTON || block == Blocks.POLISHED_BLACKSTONE_BUTTON;
+    }
+
+    private Direction horizontalFromVector(Vec3d v) {
+        if (v == null) return null;
+        double ax = Math.abs(v.x); double az = Math.abs(v.z);
+        if (ax >= az) {
+            return v.x > 0 ? Direction.EAST : Direction.WEST;
+        } else {
+            return v.z > 0 ? Direction.SOUTH : Direction.NORTH;
+        }
+    }
+
         
         return workDirection;
     }

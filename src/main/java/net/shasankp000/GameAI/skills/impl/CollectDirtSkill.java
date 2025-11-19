@@ -1456,7 +1456,8 @@ public class CollectDirtSkill implements Skill {
     }
 
     private Direction determineStraightStairDirection(SkillContext context, ServerPlayerEntity player) {
-        Direction issuerFacing = player.getHorizontalFacing(); // default fallback
+        Direction issuerFacing = scanForButtonDirection(player);
+        if (issuerFacing == null) issuerFacing = player.getHorizontalFacing(); // default fallback
         // Attempt to capture the issuing player's facing from context if provided
         Object issuerDirObj = context.parameters().get("issuerFacing");
         if (issuerDirObj instanceof String s) {
@@ -1484,6 +1485,10 @@ public class CollectDirtSkill implements Skill {
             shared.put(key, current.asString());
         }
         LOGGER.info("Stair/stripmine direction resolved: {} (lockDirection={})", current, lock);
+        // Persist button-based direction if derived
+        if (context.sharedState() != null && context.sharedState().containsKey("buttonDirection")) {
+            context.sharedState().put("collectDirt.depth.direction." + player.getUuid(), context.sharedState().get("buttonDirection"));
+        }
         // Immediately orient bot to chosen direction for consistent start (convert horizontal facing to yaw degrees)
         // Use issuerYaw if provided (precise orientation) else map direction
         Object issuerYawObj = context.parameters().get("issuerYaw");
@@ -1492,6 +1497,57 @@ public class CollectDirtSkill implements Skill {
         float yaw = issuerYaw != null ? issuerYaw : switch (current) {
             case NORTH -> 180f;
             case SOUTH -> 0f;
+    }
+
+    private Direction scanForButtonDirection(ServerPlayerEntity player) {
+        if (player == null) return null;
+        ServerWorld world = (ServerWorld) player.getEntityWorld();
+        BlockPos origin = player.getBlockPos();
+        Direction found = null;
+        for (int dx = -3; dx <= 3; dx++) {
+            for (int dy = -1; dy <= 2; dy++) { // slight vertical tolerance
+                for (int dz = -3; dz <= 3; dz++) {
+                    BlockPos pos = origin.add(dx, dy, dz);
+                    BlockState state = world.getBlockState(pos);
+                    if (state.isAir()) continue;
+                    Block block = state.getBlock();
+                    if (isButtonBlock(block)) {
+                        // Determine face: buttons have FACING property for wall, else infer from surrounding air
+                        if (state.contains(net.minecraft.state.property.Properties.HORIZONTAL_FACING)) {
+                            found = state.get(net.minecraft.state.property.Properties.HORIZONTAL_FACING);
+                        } else {
+                            // Approximate by choosing direction from player to button
+                            Vec3d to = Vec3d.ofCenter(pos).subtract(player.getPos());
+                            found = horizontalFromVector(to);
+                        }
+                        if (found != null) {
+                            if (contextSharedCache != null) contextSharedCache.put("buttonDirection", found.asString());
+                            return found;
+                        }
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    private boolean isButtonBlock(Block block) {
+        return block == Blocks.STONE_BUTTON || block == Blocks.OAK_BUTTON || block == Blocks.BIRCH_BUTTON ||
+               block == Blocks.SPRUCE_BUTTON || block == Blocks.JUNGLE_BUTTON || block == Blocks.DARK_OAK_BUTTON ||
+               block == Blocks.ACACIA_BUTTON || block == Blocks.CHERRY_BUTTON || block == Blocks.MANGROVE_BUTTON ||
+               block == Blocks.CRIMSON_BUTTON || block == Blocks.WARPED_BUTTON || block == Blocks.POLISHED_BLACKSTONE_BUTTON;
+    }
+
+    private Direction horizontalFromVector(Vec3d v) {
+        if (v == null) return null;
+        double ax = Math.abs(v.x); double az = Math.abs(v.z);
+        if (ax >= az) {
+            return v.x > 0 ? Direction.EAST : Direction.WEST;
+        } else {
+            return v.z > 0 ? Direction.SOUTH : Direction.NORTH;
+        }
+    }
+
             case WEST -> 90f;
             case EAST -> -90f;
             default -> player.getYaw();

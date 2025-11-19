@@ -56,6 +56,8 @@
 
 - Ascent hazard scan: Added MiningHazardDetector call in executeUpwardStep to announce ores and pause on blocking hazards. Files: CollectDirtSkill.java.
 
+- Direction by button: Added scanForButtonDirection (3-block radius) to override issuerFacing for ascent/descent (CollectDirtSkill) and stripmine (StripMineSkill). Files: CollectDirtSkill.java, StripMineSkill.java.
+
 - Outcome: Bot reliably walks to step, clears step + 8 blocks headroom, and ascends without obstruction in tests. Marking feature functional.
 
 
