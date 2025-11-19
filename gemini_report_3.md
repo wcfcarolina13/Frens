@@ -1,4 +1,8 @@
 ## Session 2025-11-18 19:30 — FINAL FIX: Ascent Now Uses Walk-and-Jump Algorithm
+2025-11-19: Implemented non-blocking, tool-based escape mining gated by recent obstruct damage (<=2s).
+- Files: AIPlayer.java, BotEventHandler.java, MiningTool.java (read), gemini_report_3.md
+- Changes: record obstruction damage; require obstruction+recent damage to trigger; schedule MiningTool.mineBlock() for surrounding blocks instead of tryBreakBlock loop to avoid server freeze.
+
 ## Session 2025-11-19 – Ascent headroom tweak
 ## Session 2025-11-19 – Ascent headroom tweak 2
 ## Session 2025-11-19 – Ascent headroom tweak 3

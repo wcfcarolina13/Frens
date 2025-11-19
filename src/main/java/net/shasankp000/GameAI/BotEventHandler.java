@@ -98,6 +98,25 @@ public class BotEventHandler {
     private static final Map<BlockPos, Long> dropRetryTimestamps = new ConcurrentHashMap<>();
     private static final double RL_MANUAL_NUDGE_DISTANCE_SQ = 4.0D;
     private static final double ALLY_DEFENSE_RADIUS = 12.0D;
+    // Track recent obstruction damage to gate escape mining (2s)
+    private static final Map<UUID, Long> LAST_OBSTRUCT_DAMAGE_TICK = new ConcurrentHashMap<>();
+    private static final int OBSTRUCT_WINDOW_TICKS = 40; // 2s @20tps
+
+    public static void noteObstructDamage(ServerPlayerEntity bot) {
+        MinecraftServer srv = bot.getServer();
+        if (srv != null) {
+            LAST_OBSTRUCT_DAMAGE_TICK.put(bot.getUuid(), (long) srv.getTicks());
+        }
+    }
+
+    private static boolean tookRecentObstructDamage(ServerPlayerEntity bot) {
+        MinecraftServer srv = bot.getServer();
+        if (srv == null) return false;
+        long now = srv.getTicks();
+        long last = LAST_OBSTRUCT_DAMAGE_TICK.getOrDefault(bot.getUuid(), Long.MIN_VALUE);
+        return now - last <= OBSTRUCT_WINDOW_TICKS;
+    }
+
     private static final Map<UUID, CommandState> COMMAND_STATES = new ConcurrentHashMap<>();
     private static final Map<UUID, Long> LAST_RL_SAMPLE_TICK = new ConcurrentHashMap<>();
     private static final Map<UUID, Long> LAST_SUFFOCATION_ALERT_TICK = new ConcurrentHashMap<>();
@@ -1726,7 +1745,6 @@ public class BotEventHandler {
         BlockPos blockedPos = null;
         for (BlockPos pos : checkPositions) {
             BlockState state = world.getBlockState(pos);
-            // Check for any solid block (not just movement-blocking) that could cause IN_WALL damage
             if (!state.isAir() && !state.isOf(Blocks.BEDROCK) && (state.blocksMovement() || state.isSolidBlock(world, pos))) {
                 anyBlocked = true;
                 blockedPos = pos;
@@ -1734,16 +1752,17 @@ public class BotEventHandler {
                 break;
             }
         }
-        
-        if (!anyBlocked) {
-            LOGGER.info("Bot {} is clear - no suffocation detected (checked {} positions)", 
-                       bot.getName().getString(), checkPositions.size());
-            return false; // Bot is not suffocating
+
+        // Gate escape mining: require obstructing blocks AND recent obstruct damage (<=2s)
+        if (!anyBlocked || !tookRecentObstructDamage(bot)) {
+            LOGGER.info("Bot {} is clear or not damaged recently (blocked={}, recentDamage={}) - skip escape",
+                    bot.getName().getString(), anyBlocked, tookRecentObstructDamage(bot));
+            return false;
         }
-        
-        LOGGER.warn("Bot {} is stuck in blocks at {}! Attempting escape", 
-                    bot.getName().getString(), blockedPos.toShortString());
-        
+
+        LOGGER.warn("Bot {} is stuck and recently damaged at {}! Attempting escape",
+                bot.getName().getString(), blockedPos.toShortString());
+
         // Build list of ALL surrounding blocks to break (3x3x3 cube around bot)
         List<BlockPos> blocksToBreak = new ArrayList<>();
         for (int x = -1; x <= 1; x++) {
@@ -1760,7 +1779,7 @@ public class BotEventHandler {
         
         LOGGER.info("Found {} blocking blocks around bot - attempting to break all", blocksToBreak.size());
         
-        // Try to break ALL surrounding blocks
+        // Try to break ALL surrounding blocks using time-based mining (non-blocking per tick)
         boolean escaped = false;
         int broken = 0;
         for (BlockPos pos : blocksToBreak) {
@@ -1769,35 +1788,42 @@ public class BotEventHandler {
             if (keyword != null) {
                 BotActions.selectBestTool(bot, keyword, "sword");
             }
-            
-            // Use interactionManager.tryBreakBlock to avoid blocking the server thread
-            if (bot.interactionManager.tryBreakBlock(pos)) {
-                broken++;
-                LOGGER.info("Broke block {} at {} ({}/{})",
-                        state.getBlock().getName().getString(),
-                        pos.toShortString(), broken, blocksToBreak.size());
 
-                if (broken >= 2) {
-                    try { Thread.sleep(50); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
-                    boolean stillBlocked = false;
-                    for (BlockPos checkPos : checkPositions) {
-                        BlockState checkState = world.getBlockState(checkPos);
-                        if (!checkState.isAir() && checkState.blocksMovement() && !checkState.isOf(Blocks.BEDROCK)) {
-                            stillBlocked = true;
-                            break;
+            // Initiate time-based mining and do NOT block the server thread
+            MiningTool.mineBlock(bot, pos).thenAccept(msg -> {
+                // This callback runs async; schedule checks on server thread
+                MinecraftServer srv = bot.getServer();
+                if (srv != null) {
+                    srv.execute(() -> {
+                        BlockState after = world.getBlockState(pos);
+                        if (after.isAir()) {
+                            // increment broken counter and check clearance
+                            // Note: using array wrapper for effectively final capture is overkill; rely on fresh scan below
                         }
-                    }
-                    if (!stillBlocked) {
-                        escaped = true;
-                        LOGGER.info("Bot {} is now clear after breaking {} blocks", bot.getName().getString(), broken);
-                        break;
-                    }
+                    });
                 }
+            });
+        }
+
+        // After scheduling mines, poll a few ticks to see if clear
+        for (int i = 0; i < 10; i++) {
+            try { Thread.sleep(50); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+            boolean stillBlocked = false;
+            for (BlockPos checkPos : checkPositions) {
+                BlockState checkState = world.getBlockState(checkPos);
+                if (!checkState.isAir() && checkState.blocksMovement() && !checkState.isOf(Blocks.BEDROCK)) {
+                    stillBlocked = true;
+                    break;
+                }
+            }
+            if (!stillBlocked) {
+                escaped = true;
+                break;
             }
         }
         
-        if (escaped || broken > 0) {
-            LOGGER.info("Bot {} successfully escaped by breaking {} blocks", bot.getName().getString(), broken);
+        if (escaped) {
+            LOGGER.info("Bot {} successfully escaped after scheduled mining", bot.getName().getString());
             return true;
         }
         

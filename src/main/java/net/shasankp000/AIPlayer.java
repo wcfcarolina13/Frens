@@ -226,22 +226,25 @@ public class AIPlayer implements ModInitializer {
             if (entity instanceof ServerPlayerEntity serverPlayer && BotEventHandler.isRegisteredBot(serverPlayer)) {
                 // If bot is taking IN_WALL damage, try to escape immediately
                 // BUT: skip aggressive escape if bot is in ascent mode (digging upward)
-                if (source.isOf(DamageTypes.IN_WALL)) {
-                    if (net.shasankp000.GameAI.services.TaskService.isInAscentMode(serverPlayer.getUuid())) {
-                        // In ascent mode - let the bot handle it naturally, don't aggressively break blocks
-                        LOGGER.debug("Bot {} taking IN_WALL damage during ascent - skipping aggressive escape", 
+                if (source.isOf(DamageTypes.IN_WALL) || source.isOf(DamageTypes.FLY_INTO_WALL) || source.isOf(DamageTypes.CRAMMING)) {
+                    // Record recent obstruction-like damage (2s window gating)
+                    BotEventHandler.noteObstructDamage(serverPlayer);
+
+                    if (source.isOf(DamageTypes.IN_WALL)) {
+                        if (net.shasankp000.GameAI.services.TaskService.isInAscentMode(serverPlayer.getUuid())) {
+                            LOGGER.debug("Bot {} taking IN_WALL damage during ascent - skipping aggressive escape",
                                     serverPlayer.getName().getString());
-                    } else {
-                        LOGGER.warn("Bot {} taking IN_WALL damage - attempting immediate escape", 
-                                   serverPlayer.getName().getString());
-                        // Schedule escape attempt for next tick (don't block damage event)
-                        MinecraftServer server = serverPlayer.getCommandSource().getServer();
-                        if (server != null) {
-                            server.execute(() -> {
-                                if (!serverPlayer.isRemoved()) {
-                                    BotEventHandler.checkAndEscapeSuffocation(serverPlayer);
-                                }
-                            });
+                        } else {
+                            LOGGER.warn("Bot {} taking IN_WALL damage - attempting immediate escape",
+                                    serverPlayer.getName().getString());
+                            MinecraftServer server = serverPlayer.getCommandSource().getServer();
+                            if (server != null) {
+                                server.execute(() -> {
+                                    if (!serverPlayer.isRemoved()) {
+                                        BotEventHandler.checkAndEscapeSuffocation(serverPlayer);
+                                    }
+                                });
+                            }
                         }
                     }
                 }
