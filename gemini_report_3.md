@@ -1,3 +1,45 @@
+## Session 2025-11-19 — Added Movement Escape and Debug Logging
+- Task: Bot still unable to break free from suffocation - no logs showing rescue attempts.
+- Files: BotEventHandler.java, gemini_report_3.md
+- Changes:
+  * Added `attemptEscapeMovement()` - checks all 6 directions (N/S/E/W/Up/Down) for adjacent clear space
+  * Bot now first tries to move out of suffocating position before mining
+  * Added debug logging to `rescueFromBurial()` to track:
+    - When bot is detected as stuck
+    - Damage vs block detection status
+    - Head and feet block states
+    - Movement attempts
+  * Modified rescue flow: Movement attempt → Mine head → Mine horizontally → Mine feet
+- Investigation: Previous logs showed NO rescue messages at all, suggesting detection or registration issue
+- Outcome: Debug logs will reveal why rescue isn't triggering; movement gives bot chance to escape without mining.
+
+## Session 2025-11-19 — Simplified Escape Logic: Prioritize Headspace Clearance
+- Task: Simplify suffocation escape - bot still unable to break free with complex directional logic.
+- Files: BotEventHandler.java, gemini_report_3.md
+- Changes:
+  * Rewrote `rescueFromBurial()` with two-phase approach:
+    1. **Phase 1**: If head blocked, mine upward to clear headspace (priority)
+    2. **Phase 2**: Once head clear, mine horizontally toward nearest air or mine feet block
+  * Removed velocity-setting and complex path-clearing logic
+  * Simplified strategy: clear head first so bot can mine freely, then escape horizontally
+- Rationale: User suspects once headspace is free, bot will be able to mine and move normally
+- Outcome: Bot now focuses on digging up first, then handles horizontal escape after head is clear.
+
+## Session 2025-11-19 — Implemented Smart Escape Route Mining
+- Task: Fix ineffective suffocation mining - bot was mining random blocks without creating an escape route.
+- Files: BotEventHandler.java, gemini_report_3.md
+- Changes:
+  * Added `findNearestAirDirection()` - scans N/S/E/W up to 3 blocks to find nearest open space
+  * Modified `rescueFromBurial()` to use directional escape strategy:
+    1. Find direction with nearest air space (both feet and head level clear)
+    2. Mine blocks toward that direction to create an escape path
+    3. If path is already clear, apply velocity to move bot toward safety
+    4. If completely surrounded, fall back to mining upward
+  * Chat messages now show direction: "I'm stuck in Gravel toward north! Mining with Shovel..."
+- Root Cause: Previous approach mined head/feet blocks randomly without creating a path to safety
+- Outcome: Bot now mines intelligently toward nearest escape route instead of ineffectively digging random blocks.
+- Strategy: Horizontal escape preferred (prevents gravel re-burying), vertical as fallback.
+
 ## Session 2025-11-19 — Fixed Suffocation Detection to Check Block Presence
 - Task: Fix bot not mining when suffocating from gravel burial - bot switched to shovel but wasn't using it.
 - Files: BotEventHandler.java, gemini_report_3.md

@@ -1712,36 +1712,29 @@ public class BotEventHandler {
             LAST_SUFFOCATION_ALERT_TICK.remove(bot.getUuid());
             return false;
         }
+        
+        LOGGER.info("Bot {} is stuck! takingSuffocationDamage={}, stuckInBlocks={}, headState={}, feetState={}", 
+                bot.getName().getString(), takingSuffocationDamage, stuckInBlocks, 
+                headState.getBlock().getName().getString(), feetState.getBlock().getName().getString());
 
-        // Bot is suffocating or stuck - use time-based mining to escape
-        // Determine which block is causing suffocation
-        BlockPos targetPos = null;
-        BlockState targetState = null;
-        String location = "";
-        
-        if (!headState.isAir() && headState.blocksMovement() && !headState.isOf(Blocks.BEDROCK)) {
-            targetPos = head;
-            targetState = headState;
-            location = "above";
-        } else if (!feetState.isAir() && feetState.blocksMovement() && !feetState.isOf(Blocks.BEDROCK)) {
-            targetPos = feet;
-            targetState = feetState;
-            location = "at feet";
+        // FIRST: Try to move out of suffocating position in all directions
+        if (attemptEscapeMovement(bot, world, feet, head)) {
+            LOGGER.info("Bot {} attempting to move out of suffocating position", bot.getName().getString());
+            return true;
         }
-        
-        if (targetPos != null && targetState != null) {
-            // Select best tool for this block
-            String keyword = preferredToolKeyword(targetState);
+
+        // Bot is suffocating or stuck - prioritize clearing headspace first
+        // Step 1: If head is blocked, mine upward to free headspace
+        if (!headState.isAir() && headState.blocksMovement() && !headState.isOf(Blocks.BEDROCK)) {
+            String keyword = preferredToolKeyword(headState);
             if (keyword != null) {
                 BotActions.selectBestTool(bot, keyword, "sword");
             }
             
-            // Alert with detailed message
-            String blockName = targetState.getBlock().getName().getString();
+            String blockName = headState.getBlock().getName().getString();
             String toolName = bot.getMainHandStack().isEmpty() ? "bare hands" : bot.getMainHandStack().getName().getString();
-            alertSuffocationWithDetails(bot, blockName, toolName, location);
+            alertSuffocationWithDetails(bot, blockName, toolName, "above");
             
-            // Attempt time-based mining (throttled to avoid spam)
             MinecraftServer srv = bot.getCommandSource().getServer();
             if (srv != null) {
                 UUID uuid = bot.getUuid();
@@ -1750,15 +1743,73 @@ public class BotEventHandler {
                 
                 if (now - lastAttempt >= MINING_ESCAPE_COOLDOWN_TICKS) {
                     LAST_MINING_ESCAPE_ATTEMPT.put(uuid, now);
-                    LOGGER.info("Bot {} starting time-based mining of {} {}", 
-                            bot.getName().getString(), blockName, location);
-                    MiningTool.mineBlock(bot, targetPos);
+                    LOGGER.info("Bot {} clearing headspace by mining {}", bot.getName().getString(), blockName);
+                    MiningTool.mineBlock(bot, head);
                     return true;
                 }
             }
-        } else {
-            // Generic suffocation alert
-            alertSuffocation(bot);
+            return false;
+        }
+        
+        // Step 2: Head is clear - check if bot is stuck in a hole or surrounded
+        // Check horizontal directions for escape
+        Direction escapeDirection = findNearestAirDirection(world, feet, head);
+        
+        if (escapeDirection != null) {
+            // Found an escape direction - mine blocks that way
+            BlockPos targetPos = feet.offset(escapeDirection);
+            BlockState targetState = world.getBlockState(targetPos);
+            
+            if (!targetState.isAir() && !targetState.isOf(Blocks.BEDROCK) && targetState.blocksMovement()) {
+                String keyword = preferredToolKeyword(targetState);
+                if (keyword != null) {
+                    BotActions.selectBestTool(bot, keyword, "sword");
+                }
+                
+                String blockName = targetState.getBlock().getName().getString();
+                String toolName = bot.getMainHandStack().isEmpty() ? "bare hands" : bot.getMainHandStack().getName().getString();
+                String directionName = escapeDirection.toString().toLowerCase();
+                alertSuffocationWithDetails(bot, blockName, toolName, "toward " + directionName);
+                
+                MinecraftServer srv = bot.getCommandSource().getServer();
+                if (srv != null) {
+                    UUID uuid = bot.getUuid();
+                    long now = srv.getTicks();
+                    long lastAttempt = LAST_MINING_ESCAPE_ATTEMPT.getOrDefault(uuid, Long.MIN_VALUE);
+                    
+                    if (now - lastAttempt >= MINING_ESCAPE_COOLDOWN_TICKS) {
+                        LAST_MINING_ESCAPE_ATTEMPT.put(uuid, now);
+                        LOGGER.info("Bot {} mining escape path {} toward {}", 
+                                bot.getName().getString(), blockName, directionName);
+                        MiningTool.mineBlock(bot, targetPos);
+                        return true;
+                    }
+                }
+            }
+        } else if (!feetState.isAir() && feetState.blocksMovement() && !feetState.isOf(Blocks.BEDROCK)) {
+            // Stuck at feet level
+            String keyword = preferredToolKeyword(feetState);
+            if (keyword != null) {
+                BotActions.selectBestTool(bot, keyword, "sword");
+            }
+            
+            String blockName = feetState.getBlock().getName().getString();
+            String toolName = bot.getMainHandStack().isEmpty() ? "bare hands" : bot.getMainHandStack().getName().getString();
+            alertSuffocationWithDetails(bot, blockName, toolName, "at feet");
+            
+            MinecraftServer srv = bot.getCommandSource().getServer();
+            if (srv != null) {
+                UUID uuid = bot.getUuid();
+                long now = srv.getTicks();
+                long lastAttempt = LAST_MINING_ESCAPE_ATTEMPT.getOrDefault(uuid, Long.MIN_VALUE);
+                
+                if (now - lastAttempt >= MINING_ESCAPE_COOLDOWN_TICKS) {
+                    LAST_MINING_ESCAPE_ATTEMPT.put(uuid, now);
+                    LOGGER.info("Bot {} mining block at feet: {}", bot.getName().getString(), blockName);
+                    MiningTool.mineBlock(bot, feet);
+                    return true;
+                }
+            }
         }
         
         return false;
@@ -1981,6 +2032,38 @@ public class BotEventHandler {
         return null;
     }
 
+    /**
+     * Finds the horizontal direction toward the nearest air space.
+     * Checks each direction up to 3 blocks away.
+     * Returns null if completely surrounded.
+     */
+    private static Direction findNearestAirDirection(ServerWorld world, BlockPos feet, BlockPos head) {
+        Direction[] horizontalDirs = {Direction.NORTH, Direction.SOUTH, Direction.EAST, Direction.WEST};
+        Direction bestDir = null;
+        int shortestDistance = Integer.MAX_VALUE;
+        
+        for (Direction dir : horizontalDirs) {
+            for (int distance = 1; distance <= 3; distance++) {
+                BlockPos checkFeet = feet.offset(dir, distance);
+                BlockPos checkHead = checkFeet.up();
+                
+                BlockState feetState = world.getBlockState(checkFeet);
+                BlockState headState = world.getBlockState(checkHead);
+                
+                // Found air space the bot can stand in
+                if (feetState.isAir() && headState.isAir()) {
+                    if (distance < shortestDistance) {
+                        shortestDistance = distance;
+                        bestDir = dir;
+                    }
+                    break; // Found air in this direction, check next direction
+                }
+            }
+        }
+        
+        return bestDir;
+    }
+
     private static void alertSuffocation(ServerPlayerEntity bot) {
         if (bot == null) {
             return;
@@ -2000,6 +2083,38 @@ public class BotEventHandler {
         LAST_SUFFOCATION_ALERT_TICK.put(uuid, now);
     }
     
+    /**
+     * Attempts to move the bot out of a suffocating position by checking adjacent spaces.
+     * Returns true if movement was attempted, false if no clear path exists.
+     */
+    private static boolean attemptEscapeMovement(ServerPlayerEntity bot, ServerWorld world, BlockPos feet, BlockPos head) {
+        Direction[] allDirs = {Direction.NORTH, Direction.SOUTH, Direction.EAST, Direction.WEST, Direction.UP, Direction.DOWN};
+        
+        for (Direction dir : allDirs) {
+            BlockPos checkFeet = feet.offset(dir);
+            BlockPos checkHead = checkFeet.up();
+            
+            BlockState feetState = world.getBlockState(checkFeet);
+            BlockState headState = world.getBlockState(checkHead);
+            
+            // Found adjacent clear space
+            if (feetState.isAir() && headState.isAir()) {
+                Vec3d targetPos = Vec3d.ofCenter(checkFeet);
+                Vec3d currentPos = new Vec3d(bot.getX(), bot.getY(), bot.getZ());
+                Vec3d direction = targetPos.subtract(currentPos).normalize();
+                
+                // Apply movement velocity toward clear space
+                bot.setVelocity(direction.multiply(0.3));
+                bot.velocityModified = true;
+                
+                LOGGER.info("Bot {} attempting escape movement toward {}", bot.getName().getString(), dir);
+                return true;
+            }
+        }
+        
+        return false;
+    }
+
     private static void alertSuffocationWithDetails(ServerPlayerEntity bot, String blockName, String toolName, String location) {
         if (bot == null) {
             return;
