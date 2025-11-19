@@ -1782,27 +1782,18 @@ public class BotEventHandler {
         // Try to break ALL surrounding blocks using time-based mining (non-blocking per tick)
         boolean escaped = false;
         int broken = 0;
+        boolean manualMiningActive = bot.handSwinging; // heuristic: let manual mining proceed
         for (BlockPos pos : blocksToBreak) {
+            if (manualMiningActive) {
+                continue; // skip programmatic mining if player/bot already swinging
+            }
             BlockState state = world.getBlockState(pos);
             String keyword = preferredToolKeyword(state);
             if (keyword != null) {
                 BotActions.selectBestTool(bot, keyword, "sword");
             }
-
-            // Initiate time-based mining and do NOT block the server thread
-            MiningTool.mineBlock(bot, pos).thenAccept(msg -> {
-                // This callback runs async; schedule checks on server thread
-                MinecraftServer srv = bot.getCommandSource().getServer();
-                if (srv != null) {
-                    srv.execute(() -> {
-                        BlockState after = world.getBlockState(pos);
-                        if (after.isAir()) {
-                            // increment broken counter and check clearance
-                            // Note: using array wrapper for effectively final capture is overkill; rely on fresh scan below
-                        }
-                    });
-                }
-            });
+            MiningTool.mineBlock(bot, pos); // fire & forget; clearance checked later
+        }
         }
 
         // Schedule clearance checks over subsequent ticks instead of blocking sleep loop

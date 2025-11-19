@@ -50,6 +50,8 @@
 
 - Compile fix: replaced bot.getServer() with bot.getCommandSource().getServer() in FunctionCallerV2 (missing method). Files: FunctionCallerV2.java.
 
+- Suffocation rescue tweak: skip MiningTool scheduling if bot already swinging (manual mining), to allow natural obstruction clearing. Files: BotEventHandler.java.
+
 - Outcome: Bot reliably walks to step, clears step + 8 blocks headroom, and ascends without obstruction in tests. Marking feature functional.
 
 
