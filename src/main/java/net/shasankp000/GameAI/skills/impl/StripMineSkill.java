@@ -300,7 +300,10 @@ public final class StripMineSkill implements Skill {
         // Fallback to bot's current facing if no direction parameter provided
         Direction workDirection = commandIssuerFacing != null ? commandIssuerFacing : player.getHorizontalFacing();
         // Re-orient bot immediately to face workDirection before starting (map horizontal direction to yaw)
-        float yaw = switch (workDirection) {
+        Object issuerYawObj = context.parameters().get("issuerYaw");
+        Float issuerYaw = null;
+        if (issuerYawObj instanceof Number n) issuerYaw = n.floatValue();
+        float yaw = issuerYaw != null ? issuerYaw : switch (workDirection) {
             case NORTH -> 180f;
             case SOUTH -> 0f;
             case WEST -> 90f;

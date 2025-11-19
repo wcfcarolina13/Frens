@@ -627,11 +627,15 @@ public class FunctionCallerV2 {
                 if (optionsStr != null && !optionsStr.isBlank()) params.put("options", List.of(optionsStr.split("\\s+")));
 
                 // Inject issuerFacing + lockDirection for directional mining/ascent skills
-                if (!params.containsKey("issuerFacing") && ("collect_dirt".equals(skillName) || "mining".equals(skillName) || "stripmine".equals(skillName))) {
-                    params.put("issuerFacing", bot.getHorizontalFacing().asString());
-                }
-                if (!params.containsKey("lockDirection") && ("collect_dirt".equals(skillName) || "mining".equals(skillName) || "stripmine".equals(skillName))) {
-                    params.put("lockDirection", true); // default lock to preserve continuity
+                if (("collect_dirt".equals(skillName) || "mining".equals(skillName) || "stripmine".equals(skillName))) {
+                    ServerPlayerEntity issuer = currentPlayerUUID() != null ? bot.getServer().getPlayerManager().getPlayer(currentPlayerUUID()) : null;
+                    if (issuer != null) {
+                        params.put("issuerFacing", issuer.getHorizontalFacing().asString());
+                        params.put("issuerYaw", issuer.getYaw());
+                    }
+                    if (optionsStr != null && optionsStr.contains("lockDirection")) {
+                        params.put("lockDirection", true);
+                    }
                 }
                 SkillContext skillContext = new SkillContext(bot.getCommandSource(), sharedState, params);
                 SkillExecutionResult result = SkillManager.runSkill(skillName, skillContext);

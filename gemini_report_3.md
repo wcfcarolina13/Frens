@@ -46,6 +46,8 @@
 
 - Replace asRotation(): Used manual yaw mapping (N/S/W/E) for CollectDirtSkill and StripMineSkill to fix compile errors. Files: CollectDirtSkill.java, StripMineSkill.java.
 
+- Facing fix: Use issuing player yaw (issuerYaw) for precise orientation; removed default lockDirection and added issuerYaw propagation. Files: FunctionCallerV2.java, CollectDirtSkill.java, StripMineSkill.java.
+
 - Outcome: Bot reliably walks to step, clears step + 8 blocks headroom, and ascends without obstruction in tests. Marking feature functional.
 
 
