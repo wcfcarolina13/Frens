@@ -287,6 +287,10 @@ public final class StripMineSkill implements Skill {
         // The context should contain the issuer's facing direction when the command was started
         Direction commandIssuerFacing = null;
         Object directionParam = context.parameters().get("direction");
+        if (directionParam == null) {
+            // Fallback to issuerFacing parameter if provided by caller
+            directionParam = context.parameters().get("issuerFacing");
+        }
         if (directionParam instanceof Direction dir) {
             commandIssuerFacing = dir;
         } else if (directionParam instanceof String dirStr) {
@@ -295,6 +299,9 @@ public final class StripMineSkill implements Skill {
         
         // Fallback to bot's current facing if no direction parameter provided
         Direction workDirection = commandIssuerFacing != null ? commandIssuerFacing : player.getHorizontalFacing();
+        // Re-orient bot immediately to face workDirection before starting
+        player.setYaw(workDirection.asRotation());
+        player.setHeadYaw(workDirection.asRotation());
         
         // Store this direction for future jobs
         WorkDirectionService.setDirection(player.getUuid(), workDirection);

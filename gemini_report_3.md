@@ -40,6 +40,8 @@
 - Files: CollectDirtSkill.java
 - Direction fix: Added issuerFacing + default lockDirection injection in FunctionCallerV2.runSkill() for collect_dirt, mining, stripmine to use player facing. Files: FunctionCallerV2.java.
 
+- StripMine direction: Updated StripMineSkill to accept issuerFacing fallback when direction param absent and immediately orient bot to chosen direction. Files: StripMineSkill.java.
+
 - Outcome: Bot reliably walks to step, clears step + 8 blocks headroom, and ascends without obstruction in tests. Marking feature functional.
 
 
