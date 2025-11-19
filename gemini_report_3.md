@@ -1,3 +1,15 @@
+## Session 2025-11-19 — Fixed Suffocation Detection to Check Block Presence
+- Task: Fix bot not mining when suffocating from gravel burial - bot switched to shovel but wasn't using it.
+- Files: BotEventHandler.java, gemini_report_3.md
+- Changes:
+  * Modified `rescueFromBurial()` to check BOTH damage AND physical block presence at head/feet positions
+  * Previously only checked `tookRecentSuffocation()` which relies on damage events that may not fire immediately
+  * Now detects if bot is stuck in solid blocks (head or feet) even before damage registers
+  * Bot will start mining as soon as blocks are detected, not waiting for damage event
+- Root Cause: Gravel falling on bot doesn't immediately trigger IN_WALL damage, causing bot to skip escape logic
+- Outcome: Bot now proactively detects burial and starts time-based mining immediately when stuck in blocks.
+- Testing: User confirmed bot switches to shovel correctly, fix addresses the "not using it" issue.
+
 ## Session 2025-11-19 — Implemented Time-Based Mining Escape System
 - Task: Make bot actively mine out when stuck/suffocating using time-based, tool-based mining (no programmatic breaking).
 - Files: BotEventHandler.java, gemini_report_3.md

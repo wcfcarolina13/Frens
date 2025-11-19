@@ -78,6 +78,10 @@ public class AIPlayer implements ModInitializer {
     // Track bots that need spawn escape checks
     private static final ConcurrentHashMap<UUID, SpawnEscapeCheck> SPAWN_ESCAPE_CHECKS = new ConcurrentHashMap<>();
     
+    // Track last IN_WALL damage warning to prevent log flooding
+    private static final ConcurrentHashMap<UUID, Long> LAST_IN_WALL_WARNING_TICK = new ConcurrentHashMap<>();
+    private static final long IN_WALL_WARNING_COOLDOWN_TICKS = 60L; // 3 seconds between warnings
+    
     private static class SpawnEscapeCheck {
         int ticksWaited = 0;
         int attemptsRemaining = 5;
@@ -235,10 +239,19 @@ public class AIPlayer implements ModInitializer {
                             LOGGER.debug("Bot {} taking IN_WALL damage during ascent - skipping aggressive escape",
                                     serverPlayer.getName().getString());
                         } else {
-                            LOGGER.warn("Bot {} taking IN_WALL damage - attempting immediate escape",
-                                    serverPlayer.getName().getString());
                             MinecraftServer server = serverPlayer.getCommandSource().getServer();
                             if (server != null) {
+                                // Only log warning once every 3 seconds to prevent flooding
+                                UUID botUuid = serverPlayer.getUuid();
+                                long now = server.getTicks();
+                                long lastWarning = LAST_IN_WALL_WARNING_TICK.getOrDefault(botUuid, Long.MIN_VALUE);
+                                
+                                if (now - lastWarning >= IN_WALL_WARNING_COOLDOWN_TICKS) {
+                                    LOGGER.warn("Bot {} taking IN_WALL damage - attempting immediate escape",
+                                            serverPlayer.getName().getString());
+                                    LAST_IN_WALL_WARNING_TICK.put(botUuid, now);
+                                }
+                                
                                 server.execute(() -> {
                                     if (!serverPlayer.isRemoved()) {
                                         BotEventHandler.checkAndEscapeSuffocation(serverPlayer);

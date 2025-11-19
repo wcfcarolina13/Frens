@@ -1077,7 +1077,8 @@ public class modCommandRegistry {
 
             Vec2f facing = context.getSource().getRotation();
 
-            Vec3d pos = new Vec3d(spawnPos.getX(), spawnPos.getY(), spawnPos.getZ());
+            // Center the bot in the block space to avoid corner collisions
+            Vec3d pos = new Vec3d(spawnPos.getX() + 0.5, spawnPos.getY(), spawnPos.getZ() + 0.5);
 
             GameMode mode = GameMode.SURVIVAL;
 
@@ -1112,7 +1113,7 @@ public class modCommandRegistry {
                 ServerWorld spawnWorld = server.getWorld(dimType);
                 if (spawnWorld != null) {
                     LOGGER.info("spawnBot: remembering spawn for training bot {}", botName);
-                    BotEventHandler.rememberSpawn(spawnWorld, pos.add(0.5, 0, 0.5), facing.y, facing.x);
+                    BotEventHandler.rememberSpawn(spawnWorld, pos, facing.y, facing.x);
                 }
 
                 isTrainingMode = true;
@@ -1163,7 +1164,7 @@ public class modCommandRegistry {
                 ServerWorld spawnWorld = server.getWorld(dimType);
                 if (spawnWorld != null) {
                     LOGGER.info("spawnBot: remembering spawn for play bot {}", botName);
-                    BotEventHandler.rememberSpawn(spawnWorld, pos.add(0.5, 0, 0.5), facing.y, facing.x);
+                    BotEventHandler.rememberSpawn(spawnWorld, pos, facing.y, facing.x);
                 }
 
                 LOGGER.info("Spawned new bot {}!", botName);

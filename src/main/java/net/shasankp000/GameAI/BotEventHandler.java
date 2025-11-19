@@ -1696,20 +1696,25 @@ public class BotEventHandler {
             return false;
         }
         
+        // Check both damage AND physical block presence to catch suffocation early
         boolean takingSuffocationDamage = tookRecentSuffocation(bot);
-        if (!takingSuffocationDamage) {
+        BlockPos feet = bot.getBlockPos();
+        BlockPos head = feet.up();
+        
+        BlockState headState = world.getBlockState(head);
+        BlockState feetState = world.getBlockState(feet);
+        
+        boolean stuckInBlocks = (!headState.isAir() && headState.blocksMovement() && !headState.isOf(Blocks.BEDROCK))
+                             || (!feetState.isAir() && feetState.blocksMovement() && !feetState.isOf(Blocks.BEDROCK));
+        
+        // Exit if not suffocating AND not stuck in blocks
+        if (!takingSuffocationDamage && !stuckInBlocks) {
             LAST_SUFFOCATION_ALERT_TICK.remove(bot.getUuid());
             return false;
         }
 
-        // Bot is suffocating - use time-based mining to escape
-        BlockPos feet = bot.getBlockPos();
-        BlockPos head = feet.up();
-        
+        // Bot is suffocating or stuck - use time-based mining to escape
         // Determine which block is causing suffocation
-        BlockState headState = world.getBlockState(head);
-        BlockState feetState = world.getBlockState(feet);
-        
         BlockPos targetPos = null;
         BlockState targetState = null;
         String location = "";

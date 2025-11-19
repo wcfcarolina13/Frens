@@ -1,9 +1,9 @@
-[13:38:03] [main/INFO]: Loading Minecraft 1.21.10 with Fabric Loader 0.17.3
-[13:38:03] [ForkJoinPool-1-worker-4/WARN]: Mod com_github_fasterxml_jackson-core uses the version jackson-core-2.17.2 which isn't compatible with Loader's extended semantic version format (Could not parse version number component 'jackson'!), SemVer is recommended for reliably evaluating dependencies and prioritizing newer version
-[13:38:03] [ForkJoinPool-1-worker-6/WARN]: Mod com_github_fasterxml_jackson-datatype-jsr310 uses the version jackson-datatype-jsr310-2.8.4 which isn't compatible with Loader's extended semantic version format (Could not parse version number component 'jackson'!), SemVer is recommended for reliably evaluating dependencies and prioritizing newer version
-[13:38:03] [ForkJoinPool-1-worker-6/WARN]: Mod com_github_fasterxml_jackson-annotations uses the version jackson-annotations-2.17.2 which isn't compatible with Loader's extended semantic version format (Could not parse version number component 'jackson'!), SemVer is recommended for reliably evaluating dependencies and prioritizing newer version
-[13:38:03] [ForkJoinPool-1-worker-4/WARN]: Mod com_github_fasterxml_jackson-databind uses the version jackson-databind-2.17.2 which isn't compatible with Loader's extended semantic version format (Could not parse version number component 'jackson'!), SemVer is recommended for reliably evaluating dependencies and prioritizing newer version
-[13:38:05] [main/INFO]: Loading 79 mods:
+[14:40:10] [main/INFO]: Loading Minecraft 1.21.10 with Fabric Loader 0.17.3
+[14:40:10] [ForkJoinPool-1-worker-1/WARN]: Mod com_github_fasterxml_jackson-core uses the version jackson-core-2.17.2 which isn't compatible with Loader's extended semantic version format (Could not parse version number component 'jackson'!), SemVer is recommended for reliably evaluating dependencies and prioritizing newer version
+[14:40:10] [ForkJoinPool-1-worker-4/WARN]: Mod com_github_fasterxml_jackson-annotations uses the version jackson-annotations-2.17.2 which isn't compatible with Loader's extended semantic version format (Could not parse version number component 'jackson'!), SemVer is recommended for reliably evaluating dependencies and prioritizing newer version
+[14:40:10] [ForkJoinPool-1-worker-8/WARN]: Mod com_github_fasterxml_jackson-datatype-jsr310 uses the version jackson-datatype-jsr310-2.8.4 which isn't compatible with Loader's extended semantic version format (Could not parse version number component 'jackson'!), SemVer is recommended for reliably evaluating dependencies and prioritizing newer version
+[14:40:10] [ForkJoinPool-1-worker-8/WARN]: Mod com_github_fasterxml_jackson-databind uses the version jackson-databind-2.17.2 which isn't compatible with Loader's extended semantic version format (Could not parse version number component 'jackson'!), SemVer is recommended for reliably evaluating dependencies and prioritizing newer version
+[14:40:11] [main/INFO]: Loading 79 mods:
 	- ai-player 1.0.6-release+1.21.10
 	   |-- ai_djl_api 0.33.0
 	   |-- ai_djl_huggingface_tokenizers 0.33.0
@@ -88,186 +88,186 @@
 	   |-- fabric-rendering-v1 16.0.2+91152d886f
 	   |-- fabric-resource-loader-v0 3.2.3+3388a3b26f
 	   \-- fabric-resource-loader-v1 1.0.3+8cc86c156f
-[13:38:05] [main/INFO]: SpongePowered MIXIN Subsystem Version=0.8.7 Source=file:/Users/roti/Library/Application%20Support/PrismLauncher/libraries/net/fabricmc/sponge-mixin/0.16.5+mixin.0.8.7/sponge-mixin-0.16.5+mixin.0.8.7.jar Service=Knot/Fabric Env=CLIENT
-[13:38:05] [main/INFO]: Compatibility level set to JAVA_17
-[13:38:05] [main/INFO]: Compatibility level set to JAVA_21
-[13:38:05] [main/WARN]: Reference map 'iris.refmap.json' for mixins.iris.json could not be read. If this is a development environment you can ignore this message
-[13:38:05] [main/WARN]: Reference map 'iris-fabric.refmap.json' for mixins.iris.fabric.json could not be read. If this is a development environment you can ignore this message
-[13:38:05] [main/WARN]: Reference map 'iris.refmap.json' for mixins.iris.fantastic.json could not be read. If this is a development environment you can ignore this message
-[13:38:05] [main/WARN]: Reference map 'iris.refmap.json' for mixins.iris.vertexformat.json could not be read. If this is a development environment you can ignore this message
-[13:38:05] [main/WARN]: Reference map 'iris.refmap.json' for mixins.iris.bettermipmaps.json could not be read. If this is a development environment you can ignore this message
-[13:38:05] [main/WARN]: Reference map 'iris.refmap.json' for mixins.iris.compat.sodium.json could not be read. If this is a development environment you can ignore this message
-[13:38:05] [main/WARN]: Reference map 'iris.refmap.json' for mixins.iris.fixes.maxfpscrash.json could not be read. If this is a development environment you can ignore this message
-[13:38:05] [main/INFO]: Loaded configuration file for Lithium: 163 options available, 0 override(s) found.
-[13:38:05] [main/INFO]: Loaded configuration file for Sodium: 42 options available, 1 override(s) found
-[13:38:05] [main/WARN]: Force-disabling mixin 'features.render.world.sky.FogRendererMixin' as rule 'mixin.features.render.world.sky' (added by mods [iris]) disables it and children
-[13:38:05] [main/WARN]: Force-disabling mixin 'features.render.world.sky.ClientLevelMixin' as rule 'mixin.features.render.world.sky' (added by mods [iris]) disables it and children
-[13:38:05] [main/WARN]: Force-disabling mixin 'features.render.world.sky.LevelRendererMixin' as rule 'mixin.features.render.world.sky' (added by mods [iris]) disables it and children
-[13:38:06] [main/INFO]: Searching for graphics cards...
-[13:38:06] [main/INFO]: Initializing MixinExtras via com.llamalad7.mixinextras.service.MixinExtrasServiceImpl(version=0.5.0).
-[13:38:06] [Datafixer Bootstrap/INFO]: 278 Datafixer optimizations took 160 milliseconds
-[13:38:09] [Render thread/INFO]: Environment: Environment[sessionHost=https://sessionserver.mojang.com, servicesHost=https://api.minecraftservices.com, profilesHost=https://api.mojang.com, name=PROD]
-[13:38:09] [Render thread/INFO]: Setting user: RotiWokeman
-[13:38:09] [Render thread/INFO]: Detecting launcher environment...
-[13:38:09] [Render thread/INFO]: Game directory: /Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft
-[13:38:09] [Render thread/INFO]: User home: /Users/roti
-[13:38:09] [Render thread/INFO]: OS: mac os x
-[13:38:09] [Render thread/INFO]: Detected launcher: Prism Launcher
-[13:38:09] [Render thread/INFO]: Hello Fabric world!
-[13:38:09] [Render thread/INFO]: [STDOUT]: Using provider: ollama
-[13:38:09] [Render thread/INFO]: [STDOUT]: === ALL SYSTEM PROPERTIES ===
-[13:38:09] [Render thread/INFO]: [STDOUT]: aiplayer.llmMode = ollama
-[13:38:09] [Render thread/INFO]: [STDOUT]: === END DEBUG ===
-[13:38:10] [Render thread/INFO]: ✅ sqlite-vec already present at: /Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/config/sqlite_vector/sqlite-vec/vector0.dylib
-[13:38:11] [Render thread/INFO]: Attempting to load sqlite-vec from /Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/config/sqlite_vector/sqlite-vec/vector0.dylib
-[13:38:11] [Render thread/INFO]: 🔗 Loading /Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/config/sqlite_vector/sqlite-vec/vector0 with entrypoint sqlite3_vec_init
-[13:38:11] [Render thread/INFO]: ✅ sqlite-vec version: v0.1.6
-[13:38:11] [Render thread/WARN]: ⚠️ macOS detected — skipping sqlite-vss (avoids OpenMP/libomp conflicts). Using fallback cosine_distance UDF.
-[13:38:11] [Render thread/INFO]: ✅ Registered fallback cosine_distance UDF on current connection.
-[13:38:11] [Render thread/INFO]: ✅ Memory table created.
-[13:38:11] [Render thread/INFO]: Setting up Q-table storage...
-[13:38:11] [Render thread/INFO]: Launcher: Prism Launcher
+[14:40:12] [main/INFO]: SpongePowered MIXIN Subsystem Version=0.8.7 Source=file:/Users/roti/Library/Application%20Support/PrismLauncher/libraries/net/fabricmc/sponge-mixin/0.16.5+mixin.0.8.7/sponge-mixin-0.16.5+mixin.0.8.7.jar Service=Knot/Fabric Env=CLIENT
+[14:40:12] [main/INFO]: Compatibility level set to JAVA_17
+[14:40:12] [main/INFO]: Compatibility level set to JAVA_21
+[14:40:12] [main/WARN]: Reference map 'iris.refmap.json' for mixins.iris.json could not be read. If this is a development environment you can ignore this message
+[14:40:12] [main/WARN]: Reference map 'iris-fabric.refmap.json' for mixins.iris.fabric.json could not be read. If this is a development environment you can ignore this message
+[14:40:12] [main/WARN]: Reference map 'iris.refmap.json' for mixins.iris.fantastic.json could not be read. If this is a development environment you can ignore this message
+[14:40:12] [main/WARN]: Reference map 'iris.refmap.json' for mixins.iris.vertexformat.json could not be read. If this is a development environment you can ignore this message
+[14:40:12] [main/WARN]: Reference map 'iris.refmap.json' for mixins.iris.bettermipmaps.json could not be read. If this is a development environment you can ignore this message
+[14:40:12] [main/WARN]: Reference map 'iris.refmap.json' for mixins.iris.compat.sodium.json could not be read. If this is a development environment you can ignore this message
+[14:40:12] [main/WARN]: Reference map 'iris.refmap.json' for mixins.iris.fixes.maxfpscrash.json could not be read. If this is a development environment you can ignore this message
+[14:40:12] [main/INFO]: Loaded configuration file for Lithium: 163 options available, 0 override(s) found.
+[14:40:12] [main/INFO]: Loaded configuration file for Sodium: 42 options available, 1 override(s) found
+[14:40:12] [main/WARN]: Force-disabling mixin 'features.render.world.sky.FogRendererMixin' as rule 'mixin.features.render.world.sky' (added by mods [iris]) disables it and children
+[14:40:12] [main/WARN]: Force-disabling mixin 'features.render.world.sky.ClientLevelMixin' as rule 'mixin.features.render.world.sky' (added by mods [iris]) disables it and children
+[14:40:12] [main/WARN]: Force-disabling mixin 'features.render.world.sky.LevelRendererMixin' as rule 'mixin.features.render.world.sky' (added by mods [iris]) disables it and children
+[14:40:12] [main/INFO]: Searching for graphics cards...
+[14:40:12] [main/INFO]: Initializing MixinExtras via com.llamalad7.mixinextras.service.MixinExtrasServiceImpl(version=0.5.0).
+[14:40:13] [Datafixer Bootstrap/INFO]: 278 Datafixer optimizations took 152 milliseconds
+[14:40:16] [Render thread/INFO]: Environment: Environment[sessionHost=https://sessionserver.mojang.com, servicesHost=https://api.minecraftservices.com, profilesHost=https://api.mojang.com, name=PROD]
+[14:40:16] [Render thread/INFO]: Setting user: RotiWokeman
+[14:40:16] [Render thread/INFO]: Detecting launcher environment...
+[14:40:16] [Render thread/INFO]: Game directory: /Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft
+[14:40:16] [Render thread/INFO]: User home: /Users/roti
+[14:40:16] [Render thread/INFO]: OS: mac os x
+[14:40:16] [Render thread/INFO]: Detected launcher: Prism Launcher
+[14:40:16] [Render thread/INFO]: Hello Fabric world!
+[14:40:16] [Render thread/INFO]: [STDOUT]: Using provider: ollama
+[14:40:16] [Render thread/INFO]: [STDOUT]: === ALL SYSTEM PROPERTIES ===
+[14:40:16] [Render thread/INFO]: [STDOUT]: aiplayer.llmMode = ollama
+[14:40:16] [Render thread/INFO]: [STDOUT]: === END DEBUG ===
+[14:40:17] [Render thread/INFO]: ✅ sqlite-vec already present at: /Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/config/sqlite_vector/sqlite-vec/vector0.dylib
+[14:40:17] [Render thread/INFO]: Attempting to load sqlite-vec from /Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/config/sqlite_vector/sqlite-vec/vector0.dylib
+[14:40:17] [Render thread/INFO]: 🔗 Loading /Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/config/sqlite_vector/sqlite-vec/vector0 with entrypoint sqlite3_vec_init
+[14:40:17] [Render thread/INFO]: ✅ sqlite-vec version: v0.1.6
+[14:40:17] [Render thread/WARN]: ⚠️ macOS detected — skipping sqlite-vss (avoids OpenMP/libomp conflicts). Using fallback cosine_distance UDF.
+[14:40:17] [Render thread/INFO]: ✅ Registered fallback cosine_distance UDF on current connection.
+[14:40:17] [Render thread/INFO]: ✅ Memory table created.
+[14:40:17] [Render thread/INFO]: Setting up Q-table storage...
+[14:40:17] [Render thread/INFO]: Launcher: Prism Launcher
 Game Directory: /Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft
 User Home: /Users/roti
 User Name: roti
 OS: Mac OS X
 
-[13:38:11] [Render thread/INFO]: ✅ Q-table storage directory exists: /Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/qtable_storage
-[13:38:11] [ForkJoinPool.commonPool-worker-1/INFO]: [STDOUT]: ℹ️ ai_search_config.json already exists, no setup needed.
-[13:38:11] [ForkJoinPool.commonPool-worker-1/INFO]: BERT model files already exist! Skipping download....
-[13:38:11] [ForkJoinPool.commonPool-worker-1/INFO]: CART files already exist! Skipping download....
-[13:38:11] [ForkJoinPool.commonPool-worker-1/INFO]: OpenNLP model files already exist! Skipping download....
-[13:38:11] [ForkJoinPool.commonPool-worker-1/INFO]: LIDSNet model files already exist! Skipping download....
-[13:38:11] [ForkJoinPool.commonPool-worker-1/WARN]: Error, file /Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/config/ai-player/NLPModels/distilbert-finetuned-intent-torchscript.zip doesn't exist for extraction! Ignore if already extracted previously.
-[13:38:11] [ForkJoinPool.commonPool-worker-1/WARN]: Error, file /Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/config/ai-player/NLPModels/cart.zip doesn't exist for extraction! Ignore if already extracted previously.
-[13:38:11] [ForkJoinPool.commonPool-worker-1/WARN]: Error, file /Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/config/ai-player/NLPModels/cart.zip doesn't exist for extraction! Ignore if already extracted previously.
-[13:38:11] [Render thread/INFO]: Initializing Distant Horizons client, firing DhApiBeforeDhInitEvent...
-[13:38:13] [ForkJoinPool.commonPool-worker-1/INFO]: [STDOUT]: NLP model deployment task complete
-[13:38:13] [Render thread/INFO]: Distant Horizons, Version: 2.3.6-b
-[13:38:13] [Render thread/INFO]: Registering Fabric Client Events
-[13:38:13] [Render thread/INFO]: Registering Fabric Server Events
-[13:38:13] [Render thread/INFO]: Registered mod compatibility accessor for: [Sodium-Fabric].
-[13:38:13] [Render thread/INFO]: Registered mod compatibility accessor for: [iris].
-[13:38:13] [Render thread/INFO]: Initialising config for [DistantHorizons]
-[13:38:13] [Render thread/INFO]: [DistantHorizons] Config initialised
-[13:38:13] [Render thread/INFO]: Distant Horizons client Initialized.
-[13:38:13] [Render thread/INFO]: [Indigo] Different rendering plugin detected; not applying Indigo.
-[13:38:13] [Render thread/INFO]: [STDOUT]: [LibGui] Initializing Client...
-[13:38:13] [Render thread/INFO]: Queuing DH event binding...
-[13:38:13] [Render thread/ERROR]: Couldn't load distanthorizons pack metadata: Pack declares support for version newer than 64, but is missing mandatory fields min_format and max_format
-[13:38:13] [Render thread/ERROR]: Couldn't load entityculling pack metadata: Pack declares support for version newer than 64, but is missing mandatory fields min_format and max_format
-[13:38:13] [Render thread/ERROR]: Couldn't load trender pack metadata: Pack declares support for version newer than 64, but is missing mandatory fields min_format and max_format
-[13:38:13] [Render thread/INFO]: Backend library: LWJGL version 3.3.3-snapshot
-[13:38:14] [ForkJoinPool.commonPool-worker-1/WARN]: [Iris Update Check] This version doesn't have an update index, skipping.
-[13:38:16] [Render thread/INFO]: Initializing ImmediatelyFast 1.13.1+1.21.10 on Apple M2 Pro (Apple) with OpenGL 4.1 Metal - 89.4
-[13:38:16] [Render thread/INFO]: Found Iris/Oculus 1.9.6+mc1.21.9. Enabling compatibility.
-[13:38:16] [Render thread/INFO]: Debug functionality is disabled.
-[13:38:16] [Render thread/INFO]: DSA support not detected.
-[13:38:16] [Render thread/INFO]: OpenGL Vendor: Apple
-[13:38:16] [Render thread/INFO]: OpenGL Renderer: Apple M2 Pro
-[13:38:16] [Render thread/INFO]: OpenGL Version: 4.1 Metal - 89.4
-[13:38:16] [Render thread/INFO]: Using optional rendering extensions: 
-[13:38:16] [Render thread/ERROR]: Couldn't load distanthorizons pack metadata: Pack declares support for version newer than 64, but is missing mandatory fields min_format and max_format
-[13:38:16] [Render thread/ERROR]: Couldn't load entityculling pack metadata: Pack declares support for version newer than 64, but is missing mandatory fields min_format and max_format
-[13:38:16] [Render thread/ERROR]: Couldn't load trender pack metadata: Pack declares support for version newer than 64, but is missing mandatory fields min_format and max_format
-[13:38:16] [DH-ApplyConfigPresetTimer/INFO]: changing preset to: BALANCED
-[13:38:16] [DH-ApplyConfigPresetTimer/INFO]: preset active: BALANCED
-[13:38:16] [DH-ApplyConfigPresetTimer/INFO]: changing preset to: MEDIUM
-[13:38:16] [DH-ApplyConfigPresetTimer/INFO]: preset active: MEDIUM
-[13:38:17] [Render thread/INFO]: Hardware information:
-[13:38:17] [Render thread/INFO]: CPU: 10x Apple M2 Pro
-[13:38:17] [Render thread/INFO]: GPU: Apple M2 Pro (Supports OpenGL 4.1 Metal - 89.4)
-[13:38:17] [Render thread/INFO]: OS: Mac OS X (15.6.1)
-[13:38:17] [Render thread/INFO]: Reloading ResourceManager: vanilla, fabric, ai-player, carpet, distanthorizons, entityculling, fabric-api, fabric-api-base, fabric-api-lookup-api-v1, fabric-biome-api-v1, fabric-block-api-v1, fabric-block-view-api-v2, fabric-command-api-v2, fabric-content-registries-v0, fabric-convention-tags-v1, fabric-convention-tags-v2, fabric-crash-report-info-v1, fabric-data-attachment-api-v1, fabric-data-generation-api-v1, fabric-dimensions-v1, fabric-entity-events-v1, fabric-events-interaction-v0, fabric-game-rule-api-v1, fabric-item-api-v1, fabric-item-group-api-v1, fabric-key-binding-api-v1, fabric-lifecycle-events-v1, fabric-loot-api-v2, fabric-loot-api-v3, fabric-message-api-v1, fabric-model-loading-api-v1, fabric-networking-api-v1, fabric-object-builder-api-v1, fabric-particles-v1, fabric-recipe-api-v1, fabric-registry-sync-v0, fabric-renderer-api-v1, fabric-renderer-indigo, fabric-rendering-fluids-v1, fabric-rendering-v1, fabric-resource-conditions-api-v1, fabric-resource-loader-v0, fabric-resource-loader-v1, fabric-screen-api-v1, fabric-screen-handler-api-v1, fabric-serialization-api-v1, fabric-sound-api-v1, fabric-tag-api-v1, fabric-transfer-api-v1, fabric-transitive-access-wideners-v1, fabricloader, immediatelyfast, iris, lithium, org_apache_commons_commons-math3, sodium, trender
-[13:38:17] [Render thread/INFO]: Running Delayed setup...
-[13:38:17] [Render thread/INFO]: Delayed setup complete, firing DhApiAfterDhInitEvent event...
-[13:38:17] [Render thread/INFO]: DH Ready, binding Iris event handlers...
-[13:38:17] [Render thread/INFO]: DH Iris events bound.
-[13:38:17] [Worker-Main-8/INFO]: Found unifont_all_no_pua-16.0.03.hex, loading
-[13:38:17] [Worker-Main-6/INFO]: Found unifont_pua-16.0.03.hex, loading
-[13:38:17] [Render thread/INFO]: Profile: HIGH (+0 options changed by user)
-[13:38:17] [Worker-Main-2/INFO]: Found unifont_jp_patch-16.0.03.hex, loading
-[13:38:18] [Render thread/INFO]: Using shaderpack: ComplementaryReimagined_r5.6.1
-[13:38:18] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/terrain and FS minecraft:core/terrain. Log output: WARNING: Could not find vertex shader attribute 'Normal' to match BindAttributeLocation request.
+[14:40:17] [Render thread/INFO]: ✅ Q-table storage directory exists: /Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/qtable_storage
+[14:40:17] [ForkJoinPool.commonPool-worker-1/INFO]: [STDOUT]: ℹ️ ai_search_config.json already exists, no setup needed.
+[14:40:18] [ForkJoinPool.commonPool-worker-1/INFO]: BERT model files already exist! Skipping download....
+[14:40:18] [ForkJoinPool.commonPool-worker-1/INFO]: CART files already exist! Skipping download....
+[14:40:18] [ForkJoinPool.commonPool-worker-1/INFO]: OpenNLP model files already exist! Skipping download....
+[14:40:18] [ForkJoinPool.commonPool-worker-1/INFO]: LIDSNet model files already exist! Skipping download....
+[14:40:18] [ForkJoinPool.commonPool-worker-1/WARN]: Error, file /Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/config/ai-player/NLPModels/distilbert-finetuned-intent-torchscript.zip doesn't exist for extraction! Ignore if already extracted previously.
+[14:40:18] [ForkJoinPool.commonPool-worker-1/WARN]: Error, file /Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/config/ai-player/NLPModels/cart.zip doesn't exist for extraction! Ignore if already extracted previously.
+[14:40:18] [ForkJoinPool.commonPool-worker-1/WARN]: Error, file /Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/config/ai-player/NLPModels/cart.zip doesn't exist for extraction! Ignore if already extracted previously.
+[14:40:18] [Render thread/INFO]: Initializing Distant Horizons client, firing DhApiBeforeDhInitEvent...
+[14:40:20] [ForkJoinPool.commonPool-worker-1/INFO]: [STDOUT]: NLP model deployment task complete
+[14:40:20] [Render thread/INFO]: Distant Horizons, Version: 2.3.6-b
+[14:40:20] [Render thread/INFO]: Registering Fabric Client Events
+[14:40:20] [Render thread/INFO]: Registering Fabric Server Events
+[14:40:20] [Render thread/INFO]: Registered mod compatibility accessor for: [Sodium-Fabric].
+[14:40:20] [Render thread/INFO]: Registered mod compatibility accessor for: [iris].
+[14:40:20] [Render thread/INFO]: Initialising config for [DistantHorizons]
+[14:40:20] [Render thread/INFO]: [DistantHorizons] Config initialised
+[14:40:20] [Render thread/INFO]: Distant Horizons client Initialized.
+[14:40:20] [Render thread/INFO]: [Indigo] Different rendering plugin detected; not applying Indigo.
+[14:40:20] [Render thread/INFO]: [STDOUT]: [LibGui] Initializing Client...
+[14:40:20] [Render thread/INFO]: Queuing DH event binding...
+[14:40:20] [Render thread/ERROR]: Couldn't load distanthorizons pack metadata: Pack declares support for version newer than 64, but is missing mandatory fields min_format and max_format
+[14:40:20] [Render thread/ERROR]: Couldn't load entityculling pack metadata: Pack declares support for version newer than 64, but is missing mandatory fields min_format and max_format
+[14:40:20] [Render thread/ERROR]: Couldn't load trender pack metadata: Pack declares support for version newer than 64, but is missing mandatory fields min_format and max_format
+[14:40:20] [Render thread/INFO]: Backend library: LWJGL version 3.3.3-snapshot
+[14:40:21] [ForkJoinPool.commonPool-worker-1/WARN]: [Iris Update Check] This version doesn't have an update index, skipping.
+[14:40:23] [Render thread/INFO]: Initializing ImmediatelyFast 1.13.1+1.21.10 on Apple M2 Pro (Apple) with OpenGL 4.1 Metal - 89.4
+[14:40:23] [Render thread/INFO]: Found Iris/Oculus 1.9.6+mc1.21.9. Enabling compatibility.
+[14:40:23] [Render thread/INFO]: Debug functionality is disabled.
+[14:40:23] [Render thread/INFO]: DSA support not detected.
+[14:40:23] [Render thread/INFO]: OpenGL Vendor: Apple
+[14:40:23] [Render thread/INFO]: OpenGL Renderer: Apple M2 Pro
+[14:40:23] [Render thread/INFO]: OpenGL Version: 4.1 Metal - 89.4
+[14:40:23] [Render thread/INFO]: Using optional rendering extensions: 
+[14:40:23] [Render thread/ERROR]: Couldn't load distanthorizons pack metadata: Pack declares support for version newer than 64, but is missing mandatory fields min_format and max_format
+[14:40:23] [Render thread/ERROR]: Couldn't load entityculling pack metadata: Pack declares support for version newer than 64, but is missing mandatory fields min_format and max_format
+[14:40:23] [Render thread/ERROR]: Couldn't load trender pack metadata: Pack declares support for version newer than 64, but is missing mandatory fields min_format and max_format
+[14:40:23] [DH-ApplyConfigPresetTimer/INFO]: changing preset to: BALANCED
+[14:40:23] [DH-ApplyConfigPresetTimer/INFO]: changing preset to: MEDIUM
+[14:40:23] [DH-ApplyConfigPresetTimer/INFO]: preset active: BALANCED
+[14:40:23] [DH-ApplyConfigPresetTimer/INFO]: preset active: MEDIUM
+[14:40:23] [Render thread/INFO]: Hardware information:
+[14:40:23] [Render thread/INFO]: CPU: 10x Apple M2 Pro
+[14:40:23] [Render thread/INFO]: GPU: Apple M2 Pro (Supports OpenGL 4.1 Metal - 89.4)
+[14:40:23] [Render thread/INFO]: OS: Mac OS X (15.6.1)
+[14:40:23] [Render thread/INFO]: Reloading ResourceManager: vanilla, fabric, ai-player, carpet, distanthorizons, entityculling, fabric-api, fabric-api-base, fabric-api-lookup-api-v1, fabric-biome-api-v1, fabric-block-api-v1, fabric-block-view-api-v2, fabric-command-api-v2, fabric-content-registries-v0, fabric-convention-tags-v1, fabric-convention-tags-v2, fabric-crash-report-info-v1, fabric-data-attachment-api-v1, fabric-data-generation-api-v1, fabric-dimensions-v1, fabric-entity-events-v1, fabric-events-interaction-v0, fabric-game-rule-api-v1, fabric-item-api-v1, fabric-item-group-api-v1, fabric-key-binding-api-v1, fabric-lifecycle-events-v1, fabric-loot-api-v2, fabric-loot-api-v3, fabric-message-api-v1, fabric-model-loading-api-v1, fabric-networking-api-v1, fabric-object-builder-api-v1, fabric-particles-v1, fabric-recipe-api-v1, fabric-registry-sync-v0, fabric-renderer-api-v1, fabric-renderer-indigo, fabric-rendering-fluids-v1, fabric-rendering-v1, fabric-resource-conditions-api-v1, fabric-resource-loader-v0, fabric-resource-loader-v1, fabric-screen-api-v1, fabric-screen-handler-api-v1, fabric-serialization-api-v1, fabric-sound-api-v1, fabric-tag-api-v1, fabric-transfer-api-v1, fabric-transitive-access-wideners-v1, fabricloader, immediatelyfast, iris, lithium, org_apache_commons_commons-math3, sodium, trender
+[14:40:24] [Render thread/INFO]: Running Delayed setup...
+[14:40:24] [Render thread/INFO]: Delayed setup complete, firing DhApiAfterDhInitEvent event...
+[14:40:24] [Render thread/INFO]: DH Ready, binding Iris event handlers...
+[14:40:24] [Render thread/INFO]: DH Iris events bound.
+[14:40:24] [Worker-Main-5/INFO]: Found unifont_all_no_pua-16.0.03.hex, loading
+[14:40:24] [Worker-Main-7/INFO]: Found unifont_pua-16.0.03.hex, loading
+[14:40:24] [Render thread/INFO]: Profile: HIGH (+0 options changed by user)
+[14:40:24] [Worker-Main-5/INFO]: Found unifont_jp_patch-16.0.03.hex, loading
+[14:40:24] [Render thread/INFO]: Using shaderpack: ComplementaryReimagined_r5.6.1
+[14:40:25] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/entity and FS minecraft:core/entity. Log output: WARNING: Could not find vertex shader attribute 'Normal' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'UV2' to match BindAttributeLocation request.
+WARNING: Output of vertex shader 'overlayColor' not read by fragment shader
 
-[13:38:18] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/rendertype_entity_alpha and FS minecraft:core/rendertype_entity_alpha. Log output: WARNING: Could not find vertex shader attribute 'Normal' to match BindAttributeLocation request.
+[14:40:25] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/terrain and FS minecraft:core/terrain. Log output: WARNING: Could not find vertex shader attribute 'Normal' to match BindAttributeLocation request.
+
+[14:40:25] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/entity and FS minecraft:core/entity. Log output: WARNING: Output of vertex shader 'overlayColor' not read by fragment shader
+
+[14:40:25] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/rendertype_crumbling and FS minecraft:core/rendertype_crumbling. Log output: WARNING: Could not find vertex shader attribute 'Normal' to match BindAttributeLocation request.
+WARNING: Output of vertex shader 'texCoord2' not read by fragment shader
+
+[14:40:25] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/entity and FS minecraft:core/entity. Log output: WARNING: Output of vertex shader 'overlayColor' not read by fragment shader
+
+[14:40:25] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/rendertype_item_entity_translucent_cull and FS minecraft:core/rendertype_item_entity_translucent_cull. Log output: WARNING: Output of vertex shader 'texCoord1' not read by fragment shader
+WARNING: Output of vertex shader 'texCoord2' not read by fragment shader
+
+[14:40:25] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/rendertype_entity_alpha and FS minecraft:core/rendertype_entity_alpha. Log output: WARNING: Could not find vertex shader attribute 'Normal' to match BindAttributeLocation request.
 WARNING: Output of vertex shader 'texCoord1' not read by fragment shader
 WARNING: Output of vertex shader 'texCoord2' not read by fragment shader
 
-[13:38:18] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/rendertype_text_see_through and FS minecraft:core/rendertype_text_see_through. Log output: WARNING: Could not find vertex shader attribute 'UV2' to match BindAttributeLocation request.
+[14:40:25] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/entity and FS minecraft:core/entity. Log output: WARNING: Output of vertex shader 'overlayColor' not read by fragment shader
 
-[13:38:18] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/rendertype_text_intensity_see_through and FS minecraft:core/rendertype_text_intensity_see_through. Log output: WARNING: Could not find vertex shader attribute 'UV2' to match BindAttributeLocation request.
+[14:40:25] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/terrain and FS minecraft:core/terrain. Log output: WARNING: Could not find vertex shader attribute 'Normal' to match BindAttributeLocation request.
 
-[13:38:18] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/entity and FS minecraft:core/entity. Log output: WARNING: Output of vertex shader 'overlayColor' not read by fragment shader
+[14:40:25] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/terrain and FS minecraft:core/terrain. Log output: WARNING: Could not find vertex shader attribute 'Normal' to match BindAttributeLocation request.
 
-[13:38:18] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/rendertype_beacon_beam and FS minecraft:core/rendertype_beacon_beam. Log output: WARNING: Could not find vertex shader attribute 'Normal' to match BindAttributeLocation request.
-WARNING: Could not find vertex shader attribute 'UV2' to match BindAttributeLocation request.
+[14:40:25] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/terrain and FS minecraft:core/terrain. Log output: WARNING: Could not find vertex shader attribute 'Normal' to match BindAttributeLocation request.
 
-[13:38:18] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/terrain and FS minecraft:core/terrain. Log output: WARNING: Could not find vertex shader attribute 'Normal' to match BindAttributeLocation request.
+[14:40:25] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/terrain and FS minecraft:core/terrain. Log output: WARNING: Could not find vertex shader attribute 'Normal' to match BindAttributeLocation request.
 
-[13:38:18] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/rendertype_crumbling and FS minecraft:core/rendertype_crumbling. Log output: WARNING: Could not find vertex shader attribute 'Normal' to match BindAttributeLocation request.
-WARNING: Output of vertex shader 'texCoord2' not read by fragment shader
+[14:40:25] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/entity and FS minecraft:core/entity. Log output: WARNING: Output of vertex shader 'overlayColor' not read by fragment shader
 
-[13:38:18] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/rendertype_entity_shadow and FS minecraft:core/rendertype_entity_shadow. Log output: WARNING: Could not find vertex shader attribute 'UV1' to match BindAttributeLocation request.
+[14:40:25] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/terrain and FS minecraft:core/terrain. Log output: WARNING: Could not find vertex shader attribute 'Normal' to match BindAttributeLocation request.
+
+[14:40:25] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/rendertype_entity_shadow and FS minecraft:core/rendertype_entity_shadow. Log output: WARNING: Could not find vertex shader attribute 'UV1' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'Normal' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'UV2' to match BindAttributeLocation request.
 
-[13:38:18] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/terrain and FS minecraft:core/terrain. Log output: WARNING: Could not find vertex shader attribute 'Normal' to match BindAttributeLocation request.
+[14:40:25] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/rendertype_text_see_through and FS minecraft:core/rendertype_text_see_through. Log output: WARNING: Could not find vertex shader attribute 'UV2' to match BindAttributeLocation request.
 
-[13:38:18] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/entity and FS minecraft:core/entity. Log output: WARNING: Could not find vertex shader attribute 'Normal' to match BindAttributeLocation request.
+[14:40:25] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/rendertype_beacon_beam and FS minecraft:core/rendertype_beacon_beam. Log output: WARNING: Could not find vertex shader attribute 'Normal' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'UV2' to match BindAttributeLocation request.
+
+[14:40:25] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/entity and FS minecraft:core/entity. Log output: WARNING: Could not find vertex shader attribute 'Normal' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'UV2' to match BindAttributeLocation request.
 WARNING: Output of vertex shader 'overlayColor' not read by fragment shader
 
-[13:38:18] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/rendertype_item_entity_translucent_cull and FS minecraft:core/rendertype_item_entity_translucent_cull. Log output: WARNING: Output of vertex shader 'texCoord1' not read by fragment shader
-WARNING: Output of vertex shader 'texCoord2' not read by fragment shader
+[14:40:25] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/rendertype_text_background_see_through and FS minecraft:core/rendertype_text_background_see_through. Log output: WARNING: Could not find vertex shader attribute 'UV2' to match BindAttributeLocation request.
 
-[13:38:18] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/entity and FS minecraft:core/entity. Log output: WARNING: Output of vertex shader 'overlayColor' not read by fragment shader
-
-[13:38:18] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/terrain and FS minecraft:core/terrain. Log output: WARNING: Could not find vertex shader attribute 'Normal' to match BindAttributeLocation request.
-
-[13:38:18] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/entity and FS minecraft:core/entity. Log output: WARNING: Could not find vertex shader attribute 'Normal' to match BindAttributeLocation request.
-WARNING: Output of vertex shader 'overlayColor' not read by fragment shader
-
-[13:38:18] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/rendertype_beacon_beam and FS minecraft:core/rendertype_beacon_beam. Log output: WARNING: Could not find vertex shader attribute 'Normal' to match BindAttributeLocation request.
+[14:40:25] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/rendertype_beacon_beam and FS minecraft:core/rendertype_beacon_beam. Log output: WARNING: Could not find vertex shader attribute 'Normal' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'UV2' to match BindAttributeLocation request.
 
-[13:38:18] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/entity and FS minecraft:core/entity. Log output: WARNING: Output of vertex shader 'overlayColor' not read by fragment shader
+[14:40:25] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/rendertype_text_intensity_see_through and FS minecraft:core/rendertype_text_intensity_see_through. Log output: WARNING: Could not find vertex shader attribute 'UV2' to match BindAttributeLocation request.
 
-[13:38:18] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/rendertype_text_background_see_through and FS minecraft:core/rendertype_text_background_see_through. Log output: WARNING: Could not find vertex shader attribute 'UV2' to match BindAttributeLocation request.
+[14:40:25] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/rendertype_translucent_moving_block and FS minecraft:core/rendertype_translucent_moving_block. Log output: WARNING: Could not find vertex shader attribute 'Normal' to match BindAttributeLocation request.
 
-[13:38:18] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/entity and FS minecraft:core/entity. Log output: WARNING: Could not find vertex shader attribute 'UV2' to match BindAttributeLocation request.
+[14:40:25] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/entity and FS minecraft:core/entity. Log output: WARNING: Could not find vertex shader attribute 'UV2' to match BindAttributeLocation request.
 
-[13:38:18] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/terrain and FS minecraft:core/terrain. Log output: WARNING: Could not find vertex shader attribute 'Normal' to match BindAttributeLocation request.
-
-[13:38:18] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/rendertype_translucent_moving_block and FS minecraft:core/rendertype_translucent_moving_block. Log output: WARNING: Could not find vertex shader attribute 'Normal' to match BindAttributeLocation request.
-
-[13:38:18] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/entity and FS minecraft:core/entity. Log output: WARNING: Output of vertex shader 'overlayColor' not read by fragment shader
-
-[13:38:18] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/entity and FS minecraft:core/entity. Log output: WARNING: Could not find vertex shader attribute 'Normal' to match BindAttributeLocation request.
-WARNING: Could not find vertex shader attribute 'UV2' to match BindAttributeLocation request.
+[14:40:25] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/entity and FS minecraft:core/entity. Log output: WARNING: Could not find vertex shader attribute 'Normal' to match BindAttributeLocation request.
 WARNING: Output of vertex shader 'overlayColor' not read by fragment shader
 
-[13:38:18] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/terrain and FS minecraft:core/terrain. Log output: WARNING: Could not find vertex shader attribute 'Normal' to match BindAttributeLocation request.
-
-[13:38:18] [Render thread/INFO]: OpenAL initialized on device MacBook Pro Speakers
-[13:38:18] [Render thread/INFO]: Sound engine started
-[13:38:18] [Render thread/INFO]: Created: 512x256x0 minecraft:textures/atlas/particles.png-atlas
-[13:38:18] [Render thread/INFO]: Created: 128x64x0 minecraft:textures/atlas/decorated_pot.png-atlas
-[13:38:18] [Render thread/INFO]: Created: 2048x1024x0 minecraft:textures/atlas/armor_trims.png-atlas
-[13:38:18] [Render thread/INFO]: Created: 512x256x0 minecraft:textures/atlas/paintings.png-atlas
-[13:38:18] [Render thread/INFO]: Created: 512x512x0 minecraft:textures/atlas/shield_patterns.png-atlas
-[13:38:18] [Render thread/INFO]: Created: 1024x512x4 minecraft:textures/atlas/blocks.png-atlas
-[13:38:18] [Render thread/INFO]: Created: 512x256x0 minecraft:textures/atlas/chest.png-atlas
-[13:38:18] [Render thread/INFO]: Created: 512x512x0 minecraft:textures/atlas/banner_patterns.png-atlas
-[13:38:18] [Render thread/INFO]: Created: 512x256x0 minecraft:textures/atlas/beds.png-atlas
-[13:38:18] [Render thread/INFO]: Created: 1024x512x0 minecraft:textures/atlas/gui.png-atlas
-[13:38:18] [Render thread/INFO]: Created: 64x64x0 minecraft:textures/atlas/map_decorations.png-atlas
-[13:38:18] [Render thread/INFO]: Created: 256x256x0 minecraft:textures/atlas/signs.png-atlas
-[13:38:18] [Render thread/INFO]: Created: 512x256x0 minecraft:textures/atlas/shulker_boxes.png-atlas
-[13:38:18] [Render thread/INFO]: Checking for Distant Horizons update
-[13:38:19] [Render thread/INFO]: Distant Horizons already up to date.
-[13:38:19] [Render thread/INFO]: Creating pipeline for dimension minecraft:overworld
-[13:38:19] [Render thread/WARN]: Program link log for centerDepthSmooth: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+[14:40:25] [Render thread/INFO]: OpenAL initialized on device MacBook Pro Speakers
+[14:40:25] [Render thread/INFO]: Sound engine started
+[14:40:25] [Render thread/INFO]: Created: 512x256x0 minecraft:textures/atlas/particles.png-atlas
+[14:40:25] [Render thread/INFO]: Created: 128x64x0 minecraft:textures/atlas/decorated_pot.png-atlas
+[14:40:25] [Render thread/INFO]: Created: 2048x1024x0 minecraft:textures/atlas/armor_trims.png-atlas
+[14:40:25] [Render thread/INFO]: Created: 512x256x0 minecraft:textures/atlas/paintings.png-atlas
+[14:40:25] [Render thread/INFO]: Created: 512x512x0 minecraft:textures/atlas/shield_patterns.png-atlas
+[14:40:25] [Render thread/INFO]: Created: 1024x512x4 minecraft:textures/atlas/blocks.png-atlas
+[14:40:25] [Render thread/INFO]: Created: 512x256x0 minecraft:textures/atlas/chest.png-atlas
+[14:40:25] [Render thread/INFO]: Created: 512x512x0 minecraft:textures/atlas/banner_patterns.png-atlas
+[14:40:25] [Render thread/INFO]: Created: 512x256x0 minecraft:textures/atlas/beds.png-atlas
+[14:40:25] [Render thread/INFO]: Created: 1024x512x0 minecraft:textures/atlas/gui.png-atlas
+[14:40:25] [Render thread/INFO]: Created: 64x64x0 minecraft:textures/atlas/map_decorations.png-atlas
+[14:40:25] [Render thread/INFO]: Created: 256x256x0 minecraft:textures/atlas/signs.png-atlas
+[14:40:25] [Render thread/INFO]: Created: 512x256x0 minecraft:textures/atlas/shulker_boxes.png-atlas
+[14:40:25] [Render thread/INFO]: Checking for Distant Horizons update
+[14:40:25] [Render thread/INFO]: Distant Horizons already up to date.
+[14:40:25] [Render thread/INFO]: Creating pipeline for dimension minecraft:overworld
+[14:40:25] [Render thread/WARN]: Program link log for centerDepthSmooth: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'mc_midTexCoord' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'UV0' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'iris_Entity' to match BindAttributeLocation request.
@@ -275,7 +275,7 @@ WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttri
 WARNING: Could not find vertex shader attribute 'mc_Entity' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'Position' to match BindAttributeLocation request.
 
-[13:38:19] [Render thread/WARN]: Program link log for deferred1: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+[14:40:26] [Render thread/WARN]: Program link log for deferred1: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'mc_midTexCoord' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'iris_Entity' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttributeLocation request.
@@ -283,21 +283,21 @@ WARNING: Could not find vertex shader attribute 'mc_Entity' to match BindAttribu
 WARNING: Output of vertex shader 'iris_FogFragCoord' not read by fragment shader
 WARNING: Output of vertex shader 'eastVec' not read by fragment shader
 
-[13:38:19] [Render thread/WARN]: Program link log for composite: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+[14:40:26] [Render thread/WARN]: Program link log for composite: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'mc_midTexCoord' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'iris_Entity' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'mc_Entity' to match BindAttributeLocation request.
 WARNING: Output of vertex shader 'iris_FogFragCoord' not read by fragment shader
 
-[13:38:19] [Render thread/WARN]: Program link log for composite1: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+[14:40:26] [Render thread/WARN]: Program link log for composite1: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'mc_midTexCoord' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'iris_Entity' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'mc_Entity' to match BindAttributeLocation request.
 WARNING: Output of vertex shader 'iris_FogFragCoord' not read by fragment shader
 
-[13:38:19] [Render thread/WARN]: Program link log for composite3: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+[14:40:26] [Render thread/WARN]: Program link log for composite3: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'mc_midTexCoord' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'UV0' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'iris_Entity' to match BindAttributeLocation request.
@@ -305,72 +305,72 @@ WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttri
 WARNING: Could not find vertex shader attribute 'mc_Entity' to match BindAttributeLocation request.
 WARNING: Output of vertex shader 'iris_FogFragCoord' not read by fragment shader
 
-[13:38:19] [Render thread/WARN]: Program link log for composite4: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+[14:40:26] [Render thread/WARN]: Program link log for composite4: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'mc_midTexCoord' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'iris_Entity' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'mc_Entity' to match BindAttributeLocation request.
 WARNING: Output of vertex shader 'iris_FogFragCoord' not read by fragment shader
 
-[13:38:19] [Render thread/WARN]: Program link log for composite5: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+[14:40:26] [Render thread/WARN]: Program link log for composite5: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'mc_midTexCoord' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'iris_Entity' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'mc_Entity' to match BindAttributeLocation request.
 WARNING: Output of vertex shader 'iris_FogFragCoord' not read by fragment shader
 
-[13:38:19] [Render thread/WARN]: Program link log for composite6: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+[14:40:26] [Render thread/WARN]: Program link log for composite6: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'mc_midTexCoord' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'iris_Entity' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'mc_Entity' to match BindAttributeLocation request.
 WARNING: Output of vertex shader 'iris_FogFragCoord' not read by fragment shader
 
-[13:38:19] [Render thread/WARN]: Program link log for composite7: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+[14:40:26] [Render thread/WARN]: Program link log for composite7: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'mc_midTexCoord' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'iris_Entity' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'mc_Entity' to match BindAttributeLocation request.
 WARNING: Output of vertex shader 'iris_FogFragCoord' not read by fragment shader
 
-[13:38:19] [Render thread/WARN]: Program link log for final: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+[14:40:26] [Render thread/WARN]: Program link log for final: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'mc_midTexCoord' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'iris_Entity' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'mc_Entity' to match BindAttributeLocation request.
 WARNING: Output of vertex shader 'iris_FogFragCoord' not read by fragment shader
 
-[13:38:19] [Render thread/WARN]: Type is VERTEX
-[13:38:19] [Render thread/WARN]: Type is FRAGMENT
-[13:38:19] [Render thread/WARN]: Type is VERTEX
-[13:38:19] [Render thread/WARN]: Type is FRAGMENT
-[13:38:19] [Render thread/WARN]: Type is VERTEX
-[13:38:19] [Render thread/WARN]: Type is FRAGMENT
-[13:38:22] [Render thread/WARN]: Program link log for sodium:chunk_shader_for_shadow: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+[14:40:26] [Render thread/WARN]: Type is VERTEX
+[14:40:26] [Render thread/WARN]: Type is FRAGMENT
+[14:40:26] [Render thread/WARN]: Type is VERTEX
+[14:40:26] [Render thread/WARN]: Type is FRAGMENT
+[14:40:26] [Render thread/WARN]: Type is VERTEX
+[14:40:26] [Render thread/WARN]: Type is FRAGMENT
+[14:40:28] [Render thread/WARN]: Program link log for sodium:chunk_shader_for_shadow: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttributeLocation request.
 WARNING: Output of vertex shader 'iris_FogFragCoord' not read by fragment shader
 
-[13:38:22] [Render thread/WARN]: Program link log for sodium:chunk_shader_for_shadow_cutout: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+[14:40:28] [Render thread/WARN]: Program link log for sodium:chunk_shader_for_shadow_cutout: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttributeLocation request.
 WARNING: Output of vertex shader 'iris_FogFragCoord' not read by fragment shader
 
-[13:38:22] [Render thread/WARN]: Program link log for sodium:chunk_shader_for_shadow_trans: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+[14:40:28] [Render thread/WARN]: Program link log for sodium:chunk_shader_for_shadow_trans: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttributeLocation request.
 WARNING: Output of vertex shader 'iris_FogFragCoord' not read by fragment shader
 
-[13:38:22] [Render thread/WARN]: Program link log for sodium:chunk_shader_for_terrain: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+[14:40:28] [Render thread/WARN]: Program link log for sodium:chunk_shader_for_terrain: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttributeLocation request.
 WARNING: Output of vertex shader 'iris_FogFragCoord' not read by fragment shader
 
-[13:38:22] [Render thread/WARN]: Program link log for sodium:chunk_shader_for_terrain_cutout: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+[14:40:28] [Render thread/WARN]: Program link log for sodium:chunk_shader_for_terrain_cutout: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttributeLocation request.
 WARNING: Output of vertex shader 'iris_FogFragCoord' not read by fragment shader
 
-[13:38:22] [Render thread/WARN]: Program link log for sodium:chunk_shader_for_translucent: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+[14:40:28] [Render thread/WARN]: Program link log for sodium:chunk_shader_for_translucent: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttributeLocation request.
 WARNING: Output of vertex shader 'iris_FogFragCoord' not read by fragment shader
 
-[13:38:22] [Render thread/WARN]: Program link log for colorSpaceFragment: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+[14:40:28] [Render thread/WARN]: Program link log for colorSpaceFragment: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'mc_midTexCoord' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'UV0' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'iris_Entity' to match BindAttributeLocation request.
@@ -379,82 +379,81 @@ WARNING: Could not find vertex shader attribute 'mc_Entity' to match BindAttribu
 WARNING: Could not find vertex shader attribute 'Position' to match BindAttributeLocation request.
 WARNING: Output of vertex shader 'uv' not read by fragment shader
 
-[13:38:55] [Render thread/INFO]: Loaded 1461 recipes
-[13:38:55] [Render thread/INFO]: Loaded 1574 advancements
-[13:38:55] [Render thread/INFO]: Applied 0 biome modifications to 0 of 65 new biomes in 658.0 μs
-[13:38:55] [Server thread/INFO]: Started DhWorld of type CLIENT_SERVER
-[13:38:55] [Server thread/INFO]: Starting integrated minecraft server version 1.21.10
-[13:38:55] [Server thread/INFO]: Generating keypair
-[13:38:55] [DH-Full Data Migration Thread[0]/INFO]: Attempting to migrate data sources for: [minecraft:overworld]-[/Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/saves/New World/data]...
-[13:38:55] [DH-Full Data Migration Thread[0]/INFO]: Found [0] data sources that need migration.
-[13:38:55] [Server thread/INFO]: Started DhClientServerLevel for [Wrapped{ServerLevel[New World]@minecraft:overworld}] at [[LocalSaveStructure@(/Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/saves/New World/data)]].
-[13:38:55] [DH-Full Data Migration Thread[0]/INFO]: No migration necessary.
-[13:38:56] [DH-Full Data Migration Thread[0]/INFO]: Attempting to migrate data sources for: [minecraft:the_end]-[/Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/saves/New World/DIM1/data]...
-[13:38:56] [DH-Full Data Migration Thread[0]/INFO]: Found [0] data sources that need migration.
-[13:38:56] [DH-Full Data Migration Thread[0]/INFO]: No migration necessary.
-[13:38:56] [Server thread/INFO]: Started DhClientServerLevel for [Wrapped{ServerLevel[New World]@minecraft:the_end}] at [[LocalSaveStructure@(/Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/saves/New World/DIM1/data;/Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/saves/New World/data)]].
-[13:38:56] [DH-Full Data Migration Thread[0]/INFO]: Attempting to migrate data sources for: [minecraft:the_nether]-[/Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/saves/New World/DIM-1/data]...
-[13:38:56] [DH-Full Data Migration Thread[0]/INFO]: Found [0] data sources that need migration.
-[13:38:56] [DH-Full Data Migration Thread[0]/INFO]: No migration necessary.
-[13:38:56] [Server thread/INFO]: Started DhClientServerLevel for [Wrapped{ServerLevel[New World]@minecraft:the_nether}] at [[LocalSaveStructure@(/Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/saves/New World/DIM-1/data;/Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/saves/New World/DIM1/data;/Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/saves/New World/data)]].
-[13:38:56] [Server thread/INFO]: Loading 0 persistent chunks...
-[13:38:56] [Server thread/INFO]: Server instance stored!
-[13:38:56] [Server thread/INFO]: [STDOUT]: Server instance is net.minecraft.class_1132@201cbb6d
-[13:38:56] [Server thread/INFO]: Queueing asynchronous BERT model load...
-[13:38:56] [bert-loader/INFO]: Proceeding to load BERT model into memory
-[13:38:56] [Server thread/INFO]: LLM world toggle for New World:minecraft:overworld set to false
-[13:38:56] [Server thread/INFO]: Executing /bot spawn Jake training
-[13:38:56] [Server thread/INFO]: spawnBot starting: botName=Jake, mode=training, dimType=minecraft:overworld, pos=(82.0, -15.0, -78.0), facingYaw=-13.715509, facingPitch=-0.22124265
-[13:38:56] [Server thread/INFO]: spawnBot: entering training branch for Jake
-[13:38:56] [Server thread/INFO]: [STDOUT]: Existing Bot Profiles: {Jake=e01f59a8-aebb-4eed-9a56-bc36f8507228, Bob=17c3d366-025a-4751-ac14-fdd43ffebae2}
-[13:38:56] [Server thread/INFO]: [STDOUT]: Using existing GameProfile: GameProfile[id=e01f59a8-aebb-4eed-9a56-bc36f8507228, name=Jake, properties={}]
-[13:38:56] [Server thread/INFO]: Jake[/127.0.0.1:0] logged in with entity id 1 at (0.0, 0.0, 0.0)
-[13:38:56] [Server thread/INFO]: Resolved PlayerManager#loadPlayerData via method_14600[class net.minecraft.class_11560]
-[13:38:56] [Server thread/INFO]: Resolved PlayerManager#savePlayerData via method_14577[class net.minecraft.class_3222]
-[13:38:56] [Server thread/INFO]: Resolved PlayerConfigEntry(GameProfile) constructor.
-[13:38:56] [Server thread/INFO]: Restored fakeplayer 'Jake' using PlayerManager.
-[13:38:56] [Server thread/INFO]: Loaded inventory and stats for fakeplayer 'Jake' from jake_e01f59a8-aebb-4eed-9a56-bc36f8507228.nbt
-[13:38:56] [Server thread/INFO]: Loaded persisted inventory for fakeplayer 'Jake'
-[13:38:56] [Server thread/INFO]: Player [Jake] joined.
-[13:38:56] [Server thread/INFO]: Jake joined the game
-[13:38:56] [Server thread/INFO]: Restored fakeplayer 'Jake' using PlayerManager.
-[13:38:56] [Server thread/INFO]: Loaded inventory and stats for fakeplayer 'Jake' from jake_e01f59a8-aebb-4eed-9a56-bc36f8507228.nbt
-[13:38:56] [Server thread/INFO]: Loaded persisted inventory for fakeplayer 'Jake'
-[13:38:56] [Server thread/INFO]: spawnBot: remembering spawn for training bot Jake
-[13:38:56] [Server thread/INFO]: Spawned new training bot Jake!
-[13:38:56] [Server thread/INFO]: LLM bot toggle for e01f59a8-aebb-4eed-9a56-bc36f8507228 set to false
-[13:38:56] [Server thread/ERROR]: ❌ Error loading Q-table from /Users/roti/.minecraft/qtable_storage/qtable.bin: writing aborted; java.io.NotSerializableException: net.minecraft.server.network.ServerPlayerEntity
-[13:38:56] [Server thread/WARN]: ❌ Failed to load Q-table from /Users/roti/.minecraft/qtable_storage/qtable.bin: writing aborted; java.io.NotSerializableException: net.minecraft.server.network.ServerPlayerEntity
-[13:38:56] [Server thread/ERROR]: ❌ Error loading Q-table from /Users/roti/minecraft_data/qtable_storage/qtable.bin: writing aborted; java.io.NotSerializableException: net.minecraft.server.network.ServerPlayerEntity
-[13:38:56] [Server thread/WARN]: ❌ Failed to load Q-table from /Users/roti/minecraft_data/qtable_storage/qtable.bin: writing aborted; java.io.NotSerializableException: net.minecraft.server.network.ServerPlayerEntity
-[13:38:57] [Server thread/ERROR]: ❌ Error loading Q-table from /var/folders/_t/5vq116m55tl1yx1y5gkstsdh0000gn/T/minecraft_ai_player/qtable_storage/qtable.bin: writing aborted; java.io.NotSerializableException: net.minecraft.server.network.ServerPlayerEntity
-[13:38:57] [Server thread/WARN]: ❌ Failed to load Q-table from /var/folders/_t/5vq116m55tl1yx1y5gkstsdh0000gn/T/minecraft_ai_player/qtable_storage/qtable.bin: writing aborted; java.io.NotSerializableException: net.minecraft.server.network.ServerPlayerEntity
-[13:38:57] [Server thread/INFO]: 📝 No existing Q-table found, creating new one
-[13:38:57] [Server thread/INFO]: /bot spawn completed successfully for Jake training
-[13:38:57] [Server thread/INFO]: Loaded 1 protected zones for world minecraft:overworld
-[13:38:57] [Server thread/INFO]: DH TerraFirmaCraft detection: false
-[13:38:57] [Server thread/INFO]: ================WORLD_GEN_STEP_INITING=============
-[13:38:57] [Server thread/INFO]: Batch Chunk Generator initialized
-[13:38:57] [Server thread/INFO]: Creating world gen queue
-[13:38:57] [Server thread/INFO]: Created world gen queue
-[13:38:57] [Server thread/INFO]: Set world gen queue for level [minecraft:overworld].
-[13:38:57] [Server thread/INFO]: Changing view distance to 12, from 10
-[13:38:57] [Server thread/INFO]: Changing simulation distance to 12, from 0
-[13:38:57] [Server thread/INFO]: Loading 38 chunks for player spawn...
-[13:38:57] [Server thread/INFO]: Preparing spawn area: 23%
-[13:38:57] [Server thread/INFO]: Preparing spawn area: 23%
-[13:38:57] [Server thread/INFO]: Preparing spawn area: 25%
-[13:38:57] [Server thread/INFO]: Preparing spawn area: 75%
-[13:38:57] [Server thread/INFO]: Time elapsed: 1527 ms
-[13:38:57] [Server thread/INFO]: RotiWokeman[local:E:da6e0bcd] logged in with entity id 134 at (82.69999998807907, -17.0, -75.62004746685628)
-[13:38:57] [Server thread/INFO]: Player [RotiWokeman] joined.
-[13:38:57] [Server thread/INFO]: RotiWokeman joined the game
-[13:38:57] [Render thread/INFO]: Loading client level [Wrapped{ClientLevel@ceh4rbi6e0gru@minecraft:overworld}]-[ceh4rbi6e0gru@minecraft:overworld].
-[13:38:57] [Render thread/INFO]: Loaded [0] waiting chunk wrappers.
-[13:38:57] [Render thread/INFO]: Reloading pipeline on dimension change: minecraft:overworld => minecraft:overworld
-[13:38:57] [Render thread/INFO]: Destroying pipeline minecraft:overworld
-[13:38:57] [Render thread/INFO]: Creating pipeline for dimension minecraft:overworld
-[13:38:57] [Render thread/WARN]: Program link log for centerDepthSmooth: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+[14:40:33] [Render thread/INFO]: Loaded 1461 recipes
+[14:40:33] [Render thread/INFO]: Loaded 1574 advancements
+[14:40:33] [Render thread/INFO]: Applied 0 biome modifications to 0 of 65 new biomes in 712.7 μs
+[14:40:33] [Server thread/INFO]: Started DhWorld of type CLIENT_SERVER
+[14:40:33] [Server thread/INFO]: Starting integrated minecraft server version 1.21.10
+[14:40:33] [Server thread/INFO]: Generating keypair
+[14:40:33] [DH-Full Data Migration Thread[0]/INFO]: Attempting to migrate data sources for: [minecraft:overworld]-[/Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/saves/New World/data]...
+[14:40:33] [DH-Full Data Migration Thread[0]/INFO]: Found [0] data sources that need migration.
+[14:40:33] [DH-Full Data Migration Thread[0]/INFO]: No migration necessary.
+[14:40:33] [Server thread/INFO]: Started DhClientServerLevel for [Wrapped{ServerLevel[New World]@minecraft:overworld}] at [[LocalSaveStructure@(/Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/saves/New World/data)]].
+[14:40:33] [DH-Full Data Migration Thread[0]/INFO]: Attempting to migrate data sources for: [minecraft:the_nether]-[/Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/saves/New World/DIM-1/data]...
+[14:40:33] [DH-Full Data Migration Thread[0]/INFO]: Found [0] data sources that need migration.
+[14:40:33] [DH-Full Data Migration Thread[0]/INFO]: No migration necessary.
+[14:40:33] [Server thread/INFO]: Started DhClientServerLevel for [Wrapped{ServerLevel[New World]@minecraft:the_nether}] at [[LocalSaveStructure@(/Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/saves/New World/DIM-1/data;/Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/saves/New World/data)]].
+[14:40:33] [DH-Full Data Migration Thread[0]/INFO]: Attempting to migrate data sources for: [minecraft:the_end]-[/Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/saves/New World/DIM1/data]...
+[14:40:33] [DH-Full Data Migration Thread[0]/INFO]: Found [0] data sources that need migration.
+[14:40:33] [DH-Full Data Migration Thread[0]/INFO]: No migration necessary.
+[14:40:33] [Server thread/INFO]: Started DhClientServerLevel for [Wrapped{ServerLevel[New World]@minecraft:the_end}] at [[LocalSaveStructure@(/Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/saves/New World/DIM-1/data;/Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/saves/New World/DIM1/data;/Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/saves/New World/data)]].
+[14:40:33] [Server thread/INFO]: Loading 0 persistent chunks...
+[14:40:33] [Server thread/INFO]: Preparing spawn area: 16%
+[14:40:33] [Server thread/INFO]: Server instance stored!
+[14:40:33] [Server thread/INFO]: [STDOUT]: Server instance is net.minecraft.class_1132@7d481030
+[14:40:33] [Server thread/INFO]: Queueing asynchronous BERT model load...
+[14:40:33] [bert-loader/INFO]: Proceeding to load BERT model into memory
+[14:40:33] [Server thread/INFO]: LLM world toggle for New World:minecraft:overworld set to false
+[14:40:33] [Server thread/INFO]: Executing /bot spawn Jake training
+[14:40:34] [Server thread/INFO]: spawnBot starting: botName=Jake, mode=training, dimType=minecraft:overworld, pos=(82.5, -15.0, -77.5), facingYaw=-13.715509, facingPitch=-0.22124265
+[14:40:34] [Server thread/INFO]: spawnBot: entering training branch for Jake
+[14:40:34] [Server thread/INFO]: [STDOUT]: Existing Bot Profiles: {Jake=e01f59a8-aebb-4eed-9a56-bc36f8507228, Bob=17c3d366-025a-4751-ac14-fdd43ffebae2}
+[14:40:34] [Server thread/INFO]: [STDOUT]: Using existing GameProfile: GameProfile[id=e01f59a8-aebb-4eed-9a56-bc36f8507228, name=Jake, properties={}]
+[14:40:34] [Server thread/INFO]: Jake[/127.0.0.1:0] logged in with entity id 1 at (0.0, 0.0, 0.0)
+[14:40:34] [Server thread/INFO]: Resolved PlayerManager#loadPlayerData via method_14600[class net.minecraft.class_11560]
+[14:40:34] [Server thread/INFO]: Resolved PlayerManager#savePlayerData via method_14577[class net.minecraft.class_3222]
+[14:40:34] [Server thread/INFO]: Resolved PlayerConfigEntry(GameProfile) constructor.
+[14:40:34] [Server thread/INFO]: Restored fakeplayer 'Jake' using PlayerManager.
+[14:40:34] [Server thread/INFO]: Loaded inventory and stats for fakeplayer 'Jake' from jake_e01f59a8-aebb-4eed-9a56-bc36f8507228.nbt
+[14:40:34] [Server thread/INFO]: Loaded persisted inventory for fakeplayer 'Jake'
+[14:40:34] [Server thread/INFO]: Player [Jake] joined.
+[14:40:34] [Server thread/INFO]: Jake joined the game
+[14:40:34] [Server thread/INFO]: Restored fakeplayer 'Jake' using PlayerManager.
+[14:40:34] [Server thread/INFO]: Loaded inventory and stats for fakeplayer 'Jake' from jake_e01f59a8-aebb-4eed-9a56-bc36f8507228.nbt
+[14:40:34] [Server thread/INFO]: Loaded persisted inventory for fakeplayer 'Jake'
+[14:40:34] [Server thread/INFO]: spawnBot: remembering spawn for training bot Jake
+[14:40:34] [Server thread/INFO]: Spawned new training bot Jake!
+[14:40:34] [Server thread/INFO]: LLM bot toggle for e01f59a8-aebb-4eed-9a56-bc36f8507228 set to false
+[14:40:34] [Server thread/ERROR]: ❌ Error loading Q-table from /Users/roti/.minecraft/qtable_storage/qtable.bin: writing aborted; java.io.NotSerializableException: net.minecraft.server.network.ServerPlayerEntity
+[14:40:34] [Server thread/WARN]: ❌ Failed to load Q-table from /Users/roti/.minecraft/qtable_storage/qtable.bin: writing aborted; java.io.NotSerializableException: net.minecraft.server.network.ServerPlayerEntity
+[14:40:34] [Server thread/ERROR]: ❌ Error loading Q-table from /Users/roti/minecraft_data/qtable_storage/qtable.bin: writing aborted; java.io.NotSerializableException: net.minecraft.server.network.ServerPlayerEntity
+[14:40:34] [Server thread/WARN]: ❌ Failed to load Q-table from /Users/roti/minecraft_data/qtable_storage/qtable.bin: writing aborted; java.io.NotSerializableException: net.minecraft.server.network.ServerPlayerEntity
+[14:40:34] [Server thread/ERROR]: ❌ Error loading Q-table from /var/folders/_t/5vq116m55tl1yx1y5gkstsdh0000gn/T/minecraft_ai_player/qtable_storage/qtable.bin: writing aborted; java.io.NotSerializableException: net.minecraft.server.network.ServerPlayerEntity
+[14:40:34] [Server thread/WARN]: ❌ Failed to load Q-table from /var/folders/_t/5vq116m55tl1yx1y5gkstsdh0000gn/T/minecraft_ai_player/qtable_storage/qtable.bin: writing aborted; java.io.NotSerializableException: net.minecraft.server.network.ServerPlayerEntity
+[14:40:34] [Server thread/INFO]: 📝 No existing Q-table found, creating new one
+[14:40:34] [Server thread/INFO]: /bot spawn completed successfully for Jake training
+[14:40:34] [Server thread/INFO]: Loaded 1 protected zones for world minecraft:overworld
+[14:40:35] [Server thread/INFO]: DH TerraFirmaCraft detection: false
+[14:40:35] [Server thread/INFO]: ================WORLD_GEN_STEP_INITING=============
+[14:40:35] [Server thread/INFO]: Batch Chunk Generator initialized
+[14:40:35] [Server thread/INFO]: Creating world gen queue
+[14:40:35] [Server thread/INFO]: Created world gen queue
+[14:40:35] [Server thread/INFO]: Set world gen queue for level [minecraft:overworld].
+[14:40:35] [Server thread/INFO]: Changing view distance to 12, from 10
+[14:40:35] [Server thread/INFO]: Changing simulation distance to 12, from 0
+[14:40:35] [Server thread/INFO]: Loading 6 chunks for player spawn...
+[14:40:35] [Server thread/INFO]: Preparing spawn area: 16%
+[14:40:35] [Server thread/INFO]: Preparing spawn area: 16%
+[14:40:35] [Server thread/INFO]: Time elapsed: 1482 ms
+[14:40:35] [Server thread/INFO]: RotiWokeman[local:E:724b20e7] logged in with entity id 127 at (82.67942923136901, -16.0, -76.19524552589095)
+[14:40:35] [Server thread/INFO]: Player [RotiWokeman] joined.
+[14:40:35] [Server thread/INFO]: RotiWokeman joined the game
+[14:40:35] [Render thread/INFO]: Loading client level [Wrapped{ClientLevel@ceh4rbi6e0gru@minecraft:overworld}]-[ceh4rbi6e0gru@minecraft:overworld].
+[14:40:35] [Render thread/INFO]: Loaded [0] waiting chunk wrappers.
+[14:40:35] [Render thread/INFO]: Reloading pipeline on dimension change: minecraft:overworld => minecraft:overworld
+[14:40:35] [Render thread/INFO]: Destroying pipeline minecraft:overworld
+[14:40:35] [Render thread/INFO]: Creating pipeline for dimension minecraft:overworld
+[14:40:35] [Render thread/WARN]: Program link log for centerDepthSmooth: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'mc_midTexCoord' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'UV0' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'iris_Entity' to match BindAttributeLocation request.
@@ -462,7 +461,7 @@ WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttri
 WARNING: Could not find vertex shader attribute 'mc_Entity' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'Position' to match BindAttributeLocation request.
 
-[13:38:57] [Render thread/WARN]: Program link log for deferred1: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+[14:40:35] [Render thread/WARN]: Program link log for deferred1: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'mc_midTexCoord' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'iris_Entity' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttributeLocation request.
@@ -470,21 +469,21 @@ WARNING: Could not find vertex shader attribute 'mc_Entity' to match BindAttribu
 WARNING: Output of vertex shader 'iris_FogFragCoord' not read by fragment shader
 WARNING: Output of vertex shader 'eastVec' not read by fragment shader
 
-[13:38:57] [Render thread/WARN]: Program link log for composite: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+[14:40:35] [Render thread/WARN]: Program link log for composite: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'mc_midTexCoord' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'iris_Entity' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'mc_Entity' to match BindAttributeLocation request.
 WARNING: Output of vertex shader 'iris_FogFragCoord' not read by fragment shader
 
-[13:38:57] [Render thread/WARN]: Program link log for composite1: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+[14:40:35] [Render thread/WARN]: Program link log for composite1: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'mc_midTexCoord' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'iris_Entity' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'mc_Entity' to match BindAttributeLocation request.
 WARNING: Output of vertex shader 'iris_FogFragCoord' not read by fragment shader
 
-[13:38:57] [Render thread/WARN]: Program link log for composite3: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+[14:40:35] [Render thread/WARN]: Program link log for composite3: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'mc_midTexCoord' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'UV0' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'iris_Entity' to match BindAttributeLocation request.
@@ -492,95 +491,66 @@ WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttri
 WARNING: Could not find vertex shader attribute 'mc_Entity' to match BindAttributeLocation request.
 WARNING: Output of vertex shader 'iris_FogFragCoord' not read by fragment shader
 
-[13:38:57] [Render thread/WARN]: Program link log for composite4: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+[14:40:35] [Render thread/WARN]: Program link log for composite4: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'mc_midTexCoord' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'iris_Entity' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'mc_Entity' to match BindAttributeLocation request.
 WARNING: Output of vertex shader 'iris_FogFragCoord' not read by fragment shader
 
-[13:38:57] [Render thread/WARN]: Program link log for composite5: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+[14:40:35] [Render thread/WARN]: Program link log for composite5: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'mc_midTexCoord' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'iris_Entity' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'mc_Entity' to match BindAttributeLocation request.
 WARNING: Output of vertex shader 'iris_FogFragCoord' not read by fragment shader
 
-[13:38:57] [Render thread/WARN]: Program link log for composite6: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+[14:40:35] [Render thread/WARN]: Program link log for composite6: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'mc_midTexCoord' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'iris_Entity' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'mc_Entity' to match BindAttributeLocation request.
 WARNING: Output of vertex shader 'iris_FogFragCoord' not read by fragment shader
 
-[13:38:57] [Render thread/WARN]: Program link log for composite7: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+[14:40:35] [Render thread/WARN]: Program link log for composite7: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'mc_midTexCoord' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'iris_Entity' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'mc_Entity' to match BindAttributeLocation request.
 WARNING: Output of vertex shader 'iris_FogFragCoord' not read by fragment shader
 
-[13:38:57] [Render thread/WARN]: Program link log for final: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+[14:40:35] [Render thread/WARN]: Program link log for final: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'mc_midTexCoord' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'iris_Entity' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'mc_Entity' to match BindAttributeLocation request.
 WARNING: Output of vertex shader 'iris_FogFragCoord' not read by fragment shader
 
-[13:38:58] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:38:59] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:38:59] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:38:59] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:38:59] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:38:59] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:38:59] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:38:59] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:38:59] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:38:59] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:38:59] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:38:59] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:38:59] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:38:59] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:38:59] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:38:59] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:38:59] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:38:59] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:38:59] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:38:59] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:38:59] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:38:59] [Render thread/WARN]: Program link log for sodium:chunk_shader_for_shadow: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+[14:40:37] [Render thread/WARN]: Program link log for sodium:chunk_shader_for_shadow: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttributeLocation request.
 WARNING: Output of vertex shader 'iris_FogFragCoord' not read by fragment shader
 
-[13:39:00] [Render thread/WARN]: Program link log for sodium:chunk_shader_for_shadow_cutout: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+[14:40:37] [Render thread/WARN]: Program link log for sodium:chunk_shader_for_shadow_cutout: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttributeLocation request.
 WARNING: Output of vertex shader 'iris_FogFragCoord' not read by fragment shader
 
-[13:39:00] [Render thread/WARN]: Program link log for sodium:chunk_shader_for_shadow_trans: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+[14:40:37] [Render thread/WARN]: Program link log for sodium:chunk_shader_for_shadow_trans: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttributeLocation request.
 WARNING: Output of vertex shader 'iris_FogFragCoord' not read by fragment shader
 
-[13:39:00] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:39:00] [bert-loader/INFO]: [STDOUT]: Loading:     100% |████████████████████████████████████████|
-[13:39:00] [bert-loader/INFO]: Ignore mismatching platform from: jar:file:/Users/roti/Library/Application%20Support/PrismLauncher/instances/1.21.10/minecraft/.fabric/processedMods/ai_djl_pytorch_pytorch-native-cp86_64-2.5.1-4fc5a0b86a123205.jar!/native/lib/pytorch.properties
-[13:39:00] [bert-loader/INFO]: Found matching platform from: jar:file:/Users/roti/Library/Application%20Support/PrismLauncher/instances/1.21.10/minecraft/.fabric/processedMods/ai_djl_pytorch_pytorch-native-cprch64-2.5.1-19906839836eeb80.jar!/native/lib/pytorch.properties
-[13:39:00] [bert-loader/INFO]: Ignore mismatching platform from: jar:file:/Users/roti/Library/Application%20Support/PrismLauncher/instances/1.21.10/minecraft/.fabric/processedMods/ai_djl_pytorch_pytorch-native-cp86_64-2.5.1-7f4cd6ea5a383f15.jar!/native/lib/pytorch.properties
-[13:39:00] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:39:00] [Render thread/WARN]: Program link log for sodium:chunk_shader_for_terrain: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+[14:40:37] [Render thread/WARN]: Program link log for sodium:chunk_shader_for_terrain: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttributeLocation request.
 WARNING: Output of vertex shader 'iris_FogFragCoord' not read by fragment shader
 
-[13:39:00] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:39:00] [Render thread/WARN]: Program link log for sodium:chunk_shader_for_terrain_cutout: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+[14:40:37] [Render thread/WARN]: Program link log for sodium:chunk_shader_for_terrain_cutout: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttributeLocation request.
 WARNING: Output of vertex shader 'iris_FogFragCoord' not read by fragment shader
 
-[13:39:00] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:39:00] [Render thread/WARN]: Program link log for sodium:chunk_shader_for_translucent: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+[14:40:37] [Render thread/WARN]: Program link log for sodium:chunk_shader_for_translucent: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttributeLocation request.
 WARNING: Output of vertex shader 'iris_FogFragCoord' not read by fragment shader
 
-[13:39:00] [Render thread/WARN]: Program link log for colorSpaceFragment: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+[14:40:37] [Render thread/WARN]: Program link log for colorSpaceFragment: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'mc_midTexCoord' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'UV0' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'iris_Entity' to match BindAttributeLocation request.
@@ -589,597 +559,355 @@ WARNING: Could not find vertex shader attribute 'mc_Entity' to match BindAttribu
 WARNING: Could not find vertex shader attribute 'Position' to match BindAttributeLocation request.
 WARNING: Output of vertex shader 'uv' not read by fragment shader
 
-[13:39:00] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:39:00] [Render thread/INFO]: Started 4 worker threads
-[13:39:00] [Render thread/INFO]: Loading client level [Wrapped{ClientLevel@ceh4rbi6e0gru@minecraft:overworld}]-[ceh4rbi6e0gru@minecraft:overworld].
-[13:39:00] [Render thread/INFO]: Loaded [0] waiting chunk wrappers.
-[13:39:00] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:39:00] [Render thread/INFO]: Loaded 264 advancements
-[13:39:00] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:39:00] [bert-loader/INFO]: PyTorch graph executor optimizer is enabled, this may impact your inference latency and throughput. See: https://docs.djl.ai/master/docs/development/inference_performance_optimization.html#graph-executor-optimization
-[13:39:00] [bert-loader/INFO]: Number of inter-op threads is 10
-[13:39:00] [bert-loader/INFO]: Number of intra-op threads is 6
-[13:39:00] [Render thread/WARN]: Error while parsing the block ID map entry for "block.10104":
-[13:39:00] [Render thread/WARN]: - The block minecraft:stone_slab has no property with the name variant, ignoring!
-[13:39:00] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:39:00] [Render thread/INFO]: Stopping worker threads
-[13:39:00] [Render thread/INFO]: Started 4 worker threads
-[13:39:00] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/screenquad and FS minecraft:core/blit_screen. Log output: WARNING: Could not find vertex shader attribute 'UV0' to match BindAttributeLocation request.
+[14:40:37] [bert-loader/INFO]: [STDOUT]: Loading:     100% |████████████████████████████████████████|
+[14:40:37] [bert-loader/INFO]: Ignore mismatching platform from: jar:file:/Users/roti/Library/Application%20Support/PrismLauncher/instances/1.21.10/minecraft/.fabric/processedMods/ai_djl_pytorch_pytorch-native-cp86_64-2.5.1-4fc5a0b86a123205.jar!/native/lib/pytorch.properties
+[14:40:37] [bert-loader/INFO]: Found matching platform from: jar:file:/Users/roti/Library/Application%20Support/PrismLauncher/instances/1.21.10/minecraft/.fabric/processedMods/ai_djl_pytorch_pytorch-native-cprch64-2.5.1-19906839836eeb80.jar!/native/lib/pytorch.properties
+[14:40:37] [bert-loader/INFO]: Ignore mismatching platform from: jar:file:/Users/roti/Library/Application%20Support/PrismLauncher/instances/1.21.10/minecraft/.fabric/processedMods/ai_djl_pytorch_pytorch-native-cp86_64-2.5.1-7f4cd6ea5a383f15.jar!/native/lib/pytorch.properties
+[14:40:37] [Render thread/INFO]: Started 4 worker threads
+[14:40:38] [Render thread/INFO]: Loading client level [Wrapped{ClientLevel@ceh4rbi6e0gru@minecraft:overworld}]-[ceh4rbi6e0gru@minecraft:overworld].
+[14:40:38] [Render thread/INFO]: Loaded [0] waiting chunk wrappers.
+[14:40:38] [Render thread/INFO]: Loaded 264 advancements
+[14:40:38] [Render thread/WARN]: Error while parsing the block ID map entry for "block.10104":
+[14:40:38] [Render thread/WARN]: - The block minecraft:stone_slab has no property with the name variant, ignoring!
+[14:40:38] [Render thread/INFO]: Stopping worker threads
+[14:40:38] [Render thread/INFO]: Started 4 worker threads
+[14:40:38] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/screenquad and FS minecraft:core/blit_screen. Log output: WARNING: Could not find vertex shader attribute 'UV0' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'Position' to match BindAttributeLocation request.
 
-[13:39:00] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:39:00] [Render thread/INFO]: Loading shader with type: [35633]
-[13:39:00] [Render thread/INFO]: Shader loaded sucessfully.
-[13:39:00] [Render thread/INFO]: Loading shader with type: [35632]
-[13:39:00] [Render thread/INFO]: Shader loaded sucessfully.
-[13:39:00] [Render thread/INFO]: Loading shader with type: [35633]
-[13:39:00] [Render thread/INFO]: Shader loaded sucessfully.
-[13:39:00] [Render thread/INFO]: Loading shader with type: [35632]
-[13:39:00] [Render thread/INFO]: Shader loaded sucessfully.
-[13:39:00] [bert-loader/INFO]: Found matching platform from: jar:file:/Users/roti/Library/Application%20Support/PrismLauncher/instances/1.21.10/minecraft/.fabric/processedMods/ai_djl_huggingface_tokenizers-0.33.0-5d541ec46a4ba9bb.jar!/native/lib/tokenizers.properties
-[13:39:00] [Render thread/INFO]: Creating GLProxy... If this is the last message you see there must have been an OpenGL error.
-[13:39:00] [Render thread/INFO]: Lod Render OpenGL version [4.1 Metal - 89.4].
-[13:39:00] [Render thread/INFO]: minecraftGlCapabilities:
+[14:40:38] [Render thread/INFO]: Loading shader with type: [35633]
+[14:40:38] [Render thread/INFO]: Shader loaded sucessfully.
+[14:40:38] [Render thread/INFO]: Loading shader with type: [35632]
+[14:40:38] [Render thread/INFO]: Shader loaded sucessfully.
+[14:40:38] [Render thread/INFO]: Loading shader with type: [35633]
+[14:40:38] [Render thread/INFO]: Shader loaded sucessfully.
+[14:40:38] [Render thread/INFO]: Loading shader with type: [35632]
+[14:40:38] [Render thread/INFO]: Shader loaded sucessfully.
+[14:40:38] [Render thread/INFO]: Creating GLProxy... If this is the last message you see there must have been an OpenGL error.
+[14:40:38] [Render thread/INFO]: Lod Render OpenGL version [4.1 Metal - 89.4].
+[14:40:38] [Render thread/INFO]: minecraftGlCapabilities:
 Your OpenGL support:
 openGL version 3.2+: [true] <- REQUIRED
 Vertex Attribute Buffer Binding: [false] <- optional improvement
 Buffer Storage: [false] <- optional improvement
 
-[13:39:00] [Render thread/INFO]: This GPU doesn't support Buffer Storage (OpenGL 4.4), falling back to using other methods.
-[13:39:00] [Render thread/INFO]: GPU Vendor [APPLE] with OS [macOS], Preferred upload method is [DATA].
-[13:39:00] [Render thread/INFO]: GLProxy creation successful. OpenGL smiles upon you this day.
-[13:39:00] [Render thread/INFO]: Resizing Dynamic Transforms UBO, capacity limit of 2 reached during a single frame. New capacity will be 4.
-[13:39:00] [Render thread/INFO]: Setting up renderer
-[13:39:00] [Render thread/INFO]: Loading shader with type: [35633]
-[13:39:00] [Render thread/INFO]: Shader loaded sucessfully.
-[13:39:00] [Render thread/INFO]: Loading shader with type: [35632]
-[13:39:00] [Render thread/INFO]: Shader loaded sucessfully.
-[13:39:00] [Render thread/INFO]: Vertex Attribute (pre GL43) completed.
-[13:39:00] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:39:00] [bert-loader/WARN]: maxLength is not explicitly specified, use modelMaxLength: 512
-[13:39:00] [bert-loader/INFO]: [STDOUT]: Model loaded successfully and ready for inference.
-[13:39:00] [bert-loader/INFO]: BERT model loaded into memory. It will stay in memory as long as any bot stays active in game.
-[13:39:00] [Render thread/INFO]: Renderer setup complete
-[13:39:00] [Render thread/ERROR]: Unexpected; somehow the Opaque + Translucent pass ran with shaders on.
-[13:39:00] [Render thread/WARN]: There have been reports of instanced rendering causing crashes on macOS when Sodium is present. Instanced rendering can be disabled via the DH config.
-[13:39:00] [Render thread/INFO]: Loading shader with type: [35633]
-[13:39:00] [Render thread/INFO]: Shader loaded sucessfully.
-[13:39:00] [Render thread/INFO]: Loading shader with type: [35632]
-[13:39:00] [Render thread/INFO]: Shader loaded sucessfully.
-[13:39:00] [Render thread/INFO]: Vertex Attribute (pre GL43) completed.
-[13:39:00] [Render thread/INFO]: Loading shader with type: [35633]
-[13:39:00] [Render thread/INFO]: Shader loaded sucessfully.
-[13:39:00] [Render thread/INFO]: Loading shader with type: [35632]
-[13:39:00] [Render thread/INFO]: Shader loaded sucessfully.
-[13:39:00] [Render thread/INFO]: Vertex Attribute (pre GL43) completed.
-[13:39:00] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:39:00] [Render thread/INFO]: Resizing Dynamic Transforms UBO, capacity limit of 4 reached during a single frame. New capacity will be 8.
-[13:39:00] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:39:00] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:39:00] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:39:00] [Render thread/INFO]: Resizing Dynamic Transforms UBO, capacity limit of 8 reached during a single frame. New capacity will be 16.
-[13:39:00] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:39:00] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:39:00] [Server thread/INFO]: Saving and pausing game...
-[13:39:00] [Server thread/INFO]: Saving chunks for level 'ServerLevel[New World]'/minecraft:overworld
-[13:39:00] [Server thread/INFO]: Saving chunks for level 'ServerLevel[New World]'/minecraft:the_end
-[13:39:00] [Server thread/INFO]: Saving chunks for level 'ServerLevel[New World]'/minecraft:the_nether
-[13:40:50] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:50] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:50] [Render thread/INFO]: Resizing Dynamic Transforms UBO, capacity limit of 16 reached during a single frame. New capacity will be 32.
-[13:40:50] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:50] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:50] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:50] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:50] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:50] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:50] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:50] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:50] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:50] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:50] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:50] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:50] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:50] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:50] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:50] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:50] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:50] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:51] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:51] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:51] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:51] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:51] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:51] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:51] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:51] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:51] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:51] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:51] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:51] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:51] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:51] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:51] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:51] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:51] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:51] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:51] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:51] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:52] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:52] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:52] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:52] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:52] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:52] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:52] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:52] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:52] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:52] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:52] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:52] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:52] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:52] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:52] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:52] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:52] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:52] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:52] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:52] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:53] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:53] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:53] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:53] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:53] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:53] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:53] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:53] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:53] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:53] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:53] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:53] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:53] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:53] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:53] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:53] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:53] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:53] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:53] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:53] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:54] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:54] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:54] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:54] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:54] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:54] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:54] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:54] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:54] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:54] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:54] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:54] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:54] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:54] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:54] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:54] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:54] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:54] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:54] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:54] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:55] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:55] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:55] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:55] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:55] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:55] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:55] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:55] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:55] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:55] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:55] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:55] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:55] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:55] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:55] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:55] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:55] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:55] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:55] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:55] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:56] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:56] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:56] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:56] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:56] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:56] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:56] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:56] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:56] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:56] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:56] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:56] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:56] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:56] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:56] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:56] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:56] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:56] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:56] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:56] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:57] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:57] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:57] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:57] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:57] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:57] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:57] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:57] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:57] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:57] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:57] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:57] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:57] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:57] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:57] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:57] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:57] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:57] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:57] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:57] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:58] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:58] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:58] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:58] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:58] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:58] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:58] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:58] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:58] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:58] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:58] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:58] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:58] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:58] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:58] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:58] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:58] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:58] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:58] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:58] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:59] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:59] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:59] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:59] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:59] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:59] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:59] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:59] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:59] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:59] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:59] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:59] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:59] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:59] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:59] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:59] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:59] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:59] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:59] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:40:59] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:00] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:00] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:00] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:00] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:00] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:00] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:00] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:00] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:00] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:00] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:00] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:00] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:00] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:00] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:00] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:00] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:00] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:00] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:00] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:00] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:01] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:01] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:01] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:01] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:01] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:01] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:01] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:01] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:01] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:01] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:01] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:01] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:01] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:01] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:01] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:01] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:01] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:01] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:01] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:01] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:02] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:02] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:02] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:02] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:02] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:02] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:02] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:02] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:02] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:02] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:02] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:02] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:02] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:02] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:02] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:02] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:02] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:02] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:02] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:02] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:03] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:03] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:03] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:03] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:03] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:03] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:03] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:03] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:03] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:03] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:03] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:03] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:03] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:03] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:03] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:03] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:03] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:03] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:03] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:03] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:04] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:04] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:04] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:04] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:04] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:04] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:04] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:04] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:04] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:04] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:04] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:04] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:04] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:04] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:04] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:04] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:04] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:04] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:04] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:04] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:05] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:05] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:05] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:05] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:05] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:05] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:05] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:05] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:05] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:05] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:05] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:05] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:05] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:05] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:05] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:05] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:05] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:05] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:05] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:05] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:06] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:06] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:06] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:06] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:06] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:06] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:06] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:06] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:06] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:06] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:06] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:06] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:06] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:06] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:06] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:06] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:06] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:06] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:06] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:06] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:07] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:07] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:07] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:07] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:07] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:07] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:07] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:07] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:07] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:07] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:07] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:07] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:07] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:07] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:07] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:07] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:07] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:07] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:07] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:07] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:08] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:08] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:08] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:08] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:08] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:08] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:08] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:08] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:08] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:08] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:08] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:08] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:08] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:08] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:08] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:08] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:08] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:08] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:08] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:08] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:09] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:09] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:09] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:09] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:09] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:09] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:09] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:09] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:09] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:09] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:09] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:09] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:09] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:09] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:09] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:09] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:09] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:09] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:09] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:09] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:10] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:10] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:10] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:10] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:10] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:10] [Server thread/WARN]: Bot Jake taking IN_WALL damage - attempting immediate escape
-[13:41:12] [Server thread/INFO]: Saving and pausing game...
-[13:41:12] [Server thread/INFO]: Saving chunks for level 'ServerLevel[New World]'/minecraft:overworld
-[13:41:12] [Server thread/INFO]: Saving chunks for level 'ServerLevel[New World]'/minecraft:the_end
-[13:41:12] [Server thread/INFO]: Saving chunks for level 'ServerLevel[New World]'/minecraft:the_nether
-[13:41:14] [Server thread/INFO]: Saving and pausing game...
-[13:41:14] [Server thread/INFO]: Saving chunks for level 'ServerLevel[New World]'/minecraft:overworld
-[13:41:14] [Server thread/INFO]: Saving chunks for level 'ServerLevel[New World]'/minecraft:the_end
-[13:41:14] [Server thread/INFO]: Saving chunks for level 'ServerLevel[New World]'/minecraft:the_nether
-[13:41:14] [Render thread/INFO]: Client on ClientOnly mode disconnecting.
-[13:41:14] [Render thread/INFO]: Unloading level [minecraft:overworld].
-[13:41:14] [Render thread/INFO]: Shutting down ClientRenderState
-[13:41:14] [Render thread/INFO]: Shutting down LodRenderer...
-[13:41:14] [Render thread/INFO]: Queuing Renderer Cleanup for main render thread
-[13:41:14] [Netty Server IO #1/INFO]: Player [RotiWokeman] disconnected.
-[13:41:14] [Render thread/INFO]: Shutting down LodQuadTree...
-[13:41:14] [Render thread/INFO]: Finished shutting down LodQuadTree
-[13:41:14] [Render thread/INFO]: Finished shutting down LodRenderer
-[13:41:14] [Render thread/INFO]: Shutting down LodQuadTree...
-[13:41:14] [Render thread/INFO]: Finished shutting down LodQuadTree
-[13:41:14] [Render thread/INFO]: Closing world gen queue
-[13:41:14] [Render thread/INFO]: Closing WorldGenerationQueue...
-[13:41:14] [Render thread/INFO]: Awaiting world generator thread pool termination...
-[13:41:14] [DH-Cleanup Thread[0]/INFO]: waiting for [0] futures before closing render cache...
-[13:41:14] [DH-Cleanup Thread[0]/INFO]: waiting for [0] futures before closing render cache...
-[13:41:14] [Server thread/INFO]: RotiWokeman lost connection: Disconnected
-[13:41:14] [Server thread/INFO]: RotiWokeman left the game
-[13:41:14] [Server thread/INFO]: Stopping singleplayer server as player logged out
-[13:41:14] [Server thread/INFO]: saveAll invoked, persisted 0 fakeplayer(s).
-[13:41:14] [Server thread/INFO]: Stopping server
-[13:41:14] [Server thread/INFO]: Saving players
-[13:41:14] [Server thread/INFO]: Saving worlds
-[13:41:14] [Server thread/INFO]: Saving chunks for level 'ServerLevel[New World]'/minecraft:overworld
-[13:41:14] [Server thread/INFO]: Saving chunks for level 'ServerLevel[New World]'/minecraft:the_end
-[13:41:14] [Server thread/INFO]: Saving chunks for level 'ServerLevel[New World]'/minecraft:the_nether
-[13:41:14] [Server thread/INFO]: ThreadedAnvilChunkStorage (New World): All chunks are saved
-[13:41:14] [Server thread/INFO]: ThreadedAnvilChunkStorage (DIM1): All chunks are saved
-[13:41:14] [Server thread/INFO]: ThreadedAnvilChunkStorage (DIM-1): All chunks are saved
-[13:41:14] [Server thread/INFO]: ThreadedAnvilChunkStorage: All dimensions are saved
-[13:41:14] [Server thread/INFO]: Unloading level DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:the_end}
-[13:41:14] [Server thread/INFO]: Closing [GeneratedFullDataSourceProvider] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:the_end}].
-[13:41:14] [Server thread/INFO]: Closing [FullDataSourceProviderV1] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:the_end}].
-[13:41:14] [Server thread/INFO]: Closing database connection: [jdbc:dh_sqlite:/Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/saves/New World/DIM1/data/DistantHorizons.sqlite]...
-[13:41:14] [DH-Parent Update Queue [minecraft:the_end] Thread[0]/INFO]: Update thread [DH-Parent Update Queue [minecraft:the_end] Thread[0]] terminated.
-[13:41:14] [Server thread/INFO]: Finished closing database connection: [jdbc:dh_sqlite:/Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/saves/New World/DIM1/data/DistantHorizons.sqlite]
-[13:41:14] [Server thread/INFO]: Closed DHLevel for [Wrapped{ServerLevel[New World]@minecraft:the_end}].
-[13:41:15] [Server thread/INFO]: Closing [GeneratedFullDataSourceProvider] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:the_end}].
-[13:41:15] [Server thread/INFO]: Closing [FullDataSourceProviderV1] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:the_end}].
-[13:41:15] [Server thread/INFO]: Closed DhClientServerLevel for Wrapped{ServerLevel[New World]@minecraft:the_end}
-[13:41:17] [Render thread/WARN]: World generator thread pool shutdown didn't complete after [3] seconds. Some world generator requests may still be running.
-[13:41:17] [Render thread/INFO]: BatchGenerator shutting down...
-[13:41:17] [Render thread/INFO]: BatchGenerationEnvironment shutting down...
-[13:41:17] [Render thread/INFO]: Canceling in progress generation event futures...
-[13:41:17] [Render thread/INFO]: BatchGenerationEnvironment shutdown complete.
-[13:41:17] [Render thread/INFO]: Finished closing WorldGenerationQueue
-[13:41:17] [Render thread/INFO]: Closing [GeneratedFullDataSourceProvider] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:overworld}].
-[13:41:17] [Render thread/INFO]: Closing [FullDataSourceProviderV1] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:overworld}].
-[13:41:17] [Render thread/INFO]: Closing database connection: [jdbc:dh_sqlite:/Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/saves/New World/data/DistantHorizons.sqlite]...
-[13:41:17] [DH-Parent Update Queue [minecraft:overworld] Thread[0]/INFO]: Update thread [DH-Parent Update Queue [minecraft:overworld] Thread[0]] terminated.
-[13:41:17] [Render thread/INFO]: Finished closing database connection: [jdbc:dh_sqlite:/Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/saves/New World/data/DistantHorizons.sqlite]
-[13:41:17] [Render thread/INFO]: Closed DHLevel for [Wrapped{ServerLevel[New World]@minecraft:overworld}].
-[13:41:17] [Render thread/INFO]: Closing [GeneratedFullDataSourceProvider] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:overworld}].
-[13:41:17] [Render thread/INFO]: Closing [FullDataSourceProviderV1] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:overworld}].
-[13:41:17] [Render thread/INFO]: Closed DhClientServerLevel for Wrapped{ServerLevel[New World]@minecraft:overworld}
-[13:41:17] [Render thread/INFO]: Unloading level [minecraft:the_end].
-[13:41:18] [Render thread/INFO]: Closing [GeneratedFullDataSourceProvider] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:the_end}].
-[13:41:18] [Render thread/INFO]: Closing [FullDataSourceProviderV1] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:the_end}].
-[13:41:18] [Render thread/INFO]: Closed DHLevel for [Wrapped{ServerLevel[New World]@minecraft:the_end}].
-[13:41:18] [Render thread/INFO]: Closing [GeneratedFullDataSourceProvider] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:the_end}].
-[13:41:18] [Render thread/INFO]: Closing [FullDataSourceProviderV1] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:the_end}].
-[13:41:18] [Render thread/INFO]: Closed DhClientServerLevel for Wrapped{ServerLevel[New World]@minecraft:the_end}
-[13:41:18] [Render thread/INFO]: Unloading level [minecraft:the_nether].
-[13:41:18] [Render thread/INFO]: Closing [GeneratedFullDataSourceProvider] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:the_nether}].
-[13:41:18] [Render thread/INFO]: Closing [FullDataSourceProviderV1] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:the_nether}].
-[13:41:18] [Render thread/INFO]: Closing database connection: [jdbc:dh_sqlite:/Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/saves/New World/DIM-1/data/DistantHorizons.sqlite]...
-[13:41:18] [DH-Parent Update Queue [minecraft:the_nether] Thread[0]/INFO]: Update thread [DH-Parent Update Queue [minecraft:the_nether] Thread[0]] terminated.
-[13:41:18] [Render thread/INFO]: Finished closing database connection: [jdbc:dh_sqlite:/Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/saves/New World/DIM-1/data/DistantHorizons.sqlite]
-[13:41:18] [Render thread/INFO]: Closed DHLevel for [Wrapped{ServerLevel[New World]@minecraft:the_nether}].
-[13:41:18] [Render thread/INFO]: Closing [GeneratedFullDataSourceProvider] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:the_nether}].
-[13:41:18] [Render thread/INFO]: Closing [FullDataSourceProviderV1] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:the_nether}].
-[13:41:18] [Render thread/INFO]: Closed DhClientServerLevel for Wrapped{ServerLevel[New World]@minecraft:the_nether}
-[13:41:18] [Render thread/INFO]: Closed DhWorld of type CLIENT_SERVER
-[13:41:18] [Render thread/INFO]: Unloading level [minecraft:overworld].
-[13:41:19] [Render thread/INFO]: Closing [GeneratedFullDataSourceProvider] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:overworld}].
-[13:41:19] [Render thread/INFO]: Closing [FullDataSourceProviderV1] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:overworld}].
-[13:41:19] [Render thread/INFO]: Closed DHLevel for [Wrapped{ServerLevel[New World]@minecraft:overworld}].
-[13:41:19] [Render thread/INFO]: Closing [GeneratedFullDataSourceProvider] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:overworld}].
-[13:41:19] [Render thread/INFO]: Closing [FullDataSourceProviderV1] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:overworld}].
-[13:41:19] [Render thread/INFO]: Closed DhClientServerLevel for Wrapped{ServerLevel[New World]@minecraft:overworld}
-[13:41:19] [Render thread/INFO]: Unloading level [minecraft:the_end].
-[13:41:19] [Render thread/INFO]: Closing [GeneratedFullDataSourceProvider] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:the_end}].
-[13:41:19] [Render thread/INFO]: Closing [FullDataSourceProviderV1] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:the_end}].
-[13:41:19] [Render thread/INFO]: Closed DHLevel for [Wrapped{ServerLevel[New World]@minecraft:the_end}].
-[13:41:19] [Render thread/INFO]: Closing [GeneratedFullDataSourceProvider] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:the_end}].
-[13:41:19] [Render thread/INFO]: Closing [FullDataSourceProviderV1] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:the_end}].
-[13:41:19] [Render thread/INFO]: Closed DhClientServerLevel for Wrapped{ServerLevel[New World]@minecraft:the_end}
-[13:41:19] [Render thread/INFO]: Unloading level [minecraft:the_nether].
-[13:41:19] [Render thread/INFO]: Closing [GeneratedFullDataSourceProvider] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:the_nether}].
-[13:41:19] [Render thread/INFO]: Closing [FullDataSourceProviderV1] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:the_nether}].
-[13:41:19] [Render thread/INFO]: Closed DHLevel for [Wrapped{ServerLevel[New World]@minecraft:the_nether}].
-[13:41:20] [Render thread/INFO]: Closing [GeneratedFullDataSourceProvider] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:the_nether}].
-[13:41:20] [Render thread/INFO]: Closing [FullDataSourceProviderV1] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:the_nether}].
-[13:41:20] [Render thread/INFO]: Closed DhClientServerLevel for Wrapped{ServerLevel[New World]@minecraft:the_nether}
-[13:41:20] [Render thread/INFO]: Closed DhWorld of type CLIENT_SERVER
-[13:41:20] [Render thread/INFO]: Shutting down PriorityTaskPicker thread pool...
-[13:41:20] [Render thread/INFO]: Closing all [0] database connections...
-[13:41:20] [Server thread/INFO]: [STDOUT]: Unloading model from memory...
-[13:41:20] [Server thread/INFO]: [STDOUT]: Model unloaded successfully.
-[13:41:20] [Server thread/INFO]: [STDOUT]: Unloaded BERT Model from memory
-[13:41:20] [Render thread/INFO]: Unloading client level [ClientLevelWrapper]-[ceh4rbi6e0gru@minecraft:overworld].
-[13:41:20] [Render thread/INFO]: Stopping worker threads
-[13:41:21] [CullThread/INFO]: [STDOUT]: Shutting down culling task!
-[13:41:21] [Render thread/INFO]: Stopping!
+[14:40:38] [Render thread/INFO]: This GPU doesn't support Buffer Storage (OpenGL 4.4), falling back to using other methods.
+[14:40:38] [Render thread/INFO]: GPU Vendor [APPLE] with OS [macOS], Preferred upload method is [DATA].
+[14:40:38] [Render thread/INFO]: GLProxy creation successful. OpenGL smiles upon you this day.
+[14:40:38] [Render thread/INFO]: Resizing Dynamic Transforms UBO, capacity limit of 2 reached during a single frame. New capacity will be 4.
+[14:40:38] [Render thread/INFO]: Setting up renderer
+[14:40:38] [Render thread/INFO]: Loading shader with type: [35633]
+[14:40:38] [Render thread/INFO]: Shader loaded sucessfully.
+[14:40:38] [Render thread/INFO]: Loading shader with type: [35632]
+[14:40:38] [Render thread/INFO]: Shader loaded sucessfully.
+[14:40:38] [Render thread/INFO]: Vertex Attribute (pre GL43) completed.
+[14:40:38] [Render thread/INFO]: Renderer setup complete
+[14:40:38] [Render thread/ERROR]: Unexpected; somehow the Opaque + Translucent pass ran with shaders on.
+[14:40:38] [Render thread/WARN]: There have been reports of instanced rendering causing crashes on macOS when Sodium is present. Instanced rendering can be disabled via the DH config.
+[14:40:38] [Render thread/INFO]: Loading shader with type: [35633]
+[14:40:38] [Render thread/INFO]: Shader loaded sucessfully.
+[14:40:38] [Render thread/INFO]: Loading shader with type: [35632]
+[14:40:38] [Render thread/INFO]: Shader loaded sucessfully.
+[14:40:38] [Render thread/INFO]: Vertex Attribute (pre GL43) completed.
+[14:40:38] [Render thread/INFO]: Loading shader with type: [35633]
+[14:40:38] [Render thread/INFO]: Shader loaded sucessfully.
+[14:40:38] [Render thread/INFO]: Loading shader with type: [35632]
+[14:40:38] [Render thread/INFO]: Shader loaded sucessfully.
+[14:40:38] [Render thread/INFO]: Vertex Attribute (pre GL43) completed.
+[14:40:38] [Render thread/INFO]: Resizing Dynamic Transforms UBO, capacity limit of 4 reached during a single frame. New capacity will be 8.
+[14:40:38] [Render thread/INFO]: Resizing Dynamic Transforms UBO, capacity limit of 8 reached during a single frame. New capacity will be 16.
+[14:40:38] [Render thread/INFO]: Resizing Dynamic Transforms UBO, capacity limit of 16 reached during a single frame. New capacity will be 32.
+[14:40:39] [bert-loader/INFO]: PyTorch graph executor optimizer is enabled, this may impact your inference latency and throughput. See: https://docs.djl.ai/master/docs/development/inference_performance_optimization.html#graph-executor-optimization
+[14:40:39] [bert-loader/INFO]: Number of inter-op threads is 10
+[14:40:39] [bert-loader/INFO]: Number of intra-op threads is 6
+[14:40:39] [bert-loader/INFO]: Found matching platform from: jar:file:/Users/roti/Library/Application%20Support/PrismLauncher/instances/1.21.10/minecraft/.fabric/processedMods/ai_djl_huggingface_tokenizers-0.33.0-5d541ec46a4ba9bb.jar!/native/lib/tokenizers.properties
+[14:40:39] [bert-loader/WARN]: maxLength is not explicitly specified, use modelMaxLength: 512
+[14:40:39] [bert-loader/INFO]: [STDOUT]: Model loaded successfully and ready for inference.
+[14:40:39] [bert-loader/INFO]: BERT model loaded into memory. It will stay in memory as long as any bot stays active in game.
+[14:40:52] [Server thread/INFO]: Executing /bot spawn Jake training
+[14:40:52] [Server thread/INFO]: spawnBot starting: botName=Jake, mode=training, dimType=minecraft:overworld, pos=(73.5, -13.0, -80.5), facingYaw=107.94024, facingPitch=6.2524185
+[14:40:52] [Server thread/INFO]: spawnBot: existing bot Jake found, aborting active tasks
+[14:40:52] [Server thread/INFO]: spawnBot: entering training branch for Jake
+[14:40:52] [Server thread/INFO]: [STDOUT]: Existing Bot Profiles: {Jake=e01f59a8-aebb-4eed-9a56-bc36f8507228, Bob=17c3d366-025a-4751-ac14-fdd43ffebae2}
+[14:40:52] [Server thread/INFO]: [STDOUT]: Using existing GameProfile: GameProfile[id=e01f59a8-aebb-4eed-9a56-bc36f8507228, name=Jake, properties={}]
+[14:40:52] [Server thread/INFO]: Jake[/127.0.0.1:0] logged in with entity id 445 at (0.0, 0.0, 0.0)
+[14:40:52] [Server thread/INFO]: Restored fakeplayer 'Jake' using PlayerManager.
+[14:40:52] [Server thread/INFO]: Player [Jake] joined.
+[14:40:52] [Server thread/INFO]: Jake joined the game
+[14:40:52] [Server thread/WARN]: Force-added player with duplicate UUID e01f59a8-aebb-4eed-9a56-bc36f8507228
+[14:40:52] [Server thread/INFO]: Restored fakeplayer 'Jake' using PlayerManager.
+[14:40:52] [Server thread/INFO]: spawnBot: remembering spawn for training bot Jake
+[14:40:52] [Server thread/INFO]: Spawned new training bot Jake!
+[14:40:52] [Server thread/INFO]: LLM bot toggle for e01f59a8-aebb-4eed-9a56-bc36f8507228 set to false
+[14:40:52] [Render thread/INFO]: [System] [CHAT] Jake joined the game
+[14:40:52] [Server thread/ERROR]: ❌ Error loading Q-table from /Users/roti/.minecraft/qtable_storage/qtable.bin: writing aborted; java.io.NotSerializableException: net.minecraft.server.network.ServerPlayerEntity
+[14:40:52] [Server thread/WARN]: ❌ Failed to load Q-table from /Users/roti/.minecraft/qtable_storage/qtable.bin: writing aborted; java.io.NotSerializableException: net.minecraft.server.network.ServerPlayerEntity
+[14:40:52] [Server thread/ERROR]: ❌ Error loading Q-table from /Users/roti/minecraft_data/qtable_storage/qtable.bin: writing aborted; java.io.NotSerializableException: net.minecraft.server.network.ServerPlayerEntity
+[14:40:52] [Server thread/WARN]: ❌ Failed to load Q-table from /Users/roti/minecraft_data/qtable_storage/qtable.bin: writing aborted; java.io.NotSerializableException: net.minecraft.server.network.ServerPlayerEntity
+[14:40:52] [Server thread/ERROR]: ❌ Error loading Q-table from /var/folders/_t/5vq116m55tl1yx1y5gkstsdh0000gn/T/minecraft_ai_player/qtable_storage/qtable.bin: writing aborted; java.io.NotSerializableException: net.minecraft.server.network.ServerPlayerEntity
+[14:40:52] [Server thread/WARN]: ❌ Failed to load Q-table from /var/folders/_t/5vq116m55tl1yx1y5gkstsdh0000gn/T/minecraft_ai_player/qtable_storage/qtable.bin: writing aborted; java.io.NotSerializableException: net.minecraft.server.network.ServerPlayerEntity
+[14:40:52] [Server thread/INFO]: 📝 No existing Q-table found, creating new one
+[14:40:52] [Server thread/INFO]: /bot spawn completed successfully for Jake training
+[14:40:52] [Server thread/INFO]: Loaded inventory and stats for fakeplayer 'Jake' from jake_e01f59a8-aebb-4eed-9a56-bc36f8507228.nbt
+[14:40:52] [Server thread/INFO]: Loaded persisted inventory for fakeplayer 'Jake'
+[14:40:52] [Server thread/INFO]: Loaded inventory and stats for fakeplayer 'Jake' from jake_e01f59a8-aebb-4eed-9a56-bc36f8507228.nbt
+[14:40:52] [Server thread/INFO]: Loaded persisted inventory for fakeplayer 'Jake'
+[14:40:55] [Server thread/WARN]: Bot Jake failed to escape after 5 attempts
+[14:41:21] [Server thread/INFO]: Executing /bot spawn Jake training
+[14:41:21] [Server thread/INFO]: spawnBot starting: botName=Jake, mode=training, dimType=minecraft:overworld, pos=(73.5, -14.0, -80.5), facingYaw=83.340385, facingPitch=5.850022
+[14:41:21] [Server thread/INFO]: spawnBot: existing bot Jake found, aborting active tasks
+[14:41:21] [Server thread/INFO]: spawnBot: entering training branch for Jake
+[14:41:21] [Server thread/INFO]: [STDOUT]: Existing Bot Profiles: {Jake=e01f59a8-aebb-4eed-9a56-bc36f8507228, Bob=17c3d366-025a-4751-ac14-fdd43ffebae2}
+[14:41:21] [Server thread/INFO]: [STDOUT]: Using existing GameProfile: GameProfile[id=e01f59a8-aebb-4eed-9a56-bc36f8507228, name=Jake, properties={}]
+[14:41:21] [Server thread/INFO]: Jake[/127.0.0.1:0] logged in with entity id 521 at (0.0, 0.0, 0.0)
+[14:41:21] [Server thread/INFO]: Restored fakeplayer 'Jake' using PlayerManager.
+[14:41:21] [Server thread/INFO]: Player [Jake] joined.
+[14:41:21] [Server thread/INFO]: Jake joined the game
+[14:41:21] [Server thread/WARN]: Force-added player with duplicate UUID e01f59a8-aebb-4eed-9a56-bc36f8507228
+[14:41:21] [Server thread/INFO]: Restored fakeplayer 'Jake' using PlayerManager.
+[14:41:21] [Server thread/INFO]: spawnBot: remembering spawn for training bot Jake
+[14:41:21] [Server thread/INFO]: Spawned new training bot Jake!
+[14:41:21] [Server thread/INFO]: LLM bot toggle for e01f59a8-aebb-4eed-9a56-bc36f8507228 set to false
+[14:41:21] [Render thread/INFO]: [System] [CHAT] Jake joined the game
+[14:41:21] [Server thread/ERROR]: ❌ Error loading Q-table from /Users/roti/.minecraft/qtable_storage/qtable.bin: writing aborted; java.io.NotSerializableException: net.minecraft.server.network.ServerPlayerEntity
+[14:41:21] [Server thread/WARN]: ❌ Failed to load Q-table from /Users/roti/.minecraft/qtable_storage/qtable.bin: writing aborted; java.io.NotSerializableException: net.minecraft.server.network.ServerPlayerEntity
+[14:41:21] [Server thread/ERROR]: ❌ Error loading Q-table from /Users/roti/minecraft_data/qtable_storage/qtable.bin: writing aborted; java.io.NotSerializableException: net.minecraft.server.network.ServerPlayerEntity
+[14:41:21] [Server thread/WARN]: ❌ Failed to load Q-table from /Users/roti/minecraft_data/qtable_storage/qtable.bin: writing aborted; java.io.NotSerializableException: net.minecraft.server.network.ServerPlayerEntity
+[14:41:21] [Server thread/ERROR]: ❌ Error loading Q-table from /var/folders/_t/5vq116m55tl1yx1y5gkstsdh0000gn/T/minecraft_ai_player/qtable_storage/qtable.bin: writing aborted; java.io.NotSerializableException: net.minecraft.server.network.ServerPlayerEntity
+[14:41:21] [Server thread/WARN]: ❌ Failed to load Q-table from /var/folders/_t/5vq116m55tl1yx1y5gkstsdh0000gn/T/minecraft_ai_player/qtable_storage/qtable.bin: writing aborted; java.io.NotSerializableException: net.minecraft.server.network.ServerPlayerEntity
+[14:41:21] [Server thread/INFO]: 📝 No existing Q-table found, creating new one
+[14:41:21] [Server thread/INFO]: /bot spawn completed successfully for Jake training
+[14:41:21] [Server thread/INFO]: Loaded inventory and stats for fakeplayer 'Jake' from jake_e01f59a8-aebb-4eed-9a56-bc36f8507228.nbt
+[14:41:21] [Server thread/INFO]: Loaded persisted inventory for fakeplayer 'Jake'
+[14:41:21] [Server thread/INFO]: Loaded inventory and stats for fakeplayer 'Jake' from jake_e01f59a8-aebb-4eed-9a56-bc36f8507228.nbt
+[14:41:21] [Server thread/INFO]: Loaded persisted inventory for fakeplayer 'Jake'
+[14:41:23] [DH-Phantom Array Recycler Thread[0]/WARN]: Pool: [Render Reducer]. Unable to find checkout for phantom reference [java.lang.ref.PhantomReference@26f55cbc], arrays will need to be recreated.
+[14:41:24] [Server thread/WARN]: Bot Jake failed to escape after 5 attempts
+[14:41:28] [Server thread/INFO]: Executing /bot spawn Jake training
+[14:41:28] [Server thread/INFO]: spawnBot starting: botName=Jake, mode=training, dimType=minecraft:overworld, pos=(75.5, -15.0, -79.5), facingYaw=15.690399, facingPitch=11.250016
+[14:41:28] [Server thread/INFO]: spawnBot: existing bot Jake found, aborting active tasks
+[14:41:28] [Server thread/INFO]: spawnBot: entering training branch for Jake
+[14:41:28] [Server thread/INFO]: [STDOUT]: Existing Bot Profiles: {Jake=e01f59a8-aebb-4eed-9a56-bc36f8507228, Bob=17c3d366-025a-4751-ac14-fdd43ffebae2}
+[14:41:28] [Server thread/INFO]: [STDOUT]: Using existing GameProfile: GameProfile[id=e01f59a8-aebb-4eed-9a56-bc36f8507228, name=Jake, properties={}]
+[14:41:28] [Server thread/INFO]: Jake[/127.0.0.1:0] logged in with entity id 539 at (0.0, 0.0, 0.0)
+[14:41:28] [Server thread/INFO]: Restored fakeplayer 'Jake' using PlayerManager.
+[14:41:28] [Server thread/INFO]: Player [Jake] joined.
+[14:41:28] [Server thread/INFO]: Jake joined the game
+[14:41:28] [Server thread/WARN]: Force-added player with duplicate UUID e01f59a8-aebb-4eed-9a56-bc36f8507228
+[14:41:28] [Server thread/INFO]: Restored fakeplayer 'Jake' using PlayerManager.
+[14:41:28] [Server thread/INFO]: spawnBot: remembering spawn for training bot Jake
+[14:41:28] [Server thread/INFO]: Spawned new training bot Jake!
+[14:41:28] [Server thread/INFO]: LLM bot toggle for e01f59a8-aebb-4eed-9a56-bc36f8507228 set to false
+[14:41:28] [Render thread/INFO]: [System] [CHAT] Jake joined the game
+[14:41:28] [Server thread/ERROR]: ❌ Error loading Q-table from /Users/roti/.minecraft/qtable_storage/qtable.bin: writing aborted; java.io.NotSerializableException: net.minecraft.server.network.ServerPlayerEntity
+[14:41:28] [Server thread/WARN]: ❌ Failed to load Q-table from /Users/roti/.minecraft/qtable_storage/qtable.bin: writing aborted; java.io.NotSerializableException: net.minecraft.server.network.ServerPlayerEntity
+[14:41:28] [Server thread/ERROR]: ❌ Error loading Q-table from /Users/roti/minecraft_data/qtable_storage/qtable.bin: writing aborted; java.io.NotSerializableException: net.minecraft.server.network.ServerPlayerEntity
+[14:41:28] [Server thread/WARN]: ❌ Failed to load Q-table from /Users/roti/minecraft_data/qtable_storage/qtable.bin: writing aborted; java.io.NotSerializableException: net.minecraft.server.network.ServerPlayerEntity
+[14:41:28] [Server thread/ERROR]: ❌ Error loading Q-table from /var/folders/_t/5vq116m55tl1yx1y5gkstsdh0000gn/T/minecraft_ai_player/qtable_storage/qtable.bin: writing aborted; java.io.NotSerializableException: net.minecraft.server.network.ServerPlayerEntity
+[14:41:28] [Server thread/WARN]: ❌ Failed to load Q-table from /var/folders/_t/5vq116m55tl1yx1y5gkstsdh0000gn/T/minecraft_ai_player/qtable_storage/qtable.bin: writing aborted; java.io.NotSerializableException: net.minecraft.server.network.ServerPlayerEntity
+[14:41:28] [Server thread/INFO]: 📝 No existing Q-table found, creating new one
+[14:41:28] [Server thread/INFO]: /bot spawn completed successfully for Jake training
+[14:41:28] [Server thread/INFO]: Loaded inventory and stats for fakeplayer 'Jake' from jake_e01f59a8-aebb-4eed-9a56-bc36f8507228.nbt
+[14:41:28] [Server thread/INFO]: Loaded persisted inventory for fakeplayer 'Jake'
+[14:41:28] [Server thread/INFO]: Loaded inventory and stats for fakeplayer 'Jake' from jake_e01f59a8-aebb-4eed-9a56-bc36f8507228.nbt
+[14:41:28] [Server thread/INFO]: Loaded persisted inventory for fakeplayer 'Jake'
+[14:41:31] [Server thread/WARN]: Bot Jake failed to escape after 5 attempts
+[14:41:34] [Server thread/INFO]: Executing /bot spawn Jake training
+[14:41:34] [Server thread/INFO]: spawnBot starting: botName=Jake, mode=training, dimType=minecraft:overworld, pos=(77.5, -15.0, -79.5), facingYaw=97.14042, facingPitch=13.950014
+[14:41:34] [Server thread/INFO]: spawnBot: existing bot Jake found, aborting active tasks
+[14:41:34] [Server thread/INFO]: spawnBot: entering training branch for Jake
+[14:41:34] [Server thread/INFO]: [STDOUT]: Existing Bot Profiles: {Jake=e01f59a8-aebb-4eed-9a56-bc36f8507228, Bob=17c3d366-025a-4751-ac14-fdd43ffebae2}
+[14:41:34] [Server thread/INFO]: [STDOUT]: Using existing GameProfile: GameProfile[id=e01f59a8-aebb-4eed-9a56-bc36f8507228, name=Jake, properties={}]
+[14:41:34] [Server thread/INFO]: Jake[/127.0.0.1:0] logged in with entity id 565 at (0.0, 0.0, 0.0)
+[14:41:34] [Server thread/INFO]: Restored fakeplayer 'Jake' using PlayerManager.
+[14:41:34] [Server thread/INFO]: Player [Jake] joined.
+[14:41:34] [Server thread/INFO]: Jake joined the game
+[14:41:34] [Server thread/WARN]: Force-added player with duplicate UUID e01f59a8-aebb-4eed-9a56-bc36f8507228
+[14:41:34] [Server thread/INFO]: Restored fakeplayer 'Jake' using PlayerManager.
+[14:41:34] [Server thread/INFO]: spawnBot: remembering spawn for training bot Jake
+[14:41:34] [Server thread/INFO]: Spawned new training bot Jake!
+[14:41:34] [Server thread/INFO]: LLM bot toggle for e01f59a8-aebb-4eed-9a56-bc36f8507228 set to false
+[14:41:34] [Render thread/INFO]: [System] [CHAT] Jake joined the game
+[14:41:34] [Server thread/ERROR]: ❌ Error loading Q-table from /Users/roti/.minecraft/qtable_storage/qtable.bin: writing aborted; java.io.NotSerializableException: net.minecraft.server.network.ServerPlayerEntity
+[14:41:34] [Server thread/WARN]: ❌ Failed to load Q-table from /Users/roti/.minecraft/qtable_storage/qtable.bin: writing aborted; java.io.NotSerializableException: net.minecraft.server.network.ServerPlayerEntity
+[14:41:34] [Server thread/ERROR]: ❌ Error loading Q-table from /Users/roti/minecraft_data/qtable_storage/qtable.bin: writing aborted; java.io.NotSerializableException: net.minecraft.server.network.ServerPlayerEntity
+[14:41:34] [Server thread/WARN]: ❌ Failed to load Q-table from /Users/roti/minecraft_data/qtable_storage/qtable.bin: writing aborted; java.io.NotSerializableException: net.minecraft.server.network.ServerPlayerEntity
+[14:41:35] [Server thread/ERROR]: ❌ Error loading Q-table from /var/folders/_t/5vq116m55tl1yx1y5gkstsdh0000gn/T/minecraft_ai_player/qtable_storage/qtable.bin: writing aborted; java.io.NotSerializableException: net.minecraft.server.network.ServerPlayerEntity
+[14:41:35] [Server thread/WARN]: ❌ Failed to load Q-table from /var/folders/_t/5vq116m55tl1yx1y5gkstsdh0000gn/T/minecraft_ai_player/qtable_storage/qtable.bin: writing aborted; java.io.NotSerializableException: net.minecraft.server.network.ServerPlayerEntity
+[14:41:35] [Server thread/INFO]: 📝 No existing Q-table found, creating new one
+[14:41:35] [Server thread/INFO]: /bot spawn completed successfully for Jake training
+[14:41:35] [Server thread/INFO]: Loaded inventory and stats for fakeplayer 'Jake' from jake_e01f59a8-aebb-4eed-9a56-bc36f8507228.nbt
+[14:41:35] [Server thread/INFO]: Loaded persisted inventory for fakeplayer 'Jake'
+[14:41:35] [Server thread/INFO]: Loaded inventory and stats for fakeplayer 'Jake' from jake_e01f59a8-aebb-4eed-9a56-bc36f8507228.nbt
+[14:41:35] [Server thread/INFO]: Loaded persisted inventory for fakeplayer 'Jake'
+[14:41:37] [Server thread/WARN]: Bot Jake failed to escape after 5 attempts
+[14:41:42] [Render thread/INFO]: Resizing Dynamic Transforms UBO, capacity limit of 32 reached during a single frame. New capacity will be 64.
+[14:41:43] [DH-Phantom Array Recycler Thread[0]/WARN]: Pool: [Render Reducer]. Unable to find checkout for phantom reference [java.lang.ref.PhantomReference@2233333f], arrays will need to be recreated.
+[14:41:50] [Server thread/INFO]: Saved inventory for fakeplayer 'Jake' to jake_e01f59a8-aebb-4eed-9a56-bc36f8507228.nbt
+[14:41:59] [Server thread/INFO]: Saved inventory for fakeplayer 'Jake' to jake_e01f59a8-aebb-4eed-9a56-bc36f8507228.nbt
+[14:42:01] [Server thread/INFO]: Executing /bot spawn Jake training
+[14:42:01] [Server thread/INFO]: spawnBot starting: botName=Jake, mode=training, dimType=minecraft:overworld, pos=(78.5, -15.0, -79.5), facingYaw=34.535282, facingPitch=6.977942
+[14:42:01] [Server thread/INFO]: spawnBot: existing bot Jake found, aborting active tasks
+[14:42:01] [Server thread/INFO]: spawnBot: entering training branch for Jake
+[14:42:01] [Server thread/INFO]: [STDOUT]: Existing Bot Profiles: {Jake=e01f59a8-aebb-4eed-9a56-bc36f8507228, Bob=17c3d366-025a-4751-ac14-fdd43ffebae2}
+[14:42:01] [Server thread/INFO]: [STDOUT]: Using existing GameProfile: GameProfile[id=e01f59a8-aebb-4eed-9a56-bc36f8507228, name=Jake, properties={}]
+[14:42:01] [Server thread/INFO]: Jake[/127.0.0.1:0] logged in with entity id 663 at (0.0, 0.0, 0.0)
+[14:42:01] [Server thread/INFO]: Restored fakeplayer 'Jake' using PlayerManager.
+[14:42:01] [Server thread/INFO]: Player [Jake] joined.
+[14:42:01] [Server thread/INFO]: Jake joined the game
+[14:42:01] [Server thread/WARN]: Force-added player with duplicate UUID e01f59a8-aebb-4eed-9a56-bc36f8507228
+[14:42:01] [Server thread/INFO]: Restored fakeplayer 'Jake' using PlayerManager.
+[14:42:01] [Server thread/INFO]: spawnBot: remembering spawn for training bot Jake
+[14:42:01] [Server thread/INFO]: Spawned new training bot Jake!
+[14:42:01] [Server thread/INFO]: LLM bot toggle for e01f59a8-aebb-4eed-9a56-bc36f8507228 set to false
+[14:42:01] [Render thread/INFO]: [System] [CHAT] Jake joined the game
+[14:42:01] [Server thread/ERROR]: ❌ Error loading Q-table from /Users/roti/.minecraft/qtable_storage/qtable.bin: writing aborted; java.io.NotSerializableException: net.minecraft.server.network.ServerPlayerEntity
+[14:42:01] [Server thread/WARN]: ❌ Failed to load Q-table from /Users/roti/.minecraft/qtable_storage/qtable.bin: writing aborted; java.io.NotSerializableException: net.minecraft.server.network.ServerPlayerEntity
+[14:42:01] [Server thread/ERROR]: ❌ Error loading Q-table from /Users/roti/minecraft_data/qtable_storage/qtable.bin: writing aborted; java.io.NotSerializableException: net.minecraft.server.network.ServerPlayerEntity
+[14:42:01] [Server thread/WARN]: ❌ Failed to load Q-table from /Users/roti/minecraft_data/qtable_storage/qtable.bin: writing aborted; java.io.NotSerializableException: net.minecraft.server.network.ServerPlayerEntity
+[14:42:02] [Server thread/ERROR]: ❌ Error loading Q-table from /var/folders/_t/5vq116m55tl1yx1y5gkstsdh0000gn/T/minecraft_ai_player/qtable_storage/qtable.bin: writing aborted; java.io.NotSerializableException: net.minecraft.server.network.ServerPlayerEntity
+[14:42:02] [Server thread/WARN]: ❌ Failed to load Q-table from /var/folders/_t/5vq116m55tl1yx1y5gkstsdh0000gn/T/minecraft_ai_player/qtable_storage/qtable.bin: writing aborted; java.io.NotSerializableException: net.minecraft.server.network.ServerPlayerEntity
+[14:42:02] [Server thread/INFO]: 📝 No existing Q-table found, creating new one
+[14:42:02] [Server thread/INFO]: /bot spawn completed successfully for Jake training
+[14:42:02] [Server thread/INFO]: Loaded inventory and stats for fakeplayer 'Jake' from jake_e01f59a8-aebb-4eed-9a56-bc36f8507228.nbt
+[14:42:02] [Server thread/INFO]: Loaded persisted inventory for fakeplayer 'Jake'
+[14:42:02] [Server thread/INFO]: Loaded inventory and stats for fakeplayer 'Jake' from jake_e01f59a8-aebb-4eed-9a56-bc36f8507228.nbt
+[14:42:02] [Server thread/INFO]: Loaded persisted inventory for fakeplayer 'Jake'
+[14:42:04] [Server thread/WARN]: Bot Jake failed to escape after 5 attempts
+[14:42:05] [Server thread/INFO]: Saved inventory for fakeplayer 'Jake' to jake_e01f59a8-aebb-4eed-9a56-bc36f8507228.nbt
+[14:42:10] [Server thread/INFO]: Executing /bot spawn Jake training
+[14:42:10] [Server thread/INFO]: spawnBot starting: botName=Jake, mode=training, dimType=minecraft:overworld, pos=(82.5, -15.0, -78.5), facingYaw=-82.1546, facingPitch=20.177942
+[14:42:10] [Server thread/INFO]: spawnBot: existing bot Jake found, aborting active tasks
+[14:42:10] [Server thread/INFO]: spawnBot: entering training branch for Jake
+[14:42:10] [Server thread/INFO]: [STDOUT]: Existing Bot Profiles: {Jake=e01f59a8-aebb-4eed-9a56-bc36f8507228, Bob=17c3d366-025a-4751-ac14-fdd43ffebae2}
+[14:42:10] [Server thread/INFO]: [STDOUT]: Using existing GameProfile: GameProfile[id=e01f59a8-aebb-4eed-9a56-bc36f8507228, name=Jake, properties={}]
+[14:42:10] [Server thread/INFO]: Jake[/127.0.0.1:0] logged in with entity id 699 at (0.0, 0.0, 0.0)
+[14:42:10] [Server thread/INFO]: Restored fakeplayer 'Jake' using PlayerManager.
+[14:42:10] [Server thread/INFO]: Player [Jake] joined.
+[14:42:10] [Server thread/INFO]: Jake joined the game
+[14:42:10] [Server thread/WARN]: Force-added player with duplicate UUID e01f59a8-aebb-4eed-9a56-bc36f8507228
+[14:42:10] [Server thread/INFO]: Restored fakeplayer 'Jake' using PlayerManager.
+[14:42:10] [Server thread/INFO]: spawnBot: remembering spawn for training bot Jake
+[14:42:10] [Server thread/INFO]: Spawned new training bot Jake!
+[14:42:10] [Server thread/INFO]: LLM bot toggle for e01f59a8-aebb-4eed-9a56-bc36f8507228 set to false
+[14:42:10] [Render thread/INFO]: [System] [CHAT] Jake joined the game
+[14:42:10] [Server thread/ERROR]: ❌ Error loading Q-table from /Users/roti/.minecraft/qtable_storage/qtable.bin: writing aborted; java.io.NotSerializableException: net.minecraft.server.network.ServerPlayerEntity
+[14:42:10] [Server thread/WARN]: ❌ Failed to load Q-table from /Users/roti/.minecraft/qtable_storage/qtable.bin: writing aborted; java.io.NotSerializableException: net.minecraft.server.network.ServerPlayerEntity
+[14:42:10] [Server thread/ERROR]: ❌ Error loading Q-table from /Users/roti/minecraft_data/qtable_storage/qtable.bin: writing aborted; java.io.NotSerializableException: net.minecraft.server.network.ServerPlayerEntity
+[14:42:10] [Server thread/WARN]: ❌ Failed to load Q-table from /Users/roti/minecraft_data/qtable_storage/qtable.bin: writing aborted; java.io.NotSerializableException: net.minecraft.server.network.ServerPlayerEntity
+[14:42:10] [Server thread/ERROR]: ❌ Error loading Q-table from /var/folders/_t/5vq116m55tl1yx1y5gkstsdh0000gn/T/minecraft_ai_player/qtable_storage/qtable.bin: writing aborted; java.io.NotSerializableException: net.minecraft.server.network.ServerPlayerEntity
+[14:42:10] [Server thread/WARN]: ❌ Failed to load Q-table from /var/folders/_t/5vq116m55tl1yx1y5gkstsdh0000gn/T/minecraft_ai_player/qtable_storage/qtable.bin: writing aborted; java.io.NotSerializableException: net.minecraft.server.network.ServerPlayerEntity
+[14:42:10] [Server thread/INFO]: 📝 No existing Q-table found, creating new one
+[14:42:10] [Server thread/INFO]: /bot spawn completed successfully for Jake training
+[14:42:10] [Server thread/INFO]: Loaded inventory and stats for fakeplayer 'Jake' from jake_e01f59a8-aebb-4eed-9a56-bc36f8507228.nbt
+[14:42:10] [Server thread/INFO]: Loaded persisted inventory for fakeplayer 'Jake'
+[14:42:10] [Server thread/INFO]: Loaded inventory and stats for fakeplayer 'Jake' from jake_e01f59a8-aebb-4eed-9a56-bc36f8507228.nbt
+[14:42:10] [Server thread/INFO]: Loaded persisted inventory for fakeplayer 'Jake'
+[14:42:13] [Server thread/WARN]: Bot Jake failed to escape after 5 attempts
+[14:42:40] [Server thread/INFO]: Saved inventory for fakeplayer 'Jake' to jake_e01f59a8-aebb-4eed-9a56-bc36f8507228.nbt
+[14:42:43] [Server thread/INFO]: Saving and pausing game...
+[14:42:43] [Server thread/INFO]: Saving chunks for level 'ServerLevel[New World]'/minecraft:overworld
+[14:42:44] [Server thread/INFO]: Saving chunks for level 'ServerLevel[New World]'/minecraft:the_nether
+[14:42:44] [Server thread/INFO]: Saving chunks for level 'ServerLevel[New World]'/minecraft:the_end
+[14:42:44] [Render thread/INFO]: Client on ClientOnly mode disconnecting.
+[14:42:44] [Render thread/INFO]: Unloading level [minecraft:the_nether].
+[14:42:44] [Netty Server IO #1/INFO]: Player [RotiWokeman] disconnected.
+[14:42:44] [Server thread/INFO]: RotiWokeman lost connection: Disconnected
+[14:42:44] [Server thread/INFO]: RotiWokeman left the game
+[14:42:44] [Server thread/INFO]: Stopping singleplayer server as player logged out
+[14:42:44] [Server thread/INFO]: saveAll invoked, persisted 0 fakeplayer(s).
+[14:42:44] [Server thread/INFO]: Stopping server
+[14:42:44] [Server thread/INFO]: Saving players
+[14:42:44] [Server thread/INFO]: Saving worlds
+[14:42:44] [Server thread/INFO]: Saving chunks for level 'ServerLevel[New World]'/minecraft:overworld
+[14:42:44] [Server thread/INFO]: Saving chunks for level 'ServerLevel[New World]'/minecraft:the_nether
+[14:42:44] [Server thread/INFO]: Saving chunks for level 'ServerLevel[New World]'/minecraft:the_end
+[14:42:44] [Server thread/INFO]: ThreadedAnvilChunkStorage (New World): All chunks are saved
+[14:42:44] [Server thread/INFO]: ThreadedAnvilChunkStorage (DIM-1): All chunks are saved
+[14:42:44] [Server thread/INFO]: ThreadedAnvilChunkStorage (DIM1): All chunks are saved
+[14:42:44] [Server thread/INFO]: ThreadedAnvilChunkStorage: All dimensions are saved
+[14:42:44] [Server thread/INFO]: Unloading level DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:overworld}
+[14:42:44] [Server thread/INFO]: Shutting down ClientRenderState
+[14:42:44] [Server thread/INFO]: Shutting down LodRenderer...
+[14:42:44] [Server thread/INFO]: Queuing Renderer Cleanup for main render thread
+[14:42:44] [Server thread/INFO]: Shutting down LodQuadTree...
+[14:42:44] [Server thread/INFO]: Finished shutting down LodQuadTree
+[14:42:44] [Server thread/INFO]: Finished shutting down LodRenderer
+[14:42:44] [Server thread/INFO]: Shutting down LodQuadTree...
+[14:42:44] [Server thread/INFO]: Finished shutting down LodQuadTree
+[14:42:44] [Server thread/INFO]: Closing world gen queue
+[14:42:44] [Server thread/INFO]: Closing WorldGenerationQueue...
+[14:42:44] [Server thread/INFO]: Awaiting world generator thread pool termination...
+[14:42:44] [DH-Cleanup Thread[0]/INFO]: waiting for [0] futures before closing render cache...
+[14:42:44] [DH-Cleanup Thread[0]/INFO]: waiting for [0] futures before closing render cache...
+[14:42:44] [Render thread/INFO]: Closing [GeneratedFullDataSourceProvider] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:the_nether}].
+[14:42:44] [Render thread/INFO]: Closing [FullDataSourceProviderV1] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:the_nether}].
+[14:42:44] [Render thread/INFO]: Closing database connection: [jdbc:dh_sqlite:/Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/saves/New World/DIM-1/data/DistantHorizons.sqlite]...
+[14:42:44] [DH-Parent Update Queue [minecraft:the_nether] Thread[0]/INFO]: Update thread [DH-Parent Update Queue [minecraft:the_nether] Thread[0]] terminated.
+[14:42:44] [Render thread/INFO]: Finished closing database connection: [jdbc:dh_sqlite:/Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/saves/New World/DIM-1/data/DistantHorizons.sqlite]
+[14:42:44] [Render thread/INFO]: Closed DHLevel for [Wrapped{ServerLevel[New World]@minecraft:the_nether}].
+[14:42:45] [Render thread/INFO]: Closing [GeneratedFullDataSourceProvider] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:the_nether}].
+[14:42:45] [Render thread/INFO]: Closing [FullDataSourceProviderV1] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:the_nether}].
+[14:42:45] [Render thread/INFO]: Closed DhClientServerLevel for Wrapped{ServerLevel[New World]@minecraft:the_nether}
+[14:42:45] [Render thread/INFO]: Unloading level [minecraft:the_end].
+[14:42:45] [Render thread/INFO]: Closing [GeneratedFullDataSourceProvider] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:the_end}].
+[14:42:45] [Render thread/INFO]: Closing [FullDataSourceProviderV1] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:the_end}].
+[14:42:45] [Render thread/INFO]: Closing database connection: [jdbc:dh_sqlite:/Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/saves/New World/DIM1/data/DistantHorizons.sqlite]...
+[14:42:45] [DH-Parent Update Queue [minecraft:the_end] Thread[0]/INFO]: Update thread [DH-Parent Update Queue [minecraft:the_end] Thread[0]] terminated.
+[14:42:45] [Render thread/INFO]: Finished closing database connection: [jdbc:dh_sqlite:/Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/saves/New World/DIM1/data/DistantHorizons.sqlite]
+[14:42:45] [Render thread/INFO]: Closed DHLevel for [Wrapped{ServerLevel[New World]@minecraft:the_end}].
+[14:42:45] [Render thread/INFO]: Closing [GeneratedFullDataSourceProvider] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:the_end}].
+[14:42:45] [Render thread/INFO]: Closing [FullDataSourceProviderV1] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:the_end}].
+[14:42:45] [Render thread/INFO]: Closed DhClientServerLevel for Wrapped{ServerLevel[New World]@minecraft:the_end}
+[14:42:45] [Render thread/INFO]: Unloading level [minecraft:overworld].
+[14:42:45] [Render thread/INFO]: Closing [GeneratedFullDataSourceProvider] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:overworld}].
+[14:42:45] [Render thread/INFO]: Closing [FullDataSourceProviderV1] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:overworld}].
+[14:42:45] [Render thread/INFO]: Closing database connection: [jdbc:dh_sqlite:/Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/saves/New World/data/DistantHorizons.sqlite]...
+[14:42:45] [DH-Parent Update Queue [minecraft:overworld] Thread[0]/INFO]: Update thread [DH-Parent Update Queue [minecraft:overworld] Thread[0]] terminated.
+[14:42:45] [Render thread/INFO]: Finished closing database connection: [jdbc:dh_sqlite:/Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/saves/New World/data/DistantHorizons.sqlite]
+[14:42:45] [Render thread/INFO]: Closed DHLevel for [Wrapped{ServerLevel[New World]@minecraft:overworld}].
+[14:42:45] [Render thread/INFO]: Closing [GeneratedFullDataSourceProvider] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:overworld}].
+[14:42:45] [Render thread/INFO]: Closing [FullDataSourceProviderV1] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:overworld}].
+[14:42:45] [Render thread/INFO]: Closed DhClientServerLevel for Wrapped{ServerLevel[New World]@minecraft:overworld}
+[14:42:45] [Render thread/INFO]: Closed DhWorld of type CLIENT_SERVER
+[14:42:45] [Render thread/INFO]: Unloading level [minecraft:the_nether].
+[14:42:46] [Render thread/INFO]: Closing [GeneratedFullDataSourceProvider] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:the_nether}].
+[14:42:46] [Render thread/INFO]: Closing [FullDataSourceProviderV1] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:the_nether}].
+[14:42:46] [Render thread/INFO]: Closed DHLevel for [Wrapped{ServerLevel[New World]@minecraft:the_nether}].
+[14:42:46] [Render thread/INFO]: Closing [GeneratedFullDataSourceProvider] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:the_nether}].
+[14:42:46] [Render thread/INFO]: Closing [FullDataSourceProviderV1] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:the_nether}].
+[14:42:46] [Render thread/INFO]: Closed DhClientServerLevel for Wrapped{ServerLevel[New World]@minecraft:the_nether}
+[14:42:46] [Render thread/INFO]: Unloading level [minecraft:the_end].
+[14:42:46] [Render thread/INFO]: Closing [GeneratedFullDataSourceProvider] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:the_end}].
+[14:42:46] [Render thread/INFO]: Closing [FullDataSourceProviderV1] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:the_end}].
+[14:42:46] [Render thread/INFO]: Closed DHLevel for [Wrapped{ServerLevel[New World]@minecraft:the_end}].
+[14:42:46] [Render thread/INFO]: Closing [GeneratedFullDataSourceProvider] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:the_end}].
+[14:42:46] [Render thread/INFO]: Closing [FullDataSourceProviderV1] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:the_end}].
+[14:42:46] [Render thread/INFO]: Closed DhClientServerLevel for Wrapped{ServerLevel[New World]@minecraft:the_end}
+[14:42:46] [Render thread/INFO]: Unloading level [minecraft:overworld].
+[14:42:46] [Render thread/INFO]: Closing [GeneratedFullDataSourceProvider] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:overworld}].
+[14:42:46] [Render thread/INFO]: Closing [FullDataSourceProviderV1] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:overworld}].
+[14:42:46] [Render thread/INFO]: Closed DHLevel for [Wrapped{ServerLevel[New World]@minecraft:overworld}].
+[14:42:47] [Render thread/INFO]: Closing [GeneratedFullDataSourceProvider] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:overworld}].
+[14:42:47] [Render thread/INFO]: Closing [FullDataSourceProviderV1] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:overworld}].
+[14:42:47] [Render thread/INFO]: Closed DhClientServerLevel for Wrapped{ServerLevel[New World]@minecraft:overworld}
+[14:42:47] [Render thread/INFO]: Closed DhWorld of type CLIENT_SERVER
+[14:42:47] [Render thread/INFO]: Shutting down PriorityTaskPicker thread pool...
+[14:42:47] [Render thread/INFO]: Closing all [0] database connections...
+[14:42:47] [Server thread/INFO]: BatchGenerator shutting down...
+[14:42:47] [Server thread/INFO]: BatchGenerationEnvironment shutting down...
+[14:42:47] [Server thread/INFO]: Canceling in progress generation event futures...
+[14:42:47] [Server thread/INFO]: BatchGenerationEnvironment shutdown complete.
+[14:42:47] [Server thread/INFO]: Finished closing WorldGenerationQueue
+[14:42:47] [Server thread/INFO]: Closing [GeneratedFullDataSourceProvider] for level: [DhClientServerLevel{ceh4rbi6e0gru@minecraft:overworld}].
+[14:42:47] [Server thread/INFO]: Closing [FullDataSourceProviderV1] for level: [DhClientServerLevel{ceh4rbi6e0gru@minecraft:overworld}].
+[14:42:47] [Server thread/INFO]: Closed DHLevel for [Wrapped{ServerLevel[New World]@minecraft:overworld}].
+[14:42:47] [Server thread/INFO]: Closing [GeneratedFullDataSourceProvider] for level: [DhClientServerLevel{ceh4rbi6e0gru@minecraft:overworld}].
+[14:42:47] [Server thread/INFO]: Closing [FullDataSourceProviderV1] for level: [DhClientServerLevel{ceh4rbi6e0gru@minecraft:overworld}].
+[14:42:47] [Server thread/INFO]: Closed DhClientServerLevel for Wrapped{ServerLevel[New World]@minecraft:overworld}
+[14:42:47] [Server thread/INFO]: [STDOUT]: Unloading model from memory...
+[14:42:47] [Server thread/INFO]: [STDOUT]: Model unloaded successfully.
+[14:42:47] [Server thread/INFO]: [STDOUT]: Unloaded BERT Model from memory
+[14:42:47] [Render thread/INFO]: Unloading client level [ClientLevelWrapper]-[ceh4rbi6e0gru@minecraft:overworld].
+[14:42:47] [Render thread/INFO]: Stopping worker threads
+[14:42:48] [CullThread/INFO]: [STDOUT]: Shutting down culling task!
+[14:42:48] [Render thread/INFO]: Stopping!
