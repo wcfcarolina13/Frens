@@ -3,6 +3,12 @@
 ## Session 2025-11-19 – Ascent headroom tweak 2
 ## Session 2025-11-19 – Ascent headroom tweak 3
 - Task: Increase headroom by one more block.
+## Session 2025-11-19 – Ascent functional checkpoint
+- Task: Confirm ascent fully functional after incremental headroom increases.
+- Files: CollectDirtSkill.java
+- Outcome: Bot reliably walks to step, clears step + 8 blocks headroom, and ascends without obstruction in tests. Marking feature functional.
+
+
 - Files: src/main/java/net/shasankp000/GameAI/skills/impl/CollectDirtSkill.java
 - Change: In executeUpwardStep(), raised loop from h<=7 to h<=8 (step + 8 above).
 - Outcome: More clearance for ascent jumping. Test needed.
