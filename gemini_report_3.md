@@ -11,6 +11,8 @@
 - Task: Add lockDirection parameter to preserve facing across resumes.
 - Files: CollectDirtSkill.java
 - Change: determineStraightStairDirection() now checks lockDirection; if true, reuses stored direction, else resets.
+- Docs updated: ASCENT_DESCENT_QUICK_REF.md and README.md list lockDirection usage examples.
+
 - Outcome: User can invoke with lockDirection=true to keep consistent stair direction across commands.
 
 

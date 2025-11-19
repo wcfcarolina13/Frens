@@ -39,6 +39,11 @@ Examples:
 
 Arguments are forwarded exactly as you type them (minus the alias token). Each bot runs the skill in its own task, so multiple bots can execute the same skill concurrently.  
 
+- `/bot skill mining ascent <blocks> [lockDirection true] <alias>` – Climb up the specified number of blocks; add `lockDirection true` to reuse prior facing across resumed or repeated commands.
+- `/bot skill mining ascent-y <Y-level> [lockDirection true] <alias>` – Climb until reaching target Y.
+- `/bot skill mining descent <blocks> [lockDirection true] <alias>` – Dig staircase downward for given blocks.
+- `/bot skill mining descent-y <Y-level> [lockDirection true] <alias>` – Dig downward staircase until at/below Y.
+
 ---
 
 ## Persistent Bot Controls (`/configMan`)

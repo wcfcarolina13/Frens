@@ -22,6 +22,9 @@
 
 # Absolute - climb up to Y-level 100
 /bot skill mining ascent-y 100 Jake
+
+# Lock direction across multiple ascent commands (preserve initial facing)
+/bot skill mining ascent 10 lockDirection true Jake
 ```
 
 ---
