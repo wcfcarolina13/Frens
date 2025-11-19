@@ -7,6 +7,13 @@
 - Task: Confirm ascent fully functional after incremental headroom increases.
 ## Session 2025-11-19 – Direction reset change
 - Task: Reset stored ascent/descent direction each new command invocation.
+## Session 2025-11-19 – Direction lock parameter
+- Task: Add lockDirection parameter to preserve facing across resumes.
+- Files: CollectDirtSkill.java
+- Change: determineStraightStairDirection() now checks lockDirection; if true, reuses stored direction, else resets.
+- Outcome: User can invoke with lockDirection=true to keep consistent stair direction across commands.
+
+
 - Files: CollectDirtSkill.java
 - Change: determineStraightStairDirection() now removes any previously stored direction key before storing current facing.
 - Outcome: Prevents stale direction reuse across separate commands.

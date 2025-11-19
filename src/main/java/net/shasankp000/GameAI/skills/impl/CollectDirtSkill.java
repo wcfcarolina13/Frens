@@ -1446,10 +1446,20 @@ public class CollectDirtSkill implements Skill {
     private Direction determineStraightStairDirection(SkillContext context, ServerPlayerEntity player) {
         Direction current = player.getHorizontalFacing();
         Map<String, Object> shared = context.sharedState();
+        boolean lock = getBooleanParameter(context, "lockDirection", false);
         if (shared != null) {
             String key = "collectDirt.depth.direction." + player.getUuid();
-            // Always reset direction on new invocation
-            shared.remove(key);
+            if (!lock) {
+                shared.remove(key); // reset unless locked
+            } else {
+                Object stored = shared.get(key);
+                if (stored instanceof String str) {
+                    Direction remembered = parseDirection(str);
+                    if (remembered != null) {
+                        current = remembered; // reuse stored when locked
+                    }
+                }
+            }
             shared.put(key, current.asString());
         }
         return current;
