@@ -1444,7 +1444,16 @@ public class CollectDirtSkill implements Skill {
     }
 
     private Direction determineStraightStairDirection(SkillContext context, ServerPlayerEntity player) {
-        Direction current = player.getHorizontalFacing();
+        Direction issuerFacing = player.getHorizontalFacing(); // default fallback
+        // Attempt to capture the issuing player's facing from context if provided
+        Object issuerDirObj = context.parameters().get("issuerFacing");
+        if (issuerDirObj instanceof String s) {
+            Direction parsed = parseDirection(s);
+            if (parsed != null) {
+                issuerFacing = parsed;
+            }
+        }
+        Direction current = issuerFacing;
         Map<String, Object> shared = context.sharedState();
         boolean lock = getBooleanParameter(context, "lockDirection", false);
         if (shared != null) {
@@ -1462,6 +1471,7 @@ public class CollectDirtSkill implements Skill {
             }
             shared.put(key, current.asString());
         }
+        LOGGER.info("Stair/stripmine direction resolved: {} (lockDirection={})", current, lock);
         return current;
     }
 

@@ -16,6 +16,8 @@
 - Outcome: User can invoke with lockDirection=true to keep consistent stair direction across commands.
 
 
+- Direction resolution now uses issuerFacing parameter if supplied; lockDirection preserves it across ascent/descent/stripmine commands.
+
 - Files: CollectDirtSkill.java
 - Change: determineStraightStairDirection() now removes any previously stored direction key before storing current facing.
 - Outcome: Prevents stale direction reuse across separate commands.
