@@ -44,6 +44,8 @@
 
 - CollectDirt direction: Bot now immediately rotates to resolved direction in determineStraightStairDirection. Files: CollectDirtSkill.java.
 
+- Replace asRotation(): Used manual yaw mapping (N/S/W/E) for CollectDirtSkill and StripMineSkill to fix compile errors. Files: CollectDirtSkill.java, StripMineSkill.java.
+
 - Outcome: Bot reliably walks to step, clears step + 8 blocks headroom, and ascends without obstruction in tests. Marking feature functional.
 
 

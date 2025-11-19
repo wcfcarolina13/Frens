@@ -1472,9 +1472,16 @@ public class CollectDirtSkill implements Skill {
             shared.put(key, current.asString());
         }
         LOGGER.info("Stair/stripmine direction resolved: {} (lockDirection={})", current, lock);
-        // Immediately orient bot to chosen direction for consistent start
-        player.setYaw(current.asRotation());
-        player.setHeadYaw(current.asRotation());
+        // Immediately orient bot to chosen direction for consistent start (convert horizontal facing to yaw degrees)
+        float yaw = switch (current) {
+            case NORTH -> 180f;
+            case SOUTH -> 0f;
+            case WEST -> 90f;
+            case EAST -> -90f;
+            default -> player.getYaw();
+        };
+        player.setYaw(yaw);
+        player.setHeadYaw(yaw);
         return current;
     }
 
