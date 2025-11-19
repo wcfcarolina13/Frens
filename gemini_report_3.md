@@ -42,6 +42,8 @@
 
 - StripMine direction: Updated StripMineSkill to accept issuerFacing fallback when direction param absent and immediately orient bot to chosen direction. Files: StripMineSkill.java.
 
+- CollectDirt direction: Bot now immediately rotates to resolved direction in determineStraightStairDirection. Files: CollectDirtSkill.java.
+
 - Outcome: Bot reliably walks to step, clears step + 8 blocks headroom, and ascends without obstruction in tests. Marking feature functional.
 
 
