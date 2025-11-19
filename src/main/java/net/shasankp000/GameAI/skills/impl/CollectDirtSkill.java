@@ -1448,13 +1448,8 @@ public class CollectDirtSkill implements Skill {
         Map<String, Object> shared = context.sharedState();
         if (shared != null) {
             String key = "collectDirt.depth.direction." + player.getUuid();
-            Object stored = shared.get(key);
-            if (stored instanceof String str) {
-                Direction remembered = parseDirection(str);
-                if (remembered != null) {
-                    current = remembered;
-                }
-            }
+            // Always reset direction on new invocation
+            shared.remove(key);
             shared.put(key, current.asString());
         }
         return current;

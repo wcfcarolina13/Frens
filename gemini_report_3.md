@@ -5,6 +5,13 @@
 - Task: Increase headroom by one more block.
 ## Session 2025-11-19 – Ascent functional checkpoint
 - Task: Confirm ascent fully functional after incremental headroom increases.
+## Session 2025-11-19 – Direction reset change
+- Task: Reset stored ascent/descent direction each new command invocation.
+- Files: CollectDirtSkill.java
+- Change: determineStraightStairDirection() now removes any previously stored direction key before storing current facing.
+- Outcome: Prevents stale direction reuse across separate commands.
+
+
 - Files: CollectDirtSkill.java
 - Outcome: Bot reliably walks to step, clears step + 8 blocks headroom, and ascends without obstruction in tests. Marking feature functional.
 
