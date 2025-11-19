@@ -1,9 +1,9 @@
-[15:02:09] [main/INFO]: Loading Minecraft 1.21.10 with Fabric Loader 0.17.3
-[15:02:09] [ForkJoinPool-1-worker-1/WARN]: Mod com_github_fasterxml_jackson-core uses the version jackson-core-2.17.2 which isn't compatible with Loader's extended semantic version format (Could not parse version number component 'jackson'!), SemVer is recommended for reliably evaluating dependencies and prioritizing newer version
-[15:02:09] [ForkJoinPool-1-worker-5/WARN]: Mod com_github_fasterxml_jackson-datatype-jsr310 uses the version jackson-datatype-jsr310-2.8.4 which isn't compatible with Loader's extended semantic version format (Could not parse version number component 'jackson'!), SemVer is recommended for reliably evaluating dependencies and prioritizing newer version
-[15:02:09] [ForkJoinPool-1-worker-9/WARN]: Mod com_github_fasterxml_jackson-annotations uses the version jackson-annotations-2.17.2 which isn't compatible with Loader's extended semantic version format (Could not parse version number component 'jackson'!), SemVer is recommended for reliably evaluating dependencies and prioritizing newer version
-[15:02:09] [ForkJoinPool-1-worker-1/WARN]: Mod com_github_fasterxml_jackson-databind uses the version jackson-databind-2.17.2 which isn't compatible with Loader's extended semantic version format (Could not parse version number component 'jackson'!), SemVer is recommended for reliably evaluating dependencies and prioritizing newer version
-[15:02:11] [main/INFO]: Loading 79 mods:
+[06:49:01] [main/INFO]: Loading Minecraft 1.21.10 with Fabric Loader 0.17.3
+[06:49:01] [ForkJoinPool-1-worker-6/WARN]: Mod com_github_fasterxml_jackson-databind uses the version jackson-databind-2.17.2 which isn't compatible with Loader's extended semantic version format (Could not parse version number component 'jackson'!), SemVer is recommended for reliably evaluating dependencies and prioritizing newer version
+[06:49:02] [ForkJoinPool-1-worker-8/WARN]: Mod com_github_fasterxml_jackson-datatype-jsr310 uses the version jackson-datatype-jsr310-2.8.4 which isn't compatible with Loader's extended semantic version format (Could not parse version number component 'jackson'!), SemVer is recommended for reliably evaluating dependencies and prioritizing newer version
+[06:49:02] [ForkJoinPool-1-worker-3/WARN]: Mod com_github_fasterxml_jackson-core uses the version jackson-core-2.17.2 which isn't compatible with Loader's extended semantic version format (Could not parse version number component 'jackson'!), SemVer is recommended for reliably evaluating dependencies and prioritizing newer version
+[06:49:02] [ForkJoinPool-1-worker-10/WARN]: Mod com_github_fasterxml_jackson-annotations uses the version jackson-annotations-2.17.2 which isn't compatible with Loader's extended semantic version format (Could not parse version number component 'jackson'!), SemVer is recommended for reliably evaluating dependencies and prioritizing newer version
+[06:49:03] [main/INFO]: Loading 79 mods:
 	- ai-player 1.0.6-release+1.21.10
 	   |-- ai_djl_api 0.33.0
 	   |-- ai_djl_huggingface_tokenizers 0.33.0
@@ -88,186 +88,186 @@
 	   |-- fabric-rendering-v1 16.0.2+91152d886f
 	   |-- fabric-resource-loader-v0 3.2.3+3388a3b26f
 	   \-- fabric-resource-loader-v1 1.0.3+8cc86c156f
-[15:02:11] [main/INFO]: SpongePowered MIXIN Subsystem Version=0.8.7 Source=file:/Users/roti/Library/Application%20Support/PrismLauncher/libraries/net/fabricmc/sponge-mixin/0.16.5+mixin.0.8.7/sponge-mixin-0.16.5+mixin.0.8.7.jar Service=Knot/Fabric Env=CLIENT
-[15:02:11] [main/INFO]: Compatibility level set to JAVA_17
-[15:02:11] [main/INFO]: Compatibility level set to JAVA_21
-[15:02:11] [main/WARN]: Reference map 'iris.refmap.json' for mixins.iris.json could not be read. If this is a development environment you can ignore this message
-[15:02:11] [main/WARN]: Reference map 'iris-fabric.refmap.json' for mixins.iris.fabric.json could not be read. If this is a development environment you can ignore this message
-[15:02:11] [main/WARN]: Reference map 'iris.refmap.json' for mixins.iris.fantastic.json could not be read. If this is a development environment you can ignore this message
-[15:02:11] [main/WARN]: Reference map 'iris.refmap.json' for mixins.iris.vertexformat.json could not be read. If this is a development environment you can ignore this message
-[15:02:11] [main/WARN]: Reference map 'iris.refmap.json' for mixins.iris.bettermipmaps.json could not be read. If this is a development environment you can ignore this message
-[15:02:11] [main/WARN]: Reference map 'iris.refmap.json' for mixins.iris.compat.sodium.json could not be read. If this is a development environment you can ignore this message
-[15:02:11] [main/WARN]: Reference map 'iris.refmap.json' for mixins.iris.fixes.maxfpscrash.json could not be read. If this is a development environment you can ignore this message
-[15:02:11] [main/INFO]: Loaded configuration file for Lithium: 163 options available, 0 override(s) found.
-[15:02:11] [main/INFO]: Loaded configuration file for Sodium: 42 options available, 1 override(s) found
-[15:02:11] [main/WARN]: Force-disabling mixin 'features.render.world.sky.FogRendererMixin' as rule 'mixin.features.render.world.sky' (added by mods [iris]) disables it and children
-[15:02:11] [main/WARN]: Force-disabling mixin 'features.render.world.sky.ClientLevelMixin' as rule 'mixin.features.render.world.sky' (added by mods [iris]) disables it and children
-[15:02:11] [main/WARN]: Force-disabling mixin 'features.render.world.sky.LevelRendererMixin' as rule 'mixin.features.render.world.sky' (added by mods [iris]) disables it and children
-[15:02:11] [main/INFO]: Searching for graphics cards...
-[15:02:12] [main/INFO]: Initializing MixinExtras via com.llamalad7.mixinextras.service.MixinExtrasServiceImpl(version=0.5.0).
-[15:02:12] [Datafixer Bootstrap/INFO]: 278 Datafixer optimizations took 157 milliseconds
-[15:02:15] [Render thread/INFO]: Environment: Environment[sessionHost=https://sessionserver.mojang.com, servicesHost=https://api.minecraftservices.com, profilesHost=https://api.mojang.com, name=PROD]
-[15:02:15] [Render thread/INFO]: Setting user: RotiWokeman
-[15:02:15] [Render thread/INFO]: Detecting launcher environment...
-[15:02:15] [Render thread/INFO]: Game directory: /Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft
-[15:02:15] [Render thread/INFO]: User home: /Users/roti
-[15:02:15] [Render thread/INFO]: OS: mac os x
-[15:02:15] [Render thread/INFO]: Detected launcher: Prism Launcher
-[15:02:15] [Render thread/INFO]: Hello Fabric world!
-[15:02:15] [Render thread/INFO]: [STDOUT]: Using provider: ollama
-[15:02:15] [Render thread/INFO]: [STDOUT]: === ALL SYSTEM PROPERTIES ===
-[15:02:15] [Render thread/INFO]: [STDOUT]: aiplayer.llmMode = ollama
-[15:02:15] [Render thread/INFO]: [STDOUT]: === END DEBUG ===
-[15:02:16] [Render thread/INFO]: ✅ sqlite-vec already present at: /Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/config/sqlite_vector/sqlite-vec/vector0.dylib
-[15:02:16] [Render thread/INFO]: Attempting to load sqlite-vec from /Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/config/sqlite_vector/sqlite-vec/vector0.dylib
-[15:02:16] [Render thread/INFO]: 🔗 Loading /Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/config/sqlite_vector/sqlite-vec/vector0 with entrypoint sqlite3_vec_init
-[15:02:16] [Render thread/INFO]: ✅ sqlite-vec version: v0.1.6
-[15:02:16] [Render thread/WARN]: ⚠️ macOS detected — skipping sqlite-vss (avoids OpenMP/libomp conflicts). Using fallback cosine_distance UDF.
-[15:02:16] [Render thread/INFO]: ✅ Registered fallback cosine_distance UDF on current connection.
-[15:02:16] [Render thread/INFO]: ✅ Memory table created.
-[15:02:16] [Render thread/INFO]: Setting up Q-table storage...
-[15:02:16] [Render thread/INFO]: Launcher: Prism Launcher
+[06:49:03] [main/INFO]: SpongePowered MIXIN Subsystem Version=0.8.7 Source=file:/Users/roti/Library/Application%20Support/PrismLauncher/libraries/net/fabricmc/sponge-mixin/0.16.5+mixin.0.8.7/sponge-mixin-0.16.5+mixin.0.8.7.jar Service=Knot/Fabric Env=CLIENT
+[06:49:03] [main/INFO]: Compatibility level set to JAVA_17
+[06:49:03] [main/INFO]: Compatibility level set to JAVA_21
+[06:49:03] [main/WARN]: Reference map 'iris.refmap.json' for mixins.iris.json could not be read. If this is a development environment you can ignore this message
+[06:49:03] [main/WARN]: Reference map 'iris-fabric.refmap.json' for mixins.iris.fabric.json could not be read. If this is a development environment you can ignore this message
+[06:49:03] [main/WARN]: Reference map 'iris.refmap.json' for mixins.iris.fantastic.json could not be read. If this is a development environment you can ignore this message
+[06:49:03] [main/WARN]: Reference map 'iris.refmap.json' for mixins.iris.vertexformat.json could not be read. If this is a development environment you can ignore this message
+[06:49:03] [main/WARN]: Reference map 'iris.refmap.json' for mixins.iris.bettermipmaps.json could not be read. If this is a development environment you can ignore this message
+[06:49:03] [main/WARN]: Reference map 'iris.refmap.json' for mixins.iris.compat.sodium.json could not be read. If this is a development environment you can ignore this message
+[06:49:03] [main/WARN]: Reference map 'iris.refmap.json' for mixins.iris.fixes.maxfpscrash.json could not be read. If this is a development environment you can ignore this message
+[06:49:03] [main/INFO]: Loaded configuration file for Lithium: 163 options available, 0 override(s) found.
+[06:49:03] [main/INFO]: Loaded configuration file for Sodium: 42 options available, 1 override(s) found
+[06:49:04] [main/WARN]: Force-disabling mixin 'features.render.world.sky.FogRendererMixin' as rule 'mixin.features.render.world.sky' (added by mods [iris]) disables it and children
+[06:49:04] [main/WARN]: Force-disabling mixin 'features.render.world.sky.ClientLevelMixin' as rule 'mixin.features.render.world.sky' (added by mods [iris]) disables it and children
+[06:49:04] [main/WARN]: Force-disabling mixin 'features.render.world.sky.LevelRendererMixin' as rule 'mixin.features.render.world.sky' (added by mods [iris]) disables it and children
+[06:49:04] [main/INFO]: Searching for graphics cards...
+[06:49:04] [main/INFO]: Initializing MixinExtras via com.llamalad7.mixinextras.service.MixinExtrasServiceImpl(version=0.5.0).
+[06:49:05] [Datafixer Bootstrap/INFO]: 278 Datafixer optimizations took 223 milliseconds
+[06:49:08] [Render thread/INFO]: Environment: Environment[sessionHost=https://sessionserver.mojang.com, servicesHost=https://api.minecraftservices.com, profilesHost=https://api.mojang.com, name=PROD]
+[06:49:08] [Render thread/INFO]: Setting user: RotiWokeman
+[06:49:08] [Render thread/INFO]: Detecting launcher environment...
+[06:49:08] [Render thread/INFO]: Game directory: /Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft
+[06:49:08] [Render thread/INFO]: User home: /Users/roti
+[06:49:08] [Render thread/INFO]: OS: mac os x
+[06:49:08] [Render thread/INFO]: Detected launcher: Prism Launcher
+[06:49:08] [Render thread/INFO]: Hello Fabric world!
+[06:49:08] [Render thread/INFO]: [STDOUT]: Using provider: ollama
+[06:49:08] [Render thread/INFO]: [STDOUT]: === ALL SYSTEM PROPERTIES ===
+[06:49:08] [Render thread/INFO]: [STDOUT]: aiplayer.llmMode = ollama
+[06:49:08] [Render thread/INFO]: [STDOUT]: === END DEBUG ===
+[06:49:10] [Render thread/INFO]: ✅ sqlite-vec already present at: /Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/config/sqlite_vector/sqlite-vec/vector0.dylib
+[06:49:10] [Render thread/INFO]: Attempting to load sqlite-vec from /Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/config/sqlite_vector/sqlite-vec/vector0.dylib
+[06:49:10] [Render thread/INFO]: 🔗 Loading /Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/config/sqlite_vector/sqlite-vec/vector0 with entrypoint sqlite3_vec_init
+[06:49:10] [Render thread/INFO]: ✅ sqlite-vec version: v0.1.6
+[06:49:10] [Render thread/WARN]: ⚠️ macOS detected — skipping sqlite-vss (avoids OpenMP/libomp conflicts). Using fallback cosine_distance UDF.
+[06:49:10] [Render thread/INFO]: ✅ Registered fallback cosine_distance UDF on current connection.
+[06:49:10] [Render thread/INFO]: ✅ Memory table created.
+[06:49:10] [Render thread/INFO]: Setting up Q-table storage...
+[06:49:10] [Render thread/INFO]: Launcher: Prism Launcher
 Game Directory: /Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft
 User Home: /Users/roti
 User Name: roti
 OS: Mac OS X
 
-[15:02:16] [Render thread/INFO]: ✅ Q-table storage directory exists: /Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/qtable_storage
-[15:02:16] [ForkJoinPool.commonPool-worker-1/INFO]: [STDOUT]: ℹ️ ai_search_config.json already exists, no setup needed.
-[15:02:16] [ForkJoinPool.commonPool-worker-1/INFO]: BERT model files already exist! Skipping download....
-[15:02:16] [ForkJoinPool.commonPool-worker-1/INFO]: CART files already exist! Skipping download....
-[15:02:16] [ForkJoinPool.commonPool-worker-1/INFO]: OpenNLP model files already exist! Skipping download....
-[15:02:16] [ForkJoinPool.commonPool-worker-1/INFO]: LIDSNet model files already exist! Skipping download....
-[15:02:16] [ForkJoinPool.commonPool-worker-1/WARN]: Error, file /Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/config/ai-player/NLPModels/distilbert-finetuned-intent-torchscript.zip doesn't exist for extraction! Ignore if already extracted previously.
-[15:02:16] [ForkJoinPool.commonPool-worker-1/WARN]: Error, file /Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/config/ai-player/NLPModels/cart.zip doesn't exist for extraction! Ignore if already extracted previously.
-[15:02:16] [ForkJoinPool.commonPool-worker-1/WARN]: Error, file /Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/config/ai-player/NLPModels/cart.zip doesn't exist for extraction! Ignore if already extracted previously.
-[15:02:16] [Render thread/INFO]: Initializing Distant Horizons client, firing DhApiBeforeDhInitEvent...
-[15:02:18] [ForkJoinPool.commonPool-worker-1/INFO]: [STDOUT]: NLP model deployment task complete
-[15:02:19] [Render thread/INFO]: Distant Horizons, Version: 2.3.6-b
-[15:02:19] [Render thread/INFO]: Registering Fabric Client Events
-[15:02:19] [Render thread/INFO]: Registering Fabric Server Events
-[15:02:19] [Render thread/INFO]: Registered mod compatibility accessor for: [Sodium-Fabric].
-[15:02:19] [Render thread/INFO]: Registered mod compatibility accessor for: [iris].
-[15:02:19] [Render thread/INFO]: Initialising config for [DistantHorizons]
-[15:02:19] [Render thread/INFO]: [DistantHorizons] Config initialised
-[15:02:19] [Render thread/INFO]: Distant Horizons client Initialized.
-[15:02:19] [Render thread/INFO]: [Indigo] Different rendering plugin detected; not applying Indigo.
-[15:02:19] [Render thread/INFO]: [STDOUT]: [LibGui] Initializing Client...
-[15:02:19] [Render thread/INFO]: Queuing DH event binding...
-[15:02:19] [Render thread/ERROR]: Couldn't load distanthorizons pack metadata: Pack declares support for version newer than 64, but is missing mandatory fields min_format and max_format
-[15:02:19] [Render thread/ERROR]: Couldn't load entityculling pack metadata: Pack declares support for version newer than 64, but is missing mandatory fields min_format and max_format
-[15:02:19] [Render thread/ERROR]: Couldn't load trender pack metadata: Pack declares support for version newer than 64, but is missing mandatory fields min_format and max_format
-[15:02:19] [Render thread/INFO]: Backend library: LWJGL version 3.3.3-snapshot
-[15:02:20] [ForkJoinPool.commonPool-worker-1/WARN]: [Iris Update Check] This version doesn't have an update index, skipping.
-[15:02:22] [DH-ApplyConfigPresetTimer/INFO]: changing preset to: BALANCED
-[15:02:22] [DH-ApplyConfigPresetTimer/INFO]: changing preset to: MEDIUM
-[15:02:22] [DH-ApplyConfigPresetTimer/INFO]: preset active: BALANCED
-[15:02:22] [DH-ApplyConfigPresetTimer/INFO]: preset active: MEDIUM
-[15:02:22] [Render thread/INFO]: Initializing ImmediatelyFast 1.13.1+1.21.10 on Apple M2 Pro (Apple) with OpenGL 4.1 Metal - 89.4
-[15:02:22] [Render thread/INFO]: Found Iris/Oculus 1.9.6+mc1.21.9. Enabling compatibility.
-[15:02:22] [Render thread/INFO]: Debug functionality is disabled.
-[15:02:22] [Render thread/INFO]: DSA support not detected.
-[15:02:22] [Render thread/INFO]: OpenGL Vendor: Apple
-[15:02:22] [Render thread/INFO]: OpenGL Renderer: Apple M2 Pro
-[15:02:22] [Render thread/INFO]: OpenGL Version: 4.1 Metal - 89.4
-[15:02:22] [Render thread/INFO]: Using optional rendering extensions: 
-[15:02:22] [Render thread/ERROR]: Couldn't load distanthorizons pack metadata: Pack declares support for version newer than 64, but is missing mandatory fields min_format and max_format
-[15:02:22] [Render thread/ERROR]: Couldn't load entityculling pack metadata: Pack declares support for version newer than 64, but is missing mandatory fields min_format and max_format
-[15:02:22] [Render thread/ERROR]: Couldn't load trender pack metadata: Pack declares support for version newer than 64, but is missing mandatory fields min_format and max_format
-[15:02:22] [Render thread/INFO]: Hardware information:
-[15:02:22] [Render thread/INFO]: CPU: 10x Apple M2 Pro
-[15:02:22] [Render thread/INFO]: GPU: Apple M2 Pro (Supports OpenGL 4.1 Metal - 89.4)
-[15:02:22] [Render thread/INFO]: OS: Mac OS X (15.6.1)
-[15:02:23] [Render thread/INFO]: Reloading ResourceManager: vanilla, fabric, ai-player, carpet, distanthorizons, entityculling, fabric-api, fabric-api-base, fabric-api-lookup-api-v1, fabric-biome-api-v1, fabric-block-api-v1, fabric-block-view-api-v2, fabric-command-api-v2, fabric-content-registries-v0, fabric-convention-tags-v1, fabric-convention-tags-v2, fabric-crash-report-info-v1, fabric-data-attachment-api-v1, fabric-data-generation-api-v1, fabric-dimensions-v1, fabric-entity-events-v1, fabric-events-interaction-v0, fabric-game-rule-api-v1, fabric-item-api-v1, fabric-item-group-api-v1, fabric-key-binding-api-v1, fabric-lifecycle-events-v1, fabric-loot-api-v2, fabric-loot-api-v3, fabric-message-api-v1, fabric-model-loading-api-v1, fabric-networking-api-v1, fabric-object-builder-api-v1, fabric-particles-v1, fabric-recipe-api-v1, fabric-registry-sync-v0, fabric-renderer-api-v1, fabric-renderer-indigo, fabric-rendering-fluids-v1, fabric-rendering-v1, fabric-resource-conditions-api-v1, fabric-resource-loader-v0, fabric-resource-loader-v1, fabric-screen-api-v1, fabric-screen-handler-api-v1, fabric-serialization-api-v1, fabric-sound-api-v1, fabric-tag-api-v1, fabric-transfer-api-v1, fabric-transitive-access-wideners-v1, fabricloader, immediatelyfast, iris, lithium, org_apache_commons_commons-math3, sodium, trender
-[15:02:23] [Render thread/INFO]: Running Delayed setup...
-[15:02:23] [Render thread/INFO]: Delayed setup complete, firing DhApiAfterDhInitEvent event...
-[15:02:23] [Render thread/INFO]: DH Ready, binding Iris event handlers...
-[15:02:23] [Render thread/INFO]: DH Iris events bound.
-[15:02:23] [Worker-Main-7/INFO]: Found unifont_all_no_pua-16.0.03.hex, loading
-[15:02:23] [Worker-Main-8/INFO]: Found unifont_pua-16.0.03.hex, loading
-[15:02:23] [Render thread/INFO]: Profile: HIGH (+0 options changed by user)
-[15:02:23] [Worker-Main-3/INFO]: Found unifont_jp_patch-16.0.03.hex, loading
-[15:02:24] [Render thread/INFO]: Using shaderpack: ComplementaryReimagined_r5.6.1
-[15:02:24] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/rendertype_item_entity_translucent_cull and FS minecraft:core/rendertype_item_entity_translucent_cull. Log output: WARNING: Output of vertex shader 'texCoord1' not read by fragment shader
-WARNING: Output of vertex shader 'texCoord2' not read by fragment shader
+[06:49:10] [Render thread/INFO]: ✅ Q-table storage directory exists: /Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/qtable_storage
+[06:49:10] [ForkJoinPool.commonPool-worker-1/INFO]: [STDOUT]: ℹ️ ai_search_config.json already exists, no setup needed.
+[06:49:10] [ForkJoinPool.commonPool-worker-1/INFO]: BERT model files already exist! Skipping download....
+[06:49:10] [ForkJoinPool.commonPool-worker-1/INFO]: CART files already exist! Skipping download....
+[06:49:10] [ForkJoinPool.commonPool-worker-1/INFO]: OpenNLP model files already exist! Skipping download....
+[06:49:10] [ForkJoinPool.commonPool-worker-1/INFO]: LIDSNet model files already exist! Skipping download....
+[06:49:10] [ForkJoinPool.commonPool-worker-1/WARN]: Error, file /Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/config/ai-player/NLPModels/distilbert-finetuned-intent-torchscript.zip doesn't exist for extraction! Ignore if already extracted previously.
+[06:49:10] [ForkJoinPool.commonPool-worker-1/WARN]: Error, file /Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/config/ai-player/NLPModels/cart.zip doesn't exist for extraction! Ignore if already extracted previously.
+[06:49:10] [ForkJoinPool.commonPool-worker-1/WARN]: Error, file /Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/config/ai-player/NLPModels/cart.zip doesn't exist for extraction! Ignore if already extracted previously.
+[06:49:10] [Render thread/INFO]: Initializing Distant Horizons client, firing DhApiBeforeDhInitEvent...
+[06:49:12] [ForkJoinPool.commonPool-worker-1/INFO]: [STDOUT]: NLP model deployment task complete
+[06:49:13] [Render thread/INFO]: Distant Horizons, Version: 2.3.6-b
+[06:49:13] [Render thread/INFO]: Registering Fabric Client Events
+[06:49:13] [Render thread/INFO]: Registering Fabric Server Events
+[06:49:13] [Render thread/INFO]: Registered mod compatibility accessor for: [Sodium-Fabric].
+[06:49:13] [Render thread/INFO]: Registered mod compatibility accessor for: [iris].
+[06:49:13] [Render thread/INFO]: Initialising config for [DistantHorizons]
+[06:49:13] [Render thread/INFO]: [DistantHorizons] Config initialised
+[06:49:13] [Render thread/INFO]: Distant Horizons client Initialized.
+[06:49:13] [Render thread/INFO]: [Indigo] Different rendering plugin detected; not applying Indigo.
+[06:49:13] [Render thread/INFO]: [STDOUT]: [LibGui] Initializing Client...
+[06:49:13] [Render thread/INFO]: Queuing DH event binding...
+[06:49:13] [Render thread/ERROR]: Couldn't load distanthorizons pack metadata: Pack declares support for version newer than 64, but is missing mandatory fields min_format and max_format
+[06:49:13] [Render thread/ERROR]: Couldn't load entityculling pack metadata: Pack declares support for version newer than 64, but is missing mandatory fields min_format and max_format
+[06:49:13] [Render thread/ERROR]: Couldn't load trender pack metadata: Pack declares support for version newer than 64, but is missing mandatory fields min_format and max_format
+[06:49:13] [Render thread/INFO]: Backend library: LWJGL version 3.3.3-snapshot
+[06:49:14] [ForkJoinPool.commonPool-worker-1/WARN]: [Iris Update Check] This version doesn't have an update index, skipping.
+[06:49:16] [Render thread/INFO]: Initializing ImmediatelyFast 1.13.1+1.21.10 on Apple M2 Pro (Apple) with OpenGL 4.1 Metal - 89.4
+[06:49:16] [Render thread/INFO]: Found Iris/Oculus 1.9.6+mc1.21.9. Enabling compatibility.
+[06:49:16] [Render thread/INFO]: Debug functionality is disabled.
+[06:49:16] [Render thread/INFO]: DSA support not detected.
+[06:49:16] [Render thread/INFO]: OpenGL Vendor: Apple
+[06:49:16] [Render thread/INFO]: OpenGL Renderer: Apple M2 Pro
+[06:49:16] [Render thread/INFO]: OpenGL Version: 4.1 Metal - 89.4
+[06:49:16] [Render thread/INFO]: Using optional rendering extensions: 
+[06:49:16] [Render thread/ERROR]: Couldn't load distanthorizons pack metadata: Pack declares support for version newer than 64, but is missing mandatory fields min_format and max_format
+[06:49:16] [Render thread/ERROR]: Couldn't load entityculling pack metadata: Pack declares support for version newer than 64, but is missing mandatory fields min_format and max_format
+[06:49:16] [Render thread/ERROR]: Couldn't load trender pack metadata: Pack declares support for version newer than 64, but is missing mandatory fields min_format and max_format
+[06:49:16] [DH-ApplyConfigPresetTimer/INFO]: changing preset to: BALANCED
+[06:49:16] [DH-ApplyConfigPresetTimer/INFO]: changing preset to: MEDIUM
+[06:49:16] [DH-ApplyConfigPresetTimer/INFO]: preset active: BALANCED
+[06:49:16] [DH-ApplyConfigPresetTimer/INFO]: preset active: MEDIUM
+[06:49:16] [Render thread/INFO]: Hardware information:
+[06:49:16] [Render thread/INFO]: CPU: 10x Apple M2 Pro
+[06:49:16] [Render thread/INFO]: GPU: Apple M2 Pro (Supports OpenGL 4.1 Metal - 89.4)
+[06:49:16] [Render thread/INFO]: OS: Mac OS X (15.6.1)
+[06:49:16] [Render thread/INFO]: Reloading ResourceManager: vanilla, fabric, ai-player, carpet, distanthorizons, entityculling, fabric-api, fabric-api-base, fabric-api-lookup-api-v1, fabric-biome-api-v1, fabric-block-api-v1, fabric-block-view-api-v2, fabric-command-api-v2, fabric-content-registries-v0, fabric-convention-tags-v1, fabric-convention-tags-v2, fabric-crash-report-info-v1, fabric-data-attachment-api-v1, fabric-data-generation-api-v1, fabric-dimensions-v1, fabric-entity-events-v1, fabric-events-interaction-v0, fabric-game-rule-api-v1, fabric-item-api-v1, fabric-item-group-api-v1, fabric-key-binding-api-v1, fabric-lifecycle-events-v1, fabric-loot-api-v2, fabric-loot-api-v3, fabric-message-api-v1, fabric-model-loading-api-v1, fabric-networking-api-v1, fabric-object-builder-api-v1, fabric-particles-v1, fabric-recipe-api-v1, fabric-registry-sync-v0, fabric-renderer-api-v1, fabric-renderer-indigo, fabric-rendering-fluids-v1, fabric-rendering-v1, fabric-resource-conditions-api-v1, fabric-resource-loader-v0, fabric-resource-loader-v1, fabric-screen-api-v1, fabric-screen-handler-api-v1, fabric-serialization-api-v1, fabric-sound-api-v1, fabric-tag-api-v1, fabric-transfer-api-v1, fabric-transitive-access-wideners-v1, fabricloader, immediatelyfast, iris, lithium, org_apache_commons_commons-math3, sodium, trender
+[06:49:16] [Render thread/INFO]: Running Delayed setup...
+[06:49:16] [Render thread/INFO]: Delayed setup complete, firing DhApiAfterDhInitEvent event...
+[06:49:16] [Render thread/INFO]: DH Ready, binding Iris event handlers...
+[06:49:16] [Render thread/INFO]: DH Iris events bound.
+[06:49:17] [Worker-Main-3/INFO]: Found unifont_pua-16.0.03.hex, loading
+[06:49:17] [Worker-Main-8/INFO]: Found unifont_all_no_pua-16.0.03.hex, loading
+[06:49:17] [Render thread/INFO]: Profile: HIGH (+0 options changed by user)
+[06:49:17] [Worker-Main-1/INFO]: Found unifont_jp_patch-16.0.03.hex, loading
+[06:49:18] [Render thread/INFO]: Using shaderpack: ComplementaryReimagined_r5.6.1
+[06:49:18] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/entity and FS minecraft:core/entity. Log output: WARNING: Output of vertex shader 'overlayColor' not read by fragment shader
 
-[15:02:24] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/entity and FS minecraft:core/entity. Log output: WARNING: Output of vertex shader 'overlayColor' not read by fragment shader
+[06:49:18] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/rendertype_text_intensity_see_through and FS minecraft:core/rendertype_text_intensity_see_through. Log output: WARNING: Could not find vertex shader attribute 'UV2' to match BindAttributeLocation request.
 
-[15:02:24] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/entity and FS minecraft:core/entity. Log output: WARNING: Could not find vertex shader attribute 'Normal' to match BindAttributeLocation request.
+[06:49:18] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/terrain and FS minecraft:core/terrain. Log output: WARNING: Could not find vertex shader attribute 'Normal' to match BindAttributeLocation request.
+
+[06:49:18] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/rendertype_beacon_beam and FS minecraft:core/rendertype_beacon_beam. Log output: WARNING: Could not find vertex shader attribute 'Normal' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'UV2' to match BindAttributeLocation request.
+
+[06:49:18] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/entity and FS minecraft:core/entity. Log output: WARNING: Output of vertex shader 'overlayColor' not read by fragment shader
+
+[06:49:18] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/rendertype_translucent_moving_block and FS minecraft:core/rendertype_translucent_moving_block. Log output: WARNING: Could not find vertex shader attribute 'Normal' to match BindAttributeLocation request.
+
+[06:49:18] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/terrain and FS minecraft:core/terrain. Log output: WARNING: Could not find vertex shader attribute 'Normal' to match BindAttributeLocation request.
+
+[06:49:18] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/terrain and FS minecraft:core/terrain. Log output: WARNING: Could not find vertex shader attribute 'Normal' to match BindAttributeLocation request.
+
+[06:49:18] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/terrain and FS minecraft:core/terrain. Log output: WARNING: Could not find vertex shader attribute 'Normal' to match BindAttributeLocation request.
+
+[06:49:18] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/entity and FS minecraft:core/entity. Log output: WARNING: Could not find vertex shader attribute 'Normal' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'UV2' to match BindAttributeLocation request.
 WARNING: Output of vertex shader 'overlayColor' not read by fragment shader
 
-[15:02:24] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/rendertype_text_intensity_see_through and FS minecraft:core/rendertype_text_intensity_see_through. Log output: WARNING: Could not find vertex shader attribute 'UV2' to match BindAttributeLocation request.
+[06:49:18] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/entity and FS minecraft:core/entity. Log output: WARNING: Output of vertex shader 'overlayColor' not read by fragment shader
 
-[15:02:24] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/terrain and FS minecraft:core/terrain. Log output: WARNING: Could not find vertex shader attribute 'Normal' to match BindAttributeLocation request.
+[06:49:18] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/entity and FS minecraft:core/entity. Log output: WARNING: Output of vertex shader 'overlayColor' not read by fragment shader
 
-[15:02:24] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/rendertype_text_see_through and FS minecraft:core/rendertype_text_see_through. Log output: WARNING: Could not find vertex shader attribute 'UV2' to match BindAttributeLocation request.
-
-[15:02:24] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/entity and FS minecraft:core/entity. Log output: WARNING: Output of vertex shader 'overlayColor' not read by fragment shader
-
-[15:02:24] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/terrain and FS minecraft:core/terrain. Log output: WARNING: Could not find vertex shader attribute 'Normal' to match BindAttributeLocation request.
-
-[15:02:24] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/rendertype_text_background_see_through and FS minecraft:core/rendertype_text_background_see_through. Log output: WARNING: Could not find vertex shader attribute 'UV2' to match BindAttributeLocation request.
-
-[15:02:24] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/rendertype_beacon_beam and FS minecraft:core/rendertype_beacon_beam. Log output: WARNING: Could not find vertex shader attribute 'Normal' to match BindAttributeLocation request.
-WARNING: Could not find vertex shader attribute 'UV2' to match BindAttributeLocation request.
-
-[15:02:24] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/entity and FS minecraft:core/entity. Log output: WARNING: Output of vertex shader 'overlayColor' not read by fragment shader
-
-[15:02:24] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/entity and FS minecraft:core/entity. Log output: WARNING: Could not find vertex shader attribute 'Normal' to match BindAttributeLocation request.
-WARNING: Output of vertex shader 'overlayColor' not read by fragment shader
-
-[15:02:24] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/rendertype_crumbling and FS minecraft:core/rendertype_crumbling. Log output: WARNING: Could not find vertex shader attribute 'Normal' to match BindAttributeLocation request.
-WARNING: Output of vertex shader 'texCoord2' not read by fragment shader
-
-[15:02:24] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/terrain and FS minecraft:core/terrain. Log output: WARNING: Could not find vertex shader attribute 'Normal' to match BindAttributeLocation request.
-
-[15:02:24] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/entity and FS minecraft:core/entity. Log output: WARNING: Could not find vertex shader attribute 'Normal' to match BindAttributeLocation request.
-WARNING: Could not find vertex shader attribute 'UV2' to match BindAttributeLocation request.
-WARNING: Output of vertex shader 'overlayColor' not read by fragment shader
-
-[15:02:24] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/rendertype_translucent_moving_block and FS minecraft:core/rendertype_translucent_moving_block. Log output: WARNING: Could not find vertex shader attribute 'Normal' to match BindAttributeLocation request.
-
-[15:02:24] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/terrain and FS minecraft:core/terrain. Log output: WARNING: Could not find vertex shader attribute 'Normal' to match BindAttributeLocation request.
-
-[15:02:24] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/rendertype_entity_alpha and FS minecraft:core/rendertype_entity_alpha. Log output: WARNING: Could not find vertex shader attribute 'Normal' to match BindAttributeLocation request.
+[06:49:18] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/rendertype_entity_alpha and FS minecraft:core/rendertype_entity_alpha. Log output: WARNING: Could not find vertex shader attribute 'Normal' to match BindAttributeLocation request.
 WARNING: Output of vertex shader 'texCoord1' not read by fragment shader
 WARNING: Output of vertex shader 'texCoord2' not read by fragment shader
 
-[15:02:24] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/terrain and FS minecraft:core/terrain. Log output: WARNING: Could not find vertex shader attribute 'Normal' to match BindAttributeLocation request.
+[06:49:18] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/rendertype_crumbling and FS minecraft:core/rendertype_crumbling. Log output: WARNING: Could not find vertex shader attribute 'Normal' to match BindAttributeLocation request.
+WARNING: Output of vertex shader 'texCoord2' not read by fragment shader
 
-[15:02:24] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/entity and FS minecraft:core/entity. Log output: WARNING: Output of vertex shader 'overlayColor' not read by fragment shader
+[06:49:18] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/rendertype_text_background_see_through and FS minecraft:core/rendertype_text_background_see_through. Log output: WARNING: Could not find vertex shader attribute 'UV2' to match BindAttributeLocation request.
 
-[15:02:24] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/entity and FS minecraft:core/entity. Log output: WARNING: Could not find vertex shader attribute 'UV2' to match BindAttributeLocation request.
-
-[15:02:24] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/rendertype_beacon_beam and FS minecraft:core/rendertype_beacon_beam. Log output: WARNING: Could not find vertex shader attribute 'Normal' to match BindAttributeLocation request.
+[06:49:18] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/rendertype_beacon_beam and FS minecraft:core/rendertype_beacon_beam. Log output: WARNING: Could not find vertex shader attribute 'Normal' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'UV2' to match BindAttributeLocation request.
 
-[15:02:24] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/terrain and FS minecraft:core/terrain. Log output: WARNING: Could not find vertex shader attribute 'Normal' to match BindAttributeLocation request.
+[06:49:18] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/entity and FS minecraft:core/entity. Log output: WARNING: Could not find vertex shader attribute 'UV2' to match BindAttributeLocation request.
 
-[15:02:24] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/rendertype_entity_shadow and FS minecraft:core/rendertype_entity_shadow. Log output: WARNING: Could not find vertex shader attribute 'UV1' to match BindAttributeLocation request.
+[06:49:18] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/terrain and FS minecraft:core/terrain. Log output: WARNING: Could not find vertex shader attribute 'Normal' to match BindAttributeLocation request.
+
+[06:49:18] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/entity and FS minecraft:core/entity. Log output: WARNING: Could not find vertex shader attribute 'Normal' to match BindAttributeLocation request.
+WARNING: Output of vertex shader 'overlayColor' not read by fragment shader
+
+[06:49:18] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/entity and FS minecraft:core/entity. Log output: WARNING: Could not find vertex shader attribute 'Normal' to match BindAttributeLocation request.
+WARNING: Could not find vertex shader attribute 'UV2' to match BindAttributeLocation request.
+WARNING: Output of vertex shader 'overlayColor' not read by fragment shader
+
+[06:49:18] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/rendertype_entity_shadow and FS minecraft:core/rendertype_entity_shadow. Log output: WARNING: Could not find vertex shader attribute 'UV1' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'Normal' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'UV2' to match BindAttributeLocation request.
 
-[15:02:24] [Render thread/INFO]: OpenAL initialized on device MacBook Pro Speakers
-[15:02:24] [Render thread/INFO]: Sound engine started
-[15:02:24] [Render thread/INFO]: Created: 512x256x0 minecraft:textures/atlas/particles.png-atlas
-[15:02:24] [Render thread/INFO]: Created: 128x64x0 minecraft:textures/atlas/decorated_pot.png-atlas
-[15:02:24] [Render thread/INFO]: Created: 2048x1024x0 minecraft:textures/atlas/armor_trims.png-atlas
-[15:02:24] [Render thread/INFO]: Created: 512x256x0 minecraft:textures/atlas/paintings.png-atlas
-[15:02:24] [Render thread/INFO]: Created: 512x512x0 minecraft:textures/atlas/shield_patterns.png-atlas
-[15:02:24] [Render thread/INFO]: Created: 1024x512x4 minecraft:textures/atlas/blocks.png-atlas
-[15:02:24] [Render thread/INFO]: Created: 512x256x0 minecraft:textures/atlas/chest.png-atlas
-[15:02:24] [Render thread/INFO]: Created: 512x512x0 minecraft:textures/atlas/banner_patterns.png-atlas
-[15:02:24] [Render thread/INFO]: Created: 512x256x0 minecraft:textures/atlas/beds.png-atlas
-[15:02:24] [Render thread/INFO]: Created: 1024x512x0 minecraft:textures/atlas/gui.png-atlas
-[15:02:24] [Render thread/INFO]: Created: 64x64x0 minecraft:textures/atlas/map_decorations.png-atlas
-[15:02:24] [Render thread/INFO]: Created: 256x256x0 minecraft:textures/atlas/signs.png-atlas
-[15:02:24] [Render thread/INFO]: Created: 512x256x0 minecraft:textures/atlas/shulker_boxes.png-atlas
-[15:02:24] [Render thread/INFO]: Checking for Distant Horizons update
-[15:02:25] [Render thread/INFO]: Distant Horizons already up to date.
-[15:02:25] [Render thread/INFO]: Creating pipeline for dimension minecraft:overworld
-[15:02:25] [Render thread/WARN]: Program link log for centerDepthSmooth: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+[06:49:18] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/rendertype_text_see_through and FS minecraft:core/rendertype_text_see_through. Log output: WARNING: Could not find vertex shader attribute 'UV2' to match BindAttributeLocation request.
+
+[06:49:18] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/terrain and FS minecraft:core/terrain. Log output: WARNING: Could not find vertex shader attribute 'Normal' to match BindAttributeLocation request.
+
+[06:49:18] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/rendertype_item_entity_translucent_cull and FS minecraft:core/rendertype_item_entity_translucent_cull. Log output: WARNING: Output of vertex shader 'texCoord1' not read by fragment shader
+WARNING: Output of vertex shader 'texCoord2' not read by fragment shader
+
+[06:49:18] [Render thread/INFO]: OpenAL initialized on device MacBook Pro Speakers
+[06:49:18] [Render thread/INFO]: Sound engine started
+[06:49:18] [Render thread/INFO]: Created: 512x256x0 minecraft:textures/atlas/particles.png-atlas
+[06:49:18] [Render thread/INFO]: Created: 128x64x0 minecraft:textures/atlas/decorated_pot.png-atlas
+[06:49:18] [Render thread/INFO]: Created: 2048x1024x0 minecraft:textures/atlas/armor_trims.png-atlas
+[06:49:18] [Render thread/INFO]: Created: 512x256x0 minecraft:textures/atlas/paintings.png-atlas
+[06:49:18] [Render thread/INFO]: Created: 512x512x0 minecraft:textures/atlas/shield_patterns.png-atlas
+[06:49:18] [Render thread/INFO]: Created: 1024x512x4 minecraft:textures/atlas/blocks.png-atlas
+[06:49:18] [Render thread/INFO]: Created: 512x256x0 minecraft:textures/atlas/chest.png-atlas
+[06:49:18] [Render thread/INFO]: Created: 512x512x0 minecraft:textures/atlas/banner_patterns.png-atlas
+[06:49:18] [Render thread/INFO]: Created: 512x256x0 minecraft:textures/atlas/beds.png-atlas
+[06:49:18] [Render thread/INFO]: Created: 1024x512x0 minecraft:textures/atlas/gui.png-atlas
+[06:49:18] [Render thread/INFO]: Created: 64x64x0 minecraft:textures/atlas/map_decorations.png-atlas
+[06:49:18] [Render thread/INFO]: Created: 256x256x0 minecraft:textures/atlas/signs.png-atlas
+[06:49:18] [Render thread/INFO]: Created: 512x256x0 minecraft:textures/atlas/shulker_boxes.png-atlas
+[06:49:18] [Render thread/INFO]: Checking for Distant Horizons update
+[06:49:18] [Render thread/INFO]: Distant Horizons already up to date.
+[06:49:18] [Render thread/INFO]: Creating pipeline for dimension minecraft:overworld
+[06:49:19] [Render thread/WARN]: Program link log for centerDepthSmooth: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'mc_midTexCoord' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'UV0' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'iris_Entity' to match BindAttributeLocation request.
@@ -275,7 +275,7 @@ WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttri
 WARNING: Could not find vertex shader attribute 'mc_Entity' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'Position' to match BindAttributeLocation request.
 
-[15:02:25] [Render thread/WARN]: Program link log for deferred1: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+[06:49:19] [Render thread/WARN]: Program link log for deferred1: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'mc_midTexCoord' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'iris_Entity' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttributeLocation request.
@@ -283,21 +283,21 @@ WARNING: Could not find vertex shader attribute 'mc_Entity' to match BindAttribu
 WARNING: Output of vertex shader 'iris_FogFragCoord' not read by fragment shader
 WARNING: Output of vertex shader 'eastVec' not read by fragment shader
 
-[15:02:25] [Render thread/WARN]: Program link log for composite: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+[06:49:19] [Render thread/WARN]: Program link log for composite: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'mc_midTexCoord' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'iris_Entity' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'mc_Entity' to match BindAttributeLocation request.
 WARNING: Output of vertex shader 'iris_FogFragCoord' not read by fragment shader
 
-[15:02:25] [Render thread/WARN]: Program link log for composite1: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+[06:49:19] [Render thread/WARN]: Program link log for composite1: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'mc_midTexCoord' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'iris_Entity' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'mc_Entity' to match BindAttributeLocation request.
 WARNING: Output of vertex shader 'iris_FogFragCoord' not read by fragment shader
 
-[15:02:25] [Render thread/WARN]: Program link log for composite3: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+[06:49:19] [Render thread/WARN]: Program link log for composite3: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'mc_midTexCoord' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'UV0' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'iris_Entity' to match BindAttributeLocation request.
@@ -305,72 +305,72 @@ WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttri
 WARNING: Could not find vertex shader attribute 'mc_Entity' to match BindAttributeLocation request.
 WARNING: Output of vertex shader 'iris_FogFragCoord' not read by fragment shader
 
-[15:02:25] [Render thread/WARN]: Program link log for composite4: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+[06:49:19] [Render thread/WARN]: Program link log for composite4: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'mc_midTexCoord' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'iris_Entity' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'mc_Entity' to match BindAttributeLocation request.
 WARNING: Output of vertex shader 'iris_FogFragCoord' not read by fragment shader
 
-[15:02:25] [Render thread/WARN]: Program link log for composite5: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+[06:49:19] [Render thread/WARN]: Program link log for composite5: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'mc_midTexCoord' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'iris_Entity' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'mc_Entity' to match BindAttributeLocation request.
 WARNING: Output of vertex shader 'iris_FogFragCoord' not read by fragment shader
 
-[15:02:25] [Render thread/WARN]: Program link log for composite6: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+[06:49:19] [Render thread/WARN]: Program link log for composite6: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'mc_midTexCoord' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'iris_Entity' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'mc_Entity' to match BindAttributeLocation request.
 WARNING: Output of vertex shader 'iris_FogFragCoord' not read by fragment shader
 
-[15:02:25] [Render thread/WARN]: Program link log for composite7: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+[06:49:19] [Render thread/WARN]: Program link log for composite7: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'mc_midTexCoord' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'iris_Entity' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'mc_Entity' to match BindAttributeLocation request.
 WARNING: Output of vertex shader 'iris_FogFragCoord' not read by fragment shader
 
-[15:02:25] [Render thread/WARN]: Program link log for final: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+[06:49:19] [Render thread/WARN]: Program link log for final: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'mc_midTexCoord' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'iris_Entity' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'mc_Entity' to match BindAttributeLocation request.
 WARNING: Output of vertex shader 'iris_FogFragCoord' not read by fragment shader
 
-[15:02:26] [Render thread/WARN]: Type is VERTEX
-[15:02:26] [Render thread/WARN]: Type is FRAGMENT
-[15:02:26] [Render thread/WARN]: Type is VERTEX
-[15:02:26] [Render thread/WARN]: Type is FRAGMENT
-[15:02:26] [Render thread/WARN]: Type is VERTEX
-[15:02:26] [Render thread/WARN]: Type is FRAGMENT
-[15:02:28] [Render thread/WARN]: Program link log for sodium:chunk_shader_for_shadow: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+[06:49:19] [Render thread/WARN]: Type is VERTEX
+[06:49:19] [Render thread/WARN]: Type is FRAGMENT
+[06:49:19] [Render thread/WARN]: Type is VERTEX
+[06:49:19] [Render thread/WARN]: Type is FRAGMENT
+[06:49:19] [Render thread/WARN]: Type is VERTEX
+[06:49:19] [Render thread/WARN]: Type is FRAGMENT
+[06:49:22] [Render thread/WARN]: Program link log for sodium:chunk_shader_for_shadow: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttributeLocation request.
 WARNING: Output of vertex shader 'iris_FogFragCoord' not read by fragment shader
 
-[15:02:28] [Render thread/WARN]: Program link log for sodium:chunk_shader_for_shadow_cutout: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+[06:49:22] [Render thread/WARN]: Program link log for sodium:chunk_shader_for_shadow_cutout: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttributeLocation request.
 WARNING: Output of vertex shader 'iris_FogFragCoord' not read by fragment shader
 
-[15:02:28] [Render thread/WARN]: Program link log for sodium:chunk_shader_for_shadow_trans: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+[06:49:22] [Render thread/WARN]: Program link log for sodium:chunk_shader_for_shadow_trans: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttributeLocation request.
 WARNING: Output of vertex shader 'iris_FogFragCoord' not read by fragment shader
 
-[15:02:28] [Render thread/WARN]: Program link log for sodium:chunk_shader_for_terrain: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+[06:49:22] [Render thread/WARN]: Program link log for sodium:chunk_shader_for_terrain: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttributeLocation request.
 WARNING: Output of vertex shader 'iris_FogFragCoord' not read by fragment shader
 
-[15:02:28] [Render thread/WARN]: Program link log for sodium:chunk_shader_for_terrain_cutout: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+[06:49:22] [Render thread/WARN]: Program link log for sodium:chunk_shader_for_terrain_cutout: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttributeLocation request.
 WARNING: Output of vertex shader 'iris_FogFragCoord' not read by fragment shader
 
-[15:02:28] [Render thread/WARN]: Program link log for sodium:chunk_shader_for_translucent: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+[06:49:22] [Render thread/WARN]: Program link log for sodium:chunk_shader_for_translucent: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttributeLocation request.
 WARNING: Output of vertex shader 'iris_FogFragCoord' not read by fragment shader
 
-[15:02:28] [Render thread/WARN]: Program link log for colorSpaceFragment: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+[06:49:22] [Render thread/WARN]: Program link log for colorSpaceFragment: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'mc_midTexCoord' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'UV0' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'iris_Entity' to match BindAttributeLocation request.
@@ -379,81 +379,82 @@ WARNING: Could not find vertex shader attribute 'mc_Entity' to match BindAttribu
 WARNING: Could not find vertex shader attribute 'Position' to match BindAttributeLocation request.
 WARNING: Output of vertex shader 'uv' not read by fragment shader
 
-[15:02:35] [Render thread/INFO]: Loaded 1461 recipes
-[15:02:35] [Render thread/INFO]: Loaded 1574 advancements
-[15:02:35] [Render thread/INFO]: Applied 0 biome modifications to 0 of 65 new biomes in 822.1 μs
-[15:02:35] [Server thread/INFO]: Started DhWorld of type CLIENT_SERVER
-[15:02:35] [Server thread/INFO]: Starting integrated minecraft server version 1.21.10
-[15:02:35] [Server thread/INFO]: Generating keypair
-[15:02:35] [DH-Full Data Migration Thread[0]/INFO]: Attempting to migrate data sources for: [minecraft:overworld]-[/Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/saves/New World/data]...
-[15:02:35] [DH-Full Data Migration Thread[0]/INFO]: Found [0] data sources that need migration.
-[15:02:35] [Server thread/INFO]: Started DhClientServerLevel for [Wrapped{ServerLevel[New World]@minecraft:overworld}] at [[LocalSaveStructure@(/Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/saves/New World/data)]].
-[15:02:35] [DH-Full Data Migration Thread[0]/INFO]: No migration necessary.
-[15:02:35] [DH-Full Data Migration Thread[0]/INFO]: Attempting to migrate data sources for: [minecraft:the_nether]-[/Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/saves/New World/DIM-1/data]...
-[15:02:35] [DH-Full Data Migration Thread[0]/INFO]: Found [0] data sources that need migration.
-[15:02:35] [DH-Full Data Migration Thread[0]/INFO]: No migration necessary.
-[15:02:35] [Server thread/INFO]: Started DhClientServerLevel for [Wrapped{ServerLevel[New World]@minecraft:the_nether}] at [[LocalSaveStructure@(/Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/saves/New World/data;/Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/saves/New World/DIM-1/data)]].
-[15:02:35] [DH-Full Data Migration Thread[0]/INFO]: Attempting to migrate data sources for: [minecraft:the_end]-[/Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/saves/New World/DIM1/data]...
-[15:02:35] [DH-Full Data Migration Thread[0]/INFO]: Found [0] data sources that need migration.
-[15:02:35] [DH-Full Data Migration Thread[0]/INFO]: No migration necessary.
-[15:02:35] [Server thread/INFO]: Started DhClientServerLevel for [Wrapped{ServerLevel[New World]@minecraft:the_end}] at [[LocalSaveStructure@(/Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/saves/New World/DIM1/data;/Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/saves/New World/data;/Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/saves/New World/DIM-1/data)]].
-[15:02:35] [Server thread/INFO]: Loading 0 persistent chunks...
-[15:02:35] [Server thread/INFO]: Preparing spawn area: 16%
-[15:02:35] [Server thread/INFO]: Server instance stored!
-[15:02:35] [Server thread/INFO]: [STDOUT]: Server instance is net.minecraft.class_1132@345b8440
-[15:02:35] [Server thread/INFO]: Queueing asynchronous BERT model load...
-[15:02:35] [bert-loader/INFO]: Proceeding to load BERT model into memory
-[15:02:35] [Server thread/INFO]: LLM world toggle for New World:minecraft:overworld set to false
-[15:02:35] [Server thread/INFO]: Executing /bot spawn Jake training
-[15:02:36] [Server thread/INFO]: spawnBot starting: botName=Jake, mode=training, dimType=minecraft:overworld, pos=(73.0, -36.0, 0.0), facingYaw=39.459274, facingPitch=-90.00001
-[15:02:36] [Server thread/INFO]: spawnBot: entering training branch for Jake
-[15:02:36] [Server thread/INFO]: [STDOUT]: Existing Bot Profiles: {Jake=e01f59a8-aebb-4eed-9a56-bc36f8507228, Bob=17c3d366-025a-4751-ac14-fdd43ffebae2}
-[15:02:36] [Server thread/INFO]: [STDOUT]: Using existing GameProfile: GameProfile[id=e01f59a8-aebb-4eed-9a56-bc36f8507228, name=Jake, properties={}]
-[15:02:37] [Server thread/INFO]: Jake[/127.0.0.1:0] logged in with entity id 1 at (0.0, 0.0, 0.0)
-[15:02:37] [Server thread/INFO]: Resolved PlayerManager#loadPlayerData via method_14600[class net.minecraft.class_11560]
-[15:02:37] [Server thread/INFO]: Resolved PlayerManager#savePlayerData via method_14577[class net.minecraft.class_3222]
-[15:02:37] [Server thread/INFO]: Resolved PlayerConfigEntry(GameProfile) constructor.
-[15:02:37] [Server thread/INFO]: Restored fakeplayer 'Jake' using PlayerManager.
-[15:02:37] [Server thread/INFO]: Loaded inventory and stats for fakeplayer 'Jake' from jake_e01f59a8-aebb-4eed-9a56-bc36f8507228.nbt
-[15:02:37] [Server thread/INFO]: Loaded persisted inventory for fakeplayer 'Jake'
-[15:02:37] [Server thread/INFO]: Player [Jake] joined.
-[15:02:37] [Server thread/INFO]: Jake joined the game
-[15:02:37] [Server thread/INFO]: Restored fakeplayer 'Jake' using PlayerManager.
-[15:02:37] [Server thread/INFO]: Loaded inventory and stats for fakeplayer 'Jake' from jake_e01f59a8-aebb-4eed-9a56-bc36f8507228.nbt
-[15:02:37] [Server thread/INFO]: Loaded persisted inventory for fakeplayer 'Jake'
-[15:02:37] [Server thread/INFO]: spawnBot: remembering spawn for training bot Jake
-[15:02:37] [Server thread/INFO]: Spawned new training bot Jake!
-[15:02:37] [Server thread/INFO]: LLM bot toggle for e01f59a8-aebb-4eed-9a56-bc36f8507228 set to false
-[15:02:37] [Server thread/ERROR]: ❌ Error loading Q-table from /Users/roti/.minecraft/qtable_storage/qtable.bin: writing aborted; java.io.NotSerializableException: net.minecraft.server.network.ServerPlayerEntity
-[15:02:37] [Server thread/WARN]: ❌ Failed to load Q-table from /Users/roti/.minecraft/qtable_storage/qtable.bin: writing aborted; java.io.NotSerializableException: net.minecraft.server.network.ServerPlayerEntity
-[15:02:37] [Server thread/ERROR]: ❌ Error loading Q-table from /Users/roti/minecraft_data/qtable_storage/qtable.bin: writing aborted; java.io.NotSerializableException: net.minecraft.server.network.ServerPlayerEntity
-[15:02:37] [Server thread/WARN]: ❌ Failed to load Q-table from /Users/roti/minecraft_data/qtable_storage/qtable.bin: writing aborted; java.io.NotSerializableException: net.minecraft.server.network.ServerPlayerEntity
-[15:02:37] [Server thread/ERROR]: ❌ Error loading Q-table from /var/folders/_t/5vq116m55tl1yx1y5gkstsdh0000gn/T/minecraft_ai_player/qtable_storage/qtable.bin: writing aborted; java.io.NotSerializableException: net.minecraft.server.network.ServerPlayerEntity
-[15:02:37] [Server thread/WARN]: ❌ Failed to load Q-table from /var/folders/_t/5vq116m55tl1yx1y5gkstsdh0000gn/T/minecraft_ai_player/qtable_storage/qtable.bin: writing aborted; java.io.NotSerializableException: net.minecraft.server.network.ServerPlayerEntity
-[15:02:37] [Server thread/INFO]: 📝 No existing Q-table found, creating new one
-[15:02:37] [Server thread/INFO]: /bot spawn completed successfully for Jake training
-[15:02:37] [Server thread/INFO]: Loaded 1 protected zones for world minecraft:overworld
-[15:02:37] [Server thread/INFO]: DH TerraFirmaCraft detection: false
-[15:02:37] [Server thread/INFO]: ================WORLD_GEN_STEP_INITING=============
-[15:02:37] [Server thread/INFO]: Batch Chunk Generator initialized
-[15:02:37] [Server thread/INFO]: Creating world gen queue
-[15:02:37] [Server thread/INFO]: Created world gen queue
-[15:02:37] [Server thread/INFO]: Set world gen queue for level [minecraft:overworld].
-[15:02:37] [Server thread/INFO]: Changing view distance to 12, from 10
-[15:02:37] [Server thread/INFO]: Changing simulation distance to 12, from 0
-[15:02:37] [Server thread/INFO]: Loading 15 chunks for player spawn...
-[15:02:37] [Server thread/INFO]: Preparing spawn area: 16%
-[15:02:37] [Server thread/INFO]: Preparing spawn area: 100%
-[15:02:37] [Server thread/INFO]: Time elapsed: 2144 ms
-[15:02:37] [Server thread/INFO]: RotiWokeman[local:E:bc4f1581] logged in with entity id 110 at (68.77555849098958, -35.0, 0.4075362224498111)
-[15:02:37] [Server thread/INFO]: Player [RotiWokeman] joined.
-[15:02:37] [Server thread/INFO]: RotiWokeman joined the game
-[15:02:37] [Render thread/INFO]: Loading client level [Wrapped{ClientLevel@ceh4rbi6e0gru@minecraft:overworld}]-[ceh4rbi6e0gru@minecraft:overworld].
-[15:02:37] [Render thread/INFO]: Loaded [0] waiting chunk wrappers.
-[15:02:37] [Render thread/INFO]: Reloading pipeline on dimension change: minecraft:overworld => minecraft:overworld
-[15:02:37] [Render thread/INFO]: Destroying pipeline minecraft:overworld
-[15:02:38] [Render thread/INFO]: Creating pipeline for dimension minecraft:overworld
-[15:02:38] [Render thread/WARN]: Program link log for centerDepthSmooth: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+[06:49:26] [Render thread/INFO]: Loaded 1461 recipes
+[06:49:26] [Render thread/INFO]: Loaded 1574 advancements
+[06:49:26] [Render thread/INFO]: Applied 0 biome modifications to 0 of 65 new biomes in 615.8 μs
+[06:49:26] [Server thread/INFO]: Started DhWorld of type CLIENT_SERVER
+[06:49:26] [Server thread/INFO]: Starting integrated minecraft server version 1.21.10
+[06:49:26] [Server thread/INFO]: Generating keypair
+[06:49:27] [DH-Full Data Migration Thread[0]/INFO]: Attempting to migrate data sources for: [minecraft:overworld]-[/Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/saves/New World/data]...
+[06:49:27] [DH-Full Data Migration Thread[0]/INFO]: Found [0] data sources that need migration.
+[06:49:27] [Server thread/INFO]: Started DhClientServerLevel for [Wrapped{ServerLevel[New World]@minecraft:overworld}] at [[LocalSaveStructure@(/Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/saves/New World/data)]].
+[06:49:27] [DH-Full Data Migration Thread[0]/INFO]: No migration necessary.
+[06:49:27] [DH-Full Data Migration Thread[0]/INFO]: Attempting to migrate data sources for: [minecraft:the_nether]-[/Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/saves/New World/DIM-1/data]...
+[06:49:27] [DH-Full Data Migration Thread[0]/INFO]: Found [0] data sources that need migration.
+[06:49:27] [DH-Full Data Migration Thread[0]/INFO]: No migration necessary.
+[06:49:27] [Server thread/INFO]: Started DhClientServerLevel for [Wrapped{ServerLevel[New World]@minecraft:the_nether}] at [[LocalSaveStructure@(/Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/saves/New World/data;/Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/saves/New World/DIM-1/data)]].
+[06:49:27] [DH-Full Data Migration Thread[0]/INFO]: Attempting to migrate data sources for: [minecraft:the_end]-[/Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/saves/New World/DIM1/data]...
+[06:49:27] [DH-Full Data Migration Thread[0]/INFO]: Found [0] data sources that need migration.
+[06:49:27] [DH-Full Data Migration Thread[0]/INFO]: No migration necessary.
+[06:49:27] [Server thread/INFO]: Started DhClientServerLevel for [Wrapped{ServerLevel[New World]@minecraft:the_end}] at [[LocalSaveStructure@(/Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/saves/New World/data;/Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/saves/New World/DIM-1/data;/Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/saves/New World/DIM1/data)]].
+[06:49:27] [Server thread/INFO]: Loading 0 persistent chunks...
+[06:49:27] [Server thread/INFO]: Preparing spawn area: 16%
+[06:49:27] [Server thread/INFO]: Server instance stored!
+[06:49:27] [Server thread/INFO]: [STDOUT]: Server instance is net.minecraft.class_1132@518a0bd5
+[06:49:27] [Server thread/INFO]: Queueing asynchronous BERT model load...
+[06:49:27] [bert-loader/INFO]: Proceeding to load BERT model into memory
+[06:49:27] [Server thread/INFO]: LLM world toggle for New World:minecraft:overworld set to false
+[06:49:27] [Server thread/INFO]: Executing /bot spawn Jake training
+[06:49:28] [Server thread/INFO]: spawnBot starting: botName=Jake, mode=training, dimType=minecraft:overworld, pos=(103.0, 31.0, -67.0), facingYaw=-0.0, facingPitch=-28.633772
+[06:49:28] [Server thread/INFO]: spawnBot: entering training branch for Jake
+[06:49:28] [Server thread/INFO]: [STDOUT]: Existing Bot Profiles: {Jake=e01f59a8-aebb-4eed-9a56-bc36f8507228, Bob=17c3d366-025a-4751-ac14-fdd43ffebae2}
+[06:49:28] [Server thread/INFO]: [STDOUT]: Using existing GameProfile: GameProfile[id=e01f59a8-aebb-4eed-9a56-bc36f8507228, name=Jake, properties={}]
+[06:49:28] [Server thread/INFO]: Jake[/127.0.0.1:0] logged in with entity id 1 at (0.0, 0.0, 0.0)
+[06:49:28] [Server thread/INFO]: Resolved PlayerManager#loadPlayerData via method_14600[class net.minecraft.class_11560]
+[06:49:28] [Server thread/INFO]: Resolved PlayerManager#savePlayerData via method_14577[class net.minecraft.class_3222]
+[06:49:28] [Server thread/INFO]: Resolved PlayerConfigEntry(GameProfile) constructor.
+[06:49:28] [Server thread/INFO]: Restored fakeplayer 'Jake' using PlayerManager.
+[06:49:28] [Server thread/INFO]: Loaded inventory and stats for fakeplayer 'Jake' from jake_e01f59a8-aebb-4eed-9a56-bc36f8507228.nbt
+[06:49:28] [Server thread/INFO]: Loaded persisted inventory for fakeplayer 'Jake'
+[06:49:28] [Server thread/INFO]: Player [Jake] joined.
+[06:49:28] [Server thread/INFO]: Jake joined the game
+[06:49:28] [Server thread/INFO]: Restored fakeplayer 'Jake' using PlayerManager.
+[06:49:28] [Server thread/INFO]: Loaded inventory and stats for fakeplayer 'Jake' from jake_e01f59a8-aebb-4eed-9a56-bc36f8507228.nbt
+[06:49:28] [Server thread/INFO]: Loaded persisted inventory for fakeplayer 'Jake'
+[06:49:28] [Server thread/INFO]: spawnBot: remembering spawn for training bot Jake
+[06:49:28] [Server thread/INFO]: Spawned new training bot Jake!
+[06:49:28] [Server thread/INFO]: LLM bot toggle for e01f59a8-aebb-4eed-9a56-bc36f8507228 set to false
+[06:49:28] [Server thread/ERROR]: ❌ Error loading Q-table from /Users/roti/.minecraft/qtable_storage/qtable.bin: writing aborted; java.io.NotSerializableException: net.minecraft.server.network.ServerPlayerEntity
+[06:49:28] [Server thread/WARN]: ❌ Failed to load Q-table from /Users/roti/.minecraft/qtable_storage/qtable.bin: writing aborted; java.io.NotSerializableException: net.minecraft.server.network.ServerPlayerEntity
+[06:49:28] [Server thread/ERROR]: ❌ Error loading Q-table from /Users/roti/minecraft_data/qtable_storage/qtable.bin: writing aborted; java.io.NotSerializableException: net.minecraft.server.network.ServerPlayerEntity
+[06:49:28] [Server thread/WARN]: ❌ Failed to load Q-table from /Users/roti/minecraft_data/qtable_storage/qtable.bin: writing aborted; java.io.NotSerializableException: net.minecraft.server.network.ServerPlayerEntity
+[06:49:28] [Server thread/ERROR]: ❌ Error loading Q-table from /var/folders/_t/5vq116m55tl1yx1y5gkstsdh0000gn/T/minecraft_ai_player/qtable_storage/qtable.bin: writing aborted; java.io.NotSerializableException: net.minecraft.server.network.ServerPlayerEntity
+[06:49:28] [Server thread/WARN]: ❌ Failed to load Q-table from /var/folders/_t/5vq116m55tl1yx1y5gkstsdh0000gn/T/minecraft_ai_player/qtable_storage/qtable.bin: writing aborted; java.io.NotSerializableException: net.minecraft.server.network.ServerPlayerEntity
+[06:49:28] [Server thread/INFO]: 📝 No existing Q-table found, creating new one
+[06:49:28] [Server thread/INFO]: /bot spawn completed successfully for Jake training
+[06:49:28] [Server thread/INFO]: Loaded 1 protected zones for world minecraft:overworld
+[06:49:28] [Server thread/INFO]: DH TerraFirmaCraft detection: false
+[06:49:28] [Server thread/INFO]: ================WORLD_GEN_STEP_INITING=============
+[06:49:28] [Server thread/INFO]: Batch Chunk Generator initialized
+[06:49:28] [Server thread/INFO]: Creating world gen queue
+[06:49:28] [Server thread/INFO]: Created world gen queue
+[06:49:28] [Server thread/INFO]: Set world gen queue for level [minecraft:overworld].
+[06:49:28] [Server thread/INFO]: Changing view distance to 12, from 10
+[06:49:28] [Server thread/INFO]: Changing simulation distance to 12, from 0
+[06:49:28] [Server thread/INFO]: Loading 41 chunks for player spawn...
+[06:49:28] [Server thread/INFO]: Preparing spawn area: 27%
+[06:49:28] [Server thread/INFO]: Preparing spawn area: 29%
+[06:49:28] [Server thread/INFO]: Preparing spawn area: 31%
+[06:49:29] [Server thread/INFO]: Time elapsed: 1600 ms
+[06:49:29] [Server thread/INFO]: RotiWokeman[local:E:83602a72] logged in with entity id 136 at (100.69999998807907, 28.0, -66.44444921174069)
+[06:49:29] [Server thread/INFO]: Player [RotiWokeman] joined.
+[06:49:29] [Server thread/INFO]: RotiWokeman joined the game
+[06:49:29] [Render thread/INFO]: Loading client level [Wrapped{ClientLevel@ceh4rbi6e0gru@minecraft:overworld}]-[ceh4rbi6e0gru@minecraft:overworld].
+[06:49:29] [Render thread/INFO]: Loaded [0] waiting chunk wrappers.
+[06:49:29] [Render thread/INFO]: Reloading pipeline on dimension change: minecraft:overworld => minecraft:overworld
+[06:49:29] [Render thread/INFO]: Destroying pipeline minecraft:overworld
+[06:49:29] [Render thread/INFO]: Creating pipeline for dimension minecraft:overworld
+[06:49:29] [Render thread/WARN]: Program link log for centerDepthSmooth: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'mc_midTexCoord' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'UV0' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'iris_Entity' to match BindAttributeLocation request.
@@ -461,7 +462,7 @@ WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttri
 WARNING: Could not find vertex shader attribute 'mc_Entity' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'Position' to match BindAttributeLocation request.
 
-[15:02:38] [Render thread/WARN]: Program link log for deferred1: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+[06:49:29] [Render thread/WARN]: Program link log for deferred1: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'mc_midTexCoord' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'iris_Entity' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttributeLocation request.
@@ -469,21 +470,21 @@ WARNING: Could not find vertex shader attribute 'mc_Entity' to match BindAttribu
 WARNING: Output of vertex shader 'iris_FogFragCoord' not read by fragment shader
 WARNING: Output of vertex shader 'eastVec' not read by fragment shader
 
-[15:02:38] [Render thread/WARN]: Program link log for composite: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+[06:49:29] [Render thread/WARN]: Program link log for composite: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'mc_midTexCoord' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'iris_Entity' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'mc_Entity' to match BindAttributeLocation request.
 WARNING: Output of vertex shader 'iris_FogFragCoord' not read by fragment shader
 
-[15:02:38] [Render thread/WARN]: Program link log for composite1: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+[06:49:29] [Render thread/WARN]: Program link log for composite1: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'mc_midTexCoord' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'iris_Entity' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'mc_Entity' to match BindAttributeLocation request.
 WARNING: Output of vertex shader 'iris_FogFragCoord' not read by fragment shader
 
-[15:02:38] [Render thread/WARN]: Program link log for composite3: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+[06:49:29] [Render thread/WARN]: Program link log for composite3: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'mc_midTexCoord' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'UV0' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'iris_Entity' to match BindAttributeLocation request.
@@ -491,77 +492,70 @@ WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttri
 WARNING: Could not find vertex shader attribute 'mc_Entity' to match BindAttributeLocation request.
 WARNING: Output of vertex shader 'iris_FogFragCoord' not read by fragment shader
 
-[15:02:38] [Render thread/WARN]: Program link log for composite4: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+[06:49:29] [Render thread/WARN]: Program link log for composite4: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'mc_midTexCoord' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'iris_Entity' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'mc_Entity' to match BindAttributeLocation request.
 WARNING: Output of vertex shader 'iris_FogFragCoord' not read by fragment shader
 
-[15:02:38] [Render thread/WARN]: Program link log for composite5: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+[06:49:29] [Render thread/WARN]: Program link log for composite5: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'mc_midTexCoord' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'iris_Entity' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'mc_Entity' to match BindAttributeLocation request.
 WARNING: Output of vertex shader 'iris_FogFragCoord' not read by fragment shader
 
-[15:02:38] [Render thread/WARN]: Program link log for composite6: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+[06:49:29] [Render thread/WARN]: Program link log for composite6: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'mc_midTexCoord' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'iris_Entity' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'mc_Entity' to match BindAttributeLocation request.
 WARNING: Output of vertex shader 'iris_FogFragCoord' not read by fragment shader
 
-[15:02:38] [Render thread/WARN]: Program link log for composite7: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+[06:49:29] [Render thread/WARN]: Program link log for composite7: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'mc_midTexCoord' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'iris_Entity' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'mc_Entity' to match BindAttributeLocation request.
 WARNING: Output of vertex shader 'iris_FogFragCoord' not read by fragment shader
 
-[15:02:38] [Render thread/WARN]: Program link log for final: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+[06:49:29] [Render thread/WARN]: Program link log for final: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'mc_midTexCoord' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'iris_Entity' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'mc_Entity' to match BindAttributeLocation request.
 WARNING: Output of vertex shader 'iris_FogFragCoord' not read by fragment shader
 
-[15:02:39] [bert-loader/INFO]: [STDOUT]: Loading:     100% |████████████████████████████████████████|
-[15:02:39] [bert-loader/INFO]: Ignore mismatching platform from: jar:file:/Users/roti/Library/Application%20Support/PrismLauncher/instances/1.21.10/minecraft/.fabric/processedMods/ai_djl_pytorch_pytorch-native-cp86_64-2.5.1-4fc5a0b86a123205.jar!/native/lib/pytorch.properties
-[15:02:39] [bert-loader/INFO]: Found matching platform from: jar:file:/Users/roti/Library/Application%20Support/PrismLauncher/instances/1.21.10/minecraft/.fabric/processedMods/ai_djl_pytorch_pytorch-native-cprch64-2.5.1-19906839836eeb80.jar!/native/lib/pytorch.properties
-[15:02:39] [bert-loader/INFO]: Ignore mismatching platform from: jar:file:/Users/roti/Library/Application%20Support/PrismLauncher/instances/1.21.10/minecraft/.fabric/processedMods/ai_djl_pytorch_pytorch-native-cp86_64-2.5.1-7f4cd6ea5a383f15.jar!/native/lib/pytorch.properties
-[15:02:40] [bert-loader/INFO]: PyTorch graph executor optimizer is enabled, this may impact your inference latency and throughput. See: https://docs.djl.ai/master/docs/development/inference_performance_optimization.html#graph-executor-optimization
-[15:02:40] [bert-loader/INFO]: Number of inter-op threads is 10
-[15:02:40] [bert-loader/INFO]: Number of intra-op threads is 6
-[15:02:40] [bert-loader/INFO]: Found matching platform from: jar:file:/Users/roti/Library/Application%20Support/PrismLauncher/instances/1.21.10/minecraft/.fabric/processedMods/ai_djl_huggingface_tokenizers-0.33.0-5d541ec46a4ba9bb.jar!/native/lib/tokenizers.properties
-[15:02:40] [bert-loader/WARN]: maxLength is not explicitly specified, use modelMaxLength: 512
-[15:02:40] [bert-loader/INFO]: [STDOUT]: Model loaded successfully and ready for inference.
-[15:02:40] [bert-loader/INFO]: BERT model loaded into memory. It will stay in memory as long as any bot stays active in game.
-[15:02:40] [Render thread/WARN]: Program link log for sodium:chunk_shader_for_shadow: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+[06:49:31] [Render thread/WARN]: Program link log for sodium:chunk_shader_for_shadow: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttributeLocation request.
 WARNING: Output of vertex shader 'iris_FogFragCoord' not read by fragment shader
 
-[15:02:40] [Render thread/WARN]: Program link log for sodium:chunk_shader_for_shadow_cutout: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+[06:49:31] [Render thread/WARN]: Program link log for sodium:chunk_shader_for_shadow_cutout: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttributeLocation request.
 WARNING: Output of vertex shader 'iris_FogFragCoord' not read by fragment shader
 
-[15:02:40] [Render thread/WARN]: Program link log for sodium:chunk_shader_for_shadow_trans: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+[06:49:31] [Render thread/WARN]: Program link log for sodium:chunk_shader_for_shadow_trans: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttributeLocation request.
 WARNING: Output of vertex shader 'iris_FogFragCoord' not read by fragment shader
 
-[15:02:40] [Render thread/WARN]: Program link log for sodium:chunk_shader_for_terrain: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+[06:49:31] [Render thread/WARN]: Program link log for sodium:chunk_shader_for_terrain: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttributeLocation request.
 WARNING: Output of vertex shader 'iris_FogFragCoord' not read by fragment shader
 
-[15:02:40] [Render thread/WARN]: Program link log for sodium:chunk_shader_for_terrain_cutout: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+[06:49:31] [bert-loader/INFO]: [STDOUT]: Loading:     100% |████████████████████████████████████████|
+[06:49:31] [bert-loader/INFO]: Ignore mismatching platform from: jar:file:/Users/roti/Library/Application%20Support/PrismLauncher/instances/1.21.10/minecraft/.fabric/processedMods/ai_djl_pytorch_pytorch-native-cp86_64-2.5.1-4fc5a0b86a123205.jar!/native/lib/pytorch.properties
+[06:49:31] [bert-loader/INFO]: Found matching platform from: jar:file:/Users/roti/Library/Application%20Support/PrismLauncher/instances/1.21.10/minecraft/.fabric/processedMods/ai_djl_pytorch_pytorch-native-cprch64-2.5.1-19906839836eeb80.jar!/native/lib/pytorch.properties
+[06:49:31] [bert-loader/INFO]: Ignore mismatching platform from: jar:file:/Users/roti/Library/Application%20Support/PrismLauncher/instances/1.21.10/minecraft/.fabric/processedMods/ai_djl_pytorch_pytorch-native-cp86_64-2.5.1-7f4cd6ea5a383f15.jar!/native/lib/pytorch.properties
+[06:49:31] [Render thread/WARN]: Program link log for sodium:chunk_shader_for_terrain_cutout: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttributeLocation request.
 WARNING: Output of vertex shader 'iris_FogFragCoord' not read by fragment shader
 
-[15:02:40] [Render thread/WARN]: Program link log for sodium:chunk_shader_for_translucent: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+[06:49:31] [Render thread/WARN]: Program link log for sodium:chunk_shader_for_translucent: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'at_midBlock' to match BindAttributeLocation request.
 WARNING: Output of vertex shader 'iris_FogFragCoord' not read by fragment shader
 
-[15:02:40] [Render thread/WARN]: Program link log for colorSpaceFragment: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
+[06:49:31] [Render thread/WARN]: Program link log for colorSpaceFragment: WARNING: Could not find vertex shader attribute 'at_tangent' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'mc_midTexCoord' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'UV0' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'iris_Entity' to match BindAttributeLocation request.
@@ -570,574 +564,293 @@ WARNING: Could not find vertex shader attribute 'mc_Entity' to match BindAttribu
 WARNING: Could not find vertex shader attribute 'Position' to match BindAttributeLocation request.
 WARNING: Output of vertex shader 'uv' not read by fragment shader
 
-[15:02:40] [Render thread/INFO]: Started 4 worker threads
-[15:02:40] [Render thread/INFO]: Loading client level [Wrapped{ClientLevel@ceh4rbi6e0gru@minecraft:overworld}]-[ceh4rbi6e0gru@minecraft:overworld].
-[15:02:40] [Render thread/INFO]: Loaded [0] waiting chunk wrappers.
-[15:02:40] [Render thread/INFO]: Loaded 252 advancements
-[15:02:40] [Render thread/WARN]: Error while parsing the block ID map entry for "block.10104":
-[15:02:40] [Render thread/WARN]: - The block minecraft:stone_slab has no property with the name variant, ignoring!
-[15:02:40] [Render thread/INFO]: Stopping worker threads
-[15:02:40] [Render thread/INFO]: Started 4 worker threads
-[15:02:40] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/screenquad and FS minecraft:core/blit_screen. Log output: WARNING: Could not find vertex shader attribute 'UV0' to match BindAttributeLocation request.
+[06:49:31] [Render thread/INFO]: Started 4 worker threads
+[06:49:31] [Render thread/INFO]: Loading client level [Wrapped{ClientLevel@ceh4rbi6e0gru@minecraft:overworld}]-[ceh4rbi6e0gru@minecraft:overworld].
+[06:49:31] [Render thread/INFO]: Loaded [0] waiting chunk wrappers.
+[06:49:31] [Render thread/INFO]: Loaded 253 advancements
+[06:49:31] [Render thread/WARN]: Error while parsing the block ID map entry for "block.10104":
+[06:49:31] [Render thread/WARN]: - The block minecraft:stone_slab has no property with the name variant, ignoring!
+[06:49:31] [Render thread/INFO]: Stopping worker threads
+[06:49:31] [Render thread/INFO]: Started 4 worker threads
+[06:49:31] [bert-loader/INFO]: PyTorch graph executor optimizer is enabled, this may impact your inference latency and throughput. See: https://docs.djl.ai/master/docs/development/inference_performance_optimization.html#graph-executor-optimization
+[06:49:31] [bert-loader/INFO]: Number of inter-op threads is 10
+[06:49:31] [bert-loader/INFO]: Number of intra-op threads is 6
+[06:49:31] [Render thread/INFO]: Info log when linking program containing VS minecraft:core/screenquad and FS minecraft:core/blit_screen. Log output: WARNING: Could not find vertex shader attribute 'UV0' to match BindAttributeLocation request.
 WARNING: Could not find vertex shader attribute 'Position' to match BindAttributeLocation request.
 
-[15:02:40] [Render thread/INFO]: Loading shader with type: [35633]
-[15:02:40] [Render thread/INFO]: Shader loaded sucessfully.
-[15:02:40] [Render thread/INFO]: Loading shader with type: [35632]
-[15:02:40] [Render thread/INFO]: Shader loaded sucessfully.
-[15:02:40] [Render thread/INFO]: Loading shader with type: [35633]
-[15:02:40] [Render thread/INFO]: Shader loaded sucessfully.
-[15:02:40] [Render thread/INFO]: Loading shader with type: [35632]
-[15:02:40] [Render thread/INFO]: Shader loaded sucessfully.
-[15:02:40] [Render thread/INFO]: Creating GLProxy... If this is the last message you see there must have been an OpenGL error.
-[15:02:40] [Render thread/INFO]: Lod Render OpenGL version [4.1 Metal - 89.4].
-[15:02:40] [Render thread/INFO]: minecraftGlCapabilities:
+[06:49:31] [Render thread/INFO]: Loading shader with type: [35633]
+[06:49:31] [Render thread/INFO]: Shader loaded sucessfully.
+[06:49:31] [Render thread/INFO]: Loading shader with type: [35632]
+[06:49:31] [Render thread/INFO]: Shader loaded sucessfully.
+[06:49:31] [Render thread/INFO]: Loading shader with type: [35633]
+[06:49:31] [Render thread/INFO]: Shader loaded sucessfully.
+[06:49:31] [Render thread/INFO]: Loading shader with type: [35632]
+[06:49:31] [Render thread/INFO]: Shader loaded sucessfully.
+[06:49:31] [Render thread/INFO]: Creating GLProxy... If this is the last message you see there must have been an OpenGL error.
+[06:49:31] [Render thread/INFO]: Lod Render OpenGL version [4.1 Metal - 89.4].
+[06:49:31] [Render thread/INFO]: minecraftGlCapabilities:
 Your OpenGL support:
 openGL version 3.2+: [true] <- REQUIRED
 Vertex Attribute Buffer Binding: [false] <- optional improvement
 Buffer Storage: [false] <- optional improvement
 
-[15:02:40] [Render thread/INFO]: This GPU doesn't support Buffer Storage (OpenGL 4.4), falling back to using other methods.
-[15:02:40] [Render thread/INFO]: GPU Vendor [APPLE] with OS [macOS], Preferred upload method is [DATA].
-[15:02:40] [Render thread/INFO]: GLProxy creation successful. OpenGL smiles upon you this day.
-[15:02:40] [Render thread/INFO]: Resizing Dynamic Transforms UBO, capacity limit of 2 reached during a single frame. New capacity will be 4.
-[15:02:40] [Render thread/INFO]: Setting up renderer
-[15:02:40] [Render thread/INFO]: Loading shader with type: [35633]
-[15:02:40] [Render thread/INFO]: Shader loaded sucessfully.
-[15:02:40] [Render thread/INFO]: Loading shader with type: [35632]
-[15:02:40] [Render thread/INFO]: Shader loaded sucessfully.
-[15:02:40] [Render thread/INFO]: Vertex Attribute (pre GL43) completed.
-[15:02:40] [Render thread/INFO]: Renderer setup complete
-[15:02:40] [Render thread/ERROR]: Unexpected; somehow the Opaque + Translucent pass ran with shaders on.
-[15:02:40] [Render thread/WARN]: There have been reports of instanced rendering causing crashes on macOS when Sodium is present. Instanced rendering can be disabled via the DH config.
-[15:02:40] [Render thread/INFO]: Loading shader with type: [35633]
-[15:02:40] [Render thread/INFO]: Shader loaded sucessfully.
-[15:02:40] [Render thread/INFO]: Loading shader with type: [35632]
-[15:02:40] [Render thread/INFO]: Shader loaded sucessfully.
-[15:02:40] [Render thread/INFO]: Vertex Attribute (pre GL43) completed.
-[15:02:40] [Render thread/INFO]: Loading shader with type: [35633]
-[15:02:40] [Render thread/INFO]: Shader loaded sucessfully.
-[15:02:40] [Render thread/INFO]: Loading shader with type: [35632]
-[15:02:40] [Render thread/INFO]: Shader loaded sucessfully.
-[15:02:40] [Render thread/INFO]: Vertex Attribute (pre GL43) completed.
-[15:02:40] [Render thread/INFO]: Resizing Dynamic Transforms UBO, capacity limit of 4 reached during a single frame. New capacity will be 8.
-[15:02:41] [Render thread/INFO]: Resizing Dynamic Transforms UBO, capacity limit of 8 reached during a single frame. New capacity will be 16.
-[15:02:41] [Render thread/INFO]: Resizing Dynamic Transforms UBO, capacity limit of 16 reached during a single frame. New capacity will be 32.
-[15:02:48] [Server thread/INFO]: Parsed ascent: climb UP by 10 blocks
-[15:02:48] [pool-5-thread-1/INFO]: Task 'mining' started for bot e01f59a8-aebb-4eed-9a56-bc36f8507228
-[15:02:48] [pool-5-thread-1/INFO]: External override activated; pausing training loop.
-[15:02:48] [pool-5-thread-1/INFO]: Ascent mode: climbing from Y=-39 to Y=-29 (+10 blocks)
-[15:02:48] [pool-5-thread-1/INFO]: Starting ascent from Y=-39 to Y=-29 in direction north
-[15:02:48] [Server thread/INFO]: Mining complete at class_2338{x=73, y=-37, z=-2}
-[15:02:48] [Server thread/INFO]: Mining complete at class_2338{x=73, y=-36, z=-2}
-[15:02:48] [Server thread/INFO]: Mining complete at class_2338{x=73, y=-35, z=-2}
-[15:02:48] [pool-5-thread-1/WARN]: Could not clear headroom block at 73, -34, -2, continuing anyway
-[15:02:48] [pool-5-thread-1/WARN]: Could not clear headroom block at 73, -33, -2, continuing anyway
-[15:02:49] [pool-5-thread-1/INFO]: Successfully climbed from Y=-39 to Y=-38 (attempt 2)
-[15:02:50] [Server thread/INFO]: Mining complete at class_2338{x=73, y=-36, z=-3}
-[15:02:50] [Server thread/INFO]: Mining complete at class_2338{x=73, y=-35, z=-3}
-[15:02:50] [Server thread/INFO]: Mining complete at class_2338{x=73, y=-34, z=-3}
-[15:02:50] [pool-5-thread-1/WARN]: Could not clear headroom block at 73, -33, -3, continuing anyway
-[15:02:50] [pool-5-thread-1/WARN]: Could not clear headroom block at 73, -32, -3, continuing anyway
-[15:02:50] [pool-5-thread-1/INFO]: Successfully climbed from Y=-38 to Y=-37 (attempt 1)
-[15:02:51] [Server thread/INFO]: Mining complete at class_2338{x=73, y=-35, z=-4}
-[15:02:51] [Server thread/INFO]: Mining complete at class_2338{x=73, y=-34, z=-4}
-[15:02:51] [Server thread/INFO]: Mining complete at class_2338{x=73, y=-33, z=-4}
-[15:02:51] [pool-5-thread-1/WARN]: Could not clear headroom block at 73, -32, -4, continuing anyway
-[15:02:51] [pool-5-thread-1/WARN]: Could not clear headroom block at 73, -31, -4, continuing anyway
-[15:02:52] [pool-5-thread-1/INFO]: Successfully climbed from Y=-37 to Y=-35 (attempt 1)
-[15:02:52] [Server thread/INFO]: Mining complete at class_2338{x=73, y=-33, z=-5}
-[15:02:52] [Server thread/INFO]: Mining complete at class_2338{x=73, y=-32, z=-5}
-[15:02:52] [Server thread/INFO]: Mining complete at class_2338{x=73, y=-31, z=-5}
-[15:02:52] [pool-5-thread-1/WARN]: Could not clear headroom block at 73, -30, -5, continuing anyway
-[15:02:52] [pool-5-thread-1/WARN]: Could not clear headroom block at 73, -29, -5, continuing anyway
-[15:02:53] [pool-5-thread-1/INFO]: Successfully climbed from Y=-35 to Y=-34 (attempt 2)
-[15:02:54] [Server thread/INFO]: Mining complete at class_2338{x=73, y=-32, z=-6}
-[15:02:54] [Server thread/INFO]: Mining complete at class_2338{x=73, y=-31, z=-6}
-[15:02:54] [Server thread/INFO]: Mining complete at class_2338{x=73, y=-30, z=-6}
-[15:02:54] [pool-5-thread-1/WARN]: Could not clear headroom block at 73, -29, -6, continuing anyway
-[15:02:54] [pool-5-thread-1/WARN]: Could not clear headroom block at 73, -28, -6, continuing anyway
-[15:02:54] [pool-5-thread-1/INFO]: Successfully climbed from Y=-34 to Y=-33 (attempt 1)
-[15:02:55] [Server thread/INFO]: Mining complete at class_2338{x=73, y=-31, z=-7}
-[15:02:55] [Server thread/INFO]: Mining complete at class_2338{x=73, y=-30, z=-7}
-[15:02:55] [Server thread/INFO]: Mining complete at class_2338{x=73, y=-29, z=-7}
-[15:02:55] [pool-5-thread-1/WARN]: Could not clear headroom block at 73, -28, -7, continuing anyway
-[15:02:55] [pool-5-thread-1/WARN]: Could not clear headroom block at 73, -27, -7, continuing anyway
-[15:02:56] [pool-5-thread-1/INFO]: Successfully climbed from Y=-33 to Y=-31 (attempt 1)
-[15:02:56] [pool-5-thread-1/INFO]: Placed torch at class_2338{x=73, y=-31, z=-5} for bot Jake
-[15:02:56] [Server thread/INFO]: Swapping best tool from main inventory slot 13 to hotbar slot 3
-[15:02:56] [Server thread/INFO]: Mining complete at class_2338{x=73, y=-29, z=-8}
-[15:02:56] [Server thread/INFO]: Mining complete at class_2338{x=73, y=-28, z=-8}
-[15:02:56] [Server thread/INFO]: Mining complete at class_2338{x=73, y=-27, z=-8}
-[15:02:56] [pool-5-thread-1/WARN]: Could not clear headroom block at 73, -26, -8, continuing anyway
-[15:02:56] [pool-5-thread-1/WARN]: Could not clear headroom block at 73, -25, -8, continuing anyway
-[15:02:57] [pool-5-thread-1/INFO]: Successfully climbed from Y=-31 to Y=-30 (attempt 2)
-[15:02:57] [Server thread/INFO]: Mining complete at class_2338{x=73, y=-28, z=-9}
-[15:02:58] [Server thread/INFO]: Mining complete at class_2338{x=73, y=-27, z=-9}
-[15:02:58] [Server thread/INFO]: Mining complete at class_2338{x=73, y=-26, z=-9}
-[15:02:58] [pool-5-thread-1/WARN]: Could not clear headroom block at 73, -25, -9, continuing anyway
-[15:02:58] [pool-5-thread-1/WARN]: Could not clear headroom block at 73, -24, -9, continuing anyway
-[15:02:58] [pool-5-thread-1/INFO]: Successfully climbed from Y=-30 to Y=-29 (attempt 1)
-[15:02:58] [pool-5-thread-1/INFO]: Ascent complete after 8 steps, final Y=-29
-[15:02:58] [pool-5-thread-1/INFO]: Drop sweep initiated with radius=8.0, vRange=4.0, maxTargets=6, duration=10000ms
-[15:02:58] [pool-5-thread-1/INFO]: Bot is holding: Netherite Pickaxe
-[15:02:58] [pool-5-thread-1/INFO]: Found 1 drops, closest is Cobbled Deepslate.
-[15:02:58] [pool-5-thread-1/INFO]: Drop sweep movement (DIRECT) -> direct: already at destination
-[15:02:58] [pool-5-thread-1/INFO]: Drop sweep reached class_2338{x=73, y=-28, z=-9} but item still present (direct: already at destination). Nudging for pickup.
-[15:02:58] [pool-5-thread-1/INFO]: Drop sweep manual nudge collected Cobbled Deepslate near class_2338{x=73, y=-27, z=-9}
-[15:02:58] [pool-5-thread-1/INFO]: External override cleared; training loop may resume.
-[15:02:58] [pool-5-thread-1/INFO]: Task 'skill:mining' finished with state COMPLETED
-[15:02:58] [pool-5-thread-1/INFO]: Scheduling post-task safety check for bot Jake after task 'skill:mining'
-[15:02:58] [Server thread/INFO]: Running post-task safety check for bot Jake at position 73, -28, -8
-[15:02:58] [Server thread/INFO]: Found blocking block at 73, -28, -7: Deepslate
-[15:02:58] [Server thread/WARN]: Bot Jake is stuck in blocks at 73, -28, -7! Attempting escape
-[15:02:58] [Server thread/INFO]: Found 21 blocking blocks around bot - attempting to break all
-[15:02:58] [Server thread/INFO]: Broke block Deepslate at 72, -29, -9 (1/21)
-[15:02:58] [Server thread/INFO]: Broke block Deepslate at 72, -29, -8 (2/21)
-[15:02:58] [Server thread/INFO]: Broke block Deepslate at 72, -29, -7 (3/21)
-[15:02:59] [Server thread/INFO]: Broke block Deepslate at 72, -28, -9 (4/21)
-[15:02:59] [Server thread/INFO]: Broke block Deepslate at 72, -28, -8 (5/21)
-[15:02:59] [Server thread/INFO]: Broke block Deepslate at 72, -28, -7 (6/21)
-[15:02:59] [Server thread/INFO]: Broke block Deepslate at 72, -27, -9 (7/21)
-[15:02:59] [Server thread/INFO]: Broke block Deepslate at 72, -27, -8 (8/21)
-[15:02:59] [Server thread/INFO]: Broke block Deepslate at 72, -27, -7 (9/21)
-[15:02:59] [Server thread/INFO]: Broke block Tuff at 73, -29, -9 (10/21)
-[15:02:59] [Server thread/INFO]: Broke block Deepslate at 73, -28, -7 (11/21)
-[15:02:59] [Server thread/INFO]: Broke block Deepslate at 73, -27, -7 (12/21)
-[15:03:00] [Server thread/INFO]: Broke block Tuff at 74, -29, -9 (13/21)
-[15:03:00] [Server thread/INFO]: Broke block Tuff at 74, -29, -8 (14/21)
-[15:03:00] [Server thread/INFO]: Broke block Tuff at 74, -29, -7 (15/21)
-[15:03:00] [Server thread/INFO]: Broke block Tuff at 74, -28, -9 (16/21)
-[15:03:00] [Server thread/INFO]: Broke block Tuff at 74, -28, -8 (17/21)
-[15:03:00] [Server thread/INFO]: Broke block Tuff at 74, -28, -7 (18/21)
-[15:03:00] [Server thread/INFO]: Broke block Deepslate at 74, -27, -9 (19/21)
-[15:03:00] [Server thread/INFO]: Broke block Deepslate at 74, -27, -8 (20/21)
-[15:03:00] [Server thread/INFO]: Bot Jake is now clear after breaking 20 blocks
-[15:03:00] [Server thread/INFO]: Bot Jake successfully escaped by breaking 20 blocks
-[15:03:00] [Server thread/INFO]: Sending system message: 'Reached target Y=-29 after 8 steps.'
-[15:03:00] [Server thread/INFO]: [Not Secure] [RotiWokeman] §7Reached target Y=-29 after 8 steps.
-[15:03:00] [Render thread/INFO]: [System] [CHAT] [RotiWokeman] §7Reached target Y=-29 after 8 steps.
-[15:03:05] [Server thread/INFO]: Saved inventory for fakeplayer 'Jake' to jake_e01f59a8-aebb-4eed-9a56-bc36f8507228.nbt
-[15:03:20] [Server thread/INFO]: Parsed ascent-y: climb UP to Y=10
-[15:03:20] [pool-5-thread-1/INFO]: Task 'mining' started for bot e01f59a8-aebb-4eed-9a56-bc36f8507228
-[15:03:20] [pool-5-thread-1/INFO]: External override activated; pausing training loop.
-[15:03:20] [pool-5-thread-1/INFO]: Ascent mode: climbing from Y=-29 to Y=10
-[15:03:20] [pool-5-thread-1/INFO]: Starting ascent from Y=-29 to Y=10 in direction north
-[15:03:20] [Server thread/INFO]: Mining complete at class_2338{x=73, y=-27, z=-10}
-[15:03:20] [Server thread/INFO]: Mining complete at class_2338{x=73, y=-26, z=-10}
-[15:03:21] [Server thread/INFO]: Mining complete at class_2338{x=73, y=-25, z=-10}
-[15:03:21] [pool-5-thread-1/WARN]: Could not clear headroom block at 73, -24, -10, continuing anyway
-[15:03:21] [pool-5-thread-1/WARN]: Could not clear headroom block at 73, -23, -10, continuing anyway
-[15:03:22] [pool-5-thread-1/INFO]: Successfully climbed from Y=-29 to Y=-28 (attempt 2)
-[15:03:27] [pool-5-thread-1/INFO]: Successfully climbed from Y=-28 to Y=-26 (attempt 1)
-[15:03:28] [pool-5-thread-1/INFO]: Successfully climbed from Y=-26 to Y=-24 (attempt 1)
-[15:03:34] [pool-5-thread-1/INFO]: Successfully climbed from Y=-25 to Y=-23 (attempt 1)
-[15:03:35] [pool-5-thread-1/INFO]: Successfully climbed from Y=-23 to Y=-21 (attempt 1)
-[15:03:35] [Server thread/INFO]: Saved inventory for fakeplayer 'Jake' to jake_e01f59a8-aebb-4eed-9a56-bc36f8507228.nbt
-[15:03:36] [pool-5-thread-1/INFO]: Successfully climbed from Y=-21 to Y=-20 (attempt 1)
-[15:03:37] [pool-5-thread-1/INFO]: Successfully climbed from Y=-20 to Y=-18 (attempt 1)
-[15:03:37] [pool-5-thread-1/WARN]: Could not clear headroom block at 73, -13, -45, continuing anyway
-[15:03:37] [pool-5-thread-1/WARN]: Could not clear headroom block at 73, -12, -45, continuing anyway
-[15:03:38] [pool-5-thread-1/INFO]: Successfully climbed from Y=-18 to Y=-17 (attempt 1)
-[15:03:40] [Server thread/INFO]: Mining complete at class_2338{x=73, y=-15, z=-46}
-[15:03:40] [pool-5-thread-1/WARN]: Could not clear headroom block at 73, -14, -46, continuing anyway
-[15:03:40] [pool-5-thread-1/WARN]: Could not clear headroom block at 73, -11, -46, continuing anyway
-[15:03:43] [pool-5-thread-1/INFO]: Successfully climbed from Y=-20 to Y=-16 (attempt 1)
-[15:03:43] [Server thread/INFO]: Mining complete at class_2338{x=74, y=-14, z=-46}
-[15:03:43] [Server thread/INFO]: Mining complete at class_2338{x=74, y=-13, z=-46}
-[15:03:43] [Server thread/INFO]: Mining complete at class_2338{x=74, y=-12, z=-46}
-[15:03:43] [pool-5-thread-1/WARN]: Could not clear headroom block at 74, -11, -46, continuing anyway
-[15:03:43] [pool-5-thread-1/WARN]: Could not clear headroom block at 74, -10, -46, continuing anyway
-[15:03:46] [pool-5-thread-1/WARN]: Did not climb after 5 attempts, Y remains at -16
-[15:03:46] [pool-5-thread-1/WARN]: Could not clear headroom block at 74, -11, -46, continuing anyway
-[15:03:46] [pool-5-thread-1/WARN]: Could not clear headroom block at 74, -10, -46, continuing anyway
-[15:03:49] [pool-5-thread-1/WARN]: Did not climb after 5 attempts, Y remains at -16
-[15:03:49] [pool-5-thread-1/WARN]: Could not clear headroom block at 74, -11, -46, continuing anyway
-[15:03:49] [pool-5-thread-1/WARN]: Could not clear headroom block at 74, -10, -46, continuing anyway
-[15:03:51] [pool-5-thread-1/WARN]: Did not climb after 5 attempts, Y remains at -16
-[15:03:51] [pool-5-thread-1/WARN]: Could not clear headroom block at 74, -11, -46, continuing anyway
-[15:03:51] [pool-5-thread-1/WARN]: Could not clear headroom block at 74, -10, -46, continuing anyway
-[15:03:54] [pool-5-thread-1/WARN]: Did not climb after 5 attempts, Y remains at -16
-[15:03:54] [pool-5-thread-1/WARN]: Could not clear headroom block at 74, -11, -46, continuing anyway
-[15:03:54] [pool-5-thread-1/WARN]: Could not clear headroom block at 74, -10, -46, continuing anyway
-[15:03:56] [pool-5-thread-1/WARN]: Did not climb after 5 attempts, Y remains at -16
-[15:03:56] [pool-5-thread-1/WARN]: Could not clear headroom block at 74, -11, -46, continuing anyway
-[15:03:56] [pool-5-thread-1/WARN]: Could not clear headroom block at 74, -10, -46, continuing anyway
-[15:03:59] [pool-5-thread-1/WARN]: Did not climb after 5 attempts, Y remains at -16
-[15:03:59] [pool-5-thread-1/WARN]: Could not clear headroom block at 74, -11, -46, continuing anyway
-[15:03:59] [pool-5-thread-1/WARN]: Could not clear headroom block at 74, -10, -46, continuing anyway
-[15:04:01] [pool-5-thread-1/WARN]: Did not climb after 5 attempts, Y remains at -16
-[15:04:01] [pool-5-thread-1/WARN]: Could not clear headroom block at 74, -11, -46, continuing anyway
-[15:04:01] [pool-5-thread-1/WARN]: Could not clear headroom block at 74, -10, -46, continuing anyway
-[15:04:04] [pool-5-thread-1/WARN]: Did not climb after 5 attempts, Y remains at -16
-[15:04:04] [pool-5-thread-1/WARN]: Could not clear headroom block at 74, -11, -46, continuing anyway
-[15:04:04] [pool-5-thread-1/WARN]: Could not clear headroom block at 74, -10, -46, continuing anyway
-[15:04:05] [Server thread/INFO]: Saved inventory for fakeplayer 'Jake' to jake_e01f59a8-aebb-4eed-9a56-bc36f8507228.nbt
-[15:04:06] [pool-5-thread-1/WARN]: Did not climb after 5 attempts, Y remains at -16
-[15:04:06] [pool-5-thread-1/WARN]: Could not clear headroom block at 74, -11, -46, continuing anyway
-[15:04:06] [pool-5-thread-1/WARN]: Could not clear headroom block at 74, -10, -46, continuing anyway
-[15:04:09] [pool-5-thread-1/WARN]: Did not climb after 5 attempts, Y remains at -16
-[15:04:09] [pool-5-thread-1/WARN]: Could not clear headroom block at 74, -11, -46, continuing anyway
-[15:04:09] [pool-5-thread-1/WARN]: Could not clear headroom block at 74, -10, -46, continuing anyway
-[15:04:10] [Render thread/INFO]: Loaded 253 advancements
-[15:04:11] [pool-5-thread-1/WARN]: Did not climb after 5 attempts, Y remains at -16
-[15:04:11] [pool-5-thread-1/WARN]: Could not clear headroom block at 74, -11, -46, continuing anyway
-[15:04:11] [pool-5-thread-1/WARN]: Could not clear headroom block at 74, -10, -46, continuing anyway
-[15:04:13] [Render thread/INFO]: Loaded 253 advancements
-[15:04:14] [pool-5-thread-1/WARN]: Did not climb after 5 attempts, Y remains at -16
-[15:04:14] [pool-5-thread-1/WARN]: Could not clear headroom block at 74, -11, -46, continuing anyway
-[15:04:14] [pool-5-thread-1/WARN]: Could not clear headroom block at 74, -10, -46, continuing anyway
-[15:04:16] [pool-5-thread-1/WARN]: Did not climb after 5 attempts, Y remains at -16
-[15:04:16] [pool-5-thread-1/WARN]: Could not clear headroom block at 74, -11, -46, continuing anyway
-[15:04:16] [pool-5-thread-1/WARN]: Could not clear headroom block at 74, -10, -46, continuing anyway
-[15:04:19] [pool-5-thread-1/WARN]: Did not climb after 5 attempts, Y remains at -16
-[15:04:19] [pool-5-thread-1/WARN]: Could not clear headroom block at 74, -11, -46, continuing anyway
-[15:04:19] [pool-5-thread-1/WARN]: Could not clear headroom block at 74, -10, -46, continuing anyway
-[15:04:21] [pool-5-thread-1/WARN]: Did not climb after 5 attempts, Y remains at -16
-[15:04:21] [pool-5-thread-1/INFO]: Set pause position 74, -16, -45 for bot e01f59a8-aebb-4eed-9a56-bc36f8507228
-[15:04:21] [pool-5-thread-1/INFO]: Drop sweep initiated with radius=8.0, vRange=4.0, maxTargets=6, duration=10000ms
-[15:04:21] [pool-5-thread-1/INFO]: Bot is holding: Crossbow
-[15:04:21] [pool-5-thread-1/INFO]: Found 1 drops, closest is Gunpowder.
-[15:04:21] [pool-5-thread-1/INFO]: [STDOUT]: Found bot: Jake
-[15:04:21] [pool-5-thread-1/INFO]: Starting Bi-directional A* pathfinding with block tagging...
-[15:04:21] [pool-5-thread-1/INFO]: Path overlap detected! Merging paths...
-[15:04:21] [pool-5-thread-1/INFO]: Bi-directional path merged. Total raw nodes: 10
-[15:04:21] [pool-5-thread-1/INFO]: Tag class_2338{x=74, y=-16, z=-45}: solidBelow=true bodyClear=true headClear=true canStand=true jumpRequired=false canStepUpSlab=false
-[15:04:21] [pool-5-thread-1/INFO]: Tag class_2338{x=77, y=-16, z=-47}: solidBelow=true bodyClear=true headClear=true canStand=true jumpRequired=true canStepUpSlab=false
-[15:04:21] [pool-5-thread-1/INFO]: Tag class_2338{x=77, y=-16, z=-48}: solidBelow=true bodyClear=true headClear=true canStand=true jumpRequired=true canStepUpSlab=false
-[15:04:21] [pool-5-thread-1/INFO]: Tag class_2338{x=78, y=-16, z=-48}: solidBelow=true bodyClear=true headClear=true canStand=true jumpRequired=true canStepUpSlab=false
-[15:04:21] [pool-5-thread-1/INFO]: Tag class_2338{x=79, y=-16, z=-48}: solidBelow=true bodyClear=true headClear=true canStand=true jumpRequired=true canStepUpSlab=false
-[15:04:21] [pool-5-thread-1/INFO]: Simplified path length after filtering: 5
-[15:04:21] [pool-5-thread-1/INFO]: [STDOUT]: Simplified path list: [PathNode{pos=class_2338{x=74, y=-16, z=-45}, blockName='deepslate', jump=false}, PathNode{pos=class_2338{x=77, y=-16, z=-47}, blockName='deepslate', jump=true}, PathNode{pos=class_2338{x=77, y=-16, z=-48}, blockName='deepslate', jump=true}, PathNode{pos=class_2338{x=78, y=-16, z=-48}, blockName='deepslate', jump=true}, PathNode{pos=class_2338{x=79, y=-16, z=-48}, blockName='deepslate', jump=true}]
-[15:04:21] [pool-5-thread-1/INFO]: Path output: [PathNode{pos=class_2338{x=74, y=-16, z=-45}, blockName='deepslate', jump=false}, PathNode{pos=class_2338{x=77, y=-16, z=-47}, blockName='deepslate', jump=true}, PathNode{pos=class_2338{x=77, y=-16, z=-48}, blockName='deepslate', jump=true}, PathNode{pos=class_2338{x=78, y=-16, z=-48}, blockName='deepslate', jump=true}, PathNode{pos=class_2338{x=79, y=-16, z=-48}, blockName='deepslate', jump=true}]
-[15:04:21] [pool-5-thread-1/INFO]: Generated segments: [Segment[start=class_2338{x=74, y=-16, z=-45}, end=class_2338{x=77, y=-16, z=-47}, jump=true, sprint=false], Segment[start=class_2338{x=77, y=-16, z=-47}, end=class_2338{x=77, y=-16, z=-48}, jump=true, sprint=false], Segment[start=class_2338{x=77, y=-16, z=-48}, end=class_2338{x=78, y=-16, z=-48}, jump=true, sprint=false], Segment[start=class_2338{x=78, y=-16, z=-48}, end=class_2338{x=79, y=-16, z=-48}, jump=true, sprint=false]]
-[15:04:21] [pool-5-thread-1/INFO]: [STDOUT]: Path tracer output: Bot moved to position - x: 80 y: -16 z: -48
-[15:04:21] [pool-5-thread-1/INFO]: [STDOUT]: Final path output: Bot moved to position - x: 80 y: -16 z: -48
-[15:04:21] [pool-5-thread-1/INFO]: Drop sweep movement (DIRECT) -> direct: Bot moved to position - x: 80 y: -16 z: -48
-[15:04:21] [pool-5-thread-1/INFO]: Drop sweep collected Gunpowder (direct: Bot moved to position - x: 80 y: -16 z: -48)
-[15:04:21] [pool-5-thread-1/INFO]: External override cleared; training loop may resume.
-[15:04:21] [pool-5-thread-1/INFO]: Task 'skill:mining' finished with state ABORTED
-[15:04:21] [pool-5-thread-1/INFO]: Scheduling post-task safety check for bot Jake after task 'skill:mining'
-[15:04:21] [Server thread/INFO]: Running post-task safety check for bot Jake at position 80, -16, -48
-[15:04:21] [Server thread/INFO]: Found blocking block at 80, -16, -49: Deepslate
-[15:04:21] [Server thread/WARN]: Bot Jake is stuck in blocks at 80, -16, -49! Attempting escape
-[15:04:21] [Server thread/INFO]: Found 13 blocking blocks around bot - attempting to break all
-[15:04:21] [Server thread/INFO]: Broke block Deepslate at 79, -17, -49 (1/13)
-[15:04:21] [Server thread/INFO]: Broke block Deepslate at 79, -17, -48 (2/13)
-[15:04:21] [Server thread/INFO]: Broke block Deepslate at 79, -16, -49 (3/13)
-[15:04:22] [Server thread/INFO]: Broke block Deepslate at 79, -16, -48 (4/13)
-[15:04:22] [Server thread/INFO]: Broke block Deepslate at 79, -15, -49 (5/13)
-[15:04:22] [Server thread/INFO]: Broke block Deepslate at 79, -15, -48 (6/13)
-[15:04:22] [Server thread/INFO]: Broke block Deepslate at 80, -17, -49 (7/13)
-[15:04:22] [Server thread/INFO]: Broke block Deepslate at 80, -17, -48 (8/13)
-[15:04:22] [Server thread/INFO]: Broke block Deepslate at 80, -16, -49 (9/13)
-[15:04:22] [Server thread/INFO]: Broke block Deepslate at 80, -15, -49 (10/13)
-[15:04:22] [Server thread/INFO]: Bot Jake is now clear after breaking 10 blocks
-[15:04:22] [Server thread/INFO]: Bot Jake successfully escaped by breaking 10 blocks
-[15:04:22] [Server thread/INFO]: Sending system message: 'Timed out after 37 steps.'
-[15:04:22] [Server thread/INFO]: [Not Secure] [RotiWokeman] §7Timed out after 37 steps.
-[15:04:22] [Render thread/INFO]: [System] [CHAT] [RotiWokeman] §7Timed out after 37 steps.
-[15:04:29] [Server thread/INFO]: Parsed ascent-y: climb UP to Y=10
-[15:04:29] [pool-5-thread-1/INFO]: Task 'mining' started for bot e01f59a8-aebb-4eed-9a56-bc36f8507228
-[15:04:29] [pool-5-thread-1/INFO]: External override activated; pausing training loop.
-[15:04:29] [pool-5-thread-1/INFO]: Ascent mode: climbing from Y=-17 to Y=10
-[15:04:29] [pool-5-thread-1/INFO]: Starting ascent from Y=-17 to Y=10 in direction north
-[15:04:29] [Server thread/INFO]: Mining complete at class_2338{x=80, y=-15, z=-50}
-[15:04:29] [Server thread/INFO]: Mining complete at class_2338{x=80, y=-14, z=-50}
-[15:04:29] [Server thread/INFO]: Mining complete at class_2338{x=80, y=-13, z=-50}
-[15:04:29] [pool-5-thread-1/WARN]: Could not clear headroom block at 80, -12, -50, continuing anyway
-[15:04:29] [pool-5-thread-1/WARN]: Could not clear headroom block at 80, -11, -50, continuing anyway
-[15:04:30] [pool-5-thread-1/INFO]: Successfully climbed from Y=-17 to Y=-16 (attempt 1)
-[15:04:30] [Server thread/INFO]: Mining complete at class_2338{x=80, y=-14, z=-51}
-[15:04:30] [Server thread/INFO]: Mining complete at class_2338{x=80, y=-13, z=-51}
-[15:04:30] [Server thread/INFO]: Mining complete at class_2338{x=80, y=-12, z=-51}
-[15:04:30] [pool-5-thread-1/WARN]: Could not clear headroom block at 80, -11, -51, continuing anyway
-[15:04:30] [pool-5-thread-1/WARN]: Could not clear headroom block at 80, -10, -51, continuing anyway
-[15:04:31] [pool-5-thread-1/INFO]: Successfully climbed from Y=-16 to Y=-15 (attempt 1)
-[15:04:32] [Server thread/INFO]: Mining complete at class_2338{x=80, y=-13, z=-52}
-[15:04:32] [Server thread/INFO]: Mining complete at class_2338{x=80, y=-12, z=-52}
-[15:04:32] [Server thread/INFO]: Mining complete at class_2338{x=80, y=-11, z=-52}
-[15:04:32] [pool-5-thread-1/WARN]: Could not clear headroom block at 80, -10, -52, continuing anyway
-[15:04:32] [pool-5-thread-1/WARN]: Could not clear headroom block at 80, -9, -52, continuing anyway
-[15:04:33] [pool-5-thread-1/INFO]: Successfully climbed from Y=-15 to Y=-13 (attempt 1)
-[15:04:33] [Server thread/INFO]: Mining complete at class_2338{x=80, y=-11, z=-53}
-[15:04:33] [Server thread/INFO]: Mining complete at class_2338{x=80, y=-10, z=-53}
-[15:04:33] [Server thread/INFO]: Mining complete at class_2338{x=80, y=-9, z=-53}
-[15:04:33] [pool-5-thread-1/WARN]: Could not clear headroom block at 80, -8, -53, continuing anyway
-[15:04:33] [pool-5-thread-1/WARN]: Could not clear headroom block at 80, -7, -53, continuing anyway
-[15:04:34] [pool-5-thread-1/INFO]: Successfully climbed from Y=-13 to Y=-12 (attempt 2)
-[15:04:35] [Server thread/INFO]: Mining complete at class_2338{x=80, y=-10, z=-54}
-[15:04:35] [Server thread/INFO]: Mining complete at class_2338{x=80, y=-9, z=-54}
-[15:04:35] [Server thread/INFO]: Mining complete at class_2338{x=80, y=-8, z=-54}
-[15:04:35] [pool-5-thread-1/WARN]: Could not clear headroom block at 80, -7, -54, continuing anyway
-[15:04:35] [pool-5-thread-1/WARN]: Could not clear headroom block at 80, -6, -54, continuing anyway
-[15:04:35] [Server thread/INFO]: Saved inventory for fakeplayer 'Jake' to jake_e01f59a8-aebb-4eed-9a56-bc36f8507228.nbt
-[15:04:35] [pool-5-thread-1/INFO]: Successfully climbed from Y=-12 to Y=-11 (attempt 1)
-[15:04:36] [Server thread/INFO]: Mining complete at class_2338{x=80, y=-9, z=-55}
-[15:04:36] [Server thread/INFO]: Mining complete at class_2338{x=80, y=-8, z=-55}
-[15:04:36] [Server thread/INFO]: Mining complete at class_2338{x=80, y=-7, z=-55}
-[15:04:36] [pool-5-thread-1/WARN]: Could not clear headroom block at 80, -6, -55, continuing anyway
-[15:04:36] [pool-5-thread-1/WARN]: Could not clear headroom block at 80, -5, -55, continuing anyway
-[15:04:37] [pool-5-thread-1/INFO]: Successfully climbed from Y=-11 to Y=-9 (attempt 1)
-[15:04:37] [pool-5-thread-1/INFO]: Placed torch at class_2338{x=80, y=-9, z=-53} for bot Jake
-[15:04:37] [Server thread/INFO]: Swapping best tool from main inventory slot 13 to hotbar slot 3
-[15:04:37] [Server thread/INFO]: Mining complete at class_2338{x=80, y=-7, z=-56}
-[15:04:38] [Server thread/INFO]: Mining complete at class_2338{x=80, y=-6, z=-56}
-[15:04:38] [Server thread/INFO]: Mining complete at class_2338{x=80, y=-5, z=-56}
-[15:04:38] [pool-5-thread-1/WARN]: Could not clear headroom block at 80, -4, -56, continuing anyway
-[15:04:38] [pool-5-thread-1/WARN]: Could not clear headroom block at 80, -3, -56, continuing anyway
-[15:04:39] [pool-5-thread-1/INFO]: Successfully climbed from Y=-9 to Y=-8 (attempt 2)
-[15:04:39] [Server thread/INFO]: Mining complete at class_2338{x=80, y=-6, z=-57}
-[15:04:39] [Server thread/INFO]: Mining complete at class_2338{x=80, y=-5, z=-57}
-[15:04:39] [Server thread/INFO]: Mining complete at class_2338{x=80, y=-4, z=-57}
-[15:04:39] [pool-5-thread-1/WARN]: Could not clear headroom block at 80, -3, -57, continuing anyway
-[15:04:39] [pool-5-thread-1/WARN]: Could not clear headroom block at 80, -2, -57, continuing anyway
-[15:04:40] [pool-5-thread-1/INFO]: Successfully climbed from Y=-8 to Y=-7 (attempt 1)
-[15:04:40] [Server thread/INFO]: Mining complete at class_2338{x=80, y=-5, z=-58}
-[15:04:40] [Server thread/INFO]: Mining complete at class_2338{x=80, y=-4, z=-58}
-[15:04:41] [Server thread/INFO]: Mining complete at class_2338{x=80, y=-3, z=-58}
-[15:04:41] [pool-5-thread-1/WARN]: Could not clear headroom block at 80, -2, -58, continuing anyway
-[15:04:41] [pool-5-thread-1/WARN]: Could not clear headroom block at 80, -1, -58, continuing anyway
-[15:04:41] [pool-5-thread-1/INFO]: Successfully climbed from Y=-7 to Y=-5 (attempt 1)
-[15:04:42] [Server thread/INFO]: Mining complete at class_2338{x=80, y=-3, z=-59}
-[15:04:42] [Server thread/INFO]: Mining complete at class_2338{x=80, y=-2, z=-59}
-[15:04:42] [Server thread/INFO]: Mining complete at class_2338{x=80, y=-1, z=-59}
-[15:04:42] [pool-5-thread-1/WARN]: Could not clear headroom block at 80, 0, -59, continuing anyway
-[15:04:42] [pool-5-thread-1/WARN]: Could not clear headroom block at 80, 1, -59, continuing anyway
-[15:04:43] [pool-5-thread-1/INFO]: Successfully climbed from Y=-5 to Y=-4 (attempt 2)
-[15:04:43] [Server thread/INFO]: Mining complete at class_2338{x=80, y=-2, z=-60}
-[15:04:43] [Server thread/INFO]: Mining complete at class_2338{x=80, y=-1, z=-60}
-[15:04:43] [Server thread/INFO]: Mining complete at class_2338{x=80, y=0, z=-60}
-[15:04:43] [Server thread/INFO]: Bot Jake broke feet block Tuff to escape suffocation
-[15:04:43] [pool-5-thread-1/WARN]: Could not clear headroom block at 80, 1, -60, continuing anyway
-[15:04:43] [pool-5-thread-1/WARN]: Could not clear headroom block at 80, 2, -60, continuing anyway
-[15:04:45] [pool-5-thread-1/INFO]: Successfully climbed from Y=-4 to Y=-3 (attempt 3)
-[15:04:45] [Server thread/INFO]: Mining complete at class_2338{x=80, y=-1, z=-61}
-[15:04:45] [Server thread/INFO]: Mining complete at class_2338{x=80, y=0, z=-61}
-[15:04:45] [pool-5-thread-1/WARN]: Could not clear headroom block at 80, 1, -61, continuing anyway
-[15:04:45] [pool-5-thread-1/WARN]: Could not clear headroom block at 80, 2, -61, continuing anyway
-[15:04:45] [pool-5-thread-1/WARN]: Could not clear headroom block at 80, 3, -61, continuing anyway
-[15:04:47] [pool-5-thread-1/INFO]: Successfully climbed from Y=-4 to Y=-3 (attempt 3)
-[15:04:47] [pool-5-thread-1/INFO]: Placed torch at class_2338{x=80, y=-3, z=-58} for bot Jake
-[15:04:47] [Server thread/INFO]: Swapping best tool from main inventory slot 13 to hotbar slot 3
-[15:04:47] [Server thread/INFO]: Mining complete at class_2338{x=80, y=1, z=-61}
-[15:04:47] [pool-5-thread-1/WARN]: Could not clear headroom block at 80, 2, -61, continuing anyway
-[15:04:47] [pool-5-thread-1/WARN]: Could not clear headroom block at 80, 3, -61, continuing anyway
-[15:04:49] [pool-5-thread-1/INFO]: Successfully climbed from Y=-4 to Y=-3 (attempt 3)
-[15:04:49] [pool-5-thread-1/WARN]: Could not clear headroom block at 80, 2, -61, continuing anyway
-[15:04:49] [pool-5-thread-1/WARN]: Could not clear headroom block at 80, 3, -61, continuing anyway
-[15:04:50] [pool-5-thread-1/INFO]: Successfully climbed from Y=-3 to Y=-1 (attempt 1)
-[15:04:50] [pool-5-thread-1/INFO]: Sending chat message (withDelay=true): 'Inventory's full! Continuing…'
-[15:04:50] [pool-5-thread-1/INFO]: Message split into 1 parts
-[15:04:50] [Server thread/INFO]: Broadcasting message part 0: 'Inventory's full! Continuing…' from source: Jake
-[15:04:50] [Server thread/INFO]: [Not Secure] [Jake] Inventory's full! Continuing…
-[15:04:50] [Render thread/INFO]: [System] [CHAT] [Jake] Inventory's full! Continuing…
-[15:04:50] [Server thread/INFO]: Mining complete at class_2338{x=80, y=1, z=-62}
-[15:04:50] [Server thread/INFO]: Mining complete at class_2338{x=80, y=2, z=-62}
-[15:04:51] [Server thread/INFO]: Mining complete at class_2338{x=80, y=3, z=-62}
-[15:04:51] [pool-5-thread-1/WARN]: Could not clear headroom block at 80, 4, -62, continuing anyway
-[15:04:51] [pool-5-thread-1/WARN]: Could not clear headroom block at 80, 5, -62, continuing anyway
-[15:04:53] [pool-5-thread-1/WARN]: Did not climb after 5 attempts, Y remains at -1
-[15:04:53] [pool-5-thread-1/WARN]: Could not clear headroom block at 80, 4, -62, continuing anyway
-[15:04:53] [pool-5-thread-1/WARN]: Could not clear headroom block at 80, 5, -62, continuing anyway
-[15:04:56] [pool-5-thread-1/WARN]: Did not climb after 5 attempts, Y remains at -1
-[15:04:56] [pool-5-thread-1/INFO]: Sending chat message (withDelay=true): 'Inventory's full! Continuing…'
-[15:04:56] [pool-5-thread-1/INFO]: Message split into 1 parts
-[15:04:56] [Server thread/INFO]: Broadcasting message part 0: 'Inventory's full! Continuing…' from source: Jake
-[15:04:56] [Server thread/INFO]: [Not Secure] [Jake] Inventory's full! Continuing…
-[15:04:56] [pool-5-thread-1/WARN]: Could not clear headroom block at 80, 4, -62, continuing anyway
-[15:04:56] [pool-5-thread-1/WARN]: Could not clear headroom block at 80, 5, -62, continuing anyway
-[15:04:56] [Render thread/INFO]: [System] [CHAT] [Jake] Inventory's full! Continuing…
-[15:04:58] [pool-5-thread-1/WARN]: Did not climb after 5 attempts, Y remains at -1
-[15:04:58] [pool-5-thread-1/WARN]: Could not clear headroom block at 80, 4, -62, continuing anyway
-[15:04:58] [pool-5-thread-1/WARN]: Could not clear headroom block at 80, 5, -62, continuing anyway
-[15:05:01] [pool-5-thread-1/WARN]: Did not climb after 5 attempts, Y remains at -1
-[15:05:01] [pool-5-thread-1/INFO]: Sending chat message (withDelay=true): 'Inventory's full! Continuing…'
-[15:05:01] [pool-5-thread-1/INFO]: Message split into 1 parts
-[15:05:01] [Server thread/INFO]: Broadcasting message part 0: 'Inventory's full! Continuing…' from source: Jake
-[15:05:01] [Server thread/INFO]: [Not Secure] [Jake] Inventory's full! Continuing…
-[15:05:01] [pool-5-thread-1/WARN]: Could not clear headroom block at 80, 4, -62, continuing anyway
-[15:05:01] [pool-5-thread-1/WARN]: Could not clear headroom block at 80, 5, -62, continuing anyway
-[15:05:01] [Render thread/INFO]: [System] [CHAT] [Jake] Inventory's full! Continuing…
-[15:05:03] [pool-5-thread-1/WARN]: Did not climb after 5 attempts, Y remains at -1
-[15:05:03] [pool-5-thread-1/WARN]: Could not clear headroom block at 80, 4, -62, continuing anyway
-[15:05:03] [pool-5-thread-1/WARN]: Could not clear headroom block at 80, 5, -62, continuing anyway
-[15:05:05] [pool-5-thread-1/INFO]: Successfully climbed from Y=-1 to Y=1 (attempt 3)
-[15:05:05] [Server thread/INFO]: Mining complete at class_2338{x=80, y=3, z=-63}
-[15:05:05] [Server thread/INFO]: Mining complete at class_2338{x=80, y=4, z=-63}
-[15:05:05] [Server thread/INFO]: Mining complete at class_2338{x=80, y=5, z=-63}
-[15:05:05] [pool-5-thread-1/WARN]: Could not clear headroom block at 80, 6, -63, continuing anyway
-[15:05:05] [pool-5-thread-1/WARN]: Could not clear headroom block at 80, 7, -63, continuing anyway
-[15:05:05] [Server thread/INFO]: Saved inventory for fakeplayer 'Jake' to jake_e01f59a8-aebb-4eed-9a56-bc36f8507228.nbt
-[15:05:06] [Server thread/INFO]: Mining complete at class_2338{x=80, y=2, z=-63}
-[15:05:06] [pool-5-thread-1/WARN]: Could not clear headroom block at 80, 6, -63, continuing anyway
-[15:05:08] [Server thread/INFO]: Saving and pausing game...
-[15:05:08] [Server thread/INFO]: Saving chunks for level 'ServerLevel[New World]'/minecraft:overworld
-[15:05:08] [Server thread/INFO]: Saving chunks for level 'ServerLevel[New World]'/minecraft:the_nether
-[15:05:08] [Server thread/INFO]: Saving chunks for level 'ServerLevel[New World]'/minecraft:the_end
-[15:05:08] [pool-5-thread-1/INFO]: Successfully climbed from Y=-1 to Y=0 (attempt 3)
-[15:05:08] [pool-5-thread-1/INFO]: Sending chat message (withDelay=true): 'Inventory's full! Continuing…'
-[15:05:08] [pool-5-thread-1/INFO]: Message split into 1 parts
-[15:05:08] [Server thread/INFO]: Broadcasting message part 0: 'Inventory's full! Continuing…' from source: Jake
-[15:05:08] [Server thread/INFO]: [Not Secure] [Jake] Inventory's full! Continuing…
-[15:05:08] [pool-5-thread-1/WARN]: Could not clear headroom block at 80, 6, -63, continuing anyway
-[15:05:08] [Render thread/INFO]: [System] [CHAT] [Jake] Inventory's full! Continuing…
-[15:05:09] [pool-5-thread-1/INFO]: Successfully climbed from Y=0 to Y=2 (attempt 1)
-[15:05:09] [Server thread/INFO]: Mining complete at class_2338{x=80, y=4, z=-64}
-[15:05:09] [Server thread/INFO]: Mining complete at class_2338{x=80, y=5, z=-64}
-[15:05:10] [Server thread/INFO]: Mining complete at class_2338{x=80, y=6, z=-64}
-[15:05:10] [pool-5-thread-1/WARN]: Could not clear headroom block at 80, 7, -64, continuing anyway
-[15:05:10] [pool-5-thread-1/WARN]: Could not clear headroom block at 80, 8, -64, continuing anyway
-[15:05:12] [pool-5-thread-1/INFO]: Successfully climbed from Y=2 to Y=3 (attempt 4)
-[15:05:12] [pool-5-thread-1/INFO]: Placed torch at class_2338{x=80, y=3, z=-62} for bot Jake
-[15:05:12] [Server thread/INFO]: Swapping best tool from main inventory slot 13 to hotbar slot 3
-[15:05:12] [Server thread/INFO]: Mining complete at class_2338{x=80, y=5, z=-65}
-[15:05:12] [Server thread/INFO]: Mining complete at class_2338{x=80, y=6, z=-65}
-[15:05:12] [pool-5-thread-1/WARN]: Could not clear headroom block at 80, 7, -65, continuing anyway
-[15:05:12] [pool-5-thread-1/WARN]: Could not clear headroom block at 80, 8, -65, continuing anyway
-[15:05:12] [pool-5-thread-1/WARN]: Could not clear headroom block at 80, 9, -65, continuing anyway
-[15:05:14] [pool-5-thread-1/INFO]: Successfully climbed from Y=2 to Y=3 (attempt 3)
-[15:05:14] [pool-5-thread-1/INFO]: Sending chat message (withDelay=true): 'Inventory's full! Continuing…'
-[15:05:14] [pool-5-thread-1/INFO]: Message split into 1 parts
-[15:05:14] [Server thread/INFO]: Broadcasting message part 0: 'Inventory's full! Continuing…' from source: Jake
-[15:05:14] [Server thread/INFO]: [Not Secure] [Jake] Inventory's full! Continuing…
-[15:05:14] [Render thread/INFO]: [System] [CHAT] [Jake] Inventory's full! Continuing…
-[15:05:15] [Server thread/INFO]: Mining complete at class_2338{x=80, y=7, z=-65}
-[15:05:15] [pool-5-thread-1/WARN]: Could not clear headroom block at 80, 8, -65, continuing anyway
-[15:05:15] [pool-5-thread-1/WARN]: Could not clear headroom block at 80, 9, -65, continuing anyway
-[15:05:17] [pool-5-thread-1/INFO]: Successfully climbed from Y=2 to Y=3 (attempt 3)
-[15:05:17] [pool-5-thread-1/WARN]: Could not clear headroom block at 80, 8, -65, continuing anyway
-[15:05:17] [pool-5-thread-1/WARN]: Could not clear headroom block at 80, 9, -65, continuing anyway
-[15:05:17] [pool-5-thread-1/INFO]: Successfully climbed from Y=3 to Y=5 (attempt 1)
-[15:05:18] [Server thread/INFO]: Mining complete at class_2338{x=80, y=7, z=-66}
-[15:05:18] [Server thread/INFO]: Mining complete at class_2338{x=80, y=8, z=-66}
-[15:05:18] [Server thread/INFO]: Mining complete at class_2338{x=80, y=9, z=-66}
-[15:05:18] [pool-5-thread-1/WARN]: Could not clear headroom block at 80, 10, -66, continuing anyway
-[15:05:18] [pool-5-thread-1/WARN]: Could not clear headroom block at 80, 11, -66, continuing anyway
-[15:05:20] [pool-5-thread-1/WARN]: Did not climb after 5 attempts, Y remains at 5
-[15:05:20] [pool-5-thread-1/INFO]: Sending chat message (withDelay=true): 'Inventory's full! Continuing…'
-[15:05:20] [pool-5-thread-1/INFO]: Message split into 1 parts
-[15:05:20] [Server thread/INFO]: Broadcasting message part 0: 'Inventory's full! Continuing…' from source: Jake
-[15:05:20] [Server thread/INFO]: [Not Secure] [Jake] Inventory's full! Continuing…
-[15:05:20] [pool-5-thread-1/WARN]: Could not clear headroom block at 80, 10, -66, continuing anyway
-[15:05:20] [pool-5-thread-1/WARN]: Could not clear headroom block at 80, 11, -66, continuing anyway
-[15:05:20] [Render thread/INFO]: [System] [CHAT] [Jake] Inventory's full! Continuing…
-[15:05:23] [pool-5-thread-1/WARN]: Did not climb after 5 attempts, Y remains at 5
-[15:05:23] [pool-5-thread-1/WARN]: Could not clear headroom block at 80, 10, -66, continuing anyway
-[15:05:23] [pool-5-thread-1/WARN]: Could not clear headroom block at 80, 11, -66, continuing anyway
-[15:05:25] [pool-5-thread-1/WARN]: Did not climb after 5 attempts, Y remains at 5
-[15:05:25] [pool-5-thread-1/INFO]: Sending chat message (withDelay=true): 'Inventory's full! Continuing…'
-[15:05:25] [pool-5-thread-1/INFO]: Message split into 1 parts
-[15:05:25] [Server thread/INFO]: Broadcasting message part 0: 'Inventory's full! Continuing…' from source: Jake
-[15:05:25] [Server thread/INFO]: [Not Secure] [Jake] Inventory's full! Continuing…
-[15:05:25] [pool-5-thread-1/WARN]: Could not clear headroom block at 80, 10, -66, continuing anyway
-[15:05:25] [pool-5-thread-1/WARN]: Could not clear headroom block at 80, 11, -66, continuing anyway
-[15:05:25] [Render thread/INFO]: [System] [CHAT] [Jake] Inventory's full! Continuing…
-[15:05:27] [Server thread/INFO]: Saving and pausing game...
-[15:05:27] [Server thread/INFO]: Saving chunks for level 'ServerLevel[New World]'/minecraft:overworld
-[15:05:27] [Server thread/INFO]: Saving chunks for level 'ServerLevel[New World]'/minecraft:the_nether
-[15:05:27] [Server thread/INFO]: Saving chunks for level 'ServerLevel[New World]'/minecraft:the_end
-[15:05:28] [Render thread/INFO]: Client on ClientOnly mode disconnecting.
-[15:05:28] [Render thread/INFO]: Unloading level [minecraft:the_nether].
-[15:05:28] [Netty Server IO #1/INFO]: Player [RotiWokeman] disconnected.
-[15:05:28] [Server thread/INFO]: RotiWokeman lost connection: Disconnected
-[15:05:28] [Server thread/INFO]: RotiWokeman left the game
-[15:05:28] [Server thread/INFO]: Stopping singleplayer server as player logged out
-[15:05:28] [pool-5-thread-1/WARN]: Did not climb after 5 attempts, Y remains at 5
-[15:05:28] [Server thread/INFO]: saveAll invoked, persisted 0 fakeplayer(s).
-[15:05:28] [Server thread/INFO]: Stopping server
-[15:05:28] [Server thread/INFO]: Saving players
-[15:05:28] [Server thread/INFO]: Saving worlds
-[15:05:28] [Server thread/INFO]: Saving chunks for level 'ServerLevel[New World]'/minecraft:overworld
-[15:05:28] [Render thread/INFO]: Closing [GeneratedFullDataSourceProvider] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:the_nether}].
-[15:05:28] [Render thread/INFO]: Closing [FullDataSourceProviderV1] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:the_nether}].
-[15:05:28] [Render thread/INFO]: Closing database connection: [jdbc:dh_sqlite:/Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/saves/New World/DIM-1/data/DistantHorizons.sqlite]...
-[15:05:28] [DH-Parent Update Queue [minecraft:the_nether] Thread[0]/INFO]: Update thread [DH-Parent Update Queue [minecraft:the_nether] Thread[0]] terminated.
-[15:05:28] [Render thread/INFO]: Finished closing database connection: [jdbc:dh_sqlite:/Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/saves/New World/DIM-1/data/DistantHorizons.sqlite]
-[15:05:28] [Render thread/INFO]: Closed DHLevel for [Wrapped{ServerLevel[New World]@minecraft:the_nether}].
-[15:05:28] [Server thread/INFO]: Saving chunks for level 'ServerLevel[New World]'/minecraft:the_nether
-[15:05:28] [Server thread/INFO]: Saving chunks for level 'ServerLevel[New World]'/minecraft:the_end
-[15:05:28] [Server thread/INFO]: ThreadedAnvilChunkStorage (New World): All chunks are saved
-[15:05:28] [Server thread/INFO]: ThreadedAnvilChunkStorage (DIM-1): All chunks are saved
-[15:05:28] [Server thread/INFO]: ThreadedAnvilChunkStorage (DIM1): All chunks are saved
-[15:05:28] [Server thread/INFO]: ThreadedAnvilChunkStorage: All dimensions are saved
-[15:05:28] [Server thread/INFO]: Unloading level DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:overworld}
-[15:05:28] [Server thread/INFO]: Shutting down ClientRenderState
-[15:05:28] [Server thread/INFO]: Shutting down LodRenderer...
-[15:05:28] [Server thread/INFO]: Queuing Renderer Cleanup for main render thread
-[15:05:28] [Server thread/INFO]: Shutting down LodQuadTree...
-[15:05:28] [Server thread/INFO]: Finished shutting down LodQuadTree
-[15:05:28] [Server thread/INFO]: Finished shutting down LodRenderer
-[15:05:28] [Server thread/INFO]: Shutting down LodQuadTree...
-[15:05:28] [Server thread/INFO]: Finished shutting down LodQuadTree
-[15:05:28] [Server thread/INFO]: Closing world gen queue
-[15:05:28] [Server thread/INFO]: Closing WorldGenerationQueue...
-[15:05:28] [Server thread/INFO]: Awaiting world generator thread pool termination...
-[15:05:28] [DH-Cleanup Thread[0]/INFO]: waiting for [0] futures before closing render cache...
-[15:05:28] [DH-Cleanup Thread[0]/INFO]: waiting for [0] futures before closing render cache...
-[15:05:28] [Render thread/INFO]: Closing [GeneratedFullDataSourceProvider] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:the_nether}].
-[15:05:28] [Render thread/INFO]: Closing [FullDataSourceProviderV1] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:the_nether}].
-[15:05:28] [Render thread/INFO]: Closed DhClientServerLevel for Wrapped{ServerLevel[New World]@minecraft:the_nether}
-[15:05:28] [Render thread/INFO]: Unloading level [minecraft:the_end].
-[15:05:28] [Render thread/INFO]: Closing [GeneratedFullDataSourceProvider] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:the_end}].
-[15:05:28] [Render thread/INFO]: Closing [FullDataSourceProviderV1] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:the_end}].
-[15:05:28] [DH-Parent Update Queue [minecraft:the_end] Thread[0]/INFO]: Update thread [DH-Parent Update Queue [minecraft:the_end] Thread[0]] terminated.
-[15:05:28] [Render thread/INFO]: Closing database connection: [jdbc:dh_sqlite:/Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/saves/New World/DIM1/data/DistantHorizons.sqlite]...
-[15:05:28] [Render thread/INFO]: Finished closing database connection: [jdbc:dh_sqlite:/Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/saves/New World/DIM1/data/DistantHorizons.sqlite]
-[15:05:28] [Render thread/INFO]: Closed DHLevel for [Wrapped{ServerLevel[New World]@minecraft:the_end}].
-[15:05:29] [Render thread/INFO]: Closing [GeneratedFullDataSourceProvider] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:the_end}].
-[15:05:29] [Render thread/INFO]: Closing [FullDataSourceProviderV1] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:the_end}].
-[15:05:29] [Render thread/INFO]: Closed DhClientServerLevel for Wrapped{ServerLevel[New World]@minecraft:the_end}
-[15:05:29] [Render thread/INFO]: Unloading level [minecraft:overworld].
-[15:05:29] [Render thread/INFO]: Closing [GeneratedFullDataSourceProvider] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:overworld}].
-[15:05:29] [Render thread/INFO]: Closing [FullDataSourceProviderV1] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:overworld}].
-[15:05:29] [Render thread/INFO]: Closing database connection: [jdbc:dh_sqlite:/Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/saves/New World/data/DistantHorizons.sqlite]...
-[15:05:29] [DH-Parent Update Queue [minecraft:overworld] Thread[0]/INFO]: Update thread [DH-Parent Update Queue [minecraft:overworld] Thread[0]] terminated.
-[15:05:29] [Render thread/INFO]: Finished closing database connection: [jdbc:dh_sqlite:/Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/saves/New World/data/DistantHorizons.sqlite]
-[15:05:29] [Render thread/INFO]: Closed DHLevel for [Wrapped{ServerLevel[New World]@minecraft:overworld}].
-[15:05:29] [Render thread/INFO]: Closing [GeneratedFullDataSourceProvider] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:overworld}].
-[15:05:29] [Render thread/INFO]: Closing [FullDataSourceProviderV1] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:overworld}].
-[15:05:29] [Render thread/INFO]: Closed DhClientServerLevel for Wrapped{ServerLevel[New World]@minecraft:overworld}
-[15:05:29] [Render thread/INFO]: Closed DhWorld of type CLIENT_SERVER
-[15:05:29] [Render thread/INFO]: Unloading level [minecraft:the_nether].
-[15:05:29] [Render thread/INFO]: Closing [GeneratedFullDataSourceProvider] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:the_nether}].
-[15:05:29] [Render thread/INFO]: Closing [FullDataSourceProviderV1] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:the_nether}].
-[15:05:29] [Render thread/INFO]: Closed DHLevel for [Wrapped{ServerLevel[New World]@minecraft:the_nether}].
-[15:05:29] [Render thread/INFO]: Closing [GeneratedFullDataSourceProvider] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:the_nether}].
-[15:05:29] [Render thread/INFO]: Closing [FullDataSourceProviderV1] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:the_nether}].
-[15:05:29] [Render thread/INFO]: Closed DhClientServerLevel for Wrapped{ServerLevel[New World]@minecraft:the_nether}
-[15:05:29] [Render thread/INFO]: Unloading level [minecraft:the_end].
-[15:05:30] [Render thread/INFO]: Closing [GeneratedFullDataSourceProvider] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:the_end}].
-[15:05:30] [Render thread/INFO]: Closing [FullDataSourceProviderV1] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:the_end}].
-[15:05:30] [Render thread/INFO]: Closed DHLevel for [Wrapped{ServerLevel[New World]@minecraft:the_end}].
-[15:05:30] [Render thread/INFO]: Closing [GeneratedFullDataSourceProvider] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:the_end}].
-[15:05:30] [Render thread/INFO]: Closing [FullDataSourceProviderV1] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:the_end}].
-[15:05:30] [Render thread/INFO]: Closed DhClientServerLevel for Wrapped{ServerLevel[New World]@minecraft:the_end}
-[15:05:30] [Render thread/INFO]: Unloading level [minecraft:overworld].
-[15:05:30] [Render thread/INFO]: Closing [GeneratedFullDataSourceProvider] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:overworld}].
-[15:05:30] [Render thread/INFO]: Closing [FullDataSourceProviderV1] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:overworld}].
-[15:05:30] [Render thread/INFO]: Closed DHLevel for [Wrapped{ServerLevel[New World]@minecraft:overworld}].
-[15:05:30] [Render thread/INFO]: Closing [GeneratedFullDataSourceProvider] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:overworld}].
-[15:05:30] [Render thread/INFO]: Closing [FullDataSourceProviderV1] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:overworld}].
-[15:05:30] [Render thread/INFO]: Closed DhClientServerLevel for Wrapped{ServerLevel[New World]@minecraft:overworld}
-[15:05:30] [Render thread/INFO]: Closed DhWorld of type CLIENT_SERVER
-[15:05:30] [Render thread/INFO]: Shutting down PriorityTaskPicker thread pool...
-[15:05:30] [Render thread/INFO]: Closing all [0] database connections...
-[15:05:30] [Server thread/INFO]: BatchGenerator shutting down...
-[15:05:30] [Server thread/INFO]: BatchGenerationEnvironment shutting down...
-[15:05:30] [Server thread/INFO]: Canceling in progress generation event futures...
-[15:05:30] [Server thread/INFO]: BatchGenerationEnvironment shutdown complete.
-[15:05:30] [Server thread/INFO]: Finished closing WorldGenerationQueue
-[15:05:31] [Server thread/INFO]: Closing [GeneratedFullDataSourceProvider] for level: [DhClientServerLevel{ceh4rbi6e0gru@minecraft:overworld}].
-[15:05:31] [Server thread/INFO]: Closing [FullDataSourceProviderV1] for level: [DhClientServerLevel{ceh4rbi6e0gru@minecraft:overworld}].
-[15:05:31] [Server thread/INFO]: Closed DHLevel for [Wrapped{ServerLevel[New World]@minecraft:overworld}].
-[15:05:31] [Server thread/INFO]: Closing [GeneratedFullDataSourceProvider] for level: [DhClientServerLevel{ceh4rbi6e0gru@minecraft:overworld}].
-[15:05:31] [Server thread/INFO]: Closing [FullDataSourceProviderV1] for level: [DhClientServerLevel{ceh4rbi6e0gru@minecraft:overworld}].
-[15:05:31] [Server thread/INFO]: Closed DhClientServerLevel for Wrapped{ServerLevel[New World]@minecraft:overworld}
-[15:05:31] [Server thread/INFO]: [STDOUT]: Unloading model from memory...
-[15:05:31] [Server thread/INFO]: [STDOUT]: Model unloaded successfully.
-[15:05:31] [Server thread/INFO]: [STDOUT]: Unloaded BERT Model from memory
-[15:05:31] [Render thread/INFO]: Unloading client level [ClientLevelWrapper]-[ceh4rbi6e0gru@minecraft:overworld].
-[15:05:31] [Render thread/INFO]: Stopping worker threads
-[15:05:32] [Render thread/INFO]: Stopping!
-[15:05:32] [CullThread/INFO]: [STDOUT]: Shutting down culling task!
+[06:49:31] [Render thread/INFO]: This GPU doesn't support Buffer Storage (OpenGL 4.4), falling back to using other methods.
+[06:49:31] [Render thread/INFO]: GPU Vendor [APPLE] with OS [macOS], Preferred upload method is [DATA].
+[06:49:31] [Render thread/INFO]: GLProxy creation successful. OpenGL smiles upon you this day.
+[06:49:31] [Render thread/INFO]: Resizing Dynamic Transforms UBO, capacity limit of 2 reached during a single frame. New capacity will be 4.
+[06:49:31] [Render thread/INFO]: Setting up renderer
+[06:49:31] [Render thread/INFO]: Loading shader with type: [35633]
+[06:49:31] [Render thread/INFO]: Shader loaded sucessfully.
+[06:49:31] [Render thread/INFO]: Loading shader with type: [35632]
+[06:49:31] [Render thread/INFO]: Shader loaded sucessfully.
+[06:49:31] [Render thread/INFO]: Vertex Attribute (pre GL43) completed.
+[06:49:31] [Render thread/INFO]: Renderer setup complete
+[06:49:31] [Render thread/ERROR]: Unexpected; somehow the Opaque + Translucent pass ran with shaders on.
+[06:49:31] [Render thread/WARN]: There have been reports of instanced rendering causing crashes on macOS when Sodium is present. Instanced rendering can be disabled via the DH config.
+[06:49:31] [Render thread/INFO]: Loading shader with type: [35633]
+[06:49:31] [Render thread/INFO]: Shader loaded sucessfully.
+[06:49:31] [Render thread/INFO]: Loading shader with type: [35632]
+[06:49:31] [Render thread/INFO]: Shader loaded sucessfully.
+[06:49:31] [Render thread/INFO]: Vertex Attribute (pre GL43) completed.
+[06:49:31] [Render thread/INFO]: Loading shader with type: [35633]
+[06:49:31] [Render thread/INFO]: Shader loaded sucessfully.
+[06:49:31] [Render thread/INFO]: Loading shader with type: [35632]
+[06:49:31] [Render thread/INFO]: Shader loaded sucessfully.
+[06:49:31] [Render thread/INFO]: Vertex Attribute (pre GL43) completed.
+[06:49:31] [Render thread/INFO]: Resizing Dynamic Transforms UBO, capacity limit of 4 reached during a single frame. New capacity will be 8.
+[06:49:32] [bert-loader/INFO]: Found matching platform from: jar:file:/Users/roti/Library/Application%20Support/PrismLauncher/instances/1.21.10/minecraft/.fabric/processedMods/ai_djl_huggingface_tokenizers-0.33.0-5d541ec46a4ba9bb.jar!/native/lib/tokenizers.properties
+[06:49:32] [bert-loader/WARN]: maxLength is not explicitly specified, use modelMaxLength: 512
+[06:49:32] [bert-loader/INFO]: [STDOUT]: Model loaded successfully and ready for inference.
+[06:49:32] [bert-loader/INFO]: BERT model loaded into memory. It will stay in memory as long as any bot stays active in game.
+[06:49:32] [Render thread/INFO]: Resizing Dynamic Transforms UBO, capacity limit of 8 reached during a single frame. New capacity will be 16.
+[06:49:32] [Render thread/INFO]: Resizing Dynamic Transforms UBO, capacity limit of 16 reached during a single frame. New capacity will be 32.
+[06:49:41] [Server thread/INFO]: Parsed ascent: climb UP by 10 blocks
+[06:49:41] [pool-5-thread-1/INFO]: Task 'mining' started for bot e01f59a8-aebb-4eed-9a56-bc36f8507228
+[06:49:41] [pool-5-thread-1/INFO]: External override activated; pausing training loop.
+[06:49:41] [pool-5-thread-1/INFO]: Ascent mode: climbing from Y=31 to Y=41 (+10 blocks)
+[06:49:41] [pool-5-thread-1/INFO]: Starting ascent from Y=31 to Y=41 in direction west
+[06:49:41] [pool-5-thread-1/INFO]: Sending chat message (withDelay=true): 'Inventory's full! Continuing…'
+[06:49:41] [pool-5-thread-1/INFO]: Message split into 1 parts
+[06:49:41] [Server thread/INFO]: Broadcasting message part 0: 'Inventory's full! Continuing…' from source: Jake
+[06:49:41] [Server thread/INFO]: [Not Secure] [Jake] Inventory's full! Continuing…
+[06:49:41] [Render thread/INFO]: [System] [CHAT] [Jake] Inventory's full! Continuing…
+[06:49:41] [Server thread/INFO]: Mining complete at class_2338{x=101, y=32, z=-68}
+[06:49:41] [Server thread/INFO]: Mining complete at class_2338{x=101, y=33, z=-68}
+[06:49:42] [Server thread/INFO]: Mining complete at class_2338{x=101, y=34, z=-68}
+[06:49:42] [Server thread/INFO]: Mining complete at class_2338{x=101, y=35, z=-68}
+[06:49:42] [pool-5-thread-1/WARN]: Could not clear headroom block at 101, 36, -68, continuing anyway
+[06:49:42] [pool-5-thread-1/WARN]: Could not clear headroom block at 101, 37, -68, continuing anyway
+[06:49:42] [pool-5-thread-1/WARN]: Could not clear headroom block at 101, 38, -68, continuing anyway
+[06:49:43] [pool-5-thread-1/INFO]: Successfully climbed from Y=31 to Y=32 (attempt 2)
+[06:49:43] [Server thread/INFO]: Mining complete at class_2338{x=100, y=33, z=-68}
+[06:49:43] [Server thread/INFO]: Mining complete at class_2338{x=100, y=34, z=-68}
+[06:49:43] [Server thread/INFO]: Mining complete at class_2338{x=100, y=35, z=-68}
+[06:49:43] [Server thread/INFO]: Mining complete at class_2338{x=100, y=36, z=-68}
+[06:49:43] [pool-5-thread-1/WARN]: Could not clear headroom block at 100, 37, -68, continuing anyway
+[06:49:43] [pool-5-thread-1/WARN]: Could not clear headroom block at 100, 38, -68, continuing anyway
+[06:49:43] [pool-5-thread-1/WARN]: Could not clear headroom block at 100, 39, -68, continuing anyway
+[06:49:44] [pool-5-thread-1/INFO]: Successfully climbed from Y=32 to Y=33 (attempt 2)
+[06:49:44] [Server thread/INFO]: Mining complete at class_2338{x=99, y=34, z=-68}
+[06:49:44] [Server thread/INFO]: Mining complete at class_2338{x=99, y=35, z=-68}
+[06:49:44] [Server thread/INFO]: Mining complete at class_2338{x=99, y=36, z=-68}
+[06:49:45] [Server thread/INFO]: Mining complete at class_2338{x=99, y=37, z=-68}
+[06:49:45] [pool-5-thread-1/WARN]: Could not clear headroom block at 99, 38, -68, continuing anyway
+[06:49:45] [pool-5-thread-1/WARN]: Could not clear headroom block at 99, 39, -68, continuing anyway
+[06:49:45] [pool-5-thread-1/WARN]: Could not clear headroom block at 99, 40, -68, continuing anyway
+[06:49:46] [pool-5-thread-1/INFO]: Successfully climbed from Y=33 to Y=34 (attempt 2)
+[06:49:46] [Server thread/INFO]: Mining complete at class_2338{x=98, y=35, z=-68}
+[06:49:46] [Server thread/INFO]: Mining complete at class_2338{x=98, y=36, z=-68}
+[06:49:46] [Server thread/INFO]: Mining complete at class_2338{x=98, y=37, z=-68}
+[06:49:46] [Server thread/INFO]: Mining complete at class_2338{x=98, y=38, z=-68}
+[06:49:46] [pool-5-thread-1/WARN]: Could not clear headroom block at 98, 39, -68, continuing anyway
+[06:49:46] [pool-5-thread-1/WARN]: Could not clear headroom block at 98, 40, -68, continuing anyway
+[06:49:46] [pool-5-thread-1/WARN]: Could not clear headroom block at 98, 41, -68, continuing anyway
+[06:49:47] [pool-5-thread-1/INFO]: Successfully climbed from Y=34 to Y=35 (attempt 2)
+[06:49:47] [pool-5-thread-1/INFO]: Sending chat message (withDelay=true): 'Inventory's full! Continuing…'
+[06:49:47] [pool-5-thread-1/INFO]: Message split into 1 parts
+[06:49:47] [Server thread/INFO]: Broadcasting message part 0: 'Inventory's full! Continuing…' from source: Jake
+[06:49:47] [Server thread/INFO]: [Not Secure] [Jake] Inventory's full! Continuing…
+[06:49:47] [Render thread/INFO]: [System] [CHAT] [Jake] Inventory's full! Continuing…
+[06:49:47] [Server thread/INFO]: Mining complete at class_2338{x=97, y=36, z=-68}
+[06:49:47] [Server thread/INFO]: Mining complete at class_2338{x=97, y=37, z=-68}
+[06:49:47] [Server thread/INFO]: Mining complete at class_2338{x=97, y=38, z=-68}
+[06:49:48] [Server thread/INFO]: Mining complete at class_2338{x=97, y=39, z=-68}
+[06:49:48] [pool-5-thread-1/WARN]: Could not clear headroom block at 97, 40, -68, continuing anyway
+[06:49:48] [pool-5-thread-1/WARN]: Could not clear headroom block at 97, 41, -68, continuing anyway
+[06:49:48] [pool-5-thread-1/WARN]: Could not clear headroom block at 97, 42, -68, continuing anyway
+[06:49:49] [pool-5-thread-1/INFO]: Successfully climbed from Y=35 to Y=36 (attempt 2)
+[06:49:49] [Server thread/INFO]: Mining complete at class_2338{x=96, y=37, z=-68}
+[06:49:49] [Server thread/INFO]: Mining complete at class_2338{x=96, y=38, z=-68}
+[06:49:49] [Server thread/INFO]: Mining complete at class_2338{x=96, y=39, z=-68}
+[06:49:49] [Server thread/INFO]: Mining complete at class_2338{x=96, y=40, z=-68}
+[06:49:49] [pool-5-thread-1/WARN]: Could not clear headroom block at 96, 41, -68, continuing anyway
+[06:49:49] [pool-5-thread-1/WARN]: Could not clear headroom block at 96, 42, -68, continuing anyway
+[06:49:49] [pool-5-thread-1/WARN]: Could not clear headroom block at 96, 43, -68, continuing anyway
+[06:49:50] [pool-5-thread-1/INFO]: Successfully climbed from Y=36 to Y=37 (attempt 2)
+[06:49:50] [pool-5-thread-1/INFO]: Placed torch at class_2338{x=98, y=37, z=-68} for bot Jake
+[06:49:50] [Server thread/INFO]: Swapping best tool from main inventory slot 13 to hotbar slot 3
+[06:49:50] [Server thread/INFO]: Mining complete at class_2338{x=95, y=38, z=-68}
+[06:49:50] [Server thread/INFO]: Mining complete at class_2338{x=95, y=39, z=-68}
+[06:49:50] [Server thread/INFO]: Mining complete at class_2338{x=95, y=40, z=-68}
+[06:49:50] [Server thread/INFO]: Mining complete at class_2338{x=95, y=41, z=-68}
+[06:49:50] [pool-5-thread-1/WARN]: Could not clear headroom block at 95, 42, -68, continuing anyway
+[06:49:50] [pool-5-thread-1/WARN]: Could not clear headroom block at 95, 43, -68, continuing anyway
+[06:49:50] [pool-5-thread-1/WARN]: Could not clear headroom block at 95, 44, -68, continuing anyway
+[06:49:51] [pool-5-thread-1/INFO]: Successfully climbed from Y=37 to Y=38 (attempt 2)
+[06:49:52] [Server thread/INFO]: Mining complete at class_2338{x=94, y=39, z=-68}
+[06:49:52] [Server thread/INFO]: Mining complete at class_2338{x=94, y=41, z=-68}
+[06:49:52] [Server thread/INFO]: Mining complete at class_2338{x=94, y=42, z=-68}
+[06:49:52] [pool-5-thread-1/WARN]: Could not clear headroom block at 94, 43, -68, continuing anyway
+[06:49:52] [pool-5-thread-1/WARN]: Could not clear headroom block at 94, 44, -68, continuing anyway
+[06:49:52] [pool-5-thread-1/WARN]: Could not clear headroom block at 94, 45, -68, continuing anyway
+[06:49:53] [pool-5-thread-1/INFO]: Successfully climbed from Y=38 to Y=39 (attempt 2)
+[06:49:53] [pool-5-thread-1/INFO]: Sending chat message (withDelay=true): 'Inventory's full! Continuing…'
+[06:49:53] [pool-5-thread-1/INFO]: Message split into 1 parts
+[06:49:53] [Server thread/INFO]: Broadcasting message part 0: 'Inventory's full! Continuing…' from source: Jake
+[06:49:53] [Server thread/INFO]: [Not Secure] [Jake] Inventory's full! Continuing…
+[06:49:53] [Render thread/INFO]: [System] [CHAT] [Jake] Inventory's full! Continuing…
+[06:49:56] [Server thread/INFO]: Mining complete at class_2338{x=87, y=40, z=-68}
+[06:49:56] [Server thread/INFO]: Mining complete at class_2338{x=87, y=41, z=-68}
+[06:49:56] [Server thread/INFO]: Mining complete at class_2338{x=87, y=42, z=-68}
+[06:49:56] [pool-5-thread-1/WARN]: Could not clear headroom block at 87, 45, -68, continuing anyway
+[06:49:56] [pool-5-thread-1/WARN]: Could not clear headroom block at 87, 46, -68, continuing anyway
+[06:49:57] [Server thread/INFO]: Saved inventory for fakeplayer 'Jake' to jake_e01f59a8-aebb-4eed-9a56-bc36f8507228.nbt
+[06:49:57] [pool-5-thread-1/INFO]: Successfully climbed from Y=39 to Y=40 (attempt 2)
+[06:49:57] [Server thread/INFO]: Mining complete at class_2338{x=86, y=41, z=-68}
+[06:49:58] [Server thread/INFO]: Mining complete at class_2338{x=86, y=42, z=-68}
+[06:49:58] [Server thread/INFO]: Mining complete at class_2338{x=86, y=43, z=-68}
+[06:49:58] [Server thread/INFO]: Mining complete at class_2338{x=86, y=44, z=-68}
+[06:49:58] [pool-5-thread-1/WARN]: Could not clear headroom block at 86, 46, -68, continuing anyway
+[06:49:58] [pool-5-thread-1/WARN]: Could not clear headroom block at 86, 47, -68, continuing anyway
+[06:49:58] [pool-5-thread-1/INFO]: Successfully climbed from Y=40 to Y=41 (attempt 1)
+[06:49:58] [pool-5-thread-1/INFO]: Ascent complete after 10 steps, final Y=41
+[06:49:58] [pool-5-thread-1/INFO]: Skipping post-task drop_sweep for 'mining' - inventory full
+[06:49:58] [pool-5-thread-1/INFO]: External override cleared; training loop may resume.
+[06:49:58] [pool-5-thread-1/INFO]: Task 'skill:mining' finished with state COMPLETED
+[06:49:58] [pool-5-thread-1/INFO]: Scheduling post-task safety check for bot Jake after task 'skill:mining'
+[06:49:58] [Server thread/INFO]: Running post-task safety check for bot Jake at position 87, 41, -68
+[06:49:58] [Server thread/INFO]: Found blocking block at 87, 41, -67: Stone
+[06:49:58] [Server thread/WARN]: Bot Jake is stuck in blocks at 87, 41, -67! Attempting escape
+[06:49:58] [Server thread/INFO]: Found 13 blocking blocks around bot - attempting to break all
+[06:49:58] [Server thread/INFO]: Broke block Andesite at 86, 40, -69 (1/13)
+[06:49:58] [Server thread/INFO]: Broke block Andesite at 86, 40, -68 (2/13)
+[06:49:58] [Server thread/INFO]: Broke block Andesite at 86, 40, -67 (3/13)
+[06:49:59] [Server thread/INFO]: Broke block Stone at 86, 41, -67 (4/13)
+[06:49:59] [Server thread/INFO]: Broke block Stone at 86, 42, -67 (5/13)
+[06:49:59] [Server thread/INFO]: Broke block Stone at 87, 40, -69 (6/13)
+[06:49:59] [Server thread/INFO]: Broke block Stone at 87, 40, -67 (7/13)
+[06:49:59] [Server thread/INFO]: Broke block Stone at 87, 41, -67 (8/13)
+[06:49:59] [Server thread/INFO]: Broke block Stone at 87, 42, -67 (9/13)
+[06:49:59] [Server thread/INFO]: Bot Jake is now clear after breaking 9 blocks
+[06:49:59] [Server thread/INFO]: Bot Jake successfully escaped by breaking 9 blocks
+[06:49:59] [Server thread/INFO]: Sending system message: 'Reached target Y=41 after 10 steps.'
+[06:49:59] [Server thread/INFO]: [Not Secure] [RotiWokeman] §7Reached target Y=41 after 10 steps.
+[06:49:59] [Render thread/INFO]: [System] [CHAT] [RotiWokeman] §7Reached target Y=41 after 10 steps.
+[06:50:05] [Server thread/INFO]: Saving and pausing game...
+[06:50:05] [Server thread/INFO]: Saving chunks for level 'ServerLevel[New World]'/minecraft:overworld
+[06:50:05] [Server thread/INFO]: Saving chunks for level 'ServerLevel[New World]'/minecraft:the_nether
+[06:50:05] [Server thread/INFO]: Saving chunks for level 'ServerLevel[New World]'/minecraft:the_end
+[06:50:06] [Render thread/INFO]: Client on ClientOnly mode disconnecting.
+[06:50:06] [Netty Server IO #1/INFO]: Player [RotiWokeman] disconnected.
+[06:50:06] [Server thread/INFO]: RotiWokeman lost connection: Disconnected
+[06:50:06] [Server thread/INFO]: RotiWokeman left the game
+[06:50:06] [Server thread/INFO]: Stopping singleplayer server as player logged out
+[06:50:06] [Server thread/INFO]: saveAll invoked, persisted 0 fakeplayer(s).
+[06:50:06] [Server thread/INFO]: Stopping server
+[06:50:06] [Server thread/INFO]: Saving players
+[06:50:06] [Server thread/INFO]: Saving worlds
+[06:50:06] [Server thread/INFO]: Saving chunks for level 'ServerLevel[New World]'/minecraft:overworld
+[06:50:06] [Server thread/INFO]: Saving chunks for level 'ServerLevel[New World]'/minecraft:the_nether
+[06:50:06] [Server thread/INFO]: Saving chunks for level 'ServerLevel[New World]'/minecraft:the_end
+[06:50:06] [Server thread/INFO]: ThreadedAnvilChunkStorage (New World): All chunks are saved
+[06:50:06] [Server thread/INFO]: ThreadedAnvilChunkStorage (DIM-1): All chunks are saved
+[06:50:06] [Server thread/INFO]: ThreadedAnvilChunkStorage (DIM1): All chunks are saved
+[06:50:06] [Server thread/INFO]: ThreadedAnvilChunkStorage: All dimensions are saved
+[06:50:06] [Server thread/INFO]: Unloading level DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:overworld}
+[06:50:06] [Server thread/INFO]: Shutting down ClientRenderState
+[06:50:06] [Server thread/INFO]: Shutting down LodRenderer...
+[06:50:06] [Server thread/INFO]: Queuing Renderer Cleanup for main render thread
+[06:50:06] [Server thread/INFO]: Shutting down LodQuadTree...
+[06:50:06] [Server thread/INFO]: Finished shutting down LodQuadTree
+[06:50:06] [Server thread/INFO]: Finished shutting down LodRenderer
+[06:50:06] [Server thread/INFO]: Shutting down LodQuadTree...
+[06:50:06] [Server thread/INFO]: Finished shutting down LodQuadTree
+[06:50:06] [Server thread/INFO]: Closing world gen queue
+[06:50:06] [Server thread/INFO]: Closing WorldGenerationQueue...
+[06:50:06] [Server thread/INFO]: Awaiting world generator thread pool termination...
+[06:50:07] [Render thread/INFO]: Unloading level [minecraft:the_end].
+[06:50:07] [DH-Cleanup Thread[0]/INFO]: waiting for [6] futures before closing render cache...
+[06:50:07] [DH-Cleanup Thread[0]/INFO]: waiting for [0] futures before closing render cache...
+[06:50:07] [Render thread/INFO]: Closing [GeneratedFullDataSourceProvider] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:the_end}].
+[06:50:07] [Render thread/INFO]: Closing [FullDataSourceProviderV1] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:the_end}].
+[06:50:07] [Render thread/INFO]: Closing database connection: [jdbc:dh_sqlite:/Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/saves/New World/DIM1/data/DistantHorizons.sqlite]...
+[06:50:07] [DH-Parent Update Queue [minecraft:the_end] Thread[0]/INFO]: Update thread [DH-Parent Update Queue [minecraft:the_end] Thread[0]] terminated.
+[06:50:07] [Render thread/INFO]: Finished closing database connection: [jdbc:dh_sqlite:/Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/saves/New World/DIM1/data/DistantHorizons.sqlite]
+[06:50:07] [Render thread/INFO]: Closed DHLevel for [Wrapped{ServerLevel[New World]@minecraft:the_end}].
+[06:50:07] [Render thread/INFO]: Closing [GeneratedFullDataSourceProvider] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:the_end}].
+[06:50:07] [Render thread/INFO]: Closing [FullDataSourceProviderV1] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:the_end}].
+[06:50:07] [Render thread/INFO]: Closed DhClientServerLevel for Wrapped{ServerLevel[New World]@minecraft:the_end}
+[06:50:07] [Render thread/INFO]: Unloading level [minecraft:the_nether].
+[06:50:07] [Render thread/INFO]: Closing [GeneratedFullDataSourceProvider] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:the_nether}].
+[06:50:07] [Render thread/INFO]: Closing [FullDataSourceProviderV1] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:the_nether}].
+[06:50:07] [Render thread/INFO]: Closing database connection: [jdbc:dh_sqlite:/Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/saves/New World/DIM-1/data/DistantHorizons.sqlite]...
+[06:50:07] [DH-Parent Update Queue [minecraft:the_nether] Thread[0]/INFO]: Update thread [DH-Parent Update Queue [minecraft:the_nether] Thread[0]] terminated.
+[06:50:07] [Render thread/INFO]: Finished closing database connection: [jdbc:dh_sqlite:/Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/saves/New World/DIM-1/data/DistantHorizons.sqlite]
+[06:50:07] [Render thread/INFO]: Closed DHLevel for [Wrapped{ServerLevel[New World]@minecraft:the_nether}].
+[06:50:08] [Render thread/INFO]: Closing [GeneratedFullDataSourceProvider] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:the_nether}].
+[06:50:08] [Render thread/INFO]: Closing [FullDataSourceProviderV1] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:the_nether}].
+[06:50:08] [Render thread/INFO]: Closed DhClientServerLevel for Wrapped{ServerLevel[New World]@minecraft:the_nether}
+[06:50:08] [Render thread/INFO]: Unloading level [minecraft:overworld].
+[06:50:08] [Render thread/INFO]: Closing [GeneratedFullDataSourceProvider] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:overworld}].
+[06:50:08] [Render thread/INFO]: Closing [FullDataSourceProviderV1] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:overworld}].
+[06:50:08] [Render thread/INFO]: Closing database connection: [jdbc:dh_sqlite:/Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/saves/New World/data/DistantHorizons.sqlite]...
+[06:50:08] [DH-Parent Update Queue [minecraft:overworld] Thread[0]/INFO]: Update thread [DH-Parent Update Queue [minecraft:overworld] Thread[0]] terminated.
+[06:50:08] [Render thread/INFO]: Finished closing database connection: [jdbc:dh_sqlite:/Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/saves/New World/data/DistantHorizons.sqlite]
+[06:50:08] [Render thread/INFO]: Closed DHLevel for [Wrapped{ServerLevel[New World]@minecraft:overworld}].
+[06:50:08] [Render thread/INFO]: Closing [GeneratedFullDataSourceProvider] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:overworld}].
+[06:50:08] [Render thread/INFO]: Closing [FullDataSourceProviderV1] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:overworld}].
+[06:50:08] [Render thread/INFO]: Closed DhClientServerLevel for Wrapped{ServerLevel[New World]@minecraft:overworld}
+[06:50:08] [Render thread/INFO]: Closed DhWorld of type CLIENT_SERVER
+[06:50:08] [Render thread/INFO]: Unloading level [minecraft:the_end].
+[06:50:08] [Render thread/INFO]: Closing [GeneratedFullDataSourceProvider] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:the_end}].
+[06:50:08] [Render thread/INFO]: Closing [FullDataSourceProviderV1] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:the_end}].
+[06:50:08] [Render thread/INFO]: Closed DHLevel for [Wrapped{ServerLevel[New World]@minecraft:the_end}].
+[06:50:08] [Render thread/INFO]: Closing [GeneratedFullDataSourceProvider] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:the_end}].
+[06:50:08] [Render thread/INFO]: Closing [FullDataSourceProviderV1] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:the_end}].
+[06:50:08] [Render thread/INFO]: Closed DhClientServerLevel for Wrapped{ServerLevel[New World]@minecraft:the_end}
+[06:50:08] [Render thread/INFO]: Unloading level [minecraft:the_nether].
+[06:50:09] [Render thread/INFO]: Closing [GeneratedFullDataSourceProvider] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:the_nether}].
+[06:50:09] [Render thread/INFO]: Closing [FullDataSourceProviderV1] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:the_nether}].
+[06:50:09] [Render thread/INFO]: Closed DHLevel for [Wrapped{ServerLevel[New World]@minecraft:the_nether}].
+[06:50:09] [Render thread/INFO]: Closing [GeneratedFullDataSourceProvider] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:the_nether}].
+[06:50:09] [Render thread/INFO]: Closing [FullDataSourceProviderV1] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:the_nether}].
+[06:50:09] [Render thread/INFO]: Closed DhClientServerLevel for Wrapped{ServerLevel[New World]@minecraft:the_nether}
+[06:50:09] [Render thread/INFO]: Unloading level [minecraft:overworld].
+[06:50:09] [Server thread/WARN]: World generator thread pool shutdown didn't complete after [3] seconds. Some world generator requests may still be running.
+[06:50:09] [Server thread/INFO]: BatchGenerator shutting down...
+[06:50:09] [Server thread/INFO]: BatchGenerationEnvironment shutting down...
+[06:50:09] [Server thread/INFO]: Canceling in progress generation event futures...
+[06:50:09] [Server thread/INFO]: BatchGenerationEnvironment shutdown complete.
+[06:50:09] [Server thread/INFO]: Finished closing WorldGenerationQueue
+[06:50:09] [Render thread/INFO]: Closing [GeneratedFullDataSourceProvider] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:overworld}].
+[06:50:09] [Render thread/INFO]: Closing [FullDataSourceProviderV1] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:overworld}].
+[06:50:09] [Render thread/INFO]: Closed DHLevel for [Wrapped{ServerLevel[New World]@minecraft:overworld}].
+[06:50:09] [Server thread/INFO]: Closing [GeneratedFullDataSourceProvider] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:overworld}].
+[06:50:09] [Server thread/INFO]: Closing [FullDataSourceProviderV1] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:overworld}].
+[06:50:09] [Server thread/INFO]: Closed DHLevel for [Wrapped{ServerLevel[New World]@minecraft:overworld}].
+[06:50:09] [Render thread/INFO]: Closing [GeneratedFullDataSourceProvider] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:overworld}].
+[06:50:09] [Render thread/INFO]: Closing [FullDataSourceProviderV1] for level: [DhClientServerLevel{New_World_ceh4rbi6e0gru@minecraft:overworld}].
+[06:50:09] [Render thread/INFO]: Closed DhClientServerLevel for Wrapped{ServerLevel[New World]@minecraft:overworld}
+[06:50:09] [Render thread/INFO]: Closed DhWorld of type CLIENT_SERVER
+[06:50:09] [Render thread/INFO]: Shutting down PriorityTaskPicker thread pool...
+[06:50:09] [Render thread/INFO]: Closing all [0] database connections...
+[06:50:10] [Server thread/INFO]: Closing [GeneratedFullDataSourceProvider] for level: [DhClientServerLevel{ceh4rbi6e0gru@minecraft:overworld}].
+[06:50:10] [Server thread/INFO]: Closing [FullDataSourceProviderV1] for level: [DhClientServerLevel{ceh4rbi6e0gru@minecraft:overworld}].
+[06:50:10] [Server thread/INFO]: Closed DhClientServerLevel for Wrapped{ServerLevel[New World]@minecraft:overworld}
+[06:50:10] [Server thread/INFO]: [STDOUT]: Unloading model from memory...
+[06:50:10] [Server thread/INFO]: [STDOUT]: Model unloaded successfully.
+[06:50:10] [Server thread/INFO]: [STDOUT]: Unloaded BERT Model from memory
+[06:50:10] [Render thread/INFO]: Unloading client level [ClientLevelWrapper]-[ceh4rbi6e0gru@minecraft:overworld].
+[06:50:10] [Render thread/INFO]: Stopping worker threads
+[06:50:11] [CullThread/INFO]: [STDOUT]: Shutting down culling task!
+[06:50:11] [Render thread/INFO]: Stopping!
