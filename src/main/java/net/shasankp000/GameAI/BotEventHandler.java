@@ -1794,7 +1794,6 @@ public class BotEventHandler {
             }
             MiningTool.mineBlock(bot, pos); // fire & forget; clearance checked later
         }
-        }
 
         // Schedule clearance checks over subsequent ticks instead of blocking sleep loop
         MinecraftServer srv = bot.getCommandSource().getServer();

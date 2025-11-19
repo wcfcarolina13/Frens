@@ -52,6 +52,8 @@
 
 - Suffocation rescue tweak: skip MiningTool scheduling if bot already swinging (manual mining), to allow natural obstruction clearing. Files: BotEventHandler.java.
 
+- Compile fix: removed stray extra brace in rescueFromBurial loop causing syntax errors. Files: BotEventHandler.java.
+
 - Outcome: Bot reliably walks to step, clears step + 8 blocks headroom, and ascends without obstruction in tests. Marking feature functional.
 
 
