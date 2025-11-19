@@ -54,39 +54,30 @@ public class MiningTool {
         AtomicInteger ticksElapsed = new AtomicInteger(0);
         AtomicInteger postThresholdAttempts = new AtomicInteger(0);
 
-        // Initialize targeting and tool selection on the server thread.
-        CompletableFuture<Void> init = new CompletableFuture<>();
-        server.execute(() -> {
-            try {
-                LookController.faceBlock(bot, targetBlockPos);
-                BlockState blockState = bot.getEntityWorld().getBlockState(targetBlockPos);
-                ItemStack bestTool = ToolSelector.selectBestToolForBlock(bot, blockState);
-                LOGGER.debug("Preparing to mine {} with tool={} (creative={})",
-                        targetBlockPos,
-                        bestTool.isEmpty() ? "empty-hand" : bestTool.getItem().toString(),
-                        bot.getAbilities().creativeMode);
-                switchToTool(bot, bestTool);
-                bot.swingHand(Hand.MAIN_HAND);
-
-                float delta = blockState.calcBlockBreakingDelta(bot, bot.getEntityWorld(), targetBlockPos);
-                if (delta <= 0.0f) {
-                    init.completeExceptionally(new IllegalStateException("block breaking delta <= 0"));
-                    return;
-                }
-                int requiredTicks = Math.max(1, (int) Math.ceil(1.0f / delta));
-                requiredTicksHolder.set(requiredTicks);
-                LOGGER.debug("Prepared mining of {} (delta={}, approx ticks={})", targetBlockPos, delta, requiredTicks);
-                init.complete(null);
-            } catch (Throwable t) {
-                LOGGER.error("Failed to prepare mining task at {}", targetBlockPos, t);
-                init.completeExceptionally(t);
-            }
-        });
-
+        // Initialize targeting and tool selection directly (avoid server-thread join deadlock)
         try {
-            init.join();
-        } catch (Exception e) {
-            miningResult.complete("⚠️ Failed to initialize mining: " + e.getMessage());
+            LookController.faceBlock(bot, targetBlockPos);
+            BlockState blockState = bot.getEntityWorld().getBlockState(targetBlockPos);
+            ItemStack bestTool = ToolSelector.selectBestToolForBlock(bot, blockState);
+            LOGGER.debug("Preparing to mine {} with tool={} (creative={})",
+                    targetBlockPos,
+                    bestTool.isEmpty() ? "empty-hand" : bestTool.getItem().toString(),
+                    bot.getAbilities().creativeMode);
+            switchToTool(bot, bestTool);
+            bot.swingHand(Hand.MAIN_HAND);
+
+            float delta = blockState.calcBlockBreakingDelta(bot, bot.getEntityWorld(), targetBlockPos);
+            if (delta <= 0.0f) {
+                miningResult.complete("⚠️ Failed to initialize mining: block breaking delta <= 0");
+                cleanup.run();
+                return miningResult;
+            }
+            int requiredTicks = Math.max(1, (int) Math.ceil(1.0f / delta));
+            requiredTicksHolder.set(requiredTicks);
+            LOGGER.debug("Prepared mining of {} (delta={}, approx ticks={})", targetBlockPos, delta, requiredTicks);
+        } catch (Throwable t) {
+            LOGGER.error("Failed to prepare mining task at {}", targetBlockPos, t);
+            miningResult.complete("⚠️ Failed to initialize mining: " + t.getMessage());
             cleanup.run();
             return miningResult;
         }

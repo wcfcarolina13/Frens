@@ -1805,20 +1805,25 @@ public class BotEventHandler {
             });
         }
 
-        // After scheduling mines, poll a few ticks to see if clear
-        for (int i = 0; i < 10; i++) {
-            try { Thread.sleep(50); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
-            boolean stillBlocked = false;
-            for (BlockPos checkPos : checkPositions) {
-                BlockState checkState = world.getBlockState(checkPos);
-                if (!checkState.isAir() && checkState.blocksMovement() && !checkState.isOf(Blocks.BEDROCK)) {
-                    stillBlocked = true;
-                    break;
-                }
-            }
-            if (!stillBlocked) {
-                escaped = true;
-                break;
+        // Schedule clearance checks over subsequent ticks instead of blocking sleep loop
+        MinecraftServer srv = bot.getCommandSource().getServer();
+        if (srv != null) {
+            final int checks = 10;
+            for (int i = 1; i <= checks; i++) {
+                int delayTicks = i * 2; // ~100ms apart (@20tps)
+                srv.send(new ServerTask(srv.getTicks() + delayTicks, () -> {
+                    boolean stillBlocked = false;
+                    for (BlockPos checkPos : checkPositions) {
+                        BlockState checkState = world.getBlockState(checkPos);
+                        if (!checkState.isAir() && checkState.blocksMovement() && !checkState.isOf(Blocks.BEDROCK)) {
+                            stillBlocked = true;
+                            break;
+                        }
+                    }
+                    if (!stillBlocked) {
+                        LOGGER.info("Bot {} successfully escaped after scheduled mining", bot.getName().getString());
+                    }
+                }));
             }
         }
         

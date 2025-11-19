@@ -31,6 +31,8 @@
 - Hotfix: reverted escape loop to tryBreakBlock (non-blocking) to prevent server freeze from join() on server thread.
 
 - Files: CollectDirtSkill.java
+- Fix (server freeze): Removed init.join() blocking call in MiningTool.mineBlock and replaced suffocation escape Thread.sleep loop with tick-scheduled ServerTask checks. Files: MiningTool.java, BotEventHandler.java. Outcome: Eliminates server-thread blocking on bot stop/escape.
+
 - Change: determineStraightStairDirection() now removes any previously stored direction key before storing current facing.
 - Outcome: Prevents stale direction reuse across separate commands.
 
