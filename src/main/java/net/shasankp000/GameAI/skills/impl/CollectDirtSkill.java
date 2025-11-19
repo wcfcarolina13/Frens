@@ -1497,6 +1497,13 @@ public class CollectDirtSkill implements Skill {
         float yaw = issuerYaw != null ? issuerYaw : switch (current) {
             case NORTH -> 180f;
             case SOUTH -> 0f;
+            case WEST -> 90f;
+            case EAST -> -90f;
+            default -> player.getYaw();
+        };
+        player.setYaw(yaw);
+        player.setHeadYaw(yaw);
+        return current;
     }
 
     private Direction scanForButtonDirection(ServerPlayerEntity player) {
@@ -1517,11 +1524,10 @@ public class CollectDirtSkill implements Skill {
                             found = state.get(net.minecraft.state.property.Properties.HORIZONTAL_FACING);
                         } else {
                             // Approximate by choosing direction from player to button
-                            Vec3d to = Vec3d.ofCenter(pos).subtract(player.getPos());
+                            Vec3d to = Vec3d.ofCenter(pos).subtract(player.getX(), player.getY(), player.getZ());
                             found = horizontalFromVector(to);
                         }
                         if (found != null) {
-                            if (contextSharedCache != null) contextSharedCache.put("buttonDirection", found.asString());
                             return found;
                         }
                     }
@@ -1546,15 +1552,6 @@ public class CollectDirtSkill implements Skill {
         } else {
             return v.z > 0 ? Direction.SOUTH : Direction.NORTH;
         }
-    }
-
-            case WEST -> 90f;
-            case EAST -> -90f;
-            default -> player.getYaw();
-        };
-        player.setYaw(yaw);
-        player.setHeadYaw(yaw);
-        return current;
     }
 
     private Direction parseDirection(String name) {

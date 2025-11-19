@@ -318,9 +318,12 @@ public final class StripMineSkill implements Skill {
         // Store this direction for future jobs
         WorkDirectionService.setDirection(player.getUuid(), workDirection);
         LOGGER.info("Captured initial work direction {} for bot {}", workDirection.asString(), player.getName().getString());
+        return workDirection;
+    }
+
     private Direction scanForButtonDirection(ServerPlayerEntity player) {
         if (player == null) return null;
-        ServerWorld world = (ServerWorld) player.getEntityWorld();
+        net.minecraft.server.world.ServerWorld world = (net.minecraft.server.world.ServerWorld) player.getEntityWorld();
         BlockPos origin = player.getBlockPos();
         for (int dx = -3; dx <= 3; dx++) {
             for (int dy = -1; dy <= 2; dy++) {
@@ -334,7 +337,7 @@ public final class StripMineSkill implements Skill {
                         if (state.contains(net.minecraft.state.property.Properties.HORIZONTAL_FACING)) {
                             facing = state.get(net.minecraft.state.property.Properties.HORIZONTAL_FACING);
                         } else {
-                            Vec3d to = Vec3d.ofCenter(pos).subtract(player.getPos());
+                            Vec3d to = Vec3d.ofCenter(pos).subtract(player.getX(), player.getY(), player.getZ());
                             facing = horizontalFromVector(to);
                         }
                         if (facing != null) return facing;
@@ -360,10 +363,6 @@ public final class StripMineSkill implements Skill {
         } else {
             return v.z > 0 ? Direction.SOUTH : Direction.NORTH;
         }
-    }
-
-        
-        return workDirection;
     }
 
     private Direction parseDirection(String name) {

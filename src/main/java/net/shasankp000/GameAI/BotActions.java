@@ -337,46 +337,22 @@ public final class BotActions {
     }
 
     public static boolean digOut(ServerPlayerEntity bot, boolean forceBreak) {
-        ServerWorld world = bot.getCommandSource().getWorld();
-        if (world == null) {
-            return false;
-        }
-
-        BlockPos origin = bot.getBlockPos();
-        boolean brokeAny = false;
-
-        BlockPos[] verticalTargets = new BlockPos[] {
-                origin,
-                origin.up(),
-                origin.up(2)
-        };
-        for (BlockPos target : verticalTargets) {
-            brokeAny |= breakBlock(world, target, bot, forceBreak);
-        }
-
-        for (Direction direction : Direction.Type.HORIZONTAL) {
-            BlockPos horizontal = origin.offset(direction);
-            brokeAny |= breakBlock(world, horizontal, bot, forceBreak);
-            brokeAny |= breakBlock(world, horizontal.up(), bot, forceBreak);
-        }
-
-        return brokeAny;
+        // Programmatic block breaking disabled - bot must mine blocks physically using tools and time
+        // This prevents instant block removal and relies on the bot's natural mining ability
+        return false;
     }
     
     /**
      * Breaks a specific block at the given position.
-     * Used for targeted suffocation relief - breaks only the block causing damage.
+     * DISABLED: Programmatic block breaking removed to rely on physical, time-based mining.
      * @param bot The bot
      * @param pos The position of the block to break
      * @param forceBreak If true, breaks blocks up to hardness 5.0 even without proper tool
-     * @return true if block was broken
+     * @return false (always returns false as programmatic breaking is disabled)
      */
     public static boolean breakBlockAt(ServerPlayerEntity bot, BlockPos pos, boolean forceBreak) {
-        ServerWorld world = bot.getEntityWorld() instanceof ServerWorld sw ? sw : null;
-        if (world == null) {
-            return false;
-        }
-        return breakBlock(world, pos, bot, forceBreak);
+        // Programmatic block breaking disabled - bot must mine blocks physically using tools and time
+        return false;
     }
 
     private static boolean canBreak(ServerWorld world, BlockPos pos, ServerPlayerEntity bot, boolean forceBreak) {

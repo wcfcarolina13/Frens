@@ -1,3 +1,43 @@
+## Session 2025-11-19 — Implemented Time-Based Mining Escape System
+- Task: Make bot actively mine out when stuck/suffocating using time-based, tool-based mining (no programmatic breaking).
+- Files: BotEventHandler.java, gemini_report_3.md
+- Changes:
+  * Added `LAST_MINING_ESCAPE_ATTEMPT` map to throttle mining attempts (3s cooldown)
+  * Reduced `SUFFOCATION_ALERT_COOLDOWN_TICKS` from 100 to 20 (5s → 1s for urgent warnings)
+  * `rescueFromBurial()` - now identifies blocking block, selects appropriate tool, alerts with details, and calls `MiningTool.mineBlock()`
+  * `checkAndEscapeSuffocation()` - detects stuck position, selects tool, sends detailed alert, initiates time-based mining
+  * Added `alertSuffocationWithDetails()` - sends messages like "I'm stuck in Stone above! Mining with Diamond Pickaxe..."
+  * Added `checkForSpawnInBlocks()` - proactively checks on spawn if bot is inside blocks and starts mining immediately
+  * Modified `registerBot()` - schedules spawn check 5 ticks after registration to catch spawn-in-blocks scenarios
+- Outcome: Bot now actively mines its way out when stuck using physical, time-based mining. Sends detailed chat warnings.
+- Benefits:
+  * No programmatic/instant block breaking
+  * No teleportation
+  * Bot uses proper tools and mining speed
+  * Clear chat feedback: "Spawned inside Stone! Mining out with Diamond Pickaxe..."
+  * Works on spawn, suffocation damage, and stuck-in-wall scenarios
+  * Throttled to prevent spam (3s between mining attempts, 1s between alerts)
+
+## Session 2025-11-19 — Disabled Programmatic Block Breaking
+- Task: Disable all programmatic/instant block breaking so bots rely entirely on physical, time-based mining with tools.
+- Files: BotActions.java, BotEventHandler.java, README.md, gemini_report_3.md
+- Changes:
+  * `BotActions.digOut()` - now returns false without breaking any blocks
+  * `BotActions.breakBlockAt()` - now returns false without breaking any blocks
+  * `BotEventHandler.rescueFromBurial()` - only alerts about suffocation, doesn't break blocks
+  * `BotEventHandler.checkAndEscapeSuffocation()` - only alerts when stuck, doesn't break blocks
+  * `BotEventHandler.ensureHeadspaceClearance()` - returns true without breaking blocks
+  * Updated stuck-in-wall detection to log message instead of calling digOut
+  * Kept helper methods as stubs to prevent compilation errors
+- Outcome: Bots must now physically mine blocks using time-based, tool-based breaking. No instant block removal.
+- Note: Bots may get stuck in walls/suffocate if they don't have proper tools. This is intentional per user request.
+
+## Session 2025-11-19 — README: Added Button Orientation Tip
+- Task: Document button orientation feature for tunnel digging.
+- Files: README.md
+- Changes: Added tip explaining that bots can right-click buttons to set facing direction for digging.
+- Outcome: Users know they can use buttons to orient bots before starting mining jobs.
+
 ## Session 2025-11-18 19:30 — FINAL FIX: Ascent Now Uses Walk-and-Jump Algorithm
 2025-11-19: Implemented non-blocking, tool-based escape mining gated by recent obstruct damage (<=2s).
 - Fix: Replaced bot.getServer() calls with bot.getCommandSource().getServer() to compile on 1.21 mappings.

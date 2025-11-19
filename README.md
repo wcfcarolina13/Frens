@@ -144,4 +144,5 @@ Most of these subcommands now accept the optional alias/`all` token in the same 
 - Bots automatically eat when hunger drops below 75% (announcing "I'm hungry"), become more urgent at 25% ("I'm starving"), and critical at final hunger bar ("I'll die if I don't eat!"). Use `/bot heal <alias>` to force immediate eating.
 - Bots place torches automatically during mining when light levels drop below 7. Torches are placed on perpendicular walls to avoid breaking during mining. If out of torches, bot announces "ran out of torches!" and pauses.
 - Mining jobs now maintain work direction across pause/resume cycles. Use `/bot reset_direction <alias>` to change the direction for the next job.
+- **Button Orientation**: Place a button on a wall and have the bot right-click it to set their facing direction. The bot will then dig toward whatever direction the button is facing, making it easy to orient tunnel digging without manually turning the bot.
 Happy testing! If a command reports “No bot found”, ensure you either targeted one previously or appended the alias/`all` token to the invocation.

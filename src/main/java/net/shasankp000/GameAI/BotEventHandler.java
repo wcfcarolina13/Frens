@@ -101,6 +101,8 @@ public class BotEventHandler {
     // Track recent obstruction damage to gate escape mining (2s)
     private static final Map<UUID, Long> LAST_OBSTRUCT_DAMAGE_TICK = new ConcurrentHashMap<>();
     private static final int OBSTRUCT_WINDOW_TICKS = 40; // 2s @20tps
+    private static final Map<UUID, Long> LAST_MINING_ESCAPE_ATTEMPT = new ConcurrentHashMap<>();
+    private static final int MINING_ESCAPE_COOLDOWN_TICKS = 60; // 3s between mining attempts
 
     public static void noteObstructDamage(ServerPlayerEntity bot) {
         MinecraftServer srv = bot.getCommandSource().getServer();
@@ -120,7 +122,7 @@ public class BotEventHandler {
     private static final Map<UUID, CommandState> COMMAND_STATES = new ConcurrentHashMap<>();
     private static final Map<UUID, Long> LAST_RL_SAMPLE_TICK = new ConcurrentHashMap<>();
     private static final Map<UUID, Long> LAST_SUFFOCATION_ALERT_TICK = new ConcurrentHashMap<>();
-    private static final long SUFFOCATION_ALERT_COOLDOWN_TICKS = 100L;
+    private static final long SUFFOCATION_ALERT_COOLDOWN_TICKS = 20L; // 1 second for urgent warnings
     private static long lastBurialScanTick = Long.MIN_VALUE;
     private static volatile boolean externalOverrideActive = false;
     private static volatile boolean pendingBotRespawn = false;
@@ -452,6 +454,18 @@ public class BotEventHandler {
         }
         pendingBotRespawn = false;
         net.shasankp000.GameAI.services.BotControlApplier.applyToBot(candidate);
+        
+        // Proactively check if bot spawned inside blocks and needs to mine out
+        if (srv != null) {
+            srv.execute(() -> {
+                // Delay check by a few ticks to let spawn complete
+                srv.send(new net.minecraft.server.ServerTask(srv.getTicks() + 5, () -> {
+                    if (!candidate.isRemoved()) {
+                        checkForSpawnInBlocks(candidate);
+                    }
+                }));
+            });
+        }
     }
 
     public static void unregisterBot(ServerPlayerEntity bot) {
@@ -915,12 +929,8 @@ public class BotEventHandler {
             stationaryTicks = 0;
             boolean threatDetected = assessImmediateThreat(bot);
             if (!threatDetected) {
-                LOGGER.info("Bot enclosed without active threats; attempting dig-out routine.");
-                boolean cleared = BotActions.digOut(bot, true);
-                if (cleared) {
-                    failedBlockBreakAttempts = 0;
-                    lastKnownPosition = new Vec3d(bot.getX(), bot.getY(), bot.getZ());
-                }
+                // Programmatic block breaking disabled - bot must mine out manually
+                LOGGER.info("Bot enclosed without active threats; bot must mine out manually.");
             }
             return;
         }
@@ -1686,212 +1696,152 @@ public class BotEventHandler {
             return false;
         }
         
-        // Only intervene if bot is actively taking suffocation damage
-        // Don't break blocks just from collision/proximity
         boolean takingSuffocationDamage = tookRecentSuffocation(bot);
         if (!takingSuffocationDamage) {
             LAST_SUFFOCATION_ALERT_TICK.remove(bot.getUuid());
             return false;
         }
 
-        // Targeted response: break only the block causing suffocation
+        // Bot is suffocating - use time-based mining to escape
         BlockPos feet = bot.getBlockPos();
         BlockPos head = feet.up();
-        boolean hasTool = ensureRescueTool(bot, world, head);
-        boolean cleared = breakSuffocatingBlock(bot, world, head, feet);
         
-        if (!hasTool || !cleared) {
-            alertSuffocation(bot);
-        } else {
-            LAST_SUFFOCATION_ALERT_TICK.remove(bot.getUuid());
+        // Determine which block is causing suffocation
+        BlockState headState = world.getBlockState(head);
+        BlockState feetState = world.getBlockState(feet);
+        
+        BlockPos targetPos = null;
+        BlockState targetState = null;
+        String location = "";
+        
+        if (!headState.isAir() && headState.blocksMovement() && !headState.isOf(Blocks.BEDROCK)) {
+            targetPos = head;
+            targetState = headState;
+            location = "above";
+        } else if (!feetState.isAir() && feetState.blocksMovement() && !feetState.isOf(Blocks.BEDROCK)) {
+            targetPos = feet;
+            targetState = feetState;
+            location = "at feet";
         }
-        return true;
+        
+        if (targetPos != null && targetState != null) {
+            // Select best tool for this block
+            String keyword = preferredToolKeyword(targetState);
+            if (keyword != null) {
+                BotActions.selectBestTool(bot, keyword, "sword");
+            }
+            
+            // Alert with detailed message
+            String blockName = targetState.getBlock().getName().getString();
+            String toolName = bot.getMainHandStack().isEmpty() ? "bare hands" : bot.getMainHandStack().getName().getString();
+            alertSuffocationWithDetails(bot, blockName, toolName, location);
+            
+            // Attempt time-based mining (throttled to avoid spam)
+            MinecraftServer srv = bot.getCommandSource().getServer();
+            if (srv != null) {
+                UUID uuid = bot.getUuid();
+                long now = srv.getTicks();
+                long lastAttempt = LAST_MINING_ESCAPE_ATTEMPT.getOrDefault(uuid, Long.MIN_VALUE);
+                
+                if (now - lastAttempt >= MINING_ESCAPE_COOLDOWN_TICKS) {
+                    LAST_MINING_ESCAPE_ATTEMPT.put(uuid, now);
+                    LOGGER.info("Bot {} starting time-based mining of {} {}", 
+                            bot.getName().getString(), blockName, location);
+                    MiningTool.mineBlock(bot, targetPos);
+                    return true;
+                }
+            }
+        } else {
+            // Generic suffocation alert
+            alertSuffocation(bot);
+        }
+        
+        return false;
     }
     
     /**
-     * Proactively checks if bot is stuck in blocks and escapes without waiting for damage.
-     * Called on spawn/join to handle cases where bot spawns inside walls.
-     * Uses multiple strategies to ensure successful escape.
+     * Proactively checks if bot is stuck in blocks and initiates time-based mining to escape.
+     * Uses MiningTool.mineBlock() for physical, tool-based breaking.
      */
     public static boolean checkAndEscapeSuffocation(ServerPlayerEntity bot) {
         if (bot == null || bot.isRemoved()) {
-            LOGGER.debug("checkAndEscapeSuffocation: bot is null or removed");
             return false;
         }
         ServerWorld world = bot.getEntityWorld() instanceof ServerWorld serverWorld ? serverWorld : null;
         if (world == null) {
-            LOGGER.debug("checkAndEscapeSuffocation: world is null");
             return false;
         }
         
         BlockPos feet = bot.getBlockPos();
         BlockPos head = feet.up();
         
-        // Check ALL surrounding blocks, not just head/feet (bot might be crawling or blocks causing damage elsewhere)
-        List<BlockPos> checkPositions = List.of(
-            feet,              // Feet level
-            head,              // Head level  
-            feet.north(),      // Adjacent blocks at feet
-            feet.south(),
-            feet.east(),
-            feet.west(),
-            head.north(),      // Adjacent blocks at head
-            head.south(),
-            head.east(),
-            head.west()
+        // Check critical positions (head and feet most important)
+        List<BlockPos> criticalPositions = List.of(feet, head);
+        List<BlockPos> adjacentPositions = List.of(
+            feet.north(), feet.south(), feet.east(), feet.west(),
+            head.north(), head.south(), head.east(), head.west()
         );
         
-        boolean anyBlocked = false;
+        boolean criticalBlocked = false;
         BlockPos blockedPos = null;
-        for (BlockPos pos : checkPositions) {
+        BlockState blockedState = null;
+        
+        // Check critical positions first
+        for (BlockPos pos : criticalPositions) {
             BlockState state = world.getBlockState(pos);
-            if (!state.isAir() && !state.isOf(Blocks.BEDROCK) && (state.blocksMovement() || state.isSolidBlock(world, pos))) {
-                anyBlocked = true;
+            if (!state.isAir() && !state.isOf(Blocks.BEDROCK) && state.blocksMovement()) {
+                criticalBlocked = true;
                 blockedPos = pos;
-                LOGGER.info("Found blocking block at {}: {}", pos.toShortString(), state.getBlock().getName().getString());
+                blockedState = state;
                 break;
             }
         }
+        
+        // If no critical blocks, check adjacent
+        if (!criticalBlocked) {
+            for (BlockPos pos : adjacentPositions) {
+                BlockState state = world.getBlockState(pos);
+                if (!state.isAir() && !state.isOf(Blocks.BEDROCK) && state.blocksMovement()) {
+                    criticalBlocked = true;
+                    blockedPos = pos;
+                    blockedState = state;
+                    break;
+                }
+            }
+        }
 
-        // Gate escape mining: require obstructing blocks AND recent obstruct damage (<=2s)
-        if (!anyBlocked || !tookRecentObstructDamage(bot)) {
-            LOGGER.info("Bot {} is clear or not damaged recently (blocked={}, recentDamage={}) - skip escape",
-                    bot.getName().getString(), anyBlocked, tookRecentObstructDamage(bot));
+        // Gate escape: require obstructing blocks AND recent obstruct damage (<=2s)
+        if (!criticalBlocked || !tookRecentObstructDamage(bot)) {
             return false;
         }
 
-        LOGGER.warn("Bot {} is stuck and recently damaged at {}! Attempting escape",
-                bot.getName().getString(), blockedPos.toShortString());
-
-        // Build list of ALL surrounding blocks to break (3x3x3 cube around bot)
-        List<BlockPos> blocksToBreak = new ArrayList<>();
-        for (int x = -1; x <= 1; x++) {
-            for (int y = -1; y <= 1; y++) {
-                for (int z = -1; z <= 1; z++) {
-                    BlockPos pos = feet.add(x, y, z);
-                    BlockState state = world.getBlockState(pos);
-                    if (!state.isAir() && state.blocksMovement() && !state.isOf(Blocks.BEDROCK)) {
-                        blocksToBreak.add(pos);
-                    }
-                }
-            }
-        }
-        
-        LOGGER.info("Found {} blocking blocks around bot - attempting to break all", blocksToBreak.size());
-        
-        // Try to break ALL surrounding blocks using time-based mining (non-blocking per tick)
-        boolean escaped = false;
-        int broken = 0;
-        boolean manualMiningActive = bot.handSwinging; // heuristic: let manual mining proceed
-        for (BlockPos pos : blocksToBreak) {
-            if (manualMiningActive) {
-                continue; // skip programmatic mining if player/bot already swinging
-            }
-            BlockState state = world.getBlockState(pos);
-            String keyword = preferredToolKeyword(state);
-            if (keyword != null) {
-                BotActions.selectBestTool(bot, keyword, "sword");
-            }
-            MiningTool.mineBlock(bot, pos); // fire & forget; clearance checked later
-        }
-
-        // Schedule clearance checks over subsequent ticks instead of blocking sleep loop
-        MinecraftServer srv = bot.getCommandSource().getServer();
-        if (srv != null) {
-            final int checks = 10;
-            for (int i = 1; i <= checks; i++) {
-                int delayTicks = i * 2; // ~100ms apart (@20tps)
-                srv.send(new ServerTask(srv.getTicks() + delayTicks, () -> {
-                    boolean stillBlocked = false;
-                    for (BlockPos checkPos : checkPositions) {
-                        BlockState checkState = world.getBlockState(checkPos);
-                        if (!checkState.isAir() && checkState.blocksMovement() && !checkState.isOf(Blocks.BEDROCK)) {
-                            stillBlocked = true;
-                            break;
-                        }
-                    }
-                    if (!stillBlocked) {
-                        LOGGER.info("Bot {} successfully escaped after scheduled mining", bot.getName().getString());
-                    }
-                }));
-            }
-        }
-        
-        if (escaped) {
-            LOGGER.info("Bot {} successfully escaped after scheduled mining", bot.getName().getString());
-            return true;
-        }
-        
-        LOGGER.error("Bot {} could NOT escape - failed to break any blocks", bot.getName().getString());
-        alertSuffocation(bot);
-        return false;
-    }
-    
-    /**
-     * Breaks only the specific block causing suffocation, not surrounding blocks.
-     * Tries head position first (most common), then feet if still suffocating.
-     */
-    private static boolean breakSuffocatingBlock(ServerPlayerEntity bot, ServerWorld world, BlockPos head, BlockPos feet) {
-        // Try breaking head block first (most common suffocation point)
-        BlockState headState = world.getBlockState(head);
-        if (!headState.isAir() && !headState.isOf(Blocks.BEDROCK) && headState.blocksMovement()) {
-            // Select best tool for this block
-            String keyword = preferredToolKeyword(headState);
+        // Bot is stuck and damaged - mine out using time-based mining
+        if (blockedPos != null && blockedState != null) {
+            // Select appropriate tool
+            String keyword = preferredToolKeyword(blockedState);
             if (keyword != null) {
                 BotActions.selectBestTool(bot, keyword, "sword");
             }
             
-            if (BotActions.breakBlockAt(bot, head, true)) {
-                LOGGER.info("Bot {} broke head block {} to escape suffocation", 
-                            bot.getName().getString(), headState.getBlock().getName().getString());
-                return true;
-            }
-        }
-        
-        // If head is clear or couldn't break it, check feet
-        BlockState feetState = world.getBlockState(feet);
-        if (!feetState.isAir() && !feetState.isOf(Blocks.BEDROCK) && feetState.blocksMovement()) {
-            // Select best tool for this block
-            String keyword = preferredToolKeyword(feetState);
-            if (keyword != null) {
-                BotActions.selectBestTool(bot, keyword, "sword");
-            }
+            String blockName = blockedState.getBlock().getName().getString();
+            String toolName = bot.getMainHandStack().isEmpty() ? "bare hands" : bot.getMainHandStack().getName().getString();
+            String location = blockedPos.equals(head) ? "above" : blockedPos.equals(feet) ? "at feet" : "nearby";
             
-            if (BotActions.breakBlockAt(bot, feet, true)) {
-                LOGGER.info("Bot {} broke feet block {} to escape suffocation", 
-                            bot.getName().getString(), feetState.getBlock().getName().getString());
-                return true;
-            }
-        }
-        
-        return false;
-    }
-    
-    /**
-     * Attempts to break adjacent blocks around the bot to create escape space.
-     */
-    private static boolean breakAdjacentBlocks(ServerPlayerEntity bot, ServerWorld world, BlockPos center) {
-        // Check horizontal directions first (most common escape routes)
-        BlockPos[] directions = {
-            center.north(),
-            center.south(),
-            center.east(),
-            center.west(),
-            center.up(),
-            center.down()
-        };
-        
-        for (BlockPos pos : directions) {
-            BlockState state = world.getBlockState(pos);
-            if (!state.isAir() && !state.isOf(Blocks.BEDROCK) && state.blocksMovement()) {
-                String keyword = preferredToolKeyword(state);
-                if (keyword != null) {
-                    BotActions.selectBestTool(bot, keyword, "sword");
-                }
+            // Send urgent alert
+            alertSuffocationWithDetails(bot, blockName, toolName, location);
+            
+            // Start time-based mining (throttled)
+            MinecraftServer srv = bot.getCommandSource().getServer();
+            if (srv != null) {
+                UUID uuid = bot.getUuid();
+                long now = srv.getTicks();
+                long lastAttempt = LAST_MINING_ESCAPE_ATTEMPT.getOrDefault(uuid, Long.MIN_VALUE);
                 
-                if (BotActions.breakBlockAt(bot, pos, true)) {
-                    LOGGER.info("Bot {} broke adjacent block {} to escape", 
-                                bot.getName().getString(), state.getBlock().getName().getString());
+                if (now - lastAttempt >= MINING_ESCAPE_COOLDOWN_TICKS) {
+                    LAST_MINING_ESCAPE_ATTEMPT.put(uuid, now);
+                    LOGGER.info("Bot {} stuck in {} {} - mining with {}", 
+                            bot.getName().getString(), blockName, location, toolName);
+                    MiningTool.mineBlock(bot, blockedPos);
                     return true;
                 }
             }
@@ -1901,53 +1851,91 @@ public class BotEventHandler {
     }
     
     /**
-     * Last resort: force-break blocks using bare hands if necessary.
+     * DISABLED: These helper methods are no longer used since programmatic block breaking is disabled.
+     * Kept as stubs to prevent compilation errors.
      */
+    private static boolean breakSuffocatingBlock(ServerPlayerEntity bot, ServerWorld world, BlockPos head, BlockPos feet) {
+        return false;
+    }
+    
+    private static boolean breakAdjacentBlocks(ServerPlayerEntity bot, ServerWorld world, BlockPos center) {
+        return false;
+    }
+    
     private static boolean forceBreakSuffocatingBlocks(ServerPlayerEntity bot, ServerWorld world, BlockPos head, BlockPos feet) {
-        // Force-break with whatever is in hand (including bare hands)
-        // Try breaking head
-        BlockState headState = world.getBlockState(head);
-        if (!headState.isAir() && !headState.isOf(Blocks.BEDROCK)) {
-            if (BotActions.breakBlockAt(bot, head, true)) {
-                LOGGER.info("Force-broke head block to escape suffocation");
-                return true;
-            }
-        }
-        
-        // Try breaking feet
-        BlockState feetState = world.getBlockState(feet);
-        if (!feetState.isAir() && !feetState.isOf(Blocks.BEDROCK)) {
-            if (BotActions.breakBlockAt(bot, feet, true)) {
-                LOGGER.info("Force-broke feet block to escape suffocation");
-                return true;
-            }
-        }
-        
         return false;
     }
     
     /**
-     * Ensures bot has headspace clearance before allowing it to stand from crawling position.
-     * Prevents damage from standing up into solid blocks.
+     * DISABLED: Programmatic block breaking removed.
+     * Bot must handle headspace clearance naturally through mining.
      */
     public static boolean ensureHeadspaceClearance(ServerPlayerEntity bot) {
-        if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
-            return false;
+        // Programmatic block breaking disabled
+        return true; // Always return true to allow bot to continue
+    }
+
+    /**
+     * Checks if bot spawned inside blocks and proactively starts mining out.
+     * Called on spawn to prevent immediate suffocation death.
+     */
+    private static void checkForSpawnInBlocks(ServerPlayerEntity bot) {
+        if (bot == null || bot.isRemoved()) {
+            return;
+        }
+        ServerWorld world = bot.getEntityWorld() instanceof ServerWorld serverWorld ? serverWorld : null;
+        if (world == null) {
+            return;
         }
         
-        BlockPos head = bot.getBlockPos().up();
+        BlockPos feet = bot.getBlockPos();
+        BlockPos head = feet.up();
+        
         BlockState headState = world.getBlockState(head);
+        BlockState feetState = world.getBlockState(feet);
         
-        // If head position is not clear, keep crawling (don't stand up)
-        if (!headState.isAir() && headState.blocksMovement()) {
-            // Break the block above if possible
-            if (!headState.isOf(Blocks.BEDROCK)) {
-                return BotActions.breakBlockAt(bot, head, false);
-            }
-            return false;
+        BlockPos targetPos = null;
+        BlockState targetState = null;
+        String location = "";
+        
+        // Check if bot is inside blocks
+        if (!headState.isAir() && headState.blocksMovement() && !headState.isOf(Blocks.BEDROCK)) {
+            targetPos = head;
+            targetState = headState;
+            location = "above";
+        } else if (!feetState.isAir() && feetState.blocksMovement() && !feetState.isOf(Blocks.BEDROCK)) {
+            targetPos = feet;
+            targetState = feetState;
+            location = "at feet";
         }
         
-        return true; // Safe to stand
+        if (targetPos != null && targetState != null) {
+            String blockName = targetState.getBlock().getName().getString();
+            
+            // Select appropriate tool
+            String keyword = preferredToolKeyword(targetState);
+            if (keyword != null) {
+                BotActions.selectBestTool(bot, keyword, "sword");
+            }
+            
+            String toolName = bot.getMainHandStack().isEmpty() ? "bare hands" : bot.getMainHandStack().getName().getString();
+            
+            // Alert player
+            String message = String.format("Spawned inside %s! Mining out with %s...", blockName, toolName);
+            ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withMaxLevel(4), message);
+            
+            LOGGER.info("Bot {} spawned inside {} {} - starting time-based mining with {}", 
+                    bot.getName().getString(), blockName, location, toolName);
+            
+            // Start mining immediately (no cooldown on spawn check)
+            MiningTool.mineBlock(bot, targetPos);
+            
+            // Mark as having attempted escape to avoid immediate re-attempts
+            MinecraftServer srv = bot.getCommandSource().getServer();
+            if (srv != null) {
+                LAST_MINING_ESCAPE_ATTEMPT.put(bot.getUuid(), (long) srv.getTicks());
+            }
+        }
     }
 
     private static boolean tookRecentSuffocation(ServerPlayerEntity bot) {
@@ -2004,6 +1992,26 @@ public class BotEventHandler {
             return;
         }
         ChatUtils.sendChatMessages(source.withSilent().withMaxLevel(4), "I'm suffocating!");
+        LAST_SUFFOCATION_ALERT_TICK.put(uuid, now);
+    }
+    
+    private static void alertSuffocationWithDetails(ServerPlayerEntity bot, String blockName, String toolName, String location) {
+        if (bot == null) {
+            return;
+        }
+        ServerCommandSource source = bot.getCommandSource();
+        MinecraftServer srv = source != null ? source.getServer() : null;
+        if (srv == null) {
+            return;
+        }
+        UUID uuid = bot.getUuid();
+        long now = srv.getTicks();
+        long last = LAST_SUFFOCATION_ALERT_TICK.getOrDefault(uuid, Long.MIN_VALUE);
+        if (now - last < SUFFOCATION_ALERT_COOLDOWN_TICKS) {
+            return;
+        }
+        String message = String.format("I'm stuck in %s %s! Mining with %s...", blockName, location, toolName);
+        ChatUtils.sendChatMessages(source.withSilent().withMaxLevel(4), message);
         LAST_SUFFOCATION_ALERT_TICK.put(uuid, now);
     }
 
