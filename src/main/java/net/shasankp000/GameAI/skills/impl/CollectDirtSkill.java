@@ -1299,8 +1299,20 @@ public class CollectDirtSkill implements Skill {
             distanceToStep = newDistance;
         }
         
-        // 3. Now that we're close, clear headroom: break the step block itself AND 8 blocks above it
-        //    This ensures we carve a tunnel tall enough to walk through after jumping
+        // 3. Scan headroom for hazards/rares before clearing, then break step block + 8 above it
+        List<BlockPos> headroomVolume = new java.util.ArrayList<>();
+        for (int hh = 0; hh <= 8; hh++) headroomVolume.add(stepBlock.up(hh));
+        DetectionResult ascentDetection = MiningHazardDetector.detect(player, headroomVolume, java.util.List.of(stepBlock));
+        ascentDetection.adjacentWarnings().forEach(w ->
+                ChatUtils.sendChatMessages(player.getCommandSource().withSilent().withMaxLevel(4), w.chatMessage()));
+        if (ascentDetection.blockingHazard().isPresent()) {
+            Hazard hazard = ascentDetection.blockingHazard().get();
+            WorkDirectionService.setPausePosition(player.getUuid(), player.getBlockPos());
+            SkillResumeService.flagManualResume(player);
+            ChatUtils.sendChatMessages(player.getCommandSource().withSilent().withMaxLevel(4), hazard.chatMessage());
+            return SkillExecutionResult.failure(hazard.failureMessage());
+        }
+        // Clear headroom: break the step block itself AND 8 blocks above it
         for (int h = 0; h <= 8; h++) {
             BlockPos clearPos = stepBlock.up(h);
             BlockState state = world.getBlockState(clearPos);

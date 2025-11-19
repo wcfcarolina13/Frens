@@ -54,6 +54,8 @@
 
 - Compile fix: removed stray extra brace in rescueFromBurial loop causing syntax errors. Files: BotEventHandler.java.
 
+- Ascent hazard scan: Added MiningHazardDetector call in executeUpwardStep to announce ores and pause on blocking hazards. Files: CollectDirtSkill.java.
+
 - Outcome: Bot reliably walks to step, clears step + 8 blocks headroom, and ascends without obstruction in tests. Marking feature functional.
 
 
