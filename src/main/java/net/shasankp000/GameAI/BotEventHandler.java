@@ -1770,38 +1770,27 @@ public class BotEventHandler {
                 BotActions.selectBestTool(bot, keyword, "sword");
             }
             
-            {
-                // Physically mine the block (no instant removal)
-                String result = net.shasankp000.PlayerUtils.MiningTool.mineBlock(bot, pos).join();
-                boolean ok = world.getBlockState(pos).isAir();
-                if (ok) {
-                    broken++;
-                    LOGGER.info("Broke block {} at {} ({}/{})", 
-                               state.getBlock().getName().getString(), 
-                               pos.toShortString(), broken, blocksToBreak.size());
+            // Use interactionManager.tryBreakBlock to avoid blocking the server thread
+            if (bot.interactionManager.tryBreakBlock(pos)) {
+                broken++;
+                LOGGER.info("Broke block {} at {} ({}/{})",
+                        state.getBlock().getName().getString(),
+                        pos.toShortString(), broken, blocksToBreak.size());
 
-                    // Check if we've freed the bot
-                    if (broken >= 2) {  // After breaking 2 blocks, check if clear
-                        try {
-                            Thread.sleep(100); // Let blocks update
-                        } catch (InterruptedException e) {
-                            Thread.currentThread().interrupt();
-                        }
-
-                        boolean stillBlocked = false;
-                        for (BlockPos checkPos : checkPositions) {
-                            BlockState checkState = world.getBlockState(checkPos);
-                            if (!checkState.isAir() && checkState.blocksMovement() && !checkState.isOf(Blocks.BEDROCK)) {
-                                stillBlocked = true;
-                                break;
-                            }
-                        }
-
-                        if (!stillBlocked) {
-                            escaped = true;
-                            LOGGER.info("Bot {} is now clear after breaking {} blocks", bot.getName().getString(), broken);
+                if (broken >= 2) {
+                    try { Thread.sleep(50); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+                    boolean stillBlocked = false;
+                    for (BlockPos checkPos : checkPositions) {
+                        BlockState checkState = world.getBlockState(checkPos);
+                        if (!checkState.isAir() && checkState.blocksMovement() && !checkState.isOf(Blocks.BEDROCK)) {
+                            stillBlocked = true;
                             break;
                         }
+                    }
+                    if (!stillBlocked) {
+                        escaped = true;
+                        LOGGER.info("Bot {} is now clear after breaking {} blocks", bot.getName().getString(), broken);
+                        break;
                     }
                 }
             }

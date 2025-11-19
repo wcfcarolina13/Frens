@@ -22,6 +22,8 @@
 
 - Suffocation escape now mines blocks via MiningTool.mineBlock (ticked), replacing any instant break; updated BotEventHandler.
 
+- Hotfix: reverted escape loop to tryBreakBlock (non-blocking) to prevent server freeze from join() on server thread.
+
 - Files: CollectDirtSkill.java
 - Change: determineStraightStairDirection() now removes any previously stored direction key before storing current facing.
 - Outcome: Prevents stale direction reuse across separate commands.
