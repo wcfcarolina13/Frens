@@ -18,6 +18,8 @@
 
 - Direction resolution now uses issuerFacing parameter if supplied; lockDirection preserves it across ascent/descent/stripmine commands.
 
+- Post-task escape now uses physical mining: BotActions.breakBlockAt switched from world.breakBlock to interactionManager.tryBreakBlock (no instant removal).
+
 - Files: CollectDirtSkill.java
 - Change: determineStraightStairDirection() now removes any previously stored direction key before storing current facing.
 - Outcome: Prevents stale direction reuse across separate commands.

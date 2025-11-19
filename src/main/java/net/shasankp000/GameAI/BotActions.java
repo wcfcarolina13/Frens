@@ -420,7 +420,8 @@ public final class BotActions {
         if (!canBreak(world, pos, bot, forceBreak)) {
             return false;
         }
-        boolean success = world.breakBlock(pos, true, bot);
+        // Attempt a physical break using the interaction manager (no instant removal)
+        boolean success = bot.interactionManager.tryBreakBlock(pos);
         if (success) {
             bot.swingHand(Hand.MAIN_HAND, true);
         }
