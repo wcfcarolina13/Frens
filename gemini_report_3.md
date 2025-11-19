@@ -1,5 +1,7 @@
 ## Session 2025-11-18 19:30 — FINAL FIX: Ascent Now Uses Walk-and-Jump Algorithm
 2025-11-19: Implemented non-blocking, tool-based escape mining gated by recent obstruct damage (<=2s).
+- Fix: Replaced bot.getServer() calls with bot.getCommandSource().getServer() to compile on 1.21 mappings.
+
 - Files: AIPlayer.java, BotEventHandler.java, MiningTool.java (read), gemini_report_3.md
 - Changes: record obstruction damage; require obstruction+recent damage to trigger; schedule MiningTool.mineBlock() for surrounding blocks instead of tryBreakBlock loop to avoid server freeze.
 

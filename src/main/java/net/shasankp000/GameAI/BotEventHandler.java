@@ -103,14 +103,14 @@ public class BotEventHandler {
     private static final int OBSTRUCT_WINDOW_TICKS = 40; // 2s @20tps
 
     public static void noteObstructDamage(ServerPlayerEntity bot) {
-        MinecraftServer srv = bot.getServer();
+        MinecraftServer srv = bot.getCommandSource().getServer();
         if (srv != null) {
             LAST_OBSTRUCT_DAMAGE_TICK.put(bot.getUuid(), (long) srv.getTicks());
         }
     }
 
     private static boolean tookRecentObstructDamage(ServerPlayerEntity bot) {
-        MinecraftServer srv = bot.getServer();
+        MinecraftServer srv = bot.getCommandSource().getServer();
         if (srv == null) return false;
         long now = srv.getTicks();
         long last = LAST_OBSTRUCT_DAMAGE_TICK.getOrDefault(bot.getUuid(), Long.MIN_VALUE);
@@ -1792,7 +1792,7 @@ public class BotEventHandler {
             // Initiate time-based mining and do NOT block the server thread
             MiningTool.mineBlock(bot, pos).thenAccept(msg -> {
                 // This callback runs async; schedule checks on server thread
-                MinecraftServer srv = bot.getServer();
+                MinecraftServer srv = bot.getCommandSource().getServer();
                 if (srv != null) {
                     srv.execute(() -> {
                         BlockState after = world.getBlockState(pos);
