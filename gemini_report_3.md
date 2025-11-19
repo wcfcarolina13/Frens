@@ -20,6 +20,8 @@
 
 - Post-task escape now uses physical mining: BotActions.breakBlockAt switched from world.breakBlock to interactionManager.tryBreakBlock (no instant removal).
 
+- Suffocation escape now mines blocks via MiningTool.mineBlock (ticked), replacing any instant break; updated BotEventHandler.
+
 - Files: CollectDirtSkill.java
 - Change: determineStraightStairDirection() now removes any previously stored direction key before storing current facing.
 - Outcome: Prevents stale direction reuse across separate commands.
