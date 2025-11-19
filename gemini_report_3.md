@@ -1,6 +1,13 @@
 ## Session 2025-11-18 19:30 — FINAL FIX: Ascent Now Uses Walk-and-Jump Algorithm
 ## Session 2025-11-19 – Ascent headroom tweak
 ## Session 2025-11-19 – Ascent headroom tweak 2
+## Session 2025-11-19 – Ascent headroom tweak 3
+- Task: Increase headroom by one more block.
+- Files: src/main/java/net/shasankp000/GameAI/skills/impl/CollectDirtSkill.java
+- Change: In executeUpwardStep(), raised loop from h<=7 to h<=8 (step + 8 above).
+- Outcome: More clearance for ascent jumping. Test needed.
+
+
 - Task: Increase headroom by one more block.
 - Files: src/main/java/net/shasankp000/GameAI/skills/impl/CollectDirtSkill.java
 - Change: In executeUpwardStep(), raised loop from h<=6 to h<=7 (step + 7 above).

@@ -1299,9 +1299,9 @@ public class CollectDirtSkill implements Skill {
             distanceToStep = newDistance;
         }
         
-        // 3. Now that we're close, clear headroom: break the step block itself AND 7 blocks above it
+        // 3. Now that we're close, clear headroom: break the step block itself AND 8 blocks above it
         //    This ensures we carve a tunnel tall enough to walk through after jumping
-        for (int h = 0; h <= 7; h++) {
+        for (int h = 0; h <= 8; h++) {
             BlockPos clearPos = stepBlock.up(h);
             BlockState state = world.getBlockState(clearPos);
             
