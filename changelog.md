@@ -1,57 +1,26 @@
-## 2025-01-17 - Checkpoint: Mining Polish & Autonomous Systems
+# Changelog & History
 
-### Added
-- **Work direction persistence:** Bots now store their initial facing direction when starting directional mining jobs (stripmine, stairs, depth mining) and maintain that direction throughout the job, even across pause/resume cycles. Added `/bot reset_direction <alias>` command to reset stored direction for next job.
-- **Torch placement:** Bots now automatically place torches during mining operations when light levels drop below 7. Torches are placed on walls perpendicular to the mining path to avoid breaking them during continued work. Bot announces "ran out of torches!" and pauses if no torches are available in inventory.
-- **Job pause/resume fixes:** Bots now properly pause jobs (rather than terminating) when encountering rare ores or hazards. `/bot resume <alias>` correctly resumes the paused job with memory of previously discovered rares intact. Jobs only terminate on explicit `/bot stop` commands or completion.
-- **Emergency healing:** New `/bot heal <alias>` command forces bot to eat food immediately, prioritizing least valuable food items and skipping items with negative side effects. Bot eats until fully satiated.
-- **Hunger management:** Bots now auto-eat at 75% hunger (with "I'm hungry" message), become more urgent at 25% ("I'm starving"), and critical at final hunger bar ("I'll die if I don't eat!"). Bot automatically eats when health drops below 75%.
-- **Stop command improvements:** `/bot stop all` and `/bot stop <alias>` now work correctly even when bot is actively mid-job, immediately terminating the current task.
+Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
-### Fixed
-- Fixed torch placement destroying torches immediately after placing them - torches now placed offset from mining path
-- Fixed resume command not finding paused jobs - jobs now correctly maintain pause state
-- Fixed bots breaking their own torch placements during mining operations
-- Fixed `/bot stop` only working when jobs were paused rather than during active execution
+## 2025-11-19
+- Hardened suffocation recovery: multiple iterations to detect head/feet blockage before damage ticks, throttle alerts, and mine with the correct tool rather than instant breaks. Spawn-in-block checks now run shortly after registration.
+- Upward stairs (ascent) refinements: walk-and-jump algorithm with headroom increases, issuer-facing direction lock, button-based direction overrides, and explicit `lockDirection` parameter for consistent stair orientation. Direction state resets per command to avoid stale facings.
+- Safety changes: blocked destructive helpers (`digOut`, `breakBlockAt`) to enforce tool-based mining; escape routines schedule work on tick instead of blocking server threads. Added hazard scanning during ascent and tightened drop cleanup to reuse trusted sweep logic.
+- Docs: added button-orientation tip to the guide and logged ascent headroom tweaks and obstruction damage gating.
 
-### Improvements
-- Torch placement now finds perpendicular walls intelligently (left or right of mining direction)
-- Work direction service ensures consistent tunnel orientation across multiple mining sessions
-- Hunger service provides graduated warnings and automatic eating based on health thresholds
-- Task service properly handles job termination vs pause states for all abort scenarios
+## 2025-11-18
+- Persistency and safety: inventory save timing fixed; drop sweeps stop breaking blocks and only collect items; bots break out when spawned in walls; upward stairs start in the controller’s facing direction (partial fix).
+- Task queue notes captured for stats persistence and the simplified upward stair spec.
 
-## Unreleased
+## 2025-11-17 Checkpoint
+- Mining polish: work-direction persistence across pause/resume, hazard pauses with `/bot resume`, torch placement on walls (level ≥7), and `/bot reset_direction` to clear stored facings.
+- Survival & UX: hunger auto-eat thresholds with `/bot heal`, inventory full messaging, drop sweep retries, suffocation checks after tasks, and `inventory` chat summaries.
+- Controls: config UI adds Bot Controls tab (auto-spawn, teleportDuringSkills, inventoryFullPause, per-bot/world LLM toggles) with owner display and scrollable rows; bots auto-spawn at last saved position.
+- LLM bridge: natural-language job routing to real skills with confirmation, per-bot personas/memory, action queueing, status responses, and `/bot config llm …` toggles.
 
-### Reverted
-- Reverted to commit `1296ae052a337cda801f080272cfbfbfbae937a8` to restore the project to a previous state.
+## 2025-10-31 (Gemini report recap)
+- Added composite tools (`mineBlock`, `chopWood`, `shovelDirt`, `cultivateLand`) with FunctionCaller orchestration and state tracking; verified builds.
+- Early RL/hold-tracking tweaks and Mineflayer/RAG exploration notes logged for future LLM integration work.
 
-- **Inventory GUI refactor:** Removed redundant `BotInventoryScreen.java`, introduced the canonical `BotInventoryScreen` in `GraphicalUserInterface`, and updated `AIPlayerClient` to register it as the bot inventory UI.
-- **Config toggles:** `/configMan` now includes a “Bot Controls” tab where you can persistently toggle auto-spawn mode (training/play), teleportDuringSkills, inventory-full pauses, and per-bot/per-world LLM enablement. These preferences sync to the server, apply automatically when bots spawn, and auto-run `/bot spawn <alias> <mode>` on world load so you no longer need to re-enter the console commands each session.
-- **Bot ownership & spawn fixes:** Every bot now tracks an owner (defaulting to whoever first spawned it). Admins can reassign with `/bot config owner <alias> <player>` or by editing `settings.json5`, and the control UI shows the current owner per row. Auto-spawn resumes at the bot’s last saved position/dimension instead of world spawn, preventing the “deep underground” respawns.
-- **Bot control UX polish:** Bot Controls rows now live inside a scrollable panel that displays both the alias and owner, tooltips explain every toggle (including why “Pause Inv” exists), and the main config page wraps informational text so it never overlaps the footer buttons.
-- **Build stability:** Fixed duplicate-class and rendering-related compilation errors that were blocking builds. The bot inventory currently uses a solid background as a temporary workaround for the previous texture issue.
-- **Docs:** Updated `file_index.md` to reflect the current project structure and to include the new `BotInventoryScreen` location.
-- **Mining safety:** Bots now detect when they spawn or tunnel into solid blocks, automatically dig themselves out with the best tool available, and broadcast "I'm suffocating!" if they only have bare hands so players can teleport them to safety. The experimental stair-step planner has been disabled for now so teleport-off mining proceeds with the proven approach while we revisit depth-targeting later.
-- **Depth mining:** `/bot skill mining depth <y>` now drives the bot to the requested Y-level by carving offset stair steps (never straight down), and the new optional `stairs` flag lets you opt into the experimental spiral planner per job. Depth runs also halt with a “Hit water” warning if the bot digs into a flooded shaft so you can come block it off.
-- **Straight staircase mode:** Re-enable the `stairs` flag as a straight stripmine-style descent—each step carves a 1×1 corridor that drops one block while clearing four blocks of headroom so you can install stairs later without re-digging.
-- **Spiral gating:** The `spiral` argument now returns a friendly “disabled” warning until the spiral variant matches the new staircase spec.
-- **Staircase polish:** Depth runs that opt into `stairs` now carve every tread with four blocks of headroom, and the depth-only `spiral` modifier (currently gated while we refactor it) enforces the same ceiling, clamps the radius to ~5 blocks, and refuses to run alongside `square` so the planner stays predictable.
-- **Spawn/claustrophobia safety:** Bots now call the dig-out routine whenever the collision box reports suffocation or the bot just took head damage, so even teleport-enabled spawns won’t sit inside stone. The chat alert remains so you can teleport if they only have fists.
-- **Depth water handling:** Depth runs only pause once the bot actually touches water (feet/head submerged). This avoids premature aborts while still warning you to block the flood.
-- **Next up:** teach bots to place blocks to plug detected water, re-enable the spiral stair planner by default once it survives more testing, and explore automated lantern placement so deep shafts aren’t pitch black.
-- **Hazard controls:** Mining now pauses whenever water, lava, or a full inventory threaten the bot; each pause explains the cause, flags the job for manual resumption, and tells you to run `/bot resume <alias>`. A new `/bot config inventoryFullPause` toggle governs the latter, and `/bot resume` (plus the matching SkillResumeService support) lets you restart the last skill when it is safe again.
-- **Stripmine skill:** `/bot skill stripmine <length>` cuts a 1×3 tunnel straight ahead, respecting vanilla reach and pausing when hazards (lava, water, drops, chests, mineshafts, or rare ores) are detected. Hazards broadcast a chat warning and require `/bot resume` once cleared.
-- **Spiral depth mode:** The optional `spiral` modifier now keeps stair shafts tight, enforces a 4-block ceiling so decorative stairs can be added later, and inherits all hazard checks from the rest of the mining toolkit.
-- **Hazard detector:** Chest, ore, structure, and precipice detection is shared across every block-breaking skill so they all stop safely with a warning instead of tunnelling blindly into danger.
-- **Resume fixes:** `/bot resume` now replays the saved skill using the calling player’s command source, so the dispatcher accepts the command and the job actually restarts. Once you intentionally resume past a hazard, that exact block won’t immediately halt the bot again.
-- **Hazard + stop tweaks:** Stair/step blocks that the bot is about to stand in are now included in hazard scans, so water, lava, chests, or drops sitting directly ahead still pause the job while off-path finds are just warnings. Stripmine’s mining loop now polls for `/bot stop` requests while breaking blocks, cancelling the dig immediately instead of finishing the entire tunnel section.
-- **Rare block awareness:** Iron ore (all variants) and amethyst geode blocks/buds now raise the same “I found something!” pause as other valuables, so the bot won’t chew through them until you explicitly `/bot resume`.
-- **Rare ore comms:** Those valuable-ore pauses now only show the bot’s “I found…” chat—your command output simply says the skill paused, reducing duplicate chatter.
-- **Rare ore additions:** Gold ore is now treated as a stop-worthy rare (overworld, deepslate, and nether flavors), and the detector automatically includes every deepslate variant whenever we add new valuables so deep tunnels don’t miss palette swaps.
-- **Startup smoothness:** The BERT NLP model now loads on a background thread when the server starts, so world creation/login is no longer blocked for several seconds while DJL initializes.
-- **QoL:** Added `/bot look_player [alias|all]` so you can snap any bot’s view to your player before issuing directional jobs like stripmine or spiral stairs.
-- **Consistency:** When you resume a stripmine run the bot keeps the original tunnel direction instead of re-orienting, and `/bot look_player stop …` releases the attention so you can let bots look forward again.
-- **LLM groundwork:** Added `/bot config llm world …` and `/bot config llm bot …` toggles, a per-world persona/memory store that gives each bot Elder Scrolls-style quirks, and a chat parser that lets you address “Jake …” or “all bots …” directly. When the toggle is on, the bots route conversational requests through the LLM before falling back to the traditional skill commands.
-- **LLM command bridge:** Natural-language chat like “collect 5 cobblestone” or “grab some dirt” now maps to the real skill runner under the hood—stone/ore keywords route to `mining`, soft-block requests hit `collect_dirt`, and the LLM automatically fills in the correct block filters so the bot actually executes the job instead of replying with an unknown function error.
-- **LLM confirmations & job tracking:** Whenever the LLM interprets a high-impact command (mining, collect_dirt, stripmine, drop_sweep) it now asks for confirmation, announces the job (“On it — mining 5 cobblestone…”), and reports completion/abort straight to chat. Jobs are tracked per bot so `/bot stop` or follow-up questions know what the bot is doing, and requests automatically pause when inventories fill to prevent infinite drop sweeps.
-- **LLM action queue & status:** Additional natural-language commands now queue behind the current job instead of being dropped, and once the job finishes the next queued request runs automatically with its own confirmation/status prompts. Asking a bot for “status” yields a personality-driven update that includes the active job, queued tasks, and the last completed assignment, all powered by the same per-world persona/memory profiles.
+## Legacy Releases (pre-2025)
+- 1.0.x line: 1.20.6 compatibility, server-side training mode support, Q-table format change, risk-taking mechanism, expanded triggers (lava/cliffs/sculk), and broad command set (`use-key`, `detectDangerZone`, inventory queries, armor equip/remove, etc.). See archived release notes in `archive/legacy_changelogs.md`.

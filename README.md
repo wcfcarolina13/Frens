@@ -39,10 +39,10 @@ Examples:
 
 Arguments are forwarded exactly as you type them (minus the alias token). Each bot runs the skill in its own task, so multiple bots can execute the same skill concurrently.  
 
-- `/bot skill mining ascent <blocks> [lockDirection true] <alias>` – Climb up the specified number of blocks; add `lockDirection true` to reuse prior facing across resumed or repeated commands.
+- `/bot skill mining ascent <blocks> [lockDirection true] <alias>` – Climb up the specified number of blocks using a walk-and-jump staircase (one block per step).
 - `/bot skill mining ascent-y <Y-level> [lockDirection true] <alias>` – Climb until reaching target Y.
-- `/bot skill mining descent <blocks> [lockDirection true] <alias>` – Dig staircase downward for given blocks.
-- `/bot skill mining descent-y <Y-level> [lockDirection true] <alias>` – Dig downward staircase until at/below Y.
+- `/bot skill mining descent <blocks> [lockDirection true] <alias>` – Dig a downward staircase one block at a time.
+- `/bot skill mining descent-y <Y-level> [lockDirection true] <alias>` – Dig a downward staircase until at/below Y.
 
 ---
 
@@ -70,14 +70,12 @@ You can also chain natural-language jobs: If you issue a second command while a 
 
 | Argument | Meaning |
 | --- | --- |
-| `square` | Stay within a square that starts at the bot’s current position. The current radius grows as the skill expands its search. Mutually exclusive with `spiral` once that mode returns. |
+| `square` | Stay within a square that starts at the bot’s current position. The current radius grows as the skill expands its search. |
 | `until` | Keep working until the bot already holds the requested amount (useful for “top off” jobs). Combine with `exact` to force the exact count instead. |
 | `each` | When you target multiple bots, have each bot satisfy the full count instead of splitting it. |
-| `depth <y>` | New: carve an offset staircase down to the requested Y level (teleport stays off). Example: `/bot skill mining depth -50 Jake`. The bot mines whatever blocks are in the way, stepping aside before every drop so it never digs directly beneath itself, and stops once its feet are at or below Y = -50. |
-| `stairs` | Combine with `depth` to dig a straight staircase: the bot carves a 1×1 corridor with 4 blocks of headroom, stepping forward and down one block per segment so you can drop in real stair blocks later. |
-| `spiral` | Temporarily disabled while the straight staircase mode is being polished. |
+| `lockDirection true` | Preserve the controller’s facing direction across resumes/repeats for ascent/descent/stripmine jobs. |
 
-Depth jobs implicitly enable the “digging down” mode so the bot removes whatever blocks block the stairwell until the target Y level is reached—it ignores ore filters and keeps carving offset steps until the goal depth is met. Add `stairs` if you want the bot to dig a straight, stripmine-style descent with 4 blocks of headroom per tread; the `spiral` option is gated for now until we rework it to match the new staircase spec. This is a stepping stone toward more advanced “mine to depth, then branch” tasks.
+Ascent/descent use the same one-block-at-a-time staircase: the bot clears 3 blocks of headroom above each tread, jumps up to the next step, and keeps the controller’s facing unless you reset it. Use positive block counts for both directions; target Y variants stop when the bot reaches the requested level.
 
 ### Stripmine
 
