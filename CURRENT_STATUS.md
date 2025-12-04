@@ -96,6 +96,9 @@ Bot stuck in blocks, breaking 15 blocks to escape
    - Add clear logging
    - Test thoroughly
 
+3. **COME/Follow gap handling**
+   - When teleport is off, blocked COME now queues ascent/descent/stripmine toward commander; still needs precipice bridging/alternate heading for large caves.
+
 ### Files Needing Attention:
 
 **High Priority:**

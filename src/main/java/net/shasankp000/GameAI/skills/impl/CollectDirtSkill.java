@@ -1399,6 +1399,15 @@ public class CollectDirtSkill implements Skill {
             block == Blocks.REDSTONE_TORCH || block == Blocks.REDSTONE_WALL_TORCH) {
             return true; // Skip torches, treat as already cleared
         }
+
+        // Select the best tool per block type (gravel/sand => shovel; pickaxe for others)
+        String toolKeyword = null;
+        if (state.isIn(net.minecraft.registry.tag.BlockTags.SHOVEL_MINEABLE)) {
+            toolKeyword = "shovel";
+        } else if (state.isIn(net.minecraft.registry.tag.BlockTags.PICKAXE_MINEABLE)) {
+            toolKeyword = "pickaxe";
+        }
+        BotActions.selectBestTool(player, toolKeyword != null ? toolKeyword : preferredTool, "sword");
         
         if (!isWithinStraightReach(player, blockPos)) {
             return false;

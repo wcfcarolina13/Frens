@@ -46,8 +46,10 @@ import net.shasankp000.Entity.EntityDetails;
 import net.shasankp000.PathFinding.GoTo;
 import net.shasankp000.GameAI.DropSweeper;
 import net.shasankp000.GameAI.services.TaskService;
+import net.shasankp000.GameAI.services.MovementService;
 import net.shasankp000.Entity.createFakePlayer;
 import net.shasankp000.WorldUitls.isBlockItem;
+import net.shasankp000.GameAI.skills.SkillPreferences;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -1351,9 +1353,38 @@ public class BotEventHandler {
 
         Vec3d targetPos = positionOf(target);
         double distanceSq = bot.squaredDistanceTo(targetPos);
+        boolean allowTeleport = SkillPreferences.teleportDuringSkills(bot);
         if (distanceSq > 100) {
-            bot.refreshPositionAndAngles(targetPos.x, targetPos.y, targetPos.z, target.getYaw(), target.getPitch());
+            if (allowTeleport) {
+                bot.refreshPositionAndAngles(targetPos.x, targetPos.y, targetPos.z, target.getYaw(), target.getPitch());
+            } else {
+                MovementService.MovementPlan plan = new MovementService.MovementPlan(
+                        MovementService.Mode.DIRECT,
+                        target.getBlockPos(),
+                        target.getBlockPos(),
+                        null,
+                        null,
+                        bot.getHorizontalFacing());
+                MovementService.MovementResult movement = MovementService.execute(bot.getCommandSource(), bot, plan);
+                if (!movement.success()) {
+                    LOGGER.warn("Follow walk catch-up failed: {}", movement.detail());
+                }
+            }
             return true;
+        }
+        if (!allowTeleport && distanceSq > 16.0D) {
+            MovementService.MovementPlan plan = new MovementService.MovementPlan(
+                    MovementService.Mode.DIRECT,
+                    target.getBlockPos(),
+                    target.getBlockPos(),
+                    null,
+                    null,
+                    bot.getHorizontalFacing());
+            MovementService.MovementResult movement = MovementService.execute(bot.getCommandSource(), bot, plan);
+            if (movement.success()) {
+                return true;
+            }
+            LOGGER.debug("Follow walk attempt fell back to simple pursuit: {}", movement.detail());
         }
         moveToward(bot, targetPos, 3.0D, true);
         return true;

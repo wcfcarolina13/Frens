@@ -8,6 +8,7 @@ Pending work only. Completed items and rationale live in `changelog.md`.
 - [ ] **Escape when spawned in walls**: Suffocation escape checks all four corners from head to feet, uses tool-based mining only, and throttles alerts to avoid spam.
 - [ ] **Task lifecycle reset & busy-loop prevention**: `/bot stop`/respawn instantly clear the active ticket, release movement overrides, and prevent “Bot is busy” spam in idle RL loops.
 - [ ] **Drop collection in tricky terrain**: Drop sweeps handle shallow water by wading/bridging, hop safely into 1-block holes to vacuum items, and keep cooldown/backoff logic so navigation is not spammed.
+- [ ] **COME/Follow precipice handling**: If walking without teleport hits a large drop/cave, plan a bridge or alternate heading, or edge-scale ascent/descent instead of stalling.
 
 ## P1 — High
 - [ ] **Protected zones persistence**: JSON-backed zones (position, radius, creator, timestamp, dimension) saved on create/update and loaded on server start.
@@ -74,6 +75,12 @@ Pending work only. Completed items and rationale live in `changelog.md`.
 - [ ] Army formations (line, grid)
 - [ ] Archer positioning
 - [ ] Horse flank maneuvers
+
+## Crafting Roadmap
+- [ ] Crafting helper: detect required inputs in bot inventory and report missing items.
+- [ ] Crafting table craft: craft when inputs exist; announce success or missing items in chat.
+- [ ] Placement: place crafted table near commander safely.
+- [ ] Recipe awareness: if commander lacks recipe (non-creative), bot refuses and explains. 
 
 ### Quality of Life
 - [ ] Debug toggle (reduce terminal spam)

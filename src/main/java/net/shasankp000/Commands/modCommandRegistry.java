@@ -26,6 +26,7 @@ import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.text.Text;
+import net.minecraft.item.Items;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import net.shasankp000.CommandUtils;
@@ -58,6 +59,7 @@ import net.shasankp000.GameAI.services.BotInventoryStorageService;
 import net.shasankp000.GameAI.services.BotTargetingService;
 import net.shasankp000.GameAI.services.HealingService;
 import net.shasankp000.GameAI.services.InventoryAccessPolicy;
+import net.shasankp000.GameAI.services.MovementService;
 import net.shasankp000.GameAI.services.ProtectedZoneService;
 import net.shasankp000.GameAI.services.SkillResumeService;
 import net.shasankp000.GameAI.services.TaskService;
@@ -296,6 +298,12 @@ public class modCommandRegistry {
                                         .executes(context -> executeFollowTargets(context,
                                                 null,
                                                 EntityArgumentType.getPlayer(context, "player"))))
+                        )
+                        .then(literal("come")
+                                .executes(context -> executeComeTargets(context, null))
+                                .then(CommandManager.argument("bots", StringArgumentType.string())
+                                        .executes(context -> executeComeTargets(context,
+                                                StringArgumentType.getString(context, "bots"))))
                         )
                         .then(literal("guard")
                                 .executes(context -> executeGuard(context, getActiveBotOrThrow(context), DEFAULT_GUARD_RADIUS))
@@ -1961,6 +1969,110 @@ public class modCommandRegistry {
     private static int executeFollow(CommandContext<ServerCommandSource> context, ServerPlayerEntity bot, ServerPlayerEntity target) {
         BotEventHandler.setFollowMode(bot, target);
         return 1;
+    }
+
+    private static int executeComeTargets(CommandContext<ServerCommandSource> context, String targetArg) throws CommandSyntaxException {
+        ServerPlayerEntity commander = context.getSource().getPlayer();
+        if (commander == null) {
+            throw new SimpleCommandExceptionType(Text.literal("Only players can call bots to come to them.")).create();
+        }
+        List<ServerPlayerEntity> bots = BotTargetingService.resolve(context.getSource(), targetArg);
+        boolean isAll = targetArg != null && "all".equalsIgnoreCase(targetArg.trim());
+        int successes = 0;
+        for (ServerPlayerEntity bot : bots) {
+            successes += executeCome(context, bot, commander);
+        }
+        if (!bots.isEmpty() && successes > 0) {
+            String summary = formatBotList(bots, isAll);
+            String verb = (isAll || bots.size() > 1) ? "are" : "is";
+            ChatUtils.sendSystemMessage(context.getSource(), summary + " " + verb + " heading to you.");
+        }
+        return successes;
+    }
+
+    private static int executeCome(CommandContext<ServerCommandSource> context, ServerPlayerEntity bot, ServerPlayerEntity commander) {
+        if (bot == null || commander == null) {
+            return 0;
+        }
+        boolean teleportAllowed = SkillPreferences.teleportDuringSkills(bot);
+        if (!teleportAllowed && !bot.canSee(commander) && !hasNavigationTool(bot)) {
+            ChatUtils.sendSystemMessage(context.getSource(),
+                    "I don't have any navigation tools to find you.");
+            return 0;
+        }
+
+        int deltaY = commander.getBlockY() - bot.getBlockY();
+        double horizontalDistance = Math.hypot(commander.getX() - bot.getX(), commander.getZ() - bot.getZ());
+
+        if (!teleportAllowed && Math.abs(deltaY) >= 3 && horizontalDistance <= 2.5D) {
+            stagePlannedDig(context.getSource(), bot, commander, deltaY, horizontalDistance);
+            return 0;
+        }
+
+        MovementService.MovementPlan plan = new MovementService.MovementPlan(
+                MovementService.Mode.DIRECT,
+                commander.getBlockPos(),
+                commander.getBlockPos(),
+                null,
+                null,
+                bot.getHorizontalFacing());
+        MovementService.MovementResult result = MovementService.execute(bot.getCommandSource(), bot, plan);
+        if (result.success()) {
+            return 1;
+        }
+
+        ChatUtils.sendSystemMessage(context.getSource(),
+                bot.getName().getString() + " could not reach you: " + result.detail());
+
+        if (!teleportAllowed) {
+            stagePlannedDig(context.getSource(), bot, commander, deltaY, horizontalDistance);
+        }
+        return 0;
+    }
+
+    private static void stagePlannedDig(ServerCommandSource source,
+                                        ServerPlayerEntity bot,
+                                        ServerPlayerEntity commander,
+                                        int deltaY,
+                                        double horizontalDistance) {
+        Direction toCommander = Direction.getFacing(commander.getX() - bot.getX(), 0, commander.getZ() - bot.getZ());
+        String skillName;
+        String skillArgs;
+        if (Math.abs(deltaY) >= 2) {
+            skillName = "collect_dirt";
+            skillArgs = (deltaY > 0 ? "ascent " : "descent ") + Math.min(8, Math.abs(deltaY));
+        } else {
+            skillName = "stripmine";
+            int stripLength = (int) Math.min(14, Math.max(6, Math.ceil(horizontalDistance) + 2));
+            skillArgs = Integer.toString(stripLength);
+        }
+
+        if (toCommander.getAxis().isHorizontal()) {
+            WorkDirectionService.setDirection(bot.getUuid(), toCommander);
+        }
+
+        SkillResumeService.recordExecution(bot, skillName, skillArgs, source);
+        SkillResumeService.flagManualResume(bot);
+
+        String prompt = bot.getName().getString() + " is blocked. Run /bot resume "
+                + bot.getName().getString() + " to let me dig (" + skillName + " " + skillArgs + ").";
+        ChatUtils.sendSystemMessage(source, prompt);
+        ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withMaxLevel(4), prompt);
+    }
+
+    private static boolean hasNavigationTool(ServerPlayerEntity bot) {
+        if (bot == null) {
+            return false;
+        }
+        for (int slot = 0; slot < bot.getInventory().size(); slot++) {
+            if (bot.getInventory().getStack(slot).isOf(Items.COMPASS)
+                    || bot.getInventory().getStack(slot).isOf(Items.RECOVERY_COMPASS)
+                    || bot.getInventory().getStack(slot).isOf(Items.FILLED_MAP)
+                    || bot.getInventory().getStack(slot).isOf(Items.MAP)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static int executeFollowStop(CommandContext<ServerCommandSource> context, ServerPlayerEntity bot) {

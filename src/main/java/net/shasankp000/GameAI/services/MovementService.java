@@ -11,17 +11,24 @@ import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.World;
 import net.minecraft.registry.tag.FluidTags;
 import net.shasankp000.GameAI.BotActions;
+import net.shasankp000.GameAI.skills.SkillPreferences;
 import net.shasankp000.Entity.LookController;
 import net.shasankp000.PathFinding.GoTo;
+import net.shasankp000.PathFinding.PathFinder;
+import net.shasankp000.PathFinding.Segment;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayDeque;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Optional;
+import java.util.Queue;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 public final class MovementService {
 
@@ -73,6 +80,9 @@ public final class MovementService {
                                  Mode mode,
                                  BlockPos arrivedAt,
                                  String detail) {
+    }
+
+    private record WalkResult(boolean success, BlockPos arrivedAt, String detail) {
     }
 
     public static Optional<MovementPlan> planLootApproach(ServerPlayerEntity player,
@@ -216,10 +226,15 @@ public final class MovementService {
         if (destination == null) {
             return new MovementResult(false, mode, player.getBlockPos(), "No destination specified for " + label);
         }
+        boolean allowTeleport = SkillPreferences.teleportDuringSkills(player);
         Vec3d playerPos = new Vec3d(player.getX(), player.getY(), player.getZ());
         Vec3d destinationCenter = new Vec3d(destination.getX() + 0.5, destination.getY(), destination.getZ() + 0.5);
         if (playerPos.squaredDistanceTo(destinationCenter) <= CLOSE_ENOUGH_DISTANCE_SQ) {
             return new MovementResult(true, mode, destination, label + ": already at destination");
+        }
+        if (!allowTeleport) {
+            WalkResult walkResult = walkTo(source, player, destination, mode, label);
+            return new MovementResult(walkResult.success(), mode, walkResult.arrivedAt(), walkResult.detail());
         }
         String rawResult = GoTo.goTo(source, destination.getX(), destination.getY(), destination.getZ(), false);
         boolean success = isGoToSuccess(rawResult);
@@ -236,6 +251,141 @@ public final class MovementService {
             encourageSurfaceDrift(player);
         }
         return new MovementResult(success, mode, destination, label + ": " + rawResult);
+    }
+
+    private static WalkResult walkTo(ServerCommandSource source,
+                                     ServerPlayerEntity player,
+                                     BlockPos destination,
+                                     Mode mode,
+                                     String label) {
+        ServerWorld world = getWorld(player);
+        if (world == null || destination == null) {
+            return new WalkResult(false, player != null ? player.getBlockPos() : null, label + ": no world/destination for walking");
+        }
+        List<PathFinder.PathNode> rawPath = PathFinder.calculatePath(player.getBlockPos(), destination, world);
+        List<PathFinder.PathNode> simplified = PathFinder.simplifyPath(rawPath, world);
+        Queue<Segment> segments = PathFinder.convertPathToSegments(simplified, false);
+        if (segments.isEmpty()) {
+            boolean straightWalk = walkDirect(player, destination, TimeUnit.SECONDS.toMillis(6));
+            if (straightWalk) {
+                return new WalkResult(true, destination, label + ": walked directly (no path)");
+            }
+            return new WalkResult(false, player.getBlockPos(), label + ": no walkable path");
+        }
+
+        long deadline = System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(20);
+        BlockPos lastReached = player.getBlockPos();
+        for (Segment segment : segments) {
+            boolean ok = walkSegment(player, segment, deadline);
+            if (!ok) {
+                return new WalkResult(false, lastReached, label + ": walk blocked near " + segment.end());
+            }
+            lastReached = segment.end();
+        }
+
+        double finalDistanceSq = player.getBlockPos().getSquaredDistance(destination);
+        boolean arrived = finalDistanceSq <= ARRIVAL_DISTANCE_SQ;
+        String detail = arrived
+                ? label + ": walked to destination"
+                : label + ": walk ended " + String.format("%.2f", Math.sqrt(finalDistanceSq)) + " blocks away";
+        return new WalkResult(arrived, player.getBlockPos(), detail);
+    }
+
+    private static boolean walkSegment(ServerPlayerEntity player, Segment segment, long deadlineMs) {
+        if (player == null || segment == null) {
+            return false;
+        }
+        Vec3d target = centerOf(segment.end());
+        while (System.currentTimeMillis() < deadlineMs) {
+            double distanceSq = player.squaredDistanceTo(target);
+            if (distanceSq <= CLOSE_ENOUGH_DISTANCE_SQ) {
+                BotActions.stop(player);
+                return true;
+            }
+            Runnable step = () -> {
+                LookController.faceBlock(player, segment.end());
+                BotActions.sprint(player, segment.sprint());
+                if (segment.jump() || target.y - player.getY() > 0.6D) {
+                    BotActions.jump(player);
+                } else {
+                    BotActions.autoJumpIfNeeded(player);
+                }
+                BotActions.moveToward(player, target, 0.45);
+            };
+            if (!runOnServerThread(player, step)) {
+                return false;
+            }
+            sleep(120L);
+        }
+        return false;
+    }
+
+    private static boolean walkDirect(ServerPlayerEntity player, BlockPos destination, long timeoutMs) {
+        Vec3d target = centerOf(destination);
+        long deadline = System.currentTimeMillis() + timeoutMs;
+        while (System.currentTimeMillis() < deadline) {
+            double distanceSq = player.squaredDistanceTo(target);
+            if (distanceSq <= CLOSE_ENOUGH_DISTANCE_SQ) {
+                BotActions.stop(player);
+                return true;
+            }
+            Runnable step = () -> {
+                LookController.faceBlock(player, destination);
+                BotActions.sprint(player, true);
+                BotActions.autoJumpIfNeeded(player);
+                BotActions.moveToward(player, target, 0.45);
+            };
+            if (!runOnServerThread(player, step)) {
+                return false;
+            }
+            sleep(120L);
+        }
+        return false;
+    }
+
+    private static boolean runOnServerThread(ServerPlayerEntity player, Runnable action) {
+        MinecraftServer server = player != null && player.getCommandSource() != null
+                ? player.getCommandSource().getServer()
+                : null;
+        if (server == null) {
+            action.run();
+            return true;
+        }
+        if (server.isOnThread()) {
+            action.run();
+            return true;
+        }
+        CompletableFuture<Void> future = new CompletableFuture<>();
+        server.execute(() -> {
+            try {
+                action.run();
+                future.complete(null);
+            } catch (Throwable t) {
+                future.completeExceptionally(t);
+            }
+        });
+        try {
+            future.get(750, TimeUnit.MILLISECONDS);
+            return true;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
+        } catch (ExecutionException | TimeoutException e) {
+            LOGGER.warn("Walk step failed: {}", e.getMessage());
+            return false;
+        }
+    }
+
+    private static void sleep(long millis) {
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    private static Vec3d centerOf(BlockPos pos) {
+        return new Vec3d(pos.getX() + 0.5, pos.getY(), pos.getZ() + 0.5);
     }
 
     private static BlockPos findNearbyStandable(ServerWorld world, BlockPos target, int horizontalRange, int verticalRange) {
