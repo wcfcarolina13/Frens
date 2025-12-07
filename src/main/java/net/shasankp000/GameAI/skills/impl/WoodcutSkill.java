@@ -2,9 +2,13 @@ package net.shasankp000.GameAI.skills.impl;
 
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
+import net.minecraft.block.entity.ChestBlockEntity;
+import net.minecraft.inventory.Inventory;
+import net.minecraft.item.BlockItem;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
+import net.minecraft.registry.tag.ItemTags;
 import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
@@ -14,10 +18,12 @@ import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.util.hit.HitResult;
 import net.minecraft.world.RaycastContext;
+import net.minecraft.world.World;
 import net.shasankp000.ChatUtils.ChatUtils;
 import net.shasankp000.Entity.LookController;
 import net.shasankp000.GameAI.BotActions;
 import net.shasankp000.GameAI.services.CraftingHelper;
+import net.shasankp000.GameAI.services.ChestStoreService;
 import net.shasankp000.GameAI.services.MovementService;
 import net.shasankp000.GameAI.services.SkillResumeService;
 import net.shasankp000.GameAI.skills.Skill;
@@ -109,6 +115,7 @@ public final class WoodcutSkill implements Skill {
             if (SkillManager.shouldAbortSkill(bot)) {
                 return SkillExecutionResult.failure("woodcut paused due to nearby threat.");
             }
+            ensureWoodSpaceOrDeposit(source, bot);
             logDetectionSummary(bot, searchRadius, verticalRange, visitedBases);
             Optional<TreeDetector.TreeTarget> targetOpt = TreeDetector.findNearestTree(bot, searchRadius, verticalRange, visitedBases);
             if (targetOpt.isEmpty()) {
@@ -263,6 +270,47 @@ public final class WoodcutSkill implements Skill {
         }
         LOGGER.warn("No path to tree base {}", base.toShortString());
         return false;
+    }
+
+    private void ensureWoodSpaceOrDeposit(ServerCommandSource source, ServerPlayerEntity bot) {
+        if (bot == null || source == null) {
+            return;
+        }
+        if (!isInventoryFull(bot)) {
+            return;
+        }
+        Optional<BlockPos> chestPos = findNearestChest(bot, 10, 4);
+        if (chestPos.isEmpty()) {
+            LOGGER.warn("Inventory full and no chest nearby for deposit.");
+            return;
+        }
+        MovementService.MovementPlan plan = new MovementService.MovementPlan(
+                MovementService.Mode.DIRECT,
+                chestPos.get(),
+                chestPos.get(),
+                null,
+                null,
+                bot.getHorizontalFacing());
+        MovementService.MovementResult move = MovementService.execute(source, bot, plan, false, true, false, false);
+        if (!move.success()) {
+            LOGGER.warn("Failed to reach chest at {} for deposit: {}", chestPos.get().toShortString(), move.detail());
+            return;
+        }
+        if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
+            return;
+        }
+        var be = world.getBlockEntity(chestPos.get());
+        if (!(be instanceof ChestBlockEntity chest)) {
+            LOGGER.warn("Chest at {} missing/invalid for deposit", chestPos.get().toShortString());
+            return;
+        }
+        int deposited = depositWood(bot, chest);
+        if (deposited > 0) {
+            LOGGER.info("Deposited {} wood items into chest at {}", deposited, chestPos.get().toShortString());
+            ChatUtils.sendSystemMessage(source, "Deposited wood into nearby chest.");
+        } else {
+            LOGGER.info("No wood to deposit or chest full at {}", chestPos.get().toShortString());
+        }
     }
 
     private boolean prepareReach(ServerPlayerEntity bot,
@@ -1027,6 +1075,93 @@ public final class WoodcutSkill implements Skill {
             }
         }
         return total;
+    }
+
+    private boolean isInventoryFull(ServerPlayerEntity bot) {
+        for (int i = 0; i < bot.getInventory().size(); i++) {
+            if (bot.getInventory().getStack(i).isEmpty()) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private Optional<BlockPos> findNearestChest(ServerPlayerEntity bot, int radius, int vertical) {
+        if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
+            return Optional.empty();
+        }
+        BlockPos origin = bot.getBlockPos();
+        double best = Double.MAX_VALUE;
+        BlockPos bestPos = null;
+        for (BlockPos pos : BlockPos.iterate(origin.add(-radius, -vertical, -radius), origin.add(radius, vertical, radius))) {
+            var state = world.getBlockState(pos);
+            if (!state.isOf(Blocks.CHEST) && !state.isOf(Blocks.TRAPPED_CHEST)) {
+                continue;
+            }
+            double d = origin.getSquaredDistance(pos);
+            if (d < best) {
+                best = d;
+                bestPos = pos.toImmutable();
+            }
+        }
+        return Optional.ofNullable(bestPos);
+    }
+
+    private int depositWood(ServerPlayerEntity bot, ChestBlockEntity chest) {
+        Inventory chestInv = chest;
+        int moved = 0;
+        for (int i = 0; i < bot.getInventory().size(); i++) {
+            ItemStack stack = bot.getInventory().getStack(i);
+            if (stack.isEmpty()) {
+                continue;
+            }
+            if (!isWoodStack(stack)) {
+                continue;
+            }
+            ItemStack toMove = stack.copy();
+            ItemStack leftover = insertInto(chestInv, toMove);
+            int deposited = toMove.getCount() - leftover.getCount();
+            if (deposited > 0) {
+                moved += deposited;
+                stack.decrement(deposited);
+                bot.getInventory().setStack(i, stack);
+            }
+        }
+        return moved;
+    }
+
+    private boolean isWoodStack(ItemStack stack) {
+        if (stack.isEmpty()) {
+            return false;
+        }
+        if (stack.isIn(ItemTags.LOGS_THAT_BURN) || stack.isIn(ItemTags.PLANKS)) {
+            return true;
+        }
+        if (stack.isOf(Items.STICK)) {
+            return true;
+        }
+        if (stack.getItem() instanceof BlockItem bi) {
+            BlockState state = bi.getBlock().getDefaultState();
+            return state.isIn(BlockTags.LOGS) || state.isIn(BlockTags.PLANKS);
+        }
+        return false;
+    }
+
+    private ItemStack insertInto(Inventory inv, ItemStack stack) {
+        ItemStack remaining = stack.copy();
+        for (int i = 0; i < inv.size() && !remaining.isEmpty(); i++) {
+            ItemStack slot = inv.getStack(i);
+            if (slot.isEmpty()) {
+                inv.setStack(i, remaining.copy());
+                return ItemStack.EMPTY;
+            }
+            if (ItemStack.areItemsEqual(slot, remaining) && ItemStack.areEqual(slot, remaining) && slot.getCount() < slot.getMaxCount()) {
+                int canAdd = Math.min(slot.getMaxCount() - slot.getCount(), remaining.getCount());
+                slot.increment(canAdd);
+                remaining.decrement(canAdd);
+            }
+        }
+        return remaining;
     }
 
     private BlockPos findNearestOverheadLog(ServerWorld world, BlockPos botPos, BlockPos base) {
