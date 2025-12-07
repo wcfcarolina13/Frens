@@ -11,6 +11,7 @@ The notes below cover the commands that are most frequently used while testing a
 - `bot store deposit <amount|all> <item> [bot]` — look at a chest/barrel in reach, move to it, and deposit matching items from the bot’s inventory.
 - `bot store withdraw <amount|all> <item> [bot]` — look at a chest/barrel in reach and withdraw matching items into the bot’s inventory.
 - `bot resume <alias>` — resume the last skill after a pause/hazard alert.
+- `bot shelter hovel <alias?>` — build a quick dirt/cobble hovel around the bot (7x7, roofed, torches, fills gaps). Mines nearby dirt if short on materials.
 
 ---
 

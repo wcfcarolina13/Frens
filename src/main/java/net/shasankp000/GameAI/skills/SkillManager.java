@@ -8,6 +8,7 @@ import net.shasankp000.GameAI.skills.impl.CollectDirtSkill;
 import net.shasankp000.GameAI.skills.impl.DirtShovelSkill;
 import net.shasankp000.GameAI.skills.impl.DropSweepSkill;
 import net.shasankp000.GameAI.skills.impl.MiningSkill;
+import net.shasankp000.GameAI.skills.impl.ShelterSkill;
 import net.shasankp000.GameAI.skills.impl.StripMineSkill;
 import net.shasankp000.GameAI.skills.impl.WoodcutSkill;
 import org.slf4j.Logger;
@@ -33,6 +34,7 @@ public final class SkillManager {
         register(new DropSweepSkill());
         register(new StripMineSkill());
         register(new WoodcutSkill());
+        register(new ShelterSkill());
     }
 
     private SkillManager() {
