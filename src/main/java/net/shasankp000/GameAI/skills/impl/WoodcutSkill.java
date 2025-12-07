@@ -2,7 +2,6 @@ package net.shasankp000.GameAI.skills.impl;
 
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
-import net.minecraft.block.entity.ChestBlockEntity;
 import net.minecraft.inventory.Inventory;
 import net.minecraft.item.BlockItem;
 import net.minecraft.item.Item;
@@ -110,12 +109,22 @@ public final class WoodcutSkill implements Skill {
         Set<BlockPos> visitedBases = new HashSet<>();
         int felled = 0;
         int failures = 0;
+        boolean swept = false;
+        BlockPos startPos = bot.getBlockPos();
+        int minX = startPos.getX();
+        int maxX = startPos.getX();
+        int minY = startPos.getY();
+        int maxY = startPos.getY();
+        int minZ = startPos.getZ();
+        int maxZ = startPos.getZ();
 
         while (felled < targetTrees && failures < MAX_FAILURES) {
             if (SkillManager.shouldAbortSkill(bot)) {
                 return SkillExecutionResult.failure("woodcut paused due to nearby threat.");
             }
-            ensureWoodSpaceOrDeposit(source, bot);
+            if (!ensureWoodSpaceOrDeposit(source, bot)) {
+                return SkillExecutionResult.failure("Inventory full and no reachable chest to deposit wood.");
+            }
             logDetectionSummary(bot, searchRadius, verticalRange, visitedBases);
             Optional<TreeDetector.TreeTarget> targetOpt = TreeDetector.findNearestTree(bot, searchRadius, verticalRange, visitedBases);
             if (targetOpt.isEmpty()) {
@@ -145,6 +154,15 @@ public final class WoodcutSkill implements Skill {
             TreeDetector.TreeTarget target = targetOpt.get();
             visitedBases.add(target.base());
 
+            // Track footprint to size post-run drop sweep.
+            BlockPos posNow = bot.getBlockPos();
+            minX = Math.min(minX, posNow.getX());
+            maxX = Math.max(maxX, posNow.getX());
+            minY = Math.min(minY, posNow.getY());
+            maxY = Math.max(maxY, posNow.getY());
+            minZ = Math.min(minZ, posNow.getZ());
+            maxZ = Math.max(maxZ, posNow.getZ());
+
             if (!approachBase(source, bot, target.base())) {
                 failures++;
                 continue;
@@ -157,8 +175,13 @@ public final class WoodcutSkill implements Skill {
             ChatUtils.sendSystemMessage(source, "Tree cut (" + felled + "/" + targetTrees + ")");
         }
 
-        if (felled >= targetTrees) {
-            DropSweeper.safeSweep(bot, source.withSilent().withMaxLevel(4));
+        if (felled > 0 && !swept) {
+            ensureWoodSpaceOrDeposit(source, bot);
+            double horizRadius = Math.max(6.0,
+                    Math.max(Math.abs(maxX - startPos.getX()), Math.abs(minX - startPos.getX())) + 3.0);
+            double vertRange = Math.max(4.0, (maxY - minY) + 3.0);
+            DropSweeper.safeSweep(bot, source.withSilent().withMaxLevel(4), horizRadius, vertRange);
+            swept = true;
         }
 
         if (felled == 0) {
@@ -179,6 +202,7 @@ public final class WoodcutSkill implements Skill {
         }
         List<BlockPos> placedPillar = new ArrayList<>();
         boolean success = false;
+        int unreachable = 0;
         try {
             Set<BlockPos> broken = new HashSet<>();
 
@@ -186,13 +210,14 @@ public final class WoodcutSkill implements Skill {
             List<BlockPos> trunk = TreeDetector.collectTrunk(world, target.base());
             for (BlockPos log : trunk) {
                 if (!mineWithRetries(bot, source, log, placedPillar, true)) {
+                    LOGGER.warn("Failed to break trunk segment {} for base {}", log.toShortString(), target.base().toShortString());
                     return false;
                 }
                 broken.add(log);
             }
 
             // Then clean up nearby connected logs (limited radius) without pursuit-cheese.
-            Set<BlockPos> remaining = new HashSet<>(TreeDetector.collectConnectedLogs(world, target.base(), 4, 12));
+            Set<BlockPos> remaining = new HashSet<>(TreeDetector.collectConnectedLogs(world, target.base(), 3, 8));
             remaining.removeAll(broken);
 
             while (!remaining.isEmpty()) {
@@ -213,11 +238,17 @@ public final class WoodcutSkill implements Skill {
                 }
                 if (mineWithRetries(bot, source, next, placedPillar, true)) {
                     remaining.remove(next);
-                    remaining.addAll(TreeDetector.collectConnectedLogs(world, target.base(), 4, 12));
+                    remaining.addAll(TreeDetector.collectConnectedLogs(world, target.base(), 3, 8));
                     remaining.removeAll(broken);
                     broken.add(next);
                 } else {
+                    LOGGER.warn("Abandoning unreachable log {} for base {}", next.toShortString(), target.base().toShortString());
                     remaining.remove(next);
+                    unreachable++;
+                    if (unreachable >= 4) {
+                        LOGGER.warn("Stopping cleanup for base {} after {} unreachable logs", target.base().toShortString(), unreachable);
+                        break;
+                    }
                 }
             }
             success = true;
@@ -241,6 +272,7 @@ public final class WoodcutSkill implements Skill {
         if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
             return false;
         }
+        clearBaseObstacles(world, bot, base);
         if (isTrunkWithinReach(world, base, bot)) {
             return true;
         }
@@ -270,25 +302,47 @@ public final class WoodcutSkill implements Skill {
             }
             LOGGER.warn("Failed to approach tree base {}: {}", base.toShortString(), result.detail());
         }
+        // Last resort: try to pillar from here to reach the trunk directly.
+        List<BlockPos> tempPillar = new ArrayList<>();
+        if (prepareReach(bot, source, base, tempPillar)) {
+            descendAndCleanup(bot, tempPillar);
+            return true;
+        }
         LOGGER.warn("No path to tree base {}", base.toShortString());
         return false;
     }
 
-    private void ensureWoodSpaceOrDeposit(ServerCommandSource source, ServerPlayerEntity bot) {
+    private void clearBaseObstacles(ServerWorld world, ServerPlayerEntity bot, BlockPos base) {
+        int radius = 2;
+        for (BlockPos pos : BlockPos.iterate(base.add(-radius, 0, -radius), base.add(radius, 2, radius))) {
+            BlockState state = world.getBlockState(pos);
+            if (state.isAir()) {
+                continue;
+            }
+            if (state.isOf(Blocks.SNOW) || state.isIn(BlockTags.LEAVES) || state.isReplaceable()) {
+                breakSoftBlock(world, bot, pos);
+            }
+        }
+    }
+
+    private boolean ensureWoodSpaceOrDeposit(ServerCommandSource source, ServerPlayerEntity bot) {
         if (bot == null || source == null) {
-            return;
+            return true;
         }
         int empty = countEmptySlots(bot);
         int woodCount = countWood(bot);
-        boolean needsDeposit = empty == 0;
+        boolean needsDeposit = empty <= 2 || woodCount > 256;
+        LOGGER.info("Woodcut inventory: emptySlots={} woodCount={} needsDeposit={}", empty, woodCount, needsDeposit);
         if (!needsDeposit) {
-            return;
+            return true;
         }
-        Optional<BlockPos> chestPos = findNearestChest(bot, 12, 5);
+        Optional<BlockPos> chestPos = findNearestChest(bot, 18, 6);
         if (chestPos.isEmpty()) {
             LOGGER.warn("Inventory full and no chest nearby for deposit.");
-            return;
+            ChatUtils.sendSystemMessage(source, "Inventory full and no reachable chest to stash wood. Pausing woodcut.");
+            return false;
         }
+        LOGGER.info("Depositing wood into nearest container at {}", chestPos.get().toShortString());
         MovementService.MovementPlan plan = new MovementService.MovementPlan(
                 MovementService.Mode.DIRECT,
                 chestPos.get(),
@@ -299,22 +353,25 @@ public final class WoodcutSkill implements Skill {
         MovementService.MovementResult move = MovementService.execute(source, bot, plan, false, true, false, false);
         if (!move.success()) {
             LOGGER.warn("Failed to reach chest at {} for deposit: {}", chestPos.get().toShortString(), move.detail());
-            return;
+            return false;
         }
         if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
-            return;
+            return false;
         }
-        var be = world.getBlockEntity(chestPos.get());
-        if (!(be instanceof ChestBlockEntity chest)) {
-            LOGGER.warn("Chest at {} missing/invalid for deposit", chestPos.get().toShortString());
-            return;
+        BlockState state = world.getBlockState(chestPos.get());
+        Inventory chestInv = resolveInventory(world, chestPos.get());
+        if (chestInv == null) {
+            LOGGER.warn("Container at {} missing/invalid for deposit (state={}, be=null)", chestPos.get().toShortString(), state);
+            return false;
         }
-        int deposited = depositWood(bot, chest);
+        int deposited = depositWood(bot, chestInv);
         if (deposited > 0) {
             LOGGER.info("Deposited {} wood items into chest at {}", deposited, chestPos.get().toShortString());
             ChatUtils.sendSystemMessage(source, "Deposited wood into nearby chest.");
+            return true;
         } else {
             LOGGER.info("No wood to deposit or chest full at {}", chestPos.get().toShortString());
+            return false;
         }
     }
 
@@ -322,18 +379,21 @@ public final class WoodcutSkill implements Skill {
                                  ServerCommandSource source,
                                  BlockPos target,
                                  List<BlockPos> placedPillar) {
+        boolean onPillar = placedPillar != null && !placedPillar.isEmpty();
         if (isWithinReach(bot, target)) {
             LOGGER.debug("Woodcut reach: {} already within reach", target.toShortString());
             return true;
         }
-        moveUnderTarget(source, bot, target);
-        if (isWithinReach(bot, target)) {
-            LOGGER.debug("Woodcut reach: moved under {}", target.toShortString());
-            return true;
-        }
-        if (tryReposition(bot, source, target)) {
-            LOGGER.debug("Woodcut reach: repositioned near {}", target.toShortString());
-            return true;
+        if (!onPillar) {
+            moveUnderTarget(source, bot, target);
+            if (isWithinReach(bot, target)) {
+                LOGGER.debug("Woodcut reach: moved under {}", target.toShortString());
+                return true;
+            }
+            if (tryReposition(bot, source, target)) {
+                LOGGER.debug("Woodcut reach: repositioned near {}", target.toShortString());
+                return true;
+            }
         }
         int needed = target.getY() - bot.getBlockY() - 1;
         if (needed <= 0) {
@@ -369,7 +429,8 @@ public final class WoodcutSkill implements Skill {
         }
         boolean wasSneaking = bot.isSneaking();
         bot.setSneaking(true);
-        LOGGER.info("Woodcut pillar: starting {} steps from {}", steps, bot.getBlockPos().toShortString());
+        LOGGER.info("Woodcut pillar: starting {} steps from {} with {} scaffold blocks",
+                steps, bot.getBlockPos().toShortString(), countPillarBlocks(bot));
         for (int i = 0; i < steps; i++) {
             if (SkillManager.shouldAbortSkill(bot)) {
                 bot.setSneaking(wasSneaking);
@@ -551,6 +612,7 @@ public final class WoodcutSkill implements Skill {
             // try to clear replaceable block
             breakSoftBlock(world, bot, placePos);
         }
+        ensureSupportBlock(bot, placePos);
         if (BotActions.placeBlockAt(bot, placePos, Direction.UP, PILLAR_BLOCKS)) {
             return true;
         }
@@ -560,12 +622,30 @@ public final class WoodcutSkill implements Skill {
             if (!isPlaceableTarget(world, alt)) {
                 breakSoftBlock(world, bot, alt);
             }
+            ensureSupportBlock(bot, alt);
             if (BotActions.placeBlockAt(bot, alt, Direction.UP, PILLAR_BLOCKS)) {
                 LOGGER.debug("Woodcut pillar: placed via offset {} at {}", dir, alt.toShortString());
                 return true;
             }
         }
         return false;
+    }
+
+    private void ensureSupportBlock(ServerPlayerEntity bot, BlockPos target) {
+        if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
+            return;
+        }
+        BlockPos below = target.down();
+        BlockState belowState = world.getBlockState(below);
+        if (!belowState.getCollisionShape(world, below).isEmpty()) {
+            return;
+        }
+        if (!isPlaceableTarget(world, below)) {
+            breakSoftBlock(world, bot, below);
+        }
+        if (BotActions.placeBlockAt(bot, below, Direction.UP, PILLAR_BLOCKS)) {
+            LOGGER.debug("Woodcut pillar: placed support at {}", below.toShortString());
+        }
     }
 
     private boolean isPlaceableTarget(ServerWorld world, BlockPos pos) {
@@ -700,6 +780,7 @@ public final class WoodcutSkill implements Skill {
     private boolean ensurePillarStock(ServerPlayerEntity bot, int needed, ServerCommandSource source) {
         int available = countPillarBlocks(bot);
         if (available >= needed) {
+            LOGGER.debug("Pillar stock ok: {} blocks available for {} needed", available, needed);
             return true;
         }
         int toGather = needed - available;
@@ -755,6 +836,8 @@ public final class WoodcutSkill implements Skill {
         } catch (Exception e) {
             LOGGER.warn("Collect dirt invocation failed: {}", e.getMessage());
         }
+        int finalCount = countPillarBlocks(bot);
+        LOGGER.info("Pillar stock after gather/collect: {} (needed {})", finalCount, needed);
         return countPillarBlocks(bot) >= needed;
     }
 
@@ -918,6 +1001,9 @@ public final class WoodcutSkill implements Skill {
                                     boolean preferAxe) {
         for (int attempt = 0; attempt < MAX_RETRY_MINING; attempt++) {
             LOGGER.info("Woodcut mining attempt {} for {}", attempt + 1, target.toShortString());
+            if (horizontalDistance(bot.getBlockPos(), target) > 2.5) {
+                moveUnderTarget(source, bot, target);
+            }
             if (!prepareReach(bot, source, target, placedPillar)) {
                 LOGGER.warn("Prepare reach failed for {} on attempt {}", target.toShortString(), attempt + 1);
                 continue;
@@ -936,11 +1022,19 @@ public final class WoodcutSkill implements Skill {
             }
             // Force a pillar attempt toward the target before retrying.
             forcePillarToward(bot, source, target, placedPillar);
-            // If still blocked after mining attempt, try a small lift to break LOS/pursuit stalls.
-            emergencyStep(bot, placedPillar);
+            // If still blocked after mining attempt, try a small lift to break LOS/pursuit stalls (only once).
+            if (attempt == 0) {
+                emergencyStep(bot, placedPillar);
+            }
         }
         LOGGER.warn("Failed to mine {} after {} attempts", target.toShortString(), MAX_RETRY_MINING);
         return false;
+    }
+
+    private double horizontalDistance(BlockPos a, BlockPos b) {
+        double dx = a.getX() - b.getX();
+        double dz = a.getZ() - b.getZ();
+        return Math.sqrt(dx * dx + dz * dz);
     }
 
     private BlockPos findStandableNear(ServerWorld world, BlockPos center, int radius, int ySpan) {
@@ -1110,22 +1204,51 @@ public final class WoodcutSkill implements Skill {
         BlockPos origin = bot.getBlockPos();
         double best = Double.MAX_VALUE;
         BlockPos bestPos = null;
+        int scanned = 0;
+        int invCount = 0;
         for (BlockPos pos : BlockPos.iterate(origin.add(-radius, -vertical, -radius), origin.add(radius, vertical, radius))) {
             var state = world.getBlockState(pos);
-            if (!state.isOf(Blocks.CHEST) && !state.isOf(Blocks.TRAPPED_CHEST)) {
+            if (!state.isOf(Blocks.CHEST) && !state.isOf(Blocks.TRAPPED_CHEST) && !state.isOf(Blocks.BARREL)) {
                 continue;
             }
+            scanned++;
+            Inventory inv = resolveInventory(world, pos);
+            if (inv == null) {
+                continue;
+            }
+            invCount++;
             double d = origin.getSquaredDistance(pos);
             if (d < best) {
                 best = d;
                 bestPos = pos.toImmutable();
             }
         }
+        LOGGER.info("Chest scan: scanned={} withInventory={} best={}", scanned, invCount, bestPos == null ? "none" : bestPos.toShortString());
         return Optional.ofNullable(bestPos);
     }
 
-    private int depositWood(ServerPlayerEntity bot, ChestBlockEntity chest) {
-        Inventory chestInv = chest;
+    private Inventory resolveInventory(ServerWorld world, BlockPos pos) {
+        var be = world.getBlockEntity(pos);
+        if (be instanceof Inventory inv) {
+            return inv;
+        }
+        if (world.getServer() == null) {
+            return null;
+        }
+        final java.util.concurrent.CompletableFuture<Inventory> future = new java.util.concurrent.CompletableFuture<>();
+        world.getServer().execute(() -> {
+            var be2 = world.getBlockEntity(pos);
+            future.complete(be2 instanceof Inventory inv2 ? inv2 : null);
+        });
+        try {
+            return future.get(300, java.util.concurrent.TimeUnit.MILLISECONDS);
+        } catch (Exception e) {
+            future.cancel(true);
+            return null;
+        }
+    }
+
+    private int depositWood(ServerPlayerEntity bot, Inventory chestInv) {
         int moved = 0;
         for (int i = 0; i < bot.getInventory().size(); i++) {
             ItemStack stack = bot.getInventory().getStack(i);
@@ -1185,8 +1308,8 @@ public final class WoodcutSkill implements Skill {
         if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
             return;
         }
-        int radius = 6;
-        for (BlockPos pos : BlockPos.iterate(base.add(-radius, -2, -radius), base.add(radius, 8, radius))) {
+        int radius = 8;
+        for (BlockPos pos : BlockPos.iterate(base.add(-radius, -2, -radius), base.add(radius, 12, radius))) {
             if (!PILLAR_BLOCKS.contains(world.getBlockState(pos).getBlock().asItem())) {
                 continue;
             }
@@ -1250,14 +1373,14 @@ public final class WoodcutSkill implements Skill {
      * Minimal drop sweep hook to avoid pulling in full skill stack.
      */
     private static final class DropSweeper {
-        static void safeSweep(ServerPlayerEntity bot, ServerCommandSource source) {
+        static void safeSweep(ServerPlayerEntity bot, ServerCommandSource source, double radius, double verticalRange) {
             try {
                 net.shasankp000.GameAI.DropSweeper.sweep(
                         source,
-                        6.0,
-                        4.0,
-                        6,
-                        7_500L
+                        radius,
+                        verticalRange,
+                        Math.max(12, (int) Math.ceil(radius * 2)),
+                        12_000L
                 );
             } catch (Exception e) {
                 LOGGER.warn("Drop sweep after woodcut failed: {}", e.getMessage());

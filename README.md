@@ -3,6 +3,15 @@
 This project adds controllable “fake players” that can run scripted skills side-by-side with real players.  
 The notes below cover the commands that are most frequently used while testing and orchestrating bots.
 
+## Command cheatsheet
+
+- `bot woodcut <count?> <searchRadius?> <verticalRange?>` — fell natural trees (all types), pillar when needed, replant saplings, avoid player builds. Deposits wood to nearby chest/barrel automatically if inventory is tight.
+- `bot follow` — follow the commander at a respectful distance (stops if too close).
+- `bot dropsweep` — manually sweep nearby drops without teleporting (woodcut also sweeps automatically when it finishes or aborts after cutting).
+- `bot store deposit <amount|all> <item> [bot]` — look at a chest/barrel in reach, move to it, and deposit matching items from the bot’s inventory.
+- `bot store withdraw <amount|all> <item> [bot]` — look at a chest/barrel in reach and withdraw matching items into the bot’s inventory.
+- `bot resume <alias>` — resume the last skill after a pause/hazard alert.
+
 ---
 
 ## Targeting Bots

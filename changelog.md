@@ -11,6 +11,10 @@ Historical record and reasoning. `TODO.md` is the source of truth for what’s n
 ## 2025-11-20
 - Follow rework: bots now chase with WASD-style input, timeboxed path steps (no tick stalls), sensible teleport catch-up, and chill when adjacent; hill walking and vertical catch-up improved.
 
+## Unreleased
+- Woodcut: tighter unreachable-log cap (4 skips), wider drop sweep sized to the job footprint, and confirmed sapling replant stays on; aborts still trigger a sweep.
+- Chest use: bot auto-deposits wood to nearby chests/barrels; documented `/bot store deposit|withdraw <amount|all> <item> [bot]`.
+
 ## 2025-11-18
 - Persistency and safety: inventory save timing fixed; drop sweeps stop breaking blocks and only collect items; bots break out when spawned in walls; upward stairs start in the controller’s facing direction (partial fix).
 - Task queue notes captured for stats persistence and the simplified upward stair spec.
