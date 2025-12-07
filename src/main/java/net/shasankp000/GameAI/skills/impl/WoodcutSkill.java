@@ -157,6 +157,9 @@ public final class WoodcutSkill implements Skill {
         if (felled == 0) {
             return SkillExecutionResult.failure("No valid trees nearby. Try moving closer or adjust radius.");
         }
+        if (failures >= MAX_FAILURES) {
+            return SkillExecutionResult.failure("Stopped after cutting " + felled + " tree(s); repeated failures reaching remaining targets (path/LOS/inventory).");
+        }
         if (felled < targetTrees) {
             return SkillExecutionResult.success("Stopped after cutting " + felled + " tree(s); no more safe targets.");
         }

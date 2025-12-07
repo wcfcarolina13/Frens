@@ -113,8 +113,8 @@ public final class DropSweeper {
             }
 
             MovementService.MovementPlan plan = planOpt.get();
-            // Avoid pursuit-style impulses during cleanup so we don't yank the bot off towers.
-            MovementService.MovementResult movement = MovementService.execute(source, player, plan, null, false, false, true);
+            // Avoid teleport/pursuit/snap during cleanup so we don't yank the bot off towers.
+            MovementService.MovementResult movement = MovementService.execute(source, player, plan, false, false, false, false);
             LOGGER.info("Drop sweep movement ({}) -> {}", plan.mode(), movement.detail());
             attempts++;
 
