@@ -229,6 +229,7 @@ public final class WoodcutSkill implements Skill {
             if (!placedPillar.isEmpty()) {
                 descendAndCleanup(bot, placedPillar);
                 cleanupNearbyScaffold(bot, target.base());
+                cleanupNearbyScaffold(bot, bot.getBlockPos());
             }
             if (!success) {
                 LOGGER.warn("Woodcut cleanup: pillar removed after failure");
@@ -279,7 +280,7 @@ public final class WoodcutSkill implements Skill {
         }
         int empty = countEmptySlots(bot);
         int woodCount = countWood(bot);
-        boolean needsDeposit = empty <= 1 || woodCount >= 32;
+        boolean needsDeposit = empty == 0;
         if (!needsDeposit) {
             return;
         }
@@ -1184,8 +1185,8 @@ public final class WoodcutSkill implements Skill {
         if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
             return;
         }
-        int radius = 3;
-        for (BlockPos pos : BlockPos.iterate(base.add(-radius, -1, -radius), base.add(radius, 5, radius))) {
+        int radius = 6;
+        for (BlockPos pos : BlockPos.iterate(base.add(-radius, -2, -radius), base.add(radius, 8, radius))) {
             if (!PILLAR_BLOCKS.contains(world.getBlockState(pos).getBlock().asItem())) {
                 continue;
             }
