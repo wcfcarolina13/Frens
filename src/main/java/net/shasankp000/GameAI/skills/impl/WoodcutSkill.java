@@ -70,6 +70,17 @@ public final class WoodcutSkill implements Skill {
             Items.COBBLED_DEEPSLATE,
             Items.NETHERRACK
     );
+    private static final List<Item> SAPLING_ITEMS = List.of(
+            Items.OAK_SAPLING,
+            Items.SPRUCE_SAPLING,
+            Items.BIRCH_SAPLING,
+            Items.JUNGLE_SAPLING,
+            Items.ACACIA_SAPLING,
+            Items.DARK_OAK_SAPLING,
+            Items.MANGROVE_PROPAGULE,
+            Items.CHERRY_SAPLING,
+            Items.BAMBOO
+    );
 
     @Override
     public String name() {
@@ -102,6 +113,12 @@ public final class WoodcutSkill implements Skill {
             Optional<TreeDetector.TreeTarget> targetOpt = TreeDetector.findNearestTree(bot, searchRadius, verticalRange, visitedBases);
             if (targetOpt.isEmpty()) {
                 logDetectionDiagnostics(bot, searchRadius, verticalRange, visitedBases);
+                Optional<BlockPos> floaters = TreeDetector.findFloatingLog(bot, searchRadius, verticalRange, visitedBases);
+                if (floaters.isPresent()) {
+                    LOGGER.warn("Woodcut: cleaning floating log at {}", floaters.get().toShortString());
+                    TreeDetector.TreeTarget synthetic = new TreeDetector.TreeTarget(floaters.get(), floaters.get(), 1);
+                    targetOpt = Optional.of(synthetic);
+                }
                 Optional<BlockPos> stray = TreeDetector.findNearestLooseLog(bot, searchRadius, verticalRange, visitedBases);
                 if (stray.isEmpty()) {
                     Optional<BlockPos> anyLog = TreeDetector.findNearestAnyLog(bot, searchRadius, verticalRange, visitedBases);
@@ -196,6 +213,9 @@ public final class WoodcutSkill implements Skill {
             success = true;
             return true;
         } finally {
+            if (success) {
+                plantSaplings(bot, source, target.base());
+            }
             if (!placedPillar.isEmpty()) {
                 descendAndCleanup(bot, placedPillar);
             }
@@ -213,7 +233,7 @@ public final class WoodcutSkill implements Skill {
             return true;
         }
         // First try a low, human-like standable near the base.
-        BlockPos nearby = findStandableNear(world, base, 2, 3);
+        BlockPos nearby = findStandableNear(world, base, 4, 4);
         if (nearby != null) {
             MovementService.MovementPlan plan = new MovementService.MovementPlan(
                     MovementService.Mode.DIRECT,
@@ -222,7 +242,7 @@ public final class WoodcutSkill implements Skill {
                     null,
                     null,
                     bot.getHorizontalFacing());
-            MovementService.MovementResult res = MovementService.execute(source, bot, plan, false, true, false);
+            MovementService.MovementResult res = MovementService.execute(source, bot, plan, false, true, false, false);
             if (res.success() || isTrunkWithinReach(world, base, bot)) {
                 return true;
             }
@@ -232,7 +252,7 @@ public final class WoodcutSkill implements Skill {
         MovementService.MovementOptions options = MovementService.MovementOptions.skillLoot();
         Optional<MovementService.MovementPlan> planOpt = MovementService.planLootApproach(bot, base, options);
         if (planOpt.isPresent()) {
-            MovementService.MovementResult result = MovementService.execute(source, bot, planOpt.get(), false, true, false);
+            MovementService.MovementResult result = MovementService.execute(source, bot, planOpt.get(), false, true, false, false);
             if (result.success() || isTrunkWithinReach(world, base, bot)) {
                 return true;
             }
@@ -278,7 +298,7 @@ public final class WoodcutSkill implements Skill {
         if (planOpt.isEmpty()) {
             return false;
         }
-        MovementService.MovementResult res = MovementService.execute(source, bot, planOpt.get(), false, true, false);
+        MovementService.MovementResult res = MovementService.execute(source, bot, planOpt.get(), false, true, false, false);
         return res.success() || isWithinReach(bot, target);
     }
 
@@ -601,15 +621,22 @@ public final class WoodcutSkill implements Skill {
     }
 
     private boolean selectLeafTool(ServerPlayerEntity bot) {
-        // Prefer shears, otherwise empty hand/any non-axe tool to preserve durability
-        if (BotActions.selectBestTool(bot, "shears", "axe")) {
+        // Prefer shears; otherwise empty hand or non-weapon/non-axe tool to preserve durability
+        if (BotActions.selectBestTool(bot, "shears", "")) {
             return true;
         }
         for (int i = 0; i < 9; i++) {
-            if (bot.getInventory().getStack(i).isEmpty()) {
+            var stack = bot.getInventory().getStack(i);
+            if (stack.isEmpty()) {
                 BotActions.selectHotbarSlot(bot, i);
                 return true;
             }
+            String key = stack.getItem().getTranslationKey().toLowerCase();
+            if (key.contains("sword") || key.contains("axe") || key.contains("pickaxe")) {
+                continue;
+            }
+            BotActions.selectHotbarSlot(bot, i);
+            return true;
         }
         return true;
     }
@@ -779,7 +806,7 @@ public final class WoodcutSkill implements Skill {
                 null,
                 null,
                 bot.getHorizontalFacing());
-        MovementService.MovementResult res = MovementService.execute(source, bot, plan, false, true, false);
+        MovementService.MovementResult res = MovementService.execute(source, bot, plan, false, true, false, false);
         if (!res.success()) {
             MovementService.clearRecentWalkAttempt(bot.getUuid());
         }
@@ -840,7 +867,15 @@ public final class WoodcutSkill implements Skill {
                 continue;
             }
             clearBlockingLeaves(bot, target);
-            if (mineBlock(bot, target, preferAxe)) {
+            boolean wasSneak = bot.isSneaking();
+            if (!placedPillar.isEmpty()) {
+                bot.setSneaking(true);
+            }
+            boolean mined = mineBlock(bot, target, preferAxe);
+            if (!placedPillar.isEmpty()) {
+                bot.setSneaking(wasSneak);
+            }
+            if (mined) {
                 return true;
             }
             // Force a pillar attempt toward the target before retrying.
@@ -919,6 +954,76 @@ public final class WoodcutSkill implements Skill {
             LOGGER.debug("Clearing LOS obstruction at {}", hitPos.toShortString());
             breakLeaf(bot, hitPos);
         }
+    }
+
+    private void plantSaplings(ServerPlayerEntity bot, ServerCommandSource source, BlockPos base) {
+        if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
+            return;
+        }
+        int toPlant = 0;
+        for (Item sap : SAPLING_ITEMS) {
+            toPlant += countItem(bot, sap);
+        }
+        if (toPlant <= 0) {
+            return;
+        }
+        int radius = 4;
+        for (BlockPos soil : BlockPos.iterate(base.add(-radius, -1, -radius), base.add(radius, 1, radius))) {
+            if (toPlant <= 0) {
+                break;
+            }
+            BlockPos target = soil.up();
+            if (!canPlantSapling(world, soil, target)) {
+                continue;
+            }
+            List<Item> availableSaplings = availableSaplingItems(bot);
+            if (availableSaplings.isEmpty()) {
+                break;
+            }
+            if (BotActions.placeBlockAt(bot, target, Direction.UP, availableSaplings)) {
+                toPlant--;
+                LOGGER.info("Planted sapling at {}", target.toShortString());
+            }
+        }
+    }
+
+    private boolean canPlantSapling(ServerWorld world, BlockPos soil, BlockPos target) {
+        BlockState soilState = world.getBlockState(soil);
+        BlockState targetState = world.getBlockState(target);
+        if (!targetState.isAir()) {
+            return false;
+        }
+        if (!soilState.isIn(BlockTags.DIRT) && !soilState.isOf(net.minecraft.block.Blocks.FARMLAND)) {
+            return false;
+        }
+        int checkRadius = 3;
+        for (BlockPos pos : BlockPos.iterate(target.add(-checkRadius, -1, -checkRadius), target.add(checkRadius, 1, checkRadius))) {
+            if (world.getBlockState(pos).isIn(BlockTags.SAPLINGS)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private List<Item> availableSaplingItems(ServerPlayerEntity bot) {
+        List<Item> found = new ArrayList<>();
+        for (Item sap : SAPLING_ITEMS) {
+            if (countItem(bot, sap) > 0) {
+                found.add(sap);
+            }
+        }
+        return found;
+    }
+
+    private int countItem(ServerPlayerEntity bot, Item item) {
+        int total = 0;
+        for (int i = 0; i < bot.getInventory().size(); i++) {
+            ItemStack stack = bot.getInventory().getStack(i);
+            if (stack.isOf(item)) {
+                total += stack.getCount();
+            }
+        }
+        return total;
     }
 
     private BlockPos findNearestOverheadLog(ServerWorld world, BlockPos botPos, BlockPos base) {

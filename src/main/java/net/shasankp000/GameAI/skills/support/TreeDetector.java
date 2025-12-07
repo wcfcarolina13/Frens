@@ -177,6 +177,53 @@ public final class TreeDetector {
         return Optional.ofNullable(best);
     }
 
+    /**
+        * Floating log: no adjacent logs and no nearby leaves; intended for cleanup of stray blocks (unlikely player builds).
+        */
+    public static Optional<BlockPos> findFloatingLog(ServerPlayerEntity bot,
+                                                     int horizontalRadius,
+                                                     int verticalRange,
+                                                     Set<BlockPos> visited) {
+        if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
+            return Optional.empty();
+        }
+        BlockPos origin = bot.getBlockPos();
+        double bestDistSq = Double.MAX_VALUE;
+        BlockPos best = null;
+        for (BlockPos candidate : BlockPos.iterate(origin.add(-horizontalRadius, -verticalRange, -horizontalRadius),
+                origin.add(horizontalRadius, verticalRange, horizontalRadius))) {
+            if (visited != null && visited.contains(candidate)) {
+                continue;
+            }
+            BlockState state = world.getBlockState(candidate);
+            if (!isLog(state)) {
+                continue;
+            }
+            if (isNearHumanBlocks(world, candidate, 3) || ProtectedZoneService.isProtected(candidate, world, null)) {
+                continue;
+            }
+            boolean hasLogNeighbor = false;
+            for (Direction dir : Direction.values()) {
+                if (isLog(world.getBlockState(candidate.offset(dir)))) {
+                    hasLogNeighbor = true;
+                    break;
+                }
+            }
+            if (hasLogNeighbor) {
+                continue;
+            }
+            if (hasLeavesNearby(world, candidate, 2, 2)) {
+                continue;
+            }
+            double d = origin.getSquaredDistance(candidate);
+            if (d < bestDistSq) {
+                bestDistSq = d;
+                best = candidate.toImmutable();
+            }
+        }
+        return Optional.ofNullable(best);
+    }
+
     public static Optional<TreeTarget> detectTreeAt(ServerWorld world, BlockPos logPos) {
         if (world == null || logPos == null) {
             return Optional.empty();

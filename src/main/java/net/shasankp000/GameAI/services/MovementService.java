@@ -146,14 +146,14 @@ public final class MovementService {
     public static MovementResult execute(ServerCommandSource source,
                                          ServerPlayerEntity player,
                                          MovementPlan plan) {
-        return execute(source, player, plan, null, false, true);
+        return execute(source, player, plan, null, false, true, true);
     }
 
     public static MovementResult execute(ServerCommandSource source,
                                          ServerPlayerEntity player,
                                          MovementPlan plan,
                                          Boolean allowTeleportOverride) {
-        return execute(source, player, plan, allowTeleportOverride, false, true);
+        return execute(source, player, plan, allowTeleportOverride, false, true, true);
     }
 
     public static MovementResult execute(ServerCommandSource source,
@@ -161,7 +161,7 @@ public final class MovementService {
                                          MovementPlan plan,
                                          Boolean allowTeleportOverride,
                                          boolean fastReplan) {
-        return execute(source, player, plan, allowTeleportOverride, fastReplan, true);
+        return execute(source, player, plan, allowTeleportOverride, fastReplan, true, true);
     }
 
     public static MovementResult execute(ServerCommandSource source,
@@ -169,16 +169,17 @@ public final class MovementService {
                                          MovementPlan plan,
                                          Boolean allowTeleportOverride,
                                          boolean fastReplan,
-                                         boolean allowPursuit) {
+                                         boolean allowPursuit,
+                                         boolean allowSnap) {
         if (source == null || player == null || plan == null) {
             return new MovementResult(false, Mode.DIRECT, player != null ? player.getBlockPos() : null, "Invalid movement request.");
         }
         LOGGER.info("Movement execute: mode={} dest={} allowTpOverride={} fastReplan={} player={}",
                 plan.mode(), plan.finalDestination(), allowTeleportOverride, fastReplan, player.getName().getString());
         return switch (plan.mode()) {
-            case DIRECT -> moveDirect(source, player, plan.finalDestination(), allowTeleportOverride, fastReplan, allowPursuit);
-            case WADE -> moveWithWade(source, player, plan, allowTeleportOverride, fastReplan, allowPursuit);
-            case BRIDGE -> moveWithBridge(source, player, plan, allowTeleportOverride, fastReplan, allowPursuit);
+            case DIRECT -> moveDirect(source, player, plan.finalDestination(), allowTeleportOverride, fastReplan, allowPursuit, allowSnap);
+            case WADE -> moveWithWade(source, player, plan, allowTeleportOverride, fastReplan, allowPursuit, allowSnap);
+            case BRIDGE -> moveWithBridge(source, player, plan, allowTeleportOverride, fastReplan, allowPursuit, allowSnap);
         };
     }
 
@@ -187,8 +188,9 @@ public final class MovementService {
                                              BlockPos destination,
                                              Boolean allowTeleportOverride,
                                              boolean fastReplan,
-                                             boolean allowPursuit) {
-        MovementResult goTo = moveTo(source, player, destination, Mode.DIRECT, "direct", allowTeleportOverride, fastReplan, allowPursuit);
+                                             boolean allowPursuit,
+                                             boolean allowSnap) {
+        MovementResult goTo = moveTo(source, player, destination, Mode.DIRECT, "direct", allowTeleportOverride, fastReplan, allowPursuit, allowSnap);
         if (!goTo.success()) {
             return goTo;
         }
@@ -200,8 +202,9 @@ public final class MovementService {
                                                MovementPlan plan,
                                                Boolean allowTeleportOverride,
                                                boolean fastReplan,
-                                               boolean allowPursuit) {
-        MovementResult approach = moveTo(source, player, plan.approachDestination(), Mode.WADE, "wade-approach", allowTeleportOverride, fastReplan, allowPursuit);
+                                               boolean allowPursuit,
+                                               boolean allowSnap) {
+        MovementResult approach = moveTo(source, player, plan.approachDestination(), Mode.WADE, "wade-approach", allowTeleportOverride, fastReplan, allowPursuit, allowSnap);
         if (!approach.success()) {
             return approach;
         }
@@ -219,8 +222,9 @@ public final class MovementService {
                                                  MovementPlan plan,
                                                  Boolean allowTeleportOverride,
                                                  boolean fastReplan,
-                                                 boolean allowPursuit) {
-        MovementResult approach = moveTo(source, player, plan.approachDestination(), Mode.BRIDGE, "bridge-approach", allowTeleportOverride, fastReplan, allowPursuit);
+                                                 boolean allowPursuit,
+                                                 boolean allowSnap) {
+        MovementResult approach = moveTo(source, player, plan.approachDestination(), Mode.BRIDGE, "bridge-approach", allowTeleportOverride, fastReplan, allowPursuit, allowSnap);
         if (!approach.success()) {
             return approach;
         }
@@ -230,7 +234,7 @@ public final class MovementService {
             return new MovementResult(false, Mode.BRIDGE, plan.bridgeTarget(), "Unable to place bridge block at " + plan.bridgeTarget());
         }
 
-        MovementResult finalMove = moveTo(source, player, plan.finalDestination(), Mode.BRIDGE, "bridge-final", allowTeleportOverride, fastReplan, allowPursuit);
+        MovementResult finalMove = moveTo(source, player, plan.finalDestination(), Mode.BRIDGE, "bridge-final", allowTeleportOverride, fastReplan, allowPursuit, allowSnap);
         if (!finalMove.success()) {
             return finalMove;
         }
@@ -273,7 +277,8 @@ public final class MovementService {
                                          String label,
                                          Boolean allowTeleportOverride,
                                          boolean fastReplan,
-                                         boolean allowPursuit) {
+                                         boolean allowPursuit,
+                                         boolean allowSnap) {
         if (destination == null) {
             return new MovementResult(false, mode, player.getBlockPos(), "No destination specified for " + label);
         }
@@ -287,7 +292,7 @@ public final class MovementService {
         }
         if (!allowTeleport) {
             LOGGER.info("Movement choosing walk only: {} -> {}", player.getName().getString(), destination);
-            WalkResult walkResult = walkTo(source, player, destination, mode, label, fastReplan);
+            WalkResult walkResult = walkTo(source, player, destination, mode, label, fastReplan, allowSnap);
             if (!walkResult.success() && allowPursuit) {
                 boolean pursued = pursuitUntilClose(player, destination, TimeUnit.SECONDS.toMillis(3), CLOSE_ENOUGH_DISTANCE_SQ, label);
                 if (pursued) {
@@ -300,14 +305,14 @@ public final class MovementService {
         double distanceSq = player.getBlockPos().getSquaredDistance(destination);
         if (mode == Mode.DIRECT && distanceSq <= 256) {
             LOGGER.info("Movement prefers walk (near): {} -> {}", player.getName().getString(), destination);
-            WalkResult walkResult = walkTo(source, player, destination, mode, label, fastReplan);
+            WalkResult walkResult = walkTo(source, player, destination, mode, label, fastReplan, allowSnap);
             if (walkResult.success()) {
                 return new MovementResult(true, mode, walkResult.arrivedAt(), label + ": walked");
             }
             LOGGER.info("Walk failed near {} ({}), trying teleport fallback", destination, walkResult.detail());
         }
         if (distanceSq <= 900) {
-            WalkResult walkResult = walkTo(source, player, destination, mode, label, fastReplan);
+            WalkResult walkResult = walkTo(source, player, destination, mode, label, fastReplan, allowSnap);
             if (walkResult.success()) {
                 return new MovementResult(true, mode, walkResult.arrivedAt(), label + ": walked");
             }
@@ -337,7 +342,8 @@ public final class MovementService {
                                      BlockPos destination,
                                      Mode mode,
                                      String label,
-                                     boolean fastReplan) {
+                                     boolean fastReplan,
+                                     boolean allowSnap) {
         ServerWorld world = getWorld(player);
         BlockPos currentPos = player != null ? player.getBlockPos() : null;
         if (world == null || destination == null) {
@@ -381,7 +387,7 @@ public final class MovementService {
 
             boolean allOk = true;
             for (Segment segment : segments) {
-                SegmentResult seg = walkSegment(player, segment, deadline);
+                SegmentResult seg = walkSegment(player, segment, deadline, allowSnap);
                 if (!seg.success()) {
                     lastReached = player.getBlockPos();
                     allOk = false;
@@ -449,7 +455,7 @@ public final class MovementService {
         }
     }
 
-    private static SegmentResult walkSegment(ServerPlayerEntity player, Segment segment, long deadlineMs) {
+    private static SegmentResult walkSegment(ServerPlayerEntity player, Segment segment, long deadlineMs, boolean allowSnap) {
         if (player == null || segment == null) {
             return new SegmentResult(false, false);
         }
@@ -499,7 +505,7 @@ public final class MovementService {
         double remaining = Math.sqrt(player.squaredDistanceTo(target));
         LOGGER.info("walkSegment timed out near {} remainingDist={}", segment.end(), remaining);
         // Force a small snap forward when very close to planned segment end to avoid infinite loop.
-        if (remaining <= 2.2D) {
+        if (allowSnap && remaining <= 2.2D) {
             LOGGER.warn("walkSegment snap forward to {}", segment.end());
             snapTo(player, segment.end());
             return new SegmentResult(true, true);
