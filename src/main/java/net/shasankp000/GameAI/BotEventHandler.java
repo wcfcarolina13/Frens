@@ -110,6 +110,10 @@ public class BotEventHandler {
     private static final long ESCAPE_NUDGE_COOLDOWN_MS = 1_200L;
     private static final Map<UUID, Long> LAST_FOLLOW_PLAN_MS = new ConcurrentHashMap<>();
     private static final Map<UUID, BlockPos> LAST_FOLLOW_TARGET_POS = new ConcurrentHashMap<>();
+    private static final Map<UUID, Long> FOLLOW_TOO_CLOSE_SINCE = new ConcurrentHashMap<>();
+    private static final double FOLLOW_PERSONAL_SPACE = 1.6D; // prefer at least ~1 block gap
+    private static final double FOLLOW_BACKUP_DISTANCE = 1.05D; // trigger backup after linger
+    private static final long FOLLOW_BACKUP_TRIGGER_MS = 3_000L;
 
     public static void noteObstructDamage(ServerPlayerEntity bot) {
         MinecraftServer srv = bot.getCommandSource().getServer();
@@ -1388,6 +1392,7 @@ public class BotEventHandler {
 
         Vec3d targetPos = positionOf(target);
         double distanceSq = bot.squaredDistanceTo(targetPos);
+        handleFollowPersonalSpace(bot, target, distanceSq, targetPos);
         boolean forceWalk = state != null && state.followNoTeleport;
         double stopRange = state != null ? state.followStopRange : 0.0D;
         boolean allowTeleport = SkillPreferences.teleportDuringSkills(bot) && !forceWalk;
@@ -1765,7 +1770,7 @@ public class BotEventHandler {
             return;
         }
         double distanceSq = bot.squaredDistanceTo(targetPos);
-        if (distanceSq <= 1.2D * 1.2D) {
+        if (distanceSq <= FOLLOW_PERSONAL_SPACE * FOLLOW_PERSONAL_SPACE) {
             BotActions.stop(bot); // close enough, chill
             return;
         }
@@ -1802,6 +1807,47 @@ public class BotEventHandler {
             return true;
         }
         return false;
+    }
+
+    private static void handleFollowPersonalSpace(ServerPlayerEntity bot,
+                                                  ServerPlayerEntity target,
+                                                  double distanceSq,
+                                                  Vec3d targetPos) {
+        if (bot == null || target == null || targetPos == null) {
+            return;
+        }
+        UUID id = bot.getUuid();
+        double closeSq = FOLLOW_BACKUP_DISTANCE * FOLLOW_BACKUP_DISTANCE;
+        if (distanceSq <= closeSq) {
+            long now = System.currentTimeMillis();
+            Long since = FOLLOW_TOO_CLOSE_SINCE.get(id);
+            if (since == null) {
+                FOLLOW_TOO_CLOSE_SINCE.put(id, now);
+            } else if (now - since >= FOLLOW_BACKUP_TRIGGER_MS) {
+                stepBack(bot, targetPos);
+            }
+        } else {
+            FOLLOW_TOO_CLOSE_SINCE.remove(id);
+        }
+    }
+
+    private static void stepBack(ServerPlayerEntity bot, Vec3d targetPos) {
+        if (bot == null || targetPos == null) {
+            return;
+        }
+        Vec3d botPos = positionOf(bot);
+        Vec3d away = botPos.subtract(targetPos);
+        if (away.lengthSquared() < 1.0E-4) {
+            // Nudge with current facing if overlap
+            float yaw = bot.getYaw();
+            double dx = -Math.sin(Math.toRadians(yaw));
+            double dz = Math.cos(Math.toRadians(yaw));
+            away = new Vec3d(dx, 0, dz);
+        }
+        Vec3d target = botPos.add(away.normalize().multiply(1.8));
+        LookController.faceBlock(bot, BlockPos.ofFloored(target));
+        BotActions.sprint(bot, false);
+        BotActions.applyMovementInput(bot, target, 0.14);
     }
 
     private static Entity findNearestItem(ServerPlayerEntity bot, List<Entity> entities, double radius) {

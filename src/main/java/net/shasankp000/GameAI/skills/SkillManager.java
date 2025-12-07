@@ -9,6 +9,7 @@ import net.shasankp000.GameAI.skills.impl.DirtShovelSkill;
 import net.shasankp000.GameAI.skills.impl.DropSweepSkill;
 import net.shasankp000.GameAI.skills.impl.MiningSkill;
 import net.shasankp000.GameAI.skills.impl.StripMineSkill;
+import net.shasankp000.GameAI.skills.impl.WoodcutSkill;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -31,6 +32,7 @@ public final class SkillManager {
         register(new MiningSkill());
         register(new DropSweepSkill());
         register(new StripMineSkill());
+        register(new WoodcutSkill());
     }
 
     private SkillManager() {
@@ -76,9 +78,9 @@ public final class SkillManager {
         } finally {
             boolean abortRequested = TaskService.isAbortRequested(botUuid);
             try {
-                // Only perform post-task drop_sweep if inventory isn't full
-                // This prevents attempting collection when there's no space
-                if (botPlayer != null && !abortRequested && !isInventoryFull(botPlayer)) {
+                // Only perform post-task drop_sweep if inventory isn't full and the skill permits it.
+                // Woodcut handles its own sweep after completion to avoid tower disruption.
+                if (botPlayer != null && !abortRequested && !isInventoryFull(botPlayer) && !"woodcut".equalsIgnoreCase(name)) {
                     DropSweeper.sweep(
                             context.botSource().withSilent().withMaxLevel(4),
                             DROP_SWEEP_RADIUS,

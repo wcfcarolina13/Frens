@@ -2,6 +2,8 @@ package net.shasankp000.PlayerUtils;
 
 import net.minecraft.block.BlockState;
 import net.minecraft.item.ItemStack;
+import net.minecraft.item.Items;
+import net.minecraft.registry.tag.BlockTags;
 import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.server.network.ServerPlayerEntity;
 import org.slf4j.Logger;
@@ -18,6 +20,14 @@ public class ToolSelector {
         ItemStack bestTool = ItemStack.EMPTY;
         float highestSpeed = 0.0f;
         int bestHotbarSlot = -1;
+
+        if (blockState != null && blockState.isIn(BlockTags.LEAVES)) {
+            ItemStack shears = findShears(bot);
+            if (!shears.isEmpty()) {
+                return shears;
+            }
+            return hotBarUtils.getSelectedHotbarItemStack(bot);
+        }
 
         // First, search hotbar (slots 0-8)
         for (int i = 0; i < hotbarItems.size(); i++) {
@@ -75,5 +85,24 @@ public class ToolSelector {
 
         return bestTool;
     }
-}
 
+    private static ItemStack findShears(ServerPlayerEntity bot) {
+        if (bot == null) {
+            return ItemStack.EMPTY;
+        }
+        // Check hotbar first
+        for (int i = 0; i < 9; i++) {
+            ItemStack stack = bot.getInventory().getStack(i);
+            if (stack.isOf(Items.SHEARS)) {
+                return stack;
+            }
+        }
+        for (int slot = 9; slot < 36; slot++) {
+            ItemStack stack = bot.getInventory().getStack(slot);
+            if (stack.isOf(Items.SHEARS)) {
+                return stack;
+            }
+        }
+        return ItemStack.EMPTY;
+    }
+}
