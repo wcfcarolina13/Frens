@@ -10,10 +10,13 @@ import net.minecraft.item.BlockItem;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
+import net.minecraft.item.ItemPlacementContext;
+import net.minecraft.item.ItemUsageContext;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.Hand;
 import net.minecraft.util.ActionResult;
+import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
@@ -70,6 +73,38 @@ public final class BotActions {
         }
         double step = Math.min(maxStep, horizontal);
         moveRelative(bot, step, true, dx / horizontal, dz / horizontal);
+    }
+
+    /**
+     * Pushes the bot toward the given target using velocity, mimicking held movement keys.
+     * This avoids teleport-style position snaps and lets collisions/physics resolve naturally.
+     */
+    public static void applyMovementInput(ServerPlayerEntity bot, Vec3d target, double maxImpulse) {
+        if (bot == null || target == null) {
+            return;
+        }
+        Vec3d pos = new Vec3d(bot.getX(), bot.getY(), bot.getZ());
+        Vec3d delta = target.subtract(pos);
+        double lenSq = delta.lengthSquared();
+        if (lenSq < 1e-6) {
+            return;
+        }
+        Vec3d impulse = delta.normalize().multiply(maxImpulse);
+
+        // Clamp horizontal velocity so repeated inputs do not spike speed.
+        Vec3d current = bot.getVelocity();
+        Vec3d horiz = new Vec3d(current.x, 0, current.z);
+        double horizMag = horiz.length();
+        double maxHoriz = 0.6;
+        if (horizMag > maxHoriz) {
+            double scale = maxHoriz / horizMag;
+            current = new Vec3d(horiz.x * scale, current.y, horiz.z * scale);
+            bot.setVelocity(current);
+        }
+
+        bot.addVelocity(impulse.x, 0, impulse.z);
+        bot.velocityDirty = true;
+        bot.velocityModified = true;
     }
 
     public static void stop(ServerPlayerEntity bot) {
@@ -286,15 +321,32 @@ public final class BotActions {
     }
 
     public static boolean placeBlockAt(ServerPlayerEntity bot, BlockPos target) {
-        return placeBlockAt(bot, target, Collections.emptyList());
+        return placeBlockAt(bot, target, Direction.UP, Collections.emptyList());
     }
 
     public static boolean placeBlockAt(ServerPlayerEntity bot, BlockPos target, List<Item> prioritizedBlocks) {
+        return placeBlockAt(bot, target, Direction.UP, prioritizedBlocks);
+    }
+
+    public static boolean placeBlockAt(ServerPlayerEntity bot, BlockPos target, Direction face, List<Item> prioritizedBlocks) {
         ServerWorld world = bot.getCommandSource().getWorld();
         if (world == null || target == null) {
             return false;
         }
+        Direction placeFace = face == null ? Direction.UP : face;
         if (!world.getBlockState(target).isAir() && world.getFluidState(target).isEmpty()) {
+            // Allow replacing snow layers/blocks to avoid placement failures
+            net.minecraft.block.BlockState state = world.getBlockState(target);
+            if (!state.isOf(net.minecraft.block.Blocks.SNOW) && !state.isOf(net.minecraft.block.Blocks.SNOW_BLOCK)) {
+                return false;
+            }
+            world.breakBlock(target, false);
+        }
+        // Avoid placing while standing inside the target
+        if (bot.getBoundingBox().intersects(new net.minecraft.util.math.Box(target))) {
+            return false;
+        }
+        if (!hasSupport(world, target)) {
             return false;
         }
         int slot = findPreferredBlockItemSlot(bot, prioritizedBlocks);
@@ -307,19 +359,34 @@ public final class BotActions {
         if (!(stack.getItem() instanceof BlockItem blockItem)) {
             return false;
         }
-        BlockState stateToPlace = blockItem.getBlock().getDefaultState();
-        if (!stateToPlace.canPlaceAt(world, target)) {
-            return false;
-        }
         selectHotbarSlot(bot, slot);
-        boolean placed = world.setBlockState(target, stateToPlace);
-        if (placed) {
-            stack.decrement(1);
+        BlockPos clickPos = target.offset(placeFace.getOpposite());
+        Vec3d hitVec = Vec3d.ofCenter(clickPos);
+        BlockHitResult hit = new BlockHitResult(hitVec, placeFace, clickPos, false);
+        ItemUsageContext usage = new ItemUsageContext(bot, Hand.MAIN_HAND, hit);
+        ItemPlacementContext placementContext = new ItemPlacementContext(usage);
+        ActionResult result = blockItem.place(placementContext);
+        if (result.isAccepted()) {
+            bot.swingHand(Hand.MAIN_HAND, true);
             if (stack.isEmpty()) {
                 inventory.setStack(slot, ItemStack.EMPTY);
             }
-            bot.swingHand(Hand.MAIN_HAND, true);
             return true;
+        }
+        return false;
+    }
+
+    private static boolean hasSupport(ServerWorld world, BlockPos target) {
+        // block below
+        if (world.getBlockState(target.down()).isSolidBlock(world, target.down())) {
+            return true;
+        }
+        // any horizontal neighbor solid
+        for (Direction dir : Direction.Type.HORIZONTAL) {
+            BlockPos neighbor = target.offset(dir);
+            if (world.getBlockState(neighbor).isSolidBlock(world, neighbor)) {
+                return true;
+            }
         }
         return false;
     }

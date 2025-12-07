@@ -22,19 +22,25 @@ import org.slf4j.LoggerFactory;
 import java.util.ArrayDeque;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Queue;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.ConcurrentHashMap;
 
 public final class MovementService {
 
     private static final Logger LOGGER = LoggerFactory.getLogger("movement-service");
     private static final double ARRIVAL_DISTANCE_SQ = 9.0D;
     private static final double CLOSE_ENOUGH_DISTANCE_SQ = 2.25D; // ~1.5 blocks
+    private static final double PATH_SAME_TARGET_DISTANCE_SQ = 9.0D; // ~3 blocks
+    private static final long PATH_ATTEMPT_MIN_INTERVAL_MS = 400L;
+    private static final long PATH_FAILURE_BACKOFF_MS = 2500L;
 
     private MovementService() {
     }
@@ -85,6 +91,14 @@ public final class MovementService {
     private record WalkResult(boolean success, BlockPos arrivedAt, String detail) {
     }
 
+    private record SegmentResult(boolean success, boolean snapped) {
+    }
+
+    private record PathAttempt(BlockPos target, long timeMs, boolean success, String detail) {
+    }
+
+    private static final Map<UUID, PathAttempt> LAST_WALK_ATTEMPT = new ConcurrentHashMap<>();
+
     public static Optional<MovementPlan> planLootApproach(ServerPlayerEntity player,
                                                           BlockPos target,
                                                           MovementOptions options) {
@@ -132,21 +146,39 @@ public final class MovementService {
     public static MovementResult execute(ServerCommandSource source,
                                          ServerPlayerEntity player,
                                          MovementPlan plan) {
+        return execute(source, player, plan, null, false);
+    }
+
+    public static MovementResult execute(ServerCommandSource source,
+                                         ServerPlayerEntity player,
+                                         MovementPlan plan,
+                                         Boolean allowTeleportOverride) {
+        return execute(source, player, plan, allowTeleportOverride, false);
+    }
+
+    public static MovementResult execute(ServerCommandSource source,
+                                         ServerPlayerEntity player,
+                                         MovementPlan plan,
+                                         Boolean allowTeleportOverride,
+                                         boolean fastReplan) {
         if (source == null || player == null || plan == null) {
             return new MovementResult(false, Mode.DIRECT, player != null ? player.getBlockPos() : null, "Invalid movement request.");
         }
-
+        LOGGER.info("Movement execute: mode={} dest={} allowTpOverride={} fastReplan={} player={}",
+                plan.mode(), plan.finalDestination(), allowTeleportOverride, fastReplan, player.getName().getString());
         return switch (plan.mode()) {
-            case DIRECT -> moveDirect(source, player, plan.finalDestination());
-            case WADE -> moveWithWade(source, player, plan);
-            case BRIDGE -> moveWithBridge(source, player, plan);
+            case DIRECT -> moveDirect(source, player, plan.finalDestination(), allowTeleportOverride, fastReplan);
+            case WADE -> moveWithWade(source, player, plan, allowTeleportOverride, fastReplan);
+            case BRIDGE -> moveWithBridge(source, player, plan, allowTeleportOverride, fastReplan);
         };
     }
 
     private static MovementResult moveDirect(ServerCommandSource source,
                                              ServerPlayerEntity player,
-                                             BlockPos destination) {
-        MovementResult goTo = moveTo(source, player, destination, Mode.DIRECT, "direct");
+                                             BlockPos destination,
+                                             Boolean allowTeleportOverride,
+                                             boolean fastReplan) {
+        MovementResult goTo = moveTo(source, player, destination, Mode.DIRECT, "direct", allowTeleportOverride, fastReplan);
         if (!goTo.success()) {
             return goTo;
         }
@@ -155,8 +187,10 @@ public final class MovementService {
 
     private static MovementResult moveWithWade(ServerCommandSource source,
                                                ServerPlayerEntity player,
-                                               MovementPlan plan) {
-        MovementResult approach = moveTo(source, player, plan.approachDestination(), Mode.WADE, "wade-approach");
+                                               MovementPlan plan,
+                                               Boolean allowTeleportOverride,
+                                               boolean fastReplan) {
+        MovementResult approach = moveTo(source, player, plan.approachDestination(), Mode.WADE, "wade-approach", allowTeleportOverride, fastReplan);
         if (!approach.success()) {
             return approach;
         }
@@ -171,8 +205,10 @@ public final class MovementService {
 
     private static MovementResult moveWithBridge(ServerCommandSource source,
                                                  ServerPlayerEntity player,
-                                                 MovementPlan plan) {
-        MovementResult approach = moveTo(source, player, plan.approachDestination(), Mode.BRIDGE, "bridge-approach");
+                                                 MovementPlan plan,
+                                                 Boolean allowTeleportOverride,
+                                                 boolean fastReplan) {
+        MovementResult approach = moveTo(source, player, plan.approachDestination(), Mode.BRIDGE, "bridge-approach", allowTeleportOverride, fastReplan);
         if (!approach.success()) {
             return approach;
         }
@@ -182,7 +218,7 @@ public final class MovementService {
             return new MovementResult(false, Mode.BRIDGE, plan.bridgeTarget(), "Unable to place bridge block at " + plan.bridgeTarget());
         }
 
-        MovementResult finalMove = moveTo(source, player, plan.finalDestination(), Mode.BRIDGE, "bridge-final");
+        MovementResult finalMove = moveTo(source, player, plan.finalDestination(), Mode.BRIDGE, "bridge-final", allowTeleportOverride, fastReplan);
         if (!finalMove.success()) {
             return finalMove;
         }
@@ -222,34 +258,64 @@ public final class MovementService {
                                          ServerPlayerEntity player,
                                          BlockPos destination,
                                          Mode mode,
-                                         String label) {
+                                         String label,
+                                         Boolean allowTeleportOverride,
+                                         boolean fastReplan) {
         if (destination == null) {
             return new MovementResult(false, mode, player.getBlockPos(), "No destination specified for " + label);
         }
-        boolean allowTeleport = SkillPreferences.teleportDuringSkills(player);
+        boolean allowTeleport = allowTeleportOverride != null
+                ? allowTeleportOverride
+                : SkillPreferences.teleportDuringSkills(player);
         Vec3d playerPos = new Vec3d(player.getX(), player.getY(), player.getZ());
         Vec3d destinationCenter = new Vec3d(destination.getX() + 0.5, destination.getY(), destination.getZ() + 0.5);
         if (playerPos.squaredDistanceTo(destinationCenter) <= CLOSE_ENOUGH_DISTANCE_SQ) {
             return new MovementResult(true, mode, destination, label + ": already at destination");
         }
         if (!allowTeleport) {
-            WalkResult walkResult = walkTo(source, player, destination, mode, label);
+            LOGGER.info("Movement choosing walk only: {} -> {}", player.getName().getString(), destination);
+            WalkResult walkResult = walkTo(source, player, destination, mode, label, fastReplan);
+            if (!walkResult.success()) {
+                boolean pursued = pursuitUntilClose(player, destination, TimeUnit.SECONDS.toMillis(3), CLOSE_ENOUGH_DISTANCE_SQ, label);
+                if (pursued) {
+                    return new MovementResult(true, mode, destination, label + ": pursuit fallback");
+                }
+            }
             return new MovementResult(walkResult.success(), mode, walkResult.arrivedAt(), walkResult.detail());
         }
+        // Prefer walking when close or visible; reserve teleport for long-range catch-up.
+        double distanceSq = player.getBlockPos().getSquaredDistance(destination);
+        if (mode == Mode.DIRECT && distanceSq <= 256) {
+            LOGGER.info("Movement prefers walk (near): {} -> {}", player.getName().getString(), destination);
+            WalkResult walkResult = walkTo(source, player, destination, mode, label, fastReplan);
+            if (walkResult.success()) {
+                return new MovementResult(true, mode, walkResult.arrivedAt(), label + ": walked");
+            }
+            LOGGER.info("Walk failed near {} ({}), trying teleport fallback", destination, walkResult.detail());
+        }
+        if (distanceSq <= 900) {
+            WalkResult walkResult = walkTo(source, player, destination, mode, label, fastReplan);
+            if (walkResult.success()) {
+                return new MovementResult(true, mode, walkResult.arrivedAt(), label + ": walked");
+            }
+            LOGGER.info("Walk failed mid-range near {} ({}), trying teleport fallback", destination, walkResult.detail());
+        }
+
         String rawResult = GoTo.goTo(source, destination.getX(), destination.getY(), destination.getZ(), false);
         boolean success = isGoToSuccess(rawResult);
         if (success) {
             BlockPos post = player.getBlockPos();
-            double distanceSq = post.getSquaredDistance(destination);
-            success = distanceSq <= ARRIVAL_DISTANCE_SQ;
+            double postDistanceSq = post.getSquaredDistance(destination);
+            success = postDistanceSq <= ARRIVAL_DISTANCE_SQ;
             if (!success) {
-                rawResult = rawResult + " (ended " + Math.sqrt(distanceSq) + " blocks away)";
+                rawResult = rawResult + " (ended " + Math.sqrt(postDistanceSq) + " blocks away)";
             } else if (mode == Mode.WADE) {
                 encourageSurfaceDrift(player);
             }
         } else if (mode == Mode.WADE) {
             encourageSurfaceDrift(player);
         }
+        LOGGER.info("Movement result: mode={} dest={} success={} detail={}", mode, destination, success, rawResult);
         return new MovementResult(success, mode, destination, label + ": " + rawResult);
     }
 
@@ -257,90 +323,345 @@ public final class MovementService {
                                      ServerPlayerEntity player,
                                      BlockPos destination,
                                      Mode mode,
-                                     String label) {
+                                     String label,
+                                     boolean fastReplan) {
         ServerWorld world = getWorld(player);
+        BlockPos currentPos = player != null ? player.getBlockPos() : null;
         if (world == null || destination == null) {
-            return new WalkResult(false, player != null ? player.getBlockPos() : null, label + ": no world/destination for walking");
-        }
-        List<PathFinder.PathNode> rawPath = PathFinder.calculatePath(player.getBlockPos(), destination, world);
-        List<PathFinder.PathNode> simplified = PathFinder.simplifyPath(rawPath, world);
-        Queue<Segment> segments = PathFinder.convertPathToSegments(simplified, false);
-        if (segments.isEmpty()) {
-            boolean straightWalk = walkDirect(player, destination, TimeUnit.SECONDS.toMillis(6));
-            if (straightWalk) {
-                return new WalkResult(true, destination, label + ": walked directly (no path)");
-            }
-            return new WalkResult(false, player.getBlockPos(), label + ": no walkable path");
+            return recordAttempt(player != null ? player.getUuid() : null, destination,
+                    new WalkResult(false, currentPos, label + ": no world/destination for walking"));
         }
 
-        long deadline = System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(20);
+        LOGGER.info("walkTo start: bot={} dest={} label={} fastReplan={} currentPos={} dist={}",
+                player.getName().getString(),
+                destination.toShortString(),
+                label,
+                fastReplan,
+                currentPos != null ? currentPos.toShortString() : "null",
+                currentPos != null ? String.format("%.2f", Math.sqrt(currentPos.getSquaredDistance(destination))) : "n/a");
+        WalkResult throttled = fastReplan ? null : maybeThrottle(player.getUuid(), destination, currentPos, label);
+        if (throttled != null) {
+            return throttled;
+        }
+        long deadline = System.currentTimeMillis() + (fastReplan ? TimeUnit.SECONDS.toMillis(5) : TimeUnit.SECONDS.toMillis(20));
         BlockPos lastReached = player.getBlockPos();
-        for (Segment segment : segments) {
-            boolean ok = walkSegment(player, segment, deadline);
-            if (!ok) {
-                return new WalkResult(false, lastReached, label + ": walk blocked near " + segment.end());
+        boolean replanned = false;
+        for (int attempt = 0; attempt < 2; attempt++) {
+            List<PathFinder.PathNode> rawPath = PathFinder.calculatePath(player.getBlockPos(), destination, world);
+            List<PathFinder.PathNode> simplified = PathFinder.simplifyPath(rawPath, world);
+            Queue<Segment> segments = PathFinder.convertPathToSegments(simplified, false);
+            LOGGER.info("walkTo path (attempt={}): raw={} simplified={} segments={} firstSegment={}",
+                    attempt + 1,
+                    rawPath.size(),
+                    simplified.size(),
+                    segments.size(),
+                    segments.peek());
+            if (segments.isEmpty()) {
+                boolean straightWalk = walkDirect(player, destination, fastReplan ? TimeUnit.SECONDS.toMillis(3) : TimeUnit.SECONDS.toMillis(6));
+                if (straightWalk) {
+                    return recordAttempt(player.getUuid(), destination,
+                            new WalkResult(true, destination, label + ": walked directly (no path)"));
+                }
+                return recordAttempt(player.getUuid(), destination,
+                        new WalkResult(false, player.getBlockPos(), label + ": no walkable path"));
             }
-            lastReached = segment.end();
-        }
 
-        double finalDistanceSq = player.getBlockPos().getSquaredDistance(destination);
-        boolean arrived = finalDistanceSq <= ARRIVAL_DISTANCE_SQ;
-        String detail = arrived
-                ? label + ": walked to destination"
-                : label + ": walk ended " + String.format("%.2f", Math.sqrt(finalDistanceSq)) + " blocks away";
-        return new WalkResult(arrived, player.getBlockPos(), detail);
+            boolean allOk = true;
+            for (Segment segment : segments) {
+                SegmentResult seg = walkSegment(player, segment, deadline);
+                if (!seg.success()) {
+                    lastReached = player.getBlockPos();
+                    allOk = false;
+                    if (!replanned) {
+                        replanned = true;
+                        LOGGER.warn("walkTo replan after stall near {}", segment.end());
+                        break; // rebuild path from new position
+                    }
+                    return recordAttempt(player.getUuid(), destination,
+                            new WalkResult(false, lastReached, label + ": walk blocked near " + segment.end()));
+                }
+                lastReached = segment.end();
+            }
+            if (allOk) {
+                double finalDistanceSq = player.getBlockPos().getSquaredDistance(destination);
+                boolean arrived = finalDistanceSq <= ARRIVAL_DISTANCE_SQ;
+                String detail = arrived
+                        ? label + ": walked to destination"
+                        : label + ": walk ended " + String.format("%.2f", Math.sqrt(finalDistanceSq)) + " blocks away";
+                return recordAttempt(player.getUuid(), destination,
+                        new WalkResult(arrived, player.getBlockPos(), detail));
+            }
+        }
+        return recordAttempt(player.getUuid(), destination,
+                new WalkResult(false, player.getBlockPos(), label + ": walk blocked after replans"));
     }
 
-    private static boolean walkSegment(ServerPlayerEntity player, Segment segment, long deadlineMs) {
+    private static WalkResult maybeThrottle(UUID botId, BlockPos destination, BlockPos currentPos, String label) {
+        if (botId == null) {
+            return null;
+        }
+        PathAttempt last = LAST_WALK_ATTEMPT.get(botId);
+        if (last == null) {
+            return null;
+        }
+        if (last.success()) {
+            return null; // do not throttle successful walks
+        }
+        long now = System.currentTimeMillis();
+        if (now - last.timeMs < PATH_ATTEMPT_MIN_INTERVAL_MS) {
+            return new WalkResult(false, currentPos,
+                    label + ": throttled (recent path attempt) – last: " + last.detail());
+        }
+        if (!last.success()
+                && last.target() != null
+                && destination != null
+                && last.target().getSquaredDistance(destination) <= PATH_SAME_TARGET_DISTANCE_SQ
+                && now - last.timeMs < PATH_FAILURE_BACKOFF_MS) {
+            return new WalkResult(false, currentPos,
+                    label + ": cooling down after failure near " + last.target().toShortString());
+        }
+        return null;
+    }
+
+    private static WalkResult recordAttempt(UUID botId, BlockPos destination, WalkResult result) {
+        if (botId != null && destination != null && result != null) {
+            LAST_WALK_ATTEMPT.put(botId, new PathAttempt(destination, System.currentTimeMillis(), result.success(), result.detail()));
+        }
+        return result;
+    }
+
+    public static void clearRecentWalkAttempt(UUID botId) {
+        if (botId != null) {
+            LAST_WALK_ATTEMPT.remove(botId);
+        }
+    }
+
+    private static SegmentResult walkSegment(ServerPlayerEntity player, Segment segment, long deadlineMs) {
         if (player == null || segment == null) {
-            return false;
+            return new SegmentResult(false, false);
         }
         Vec3d target = centerOf(segment.end());
-        while (System.currentTimeMillis() < deadlineMs) {
+        // Scale effort with distance so long hallway segments don't fail after a handful of steps.
+        double segmentDistance = Math.sqrt(player.squaredDistanceTo(target));
+        long now = System.currentTimeMillis();
+        long remainingBudget = Math.max(0L, deadlineMs - now);
+        long segmentAllowance = Math.min(remainingBudget, Math.max(900L, (long) (segmentDistance * 300))); // allow slower tick progression
+        long endTime = now + segmentAllowance;
+        int maxSteps = (int) Math.min(160, Math.max(16, Math.ceil(segmentDistance * 14)));
+        LOGGER.info("walkSegment start: from={} to={} dist={}/steps={} allowanceMs={}",
+                player.getBlockPos().toShortString(),
+                segment.end().toShortString(),
+                String.format("%.2f", segmentDistance),
+                maxSteps,
+                segmentAllowance);
+
+        double lastDistanceSq = Double.MAX_VALUE;
+        int stagnantSteps = 0;
+
+        for (int steps = 0; System.currentTimeMillis() < endTime && steps < maxSteps; steps++) {
             double distanceSq = player.squaredDistanceTo(target);
             if (distanceSq <= CLOSE_ENOUGH_DISTANCE_SQ) {
                 BotActions.stop(player);
-                return true;
+                return new SegmentResult(true, false);
             }
-            Runnable step = () -> {
-                LookController.faceBlock(player, segment.end());
-                BotActions.sprint(player, segment.sprint());
-                if (segment.jump() || target.y - player.getY() > 0.6D) {
-                    BotActions.jump(player);
-                } else {
-                    BotActions.autoJumpIfNeeded(player);
+            if (steps == 0) {
+                LOGGER.debug("walkSegment step0 pos={} dist={}", player.getBlockPos().toShortString(), Math.sqrt(distanceSq));
+            }
+            // Bail out early if we stopped making progress (e.g., collision).
+            if (distanceSq >= lastDistanceSq - 0.01) {
+                stagnantSteps++;
+                if (stagnantSteps >= 5) {
+                    LOGGER.info("walkSegment stalled near {} dist={}", segment.end(), Math.sqrt(distanceSq));
+                    break;
                 }
-                BotActions.moveToward(player, target, 0.45);
-            };
-            if (!runOnServerThread(player, step)) {
-                return false;
+            } else {
+                stagnantSteps = 0;
+                lastDistanceSq = distanceSq;
             }
-            sleep(120L);
+            if (!inputStepToward(player, segment.end(), target, segment.sprint(), segment.jump())) {
+                return new SegmentResult(false, false);
+            }
+            sleep(35L);
         }
-        return false;
+        double remaining = Math.sqrt(player.squaredDistanceTo(target));
+        LOGGER.info("walkSegment timed out near {} remainingDist={}", segment.end(), remaining);
+        // Force a small snap forward when very close to planned segment end to avoid infinite loop.
+        if (remaining <= 2.2D) {
+            LOGGER.warn("walkSegment snap forward to {}", segment.end());
+            snapTo(player, segment.end());
+            return new SegmentResult(true, true);
+        }
+        return new SegmentResult(false, false);
     }
 
     private static boolean walkDirect(ServerPlayerEntity player, BlockPos destination, long timeoutMs) {
         Vec3d target = centerOf(destination);
-        long deadline = System.currentTimeMillis() + timeoutMs;
-        while (System.currentTimeMillis() < deadline) {
+        long now = System.currentTimeMillis();
+        long deadline = now + Math.min(timeoutMs, 4500L); // bounded to avoid long blocking but generous for short marches
+        int maxSteps = 42;
+        LOGGER.info("walkDirect start: from={} to={} dist={} timeoutMs={} steps={}",
+                player.getBlockPos().toShortString(),
+                destination.toShortString(),
+                String.format("%.2f", Math.sqrt(player.getBlockPos().getSquaredDistance(destination))),
+                timeoutMs,
+                maxSteps);
+        double lastDistanceSq = Double.MAX_VALUE;
+        int stagnantSteps = 0;
+
+        for (int steps = 0; System.currentTimeMillis() < deadline && steps < maxSteps; steps++) {
             double distanceSq = player.squaredDistanceTo(target);
             if (distanceSq <= CLOSE_ENOUGH_DISTANCE_SQ) {
                 BotActions.stop(player);
                 return true;
             }
-            Runnable step = () -> {
-                LookController.faceBlock(player, destination);
-                BotActions.sprint(player, true);
-                BotActions.autoJumpIfNeeded(player);
-                BotActions.moveToward(player, target, 0.45);
-            };
-            if (!runOnServerThread(player, step)) {
+            if (distanceSq >= lastDistanceSq - 0.01) {
+                stagnantSteps++;
+                if (stagnantSteps >= 5) {
+                    break;
+                }
+            } else {
+                stagnantSteps = 0;
+                lastDistanceSq = distanceSq;
+            }
+            if (!inputStepToward(player, destination, target, true, false)) {
                 return false;
             }
-            sleep(120L);
+            sleep(35L);
         }
         return false;
+    }
+
+    /**
+     * Small, iterative pursuit toward a static target. Stops once within reachSq.
+     */
+    public static boolean nudgeTowardUntilClose(ServerPlayerEntity bot,
+                                                BlockPos target,
+                                                double reachSq,
+                                                long timeoutMs,
+                                                double impulse,
+                                                String label) {
+        if (bot == null || target == null) {
+            return false;
+        }
+        long deadline = System.currentTimeMillis() + timeoutMs;
+        double best = bot.getBlockPos().getSquaredDistance(target);
+        double start = best;
+        LOGGER.info("nudgeToward start [{}]: from={} to={} dist={}", label, bot.getBlockPos().toShortString(), target.toShortString(), Math.sqrt(best));
+        int noProgress = 0;
+        while (System.currentTimeMillis() < deadline) {
+            double distSq = bot.getBlockPos().getSquaredDistance(target);
+            if (distSq <= reachSq && (start - distSq > 0.25D || distSq <= reachSq * 0.6D)) {
+                BotActions.stop(bot);
+                LOGGER.info("nudgeToward success [{}]: dist={}", label, Math.sqrt(distSq));
+                return true;
+            }
+            LookController.faceBlock(bot, target);
+            boolean sprint = distSq > 9.0D;
+            bot.setSprinting(sprint);
+            double dy = target.getY() - bot.getY();
+            if (dy > 0.6D) {
+                BotActions.jump(bot);
+            } else if (distSq > CLOSE_ENOUGH_DISTANCE_SQ) {
+                BotActions.autoJumpIfNeeded(bot);
+            }
+            double tunedImpulse = distSq > 16.0D ? Math.max(impulse, 0.16) : impulse;
+            BotActions.applyMovementInput(bot, Vec3d.ofCenter(target), tunedImpulse);
+            sleep(90L);
+
+            double nowDist = bot.getBlockPos().getSquaredDistance(target);
+            if (nowDist + 0.05D >= best) {
+                noProgress++;
+                if (noProgress >= 7) {
+                    LOGGER.info("nudgeToward stalled [{}]: bestDist={}", label, Math.sqrt(best));
+                    break;
+                }
+            } else {
+                best = nowDist;
+                noProgress = 0;
+            }
+        }
+        LOGGER.warn("nudgeToward failed [{}]: finalDist={}", label, Math.sqrt(bot.getBlockPos().getSquaredDistance(target)));
+        return bot.getBlockPos().getSquaredDistance(target) <= reachSq;
+    }
+
+    /**
+     * Follow-style pursuit that keeps stepping toward the target using movement input until close.
+     */
+    private static boolean pursuitUntilClose(ServerPlayerEntity bot,
+                                             BlockPos target,
+                                             long timeoutMs,
+                                             double reachSq,
+                                             String label) {
+        if (bot == null || target == null) {
+            return false;
+        }
+        long deadline = System.currentTimeMillis() + timeoutMs;
+        double best = bot.getBlockPos().getSquaredDistance(target);
+        int stagnant = 0;
+        LOGGER.info("pursuit start [{}]: from={} to={} dist={}", label, bot.getBlockPos().toShortString(), target.toShortString(), Math.sqrt(best));
+        while (System.currentTimeMillis() < deadline) {
+            double distSq = bot.getBlockPos().getSquaredDistance(target);
+            if (distSq <= reachSq) {
+                BotActions.stop(bot);
+                LOGGER.info("pursuit success [{}]: dist={}", label, Math.sqrt(distSq));
+                return true;
+            }
+            LookController.faceBlock(bot, target);
+            boolean sprint = distSq > 9.0D;
+            BotActions.sprint(bot, sprint);
+            double dy = target.getY() - bot.getY();
+            if (dy > 0.6D) {
+                BotActions.jump(bot);
+            } else {
+                BotActions.autoJumpIfNeeded(bot);
+            }
+            double impulse = sprint ? 0.19 : 0.15;
+            BotActions.applyMovementInput(bot, Vec3d.ofCenter(target), impulse);
+            sleep(80L);
+            double nowDist = bot.getBlockPos().getSquaredDistance(target);
+            if (nowDist + 0.02D >= best) {
+                stagnant++;
+                if (stagnant >= 8) {
+                    LOGGER.info("pursuit stalled [{}]: bestDist={}", label, Math.sqrt(best));
+                    break;
+                }
+            } else {
+                best = nowDist;
+                stagnant = 0;
+            }
+        }
+        LOGGER.warn("pursuit failed [{}]: finalDist={}", label, Math.sqrt(bot.getBlockPos().getSquaredDistance(target)));
+        return false;
+    }
+
+    private static void snapTo(ServerPlayerEntity player, BlockPos target) {
+        if (player == null || target == null) {
+            return;
+        }
+        Vec3d center = centerOf(target);
+        player.refreshPositionAndAngles(center.x, center.y, center.z, player.getYaw(), player.getPitch());
+        player.setVelocity(Vec3d.ZERO);
+        player.velocityDirty = true;
+        LOGGER.info("Snap repositioned {} to {}", player.getName().getString(), target.toShortString());
+    }
+
+    private static boolean inputStepToward(ServerPlayerEntity player,
+                                           BlockPos blockTarget,
+                                           Vec3d vecTarget,
+                                           boolean sprint,
+                                           boolean forceJump) {
+        Runnable step = () -> {
+            LookController.faceBlock(player, blockTarget);
+            BotActions.sprint(player, sprint);
+            if (forceJump || vecTarget.y - player.getY() > 0.6D) {
+                BotActions.jump(player);
+            } else {
+                BotActions.autoJumpIfNeeded(player);
+            }
+            // Small impulse; repeated calls mimic held WASD.
+            BotActions.applyMovementInput(player, vecTarget, sprint ? 0.16 : 0.12);
+        };
+        return runOnServerThread(player, step);
     }
 
     private static boolean runOnServerThread(ServerPlayerEntity player, Runnable action) {

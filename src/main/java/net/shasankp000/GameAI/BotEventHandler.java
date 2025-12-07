@@ -33,6 +33,7 @@ import net.shasankp000.Database.QTable;
 import net.shasankp000.Database.QTableStorage;
 import net.shasankp000.Database.StateActionPair;
 import net.shasankp000.Entity.AutoFaceEntity;
+import net.shasankp000.Entity.LookController;
 
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
@@ -105,6 +106,10 @@ public class BotEventHandler {
     private static final int OBSTRUCT_WINDOW_TICKS = 40; // 2s @20tps
     private static final Map<UUID, Long> LAST_MINING_ESCAPE_ATTEMPT = new ConcurrentHashMap<>();
     private static final int MINING_ESCAPE_COOLDOWN_TICKS = 60; // 3s between mining attempts
+    private static final Map<UUID, Long> LAST_ESCAPE_NUDGE_MS = new ConcurrentHashMap<>();
+    private static final long ESCAPE_NUDGE_COOLDOWN_MS = 1_200L;
+    private static final Map<UUID, Long> LAST_FOLLOW_PLAN_MS = new ConcurrentHashMap<>();
+    private static final Map<UUID, BlockPos> LAST_FOLLOW_TARGET_POS = new ConcurrentHashMap<>();
 
     public static void noteObstructDamage(ServerPlayerEntity bot) {
         MinecraftServer srv = bot.getCommandSource().getServer();
@@ -152,6 +157,8 @@ public class BotEventHandler {
     private static final class CommandState {
         Mode mode = Mode.IDLE;
         UUID followTargetUuid;
+        boolean followNoTeleport;
+        double followStopRange = 0.0D;
         Vec3d guardCenter;
         double guardRadius = 6.0D;
         Vec3d baseTarget;
@@ -1129,11 +1136,34 @@ public class BotEventHandler {
         }
         registerBot(bot);
         setFollowTarget(bot, target.getUuid());
+        CommandState state = stateFor(bot);
+        if (state != null) {
+            state.followNoTeleport = false;
+            state.followStopRange = 0.0D;
+        }
         setMode(bot, Mode.FOLLOW);
         clearGuard(bot);
         clearBase(bot);
         sendBotMessage(bot, "Following " + target.getName().getString() + ".");
         return "Now following " + target.getName().getString() + ".";
+    }
+
+    public static String setFollowModeWalk(ServerPlayerEntity bot, ServerPlayerEntity target, double stopRange) {
+        if (bot == null || target == null) {
+            return "Unable to follow — target not found.";
+        }
+        registerBot(bot);
+        setFollowTarget(bot, target.getUuid());
+        CommandState state = stateFor(bot);
+        if (state != null) {
+            state.followNoTeleport = true;
+            state.followStopRange = Math.max(1.5D, stopRange);
+        }
+        setMode(bot, Mode.FOLLOW);
+        clearGuard(bot);
+        clearBase(bot);
+        sendBotMessage(bot, "Walking to you.");
+        return "Walking to " + target.getName().getString() + ".";
     }
 
     public static String stopFollowing(ServerPlayerEntity bot) {
@@ -1142,6 +1172,11 @@ public class BotEventHandler {
         }
         boolean wasFollowing = getMode(bot) == Mode.FOLLOW && getFollowTargetFor(bot) != null;
         setFollowTarget(bot, null);
+        CommandState state = stateFor(bot);
+        if (state != null) {
+            state.followNoTeleport = false;
+            state.followStopRange = 0.0D;
+        }
         if (bot != null) {
             BotActions.stop(bot);
         }
@@ -1353,26 +1388,57 @@ public class BotEventHandler {
 
         Vec3d targetPos = positionOf(target);
         double distanceSq = bot.squaredDistanceTo(targetPos);
-        boolean allowTeleport = SkillPreferences.teleportDuringSkills(bot);
-        if (distanceSq > 100) {
-            if (allowTeleport) {
-                bot.refreshPositionAndAngles(targetPos.x, targetPos.y, targetPos.z, target.getYaw(), target.getPitch());
-            } else {
-                MovementService.MovementPlan plan = new MovementService.MovementPlan(
-                        MovementService.Mode.DIRECT,
-                        target.getBlockPos(),
-                        target.getBlockPos(),
-                        null,
-                        null,
-                        bot.getHorizontalFacing());
-                MovementService.MovementResult movement = MovementService.execute(bot.getCommandSource(), bot, plan);
-                if (!movement.success()) {
-                    LOGGER.warn("Follow walk catch-up failed: {}", movement.detail());
-                }
+        boolean forceWalk = state != null && state.followNoTeleport;
+        double stopRange = state != null ? state.followStopRange : 0.0D;
+        boolean allowTeleport = SkillPreferences.teleportDuringSkills(bot) && !forceWalk;
+        boolean canSee = bot.canSee(target);
+        double deltaY = target.getY() - bot.getY();
+        // Loosen teleport gating for big vertical or longer distances; sighted targets are allowed too.
+        if (deltaY > 2.5D || distanceSq > 36.0D) {
+            allowTeleport = true;
+        }
+        LOGGER.info("Follow tick: bot={} target={} dist={}/{} dy={} forceWalk={} allowTp={} canSee={} stopRange={}",
+                bot.getName().getString(),
+                target.getName().getString(),
+                Math.sqrt(distanceSq),
+                target.getBlockPos(),
+                String.format(Locale.ROOT, "%.2f", deltaY),
+                forceWalk,
+                allowTeleport,
+                canSee,
+                stopRange);
+        // Only allow teleport when far AND not visible
+        if (allowTeleport && (canSee || distanceSq <= 400.0D)) {
+            allowTeleport = false;
+        }
+        if (stopRange > 0 && distanceSq <= stopRange * stopRange) {
+            stopFollowing(bot);
+            return true;
+        }
+        if (!shouldPlanFollow(bot, target)) {
+            LOGGER.info("Follow throttle hit: simple pursuit for {}", bot.getName().getString());
+            simplePursuitStep(bot, targetPos);
+            return true;
+        }
+        if (distanceSq > 1024 && !canSee && allowTeleport) {
+            BlockPos safe = target.getBlockPos().mutableCopy().mutableCopy();
+            MovementService.MovementPlan plan = new MovementService.MovementPlan(
+                    MovementService.Mode.DIRECT,
+                    safe,
+                    safe,
+                    null,
+                    null,
+                    bot.getHorizontalFacing());
+            LOGGER.info("Follow selecting teleport catch-up: bot={} targetPos={}", bot.getName().getString(), safe);
+            MovementService.MovementResult res = MovementService.execute(bot.getCommandSource(), bot, plan, true, false);
+            if (!res.success()) {
+                LOGGER.warn("Follow teleport catch-up failed: {}", res.detail());
+                MovementService.clearRecentWalkAttempt(bot.getUuid());
+                simplePursuitStep(bot, targetPos);
             }
             return true;
         }
-        if (!allowTeleport && distanceSq > 16.0D) {
+        if (distanceSq > 16.0D) {
             MovementService.MovementPlan plan = new MovementService.MovementPlan(
                     MovementService.Mode.DIRECT,
                     target.getBlockPos(),
@@ -1380,13 +1446,17 @@ public class BotEventHandler {
                     null,
                     null,
                     bot.getHorizontalFacing());
-            MovementService.MovementResult movement = MovementService.execute(bot.getCommandSource(), bot, plan);
-            if (movement.success()) {
-                return true;
+            LOGGER.info("Follow selecting walk plan: bot={} targetPos={}", bot.getName().getString(), target.getBlockPos());
+            MovementService.MovementResult res = MovementService.execute(bot.getCommandSource(), bot, plan, false, false);
+            if (!res.success()) {
+                LOGGER.warn("Follow walk failed: {}", res.detail());
+                MovementService.clearRecentWalkAttempt(bot.getUuid());
+                simplePursuitStep(bot, targetPos);
             }
-            LOGGER.debug("Follow walk attempt fell back to simple pursuit: {}", movement.detail());
+            return true;
         }
-        moveToward(bot, targetPos, 3.0D, true);
+        LOGGER.info("Follow using close pursuit step: bot={} targetPos={}", bot.getName().getString(), target.getBlockPos());
+        simplePursuitStep(bot, targetPos);
         return true;
     }
 
@@ -1682,12 +1752,56 @@ public class BotEventHandler {
 
         lowerShieldTracking(bot);
         BotActions.sprint(bot, sprint);
-        BotActions.moveForward(bot);
         if (target.y - pos.y > 0.6D) {
             BotActions.jump(bot);
         } else {
             BotActions.autoJumpIfNeeded(bot);
         }
+        BotActions.applyMovementInput(bot, target, sprint ? 0.18 : 0.14);
+    }
+
+    private static void simplePursuitStep(ServerPlayerEntity bot, Vec3d targetPos) {
+        if (bot == null || targetPos == null) {
+            return;
+        }
+        double distanceSq = bot.squaredDistanceTo(targetPos);
+        if (distanceSq <= 1.2D * 1.2D) {
+            BotActions.stop(bot); // close enough, chill
+            return;
+        }
+        LookController.faceBlock(bot, BlockPos.ofFloored(targetPos));
+        boolean sprint = distanceSq > 9.0D;
+        bot.setSprinting(sprint);
+        double dy = targetPos.y - bot.getY();
+        if (dy > 0.6D) {
+            BotActions.jump(bot);
+        } else if (distanceSq > 2.25D) {
+            BotActions.autoJumpIfNeeded(bot);
+        }
+        double impulse = sprint ? 0.16 : 0.11;
+        BotActions.applyMovementInput(bot, targetPos, impulse);
+    }
+
+    private static boolean shouldPlanFollow(ServerPlayerEntity bot, ServerPlayerEntity target) {
+        if (bot == null || target == null) {
+            return false;
+        }
+        UUID id = bot.getUuid();
+        long now = System.currentTimeMillis();
+        BlockPos currentTargetPos = target.getBlockPos();
+
+        BlockPos lastPos = LAST_FOLLOW_TARGET_POS.get(id);
+        Long lastTime = LAST_FOLLOW_PLAN_MS.get(id);
+
+        boolean movedEnough = lastPos == null || lastPos.getSquaredDistance(currentTargetPos) > 9; // >3 blocks
+        boolean timeElapsed = lastTime == null || now - lastTime > 500; // 0.5s throttle
+
+        if (movedEnough || timeElapsed) {
+            LAST_FOLLOW_TARGET_POS.put(id, currentTargetPos.toImmutable());
+            LAST_FOLLOW_PLAN_MS.put(id, now);
+            return true;
+        }
+        return false;
     }
 
     private static Entity findNearestItem(ServerPlayerEntity bot, List<Entity> entities, double radius) {
@@ -2120,6 +2234,12 @@ public class BotEventHandler {
      */
     private static boolean attemptEscapeMovement(ServerPlayerEntity bot, ServerWorld world, BlockPos feet, BlockPos head) {
         Direction[] allDirs = {Direction.NORTH, Direction.SOUTH, Direction.EAST, Direction.WEST, Direction.UP, Direction.DOWN};
+
+        long nowMs = System.currentTimeMillis();
+        long lastNudge = LAST_ESCAPE_NUDGE_MS.getOrDefault(bot.getUuid(), Long.MIN_VALUE);
+        if (nowMs - lastNudge < ESCAPE_NUDGE_COOLDOWN_MS) {
+            return false;
+        }
         
         for (Direction dir : allDirs) {
             BlockPos checkFeet = feet.offset(dir);
@@ -2137,6 +2257,7 @@ public class BotEventHandler {
                 // Apply movement velocity toward clear space
                 bot.setVelocity(direction.multiply(0.3));
                 bot.velocityModified = true;
+                LAST_ESCAPE_NUDGE_MS.put(bot.getUuid(), nowMs);
                 
                 LOGGER.info("Bot {} attempting escape movement toward {}", bot.getName().getString(), dir);
                 return true;

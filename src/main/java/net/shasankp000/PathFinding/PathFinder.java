@@ -118,7 +118,7 @@ public class PathFinder {
                 }
 
                 if (closedBackward.containsKey(neighbor)) {
-                    LOGGER.info("Path overlap detected! Merging paths...");
+                LOGGER.debug("Path overlap detected; merging paths");
                     List<BlockPos> rawPath = mergePaths(openMapForward.get(neighbor), closedBackward.get(neighbor));
                     return tagBlocks(rawPath, world);
                 }
@@ -197,9 +197,9 @@ public class PathFinder {
                     jumpNeeded = true;
                     pos = pos.up(); // Adjust to landing position
                 } else {
-                    LOGGER.info("Unwalkable multi-block obstacle at {}, skipping.", pos);
-                    continue; // Completely blocked
-                }
+                LOGGER.debug("Unwalkable multi-block obstacle at {}, skipping.", pos);
+                continue; // Completely blocked
+            }
             }
 
             String feetBlockType = world.getBlockState(feetPos).getBlock().getName().getString().toLowerCase();
@@ -210,12 +210,11 @@ public class PathFinder {
                 simplifiedPath.add(node);
                 prev = node;
             } else {
-                LOGGER.info("Duplicate node at {}, skipping.", pos);
+                LOGGER.debug("Duplicate node at {}, skipping.", pos);
             }
         }
 
-        LOGGER.info("Simplified path length after filtering: {}", simplifiedPath.size());
-        System.out.println("Simplified path list: " + simplifiedPath);
+        LOGGER.debug("Simplified path length after filtering: {}", simplifiedPath.size());
         return simplifiedPath;
     }
 
@@ -379,7 +378,7 @@ public class PathFinder {
             boolean isCrop = bodyState.isIn(BlockTags.CROPS);
 
             if (bodyClear && isCrop) {
-                LOGGER.info("Detected crops at {}, setting jumpRequired=false", pos);
+                LOGGER.debug("Detected crops at {}, setting jumpRequired=false", pos);
                 jumpRequired = false;
             }
 
@@ -392,10 +391,10 @@ public class PathFinder {
                     // Upward step
                     if (bodyIsSlab || canStepUpSlab) {
                         jumpRequired = false; // treat slab as walkable step
-                        LOGGER.info("Stepping up onto slab at {}, no jump needed", pos);
+                        LOGGER.debug("Stepping up onto slab at {}, no jump needed", pos);
                     } else {
                         jumpRequired = true;
-                        LOGGER.info("Stepping up full block at {}, jump required", pos);
+                        LOGGER.debug("Stepping up full block at {}, jump required", pos);
                     }
                 } else {
                     // Same level: check block in front
@@ -404,7 +403,7 @@ public class PathFinder {
                     if (isSolidBlock(world, forward) && !isSlab(world, forward)) {
                         jumpRequired = true;
                     } else if (isSlab(world, forward)) {
-                        LOGGER.info("Stepping onto slab in front at {}, no jump needed", forward);
+                        LOGGER.debug("Stepping onto slab in front at {}, no jump needed", forward);
                         jumpRequired = false;
                     }
                 }
@@ -423,7 +422,7 @@ public class PathFinder {
                     boolean hasCollision = !upHeadState.getCollisionShape(world, upHead).isEmpty();
 
                     if (isSlab || hasCollision) {
-                        LOGGER.info("Jump blocked: obstacle above {} is slab/partial block", upHead);
+                        LOGGER.debug("Jump blocked: obstacle above {} is slab/partial block", upHead);
                         continue; // skip blocked path
                     }
 
@@ -439,7 +438,7 @@ public class PathFinder {
             PathNode node = new PathNode(pos, feetBlockType, canStand, jumpRequired);
             taggedPath.add(node);
 
-            LOGGER.info("Tag {}: solidBelow={} bodyClear={} headClear={} canStand={} jumpRequired={} canStepUpSlab={}",
+            LOGGER.debug("Tag {}: solidBelow={} bodyClear={} headClear={} canStand={} jumpRequired={} canStepUpSlab={}",
                     pos, solidBelow, bodyClear, headClear, canStand, jumpRequired, canStepUpSlab);
         }
 
@@ -457,7 +456,7 @@ public class PathFinder {
 
     private static boolean isPassable(ServerWorld world, BlockPos pos) {
         BlockState blockState = world.getBlockState(pos);
-        return blockState.isAir() || blockState.isOf(Blocks.WATER) || !blockState.getCollisionShape(world, pos).isEmpty();
+        return blockState.isAir() || blockState.isOf(Blocks.WATER) || blockState.getCollisionShape(world, pos).isEmpty();
     }
 
 

@@ -3,6 +3,7 @@ package net.shasankp000.Commands;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.DoubleArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
+import com.mojang.brigadier.arguments.BoolArgumentType;
 import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import com.mojang.brigadier.exceptions.SimpleCommandExceptionType;
@@ -60,12 +61,16 @@ import net.shasankp000.GameAI.services.BotTargetingService;
 import net.shasankp000.GameAI.services.HealingService;
 import net.shasankp000.GameAI.services.InventoryAccessPolicy;
 import net.shasankp000.GameAI.services.MovementService;
+import net.shasankp000.GameAI.services.CraftingHelper;
+import net.shasankp000.GameAI.services.SmeltingService;
 import net.shasankp000.GameAI.services.ProtectedZoneService;
 import net.shasankp000.GameAI.services.SkillResumeService;
 import net.shasankp000.GameAI.services.TaskService;
 import net.shasankp000.GameAI.services.WorkDirectionService;
 import net.shasankp000.GameAI.skills.SkillContext;
 import net.shasankp000.GameAI.skills.SkillExecutionResult;
+import net.shasankp000.GameAI.BotActions;
+import net.shasankp000.GameAI.services.ChestStoreService;
 import net.shasankp000.ui.BotInventoryAccess;
 import net.shasankp000.FunctionCaller.FunctionCallerV2;
 import net.shasankp000.ServiceLLMClients.LLMClient;
@@ -82,6 +87,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 import net.minecraft.registry.entry.RegistryEntry;
@@ -447,6 +453,123 @@ public class modCommandRegistry {
                         .then(literal("teleport_forward")
                                 .then(CommandManager.argument("bot", EntityArgumentType.player())
                                         .executes(context -> { teleportForward(context); return 1; })
+                                )
+                        )
+                        .then(literal("craft")
+                                .then(CommandManager.argument("item", StringArgumentType.string())
+                                        .executes(context -> executeCraftGeneric(context,
+                                                StringArgumentType.getString(context, "item"),
+                                                1,
+                                                null,
+                                                getActiveBotOrThrow(context)))
+                                        .then(CommandManager.argument("amount", IntegerArgumentType.integer(1))
+                                                .executes(context -> executeCraftGeneric(context,
+                                                        StringArgumentType.getString(context, "item"),
+                                                        IntegerArgumentType.getInteger(context, "amount"),
+                                                        null,
+                                                        getActiveBotOrThrow(context)))
+                                                .then(CommandManager.argument("material", StringArgumentType.string())
+                                                        .executes(context -> executeCraftGeneric(context,
+                                                                StringArgumentType.getString(context, "item"),
+                                                                IntegerArgumentType.getInteger(context, "amount"),
+                                                                StringArgumentType.getString(context, "material"),
+                                                                getActiveBotOrThrow(context)))
+                                                        .then(CommandManager.argument("bot", EntityArgumentType.player())
+                                                                .executes(context -> executeCraftGeneric(context,
+                                                                        StringArgumentType.getString(context, "item"),
+                                                                        IntegerArgumentType.getInteger(context, "amount"),
+                                                                        StringArgumentType.getString(context, "material"),
+                                                                        EntityArgumentType.getPlayer(context, "bot"))))))
+                                        .then(CommandManager.argument("material", StringArgumentType.string())
+                                                .executes(context -> executeCraftGeneric(context,
+                                                        StringArgumentType.getString(context, "item"),
+                                                        1,
+                                                        StringArgumentType.getString(context, "material"),
+                                                        getActiveBotOrThrow(context)))
+                                                .then(CommandManager.argument("bot", EntityArgumentType.player())
+                                                        .executes(context -> executeCraftGeneric(context,
+                                                                StringArgumentType.getString(context, "item"),
+                                                                1,
+                                                                StringArgumentType.getString(context, "material"),
+                                                                EntityArgumentType.getPlayer(context, "bot")))))
+                                        .then(CommandManager.argument("bot", EntityArgumentType.player())
+                                                .executes(context -> executeCraftGeneric(context,
+                                                        StringArgumentType.getString(context, "item"),
+                                                        1,
+                                                        null,
+                                                        EntityArgumentType.getPlayer(context, "bot"))))
+                                )
+                        )
+                        .then(literal("place")
+                                .then(CommandManager.argument("item", StringArgumentType.string())
+                                        .executes(context -> executePlaceGeneric(context,
+                                                StringArgumentType.getString(context, "item"),
+                                                1,
+                                                getActiveBotOrThrow(context)))
+                                        .then(CommandManager.argument("count", IntegerArgumentType.integer(1))
+                                                .executes(context -> executePlaceGeneric(context,
+                                                        StringArgumentType.getString(context, "item"),
+                                                        IntegerArgumentType.getInteger(context, "count"),
+                                                        getActiveBotOrThrow(context)))
+                                                .then(CommandManager.argument("bot", EntityArgumentType.player())
+                                                        .executes(context -> executePlaceGeneric(context,
+                                                                StringArgumentType.getString(context, "item"),
+                                                                IntegerArgumentType.getInteger(context, "count"),
+                                                                EntityArgumentType.getPlayer(context, "bot")))))
+                                        .then(CommandManager.argument("bot", EntityArgumentType.player())
+                                                .executes(context -> executePlaceGeneric(context,
+                                                        StringArgumentType.getString(context, "item"),
+                                                        1,
+                                                        EntityArgumentType.getPlayer(context, "bot"))))
+                                )
+                        )
+                        .then(literal("cook")
+                                .executes(context -> executeCook(context, getActiveBotOrThrow(context), null, false))
+                                .then(CommandManager.argument("item", StringArgumentType.string())
+                                        .executes(context -> executeCook(context, getActiveBotOrThrow(context), StringArgumentType.getString(context, "item"), false))
+                                        .then(CommandManager.argument("fuel", BoolArgumentType.bool())
+                                                .executes(context -> executeCook(context, getActiveBotOrThrow(context),
+                                                        StringArgumentType.getString(context, "item"),
+                                                        BoolArgumentType.getBool(context, "fuel")))
+                                                .then(CommandManager.argument("bot", EntityArgumentType.player())
+                                                        .executes(context -> executeCook(context, EntityArgumentType.getPlayer(context, "bot"),
+                                                                StringArgumentType.getString(context, "item"),
+                                                                BoolArgumentType.getBool(context, "fuel"))))))
+                                .then(CommandManager.argument("fuel", BoolArgumentType.bool())
+                                        .executes(context -> executeCook(context, getActiveBotOrThrow(context), null,
+                                                BoolArgumentType.getBool(context, "fuel")))
+                                        .then(CommandManager.argument("bot", EntityArgumentType.player())
+                                                .executes(context -> executeCook(context, EntityArgumentType.getPlayer(context, "bot"), null,
+                                                        BoolArgumentType.getBool(context, "fuel")))))
+                                .then(CommandManager.argument("bot", EntityArgumentType.player())
+                                        .executes(context -> executeCook(context, EntityArgumentType.getPlayer(context, "bot"), null, false)))
+                        )
+                        .then(literal("store")
+                                .then(literal("deposit")
+                                        .then(CommandManager.argument("amount", StringArgumentType.string())
+                                                .then(CommandManager.argument("item", StringArgumentType.string())
+                                                        .executes(context -> executeStoreDeposit(context,
+                                                                StringArgumentType.getString(context, "amount"),
+                                                                StringArgumentType.getString(context, "item"),
+                                                                getActiveBotOrThrow(context)))
+                                                        .then(CommandManager.argument("bot", EntityArgumentType.player())
+                                                                .executes(context -> executeStoreDeposit(context,
+                                                                        StringArgumentType.getString(context, "amount"),
+                                                                        StringArgumentType.getString(context, "item"),
+                                                                        EntityArgumentType.getPlayer(context, "bot"))))))
+                                )
+                                .then(literal("withdraw")
+                                        .then(CommandManager.argument("amount", StringArgumentType.string())
+                                                .then(CommandManager.argument("item", StringArgumentType.string())
+                                                        .executes(context -> executeStoreWithdraw(context,
+                                                                StringArgumentType.getString(context, "amount"),
+                                                                StringArgumentType.getString(context, "item"),
+                                                                getActiveBotOrThrow(context)))
+                                                        .then(CommandManager.argument("bot", EntityArgumentType.player())
+                                                                .executes(context -> executeStoreWithdraw(context,
+                                                                        StringArgumentType.getString(context, "amount"),
+                                                                        StringArgumentType.getString(context, "item"),
+                                                                        EntityArgumentType.getPlayer(context, "bot"))))))
                                 )
                         )
                         .then(literal("test_chat_message")
@@ -1429,6 +1552,88 @@ public class modCommandRegistry {
 
     }
 
+    private static int executeCraftGeneric(CommandContext<ServerCommandSource> context, String item, int amount, String material, ServerPlayerEntity bot) {
+        ServerCommandSource source = context.getSource();
+        ServerPlayerEntity commander = source.getPlayer();
+        if (bot == null) {
+            return 0;
+        }
+        int crafted = CraftingHelper.craftGeneric(source, bot, commander, item, amount, material);
+        if (crafted > 0) {
+            ChatUtils.sendSystemMessage(source, "Crafted " + crafted + " " + item + (crafted == 1 ? "" : "s") + ".");
+            return 1;
+        }
+        return 0;
+    }
+
+    private static int executePlaceGeneric(CommandContext<ServerCommandSource> context, String item, int count, ServerPlayerEntity bot) {
+        ServerPlayerEntity commander = context.getSource().getPlayer();
+        if (bot == null || commander == null) {
+            return 0;
+        }
+        PlacementTarget target = capturePlacementTarget(commander);
+        if (target == null) {
+            ChatUtils.sendSystemMessage(context.getSource(), "Look at the block where you want it placed, then run /bot place " + item + ".");
+            return 0;
+        }
+
+        net.minecraft.item.Item placeItem = resolvePlaceable(item);
+        if (placeItem == null) {
+            ChatUtils.sendSystemMessage(context.getSource(), "I can't place " + item + " yet.");
+            return 0;
+        }
+
+        int placed = 0;
+        BlockPos lastPlaced = null;
+        for (int i = 0; i < count; i++) {
+            int slot = findItem(bot, placeItem);
+            if (slot == -1) {
+                break;
+            }
+            BlockPos placedPos;
+            if (placeItem == Items.CHEST && lastPlaced != null) {
+                placedPos = attemptAdjacentChest(bot, lastPlaced, slot, placeItem);
+                if (placedPos == null) {
+                    placedPos = attemptPlacement(bot, target, slot, placeItem);
+                }
+            } else {
+                placedPos = attemptPlacement(bot, target, slot, placeItem);
+            }
+            if (placedPos == null && placeItem == Items.CHEST) {
+                // try adjacent from commander block if first chest failed
+                placedPos = attemptAdjacentChest(bot, target.hitPos.offset(target.face), slot, placeItem);
+            }
+            if (placedPos == null) {
+                ChatUtils.sendSystemMessage(context.getSource(), "I can't reach that spot.");
+                break;
+            }
+            placed++;
+            lastPlaced = placedPos;
+        }
+        if (placed > 0) {
+            ChatUtils.sendSystemMessage(context.getSource(), "Placed " + placed + " " + item + (placed == 1 ? "" : "s") + ".");
+        } else {
+            ChatUtils.sendSystemMessage(context.getSource(), "I don't have any " + item + " to place.");
+        }
+        return placed > 0 ? 1 : 0;
+    }
+
+    private static int executeCook(CommandContext<ServerCommandSource> context, ServerPlayerEntity bot, String itemFilter, boolean useFuel) {
+        if (bot == null) {
+            return 0;
+        }
+        boolean started = SmeltingService.startBatchCook(bot, context.getSource(), itemFilter, useFuel);
+        return started ? 1 : 0;
+    }
+
+    private static int executeStoreDeposit(CommandContext<ServerCommandSource> context, String amountRaw, String itemRaw, ServerPlayerEntity bot) {
+        return ChestStoreService.handleDeposit(context.getSource(), bot, amountRaw, itemRaw);
+    }
+
+    private static int executeStoreWithdraw(CommandContext<ServerCommandSource> context, String amountRaw, String itemRaw, ServerPlayerEntity bot) {
+        return ChestStoreService.handleWithdraw(context.getSource(), bot, amountRaw, itemRaw);
+    }
+
     private static void botGo(CommandContext<ServerCommandSource> context) {
         MinecraftServer server = context.getSource().getServer();
         BlockPos position = BlockPosArgumentType.getBlockPos(context, "pos");
@@ -2004,6 +2209,12 @@ public class modCommandRegistry {
         int deltaY = commander.getBlockY() - bot.getBlockY();
         double horizontalDistance = Math.hypot(commander.getX() - bot.getX(), commander.getZ() - bot.getZ());
 
+        boolean closeEnoughForWalk = horizontalDistance <= 24.0D && Math.abs(deltaY) <= 6;
+        if (!teleportAllowed && closeEnoughForWalk) {
+            BotEventHandler.setFollowModeWalk(bot, commander, 3.2D);
+            return 1;
+        }
+
         if (!teleportAllowed && Math.abs(deltaY) >= 3 && horizontalDistance <= 2.5D) {
             stagePlannedDig(context.getSource(), bot, commander, deltaY, horizontalDistance);
             return 0;
@@ -2016,7 +2227,7 @@ public class modCommandRegistry {
                 null,
                 null,
                 bot.getHorizontalFacing());
-        MovementService.MovementResult result = MovementService.execute(bot.getCommandSource(), bot, plan);
+        MovementService.MovementResult result = MovementService.execute(bot.getCommandSource(), bot, plan, false);
         if (result.success()) {
             return 1;
         }
@@ -2073,6 +2284,100 @@ public class modCommandRegistry {
             }
         }
         return false;
+    }
+
+    private record PlacementTarget(BlockPos hitPos, Direction face, float yaw, float pitch) {}
+
+    private static PlacementTarget capturePlacementTarget(ServerPlayerEntity commander) {
+        if (commander == null) {
+            return null;
+        }
+        var hit = commander.raycast(6.0D, 1.0F, false);
+        if (!(hit instanceof net.minecraft.util.hit.BlockHitResult bhr)) {
+            return null;
+        }
+        return new PlacementTarget(bhr.getBlockPos(), bhr.getSide(), commander.getYaw(), commander.getPitch());
+    }
+
+    private static BlockPos attemptPlacement(ServerPlayerEntity bot, PlacementTarget target, int itemSlot, net.minecraft.item.Item placeItem) {
+        if (bot == null || target == null) {
+            return null;
+        }
+        BlockPos placePos = target.hitPos.offset(target.face);
+        bot.setYaw(target.yaw);
+        bot.setHeadYaw(target.yaw);
+        bot.setPitch(target.pitch);
+
+        int tries = 0;
+        while (tries < 10) {
+            // Clear snow on target
+            var state = bot.getEntityWorld().getBlockState(placePos);
+            if (state.isOf(net.minecraft.block.Blocks.SNOW) || state.isOf(net.minecraft.block.Blocks.SNOW_BLOCK)) {
+                bot.getEntityWorld().breakBlock(placePos, false);
+            }
+            if (BotActions.placeBlockAt(bot, placePos, target.face, List.of(placeItem))) {
+                return placePos.toImmutable();
+            }
+            // try moving closer and retry
+            BlockPos approach = placePos.offset(target.face.getOpposite());
+            MovementService.MovementPlan plan = new MovementService.MovementPlan(
+                    MovementService.Mode.DIRECT,
+                    approach,
+                    approach,
+                    null,
+                    null,
+                    target.face.getOpposite());
+            MovementService.execute(bot.getCommandSource(), bot, plan, false);
+            // Nudge sideways to avoid occupying the placement spot
+            MovementService.MovementPlan sidestep = new MovementService.MovementPlan(
+                    MovementService.Mode.DIRECT,
+                    approach.offset(target.face.rotateYClockwise()),
+                    approach.offset(target.face.rotateYClockwise()),
+                    null,
+                    null,
+                    target.face.getOpposite());
+            MovementService.execute(bot.getCommandSource(), bot, sidestep, false);
+            tries++;
+        }
+        return null;
+    }
+
+    private static int findItem(ServerPlayerEntity bot, net.minecraft.item.Item item) {
+        if (bot == null) {
+            return -1;
+        }
+        for (int i = 0; i < bot.getInventory().size(); i++) {
+            if (bot.getInventory().getStack(i).isOf(item)) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    private static net.minecraft.item.Item resolvePlaceable(String item) {
+        return switch (item.toLowerCase()) {
+            case "crafting_table", "craftingtable" -> Items.CRAFTING_TABLE;
+            case "furnace" -> Items.FURNACE;
+            case "chest" -> Items.CHEST;
+            default -> null;
+        };
+    }
+
+    private static BlockPos attemptAdjacentChest(ServerPlayerEntity bot, BlockPos anchor, int slot, net.minecraft.item.Item placeItem) {
+        if (anchor == null) {
+            return null;
+        }
+        for (Direction dir : Direction.Type.HORIZONTAL) {
+            BlockPos candidate = anchor.offset(dir);
+            PlacementTarget alt = new PlacementTarget(candidate, dir.getOpposite(), bot.getYaw(), bot.getPitch());
+            if (bot.getEntityWorld().getBlockState(candidate).isAir()) {
+                BlockPos placed = attemptPlacement(bot, alt, slot, placeItem);
+                if (placed != null) {
+                    return placed;
+                }
+            }
+        }
+        return null;
     }
 
     private static int executeFollowStop(CommandContext<ServerCommandSource> context, ServerPlayerEntity bot) {
