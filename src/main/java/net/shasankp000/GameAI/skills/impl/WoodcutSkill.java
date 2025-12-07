@@ -228,6 +228,7 @@ public final class WoodcutSkill implements Skill {
             }
             if (!placedPillar.isEmpty()) {
                 descendAndCleanup(bot, placedPillar);
+                cleanupNearbyScaffold(bot, target.base());
             }
             if (!success) {
                 LOGGER.warn("Woodcut cleanup: pillar removed after failure");
@@ -276,10 +277,13 @@ public final class WoodcutSkill implements Skill {
         if (bot == null || source == null) {
             return;
         }
-        if (!isInventoryFull(bot)) {
+        int empty = countEmptySlots(bot);
+        int woodCount = countWood(bot);
+        boolean needsDeposit = empty <= 1 || woodCount >= 32;
+        if (!needsDeposit) {
             return;
         }
-        Optional<BlockPos> chestPos = findNearestChest(bot, 10, 4);
+        Optional<BlockPos> chestPos = findNearestChest(bot, 12, 5);
         if (chestPos.isEmpty()) {
             LOGGER.warn("Inventory full and no chest nearby for deposit.");
             return;
@@ -1077,13 +1081,25 @@ public final class WoodcutSkill implements Skill {
         return total;
     }
 
-    private boolean isInventoryFull(ServerPlayerEntity bot) {
+    private int countEmptySlots(ServerPlayerEntity bot) {
+        int empty = 0;
         for (int i = 0; i < bot.getInventory().size(); i++) {
             if (bot.getInventory().getStack(i).isEmpty()) {
-                return false;
+                empty++;
             }
         }
-        return true;
+        return empty;
+    }
+
+    private int countWood(ServerPlayerEntity bot) {
+        int total = 0;
+        for (int i = 0; i < bot.getInventory().size(); i++) {
+            ItemStack stack = bot.getInventory().getStack(i);
+            if (isWoodStack(stack)) {
+                total += stack.getCount();
+            }
+        }
+        return total;
     }
 
     private Optional<BlockPos> findNearestChest(ServerPlayerEntity bot, int radius, int vertical) {
@@ -1162,6 +1178,23 @@ public final class WoodcutSkill implements Skill {
             }
         }
         return remaining;
+    }
+
+    private void cleanupNearbyScaffold(ServerPlayerEntity bot, BlockPos base) {
+        if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
+            return;
+        }
+        int radius = 3;
+        for (BlockPos pos : BlockPos.iterate(base.add(-radius, -1, -radius), base.add(radius, 5, radius))) {
+            if (!PILLAR_BLOCKS.contains(world.getBlockState(pos).getBlock().asItem())) {
+                continue;
+            }
+            // Avoid touching actual logs/planks to prevent structure damage
+            if (world.getBlockState(pos).isIn(BlockTags.LOGS) || world.getBlockState(pos).isIn(BlockTags.PLANKS)) {
+                continue;
+            }
+            mineBlock(bot, pos, false);
+        }
     }
 
     private BlockPos findNearestOverheadLog(ServerWorld world, BlockPos botPos, BlockPos base) {
