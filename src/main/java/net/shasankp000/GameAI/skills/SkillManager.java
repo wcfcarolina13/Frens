@@ -35,6 +35,7 @@ public final class SkillManager {
         register(new StripMineSkill());
         register(new WoodcutSkill());
         register(new ShelterSkill());
+        register(new net.shasankp000.GameAI.skills.impl.FarmSkill());
     }
 
     private SkillManager() {
