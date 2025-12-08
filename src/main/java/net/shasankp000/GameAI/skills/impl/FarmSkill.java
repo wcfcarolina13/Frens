@@ -43,7 +43,7 @@ public class FarmSkill implements Skill {
     private static final int PATCH_SIZE = HYDRATION_RADIUS * 2 + 1;
     private static final int SEARCH_RADIUS_PATCHES = 2;
     private static final int PATCH_AREA = PATCH_SIZE * PATCH_SIZE;
-    private static final double MAX_CENTER_DISTANCE_SQ = 9.0; // Relaxed to 3 blocks
+    private static final double MAX_CENTER_DISTANCE_SQ = 16.0; // Relaxed to 4 blocks
     private static final int MAX_SURFACE_CLEAR_HEIGHT = 3;
     private static final Set<Block> SURFACE_COVER_BLOCKS = Set.of(
             Blocks.SNOW,
@@ -74,11 +74,14 @@ public class FarmSkill implements Skill {
         BlockPos center = selectFarmCenter(bot, world);
         LOGGER.info("Bot {} initiating farming workflow at {} (radius {})", bot.getName().getString(), center, HYDRATION_RADIUS);
 
+        // Target the block ABOVE the center (where we stand)
+        BlockPos standTarget = center.up();
+
         // Ensure we don't jump around (use DIRECT movement only)
         MovementService.MovementPlan plan = new MovementService.MovementPlan(
                 MovementService.Mode.DIRECT,
-                center.up(), // Move to STAND on the farm, so target center + 1
-                center.up(),
+                standTarget, 
+                standTarget,
                 null,
                 null,
                 bot.getHorizontalFacing()
@@ -123,9 +126,10 @@ public class FarmSkill implements Skill {
             LOGGER.debug("Water bucket available in slot {}", waterBucketSlot);
             selectHotbarSlot(bot, waterBucketSlot);
             ItemStack stack = bot.getInventory().getStack(waterBucketSlot);
-            // Water is placed INTO the hole, so we click the block inside or the top face of the base?
-            // We cleared waterPos. waterPos.down() is base.
-            // Clicking UP on base places water at waterPos.
+            
+            // Water is placed INTO the hole. The hole is at 'waterPos'.
+            // To place water IN a block, we usually target the block below or the side.
+            // If waterPos is air, targeting waterPos.down() (UP face) works.
             BlockPos waterBase = waterPos.down();
             LookController.faceBlock(bot, waterBase);
             ActionResult waterPlacement = stack.useOnBlock(new net.minecraft.item.ItemUsageContext(bot, Hand.MAIN_HAND,
@@ -405,10 +409,28 @@ public class FarmSkill implements Skill {
         BlockPos feetPos = bot.getBlockPos();
         BlockPos base = alignToPatchGrid(feetPos);
         
-        // Correction: If the aligned base is AIR, move down.
-        // We want the farm layer to be solid blocks (dirt/grass).
-        if (world.getBlockState(base).isAir() && !world.getBlockState(base.down()).isAir()) {
-            base = base.down();
+        // Improved Vertical Scan:
+        // We want to find a SOLID block to be the farm center.
+        // Scan down from feet level (and slightly above) to find solid ground.
+        
+        BlockPos bestY = null;
+        // Scan from Eye level down to 5 blocks below feet
+        for (int y = feetPos.getY() + 1; y >= feetPos.getY() - 5; y--) {
+            BlockPos check = new BlockPos(base.getX(), y, base.getZ());
+            if (!world.getBlockState(check).isAir() && !shouldRemoveCover(world.getBlockState(check))) {
+                // Found a solid block that isn't just grass/flowers
+                bestY = check;
+                break;
+            }
+        }
+        
+        if (bestY != null) {
+            base = bestY;
+        } else {
+            // Fallback if floating or in air: just use feet - 1 if air
+            if (world.getBlockState(base).isAir()) {
+                base = base.down();
+            }
         }
         
         BlockPos best = base;
@@ -425,9 +447,17 @@ public class FarmSkill implements Skill {
                     }
                     BlockPos candidate = base.add(dx * PATCH_SIZE, 0, dz * PATCH_SIZE);
                     
-                    // Adjust candidate Y as well
-                    if (world.getBlockState(candidate).isAir() && !world.getBlockState(candidate.down()).isAir()) {
-                        candidate = candidate.down();
+                    // Re-adjust candidate Y to match terrain
+                    BlockPos candidateSurface = null;
+                    for (int y = candidate.getY() + 2; y >= candidate.getY() - 3; y--) {
+                         BlockPos check = new BlockPos(candidate.getX(), y, candidate.getZ());
+                         if (!world.getBlockState(check).isAir() && !shouldRemoveCover(world.getBlockState(check))) {
+                             candidateSurface = check;
+                             break;
+                         }
+                    }
+                    if (candidateSurface != null) {
+                        candidate = candidateSurface;
                     }
                     
                     int score = patchFarmlandCoverage(world, candidate);
