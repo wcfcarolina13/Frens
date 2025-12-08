@@ -32,3 +32,10 @@ Historical record and reasoning. `TODO.md` is the source of truth for what’s n
 
 ## Legacy Releases (pre-2025)
 - 1.0.x line: 1.20.6 compatibility, server-side training mode support, Q-table format change, risk-taking mechanism, expanded triggers (lava/cliffs/sculk), and broad command set (`use-key`, `detectDangerZone`, inventory queries, armor equip/remove, etc.). See archived release notes in `archive/legacy_changelogs.md`.
+
+## 2025-12-08
+- UI: Moved Specific URLs to dedicated button + popup; ensured popup min 800x600.
+- Textbox: Added placeholder guidance.
+- Specific URLs flow: Added --urls support, timestamped outputs saved to 'Specific Video Lists/'.
+- Cleanup: Removed empty markdown placeholders in audio_briefing project (kept API keys out of git).
+
