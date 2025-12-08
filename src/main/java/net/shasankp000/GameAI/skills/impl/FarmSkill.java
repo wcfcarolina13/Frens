@@ -74,11 +74,11 @@ public class FarmSkill implements Skill {
         BlockPos center = selectFarmCenter(bot, world);
         LOGGER.info("Bot {} initiating farming workflow at {} (radius {})", bot.getName().getString(), center, HYDRATION_RADIUS);
 
-        // Ensure we don't jump around (use DIRECT movement only)
+        // Ensure we don\u0027t jump around (use DIRECT movement only)
         MovementService.MovementPlan plan = new MovementService.MovementPlan(
                 MovementService.Mode.DIRECT,
-                center,
-                center,
+                center.up(), // Move to STAND on the farm, so target center + 1
+                center.up(),
                 null,
                 null,
                 bot.getHorizontalFacing()
@@ -89,10 +89,15 @@ public class FarmSkill implements Skill {
             ChatUtils.sendSystemMessage(source, "Unable to reach the intended farm area.");
             return SkillExecutionResult.failure("Failed to reach farm center.");
         }
-        if (bot.getBlockPos().getSquaredDistance(center) > MAX_CENTER_DISTANCE_SQ) {
-            double actualDist = Math.sqrt(bot.getBlockPos().getSquaredDistance(center));
+        
+        // Check distance to center (ignoring Y for "close enough" if we are above/on it)
+        double dx = bot.getX() - (center.getX() + 0.5);
+        double dz = bot.getZ() - (center.getZ() + 0.5);
+        double horizontalDistSq = dx * dx + dz * dz;
+
+        if (horizontalDistSq > MAX_CENTER_DISTANCE_SQ) {
             LOGGER.warn("Bot {} ended {:.2f} blocks away from center {} (needed <= {:.1f})",
-                    bot.getName().getString(), actualDist, center, Math.sqrt(MAX_CENTER_DISTANCE_SQ));
+                    bot.getName().getString(), Math.sqrt(horizontalDistSq), center, Math.sqrt(MAX_CENTER_DISTANCE_SQ));
             ChatUtils.sendSystemMessage(source, "Could not get close enough to the farm center.");
             return SkillExecutionResult.failure("Failed to reach farm center closely enough.");
         }
@@ -118,10 +123,13 @@ public class FarmSkill implements Skill {
             LOGGER.debug("Water bucket available in slot {}", waterBucketSlot);
             selectHotbarSlot(bot, waterBucketSlot);
             ItemStack stack = bot.getInventory().getStack(waterBucketSlot);
-            BlockPos waterTarget = waterPos.down();
-            LookController.faceBlock(bot, waterTarget);
+            // Water is placed INTO the hole, so we click the block inside or the top face of the base?
+            // We cleared waterPos. waterPos.down() is base.
+            // Clicking UP on base places water at waterPos.
+            BlockPos waterBase = waterPos.down();
+            LookController.faceBlock(bot, waterBase);
             ActionResult waterPlacement = stack.useOnBlock(new net.minecraft.item.ItemUsageContext(bot, Hand.MAIN_HAND,
-                    new BlockHitResult(Vec3d.ofCenter(waterTarget), Direction.UP, waterTarget, false)));
+                    new BlockHitResult(Vec3d.ofCenter(waterBase), Direction.UP, waterBase, false)));
             if (waterPlacement.isAccepted()) {
                 bot.swingHand(Hand.MAIN_HAND, true);
                 LOGGER.info("Placed irrigation water at {}", waterPos);
@@ -131,7 +139,7 @@ public class FarmSkill implements Skill {
                 return SkillExecutionResult.failure("Unable to place irrigation water.");
             }
         } else {
-            ChatUtils.sendSystemMessage(source, "I don't have water. Please give me a water bucket; pausing farm.");
+            ChatUtils.sendSystemMessage(source, "I don\u0027t have water. Please give me a water bucket; pausing farm.");
             SkillManager.requestSkillPause(bot, "Missing water bucket for farming.");
             return SkillExecutionResult.failure("Paused: missing water bucket.");
         }
@@ -195,23 +203,28 @@ public class FarmSkill implements Skill {
         int tilled = 0;
         int dirtFilled = 0;
         BlockPos waterBase = waterPos.down();
+        
         for (int dx = -HYDRATION_RADIUS; dx <= HYDRATION_RADIUS; dx++) {
             for (int dz = -HYDRATION_RADIUS; dz <= HYDRATION_RADIUS; dz++) {
                 BlockPos pos = waterPos.add(dx, 0, dz);
                 if (pos.equals(waterPos) || pos.equals(waterBase)) {
                     continue;
                 }
+                
                 clearSurfaceObstacles(world, bot, pos);
+                
                 if (botSquaredDistance(bot, pos) > 36.0) {
                     MovementService.MovementPlan step = new MovementService.MovementPlan(
-                            MovementService.Mode.DIRECT, pos, pos, null, null, bot.getHorizontalFacing());
+                            MovementService.Mode.DIRECT, pos.up(), pos.up(), null, null, bot.getHorizontalFacing());
                     MovementService.execute(source, bot, step, false);
                 }
-                BlockState above = world.getBlockState(pos);
+                
+                BlockState above = world.getBlockState(pos.up());
                 if (!above.isAir() && above.isReplaceable()) {
-                    mineBlock(bot, pos, world);
-                    LOGGER.debug("Cleared {} while preparing the plot (was {})", pos, above.getBlock());
+                    mineBlock(bot, pos.up(), world);
+                    LOGGER.debug("Cleared {} while preparing the plot (was {})", pos.up(), above.getBlock());
                 }
+                
                 BlockState base = world.getBlockState(pos);
                 if (base.isAir()) {
                     LookController.faceBlock(bot, pos);
@@ -223,6 +236,7 @@ public class FarmSkill implements Skill {
                     }
                     base = world.getBlockState(pos);
                 }
+                
                 Block baseBlock = base.getBlock();
                 if (!TILLABLE_SURFACES.contains(baseBlock) && baseBlock != Blocks.FARMLAND) {
                     LOGGER.debug("Skipping {} because base {} cannot be hoed", pos, baseBlock);
@@ -246,13 +260,11 @@ public class FarmSkill implements Skill {
     }
 
     private static void clearSurfaceObstacles(ServerWorld world, ServerPlayerEntity bot, BlockPos groundPos) {
-        for (int offsetY = 0; offsetY <= MAX_SURFACE_CLEAR_HEIGHT; offsetY++) {
+        // groundPos is the dirt layer. We check blocks ABOVE it.
+        for (int offsetY = 1; offsetY <= MAX_SURFACE_CLEAR_HEIGHT; offsetY++) {
             BlockPos checkPos = groundPos.up(offsetY);
             BlockState state = world.getBlockState(checkPos);
             if (state.isAir()) {
-                continue;
-            }
-            if (offsetY == 0 && state.isOf(Blocks.FARMLAND)) {
                 continue;
             }
             if (state.isReplaceable() || shouldRemoveCover(state)) {
@@ -260,7 +272,7 @@ public class FarmSkill implements Skill {
                 LOGGER.debug("Cleared {} at {} while preparing farm plot", state.getBlock(), checkPos);
                 continue;
             }
-            if (offsetY > 0) {
+            if (offsetY > 1) {
                 LOGGER.debug("Left solid block {} at {} while prepping plot", state.getBlock(), checkPos);
             }
         }
@@ -278,22 +290,30 @@ public class FarmSkill implements Skill {
     }
 
     private static boolean digWaterHole(ServerWorld world, ServerPlayerEntity bot, ServerCommandSource source, BlockPos waterPos) {
+        // waterPos is the block where water source goes.
+        // waterBase is the block UNDER it (must be solid).
+        
         BlockPos waterBase = waterPos.down();
         BlockState centerState = world.getBlockState(waterPos);
         BlockState baseState = world.getBlockState(waterBase);
+        
         LOGGER.debug("Starting water hole prep at {} (center={}, base={})", waterPos, centerState.getBlock(), baseState.getBlock());
+        
+        // 1. Clear the center (Y)
         if (!centerState.isAir()) {
             mineBlock(bot, waterPos, world);
         }
-        if (!baseState.isAir()) {
-            mineBlock(bot, waterBase, world);
+        
+        // 2. Ensure base (Y-1) is solid. DO NOT MINE IT if it\u0027s already solid!
+        if (baseState.isAir()) {
+            LookController.faceBlock(bot, waterBase);
+            if (!fillWithDirt(bot, world, waterBase)) {
+                LOGGER.warn("Unable to fill water hole base at {}", waterBase);
+                ChatUtils.sendSystemMessage(source, "I need more dirt to shape the water hole.");
+                return false;
+            }
         }
-        LookController.faceBlock(bot, waterBase);
-        if (!fillWithDirt(bot, world, waterBase)) {
-            LOGGER.warn("Unable to fill water hole base at {}", waterBase);
-            ChatUtils.sendSystemMessage(source, "I need more dirt to shape the water hole.");
-            return false;
-        }
+        
         LOGGER.debug("Dug water hole at {}", waterPos);
         return true;
     }
@@ -305,7 +325,7 @@ public class FarmSkill implements Skill {
                                                BlockPos waterPos) {
         Optional<MovementService.MovementPlan> planOpt = MovementService.planLootApproach(
                 bot,
-                waterPos,
+                waterPos, // Move close to waterPos
                 MovementService.MovementOptions.skillLoot()
         );
         if (planOpt.isEmpty()) {
@@ -382,7 +402,15 @@ public class FarmSkill implements Skill {
     }
 
     private static BlockPos selectFarmCenter(ServerPlayerEntity bot, ServerWorld world) {
-        BlockPos base = alignToPatchGrid(bot.getBlockPos());
+        BlockPos feetPos = bot.getBlockPos();
+        BlockPos base = alignToPatchGrid(feetPos);
+        
+        // Correction: If the aligned base is AIR, move down.
+        // We want the farm layer to be solid blocks (dirt/grass).
+        if (world.getBlockState(base).isAir() && !world.getBlockState(base.down()).isAir()) {
+            base = base.down();
+        }
+        
         BlockPos best = base;
         int bestScore = patchFarmlandCoverage(world, base);
         if (bestScore == 0) {
@@ -396,6 +424,12 @@ public class FarmSkill implements Skill {
                         continue;
                     }
                     BlockPos candidate = base.add(dx * PATCH_SIZE, 0, dz * PATCH_SIZE);
+                    
+                    // Adjust candidate Y as well
+                    if (world.getBlockState(candidate).isAir() && !world.getBlockState(candidate.down()).isAir()) {
+                        candidate = candidate.down();
+                    }
+                    
                     int score = patchFarmlandCoverage(world, candidate);
                     if (score < bestScore) {
                         bestScore = score;
