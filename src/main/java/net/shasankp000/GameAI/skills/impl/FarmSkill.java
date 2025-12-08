@@ -30,6 +30,7 @@ import net.shasankp000.Entity.LookController;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -127,19 +128,61 @@ public class FarmSkill implements Skill {
             selectHotbarSlot(bot, waterBucketSlot);
             ItemStack stack = bot.getInventory().getStack(waterBucketSlot);
             
-            // Water is placed INTO the hole. The hole is at 'waterPos'.
-            // To place water IN a block, we usually target the block below or the side.
-            // If waterPos is air, targeting waterPos.down() (UP face) works.
-            BlockPos waterBase = waterPos.down();
-            LookController.faceBlock(bot, waterBase);
-            try { Thread.sleep(50); } catch (InterruptedException e) {} // Wait for rotation sync
-            ActionResult waterPlacement = stack.useOnBlock(new net.minecraft.item.ItemUsageContext(bot, Hand.MAIN_HAND,
-                    new BlockHitResult(Vec3d.ofCenter(waterBase), Direction.UP, waterBase, false)));
-            if (waterPlacement.isAccepted()) {
-                bot.swingHand(Hand.MAIN_HAND, true);
-                LOGGER.info("Placed irrigation water at {}", waterPos);
-            } else {
-                LOGGER.warn("Water placement at {} failed ({})", waterPos, waterPlacement);
+            boolean waterPlaced = false;
+            List<Direction> facesToTry = new ArrayList<>();
+            facesToTry.add(Direction.UP); // Floor of the hole
+            for (Direction h : Direction.Type.HORIZONTAL) {
+                facesToTry.add(h); // Walls of the hole
+            }
+            
+            // waterPos is the hole (AIR).
+            // We want to click a SOLID neighbor block that faces INTO the hole.
+            
+            for (Direction clickFace : facesToTry) {
+                BlockPos targetBlock;
+                Direction side;
+                
+                if (clickFace == Direction.UP) {
+                    targetBlock = waterPos.down(); // The floor block
+                    side = Direction.UP; // Click the top of the floor
+                } else {
+                    // If clickFace is NORTH, we want the SOUTH face of the block to the NORTH of waterPos?
+                    // No, if we iterate  as the face of the NEIGHBOR we click...
+                    
+                    // Let's iterate NEIGHBORS instead.
+                    // Identify neighbor block.
+                    // Identify face of neighbor that points to waterPos.
+                    
+                    // Actually, let's stick to the simple logic:
+                    // We are standing adjacent to waterPos.
+                    // We can try clicking waterPos.down() (UP face).
+                    // We can try clicking waterPos.north() (SOUTH face).
+                    // We can try clicking waterPos.south() (NORTH face).
+                    // etc.
+                    
+                    targetBlock = waterPos.offset(clickFace); // The wall block
+                    side = clickFace.getOpposite(); // The face of that block pointing to waterPos
+                }
+                
+                if (world.getBlockState(targetBlock).isSolidBlock(world, targetBlock)) {
+                    LOGGER.debug("Trying to place water on {} face of {}", side, targetBlock);
+                    LookController.faceBlock(bot, targetBlock);
+                    try { Thread.sleep(50); } catch (InterruptedException e) {}
+                    
+                    ActionResult result = stack.useOnBlock(new net.minecraft.item.ItemUsageContext(bot, Hand.MAIN_HAND,
+                            new BlockHitResult(Vec3d.ofCenter(targetBlock), side, targetBlock, false)));
+                            
+                    if (result.isAccepted()) {
+                        bot.swingHand(Hand.MAIN_HAND, true);
+                        LOGGER.info("Placed irrigation water at {} using {} face of {}", waterPos, side, targetBlock);
+                        waterPlaced = true;
+                        break;
+                    }
+                }
+            }
+
+            if (!waterPlaced) {
+                LOGGER.warn("Water placement at {} failed completely.", waterPos);
                 ChatUtils.sendSystemMessage(source, "Water placement failed at " + waterPos + "; is the bucket full and reachable?");
                 return SkillExecutionResult.failure("Unable to place irrigation water.");
             }
@@ -422,136 +465,6 @@ public class FarmSkill implements Skill {
         for (int i = 0; i < inventory.size(); i++) {
             ItemStack stack = inventory.getStack(i);
             if (!stack.isEmpty() && stack.getItem() instanceof HoeItem) {
-                return i;
-            }
-        }
-        return -1;
-    }
-
-    private static BlockPos selectFarmCenter(ServerPlayerEntity bot, ServerWorld world) {
-        BlockPos feetPos = bot.getBlockPos();
-        BlockPos base = alignToPatchGrid(feetPos);
-        
-        // Improved Vertical Scan:
-        // We want to find a SOLID block to be the farm center.
-        // Scan down from feet level (and slightly above) to find solid ground.
-        
-        BlockPos bestY = null;
-        // Scan from Eye level down to 5 blocks below feet
-        for (int y = feetPos.getY() + 1; y >= feetPos.getY() - 5; y--) {
-            BlockPos check = new BlockPos(base.getX(), y, base.getZ());
-            if (!world.getBlockState(check).isAir() && !shouldRemoveCover(world.getBlockState(check))) {
-                // Found a solid block that isn't just grass/flowers
-                bestY = check;
-                break;
-            }
-        }
-        
-        if (bestY != null) {
-            base = bestY;
-        } else {
-            // Fallback if floating or in air: just use feet - 1 if air
-            if (world.getBlockState(base).isAir()) {
-                base = base.down();
-            }
-        }
-        
-        BlockPos best = base;
-        int bestScore = patchFarmlandCoverage(world, base);
-        if (bestScore == 0) {
-            LOGGER.debug("Starting new patch at {}", base);
-            return base;
-        }
-        for (int radius = 1; radius <= SEARCH_RADIUS_PATCHES; radius++) {
-            for (int dx = -radius; dx <= radius; dx++) {
-                for (int dz = -radius; dz <= radius; dz++) {
-                    if (Math.abs(dx) != radius && Math.abs(dz) != radius) {
-                        continue;
-                    }
-                    BlockPos candidate = base.add(dx * PATCH_SIZE, 0, dz * PATCH_SIZE);
-                    
-                    // Re-adjust candidate Y to match terrain
-                    BlockPos candidateSurface = null;
-                    for (int y = candidate.getY() + 2; y >= candidate.getY() - 3; y--) {
-                         BlockPos check = new BlockPos(candidate.getX(), y, candidate.getZ());
-                         if (!world.getBlockState(check).isAir() && !shouldRemoveCover(world.getBlockState(check))) {
-                             candidateSurface = check;
-                             break;
-                         }
-                    }
-                    if (candidateSurface != null) {
-                        candidate = candidateSurface;
-                    }
-                    
-                    int score = patchFarmlandCoverage(world, candidate);
-                    if (score < bestScore) {
-                        bestScore = score;
-                        best = candidate;
-                        if (score == 0) {
-                            LOGGER.debug("Found empty patch at {}", candidate);
-                            return candidate;
-                        }
-                    }
-                }
-            }
-        }
-        if (!best.equals(base)) {
-            LOGGER.debug("Advancing to farm patch {} ({} farmland blocks)", best, bestScore);
-        } else {
-            LOGGER.debug("Continuing at patch {} ({} farmland blocks)", base, bestScore);
-        }
-        return best;
-    }
-
-    private static BlockPos alignToPatchGrid(BlockPos pos) {
-        int x = Math.round(pos.getX() / (float) PATCH_SIZE) * PATCH_SIZE;
-        int z = Math.round(pos.getZ() / (float) PATCH_SIZE) * PATCH_SIZE;
-        return new BlockPos(x, pos.getY(), z);
-    }
-
-    private static int patchFarmlandCoverage(ServerWorld world, BlockPos center) {
-        int farmlandCount = 0;
-        for (int dx = -HYDRATION_RADIUS; dx <= HYDRATION_RADIUS; dx++) {
-            for (int dz = -HYDRATION_RADIUS; dz <= HYDRATION_RADIUS; dz++) {
-                BlockPos pos = center.add(dx, 0, dz);
-                if (world.getBlockState(pos).isOf(Blocks.FARMLAND)) {
-                    farmlandCount++;
-                }
-            }
-        }
-        return farmlandCount;
-    }
-
-    private static double botSquaredDistance(ServerPlayerEntity bot, BlockPos pos) {
-        BlockPos b = bot.getBlockPos();
-        double dx = b.getX() - pos.getX();
-        double dz = b.getZ() - pos.getZ();
-        return dx*dx + dz*dz;
-    }
-
-    private static int ensureHotbarItem(ServerPlayerEntity bot, Item item) {
-        PlayerInventory inventory = bot.getInventory();
-        int hotbarSlot = findHotbarItemSlot(inventory, item);
-        if (hotbarSlot != -1) {
-            return hotbarSlot;
-        }
-        int stackSlot = findInventoryItemSlot(inventory, item);
-        if (stackSlot == -1) {
-            return -1;
-        }
-        int target = findEmptyHotbarSlot(inventory);
-        if (target == -1) {
-            target = inventory.getSelectedSlot();
-        }
-        swapStacks(inventory, stackSlot, target);
-        LOGGER.debug("Moved {} from slot {} to hotbar slot {}", item.getTranslationKey(), stackSlot, target);
-        return target;
-    }
-
-    private static int findHotbarItemSlot(PlayerInventory inventory, Item item) {
-        for (int i = 0; i < 9; i++) {
-            ItemStack stack = inventory.getStack(i);
-            if (!stack.isEmpty() && stack.isOf(item)) {
                 return i;
             }
         }
