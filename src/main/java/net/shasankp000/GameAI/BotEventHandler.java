@@ -1413,7 +1413,7 @@ public class BotEventHandler {
                 canSee,
                 stopRange);
         // Only allow teleport when far AND not visible
-        if (allowTeleport && (canSee || distanceSq <= 400.0D)) {
+        if (allowTeleport && canSee && distanceSq <= 225.0D) {
             allowTeleport = false;
         }
         if (stopRange > 0 && distanceSq <= stopRange * stopRange) {
@@ -1452,7 +1452,7 @@ public class BotEventHandler {
                     null,
                     bot.getHorizontalFacing());
             LOGGER.info("Follow selecting walk plan: bot={} targetPos={}", bot.getName().getString(), target.getBlockPos());
-            MovementService.MovementResult res = MovementService.execute(bot.getCommandSource(), bot, plan, false, false);
+            MovementService.MovementResult res = MovementService.execute(bot.getCommandSource(), bot, plan, allowTeleport, false);
             if (!res.success()) {
                 LOGGER.warn("Follow walk failed: {}", res.detail());
                 MovementService.clearRecentWalkAttempt(bot.getUuid());

@@ -1081,7 +1081,7 @@ public class CollectDirtSkill implements Skill {
             BlockPos forward = currentFeet.offset(digDirection);
             BlockPos stairFoot = forward.down();
             List<BlockPos> workVolume = buildStraightStairVolume(forward, stairFoot);
-            DetectionResult detection = MiningHazardDetector.detect(player, workVolume, List.of(stairFoot));
+            DetectionResult detection = MiningHazardDetector.detect(player, workVolume, List.of(stairFoot), true);
             detection.adjacentWarnings().forEach(warning ->
                     ChatUtils.sendChatMessages(player.getCommandSource().withSilent().withMaxLevel(4), warning.chatMessage()));
             if (detection.blockingHazard().isPresent()) {
@@ -1117,7 +1117,9 @@ public class CollectDirtSkill implements Skill {
 
             MovementService.MovementPlan plan =
                     new MovementService.MovementPlan(MovementService.Mode.DIRECT, stairFoot, stairFoot, null, null, digDirection);
-            MovementService.MovementResult moveResult = MovementService.execute(source, player, plan);
+            // Allow pursuit and a single snap during stair descent to avoid "no walkable path" stalls,
+            // but keep teleport disabled to remain human-like.
+            MovementService.MovementResult moveResult = MovementService.execute(source, player, plan, false, true, true, true);
             if (!moveResult.success()) {
                 return SkillExecutionResult.failure("Descent aborted: failed to advance (" + moveResult.detail() + ").");
             }

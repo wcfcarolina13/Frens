@@ -228,9 +228,31 @@ public class modCommandRegistry {
                         .then(literal("shelter")
                                 .then(literal("hovel")
                                         .executes(context -> executeSkillTargets(context, "shelter", "hovel"))
+                                        .then(CommandManager.argument("options", StringArgumentType.greedyString())
+                                                .executes(context -> executeSkillTargets(context, "shelter",
+                                                        "hovel " + StringArgumentType.getString(context, "options"))))
                                         .then(CommandManager.argument("target", StringArgumentType.string())
                                                 .executes(context -> executeSkillTargets(context, "shelter",
-                                                        StringArgumentType.getString(context, "target") + " hovel")))
+                                                        StringArgumentType.getString(context, "target") + " hovel"))
+                                                 .then(CommandManager.argument("options", StringArgumentType.greedyString())
+                                                         .executes(context -> executeSkillTargets(context, "shelter",
+                                                                 StringArgumentType.getString(context, "target") + " hovel "
+                                                                         + StringArgumentType.getString(context, "options"))))
+                                        )
+                                )
+                                .then(literal("burrow")
+                                        .executes(context -> executeSkillTargets(context, "shelter", "burrow"))
+                                        .then(CommandManager.argument("options", StringArgumentType.greedyString())
+                                                .executes(context -> executeSkillTargets(context, "shelter",
+                                                        "burrow " + StringArgumentType.getString(context, "options"))))
+                                        .then(CommandManager.argument("target", StringArgumentType.string())
+                                                .executes(context -> executeSkillTargets(context, "shelter",
+                                                        StringArgumentType.getString(context, "target") + " burrow"))
+                                                 .then(CommandManager.argument("options", StringArgumentType.greedyString())
+                                                         .executes(context -> executeSkillTargets(context, "shelter",
+                                                                 StringArgumentType.getString(context, "target") + " burrow "
+                                                                         + StringArgumentType.getString(context, "options"))))
+                                        )
                                 )
                         )
                         .then(literal("stop")
@@ -2560,6 +2582,8 @@ public class modCommandRegistry {
             return 0;
         }
         String alias = bot.getName().getString();
+        // Ensure follow state is cleared so the bot truly stops.
+        net.shasankp000.GameAI.BotEventHandler.stopFollowing(bot);
         stopMoving(server, context.getSource(), alias);
         TaskService.forceAbort(bot.getUuid(), "§cCurrent task aborted via /bot stop.");
         net.shasankp000.PathFinding.PathTracer.flushAllMovementTasks();

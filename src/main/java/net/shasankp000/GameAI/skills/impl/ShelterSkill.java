@@ -14,9 +14,14 @@ import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 import net.shasankp000.ChatUtils.ChatUtils;
 import net.shasankp000.GameAI.BotActions;
+import net.shasankp000.GameAI.DropSweeper;
+import net.shasankp000.GameAI.services.MovementService;
+import net.shasankp000.GameAI.services.WorkDirectionService;
 import net.shasankp000.GameAI.skills.Skill;
 import net.shasankp000.GameAI.skills.SkillContext;
 import net.shasankp000.GameAI.skills.SkillExecutionResult;
+import net.shasankp000.GameAI.skills.impl.CollectDirtSkill;
+import net.shasankp000.GameAI.skills.impl.StripMineSkill;
 import net.shasankp000.GameAI.skills.support.TreeDetector;
 import net.shasankp000.PlayerUtils.MiningTool;
 import org.slf4j.Logger;
@@ -26,6 +31,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -61,15 +67,62 @@ public final class ShelterSkill implements Skill {
             return SkillExecutionResult.failure("No world available for shelter.");
         }
         BlockPos center = bot.getBlockPos();
-        int radius = 3; // 7x7 footprint, enough for 3 players/beds
+        String type = getOption(context, "hovel");
+        if ("burrow".equalsIgnoreCase(type)) {
+            LOGGER.info("Burrow sequence start: descend 5 -> strip 5 -> descend 3 -> hollow");
+            SkillExecutionResult burrowResult = buildBurrow(source, bot, world, center);
+            if (!burrowResult.success()) {
+                return burrowResult;
+            }
+            BlockPos chamberCenter = bot.getBlockPos();
+            depositCheapLoot(world, bot, chamberCenter);
+            ensurePickupSlot(bot);
+            if (!inventoryFull(bot)) {
+                sweepDrops(source, 12.0, 5.0, 24, 12_000L);
+            } else {
+                LOGGER.warn("Burrow: inventory still full after deposit; skipping drop sweep.");
+            }
+            ChatUtils.sendSystemMessage(source, "Emergency burrow built.");
+            return SkillExecutionResult.success("Shelter (burrow) built.");
+        }
+        int radius = Math.max(2, Math.min(5, getInt(context, "radius", getInt(context, "count", 3))));
         int wallHeight = 3;
         int roofY = center.getY() + wallHeight;
         int neededBlocks = estimateBlockNeed(radius, wallHeight);
-        ensureBuildStock(source, bot, neededBlocks);
+        int available = countBuildBlocks(bot);
+        LOGGER.info("Shelter: center={}, radius={}, wallHeight={}, estBlocks={}, available={}", center.toShortString(), radius, wallHeight, neededBlocks, available);
+        boolean allowAutoGather = hasOption(context, "proceed", "collect", "gather", "auto");
+        announceResources(source, neededBlocks, available, allowAutoGather);
+        int shortage = Math.max(0, neededBlocks - available);
+        if (shortage > 0 && !allowAutoGather) {
+            String waitMsg = "Shelter needs " + neededBlocks + " cheap blocks (have " + available + ", short " + shortage + "). "
+                    + "Supply at least " + shortage + " or rerun with 'proceed' to let me gather.";
+            LOGGER.warn("Shelter paused for materials: {}", waitMsg);
+            ChatUtils.sendSystemMessage(source, waitMsg);
+            return SkillExecutionResult.failure("Shelter waiting for materials.");
+        }
+
+        int gathered = allowAutoGather ? ensureBuildStock(source, bot, neededBlocks, true, center) : 0;
+        available = countBuildBlocks(bot);
+        if (gathered + available < neededBlocks) {
+            int oldRadius = radius;
+            radius = Math.max(2, radius - 1);
+            neededBlocks = estimateBlockNeed(radius, wallHeight);
+            LOGGER.warn("Shelter: downsizing radius from {} to {} due to material shortfall. New estBlocks={}", oldRadius, radius, neededBlocks);
+        }
 
         // Clear interior and shape walls/roof
+        levelInterior(world, bot, center, radius);
         buildHovel(world, bot, center, radius, wallHeight);
+        // Patch pass to fill holes
+        patchGaps(world, bot, center, radius, wallHeight);
+        if (hasGaps(world, center, radius, wallHeight)) {
+            LOGGER.warn("Shelter: gaps detected after first patch; gathering more and repatching.");
+            ensureBuildStock(source, bot, estimateBlockNeed(radius, wallHeight) / 2, true, center);
+            patchGaps(world, bot, center, radius, wallHeight);
+        }
         placeTorches(world, bot, center, radius);
+        sweepDrops(source, 12.0, 5.0, 24, 12_000L);
         ChatUtils.sendSystemMessage(source, "Emergency hovel built.");
         return SkillExecutionResult.success("Shelter (hovel) built.");
     }
@@ -81,16 +134,30 @@ public final class ShelterSkill implements Skill {
         return roof + perimeter + 10; // small buffer
     }
 
-    private void ensureBuildStock(ServerCommandSource source, ServerPlayerEntity bot, int needed) {
+    private void announceResources(ServerCommandSource source, int needed, int available, boolean willAutoGather) {
+        int shortage = Math.max(0, needed - available);
+        String msg = "Shelter needs " + needed + " cheap blocks (have " + available + ", short " + shortage + "). "
+                + (shortage == 0 ? "Enough materials on hand."
+                : willAutoGather ? "Proceeding to collect the shortfall." : "Say 'proceed' in the command to let me gather.");
+        LOGGER.info("Shelter preflight: {}", msg);
+        ChatUtils.sendSystemMessage(source, msg);
+    }
+
+    private int ensureBuildStock(ServerCommandSource source, ServerPlayerEntity bot, int needed, boolean approved, BlockPos returnPos) {
         int available = countBuildBlocks(bot);
+        if (!approved || needed <= available) {
+            LOGGER.info("Shelter: {} blocks available (need {}); auto-collect approved? {}", available, needed, approved);
+            return 0;
+        }
         if (available >= needed) {
             LOGGER.info("Shelter: {} blocks available (need {})", available, needed);
-            return;
+            return 0;
         }
         int toGather = needed - available;
         LOGGER.info("Shelter: short {} blocks; gathering dirt.", toGather);
         Map<String, Object> params = new HashMap<>();
         params.put("count", Math.max(toGather, 32));
+        int collected = 0;
         try {
             CollectDirtSkill collect = new CollectDirtSkill();
             SkillContext ctx = new SkillContext(source, new HashMap<>(), params);
@@ -98,8 +165,55 @@ public final class ShelterSkill implements Skill {
             if (!res.success()) {
                 LOGGER.warn("Shelter dirt collection failed: {}", res.message());
             }
+            collected = Math.max(0, countBuildBlocks(bot) - available);
+            // Retry if still short
+            int after = countBuildBlocks(bot);
+            if (after < needed) {
+                int remaining = needed - after;
+                LOGGER.warn("Shelter: still short {} blocks after gather; retrying dirt collection.", remaining);
+                params.put("count", Math.max(remaining, 24));
+                res = collect.execute(new SkillContext(source, new HashMap<>(), params));
+                if (!res.success()) {
+                    LOGGER.warn("Shelter dirt collection second attempt failed: {}", res.message());
+                }
+                collected = Math.max(0, countBuildBlocks(bot) - available);
+            }
         } catch (Exception e) {
             LOGGER.warn("Shelter dirt collection errored: {}", e.getMessage());
+        }
+        // Return to build site if we wandered
+        if (returnPos != null) {
+            var planOpt = net.shasankp000.GameAI.services.MovementService.planLootApproach(bot, returnPos, net.shasankp000.GameAI.services.MovementService.MovementOptions.skillLoot());
+            if (planOpt.isPresent()) {
+                var res = net.shasankp000.GameAI.services.MovementService.execute(source, bot, planOpt.get(), false, true, false, false);
+                if (!res.success()) {
+                    LOGGER.warn("Shelter: failed to return to build site {} after gathering: {}", returnPos.toShortString(), res.detail());
+                }
+            } else {
+                LOGGER.warn("Shelter: could not plan path back to build site {}", returnPos.toShortString());
+            }
+        }
+        return collected;
+    }
+
+    private void levelInterior(ServerWorld world, ServerPlayerEntity bot, BlockPos center, int radius) {
+        int floorY = center.getY();
+        for (int dx = -radius; dx <= radius; dx++) {
+            for (int dz = -radius; dz <= radius; dz++) {
+                BlockPos pos = center.add(dx, 0, dz);
+                for (int y = floorY + 1; y <= floorY + 3; y++) {
+                    BlockPos target = new BlockPos(pos.getX(), y, pos.getZ());
+                    BlockState state = world.getBlockState(target);
+                    if (state.isAir()) continue;
+                    if (state.isIn(BlockTags.LEAVES) || state.isReplaceable() || state.isOf(Blocks.SNOW) || state.isIn(BlockTags.LOGS) || state.isIn(BlockTags.PLANKS)) {
+                        mineSoft(bot, target);
+                    }
+                }
+                BlockPos below = pos.down();
+                if (world.getBlockState(pos).isAir() && world.getBlockState(below).isAir()) {
+                    placeBlock(bot, pos);
+                }
+            }
         }
     }
 
@@ -140,6 +254,35 @@ public final class ShelterSkill implements Skill {
         }
     }
 
+    private void patchGaps(ServerWorld world, ServerPlayerEntity bot, BlockPos center, int radius, int wallHeight) {
+        int floorY = center.getY();
+        int roofY = floorY + wallHeight;
+        int roofHoles = 0;
+        int wallHoles = 0;
+        for (int dx = -radius; dx <= radius; dx++) {
+            for (int dz = -radius; dz <= radius; dz++) {
+                boolean perimeter = Math.abs(dx) == radius || Math.abs(dz) == radius;
+                BlockPos roof = center.add(dx, wallHeight, dz);
+                BlockState roofState = world.getBlockState(roof);
+                if (roofState.isAir() || roofState.isReplaceable() || roofState.isIn(BlockTags.LEAVES)) {
+                    roofHoles++;
+                    placeBlock(bot, roof);
+                }
+                if (perimeter) {
+                    for (int y = floorY + 1; y <= roofY; y++) {
+                        BlockPos pos = center.add(dx, y - floorY, dz);
+                        BlockState state = world.getBlockState(pos);
+                        if (state.isAir() || state.isReplaceable() || state.isIn(BlockTags.LEAVES)) {
+                            wallHoles++;
+                            placeBlock(bot, pos);
+                        }
+                    }
+                }
+            }
+        }
+        LOGGER.info("Shelter patch summary: roofHolesFilled={} wallHolesFilled={}", roofHoles, wallHoles);
+    }
+
     private void clearColumn(ServerWorld world, ServerPlayerEntity bot, BlockPos column, int floorY, int topY) {
         for (int y = floorY; y <= topY; y++) {
             BlockPos pos = new BlockPos(column.getX(), y, column.getZ());
@@ -175,6 +318,10 @@ public final class ShelterSkill implements Skill {
         if (state.isReplaceable() || state.isIn(BlockTags.LEAVES) || state.isOf(Blocks.SNOW)) {
             mineSoft(bot, pos);
         }
+        if (!ensureReach(bot, pos)) {
+            LOGGER.warn("Shelter: could not reach {} for placement", pos.toShortString());
+            return;
+        }
         BotActions.placeBlockAt(bot, pos, Direction.UP, List.of(blockItem));
     }
 
@@ -189,6 +336,31 @@ public final class ShelterSkill implements Skill {
         return null;
     }
 
+    private String getOption(SkillContext context, String defaultVal) {
+        Object options = context.parameters().get("options");
+        if (options instanceof List<?> list && !list.isEmpty()) {
+            Object first = list.get(0);
+            if (first != null) {
+                return first.toString();
+            }
+        }
+        return defaultVal;
+    }
+
+    private int getInt(SkillContext context, String key, int fallback) {
+        Object value = context.parameters().get(key);
+        if (value instanceof Number num) {
+            return num.intValue();
+        }
+        if (value instanceof String str) {
+            try {
+                return Integer.parseInt(str.trim());
+            } catch (NumberFormatException ignored) {
+            }
+        }
+        return fallback;
+    }
+
     private int countBuildBlocks(ServerPlayerEntity bot) {
         int total = 0;
         for (int i = 0; i < bot.getInventory().size(); i++) {
@@ -201,6 +373,44 @@ public final class ShelterSkill implements Skill {
         return total;
     }
 
+    private int countTorches(ServerPlayerEntity bot) {
+        int total = 0;
+        for (int i = 0; i < bot.getInventory().size(); i++) {
+            ItemStack stack = bot.getInventory().getStack(i);
+            if (stack.isEmpty()) continue;
+            if (stack.getItem() == Items.TORCH) {
+                total += stack.getCount();
+            }
+        }
+        return total;
+    }
+
+    private void sweepDrops(ServerCommandSource source, double radius, double vRange, int maxTargets, long durationMs) {
+        try {
+            DropSweeper.sweep(source.withSilent().withMaxLevel(4), radius, vRange, maxTargets, durationMs);
+            DropSweeper.sweep(source.withSilent().withMaxLevel(4), radius + 2.0, vRange + 1.0, Math.max(maxTargets, 40), durationMs + 3000); // second, wider pass
+        } catch (Exception e) {
+            LOGGER.warn("Shelter drop-sweep failed: {}", e.getMessage());
+        }
+    }
+
+    private boolean hasOption(SkillContext context, String... names) {
+        Object opts = context.parameters().get("options");
+        if (!(opts instanceof List<?> list) || list.isEmpty()) {
+            return false;
+        }
+        for (Object val : list) {
+            if (val == null) continue;
+            String opt = val.toString().toLowerCase(Locale.ROOT);
+            for (String name : names) {
+                if (opt.equals(name.toLowerCase(Locale.ROOT))) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
     private void mineSoft(ServerPlayerEntity bot, BlockPos pos) {
         if (!(bot.getEntityWorld() instanceof ServerWorld)) {
             return;
@@ -210,5 +420,478 @@ public final class ShelterSkill implements Skill {
         } catch (Exception e) {
             LOGGER.warn("Shelter: failed to clear {}: {}", pos.toShortString(), e.getMessage());
         }
+    }
+
+    private SkillExecutionResult buildBurrow(ServerCommandSource source, ServerPlayerEntity bot, ServerWorld world, BlockPos start) {
+        // Require at least 2 torches before starting; avoid mid-run pauses.
+        int torches = countTorches(bot);
+        if (torches < 2) {
+            String msg = "Burrow needs at least 2 torches; provide some and rerun.";
+            ChatUtils.sendSystemMessage(source, msg);
+            LOGGER.warn("Burrow aborted: {}", msg);
+            return SkillExecutionResult.failure(msg);
+        }
+
+        // Phase 1: descend 5 blocks using the standard stair descent.
+        Direction burrowDir = WorkDirectionService.getDirection(bot.getUuid()).orElse(bot.getHorizontalFacing());
+        WorkDirectionService.setDirection(bot.getUuid(), burrowDir);
+        faceDirection(bot, burrowDir);
+        Map<String, Object> sharedState = new HashMap<>();
+        CollectDirtSkill collect = new CollectDirtSkill();
+        Map<String, Object> params = new HashMap<>();
+        params.put("descentBlocks", 5);
+        params.put("issuerFacing", burrowDir.asString());
+        params.put("lockDirection", true);
+        SkillContext descentCtx = new SkillContext(source, sharedState, params);
+        SkillExecutionResult descentResult = collect.execute(descentCtx);
+        if (!descentResult.success()) {
+            LOGGER.warn("Burrow descent(6) failed: {}", descentResult.message());
+            ChatUtils.sendSystemMessage(source, "Burrow paused: " + descentResult.message());
+            return descentResult;
+        }
+
+        // Phase 2: stripmine forward 4 blocks at this level to create entry throat.
+        LOGGER.info("Burrow stripmine throat: direction={} length=4 start={}", burrowDir, bot.getBlockPos().toShortString());
+        WorkDirectionService.setDirection(bot.getUuid(), burrowDir);
+        faceDirection(bot, burrowDir);
+        StripMineSkill strip = new StripMineSkill();
+        Map<String, Object> stripParams = new HashMap<>();
+        stripParams.put("count", 4);
+        stripParams.put("issuerFacing", burrowDir.asString());
+        stripParams.put("lockDirection", true);
+        SkillExecutionResult stripResult = strip.execute(new SkillContext(source, sharedState, stripParams));
+        if (!stripResult.success()) {
+            LOGGER.warn("Burrow stripmine throat failed: {}", stripResult.message());
+            return stripResult;
+        }
+
+        // Phase 3: descend final 3 blocks to the chamber depth.
+        Map<String, Object> params2 = new HashMap<>();
+        params2.put("descentBlocks", 3);
+        params2.put("issuerFacing", burrowDir.asString());
+        params2.put("lockDirection", true);
+        SkillContext descentCtx2 = new SkillContext(source, sharedState, params2);
+        LOGGER.info("Burrow final descent: 3 blocks from {}", bot.getBlockPos().toShortString());
+        WorkDirectionService.setDirection(bot.getUuid(), burrowDir);
+        faceDirection(bot, burrowDir);
+        SkillExecutionResult descentResult2 = collect.execute(descentCtx2);
+        if (!descentResult2.success()) {
+            LOGGER.warn("Burrow descent(3) failed: {}", descentResult2.message());
+            ChatUtils.sendSystemMessage(source, "Burrow paused: " + descentResult2.message());
+            return descentResult2;
+        }
+
+        BlockPos chamberCenter = bot.getBlockPos();
+        Direction ascentDir = resolveAscentDirection(start, chamberCenter);
+        Set<BlockPos> protectedSteps = computeProtectedSteps(chamberCenter, ascentDir, 5);
+        int radius = 3;
+        int height = 3;
+        for (int dx = -radius; dx <= radius; dx++) {
+            for (int dz = -radius; dz <= radius; dz++) {
+                for (int dy = 0; dy < height; dy++) {
+                    BlockPos pos = chamberCenter.add(dx, dy, dz);
+                    BlockState state = world.getBlockState(pos);
+                    if (protectedSteps.contains(pos)) {
+                        continue; // keep the stair spine intact
+                    }
+                    if (!state.isAir()) {
+                        mineSoft(bot, pos);
+                    }
+                }
+            }
+        }
+        List<BlockPos> torchPositions = new ArrayList<>();
+        torchPositions.add(chamberCenter.add(radius, 0, radius));
+        torchPositions.add(chamberCenter.add(-radius, 0, -radius));
+        torchPositions.add(chamberCenter.add(radius, 0, -radius));
+        torchPositions.add(chamberCenter.add(-radius, 0, radius));
+        for (BlockPos pos : torchPositions) {
+            if (world.getBlockState(pos.down()).isSolidBlock(world, pos.down()) && world.getBlockState(pos).isAir()) {
+                BotActions.placeBlockAt(bot, pos, Direction.UP, List.of(Items.TORCH));
+            }
+        }
+        smoothStairExit(world, bot, chamberCenter, ascentDir, 6);
+        return SkillExecutionResult.success("Burrow finished.");
+    }
+
+    private boolean ensureReach(ServerPlayerEntity bot, BlockPos target) {
+        Vec3d center = Vec3d.ofCenter(target);
+        Vec3d botPos = new Vec3d(bot.getX(), bot.getY(), bot.getZ());
+        double maxReachSq = 12.25D; // ~3.5 blocks to keep placement human-like
+        if (botPos.squaredDistanceTo(center) <= maxReachSq) {
+            return true;
+        }
+        if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
+            return false;
+        }
+        BlockPos stand = findStandableNear(world, target, 3, 3);
+        if (stand == null) {
+            LOGGER.warn("Shelter: no standable spot near {} for placement", target.toShortString());
+            return false;
+        }
+        var planOpt = net.shasankp000.GameAI.services.MovementService.planLootApproach(bot, stand, net.shasankp000.GameAI.services.MovementService.MovementOptions.skillLoot());
+        if (planOpt.isEmpty()) {
+            return false;
+        }
+        var res = net.shasankp000.GameAI.services.MovementService.execute(bot.getCommandSource(), bot, planOpt.get(), false, true, false, false);
+        if (!res.success()) {
+            return false;
+        }
+        Vec3d newPos = new Vec3d(bot.getX(), bot.getY(), bot.getZ());
+        if (newPos.squaredDistanceTo(center) > maxReachSq) {
+            LOGGER.warn("Shelter: still too far ({}) from {} after approach", newPos.squaredDistanceTo(center), target.toShortString());
+            return false;
+        }
+        net.shasankp000.Entity.LookController.faceBlock(bot, target);
+        return true;
+    }
+
+    private BlockPos findStandableNear(ServerWorld world, BlockPos center, int radius, int ySpan) {
+        for (BlockPos pos : BlockPos.iterate(center.add(-radius, -ySpan, -radius), center.add(radius, ySpan, radius))) {
+            BlockPos foot = pos.toImmutable();
+            BlockPos head = foot.up();
+            BlockPos below = foot.down();
+            if (!world.getBlockState(foot).getCollisionShape(world, foot).isEmpty()) {
+                continue;
+            }
+            if (!world.getBlockState(head).getCollisionShape(world, head).isEmpty()) {
+                continue;
+            }
+            if (world.getBlockState(below).getCollisionShape(world, below).isEmpty()) {
+                continue;
+            }
+            return foot;
+        }
+        return null;
+    }
+
+    private boolean hasGaps(ServerWorld world, BlockPos center, int radius, int wallHeight) {
+        int floorY = center.getY();
+        int roofY = floorY + wallHeight;
+        for (int dx = -radius; dx <= radius; dx++) {
+            for (int dz = -radius; dz <= radius; dz++) {
+                boolean perimeter = Math.abs(dx) == radius || Math.abs(dz) == radius;
+                BlockPos roof = center.add(dx, wallHeight, dz);
+                BlockState roofState = world.getBlockState(roof);
+                if (roofState.isAir() || roofState.isReplaceable() || roofState.isIn(BlockTags.LEAVES)) {
+                    return true;
+                }
+                if (perimeter) {
+                    for (int y = floorY + 1; y <= roofY; y++) {
+                        BlockPos pos = center.add(dx, y - floorY, dz);
+                        BlockState state = world.getBlockState(pos);
+                        if (state.isAir() || state.isReplaceable() || state.isIn(BlockTags.LEAVES)) {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    private Direction resolveAscentDirection(BlockPos surface, BlockPos chamber) {
+        int dx = surface.getX() - chamber.getX();
+        int dz = surface.getZ() - chamber.getZ();
+        if (Math.abs(dx) >= Math.abs(dz)) {
+            return dx >= 0 ? Direction.EAST : Direction.WEST;
+        }
+        return dz >= 0 ? Direction.SOUTH : Direction.NORTH;
+    }
+
+    private Set<BlockPos> computeProtectedSteps(BlockPos chamberCenter, Direction ascentDir, int count) {
+        Set<BlockPos> protectedSteps = new HashSet<>();
+        for (int i = 0; i < count; i++) {
+            BlockPos step = chamberCenter.offset(ascentDir, i).up(i);
+            protectedSteps.add(step);
+        }
+        return protectedSteps;
+    }
+
+    private void smoothStairExit(ServerWorld world, ServerPlayerEntity bot, BlockPos chamberCenter, Direction ascentDir, int steps) {
+        for (int i = 0; i < steps; i++) {
+            BlockPos foot = chamberCenter.offset(ascentDir, i).up(i);
+            // Only clear headroom; do not place blocks or ladders to avoid blocking the throat.
+            BlockPos head = foot.up();
+            BlockPos head2 = head.up();
+            if (!world.getBlockState(head).isAir() && !world.getBlockState(head).isReplaceable() && !world.getBlockState(head).isIn(BlockTags.LEAVES)) {
+                mineSoft(bot, head);
+            }
+            if (!world.getBlockState(head2).isAir() && !world.getBlockState(head2).isReplaceable() && !world.getBlockState(head2).isIn(BlockTags.LEAVES)) {
+                mineSoft(bot, head2);
+            }
+        }
+        // Add a throat torch for visibility
+        BlockPos torchPos = chamberCenter.offset(ascentDir, Math.min(steps, 2)).up(1);
+        BlockPos torchFloor = torchPos.down();
+        if (world.getBlockState(torchPos).isAir() && world.getBlockState(torchFloor).isSolidBlock(world, torchFloor)) {
+            BotActions.placeBlockAt(bot, torchPos, Direction.UP, List.of(Items.TORCH));
+        }
+    }
+
+    private void depositCheapLoot(ServerWorld world, ServerPlayerEntity bot, BlockPos chamberCenter) {
+        BlockPos chestPos = findChestNear(world, chamberCenter, 3);
+        if (chestPos == null) {
+            if (!hasItem(bot, Items.CHEST)) {
+                LOGGER.info("Burrow deposit: no chest nearby and none in inventory; skipping deposit.");
+                return;
+            }
+            List<BlockPos> candidates = chestPlacementOptions(chamberCenter);
+            for (BlockPos placement : candidates) {
+                if (placement.equals(bot.getBlockPos())) {
+                    continue;
+                }
+                BlockPos floor = placement.down();
+                if (!world.getBlockState(floor).isSolidBlock(world, floor)) {
+                    continue;
+                }
+                // Clear space at placement (foot + head)
+                mineSoft(bot, placement);
+                mineSoft(bot, placement.up());
+                if (!ensureReach(bot, placement)) {
+                    LOGGER.warn("Burrow deposit: could not reach {} for chest placement.", placement.toShortString());
+                    continue;
+                }
+                BotActions.placeBlockAt(bot, placement, Direction.UP, List.of(Items.CHEST));
+                BlockState placed = world.getBlockState(placement);
+                if (!placed.isOf(Blocks.CHEST) && !placed.isOf(Blocks.TRAPPED_CHEST)) {
+                    LOGGER.warn("Burrow deposit: chest placement at {} failed (state={}).", placement.toShortString(), placed.getBlock().getName().getString());
+                    continue;
+                }
+                chestPos = placement;
+                LOGGER.info("Burrow deposit: placed chest at {}", chestPos.toShortString());
+                break;
+            }
+            if (chestPos == null) {
+                LOGGER.warn("Burrow deposit: could not place a chest near {} after trying {} spots.", chamberCenter.toShortString(), candidates.size());
+                return;
+            }
+        }
+        BlockPos nearby = findChestNear(world, chamberCenter, 3);
+        if (nearby != null) {
+            chestPos = nearby;
+        }
+        net.minecraft.block.entity.ChestBlockEntity chest = awaitChest(world, chestPos);
+        if (chest == null) {
+            BlockState state = world.getBlockState(chestPos);
+            LOGGER.warn("Burrow deposit: chest not ready at {} (state={}); skipping deposit.", chestPos.toShortString(), state.getBlock().getName().getString());
+            return;
+        }
+        Integer moved = callOnServer(world, () -> moveCheapItems(bot, chest));
+        if (moved == null) {
+            LOGGER.warn("Burrow deposit: could not move items into chest at {}", chestPos.toShortString());
+            return;
+        }
+        LOGGER.info("Burrow deposit: moved {} items into chest at {}", moved, chestPos.toShortString());
+    }
+
+    private boolean hasItem(ServerPlayerEntity bot, Item item) {
+        for (int i = 0; i < bot.getInventory().size(); i++) {
+            if (bot.getInventory().getStack(i).isOf(item)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private BlockPos findChestNear(ServerWorld world, BlockPos center, int radius) {
+        for (BlockPos pos : BlockPos.iterate(center.add(-radius, -1, -radius), center.add(radius, 1, radius))) {
+            var state = world.getBlockState(pos);
+            if (state.isOf(net.minecraft.block.Blocks.CHEST) || state.isOf(net.minecraft.block.Blocks.TRAPPED_CHEST)) {
+                return pos.toImmutable();
+            }
+        }
+        return null;
+    }
+
+    private List<BlockPos> chestPlacementOptions(BlockPos chamberCenter) {
+        List<BlockPos> candidates = new ArrayList<>();
+        candidates.add(chamberCenter);
+        for (Direction dir : Direction.Type.HORIZONTAL) {
+            candidates.add(chamberCenter.offset(dir));
+        }
+        for (Direction dir : Direction.Type.HORIZONTAL) {
+            candidates.add(chamberCenter.offset(dir, 2));
+        }
+        return candidates;
+    }
+
+    private net.minecraft.block.entity.ChestBlockEntity awaitChest(ServerWorld world, BlockPos pos) {
+        if (world == null || pos == null) {
+            return null;
+        }
+        for (int attempt = 0; attempt < 5; attempt++) {
+            var be = callOnServer(world, () -> world.getBlockEntity(pos));
+            if (be instanceof net.minecraft.block.entity.ChestBlockEntity chest) {
+                return chest;
+            }
+            BlockState state = callOnServer(world, () -> world.getBlockState(pos));
+            if (state == null || !(state.getBlock() instanceof net.minecraft.block.ChestBlock)) {
+                return null; // something else replaced the spot
+            }
+            try {
+                Thread.sleep(60L);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+        }
+        var be = callOnServer(world, () -> world.getBlockEntity(pos));
+        return be instanceof net.minecraft.block.entity.ChestBlockEntity chest ? chest : null;
+    }
+
+    private <T> T callOnServer(ServerWorld world, java.util.function.Supplier<T> task) {
+        if (world == null || task == null) {
+            return null;
+        }
+        var server = world.getServer();
+        if (server == null) {
+            return null;
+        }
+        if (server.isOnThread()) {
+            return task.get();
+        }
+        java.util.concurrent.CompletableFuture<T> future = new java.util.concurrent.CompletableFuture<>();
+        server.execute(() -> {
+            try {
+                future.complete(task.get());
+            } catch (Throwable t) {
+                future.complete(null);
+            }
+        });
+        try {
+            return future.get(200, java.util.concurrent.TimeUnit.MILLISECONDS);
+        } catch (Exception e) {
+            future.cancel(true);
+            return null;
+        }
+    }
+
+    private int moveCheapItems(ServerPlayerEntity bot, net.minecraft.block.entity.ChestBlockEntity chest) {
+        var chestInv = (net.minecraft.inventory.Inventory) chest;
+        int moved = 0;
+        for (int i = 0; i < bot.getInventory().size(); i++) {
+            ItemStack stack = bot.getInventory().getStack(i);
+            if (stack.isEmpty()) continue;
+            if (!isCheap(stack.getItem())) continue;
+            ItemStack moving = stack.copy();
+            moved += insertIntoChest(bot, chestInv, i, moving);
+        }
+        return moved;
+    }
+
+    private boolean isCheap(Item item) {
+        if (BUILD_BLOCKS.contains(item)) return true;
+        return item == Items.ROTTEN_FLESH
+                || item == Items.BONE
+                || item == Items.STRING
+                || item == Items.SPIDER_EYE
+                || item == Items.GUNPOWDER
+                || item == Items.ARROW
+                || item == Items.NAUTILUS_SHELL
+                || item == Items.FEATHER;
+    }
+
+    private int insertIntoChest(ServerPlayerEntity bot, net.minecraft.inventory.Inventory chest, int slot, ItemStack moving) {
+        ItemStack remaining = moving;
+        for (int c = 0; c < chest.size() && !remaining.isEmpty(); c++) {
+            ItemStack chestStack = chest.getStack(c);
+            if (chestStack.isEmpty()) {
+                chest.setStack(c, remaining.copy());
+                bot.getInventory().setStack(slot, ItemStack.EMPTY);
+                return moving.getCount();
+            }
+            if (ItemStack.areItemsEqual(chestStack, remaining)
+                    && chestStack.getCount() < chestStack.getMaxCount()) {
+                int canAdd = Math.min(chestStack.getMaxCount() - chestStack.getCount(), remaining.getCount());
+                chestStack.increment(canAdd);
+                remaining.decrement(canAdd);
+                chest.setStack(c, chestStack);
+            }
+        }
+        if (remaining.getCount() != moving.getCount()) {
+            bot.getInventory().setStack(slot, remaining.isEmpty() ? ItemStack.EMPTY : remaining);
+        }
+        return moving.getCount() - remaining.getCount();
+    }
+
+    private boolean inventoryFull(ServerPlayerEntity bot) {
+        return bot.getInventory().getEmptySlot() < 0;
+    }
+
+    private void faceDirection(ServerPlayerEntity bot, Direction dir) {
+        float yaw = switch (dir) {
+            case NORTH -> 180f;
+            case SOUTH -> 0f;
+            case WEST -> 90f;
+            case EAST -> -90f;
+            default -> bot.getYaw();
+        };
+        bot.setYaw(yaw);
+        bot.setHeadYaw(yaw);
+    }
+
+    private SkillExecutionResult stripForward(ServerPlayerEntity bot, ServerCommandSource source, Direction dir, int blocks) {
+        ServerWorld world = bot.getEntityWorld() instanceof ServerWorld sw ? sw : null;
+        if (world == null) {
+            return SkillExecutionResult.failure("No world for stripmine throat.");
+        }
+        BlockPos start = bot.getBlockPos();
+        BlockPos current = start;
+        int advanced = 0;
+        for (int i = 0; i < blocks; i++) {
+            BlockPos target = current.offset(dir);
+            BlockPos head = target.up();
+            mineSoft(bot, target);
+            mineSoft(bot, head);
+            BlockPos support = target.down();
+            BlockState supportState = world.getBlockState(support);
+            if (supportState.isAir() || supportState.isReplaceable()) {
+                placeBlock(bot, support); // ensure a floor to stand on
+            }
+            var plan = new MovementService.MovementPlan(MovementService.Mode.DIRECT, target, target, null, null, dir);
+            var res = MovementService.execute(source, bot, plan, false, true, true, true);
+            if (!res.success()) {
+                return SkillExecutionResult.failure("Stripmine throat movement failed: " + res.detail());
+            }
+            if (!bot.getBlockPos().equals(target)) {
+                // Retry once with a direct push if we didn't actually reach the target.
+                LOGGER.warn("Stripmine throat step {}: ended at {} instead of {}; retrying once.", i + 1, bot.getBlockPos().toShortString(), target.toShortString());
+                var retryPlan = new MovementService.MovementPlan(MovementService.Mode.DIRECT, target, target, null, null, dir);
+                var retry = MovementService.execute(source, bot, retryPlan, false, true, true, true);
+                if (!retry.success() || !bot.getBlockPos().equals(target)) {
+                    return SkillExecutionResult.failure("Stripmine throat stalled before " + target.toShortString());
+                }
+            }
+            current = bot.getBlockPos();
+            advanced++;
+        }
+        BlockPos expected = start.offset(dir, blocks);
+        int forwardGain = Math.abs(current.getX() - start.getX()) + Math.abs(current.getZ() - start.getZ());
+        if (!current.equals(expected)) {
+            LOGGER.warn("Stripmine throat ended at {} (expected {}), forwardGain={} blocks", current.toShortString(), expected.toShortString(), forwardGain);
+        }
+        return SkillExecutionResult.success("Stripmine throat complete.");
+    }
+
+    private void ensurePickupSlot(ServerPlayerEntity bot) {
+        if (bot.getInventory().getEmptySlot() >= 0) {
+            return;
+        }
+        for (int i = 0; i < bot.getInventory().size(); i++) {
+            ItemStack stack = bot.getInventory().getStack(i);
+            if (stack.isEmpty()) continue;
+            if (BUILD_BLOCKS.contains(stack.getItem())) {
+                bot.dropItem(stack.split(stack.getCount()), false, false);
+                LOGGER.warn("Shelter drop-sweep: inventory full, dropped {} to make space.", stack.getItem().getName().getString());
+                return;
+            }
+        }
+    }
+
+    private void maybePlaceLadder(ServerPlayerEntity bot, BlockPos foot, Direction ascentDir) {
+        // Place ladder on the back face of the step to guarantee climbability; no-op if no ladders.
+        BlockPos attach = foot.offset(ascentDir.getOpposite());
+        BotActions.placeBlockAt(bot, foot, ascentDir.getOpposite(), List.of(Items.LADDER));
     }
 }

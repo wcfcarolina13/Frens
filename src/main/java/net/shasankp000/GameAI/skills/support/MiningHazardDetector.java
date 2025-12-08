@@ -114,6 +114,13 @@ public final class MiningHazardDetector {
     public static DetectionResult detect(ServerPlayerEntity bot,
                                          List<BlockPos> breakTargets,
                                          List<BlockPos> stepTargets) {
+        return detect(bot, breakTargets, stepTargets, false);
+    }
+
+    public static DetectionResult detect(ServerPlayerEntity bot,
+                                         List<BlockPos> breakTargets,
+                                         List<BlockPos> stepTargets,
+                                         boolean ignoreTorchHazards) {
         if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
             return NO_HAZARDS;
         }
@@ -122,12 +129,12 @@ public final class MiningHazardDetector {
             return NO_HAZARDS;
         }
         if (server.isOnThread()) {
-            return detectInternal(bot, world, breakTargets, stepTargets);
+            return detectInternal(bot, world, breakTargets, stepTargets, ignoreTorchHazards);
         }
         CompletableFuture<DetectionResult> future = new CompletableFuture<>();
         server.execute(() -> {
             try {
-                future.complete(detectInternal(bot, world, breakTargets, stepTargets));
+                future.complete(detectInternal(bot, world, breakTargets, stepTargets, ignoreTorchHazards));
             } catch (Exception e) {
                 future.completeExceptionally(e);
             }
@@ -145,7 +152,8 @@ public final class MiningHazardDetector {
     private static DetectionResult detectInternal(ServerPlayerEntity bot,
                                                   ServerWorld world,
                                                   List<BlockPos> breakTargets,
-                                                  List<BlockPos> stepTargets) {
+                                                  List<BlockPos> stepTargets,
+                                                  boolean ignoreTorchHazards) {
         List<BlockPos> inspection = breakTargets == null ? List.of() : breakTargets;
         List<BlockPos> steps = stepTargets == null ? List.of() : stepTargets;
         Hazard blocking = null;
@@ -156,7 +164,7 @@ public final class MiningHazardDetector {
             if (isBlockerAcknowledged(bot, target)) {
                 continue;
             }
-            Hazard found = inspectBlock(world, target);
+            Hazard found = inspectBlock(world, target, ignoreTorchHazards);
             if (found != null) {
                 acknowledgeBlocker(bot, target);
                 blocking = found;
@@ -169,7 +177,7 @@ public final class MiningHazardDetector {
                     continue;
                 }
                 if (!isBlockerAcknowledged(bot, foot)) {
-                    Hazard hazard = inspectBlock(world, foot);
+                    Hazard hazard = inspectBlock(world, foot, ignoreTorchHazards);
                     if (hazard != null) {
                         acknowledgeBlocker(bot, foot);
                         blocking = hazard;
@@ -186,14 +194,14 @@ public final class MiningHazardDetector {
         if (blocking != null) {
             return new DetectionResult(Optional.of(blocking), List.of());
         }
-        List<Hazard> adjacentWarnings = collectAdjacentHazards(bot, world, inspection, steps);
+        List<Hazard> adjacentWarnings = collectAdjacentHazards(bot, world, inspection, steps, ignoreTorchHazards);
         if (adjacentWarnings.isEmpty()) {
             return NO_HAZARDS;
         }
         return new DetectionResult(Optional.empty(), adjacentWarnings);
     }
 
-    private static Hazard inspectBlock(ServerWorld world, BlockPos pos) {
+    private static Hazard inspectBlock(ServerWorld world, BlockPos pos, boolean ignoreTorchHazards) {
         BlockState state = world.getBlockState(pos);
         if (state.isAir()) {
             return null;
@@ -209,7 +217,7 @@ public final class MiningHazardDetector {
         
         // Check if this is a torch (protect torches from accidental breaking)
         Block block = state.getBlock();
-        if (block == Blocks.TORCH || block == Blocks.WALL_TORCH || block == Blocks.SOUL_TORCH || block == Blocks.SOUL_WALL_TORCH) {
+        if (!ignoreTorchHazards && (block == Blocks.TORCH || block == Blocks.WALL_TORCH || block == Blocks.SOUL_TORCH || block == Blocks.SOUL_WALL_TORCH)) {
             return hazard(pos, "This is a torch.", true, "Cannot break placed torches");
         }
         
@@ -311,7 +319,8 @@ public final class MiningHazardDetector {
     private static List<Hazard> collectAdjacentHazards(ServerPlayerEntity bot,
                                                        ServerWorld world,
                                                        List<BlockPos> breakTargets,
-                                                       List<BlockPos> stepTargets) {
+                                                       List<BlockPos> stepTargets,
+                                                       boolean ignoreTorchHazards) {
         if (bot == null || world == null) {
             return List.of();
         }
@@ -351,7 +360,7 @@ public final class MiningHazardDetector {
             if (isBlockerAcknowledged(bot, neighbor)) {
                 continue;
             }
-            Hazard hazard = inspectBlock(world, neighbor);
+            Hazard hazard = inspectBlock(world, neighbor, ignoreTorchHazards);
             if (hazard == null) {
                 continue;
             }

@@ -82,7 +82,11 @@ public final class SkillManager {
             try {
                 // Only perform post-task drop_sweep if inventory isn't full and the skill permits it.
                 // Woodcut handles its own sweep after completion to avoid tower disruption.
-                if (botPlayer != null && !abortRequested && !isInventoryFull(botPlayer) && !"woodcut".equalsIgnoreCase(name)) {
+                if (botPlayer != null
+                        && !abortRequested
+                        && !isInventoryFull(botPlayer)
+                        && !"woodcut".equalsIgnoreCase(name)
+                        && !"shelter".equalsIgnoreCase(name)) {
                     DropSweeper.sweep(
                             context.botSource().withSilent().withMaxLevel(4),
                             DROP_SWEEP_RADIUS,

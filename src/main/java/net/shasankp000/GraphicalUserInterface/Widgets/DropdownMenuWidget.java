@@ -9,18 +9,20 @@ import net.minecraft.client.gui.Click;
 import net.minecraft.client.gui.screen.narration.NarrationMessageBuilder;
 import net.minecraft.client.gui.widget.ClickableWidget;
 import net.minecraft.text.Text;
-
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.List;
 
 public class DropdownMenuWidget extends ClickableWidget {
+    private static final Logger LOGGER = LoggerFactory.getLogger("DropdownMenuWidget");
     private List<String> options;
     private boolean isOpen;
     private int selectedIndex;
     private int width;
     private int height;
-    private static final boolean DEBUG = false;
+    private static final boolean DEBUG = true; // Enable debug logging
 
     // scrolling support
     private int scrollIndex = 0; // first visible option when open
@@ -33,8 +35,10 @@ public class DropdownMenuWidget extends ClickableWidget {
         this.visible = true;
 
         this.selectedIndex = -1; // No initial selection; ConfigManager or caller can set one
-        if (DEBUG) {
-            System.out.println("[DropdownMenuWidget] initial selectedIndex=" + this.selectedIndex);
+        LOGGER.info("DropdownMenuWidget created with {} options, initial selectedIndex={}", 
+            this.options.size(), this.selectedIndex);
+        if (DEBUG && !this.options.isEmpty()) {
+            LOGGER.debug("Available options: {}", this.options);
         }
         this.width = width;
         this.height = height;
