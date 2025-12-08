@@ -132,6 +132,7 @@ public class FarmSkill implements Skill {
             // If waterPos is air, targeting waterPos.down() (UP face) works.
             BlockPos waterBase = waterPos.down();
             LookController.faceBlock(bot, waterBase);
+            try { Thread.sleep(50); } catch (InterruptedException e) {} // Wait for rotation sync
             ActionResult waterPlacement = stack.useOnBlock(new net.minecraft.item.ItemUsageContext(bot, Hand.MAIN_HAND,
                     new BlockHitResult(Vec3d.ofCenter(waterBase), Direction.UP, waterBase, false)));
             if (waterPlacement.isAccepted()) {
@@ -327,27 +328,49 @@ public class FarmSkill implements Skill {
     private static boolean positionForWatering(ServerCommandSource source,
                                                ServerPlayerEntity bot,
                                                BlockPos waterPos) {
-        Optional<MovementService.MovementPlan> planOpt = MovementService.planLootApproach(
-                bot,
-                waterPos, // Move close to waterPos
-                MovementService.MovementOptions.skillLoot()
+        // Custom logic: Find a solid neighbor at waterPos level (e.g. Farmland/Dirt)
+        // We want to stand ON it (Y+1).
+        // waterPos is the hole (Air). waterPos.neighbors should be Dirt/Farmland.
+        
+        ServerWorld world = source.getWorld();
+        BlockPos bestStand = null;
+        double minDist = Double.MAX_VALUE;
+
+        for (Direction dir : Direction.Type.HORIZONTAL) {
+            BlockPos neighbor = waterPos.offset(dir);
+            
+            // Valid standing spot:
+            // neighbor (Y) is solid.
+            // neighbor.up() (Y+1) is air.
+            // neighbor.up(2) (Y+2) is air.
+            
+            if (world.getBlockState(neighbor).isSolidBlock(world, neighbor) &&
+                world.getBlockState(neighbor.up()).isAir() &&
+                world.getBlockState(neighbor.up(2)).isAir()) {
+                
+                BlockPos standPos = neighbor.up();
+                double d = bot.squaredDistanceTo(Vec3d.ofCenter(standPos));
+                if (d < minDist) {
+                    minDist = d;
+                    bestStand = standPos;
+                }
+            }
+        }
+
+        BlockPos target = (bestStand != null) ? bestStand : waterPos.up(); // Fallback: try standing above hole?
+        
+        LOGGER.info("positionForWatering selected target {}", target);
+        
+        MovementService.MovementPlan plan = new MovementService.MovementPlan(
+                MovementService.Mode.DIRECT,
+                target,
+                target,
+                null,
+                null,
+                bot.getHorizontalFacing()
         );
-        if (planOpt.isEmpty()) {
-            LOGGER.warn("No viable standing position detected around {} for irrigation", waterPos);
-            ChatUtils.sendSystemMessage(source, "I cannot get into position to water the farm.");
-            return false;
-        }
-
-        MovementService.MovementResult movement = MovementService.execute(source, bot, planOpt.get(), false);
-        if (!movement.success()) {
-            LOGGER.warn("Failed to move adjacent to {} before watering: {}", waterPos, movement.detail());
-            ChatUtils.sendSystemMessage(source, "Unable to position myself beside the irrigation hole.");
-            return false;
-        }
-
-        BlockPos arrived = movement.arrivedAt() != null ? movement.arrivedAt() : bot.getBlockPos();
-        LOGGER.debug("Positioned at {} to irrigate hole centered at {}", arrived, waterPos);
-        return true;
+        
+        return MovementService.execute(source, bot, plan, false).success();
     }
 
     private static boolean fillWithDirt(ServerPlayerEntity bot, ServerWorld world, BlockPos pos) {
