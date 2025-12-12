@@ -167,15 +167,9 @@ public final class HealingService {
         }
         
         if (message != null) {
-            PlayerInventory inv = bot.getInventory();
-            OptionalInt foodSlot = findCheapestSafeFood(inv);
-            
-            if (foodSlot.isEmpty()) {
-                // No food available - complain
-                ChatUtils.sendChatMessages(bot.getCommandSource(), message);
-                LAST_HUNGER_WARNING.put(uuid, now);
-                LAST_WARNED_LEVEL.put(uuid, foodLevel);
-            }
+            ChatUtils.sendChatMessages(bot.getCommandSource(), message);
+            LAST_HUNGER_WARNING.put(uuid, now);
+            LAST_WARNED_LEVEL.put(uuid, foodLevel);
         }
     }
     

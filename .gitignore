@@ -46,3 +46,14 @@ logs-prism/
 sqlite-vec-macos-aarch64.tar.gz
 build/
 dist/
+
+# API keys and sensitive config files
+config/
+*_config.json
+ai_search_config.json
+*.key
+*.secret
+.env
+.env.*
+# Ignore local gemini helper directory
+.gemini/

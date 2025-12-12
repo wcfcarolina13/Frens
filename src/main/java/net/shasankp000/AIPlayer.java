@@ -193,6 +193,7 @@ public class AIPlayer implements ModInitializer {
         ServerLifecycleEvents.SERVER_STOPPING.register(server -> BotPersistenceService.saveAll(server));
 
         ServerLifecycleEvents.SERVER_STOPPED.register(server -> {
+            BotEventHandler.resetAll();
             AutoFaceEntity.onServerStopped(server);
             try {
                 if (modelManager.isModelLoaded() || loadedBERTModelIntoMemory) {
@@ -295,6 +296,7 @@ public class AIPlayer implements ModInitializer {
 
         ServerTickEvents.END_SERVER_TICK.register(BotPersistenceService::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(BotEventHandler::tickBurialRescue);
+        ServerTickEvents.END_SERVER_TICK.register(BotEventHandler::tickHunger);
         ServerTickEvents.END_SERVER_TICK.register(AIPlayer::processSpawnEscapeChecks);
 
         ServerMessageEvents.CHAT_MESSAGE.register((message, sender, params) -> {

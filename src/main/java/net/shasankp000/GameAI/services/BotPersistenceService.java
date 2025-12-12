@@ -10,6 +10,7 @@ import net.shasankp000.AIPlayer;
 import net.shasankp000.Entity.createFakePlayer;
 import net.shasankp000.FilingSystem.ManualConfig;
 import net.shasankp000.GameAI.BotEventHandler;
+import net.shasankp000.GameAI.services.BotWorldStateService.BotState;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -43,6 +44,7 @@ public final class BotPersistenceService {
     private static final Method LOAD_PLAYER_DATA = resolveManagerHook("loadPlayerData", "loadPlayerData", "method_14600");
     private static final Method SAVE_PLAYER_DATA = resolveManagerHook("savePlayerData", "savePlayerData", "method_14577");
     private static final Constructor<?> PLAYER_CONFIG_ENTRY_CONSTRUCTOR = resolvePlayerConfigEntryConstructor();
+    private static final Method REMOVE_PLAYER = resolveManagerHook("remove", "removePlayer", "method_2984", "method_14576"); // Common obfuscated name for PlayerManager#remove
 
     private static final ConcurrentMap<UUID, Integer> LAST_SAVE_TICK = new ConcurrentHashMap<>();
 
@@ -67,6 +69,13 @@ public final class BotPersistenceService {
                 if (loaded) {
                     LOGGER.info("Loaded persisted inventory for fakeplayer '{}'", bot.getName().getString());
                 }
+                BotWorldStateService.loadState(server, bot.getName().getString()).ifPresentOrElse(state -> {
+                    LOGGER.info("Restoring {} to last position in world {}: {},{},{}, yaw={}, pitch={}",
+                            bot.getName().getString(),
+                            BotWorldStateService.currentWorldKey(server),
+                            state.x(), state.y(), state.z(), state.yaw(), state.pitch());
+                    bot.refreshPositionAndAngles(state.x(), state.y(), state.z(), state.yaw(), state.pitch());
+                }, () -> LOGGER.info("No prior world-state for {} in world {}", bot.getName().getString(), BotWorldStateService.currentWorldKey(server)));
             }
         });
         
@@ -81,6 +90,7 @@ public final class BotPersistenceService {
         if (persistViaPlayerManager(server, bot, "disconnect")) {
             BotInventoryStorageService.save(bot);
         }
+        BotWorldStateService.saveState(bot);
         LAST_SAVE_TICK.remove(bot.getUuid());
         BotEventHandler.unregisterBot(bot);
     }
@@ -127,10 +137,12 @@ public final class BotPersistenceService {
                 continue;
             }
             active.add(player.getUuid());
+            BotWorldStateService.saveState(player); // keep last-known position fresh
             int last = LAST_SAVE_TICK.getOrDefault(player.getUuid(), Integer.MIN_VALUE);
             if (currentTick - last >= AUTOSAVE_INTERVAL_TICKS) {
                 if (persistViaPlayerManager(server, player, "autosave")) {
                     BotInventoryStorageService.save(player);
+                    BotWorldStateService.saveState(player);
                     LAST_SAVE_TICK.put(player.getUuid(), currentTick);
                 }
             }
@@ -143,16 +155,18 @@ public final class BotPersistenceService {
         if (server == null) {
             return;
         }
-        long count = server.getPlayerManager().getPlayerList().stream()
-                .filter(createFakePlayer.class::isInstance)
-                .mapToLong(player -> {
-                    if (persistViaPlayerManager(server, player, "shutdown")) {
-                        BotInventoryStorageService.save(player);
-                        return 1L;
-                    }
-                    return 0L;
-                })
-                .sum();
+        long count = 0;
+        // Prefer registered bots, since PlayerManager#getPlayerList may not include fake players at shutdown
+        for (ServerPlayerEntity player : net.shasankp000.GameAI.BotEventHandler.getRegisteredBots(server)) {
+            if (player instanceof createFakePlayer) {
+                if (persistViaPlayerManager(server, player, "shutdown")) {
+                    BotInventoryStorageService.save(player);
+                    BotWorldStateService.saveState(player);
+                    count++;
+                }
+            }
+        }
+        BotWorldStateService.saveAll(server);
         LOGGER.info("saveAll invoked, persisted {} fakeplayer(s).", count);
     }
 
@@ -210,6 +224,13 @@ public final class BotPersistenceService {
 
     private static Method resolveManagerHook(String label, String... candidates) {
         Class<?> managerClass = net.minecraft.server.PlayerManager.class;
+        LOGGER.info("Attempting to resolve PlayerManager#{}. Candidates: {}", label, Arrays.toString(candidates));
+        // Log all single-ServerPlayerEntity methods to help identify the correct one
+        for (Method method : managerClass.getDeclaredMethods()) {
+            if (method.getParameterCount() == 1 && method.getParameterTypes()[0] == ServerPlayerEntity.class) {
+                LOGGER.info("Found single-ServerPlayerEntity method: {}{}", method.getName(), Arrays.toString(method.getParameterTypes()));
+            }
+        }
         for (Method method : managerClass.getDeclaredMethods()) {
             for (String candidate : candidates) {
                 if (!method.getName().equals(candidate)) {
@@ -313,5 +334,35 @@ public final class BotPersistenceService {
         );
         AIPlayer.CONFIG.setBotSpawn(bot.getName().getString(), spawn);
         AIPlayer.CONFIG.save();
+    }
+
+    public static void removeBot(ServerPlayerEntity bot) {
+        if (REMOVE_PLAYER == null) {
+            LOGGER.warn("Unable to remove fakeplayer '{}': PlayerManager#remove method not resolved.", bot.getName().getString());
+            return;
+        }
+        try {
+            MinecraftServer server = extractServer(bot);
+            if (server != null) {
+                // Remove player from the manager's player list and world
+                REMOVE_PLAYER.invoke(server.getPlayerManager(), bot);
+                LOGGER.info("Removed fakeplayer '{}' from PlayerManager.", bot.getName().getString());
+            }
+        } catch (Exception e) {
+            LOGGER.warn("Failed to remove fakeplayer '{}' from PlayerManager: {}", bot.getName().getString(), e.getMessage());
+        }
+    }
+
+    public static void deletePlayerDataFile(MinecraftServer server, UUID playerUuid) {
+        Path playerDataPath = server.getSavePath(WorldSavePath.PLAYERDATA).resolve(playerUuid.toString() + ".dat");
+        try {
+            if (Files.deleteIfExists(playerDataPath)) {
+                LOGGER.info("Deleted player data file for UUID: {}", playerUuid);
+            } else {
+                LOGGER.warn("Player data file for UUID {} did not exist at {}.", playerUuid, playerDataPath);
+            }
+        } catch (IOException e) {
+            LOGGER.error("Failed to delete player data file for UUID {}: {}", playerUuid, e.getMessage());
+        }
     }
 }

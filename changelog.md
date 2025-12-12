@@ -15,6 +15,7 @@ Historical record and reasoning. `TODO.md` is the source of truth for what’s n
 - Woodcut: tighter unreachable-log cap (4 skips), wider drop sweep sized to the job footprint, and confirmed sapling replant stays on; aborts still trigger a sweep.
 - Chest use: bot auto-deposits wood to nearby chests/barrels; documented `/bot store deposit|withdraw <amount|all> <item> [bot]`.
 - Shelter: added `/bot shelter hovel <alias?>` to build a quick dirt/cobble hovel (roofed, torches, fills gaps, gathers dirt if short).
+- Farming: secured irrigation basins on uneven terrain (fills edges/underblocks, cleans stray flow), repair pass now levels plots to farm Y before re-till/plant, and leaves are broken with shears/harmless items (no axe wear).
 
 ## 2025-11-18
 - Persistency and safety: inventory save timing fixed; drop sweeps stop breaking blocks and only collect items; bots break out when spawned in walls; upward stairs start in the controller’s facing direction (partial fix).
@@ -38,4 +39,3 @@ Historical record and reasoning. `TODO.md` is the source of truth for what’s n
 - Textbox: Added placeholder guidance.
 - Specific URLs flow: Added --urls support, timestamped outputs saved to 'Specific Video Lists/'.
 - Cleanup: Removed empty markdown placeholders in audio_briefing project (kept API keys out of git).
-

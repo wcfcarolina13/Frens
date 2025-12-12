@@ -397,6 +397,10 @@ public final class WoodcutSkill implements Skill {
         }
         int needed = target.getY() - bot.getBlockY() - 1;
         if (needed <= 0) {
+            // We are above the target (canopy case). Try descending near the trunk and re-evaluate reach.
+            if (descendTowardTarget(bot, source, target)) {
+                return true;
+            }
             return false;
         }
         LOGGER.info("Woodcut reach: pillaring {} blocks to reach {}", needed, target.toShortString());
@@ -416,6 +420,37 @@ public final class WoodcutSkill implements Skill {
         }
         MovementService.MovementResult res = MovementService.execute(source, bot, planOpt.get(), false, true, false, false);
         return res.success() || isWithinReach(bot, target);
+    }
+
+    private boolean descendTowardTarget(ServerPlayerEntity bot, ServerCommandSource source, BlockPos target) {
+        ServerWorld world = (ServerWorld) bot.getEntityWorld();
+        int maxSteps = 6;
+        for (int i = 0; i < maxSteps; i++) {
+            if (isWithinReach(bot, target)) {
+                return true;
+            }
+            BlockPos feet = bot.getBlockPos();
+            BlockPos below = feet.down();
+            BlockState belowState = world.getBlockState(below);
+            // If we can step down safely, walk to the block above target (same X/Z, lower Y)
+            if (world.isAir(below) || belowState.isReplaceable()) {
+                // clear replaceable to drop a step
+                mineBlock(bot, below, false);
+            }
+            MovementService.MovementPlan plan = new MovementService.MovementPlan(
+                    MovementService.Mode.DIRECT,
+                    target.up(), // aim just above the target trunk
+                    target.up(),
+                    null,
+                    null,
+                    bot.getHorizontalFacing()
+            );
+            MovementService.execute(source, bot, plan, false);
+            if (bot.getBlockY() <= target.getY() + 1) {
+                return isWithinReach(bot, target);
+            }
+        }
+        return false;
     }
 
     private boolean pillarUp(ServerPlayerEntity bot, int steps, List<BlockPos> placedPillar, ServerCommandSource source) {
@@ -757,7 +792,7 @@ public final class WoodcutSkill implements Skill {
     }
 
     private boolean selectLeafTool(ServerPlayerEntity bot) {
-        // Prefer shears; otherwise empty hand or non-weapon/non-axe tool to preserve durability
+        // Prefer shears; otherwise pick an innocuous item/empty hand (never axe/shovel/pick/hoe).
         if (BotActions.selectBestTool(bot, "shears", "")) {
             return true;
         }
@@ -768,11 +803,18 @@ public final class WoodcutSkill implements Skill {
                 return true;
             }
             String key = stack.getItem().getTranslationKey().toLowerCase();
-            if (key.contains("sword") || key.contains("axe") || key.contains("pickaxe")) {
+            if (key.contains("sword") || key.contains("axe") || key.contains("pickaxe") || key.contains("shovel") || key.contains("hoe")) {
                 continue;
             }
             BotActions.selectHotbarSlot(bot, i);
             return true;
+        }
+        // Fallback: use the first empty slot if any; otherwise leave current hand (but we skipped axes).
+        for (int i = 0; i < 9; i++) {
+            if (bot.getInventory().getStack(i).isEmpty()) {
+                BotActions.selectHotbarSlot(bot, i);
+                break;
+            }
         }
         return true;
     }

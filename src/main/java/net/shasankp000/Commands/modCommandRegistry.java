@@ -48,6 +48,11 @@ import net.shasankp000.FilingSystem.LLMClientFactory;
 import net.shasankp000.FilingSystem.ManualConfig;
 import net.shasankp000.AIPlayer;
 import net.shasankp000.GameAI.BotEventHandler;
+import net.shasankp000.GameAI.services.BotPersistenceService;
+import net.shasankp000.GameAI.State;
+import net.shasankp000.GameAI.StateActions;
+import java.io.ByteArrayOutputStream;
+import java.io.ObjectOutputStream;
 import net.shasankp000.OllamaClient.ollamaClient;
 import net.shasankp000.PathFinding.ChartPathToBlock;
 import net.shasankp000.PathFinding.PathFinder;
@@ -429,7 +434,16 @@ public class modCommandRegistry {
                         .then(literal("equip")
                                 .executes(context -> executeEquip(context, getActiveBotOrThrow(context)))
                                 .then(CommandManager.argument("bot", EntityArgumentType.player())
-                                        .executes(context -> executeEquip(context, EntityArgumentType.getPlayer(context, "bot")))
+                                        .executes(context -> {
+                                            ServerPlayerEntity resolvedBot = EntityArgumentType.getPlayer(context, "bot");
+                                            if (resolvedBot == null) {
+                                                context.getSource().sendError(Text.literal("Error: Bot '" + StringArgumentType.getString(context, "bot") + "' not found or not a player."));
+                                                LOGGER.warn("Resolved bot for /bot equip <bot_name> was null.");
+                                                return 0;
+                                            }
+                                            LOGGER.info("Resolved bot for /bot equip <bot_name>: {} ({})", resolvedBot.getName().getString(), resolvedBot.getUuid());
+                                            return executeEquip(context, resolvedBot);
+                                        })
                                 )
                         )
                         .then(literal("config")
@@ -601,6 +615,53 @@ public class modCommandRegistry {
                                                                         StringArgumentType.getString(context, "item"),
                                                                         EntityArgumentType.getPlayer(context, "bot"))))))
                                 )
+                        )
+                        .then(literal("debug_serialization")
+                                .then(CommandManager.argument("bot", EntityArgumentType.player())
+                                        .executes(context -> {
+                                            try {
+                                                ServerPlayerEntity bot = EntityArgumentType.getPlayer(context, "bot");
+                                                if (bot == null) return 0;
+                                                State state = BotEventHandler.createInitialState(bot);
+                                                
+                                                ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                                                ObjectOutputStream oos = new ObjectOutputStream(baos);
+                                                oos.writeObject(state);
+                                                oos.close();
+                                                
+                                                ChatUtils.sendSystemMessage(context.getSource(), "Serialization successful! Size: " + baos.size());
+                                                return 1;
+                                            } catch (Exception e) {
+                                                ChatUtils.sendSystemMessage(context.getSource(), "Serialization failed: " + e.toString());
+                                                e.printStackTrace();
+                                                return 0;
+                                            }
+                                        })
+                                )
+                        )
+                        .then(literal("debug_qtable_serialization")
+                                .executes(context -> {
+                                    try {
+                                        net.shasankp000.Database.QTable qTable = new net.shasankp000.Database.QTable();
+                                        ServerPlayerEntity bot = context.getSource().getPlayer();
+                                        if (bot != null) {
+                                            State state = BotEventHandler.createInitialState(bot);
+                                            qTable.addEntry(state, StateActions.Action.STAY, 0.0, state);
+                                        }
+                                        
+                                        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                                        ObjectOutputStream oos = new ObjectOutputStream(baos);
+                                        oos.writeObject(qTable);
+                                        oos.close();
+                                        
+                                        ChatUtils.sendSystemMessage(context.getSource(), "QTable Serialization successful! Size: " + baos.size());
+                                        return 1;
+                                    } catch (Exception e) {
+                                        ChatUtils.sendSystemMessage(context.getSource(), "QTable Serialization failed: " + e.toString());
+                                        e.printStackTrace();
+                                        return 0;
+                                    }
+                                })
                         )
                         .then(literal("test_chat_message")
                                 .then(CommandManager.argument("bot", EntityArgumentType.player())
@@ -1116,6 +1177,34 @@ public class modCommandRegistry {
                         )
 
                         .then(literal("stopAllMovementTasks")
+
+                        .then(literal("forget")
+                                .then(CommandManager.argument("alias", StringArgumentType.string())
+                                        .executes(context -> {
+                                            String alias = StringArgumentType.getString(context, "alias");
+                                            MinecraftServer server = context.getSource().getServer();
+                                            ServerPlayerEntity bot = server.getPlayerManager().getPlayer(alias);
+
+                                            if (bot == null) {
+                                                context.getSource().sendError(Text.literal("Bot '" + alias + "' not found."));
+                                                return 0;
+                                            }
+
+                                            // Unregister from mod's internal tracking, which calls BotPersistenceService.removeBot()
+                                            BotEventHandler.unregisterBot(bot);
+
+                                            // Explicitly delete player data file
+                                            BotPersistenceService.deletePlayerDataFile(server, bot.getUuid());
+
+                                            // Clear from mod's config if present
+                                            AIPlayer.CONFIG.removeBotEntry(alias);
+                                            AIPlayer.CONFIG.save();
+
+                                            context.getSource().sendFeedback(() -> Text.literal("§aBot '" + alias + "' has been forgotten."), false);
+                                            LOGGER.info("Bot '{}' (UUID {}) has been forgotten and its data deleted.", alias, bot.getUuid());
+                                            return 1;
+                                        }))
+                        )
                                 .executes(context -> {
 
                                     MinecraftServer server = context.getSource().getServer(); // gets the minecraft server

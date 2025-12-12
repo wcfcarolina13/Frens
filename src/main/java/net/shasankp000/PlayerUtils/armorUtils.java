@@ -36,6 +36,7 @@ public class armorUtils {
                 ItemStack stackToEquip = bestArmor.copy();
                 bot.equipStack(slot, stackToEquip);
                 inventory.removeOne(bestArmor); // Remove the equipped armor from inventory
+                inventory.markDirty();
                 System.out.println("Equipped " + stackToEquip.getName().getString() + " in slot " + slot.getName());
 
                 // Add this update to the list for notifying clients
@@ -125,6 +126,7 @@ public class armorUtils {
                 if (inventory.insertStack(equippedArmor)) {
                     // Clear the equipped armor slot
                     bot.equipStack(slot, ItemStack.EMPTY);
+                    inventory.markDirty();
 
                     // Add this update to the list for notifying clients
                     equipmentUpdates.add(new Pair<>(slot, ItemStack.EMPTY));

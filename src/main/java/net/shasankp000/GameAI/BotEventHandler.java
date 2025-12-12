@@ -31,6 +31,8 @@ import net.shasankp000.ChatUtils.ChatUtils;
 import net.shasankp000.DangerZoneDetector.DangerZoneDetector;
 import net.shasankp000.Database.QTable;
 import net.shasankp000.Database.QTableStorage;
+import net.shasankp000.GameAI.services.BotPersistenceService;
+import net.shasankp000.GameAI.services.HealingService;
 import net.shasankp000.Database.StateActionPair;
 import net.shasankp000.Entity.AutoFaceEntity;
 import net.shasankp000.Entity.LookController;
@@ -487,6 +489,11 @@ public class BotEventHandler {
         }
         UUID uuid = bot.getUuid();
         REGISTERED_BOTS.remove(uuid);
+        BotPersistenceService.removeBot(bot);
+        BotPersistenceService.removeBot(bot);
+        BotPersistenceService.removeBot(bot);
+        BotPersistenceService.removeBot(bot);
+        BotPersistenceService.removeBot(bot);
         clearState(bot);
         LAST_RL_SAMPLE_TICK.remove(uuid);
         if (registeredBotUuid != null && registeredBotUuid.equals(uuid)) {
@@ -686,6 +693,13 @@ public class BotEventHandler {
                 AutoFaceEntity.isBotMoving = false;
                 debugRL("Resetting handler trigger flag to: " + false);
             }
+        }
+    }
+
+    public static void tickHunger(MinecraftServer server) {
+        if (server == null) return;
+        for (ServerPlayerEntity player : getRegisteredBots(server)) {
+            HealingService.autoEat(player);
         }
     }
 
@@ -929,8 +943,9 @@ public class BotEventHandler {
             return;
         }
 
+        // Reduced distance threshold to 0.01 (very strict) to catch subtle movements
         double distanceSq = currentPos.squaredDistanceTo(lastKnownPosition);
-        if (distanceSq < 0.04) {
+        if (distanceSq < 0.01) {
             stationaryTicks++;
         } else {
             stationaryTicks = 0;
@@ -948,6 +963,14 @@ public class BotEventHandler {
             return;
         }
 
+        // Check if we are stuck on farmland (partial block)
+        // If we've been stationary for a while, try to jump
+        // FIXED: Use bot.getCommandSource().getWorld() instead of bot.getWorld()
+        BlockState feetState = bot.getCommandSource().getWorld().getBlockState(bot.getBlockPos());
+        if (feetState.isOf(Blocks.FARMLAND) && stationaryTicks > 5) {
+             BotActions.jump(bot);
+        }
+
         if (stationaryTicks >= STUCK_TICK_THRESHOLD || (environmentSnapshot.enclosed() && !environmentSnapshot.hasEscapeRoute())) {
             LOGGER.info("Escape routine triggered (stationaryTicks={}, enclosed={}, hasEscapeRoute={})",
                     stationaryTicks, environmentSnapshot.enclosed(), environmentSnapshot.hasEscapeRoute());
@@ -956,6 +979,8 @@ public class BotEventHandler {
             lastKnownPosition = new Vec3d(bot.getX(), bot.getY(), bot.getZ());
         }
     }
+
+
 
     public static void onBotRespawn(ServerPlayerEntity bot) {
         registerBot(bot);
@@ -1398,6 +1423,18 @@ public class BotEventHandler {
         boolean allowTeleport = SkillPreferences.teleportDuringSkills(bot) && !forceWalk;
         boolean canSee = bot.canSee(target);
         double deltaY = target.getY() - bot.getY();
+        MinecraftServer srv = bot.getCommandSource().getServer();
+        if (bot.getEntityWorld() != target.getEntityWorld() && srv != null) {
+            ServerWorld targetWorld = srv.getWorld(target.getEntityWorld().getRegistryKey());
+            if (targetWorld != null) {
+                LOGGER.info("Follow dimension handoff: moving {} from {} to {} (target dim {})", bot.getName().getString(), bot.getEntityWorld().getRegistryKey().getValue(), targetWorld.getRegistryKey().getValue(), target.getEntityWorld().getRegistryKey().getValue());
+                ChatUtils.sendSystemMessage(bot.getCommandSource(), bot.getName().getString() + " is in a different world. Spawn or move the bot into this world to continue following.");
+                return false;
+            } else {
+                LOGGER.warn("Follow dimension handoff: unable to resolve target world {} for {}", target.getEntityWorld().getRegistryKey().getValue(), bot.getName().getString());
+                return false;
+            }
+        }
         // Loosen teleport gating for big vertical or longer distances; sighted targets are allowed too.
         if (deltaY > 2.5D || distanceSq > 36.0D) {
             allowTeleport = true;
@@ -1895,8 +1932,11 @@ public class BotEventHandler {
         BlockState headState = world.getBlockState(head);
         BlockState feetState = world.getBlockState(feet);
         
-        boolean stuckInBlocks = (!headState.isAir() && headState.blocksMovement() && !headState.isOf(Blocks.BEDROCK))
-                             || (!feetState.isAir() && feetState.blocksMovement() && !feetState.isOf(Blocks.BEDROCK));
+        // Stuck logic: Ignore Farmland, Water, and non-solid blocks like Crops
+        boolean headBlocked = !headState.isAir() && !headState.isOf(Blocks.WATER) && !headState.isOf(Blocks.WHEAT) && headState.blocksMovement();
+        boolean feetBlocked = !feetState.isAir() && !feetState.isOf(Blocks.WATER) && !feetState.isOf(Blocks.FARMLAND) && !feetState.isOf(Blocks.WHEAT) && feetState.blocksMovement();
+        
+        boolean stuckInBlocks = (headBlocked || feetBlocked);
         
         // Exit if not suffocating AND not stuck in blocks
         if (!takingSuffocationDamage && !stuckInBlocks) {
@@ -1916,7 +1956,7 @@ public class BotEventHandler {
 
         // Bot is suffocating or stuck - prioritize clearing headspace first
         // Step 1: If head is blocked, mine upward to free headspace
-        if (!headState.isAir() && headState.blocksMovement() && !headState.isOf(Blocks.BEDROCK)) {
+        if (headBlocked && !headState.isOf(Blocks.BEDROCK)) {
             String keyword = preferredToolKeyword(headState);
             if (keyword != null) {
                 BotActions.selectBestTool(bot, keyword, "sword");
@@ -1977,7 +2017,7 @@ public class BotEventHandler {
                     }
                 }
             }
-        } else if (!feetState.isAir() && feetState.blocksMovement() && !feetState.isOf(Blocks.BEDROCK)) {
+        } else if (feetBlocked && !feetState.isOf(Blocks.BEDROCK)) {
             // Stuck at feet level
             String keyword = preferredToolKeyword(feetState);
             if (keyword != null) {
@@ -2005,7 +2045,12 @@ public class BotEventHandler {
         
         return false;
     }
+
     
+    /**
+     * Proactively checks if bot is stuck in blocks and initiates time-based mining to escape.
+     * Uses MiningTool.mineBlock() for physical, tool-based breaking.
+     */
     /**
      * Proactively checks if bot is stuck in blocks and initiates time-based mining to escape.
      * Uses MiningTool.mineBlock() for physical, tool-based breaking.
@@ -2036,11 +2081,15 @@ public class BotEventHandler {
         // Check critical positions first
         for (BlockPos pos : criticalPositions) {
             BlockState state = world.getBlockState(pos);
-            if (!state.isAir() && !state.isOf(Blocks.BEDROCK) && state.blocksMovement()) {
-                criticalBlocked = true;
-                blockedPos = pos;
-                blockedState = state;
-                break;
+            // Ignore Farmland and other partial blocks that don't suffocate
+            if (!state.isAir() && !state.isOf(Blocks.BEDROCK) && !state.isOf(Blocks.FARMLAND) && !state.isOf(Blocks.WATER) && state.blocksMovement()) {
+                // Double check collision shape to be sure
+                if (!state.getCollisionShape(world, pos).isEmpty()) {
+                    criticalBlocked = true;
+                    blockedPos = pos;
+                    blockedState = state;
+                    break;
+                }
             }
         }
         
@@ -2048,7 +2097,7 @@ public class BotEventHandler {
         if (!criticalBlocked) {
             for (BlockPos pos : adjacentPositions) {
                 BlockState state = world.getBlockState(pos);
-                if (!state.isAir() && !state.isOf(Blocks.BEDROCK) && state.blocksMovement()) {
+                if (!state.isAir() && !state.isOf(Blocks.BEDROCK) && !state.isOf(Blocks.FARMLAND) && state.blocksMovement()) {
                     criticalBlocked = true;
                     blockedPos = pos;
                     blockedState = state;
@@ -2096,6 +2145,7 @@ public class BotEventHandler {
         
         return false;
     }
+
     
     /**
      * DISABLED: These helper methods are no longer used since programmatic block breaking is disabled.
@@ -2725,5 +2775,53 @@ public class BotEventHandler {
 
     public static boolean isSpartanModeActive() {
         return spartanModeActive;
+    }
+
+    /**
+     * Resets all static fields to prevent state from leaking between worlds/servers.
+     * Must be called on server stop or when the bot completely disconnects.
+     */
+    public static void resetAll() {
+        synchronized (monitorLock) {
+            server = null;
+            bot = null;
+            registeredBotUuid = null;
+            REGISTERED_BOTS.clear();
+            COMMAND_STATES.clear();
+            LAST_RL_SAMPLE_TICK.clear();
+            LAST_SUFFOCATION_ALERT_TICK.clear();
+            LAST_OBSTRUCT_DAMAGE_TICK.clear();
+            LAST_MINING_ESCAPE_ATTEMPT.clear();
+            LAST_ESCAPE_NUDGE_MS.clear();
+            LAST_FOLLOW_PLAN_MS.clear();
+            LAST_FOLLOW_TARGET_POS.clear();
+            FOLLOW_TOO_CLOSE_SINCE.clear();
+            dropRetryTimestamps.clear();
+            
+            isExecuting = false;
+            externalOverrideActive = false;
+            pendingBotRespawn = false;
+            botDied = false;
+            hasRespawned = false;
+            botSpawnCount = 0;
+            
+            lastSpawnPosition = null;
+            lastSpawnWorld = null;
+            lastSpawnYaw = 0.0F;
+            lastSpawnPitch = 0.0F;
+            lastBotName = null;
+            currentState = null;
+            lastKnownPosition = null;
+            stationaryTicks = 0;
+            spartanModeActive = false;
+            failedBlockBreakAttempts = 0;
+            lastSafePosition = null;
+            lastDropSweepMs = 0L;
+            dropSweepInProgress.set(false);
+            lastBurialScanTick = Long.MIN_VALUE;
+            lastRespawnHandledTick = -1;
+            
+            LOGGER.info("BotEventHandler static state reset successfully.");
+        }
     }
 }

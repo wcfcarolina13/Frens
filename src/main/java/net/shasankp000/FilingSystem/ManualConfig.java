@@ -422,6 +422,25 @@ public class ManualConfig {
         save();
     }
 
+    public void removeBotEntry(String alias) {
+        if (alias == null || alias.isBlank()) {
+            return;
+        }
+        String trimmedAlias = alias.trim();
+        if (botGameProfile != null) {
+            botGameProfile.remove(trimmedAlias);
+        }
+        if (botOwnership != null) {
+            botOwnership.remove(trimmedAlias);
+        }
+        if (botSpawnPoints != null) {
+            botSpawnPoints.remove(trimmedAlias);
+        }
+        if (botControls != null) {
+            botControls.remove(trimmedAlias);
+        }
+    }
+
     public static class BotOwnership {
         private String ownerUuid;
         private String ownerName;
