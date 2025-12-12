@@ -124,7 +124,14 @@ public final class BotActions {
     }
 
     public static void jump(ServerPlayerEntity bot) {
-        bot.jump();
+        if (bot == null) {
+            return;
+        }
+        // Prevent "multi-jump" / air-jump behavior caused by repeated calls while airborne.
+        // Allow jumping only when grounded or swimming (vanilla-like controls).
+        if (bot.isOnGround() || bot.isTouchingWater() || bot.isInLava()) {
+            bot.jump();
+        }
     }
 
     public static void sneak(ServerPlayerEntity bot, boolean value) {
