@@ -16,6 +16,7 @@ Historical record and reasoning. `TODO.md` is the source of truth for what’s n
 - Chest use: bot auto-deposits wood to nearby chests/barrels; documented `/bot store deposit|withdraw <amount|all> <item> [bot]`.
 - Shelter: added `/bot shelter hovel <alias?>` to build a quick dirt/cobble hovel (roofed, torches, fills gaps, gathers dirt if short).
 - Farming: secured irrigation basins on uneven terrain (fills edges/underblocks, cleans stray flow), repair pass now levels plots to farm Y before re-till/plant, and leaves are broken with shears/harmless items (no axe wear).
+- Wool skill: peaceful shearing that crafts/equips shears if needed, detects pens vs. wild range (fence-aware search), collects drops, and auto-deposits bulk blocks to nearby chests to keep ≥5 free slots.
 
 ## 2025-11-18
 - Persistency and safety: inventory save timing fixed; drop sweeps stop breaking blocks and only collect items; bots break out when spawned in walls; upward stairs start in the controller’s facing direction (partial fix).
