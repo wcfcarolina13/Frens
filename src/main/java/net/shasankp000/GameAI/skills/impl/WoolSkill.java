@@ -30,9 +30,12 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 
 /**
  * Peaceful wool collection: shears adult sheep, collects drops, and deposits blocks if inventory is tight.
@@ -42,8 +45,11 @@ public class WoolSkill implements Skill {
     private static final Logger LOGGER = LoggerFactory.getLogger("skill-wool");
     private static final int MIN_FREE_SLOTS = 5;
     private static final int PEN_SEARCH_RADIUS = 14;
-    private static final int WILD_SEARCH_RADIUS = 32;
+    private static final int WILD_SEARCH_RADIUS = 48;
+    private static final int SHEEP_VERTICAL_RANGE = 18;
     private static final int CHEST_SEARCH_RADIUS = 10;
+    private static final int SUNSET_TIME_OF_DAY = 12000; // day phase; stop when sun starts going down
+    private static final long MAX_JOB_MILLIS = 30 * 60_000L; // hard cap (day is ~20 minutes)
     private static final List<Item> DEPOSIT_PREFERRED = List.of(
             Items.COBBLESTONE, Items.COBBLED_DEEPSLATE, Items.STONE, Items.ANDESITE, Items.DIORITE, Items.GRANITE,
             Items.DIRT, Items.GRASS_BLOCK, Items.COARSE_DIRT, Items.ROOTED_DIRT, Items.SAND, Items.RED_SAND,
@@ -52,6 +58,7 @@ public class WoolSkill implements Skill {
             Items.OAK_PLANKS, Items.SPRUCE_PLANKS, Items.BIRCH_PLANKS, Items.JUNGLE_PLANKS, Items.ACACIA_PLANKS,
             Items.DARK_OAK_PLANKS, Items.MANGROVE_PLANKS, Items.CHERRY_PLANKS, Items.CRIMSON_PLANKS, Items.WARPED_PLANKS
     );
+    private static final Map<UUID, BlockPos> LAST_SEEN_SHEEP = new HashMap<>();
 
     @Override
     public String name() {
@@ -71,13 +78,62 @@ public class WoolSkill implements Skill {
             return SkillExecutionResult.failure("Missing shears and cannot craft.");
         }
 
-        ensureInventorySpace(bot, world, source);
-
         int radius = detectFenceNearby(world, bot.getBlockPos()) ? PEN_SEARCH_RADIUS : WILD_SEARCH_RADIUS;
-        ChatUtils.sendSystemMessage(source, "Looking for sheep within " + radius + " blocks.");
+        BlockPos startPos = bot.getBlockPos();
+        long startedAt = System.currentTimeMillis();
+        int timeOfDay = (int) (world.getTimeOfDay() % 24000L);
+        if (timeOfDay >= SUNSET_TIME_OF_DAY) {
+            ChatUtils.sendSystemMessage(source, "It's getting late; I'll collect wool tomorrow.");
+            return SkillExecutionResult.failure("Too late to start wool run.");
+        }
 
-        int sheared = shearNearbySheep(bot, world, source, radius);
-        collectNearbyWool(bot, world);
+        ensureInventorySpace(bot, world, source);
+        ChatUtils.sendSystemMessage(source, "Looking for sheep within " + radius + " blocks (line-of-sight only).");
+
+        int sheared = 0;
+
+        while (System.currentTimeMillis() - startedAt < MAX_JOB_MILLIS) {
+            int now = (int) (world.getTimeOfDay() % 24000L);
+            if (now >= SUNSET_TIME_OF_DAY) {
+                ChatUtils.sendSystemMessage(source, "It's getting late; I'm returning to base.");
+                moveTo(bot, source, startPos, false);
+                break;
+            }
+
+            if (!ensureWoolCapacityOrDeposit(bot, world, source)) {
+                break;
+            }
+
+            List<SheepEntity> candidates = visibleSheep(bot, world, radius);
+            if (candidates.isEmpty()) {
+                if (!exploreForSheep(bot, world, source, radius)) {
+                    break;
+                }
+                continue;
+            }
+
+            boolean progressed = false;
+            for (SheepEntity target : candidates) {
+                LAST_SEEN_SHEEP.put(bot.getUuid(), target.getBlockPos());
+                if (!moveNextTo(bot, source, target.getBlockPos())) {
+                    continue;
+                }
+                if (!target.isShearable() || target.isBaby()) {
+                    continue;
+                }
+                LookController.faceEntity(bot, target);
+                bot.interact(target, Hand.MAIN_HAND);
+                sheared++;
+                progressed = true;
+                sleep(120);
+                dropSweepWool(bot, world, source);
+            }
+            if (!progressed) {
+                exploreForSheep(bot, world, source, radius);
+            }
+        }
+
+        dropSweepWool(bot, world, source);
 
         ensureInventorySpace(bot, world, source); // final deposit pass
 
@@ -115,27 +171,40 @@ public class WoolSkill implements Skill {
         return true;
     }
 
-    private int shearNearbySheep(ServerPlayerEntity bot, ServerWorld world, ServerCommandSource source, int radius) {
-        Box box = Box.from(Vec3d.of(bot.getBlockPos())).expand(radius, 6, radius);
-        List<SheepEntity> sheep = world.getEntitiesByClass(SheepEntity.class, box, s -> !s.isBaby() && s.isShearable());
-        if (sheep.isEmpty()) {
-            return 0;
+    private List<SheepEntity> visibleSheep(ServerPlayerEntity bot, ServerWorld world, int radius) {
+        Box box = Box.from(Vec3d.of(bot.getBlockPos())).expand(radius, SHEEP_VERTICAL_RANGE, radius);
+        List<SheepEntity> visible = world.getEntitiesByClass(
+                SheepEntity.class,
+                box,
+                s -> !s.isBaby() && s.isShearable() && (bot.canSee(s) || bot.squaredDistanceTo(s) <= 64.0)
+        );
+        if (visible.isEmpty()) {
+            return List.of();
         }
-        int count = 0;
-        for (SheepEntity s : sheep) {
-            if (!moveNextTo(bot, source, s.getBlockPos())) {
-                continue;
+        visible.sort((a, b) -> Double.compare(bot.squaredDistanceTo(a), bot.squaredDistanceTo(b)));
+        return visible;
+    }
+
+    private boolean exploreForSheep(ServerPlayerEntity bot, ServerWorld world, ServerCommandSource source, int radius) {
+        BlockPos last = LAST_SEEN_SHEEP.get(bot.getUuid());
+        BlockPos anchor = last != null ? last : bot.getBlockPos();
+        // Small spiral exploration around the last seen region (or current position).
+        int[] rings = {0, 4, 8, 12, 16};
+        for (int r : rings) {
+            for (int dx : new int[]{r, -r, 0}) {
+                for (int dz : new int[]{0, r, -r}) {
+                    BlockPos probe = anchor.add(dx, 0, dz);
+                    probe = probe.withY(anchor.getY());
+                    if (moveTo(bot, source, probe, true)) {
+                        if (!visibleSheep(bot, world, radius).isEmpty()) {
+                            return true;
+                        }
+                    }
+                }
             }
-            if (!s.isShearable()) {
-                continue;
-            }
-            LookController.faceEntity(bot, s);
-            bot.interact(s, Hand.MAIN_HAND);
-            count++;
-            sleep(120);
-            collectNearbyWool(bot, world);
         }
-        return count;
+        // Even if we didn't find sheep, we still explored.
+        return true;
     }
 
     private void collectNearbyWool(ServerPlayerEntity bot, ServerWorld world) {
@@ -143,6 +212,21 @@ public class WoolSkill implements Skill {
         List<ItemEntity> drops = world.getEntitiesByClass(ItemEntity.class, box, e -> e.getStack().isOf(Items.WHITE_WOOL) || e.getStack().getItem().getTranslationKey().contains("wool"));
         for (ItemEntity drop : drops) {
             moveNextTo(bot, bot.getCommandSource(), drop.getBlockPos());
+            sleep(40);
+        }
+    }
+
+    private void dropSweepWool(ServerPlayerEntity bot, ServerWorld world, ServerCommandSource source) {
+        Box box = Box.from(Vec3d.of(bot.getBlockPos())).expand(12, 6, 12);
+        List<ItemEntity> drops = world.getEntitiesByClass(ItemEntity.class, box,
+                e -> e.getStack().getItem().getTranslationKey().contains("wool"));
+        drops.sort((a, b) -> Double.compare(bot.squaredDistanceTo(a), bot.squaredDistanceTo(b)));
+        for (ItemEntity drop : drops) {
+            BlockPos pos = drop.getBlockPos();
+            if (Math.abs(pos.getY() - bot.getBlockY()) > 2) {
+                continue; // avoid climbing/airwalking for off-level drops
+            }
+            moveNextTo(bot, source, pos);
             sleep(40);
         }
     }
@@ -228,6 +312,29 @@ public class WoolSkill implements Skill {
     }
 
     private boolean moveNextTo(ServerPlayerEntity bot, ServerCommandSource source, BlockPos target) {
+        List<BlockPos> stands = findStandCandidates(bot, source.getWorld(), target);
+        for (BlockPos stand : stands) {
+            if (moveTo(bot, source, stand, true)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private List<BlockPos> findStandCandidates(ServerPlayerEntity bot, ServerWorld world, BlockPos target) {
+        List<BlockPos> candidates = new ArrayList<>();
+        for (Direction dir : Direction.Type.HORIZONTAL) {
+            BlockPos foot = target.offset(dir);
+            BlockPos below = foot.down();
+            if (world.getBlockState(below).isSolidBlock(world, below) && world.isAir(foot)) {
+                candidates.add(foot);
+            }
+        }
+        candidates.sort((a, b) -> Double.compare(bot.squaredDistanceTo(Vec3d.ofCenter(a)), bot.squaredDistanceTo(Vec3d.ofCenter(b))));
+        return candidates;
+    }
+
+    private boolean moveTo(ServerPlayerEntity bot, ServerCommandSource source, BlockPos target, boolean fastReplan) {
         MovementService.MovementPlan plan = new MovementService.MovementPlan(
                 MovementService.Mode.DIRECT,
                 target,
@@ -236,9 +343,23 @@ public class WoolSkill implements Skill {
                 null,
                 bot.getHorizontalFacing()
         );
-        MovementService.execute(source, bot, plan, false);
-        double dist = bot.getBlockPos().getSquaredDistance(target);
-        return dist <= 9.0;
+        MovementService.MovementResult res = MovementService.execute(source, bot, plan, false, fastReplan, true, false);
+        return res.success() || bot.getBlockPos().getSquaredDistance(target) <= 9.0;
+    }
+
+    private boolean ensureWoolCapacityOrDeposit(ServerPlayerEntity bot, ServerWorld world, ServerCommandSource source) {
+        int free = countFreeSlots(bot.getInventory());
+        if (free > 0) {
+            return true;
+        }
+        // If inventory is full, try deposit. If still full, stop with an explanation.
+        ensureInventorySpace(bot, world, source);
+        free = countFreeSlots(bot.getInventory());
+        if (free > 0) {
+            return true;
+        }
+        ChatUtils.sendSystemMessage(source, "I don't have space for more wool. I need a nearby chest to store items.");
+        return false;
     }
 
     private int findShearsSlot(ServerPlayerEntity bot) {

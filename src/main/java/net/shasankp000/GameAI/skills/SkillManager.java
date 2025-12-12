@@ -88,7 +88,8 @@ public final class SkillManager {
                         && !abortRequested
                         && !isInventoryFull(botPlayer)
                         && !"woodcut".equalsIgnoreCase(name)
-                        && !"shelter".equalsIgnoreCase(name)) {
+                        && !"shelter".equalsIgnoreCase(name)
+                        && !"wool".equalsIgnoreCase(name)) {
                     DropSweeper.sweep(
                             context.botSource().withSilent().withMaxLevel(4),
                             DROP_SWEEP_RADIUS,
