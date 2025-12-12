@@ -1637,7 +1637,7 @@ public class modCommandRegistry {
 
             String botName = bot.getName().getLiteralString();
 
-            bot.jump();
+            BotActions.jump(bot);
 
 
             LOGGER.info("{} jumped!", botName);

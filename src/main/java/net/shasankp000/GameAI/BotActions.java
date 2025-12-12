@@ -226,7 +226,7 @@ public final class BotActions {
     }
 
     public static void jumpForward(ServerPlayerEntity bot) {
-        bot.jump();
+        jump(bot);
         moveRelative(bot, STEP_DISTANCE * 0.6, false, 0, 0);
     }
 
@@ -612,16 +612,12 @@ public final class BotActions {
         ServerWorld world = bot.getCommandSource().getWorld();
         BlockPos front = getRelativeBlockPos(bot, 1, 0);
         BlockPos frontAbove = front.up();
-        BlockPos frontBelow = front.down();
 
         boolean obstacleAhead = !world.getBlockState(front).isAir();
         boolean headSpace = world.getBlockState(frontAbove).isAir();
-        boolean gapAhead = world.getBlockState(front).isAir() && world.getBlockState(frontBelow).isAir();
 
         if (obstacleAhead && headSpace) {
-            bot.jump();
-        } else if (gapAhead) {
-            bot.jump();
+            jump(bot);
         }
     }
 

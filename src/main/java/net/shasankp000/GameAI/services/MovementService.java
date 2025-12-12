@@ -490,6 +490,12 @@ public final class MovementService {
             if (distanceSq >= lastDistanceSq - 0.01) {
                 stagnantSteps++;
                 if (stagnantSteps >= 5) {
+                    if (trySidestepAround(player, segment.end())) {
+                        // Reset progress tracking after a successful sidestep.
+                        stagnantSteps = 0;
+                        lastDistanceSq = Double.MAX_VALUE;
+                        continue;
+                    }
                     LOGGER.info("walkSegment stalled near {} dist={}", segment.end(), Math.sqrt(distanceSq));
                     break;
                 }
@@ -511,6 +517,55 @@ public final class MovementService {
             return new SegmentResult(true, true);
         }
         return new SegmentResult(false, false);
+    }
+
+    private static boolean trySidestepAround(ServerPlayerEntity player, BlockPos goal) {
+        ServerWorld world = getWorld(player);
+        if (world == null || goal == null) {
+            return false;
+        }
+        Direction toward = Direction.getFacing(goal.getX() - player.getX(), 0, goal.getZ() - player.getZ());
+        if (!toward.getAxis().isHorizontal()) {
+            toward = player.getHorizontalFacing();
+        }
+        Direction[] options = new Direction[] {
+                toward.rotateYClockwise(),
+                toward.rotateYCounterclockwise(),
+                toward.getOpposite()
+        };
+
+        BlockPos start = player.getBlockPos();
+        for (Direction dir : options) {
+            BlockPos stand = start.offset(dir);
+            if (!isSolidStandable(world, stand.down(), stand)) {
+                continue;
+            }
+            LOGGER.info("walkSegment sidestep attempt dir={} stand={}", dir, stand.toShortString());
+            if (pursuitUntilClose(player, stand, 900L, 2.25D, "sidestep")) {
+                return true;
+            }
+            // If pursuit is disabled elsewhere, try a short manual nudge.
+            Vec3d standCenter = centerOf(stand);
+            long deadline = System.currentTimeMillis() + 900L;
+            while (System.currentTimeMillis() < deadline) {
+                double distSq = player.squaredDistanceTo(standCenter);
+                if (distSq <= 2.25D) {
+                    BotActions.stop(player);
+                    return true;
+                }
+                boolean ok = runOnServerThread(player, () -> {
+                    LookController.faceBlock(player, stand);
+                    BotActions.sprint(player, false);
+                    BotActions.autoJumpIfNeeded(player);
+                    BotActions.applyMovementInput(player, standCenter, 0.12);
+                });
+                if (!ok) {
+                    break;
+                }
+                sleep(90L);
+            }
+        }
+        return false;
     }
 
     private static boolean walkDirect(ServerPlayerEntity player, BlockPos destination, long timeoutMs) {
