@@ -50,6 +50,8 @@ public class WoolSkill implements Skill {
     private static final int CHEST_SEARCH_RADIUS = 10;
     private static final int SUNSET_TIME_OF_DAY = 12000; // day phase; stop when sun starts going down
     private static final long MAX_JOB_MILLIS = 30 * 60_000L; // hard cap (day is ~20 minutes)
+    private static final int DROP_SWEEP_RADIUS = 18;
+    private static final int DROP_SWEEP_PASSES = 4;
     private static final List<Item> DEPOSIT_PREFERRED = List.of(
             Items.COBBLESTONE, Items.COBBLED_DEEPSLATE, Items.STONE, Items.ANDESITE, Items.DIORITE, Items.GRANITE,
             Items.DIRT, Items.GRASS_BLOCK, Items.COARSE_DIRT, Items.ROOTED_DIRT, Items.SAND, Items.RED_SAND,
@@ -80,6 +82,8 @@ public class WoolSkill implements Skill {
 
         int radius = detectFenceNearby(world, bot.getBlockPos()) ? PEN_SEARCH_RADIUS : WILD_SEARCH_RADIUS;
         BlockPos startPos = bot.getBlockPos();
+        int minWoolToCollect = parseCount(context.parameters());
+        int woolAtStart = countWoolItems(bot.getInventory());
         long startedAt = System.currentTimeMillis();
         int timeOfDay = (int) (world.getTimeOfDay() % 24000L);
         if (timeOfDay >= SUNSET_TIME_OF_DAY) {
@@ -125,8 +129,19 @@ public class WoolSkill implements Skill {
                 bot.interact(target, Hand.MAIN_HAND);
                 sheared++;
                 progressed = true;
-                sleep(120);
+                // Give the drops a tick to spawn, then sweep aggressively.
+                sleep(220);
                 dropSweepWool(bot, world, source);
+
+                if (minWoolToCollect > 0) {
+                    int collected = countWoolItems(bot.getInventory()) - woolAtStart;
+                    if (collected >= minWoolToCollect) {
+                        ChatUtils.sendSystemMessage(source, "Collected at least " + minWoolToCollect + " wool; heading back.");
+                        dropSweepWool(bot, world, source);
+                        moveTo(bot, source, startPos, false);
+                        return SkillExecutionResult.success("Collected " + collected + " wool and sheared " + sheared + " sheep.");
+                    }
+                }
             }
             if (!progressed) {
                 exploreForSheep(bot, world, source, radius);
@@ -141,6 +156,35 @@ public class WoolSkill implements Skill {
             return SkillExecutionResult.failure("No shearable sheep found nearby.");
         }
         return SkillExecutionResult.success("Sheared " + sheared + " sheep and gathered wool.");
+    }
+
+    private int parseCount(Map<String, Object> params) {
+        if (params == null) {
+            return 0;
+        }
+        Object value = params.get("count");
+        if (value instanceof Number number) {
+            return Math.max(0, number.intValue());
+        }
+        if (value instanceof String s) {
+            try {
+                return Math.max(0, Integer.parseInt(s));
+            } catch (NumberFormatException ignored) {
+            }
+        }
+        return 0;
+    }
+
+    private int countWoolItems(Inventory inv) {
+        int total = 0;
+        for (int i = 0; i < inv.size(); i++) {
+            ItemStack stack = inv.getStack(i);
+            if (stack.isEmpty()) continue;
+            if (stack.getItem().getTranslationKey().contains("wool")) {
+                total += stack.getCount();
+            }
+        }
+        return total;
     }
 
     private boolean ensureShears(ServerPlayerEntity bot, ServerCommandSource source) {
@@ -217,17 +261,23 @@ public class WoolSkill implements Skill {
     }
 
     private void dropSweepWool(ServerPlayerEntity bot, ServerWorld world, ServerCommandSource source) {
-        Box box = Box.from(Vec3d.of(bot.getBlockPos())).expand(12, 6, 12);
-        List<ItemEntity> drops = world.getEntitiesByClass(ItemEntity.class, box,
-                e -> e.getStack().getItem().getTranslationKey().contains("wool"));
-        drops.sort((a, b) -> Double.compare(bot.squaredDistanceTo(a), bot.squaredDistanceTo(b)));
-        for (ItemEntity drop : drops) {
-            BlockPos pos = drop.getBlockPos();
-            if (Math.abs(pos.getY() - bot.getBlockY()) > 2) {
-                continue; // avoid climbing/airwalking for off-level drops
+        for (int pass = 0; pass < DROP_SWEEP_PASSES; pass++) {
+            Box box = Box.from(Vec3d.of(bot.getBlockPos())).expand(DROP_SWEEP_RADIUS, 6, DROP_SWEEP_RADIUS);
+            List<ItemEntity> drops = world.getEntitiesByClass(ItemEntity.class, box,
+                    e -> e.getStack().getItem().getTranslationKey().contains("wool"));
+            if (drops.isEmpty()) {
+                return;
             }
-            moveNextTo(bot, source, pos);
-            sleep(40);
+            drops.sort((a, b) -> Double.compare(bot.squaredDistanceTo(a), bot.squaredDistanceTo(b)));
+            for (ItemEntity drop : drops) {
+                BlockPos pos = drop.getBlockPos();
+                if (Math.abs(pos.getY() - bot.getBlockY()) > 3) {
+                    continue;
+                }
+                moveNextTo(bot, source, pos);
+                sleep(60);
+            }
+            sleep(120);
         }
     }
 

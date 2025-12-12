@@ -9,6 +9,7 @@ import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.World;
+import net.minecraft.registry.tag.BlockTags;
 import net.minecraft.registry.tag.FluidTags;
 import net.shasankp000.GameAI.BotActions;
 import net.shasankp000.GameAI.skills.SkillPreferences;
@@ -16,6 +17,8 @@ import net.shasankp000.Entity.LookController;
 import net.shasankp000.PathFinding.GoTo;
 import net.shasankp000.PathFinding.PathFinder;
 import net.shasankp000.PathFinding.Segment;
+import net.shasankp000.PlayerUtils.MiningTool;
+import net.minecraft.item.ItemStack;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -565,7 +568,56 @@ public final class MovementService {
                 sleep(90L);
             }
         }
+        // If we're stuck against leaves (common with foliage), clear one leaf block using shears/hand.
+        BlockPos front = start.offset(toward);
+        if (isBreakableLeaf(world, front) && isWithinReach(player, front)) {
+            LOGGER.info("walkSegment leaf-stuck: breaking leaf at {}", front.toShortString());
+            selectHarmlessForLeaves(player);
+            try {
+                MiningTool.mineBlock(player, front).get(4, TimeUnit.SECONDS);
+            } catch (Exception ignored) {
+            }
+            return true;
+        }
         return false;
+    }
+
+    private static boolean isBreakableLeaf(ServerWorld world, BlockPos pos) {
+        if (world == null || pos == null) {
+            return false;
+        }
+        var state = world.getBlockState(pos);
+        return state.isIn(BlockTags.LEAVES);
+    }
+
+    private static boolean isWithinReach(ServerPlayerEntity player, BlockPos pos) {
+        if (player == null || pos == null) {
+            return false;
+        }
+        return player.squaredDistanceTo(Vec3d.ofCenter(pos)) <= 20.25D; // ~4.5 blocks
+    }
+
+    private static void selectHarmlessForLeaves(ServerPlayerEntity player) {
+        if (player == null) {
+            return;
+        }
+        // Prefer shears, otherwise an empty slot or a non-tool/weapon hotbar item.
+        if (BotActions.selectBestTool(player, "shears", "")) {
+            return;
+        }
+        for (int i = 0; i < 9; i++) {
+            ItemStack stack = player.getInventory().getStack(i);
+            if (stack.isEmpty()) {
+                BotActions.selectHotbarSlot(player, i);
+                return;
+            }
+            String key = stack.getItem().getTranslationKey().toLowerCase();
+            if (key.contains("sword") || key.contains("axe") || key.contains("pickaxe") || key.contains("shovel") || key.contains("hoe")) {
+                continue;
+            }
+            BotActions.selectHotbarSlot(player, i);
+            return;
+        }
     }
 
     private static boolean walkDirect(ServerPlayerEntity player, BlockPos destination, long timeoutMs) {
