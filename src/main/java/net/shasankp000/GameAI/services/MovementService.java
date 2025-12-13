@@ -570,14 +570,17 @@ public final class MovementService {
         }
         // If we're stuck against leaves (common with foliage), clear one leaf block using shears/hand.
         BlockPos front = start.offset(toward);
-        if (isBreakableLeaf(world, front) && isWithinReach(player, front)) {
-            LOGGER.info("walkSegment leaf-stuck: breaking leaf at {}", front.toShortString());
-            selectHarmlessForLeaves(player);
-            try {
-                MiningTool.mineBlock(player, front).get(4, TimeUnit.SECONDS);
-            } catch (Exception ignored) {
+        BlockPos[] candidates = new BlockPos[] { front, front.up(), start.up() };
+        for (BlockPos leaf : candidates) {
+            if (isBreakableLeaf(world, leaf) && isWithinReach(player, leaf)) {
+                LOGGER.info("walkSegment leaf-stuck: breaking leaf at {}", leaf.toShortString());
+                selectHarmlessForLeaves(player);
+                try {
+                    MiningTool.mineBlock(player, leaf).get(4, TimeUnit.SECONDS);
+                } catch (Exception ignored) {
+                }
+                return true;
             }
-            return true;
         }
         return false;
     }
