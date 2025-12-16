@@ -236,7 +236,7 @@ public final class FishingSkill implements Skill {
         try {
             // Take small steps forward
             for (int i = 0; i < 5; i++) {
-                Vec3d nextPos = bot.getPos().add(bot.getRotationVec(1.0f).multiply(0.2));
+                Vec3d nextPos = new Vec3d(bot.getX(), bot.getY(), bot.getZ()).add(bot.getRotationVec(1.0f).multiply(0.2));
                 BlockPos nextBlock = BlockPos.ofFloored(nextPos);
                 // Check if ground exists below next position
                 if (bot.getEntityWorld().getBlockState(nextBlock.down()).getCollisionShape(bot.getEntityWorld(), nextBlock.down()).isEmpty()) {
