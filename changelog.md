@@ -123,3 +123,10 @@ Historical record and reasoning. `TODO.md` is the source of truth for what’s n
     - Fixed issue where the bot would deposit its fishing rod into the chest, preventing it from continuing.
     - Updated default behavior: if no count is specified, the bot fishes until sunset (or stopped).
     - Improved `ChestStoreService` to support item exclusion during deposits.
+
+### Improved
+- **Fishing Skill Upgrade (Part 2)**:
+    - **Drop Sweeping**: Bot now performs item collection sweeps every 3 minutes and at the end of the session to catch floating items.
+    - **Positioning**: Improved logic to move closer to the shoreline edge before casting to avoid hitting the ground.
+    - **Bad Throw Detection**: Automatically detects if the bobber lands on dry land, retracts, and adjusts position.
+    - **Cliff Casting**: Expanded vertical search range for fishing spots to better support fishing from ledges.

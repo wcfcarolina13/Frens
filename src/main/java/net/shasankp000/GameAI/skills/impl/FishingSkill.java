@@ -13,11 +13,13 @@ import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
+import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.World;
 import net.minecraft.registry.tag.FluidTags;
 import net.shasankp000.ChatUtils.ChatUtils;
 import net.shasankp000.Entity.LookController;
 import net.shasankp000.GameAI.BotActions;
+import net.shasankp000.GameAI.DropSweeper;
 import net.shasankp000.GameAI.services.ChestStoreService;
 import net.shasankp000.GameAI.services.CraftingHelper;
 import net.shasankp000.GameAI.services.MovementService;
@@ -42,8 +44,10 @@ public final class FishingSkill implements Skill {
     private static final Logger LOGGER = LoggerFactory.getLogger("skill-fishing");
     private static final int MAX_ATTEMPTS_PER_FISH = 6;
     private static final double APPROACH_REACH_SQ = 1.44D;
-    private static final int WATER_SEARCH_RADIUS = 10;
+    private static final int WATER_SEARCH_RADIUS = 12;
     private static final long CAST_WAIT_MS = 6_000L;
+    private static final long SWEEP_INTERVAL_MS = 3 * 60 * 1000L; // 3 minutes
+    
     private static final Set<Item> FISH_ITEMS = Set.of(
             Items.COD,
             Items.SALMON,
@@ -88,6 +92,9 @@ public final class FishingSkill implements Skill {
         if (!approached) {
             return SkillExecutionResult.failure("Can't reach the fishing spot.");
         }
+        
+        // Initial positioning adjustment
+        adjustPositionToWaterEdge(bot, spot.water());
 
         if (!BotActions.ensureHotbarItem(bot, Items.FISHING_ROD)) {
             return SkillExecutionResult.failure("Unable to equip the fishing rod.");
@@ -105,6 +112,7 @@ public final class FishingSkill implements Skill {
         int caught = 0;
         int attempts = 0;
         int baseline = countFish(bot);
+        long lastSweepTime = System.currentTimeMillis();
         ServerWorld world = (ServerWorld) bot.getEntityWorld();
 
         String modeDesc = (targetFish == Integer.MAX_VALUE ? "until sunset" : targetFish + " catches") + (checkSunset && targetFish != Integer.MAX_VALUE ? " (or sunset)" : "");
@@ -113,6 +121,17 @@ public final class FishingSkill implements Skill {
         while (caught < targetFish && attempts < maxAttempts) {
             if (SkillManager.shouldAbortSkill(bot)) {
                 return SkillExecutionResult.failure("Fishing paused by another task.");
+            }
+
+            // Periodic Sweep
+            if (System.currentTimeMillis() - lastSweepTime > SWEEP_INTERVAL_MS) {
+                performSweep(source, bot, stand);
+                lastSweepTime = System.currentTimeMillis();
+                // Re-equip after sweep
+                if (!BotActions.ensureHotbarItem(bot, Items.FISHING_ROD)) {
+                    return SkillExecutionResult.failure("Lost fishing rod during sweep.");
+                }
+                adjustPositionToWaterEdge(bot, spot.water());
             }
 
             if (checkSunset) {
@@ -134,23 +153,36 @@ public final class FishingSkill implements Skill {
                     return SkillExecutionResult.failure("Lost fishing rod during storage routine.");
                 }
                 MovementService.nudgeTowardUntilClose(bot, stand, APPROACH_REACH_SQ, 1500L, 0.16D, "fishing-reapproach");
+                adjustPositionToWaterEdge(bot, spot.water());
             }
 
             aimTowardWater(bot, spot.water());
-            BotActions.useSelectedItem(bot); 
+            BotActions.useSelectedItem(bot); // Cast
+            
+            // Wait for bobber to land and check validity
+            sleep(1200L);
+            FishingBobberEntity bobber = findActiveBobber(bot);
+            if (bobber != null && !bobber.isTouchingWater()) {
+                 LOGGER.warn("Bad throw detected (on land). Retracting and adjusting.");
+                 BotActions.useSelectedItem(bot); // Retract
+                 attempts++;
+                 adjustPositionToWaterEdge(bot, spot.water());
+                 continue;
+            }
+            
             boolean caughtFish = waitForBite(bot);
             
             if (!caughtFish) {
-                 BotActions.useSelectedItem(bot); 
+                 BotActions.useSelectedItem(bot); // Retract
                  attempts++;
                  continue;
             }
 
             aimTowardWater(bot, spot.water());
-            BotActions.useSelectedItem(bot);
+            BotActions.useSelectedItem(bot); // Reel in
             waitForBobberRemoval(bot);
             
-            sleep(600L); 
+            sleep(600L); // Wait for item arrival
             
             int now = countFish(bot);
             int delta = now - baseline;
@@ -163,8 +195,11 @@ public final class FishingSkill implements Skill {
             }
             attempts++;
             
-            BotActions.stop(bot); 
+            BotActions.stop(bot); // Ensure we don't drift
         }
+
+        // Final Sweep
+        performSweep(source, bot, stand);
 
         if (caught == 0 && attempts > 0) {
             return SkillExecutionResult.failure("No bites after " + attempts + " casts.");
@@ -172,6 +207,52 @@ public final class FishingSkill implements Skill {
         
         ChatUtils.sendSystemMessage(source, "Fishing session finished. Caught " + caught + " items.");
         return SkillExecutionResult.success("Fishing succeeded (" + caught + " items).");
+    }
+
+    private void performSweep(ServerCommandSource source, ServerPlayerEntity bot, BlockPos returnPos) {
+        LOGGER.info("Scanning for loose items...");
+        // Short duration sweep to catch floating items
+        DropSweeper.sweep(source, 10.0, 5.0, 15, 8000L);
+        // Return to spot
+        MovementService.nudgeTowardUntilClose(bot, returnPos, APPROACH_REACH_SQ, 2500L, 0.16D, "fishing-return");
+        aimTowardWater(bot, returnPos); // Rough re-aim, will be refined by loop
+    }
+
+    private void adjustPositionToWaterEdge(ServerPlayerEntity bot, BlockPos water) {
+        if (bot == null || water == null) return;
+        
+        // Face the water
+        LookController.faceBlock(bot, water);
+        
+        // Safety check: only move if we are safely on ground
+        if (!bot.isOnGround()) return;
+
+        double distSq = bot.getBlockPos().getSquaredDistance(water);
+        // If we are already very close (e.g. adjacent), don't risk falling in.
+        // But if we are casting on land, we might be 2-3 blocks away.
+        if (distSq < 2.5) return; 
+
+        BotActions.sneak(bot, true);
+        try {
+            // Take small steps forward
+            for (int i = 0; i < 5; i++) {
+                Vec3d nextPos = bot.getPos().add(bot.getRotationVec(1.0f).multiply(0.2));
+                BlockPos nextBlock = BlockPos.ofFloored(nextPos);
+                // Check if ground exists below next position
+                if (bot.getEntityWorld().getBlockState(nextBlock.down()).getCollisionShape(bot.getEntityWorld(), nextBlock.down()).isEmpty()) {
+                    // Edge detected! Stop.
+                    break;
+                }
+                
+                BotActions.moveForward(bot);
+                sleep(100L);
+                
+                if (bot.getBlockPos().getSquaredDistance(water) < 3.0) break;
+            }
+            BotActions.stop(bot);
+        } finally {
+            BotActions.sneak(bot, false);
+        }
     }
 
     private static boolean handleFullInventory(ServerPlayerEntity bot, ServerCommandSource source, BlockPos safeStand) {
@@ -288,13 +369,16 @@ public final class FishingSkill implements Skill {
         }
         BlockPos best = null;
         double bestDist = Double.MAX_VALUE;
-        BlockPos min = water.add(-2, -1, -2);
-        BlockPos max = water.add(2, 1, 2);
+        
+        // Expanded search range for cliffs/ledges
+        BlockPos min = water.add(-3, -1, -3);
+        BlockPos max = water.add(3, 4, 3);
+        
         for (BlockPos candidate : BlockPos.iterate(min, max)) {
             if (candidate.equals(water)) {
                 continue;
             }
-            if (!isAdjacentToWater(candidate, water)) {
+            if (!isAdjacentToWater(candidate, water) && !canCastFrom(candidate, water)) {
                 continue;
             }
             if (!isStandable(world, candidate)) {
@@ -313,6 +397,13 @@ public final class FishingSkill implements Skill {
             }
         }
         return best;
+    }
+    
+    private static boolean canCastFrom(BlockPos stand, BlockPos water) {
+        // Simple heuristic: if stand is higher than water and within casting distance
+        int dy = stand.getY() - water.getY();
+        double distSq = stand.getSquaredDistance(water);
+        return dy >= 0 && dy <= 5 && distSq <= 20.0;
     }
 
     private static boolean isAdjacentToWater(BlockPos candidate, BlockPos water) {
