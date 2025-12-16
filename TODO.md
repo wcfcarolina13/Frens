@@ -16,8 +16,7 @@ Pending work only. Completed items and rationale live in `changelog.md`.
 - [ ] **Bot identity separation**: Per-alias inventory/hunger/sleep/XP isolation across sessions (Jake vs Bob) with validation.
 - [ ] **Job resume prompts on death/leave**: Pause current job; on rejoin/respawn, ask whether to continue and resume when confirmed.
 - [ ] **Per-bot chat addressing & broadcasts**: Direct questions route to the named bot; `allbots` commands fan out once without cross-talk.
-- [ ] **New skill: fishing**: Cast/reel loop with safe footing, inventory checks (rod, bait if needed), avoid water teleport, auto-store catch when inventory nears full.
-- [ ] **New skill: peaceful wool collection**: Locate sheep, shear without harm, avoid lava/precipices, gather dropped wool, restock shears or craft when possible.
+- [x] **New skill: fishing**: Cast/reel loop with safe footing, inventory checks (rod, bait if needed), avoid water teleport, auto-store catch when inventory nears full.
 
 ## P2 — Medium
 
@@ -45,7 +44,7 @@ Pending work only. Completed items and rationale live in `changelog.md`.
 
 ### Crafting & Building
 - [ ] Place and use crafting table, furnace, chest
-- [ ] Craft common items (bed, tools, weapons, armor)
+- [ ] Craft more common items (armor, torches, etc.)
 - [ ] Build walls (specified materials, dimensions)
 - [ ] Simple 2-person house
 - [ ] Block placement primitives
