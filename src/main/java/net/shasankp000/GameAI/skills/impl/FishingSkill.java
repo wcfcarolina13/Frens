@@ -23,6 +23,9 @@ import net.shasankp000.GameAI.DropSweeper;
 import net.shasankp000.GameAI.services.ChestStoreService;
 import net.shasankp000.GameAI.services.CraftingHelper;
 import net.shasankp000.GameAI.services.MovementService;
+import net.shasankp000.GameAI.services.MovementService.Mode;
+import net.shasankp000.GameAI.services.MovementService.MovementPlan;
+import net.shasankp000.GameAI.services.MovementService.MovementResult;
 import net.shasankp000.GameAI.skills.Skill;
 import net.shasankp000.GameAI.skills.SkillContext;
 import net.shasankp000.GameAI.skills.SkillExecutionResult;
@@ -88,9 +91,10 @@ public final class FishingSkill implements Skill {
         }
 
         BlockPos stand = spot.stand();
-        boolean approached = MovementService.nudgeTowardUntilClose(bot, stand, APPROACH_REACH_SQ, 2600L, 0.16D, "fishing-approach");
+        // Use smarter navigation that can clear leaves
+        boolean approached = navigateToSpot(source, bot, stand);
         if (!approached) {
-            return SkillExecutionResult.failure("Can't reach the fishing spot.");
+            return SkillExecutionResult.failure("Can't reach the fishing spot (blocked?).");
         }
         
         // Initial positioning adjustment
@@ -152,7 +156,8 @@ public final class FishingSkill implements Skill {
                 if (!BotActions.ensureHotbarItem(bot, Items.FISHING_ROD)) {
                     return SkillExecutionResult.failure("Lost fishing rod during storage routine.");
                 }
-                MovementService.nudgeTowardUntilClose(bot, stand, APPROACH_REACH_SQ, 1500L, 0.16D, "fishing-reapproach");
+                // Smart re-approach
+                navigateToSpot(source, bot, stand);
                 adjustPositionToWaterEdge(bot, spot.water());
             }
 
@@ -209,12 +214,31 @@ public final class FishingSkill implements Skill {
         return SkillExecutionResult.success("Fishing succeeded (" + caught + " items).");
     }
 
+    private boolean navigateToSpot(ServerCommandSource source, ServerPlayerEntity bot, BlockPos target) {
+        // Use pathfinding first
+        MovementPlan plan = new MovementPlan(Mode.DIRECT, target, target, null, null, null);
+        MovementResult result = MovementService.execute(source, bot, plan);
+        
+        if (result.success()) return true;
+        
+        // If failed, try clearing leaves towards target
+        Direction dir = Direction.getFacing(target.getX() - bot.getX(), 0, target.getZ() - bot.getZ());
+        if (MovementService.clearLeafObstruction(bot, dir)) {
+             // Retry if we cleared something
+             result = MovementService.execute(source, bot, plan);
+             if (result.success()) return true;
+        }
+        
+        // Fallback to nudge (linear pursuit) if pathfinding failed but we are close
+        return MovementService.nudgeTowardUntilClose(bot, target, APPROACH_REACH_SQ, 2600L, 0.16D, "fishing-approach-fallback");
+    }
+
     private void performSweep(ServerCommandSource source, ServerPlayerEntity bot, BlockPos returnPos) {
         LOGGER.info("Scanning for loose items...");
         // Short duration sweep to catch floating items
         DropSweeper.sweep(source, 10.0, 5.0, 15, 8000L);
         // Return to spot
-        MovementService.nudgeTowardUntilClose(bot, returnPos, APPROACH_REACH_SQ, 2500L, 0.16D, "fishing-return");
+        navigateToSpot(source, bot, returnPos);
         aimTowardWater(bot, returnPos); // Rough re-aim, will be refined by loop
     }
 
@@ -236,7 +260,8 @@ public final class FishingSkill implements Skill {
         try {
             // Take small steps forward
             for (int i = 0; i < 5; i++) {
-                Vec3d nextPos = new Vec3d(bot.getX(), bot.getY(), bot.getZ()).add(bot.getRotationVec(1.0f).multiply(0.2));
+                Vec3d currentPos = new Vec3d(bot.getX(), bot.getY(), bot.getZ());
+                Vec3d nextPos = currentPos.add(bot.getRotationVec(1.0f).multiply(0.2));
                 BlockPos nextBlock = BlockPos.ofFloored(nextPos);
                 // Check if ground exists below next position
                 if (bot.getEntityWorld().getBlockState(nextBlock.down()).getCollisionShape(bot.getEntityWorld(), nextBlock.down()).isEmpty()) {

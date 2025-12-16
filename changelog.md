@@ -130,3 +130,8 @@ Historical record and reasoning. `TODO.md` is the source of truth for what’s n
     - **Positioning**: Improved logic to move closer to the shoreline edge before casting to avoid hitting the ground.
     - **Bad Throw Detection**: Automatically detects if the bobber lands on dry land, retracts, and adjusts position.
     - **Cliff Casting**: Expanded vertical search range for fishing spots to better support fishing from ledges.
+
+### Fixed
+- **Fishing Skill Navigation**:
+    - Replaced simple nudging with robust pathfinding for approaching fishing spots, allowing the bot to navigate around obstacles.
+    - Added logic to automatically clear obstructing leaves when navigating to the water, ensuring the bot doesn't get stuck by trees.
