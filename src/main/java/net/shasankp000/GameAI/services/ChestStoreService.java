@@ -3,6 +3,7 @@ package net.shasankp000.GameAI.services;
 import net.minecraft.block.Blocks;
 import net.minecraft.block.entity.ChestBlockEntity;
 import net.minecraft.inventory.Inventory;
+import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.command.ServerCommandSource;
@@ -15,9 +16,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.Locale;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Predicate;
 
 public final class ChestStoreService {
 
@@ -26,28 +29,14 @@ public final class ChestStoreService {
     private ChestStoreService() {}
 
     public static int handleDeposit(ServerCommandSource source, ServerPlayerEntity bot, String amountRaw, String itemRaw) {
-        BlockPos chestPos = resolveChestPos(source);
-        if (chestPos == null || bot == null) {
-            ChatUtils.sendSystemMessage(source, "Look at a chest.");
-            return 0;
-        }
-        MinecraftServer server = source.getServer();
-        if (server == null) {
-            return 0;
-        }
-        int amount = parseAmount(amountRaw, Integer.MAX_VALUE);
-        String itemName = itemRaw != null ? itemRaw.toLowerCase() : "";
-        server.execute(() -> ChatUtils.sendSystemMessage(source, "Heading to the chest to deposit items..."));
-        UUID botId = bot.getUuid();
-        CompletableFuture.runAsync(() -> {
-            int moved = performStoreTransfer(source, botId, chestPos, amount, itemName, true);
-            server.execute(() -> ChatUtils.sendSystemMessage(source,
-                    moved > 0 ? "Deposited " + moved + " " + itemName + "." : "Couldn't deposit (unreachable, blocked, or no matching items)."));
-        });
-        return 1;
+        return handleTransfer(source, bot, amountRaw, itemRaw, true);
     }
 
     public static int handleWithdraw(ServerCommandSource source, ServerPlayerEntity bot, String amountRaw, String itemRaw) {
+        return handleTransfer(source, bot, amountRaw, itemRaw, false);
+    }
+
+    private static int handleTransfer(ServerCommandSource source, ServerPlayerEntity bot, String amountRaw, String itemRaw, boolean deposit) {
         BlockPos chestPos = resolveChestPos(source);
         if (chestPos == null || bot == null) {
             ChatUtils.sendSystemMessage(source, "Look at a chest.");
@@ -58,18 +47,31 @@ public final class ChestStoreService {
             return 0;
         }
         int amount = parseAmount(amountRaw, Integer.MAX_VALUE);
-        String itemName = itemRaw != null ? itemRaw.toLowerCase() : "";
-        server.execute(() -> ChatUtils.sendSystemMessage(source, "Heading to the chest to withdraw items..."));
+        String itemName = itemRaw != null ? itemRaw.toLowerCase(Locale.ROOT) : "";
+        
+        server.execute(() -> ChatUtils.sendSystemMessage(source, "Heading to the chest to " + (deposit ? "deposit" : "withdraw") + " items..."));
+        
+        Predicate<ItemStack> filter = stack -> {
+            if (itemName.isBlank()) return true;
+            return stack.getName().getString().toLowerCase(Locale.ROOT).contains(itemName);
+        };
+
         UUID botId = bot.getUuid();
         CompletableFuture.runAsync(() -> {
-            int moved = performStoreTransfer(source, botId, chestPos, amount, itemName, false);
+            int moved = performStoreTransfer(source, botId, chestPos, amount, filter, deposit);
+            String action = deposit ? "Deposited" : "Withdrew";
+            String fail = deposit ? "deposit" : "withdraw";
             server.execute(() -> ChatUtils.sendSystemMessage(source,
-                    moved > 0 ? "Withdrew " + moved + " " + itemName + "." : "Couldn't withdraw (unreachable, blocked, or missing item)."));
+                    moved > 0 ? action + " " + moved + " items." : "Couldn't " + fail + " (unreachable, blocked, or no matching items)."));
         });
         return 1;
     }
 
     public static int depositAll(ServerCommandSource source, ServerPlayerEntity bot, BlockPos chestPos) {
+        return depositAllExcept(source, bot, chestPos, Set.of());
+    }
+
+    public static int depositAllExcept(ServerCommandSource source, ServerPlayerEntity bot, BlockPos chestPos, Set<Item> excluded) {
         if (bot == null || chestPos == null || source == null) {
             return 0;
         }
@@ -78,10 +80,9 @@ public final class ChestStoreService {
             return 0;
         }
 
-        // Blocking call to ensure it finishes before skill continues
         return callOnServer(server, () -> {
-            int moved = performStoreTransfer(source, bot.getUuid(), chestPos, Integer.MAX_VALUE, "", true);
-            return moved;
+            return performStoreTransfer(source, bot.getUuid(), chestPos, Integer.MAX_VALUE, 
+                stack -> !excluded.contains(stack.getItem()), true);
         }, 5000, 0);
     }
 
@@ -117,7 +118,7 @@ public final class ChestStoreService {
                                            UUID botId,
                                            BlockPos chestPos,
                                            int amount,
-                                           String itemName,
+                                           Predicate<ItemStack> filter,
                                            boolean deposit) {
         if (source == null || botId == null || chestPos == null) {
             return 0;
@@ -127,7 +128,6 @@ public final class ChestStoreService {
             return 0;
         }
 
-        // Resolve the bot and the chest on the server thread.
         ServerPlayerEntity bot = callOnServer(server, () -> server.getPlayerManager().getPlayer(botId), 800, null);
         if (bot == null || bot.isRemoved()) {
             return 0;
@@ -137,14 +137,13 @@ public final class ChestStoreService {
             return 0;
         }
 
-        if (deposit && itemName != null && !itemName.isBlank()) {
-            int have = callOnServer(server, () -> countMatching(bot.getInventory(), itemName), 800, 0);
+        if (deposit) {
+            int have = callOnServer(server, () -> countMatching(bot.getInventory(), filter), 800, 0);
             if (have <= 0) {
                 return 0;
             }
         }
 
-        // Move next to the chest (no teleport; relies on door opening in MovementService).
         java.util.List<BlockPos> stands = callOnServer(server,
                 () -> findStandCandidatesNearChest(source.getWorld(), bot, chestPos),
                 1200,
@@ -154,7 +153,6 @@ public final class ChestStoreService {
         }
         boolean reached = false;
         for (BlockPos stand : stands) {
-            // If there's a door between us and the target stand, try opening it first.
             BlockPos door = BlockInteractionService.findDoorAlongLine(bot, Vec3d.ofCenter(stand), 6.0D);
             if (door != null) {
                 callOnServer(server, () -> MovementService.tryOpenDoorAt(bot, door), 800, Boolean.FALSE);
@@ -169,7 +167,6 @@ public final class ChestStoreService {
                     bot.getHorizontalFacing());
             MovementService.MovementResult move = MovementService.execute(bot.getCommandSource(), bot, plan, false, true, true, false);
             double distSq = bot.getBlockPos().getSquaredDistance(stand);
-            LOGGER.info("Store move: targetStand={} success={} dist={}", stand.toShortString(), move.success(), String.format(Locale.ROOT, "%.2f", Math.sqrt(distSq)));
             if (move.success() || distSq <= BlockInteractionService.SURVIVAL_REACH_SQ) {
                 reached = true;
                 break;
@@ -179,7 +176,6 @@ public final class ChestStoreService {
             return 0;
         }
 
-        // Open a blocking door near the chest if needed (door-in-enclosure case).
         if (!BlockInteractionService.canInteract(bot, chestPos)) {
             BlockPos door = BlockInteractionService.findBlockingDoor(bot, chestPos, BlockInteractionService.SURVIVAL_REACH_SQ);
             if (door != null) {
@@ -197,9 +193,9 @@ public final class ChestStoreService {
                 return 0;
             }
             if (deposit) {
-                return moveItems(bot.getInventory(), chest, itemName, amount, true);
+                return moveItems(bot.getInventory(), chest, filter, amount);
             }
-            return moveItems(chest, bot.getInventory(), itemName, amount, false);
+            return moveItems(chest, bot.getInventory(), filter, amount);
         }, 2500, 0);
         return moved != null ? moved : 0;
     }
@@ -256,16 +252,15 @@ public final class ChestStoreService {
         }
     }
 
-    private static int countMatching(Inventory inv, String itemName) {
-        if (inv == null || itemName == null || itemName.isBlank()) {
+    private static int countMatching(Inventory inv, Predicate<ItemStack> filter) {
+        if (inv == null || filter == null) {
             return 0;
         }
         int count = 0;
         for (int i = 0; i < inv.size(); i++) {
             ItemStack stack = inv.getStack(i);
             if (stack.isEmpty()) continue;
-            String name = stack.getName().getString().toLowerCase(Locale.ROOT);
-            if (name.contains(itemName.toLowerCase(Locale.ROOT))) {
+            if (filter.test(stack)) {
                 count += stack.getCount();
             }
         }
@@ -289,7 +284,6 @@ public final class ChestStoreService {
             return;
         }
         if (state.contains(net.minecraft.block.DoorBlock.OPEN) && !Boolean.TRUE.equals(state.get(net.minecraft.block.DoorBlock.OPEN))) {
-            // door is still closed; nothing to do
             return;
         }
         net.minecraft.util.math.Direction toward = net.minecraft.util.math.Direction.getFacing(
@@ -304,13 +298,12 @@ public final class ChestStoreService {
         MovementService.nudgeTowardUntilClose(bot, step, 2.25D, 1400L, 0.22, "store-doorway-step");
     }
 
-    private static int moveItems(Inventory from, Inventory to, String itemName, int amount, boolean exactName) {
+    private static int moveItems(Inventory from, Inventory to, Predicate<ItemStack> filter, int amount) {
         int moved = 0;
         for (int i = 0; i < from.size() && moved < amount; i++) {
             ItemStack stack = from.getStack(i);
             if (stack.isEmpty()) continue;
-            String name = stack.getName().getString().toLowerCase();
-            if (!name.contains(itemName)) continue;
+            if (!filter.test(stack)) continue;
             int toMove = Math.min(stack.getCount(), amount - moved);
             ItemStack split = stack.split(toMove);
             if (split.isEmpty()) {
@@ -318,7 +311,6 @@ public final class ChestStoreService {
             }
             ItemStack remainder = insertInto(to, split);
             if (!remainder.isEmpty()) {
-                // Put back what didn't fit
                 stack.increment(remainder.getCount());
                 from.setStack(i, stack);
                 break;

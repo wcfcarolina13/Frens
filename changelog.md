@@ -117,3 +117,9 @@ Historical record and reasoning. `TODO.md` is the source of truth for what’s n
     - Added movement safety: bot now stops moving after catching to prevent running into water; relies on rod mechanics for item collection.
     - Improved default behavior to handle infinite fishing or specific counts more intuitively.
     - Added `depositAll` method to `ChestStoreService`.
+
+### Fixed
+- **Fishing Skill**:
+    - Fixed issue where the bot would deposit its fishing rod into the chest, preventing it from continuing.
+    - Updated default behavior: if no count is specified, the bot fishes until sunset (or stopped).
+    - Improved `ChestStoreService` to support item exclusion during deposits.

@@ -31,6 +31,7 @@ import org.slf4j.LoggerFactory;
 import java.lang.reflect.Field;
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -39,7 +40,6 @@ import java.util.Set;
 public final class FishingSkill implements Skill {
 
     private static final Logger LOGGER = LoggerFactory.getLogger("skill-fishing");
-    private static final int DEFAULT_TARGET_FISH = 1;
     private static final int MAX_ATTEMPTS_PER_FISH = 6;
     private static final double APPROACH_REACH_SQ = 1.44D;
     private static final int WATER_SEARCH_RADIUS = 10;
@@ -49,6 +49,9 @@ public final class FishingSkill implements Skill {
             Items.SALMON,
             Items.TROPICAL_FISH,
             Items.PUFFERFISH
+    );
+    private static final Set<Item> EXCLUDED_ITEMS = Set.of(
+            Items.FISHING_ROD
     );
 
     private static final record FishingSpot(BlockPos water, BlockPos stand) {}
@@ -90,11 +93,12 @@ public final class FishingSkill implements Skill {
             return SkillExecutionResult.failure("Unable to equip the fishing rod.");
         }
 
-        boolean untilSunset = isUntilSunset(context.parameters());
         int targetFish = getIntParameter(context.parameters(), "count", -1);
+        boolean explicitSunset = isUntilSunset(context.parameters());
+        boolean checkSunset = explicitSunset || (targetFish == -1);
         
-        if (targetFish <= 0) {
-            targetFish = untilSunset ? Integer.MAX_VALUE : DEFAULT_TARGET_FISH;
+        if (targetFish == -1) {
+            targetFish = Integer.MAX_VALUE;
         }
 
         int maxAttempts = targetFish == Integer.MAX_VALUE ? Integer.MAX_VALUE : Math.max(targetFish * MAX_ATTEMPTS_PER_FISH, MAX_ATTEMPTS_PER_FISH);
@@ -103,7 +107,7 @@ public final class FishingSkill implements Skill {
         int baseline = countFish(bot);
         ServerWorld world = (ServerWorld) bot.getEntityWorld();
 
-        String modeDesc = untilSunset ? "until sunset" : (targetFish + " catches");
+        String modeDesc = (targetFish == Integer.MAX_VALUE ? "until sunset" : targetFish + " catches") + (checkSunset && targetFish != Integer.MAX_VALUE ? " (or sunset)" : "");
         LOGGER.info("Starting fishing session for {} (mode: {})", bot.getName().getString(), modeDesc);
 
         while (caught < targetFish && attempts < maxAttempts) {
@@ -111,7 +115,7 @@ public final class FishingSkill implements Skill {
                 return SkillExecutionResult.failure("Fishing paused by another task.");
             }
 
-            if (untilSunset) {
+            if (checkSunset) {
                 long timeOfDay = world.getTimeOfDay() % 24000;
                 if (timeOfDay >= 13000 && timeOfDay < 23000) {
                     ChatUtils.sendSystemMessage(source, "Sun has set. Stopping fishing.");
@@ -119,7 +123,6 @@ public final class FishingSkill implements Skill {
                 }
             }
 
-            // Inventory Check
             if (isInventoryFull(bot)) {
                 LOGGER.info("Inventory full. Attempting to store items.");
                 boolean cleared = handleFullInventory(bot, source, stand);
@@ -127,50 +130,39 @@ public final class FishingSkill implements Skill {
                     ChatUtils.sendSystemMessage(source, "Inventory full and couldn't store items. Stopping.");
                     break;
                 }
-                // Re-equip rod after potential crafting/placing
                 if (!BotActions.ensureHotbarItem(bot, Items.FISHING_ROD)) {
                     return SkillExecutionResult.failure("Lost fishing rod during storage routine.");
                 }
-                // Re-approach stand just in case we moved
                 MovementService.nudgeTowardUntilClose(bot, stand, APPROACH_REACH_SQ, 1500L, 0.16D, "fishing-reapproach");
             }
 
             aimTowardWater(bot, spot.water());
-            BotActions.useSelectedItem(bot); // Cast
+            BotActions.useSelectedItem(bot); 
             boolean caughtFish = waitForBite(bot);
             
             if (!caughtFish) {
-                 // Retract (if bobber still exists)
-                 BotActions.useSelectedItem(bot);
-                 // Don't count as attempt if interrupted or just missed? 
-                 // Actually, if we timed out, it's an attempt.
+                 BotActions.useSelectedItem(bot); 
                  attempts++;
                  continue;
             }
 
-            // Reel in
             aimTowardWater(bot, spot.water());
             BotActions.useSelectedItem(bot);
             waitForBobberRemoval(bot);
             
-            // Wait for item to arrive (rod pulls it)
             sleep(600L); 
             
-            // Verify catch
             int now = countFish(bot);
             int delta = now - baseline;
             if (delta > 0) {
                 caught += delta;
                 baseline = now;
             } else {
-                caught += 1; // assume bite still produced a fish/item even if it dropped or inventory stayed constant
-                // keep baseline in sync so we don't regrow the same delta if we pick it up later
+                caught += 1;
                 baseline = now;
             }
             attempts++;
             
-            // Prevent bot from wandering into water for drops
-            // We rely on the rod pulling the fish. If it didn't reach us, ignore it for safety.
             BotActions.stop(bot); 
         }
 
@@ -194,7 +186,7 @@ public final class FishingSkill implements Skill {
         }
         if (chestPos != null) {
             LOGGER.info("Depositing items to chest at {}", chestPos.toShortString());
-            int deposited = ChestStoreService.depositAll(source, bot, chestPos);
+            int deposited = ChestStoreService.depositAllExcept(source, bot, chestPos, EXCLUDED_ITEMS);
             if (deposited > 0) {
                 return true;
             } else {
