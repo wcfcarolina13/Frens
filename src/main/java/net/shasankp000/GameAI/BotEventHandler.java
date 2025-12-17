@@ -35,6 +35,7 @@ import net.shasankp000.DangerZoneDetector.DangerZoneDetector;
 import net.shasankp000.Database.QTable;
 import net.shasankp000.Database.QTableStorage;
 import net.shasankp000.GameAI.services.BotPersistenceService;
+import net.shasankp000.GameAI.services.BotRegistry;
 import net.shasankp000.GameAI.services.HealingService;
 import net.shasankp000.Database.StateActionPair;
 import net.shasankp000.Entity.AutoFaceEntity;
@@ -77,7 +78,7 @@ public class BotEventHandler {
     private static MinecraftServer server = null;
     public static ServerPlayerEntity bot = null;
     private static final boolean DEBUG_RL = false;
-    private static final Set<UUID> REGISTERED_BOTS = ConcurrentHashMap.newKeySet();
+    // Stage-2 refactor: registry moved to BotRegistry.
     private static UUID registeredBotUuid = null;
     public static final String qTableDir = LauncherEnvironment.getStorageDirectory("qtable_storage");
     private static final Object monitorLock = new Object();
@@ -301,7 +302,7 @@ public class BotEventHandler {
         if (registeredBotUuid != null) {
             return stateFor(registeredBotUuid);
         }
-        Iterator<UUID> iterator = REGISTERED_BOTS.iterator();
+        Iterator<UUID> iterator = BotRegistry.ids().iterator();
         if (iterator.hasNext()) {
             return stateFor(iterator.next());
         }
@@ -496,7 +497,7 @@ public class BotEventHandler {
             existing = srv.getPlayerManager().getPlayer(registeredBotUuid);
         }
         if (existing == null) {
-            Iterator<UUID> iterator = REGISTERED_BOTS.iterator();
+            Iterator<UUID> iterator = BotRegistry.ids().iterator();
             while (existing == null && iterator.hasNext()) {
                 UUID candidateId = iterator.next();
                 existing = srv.getPlayerManager().getPlayer(candidateId);
@@ -551,7 +552,7 @@ public class BotEventHandler {
         if (candidate == null) {
             return;
         }
-        REGISTERED_BOTS.add(candidate.getUuid());
+        BotRegistry.register(candidate.getUuid());
         registeredBotUuid = candidate.getUuid();
         BotEventHandler.bot = candidate;
         stateFor(candidate);
@@ -584,17 +585,13 @@ public class BotEventHandler {
             return;
         }
         UUID uuid = bot.getUuid();
-        REGISTERED_BOTS.remove(uuid);
-        BotPersistenceService.removeBot(bot);
-        BotPersistenceService.removeBot(bot);
-        BotPersistenceService.removeBot(bot);
-        BotPersistenceService.removeBot(bot);
+        BotRegistry.unregister(uuid);
         BotPersistenceService.removeBot(bot);
         clearState(bot);
         LAST_RL_SAMPLE_TICK.remove(uuid);
         if (registeredBotUuid != null && registeredBotUuid.equals(uuid)) {
             registeredBotUuid = null;
-            Iterator<UUID> iterator = REGISTERED_BOTS.iterator();
+            Iterator<UUID> iterator = BotRegistry.ids().iterator();
             if (iterator.hasNext()) {
                 registeredBotUuid = iterator.next();
             }
@@ -605,7 +602,7 @@ public class BotEventHandler {
     }
 
     public static boolean isRegisteredBot(ServerPlayerEntity candidate) {
-        return candidate != null && REGISTERED_BOTS.contains(candidate.getUuid());
+        return candidate != null && BotRegistry.isRegistered(candidate.getUuid());
     }
 
     public static List<ServerPlayerEntity> getRegisteredBots(MinecraftServer fallback) {
@@ -614,7 +611,7 @@ public class BotEventHandler {
             return List.of();
         }
         List<ServerPlayerEntity> bots = new ArrayList<>();
-        for (UUID uuid : REGISTERED_BOTS) {
+        for (UUID uuid : BotRegistry.ids()) {
             ServerPlayerEntity player = srv.getPlayerManager().getPlayer(uuid);
             if (player != null) {
                 bots.add(player);
@@ -1254,7 +1251,7 @@ public class BotEventHandler {
         }
         List<Entity> threats = new ArrayList<>();
         double radiusSq = ALLY_DEFENSE_RADIUS * ALLY_DEFENSE_RADIUS;
-        for (UUID allyId : REGISTERED_BOTS) {
+        for (UUID allyId : BotRegistry.ids()) {
             if (allyId == null || allyId.equals(bot.getUuid())) {
                 continue;
             }
@@ -4118,7 +4115,7 @@ public class BotEventHandler {
     }
 
     public static void tickBurialRescue(MinecraftServer server) {
-        if (server == null || REGISTERED_BOTS.isEmpty()) {
+        if (server == null || BotRegistry.isEmpty()) {
             return;
         }
         long now = server.getTicks();
@@ -4126,7 +4123,7 @@ public class BotEventHandler {
             return;
         }
         lastBurialScanTick = now;
-        for (UUID uuid : REGISTERED_BOTS) {
+        for (UUID uuid : BotRegistry.ids()) {
             ServerPlayerEntity candidate = server.getPlayerManager().getPlayer(uuid);
             if (candidate != null && candidate.isAlive()) {
                 rescueFromBurial(candidate);
@@ -4520,14 +4517,14 @@ public class BotEventHandler {
      * Must be called on server stop or when the bot completely disconnects.
      */
     public static void resetAll() {
-        synchronized (monitorLock) {
-            server = null;
-            bot = null;
-            registeredBotUuid = null;
-            REGISTERED_BOTS.clear();
-            COMMAND_STATES.clear();
-            LAST_RL_SAMPLE_TICK.clear();
-	            LAST_SUFFOCATION_ALERT_TICK.clear();
+	        synchronized (monitorLock) {
+	            server = null;
+	            bot = null;
+	            registeredBotUuid = null;
+	            BotRegistry.clear();
+	            COMMAND_STATES.clear();
+	            LAST_RL_SAMPLE_TICK.clear();
+		            LAST_SUFFOCATION_ALERT_TICK.clear();
 	            LAST_OBSTRUCT_DAMAGE_TICK.clear();
 	            LAST_MINING_ESCAPE_ATTEMPT.clear();
 	            LAST_ESCAPE_NUDGE_MS.clear();
