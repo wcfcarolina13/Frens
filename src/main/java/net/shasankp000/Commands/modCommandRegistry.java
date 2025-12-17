@@ -203,82 +203,10 @@ public class modCommandRegistry {
                                 )
                         )
 
-                        .then(literal("inventory")
-                                .executes(context -> executeInventorySummaryTargetsV2(context, null))
-                                .then(CommandManager.argument("target", StringArgumentType.string())
-                                        .executes(context -> executeInventorySummaryTargetsV2(context,
-                                                StringArgumentType.getString(context, "target"))))
-                                .then(literal("count")
-                                        .then(CommandManager.argument("item", StringArgumentType.string())
-                                                .executes(context -> executeInventoryCountTargets(context,
-                                                        null,
-                                                        StringArgumentType.getString(context, "item")))
-                                                .then(CommandManager.argument("targets", StringArgumentType.string())
-                                                        .executes(context -> executeInventoryCountTargets(context,
-                                                                StringArgumentType.getString(context, "targets"),
-                                                                StringArgumentType.getString(context, "item"))))
-                                        )
-                                )
-                                .then(literal("save")
-                                        .executes(context -> executeInventorySaveTargets(context, null))
-                                        .then(CommandManager.argument("targets", StringArgumentType.string())
-                                                .executes(context -> executeInventorySaveTargets(context,
-                                                        StringArgumentType.getString(context, "targets"))))
-                                )
-                                .then(literal("load")
-                                        .executes(context -> executeInventoryLoadTargets(context, null))
-                                        .then(CommandManager.argument("targets", StringArgumentType.string())
-                                                .executes(context -> executeInventoryLoadTargets(context,
-                                                        StringArgumentType.getString(context, "targets"))))
-                                )
-                        )
-                        .then(literal("skill")
-                                .then(CommandManager.argument("skill_name", StringArgumentType.string())
-                                        .executes(context -> executeSkillTargets(context,
-                                                StringArgumentType.getString(context, "skill_name"),
-                                                null))
-                                        .then(CommandManager.argument("arguments", StringArgumentType.greedyString())
-                                                .executes(context -> executeSkillTargets(context,
-                                                StringArgumentType.getString(context, "skill_name"),
-                                                StringArgumentType.getString(context, "arguments"))))
-                                )
-                        )
-                        .then(literal("fish")
-                                .executes(context -> executeSkillTargets(context, "fish", null))
-                                .then(CommandManager.argument("arguments", StringArgumentType.greedyString())
-                                        .executes(context -> executeSkillTargets(context, "fish",
-                                                StringArgumentType.getString(context, "arguments"))))
-                        )
-                        .then(literal("shelter")
-                                .then(literal("hovel")
-                                        .executes(context -> executeSkillTargets(context, "shelter", "hovel"))
-                                        .then(CommandManager.argument("options", StringArgumentType.greedyString())
-                                                .executes(context -> executeSkillTargets(context, "shelter",
-                                                        "hovel " + StringArgumentType.getString(context, "options"))))
-                                        .then(CommandManager.argument("target", StringArgumentType.string())
-                                                .executes(context -> executeSkillTargets(context, "shelter",
-                                                        StringArgumentType.getString(context, "target") + " hovel"))
-                                                 .then(CommandManager.argument("options", StringArgumentType.greedyString())
-                                                         .executes(context -> executeSkillTargets(context, "shelter",
-                                                                 StringArgumentType.getString(context, "target") + " hovel "
-                                                                         + StringArgumentType.getString(context, "options"))))
-                                        )
-                                )
-                                .then(literal("burrow")
-                                        .executes(context -> executeSkillTargets(context, "shelter", "burrow"))
-                                        .then(CommandManager.argument("options", StringArgumentType.greedyString())
-                                                .executes(context -> executeSkillTargets(context, "shelter",
-                                                        "burrow " + StringArgumentType.getString(context, "options"))))
-                                        .then(CommandManager.argument("target", StringArgumentType.string())
-                                                .executes(context -> executeSkillTargets(context, "shelter",
-                                                        StringArgumentType.getString(context, "target") + " burrow"))
-                                                 .then(CommandManager.argument("options", StringArgumentType.greedyString())
-                                                         .executes(context -> executeSkillTargets(context, "shelter",
-                                                                 StringArgumentType.getString(context, "target") + " burrow "
-                                                                         + StringArgumentType.getString(context, "options"))))
-                                        )
-                                )
-                        )
+                        .then(BotInventoryCommands.build())
+                        .then(BotSkillCommands.buildSkill())
+                        .then(BotSkillCommands.buildFish())
+                        .then(BotSkillCommands.buildShelter())
                         .then(literal("stop")
                                 .executes(context -> executeStopTargets(context, (String) null))
                                 .then(CommandManager.argument("target", StringArgumentType.string())
@@ -297,68 +225,10 @@ public class modCommandRegistry {
                                         .executes(context -> executeHealTargets(context,
                                                 StringArgumentType.getString(context, "target"))))
                         )
-                        .then(literal("direction")
-                                .then(literal("reset")
-                                        .executes(context -> executeDirectionReset(context, (String) null))
-                                        .then(CommandManager.argument("target", StringArgumentType.string())
-                                                .executes(context -> executeDirectionReset(context,
-                                                        StringArgumentType.getString(context, "target"))))
-                                )
-                        )
-                        .then(literal("zone")
-                                .then(literal("protect")
-                                        .then(CommandManager.argument("radius", IntegerArgumentType.integer(1, 100))
-                                                .executes(context -> executeZoneProtect(context,
-                                                        IntegerArgumentType.getInteger(context, "radius"), null))
-                                                .then(CommandManager.argument("label", StringArgumentType.string())
-                                                        .executes(context -> executeZoneProtect(context,
-                                                                IntegerArgumentType.getInteger(context, "radius"),
-                                                                StringArgumentType.getString(context, "label"))))
-                                        )
-                                )
-                                .then(literal("remove")
-                                        .then(CommandManager.argument("label", StringArgumentType.string())
-                                                .executes(context -> executeZoneRemove(context,
-                                                        StringArgumentType.getString(context, "label"))))
-                                )
-                                .then(literal("list")
-                                        .executes(context -> executeZoneList(context))
-                                )
-                        )
-                        .then(literal("look_player")
-                                .executes(context -> executeLookPlayerTargets(context, null, false))
-                                .then(literal("stop")
-                                        .executes(context -> executeLookPlayerTargets(context, null, true))
-                                        .then(CommandManager.argument("target", StringArgumentType.string())
-                                                .executes(context -> executeLookPlayerTargets(context,
-                                                        StringArgumentType.getString(context, "target"), true)))
-                                )
-                                .then(CommandManager.argument("target", StringArgumentType.string())
-                                        .executes(context -> executeLookPlayerTargets(context,
-                                                StringArgumentType.getString(context, "target"), false)))
-                        )
-                        .then(literal("follow")
-                                .then(literal("stop")
-                                        .executes(context -> executeFollowStopTargets(context, null))
-                                        .then(CommandManager.argument("target", StringArgumentType.string())
-                                                .executes(context -> executeFollowStopTargets(context,
-                                                        StringArgumentType.getString(context, "target"))))
-                                )
-                                .executes(context -> executeFollowTargets(context, null, context.getSource().getPlayer()))
-                                .then(CommandManager.argument("bots", StringArgumentType.string())
-                                        .executes(context -> executeFollowTargets(context,
-                                                StringArgumentType.getString(context, "bots"),
-                                                context.getSource().getPlayer()))
-                                        .then(CommandManager.argument("player", EntityArgumentType.player())
-                                                .executes(context -> executeFollowTargets(context,
-                                                        StringArgumentType.getString(context, "bots"),
-                                                        EntityArgumentType.getPlayer(context, "player"))))
-                                )
-                                .then(CommandManager.argument("player", EntityArgumentType.player())
-                                        .executes(context -> executeFollowTargets(context,
-                                                null,
-                                                EntityArgumentType.getPlayer(context, "player"))))
-                        )
+                        .then(BotUtilityCommands.buildDirection())
+                        .then(BotUtilityCommands.buildZone())
+                        .then(BotUtilityCommands.buildLookPlayer())
+                        .then(BotUtilityCommands.buildFollow())
                         .then(literal("come")
                                 .executes(context -> executeComeTargets(context, null))
                                 .then(CommandManager.argument("bots", StringArgumentType.string())
@@ -1917,7 +1787,7 @@ public class modCommandRegistry {
 
 
     // === Inventory summary to chat (V2, MC 1.21-safe) ===
-    private static int executeInventorySummaryTargetsV2(
+    static int executeInventorySummaryTargetsV2(
             com.mojang.brigadier.context.CommandContext<net.minecraft.server.command.ServerCommandSource> context,
             String targetArg
     ) {
@@ -2611,7 +2481,7 @@ public class modCommandRegistry {
         return successes;
     }
 
-    private static int executeInventoryCountTargets(CommandContext<ServerCommandSource> context, String targetArg, String itemId) throws CommandSyntaxException {
+    static int executeInventoryCountTargets(CommandContext<ServerCommandSource> context, String targetArg, String itemId) throws CommandSyntaxException {
         Identifier id = Identifier.tryParse(itemId);
         if (id == null || !Registries.ITEM.containsId(id)) {
             ChatUtils.sendSystemMessage(context.getSource(), "Unknown item: " + itemId);
@@ -2632,7 +2502,7 @@ public class modCommandRegistry {
         return successes;
     }
 
-    private static int executeInventorySaveTargets(CommandContext<ServerCommandSource> context, String targetArg) throws CommandSyntaxException {
+    static int executeInventorySaveTargets(CommandContext<ServerCommandSource> context, String targetArg) throws CommandSyntaxException {
         List<ServerPlayerEntity> bots = BotTargetingService.resolve(context.getSource(), targetArg);
         int successes = 0;
         for (ServerPlayerEntity bot : bots) {
@@ -2647,7 +2517,7 @@ public class modCommandRegistry {
         return successes;
     }
 
-    private static int executeInventoryLoadTargets(CommandContext<ServerCommandSource> context, String targetArg) throws CommandSyntaxException {
+    static int executeInventoryLoadTargets(CommandContext<ServerCommandSource> context, String targetArg) throws CommandSyntaxException {
         List<ServerPlayerEntity> bots = BotTargetingService.resolve(context.getSource(), targetArg);
         int successes = 0;
         for (ServerPlayerEntity bot : bots) {
@@ -2724,7 +2594,7 @@ public class modCommandRegistry {
         return 1;
     }
 
-    private static int executeSkillTargets(CommandContext<ServerCommandSource> context, String skillName, String rawInput) throws CommandSyntaxException {
+    static int executeSkillTargets(CommandContext<ServerCommandSource> context, String skillName, String rawInput) throws CommandSyntaxException {
         SkillCommandInvocation invocation = parseSkillInvocation(context.getSource(), rawInput);
         List<ServerPlayerEntity> targets = BotTargetingService.resolve(context.getSource(), invocation.target());
         int successes = 0;
@@ -2867,7 +2737,7 @@ public class modCommandRegistry {
         return successes;
     }
 
-    private static int executeDirectionReset(CommandContext<ServerCommandSource> context, String targetArg) throws CommandSyntaxException {
+    static int executeDirectionReset(CommandContext<ServerCommandSource> context, String targetArg) throws CommandSyntaxException {
         List<ServerPlayerEntity> targets = BotTargetingService.resolve(context.getSource(), targetArg);
         return executeDirectionReset(context, targets, "allbots".equalsIgnoreCase(targetArg));
     }
@@ -2899,7 +2769,7 @@ public class modCommandRegistry {
         return successes;
     }
 
-    private static int executeLookPlayerTargets(CommandContext<ServerCommandSource> context,
+    static int executeLookPlayerTargets(CommandContext<ServerCommandSource> context,
                                                 String targetArg,
                                                 boolean stop) throws CommandSyntaxException {
         List<ServerPlayerEntity> bots = resolveTargetBots(context, targetArg);
@@ -2948,7 +2818,7 @@ public class modCommandRegistry {
         return BotTargetingService.resolve(context.getSource(), targetArg);
     }
 
-    private static int executeFollowTargets(CommandContext<ServerCommandSource> context, String targetArg, ServerPlayerEntity followTarget) throws CommandSyntaxException {
+    static int executeFollowTargets(CommandContext<ServerCommandSource> context, String targetArg, ServerPlayerEntity followTarget) throws CommandSyntaxException {
         if (followTarget == null) {
             throw new SimpleCommandExceptionType(Text.literal("Specify a player for the bots to follow.")).create();
         }
@@ -2971,7 +2841,7 @@ public class modCommandRegistry {
         return successes;
     }
 
-    private static int executeFollowStopTargets(CommandContext<ServerCommandSource> context, String targetArg) throws CommandSyntaxException {
+    static int executeFollowStopTargets(CommandContext<ServerCommandSource> context, String targetArg) throws CommandSyntaxException {
         List<ServerPlayerEntity> bots = BotTargetingService.resolve(context.getSource(), targetArg);
         return executeFollowStopTargets(context, bots, targetArg != null && "all".equalsIgnoreCase(targetArg.trim()));
     }
@@ -3550,7 +3420,7 @@ public class modCommandRegistry {
         return 1;
     }
 
-    private static int executeZoneProtect(CommandContext<ServerCommandSource> context, int radius, String label) throws CommandSyntaxException {
+    static int executeZoneProtect(CommandContext<ServerCommandSource> context, int radius, String label) throws CommandSyntaxException {
         ServerCommandSource source = context.getSource();
         ServerPlayerEntity player = source.getPlayerOrThrow();
         ServerWorld world = source.getWorld();
@@ -3594,7 +3464,7 @@ public class modCommandRegistry {
         return 1;
     }
 
-    private static int executeZoneRemove(CommandContext<ServerCommandSource> context, String label) throws CommandSyntaxException {
+    static int executeZoneRemove(CommandContext<ServerCommandSource> context, String label) throws CommandSyntaxException {
         ServerCommandSource source = context.getSource();
         ServerPlayerEntity player = source.getPlayerOrThrow();
         ServerWorld world = source.getWorld();
@@ -3610,7 +3480,7 @@ public class modCommandRegistry {
         return 1;
     }
 
-    private static int executeZoneList(CommandContext<ServerCommandSource> context) throws CommandSyntaxException {
+    static int executeZoneList(CommandContext<ServerCommandSource> context) throws CommandSyntaxException {
         ServerCommandSource source = context.getSource();
         ServerWorld world = source.getWorld();
         
