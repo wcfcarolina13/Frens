@@ -18,10 +18,10 @@ import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 import net.shasankp000.ChatUtils.ChatUtils;
-import net.shasankp000.Entity.LookController;
 import net.shasankp000.GameAI.BotActions;
 import net.shasankp000.GameAI.services.CraftingHelper;
 import net.shasankp000.GameAI.services.MovementService;
+import net.shasankp000.GameAI.services.BlockInteractionService;
 import net.shasankp000.GameAI.skills.Skill;
 import net.shasankp000.GameAI.skills.SkillContext;
 import net.shasankp000.GameAI.skills.SkillExecutionResult;
@@ -103,6 +103,10 @@ public class WoolSkill implements Skill {
         int sheared = 0;
 
         while (System.currentTimeMillis() - startedAt < MAX_JOB_MILLIS) {
+            if (SkillManager.shouldAbortSkill(bot)) {
+                BotActions.stop(bot);
+                return SkillExecutionResult.failure("Wool job stopped.");
+            }
             int now = (int) (world.getTimeOfDay() % 24000L);
             if (now >= SUNSET_TIME_OF_DAY) {
                 ChatUtils.sendSystemMessage(source, "It's getting late; I'm returning to base.");
@@ -124,6 +128,10 @@ public class WoolSkill implements Skill {
 
             boolean progressed = false;
             for (SheepEntity target : candidates) {
+                if (SkillManager.shouldAbortSkill(bot)) {
+                    BotActions.stop(bot);
+                    return SkillExecutionResult.failure("Wool job stopped.");
+                }
                 LAST_SEEN_SHEEP.put(bot.getUuid(), target.getBlockPos());
                 if (!moveNextTo(bot, source, target.getBlockPos())) {
                     continue;
@@ -131,13 +139,16 @@ public class WoolSkill implements Skill {
                 if (!target.isShearable() || target.isBaby()) {
                     continue;
                 }
-                LookController.faceEntity(bot, target);
-                bot.interact(target, Hand.MAIN_HAND);
+                BotActions.interactEntity(bot, target, Hand.MAIN_HAND);
                 sheared++;
                 progressed = true;
                 // Give the drops a tick to spawn, then sweep aggressively.
                 sleep(220);
                 dropSweepWool(bot, world, source, target.getBlockPos(), POST_SHEAR_SWEEP_BUDGET_MS);
+                if (SkillManager.shouldAbortSkill(bot)) {
+                    BotActions.stop(bot);
+                    return SkillExecutionResult.failure("Wool job stopped.");
+                }
 
                 int collected = countWoolItems(bot.getInventory()) - woolAtStart;
                 if (collected >= minWoolToCollect) {
@@ -241,6 +252,10 @@ public class WoolSkill implements Skill {
         for (int r : rings) {
             for (int dx : new int[]{r, -r, 0}) {
                 for (int dz : new int[]{0, r, -r}) {
+                    if (SkillManager.shouldAbortSkill(bot)) {
+                        BotActions.stop(bot);
+                        return false;
+                    }
                     BlockPos probe = anchor.add(dx, 0, dz);
                     probe = probe.withY(anchor.getY());
                     if (moveTo(bot, source, probe, true)) {
@@ -270,6 +285,10 @@ public class WoolSkill implements Skill {
         int emptyScans = 0;
 
         while (System.currentTimeMillis() < deadline) {
+            if (SkillManager.shouldAbortSkill(bot)) {
+                BotActions.stop(bot);
+                return;
+            }
             Box box = Box.from(Vec3d.of(center)).expand(DROP_SWEEP_RADIUS, 6, DROP_SWEEP_RADIUS);
             List<ItemEntity> drops = world.getEntitiesByClass(ItemEntity.class, box,
                     e -> e.getStack().getItem().getTranslationKey().contains("wool"));
@@ -290,6 +309,10 @@ public class WoolSkill implements Skill {
             for (ItemEntity drop : drops) {
                 if (System.currentTimeMillis() >= deadline) {
                     break;
+                }
+                if (SkillManager.shouldAbortSkill(bot)) {
+                    BotActions.stop(bot);
+                    return;
                 }
                 BlockPos pos = drop.getBlockPos();
                 if (Math.abs(pos.getY() - bot.getBlockY()) > 3) {
@@ -324,7 +347,11 @@ public class WoolSkill implements Skill {
             ChatUtils.sendSystemMessage(source, "Inventory is tight and no chest nearby; proceeding anyway.");
             return;
         }
-        moveNextTo(bot, source, chestPos);
+        boolean reached = moveNextTo(bot, source, chestPos);
+        if (!reached || !BlockInteractionService.canInteract(bot, chestPos)) {
+            ChatUtils.sendSystemMessage(source, "I found a chest, but I can't reach it from here.");
+            return;
+        }
         ChestBlockEntity chest = world.getBlockEntity(chestPos) instanceof ChestBlockEntity c ? c : null;
         if (chest == null) {
             return;
@@ -386,6 +413,10 @@ public class WoolSkill implements Skill {
     private boolean moveNextTo(ServerPlayerEntity bot, ServerCommandSource source, BlockPos target) {
         List<BlockPos> stands = findStandCandidates(bot, source.getWorld(), target);
         for (BlockPos stand : stands) {
+            if (SkillManager.shouldAbortSkill(bot)) {
+                BotActions.stop(bot);
+                return false;
+            }
             if (moveTo(bot, source, stand, true)) {
                 return true;
             }
@@ -407,6 +438,22 @@ public class WoolSkill implements Skill {
     }
 
     private boolean moveTo(ServerPlayerEntity bot, ServerCommandSource source, BlockPos target, boolean fastReplan) {
+        if (SkillManager.shouldAbortSkill(bot)) {
+            BotActions.stop(bot);
+            return false;
+        }
+        double distSq = bot.getBlockPos().getSquaredDistance(target);
+        int dy = Math.abs(target.getY() - bot.getBlockY());
+        if (distSq <= 196.0D && dy <= 2) {
+            boolean close = MovementService.nudgeTowardUntilClose(
+                    bot,
+                    target,
+                    9.0D,
+                    fastReplan ? 1800L : 2800L,
+                    0.16,
+                    "wool-short-move");
+            return close || bot.getBlockPos().getSquaredDistance(target) <= 9.0D;
+        }
         MovementService.MovementPlan plan = new MovementService.MovementPlan(
                 MovementService.Mode.DIRECT,
                 target,

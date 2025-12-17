@@ -30,11 +30,18 @@ Pending work only. Completed items and rationale live in `changelog.md`.
 
 ### Navigation & Movement
 - [ ] Swimming parity (surface and underwater)
+- [ ] Verify swimming behavior matches survival movement (no “snap”/teleport, proper buoyancy, safe ascent)
 - [ ] Boat support (enter, exit, navigate)
+- [ ] Test fishing from a boat; define behavior (stay seated vs dismount to shore)
 - [ ] Portal following (Nether, End)
 - [ ] Cross-realm teleport command
 - [ ] Water-aware pickup (wade/bridge)
 - [ ] Edge/hole pickup (hop down safely)
+
+### Fishing (Verification)
+- [ ] Verify leaf-block clearing when fishing requires navigating far from shoreline
+- [ ] Verify fishing works from higher vertical positions (cliffs/piers) without mis-casting
+- [ ] Handle being asked to fish while swimming (refuse, relocate to shore, or swim-to-shore logic)
 
 ### Combat & Safety
 - [ ] Creeper evasion (sprint away when unarmed)

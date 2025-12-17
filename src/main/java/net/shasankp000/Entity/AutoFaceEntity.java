@@ -285,7 +285,9 @@ public class AutoFaceEntity {
 
                     BotEventHandler eventHandler = new BotEventHandler(server, bot);
 
-                    if (modCommandRegistry.isTrainingMode) {
+                    if (!modCommandRegistry.enableReinforcementLearning) {
+                        LOGGER.debug("RL loop disabled; skipping detectAndReact.");
+                    } else if (modCommandRegistry.isTrainingMode) {
                         try {
                             eventHandler.detectAndReact(rlAgent, distanceToHostileEntity, qTable);
                         } catch (IOException e) {
@@ -335,7 +337,9 @@ public class AutoFaceEntity {
 
             boolean runHeavyLogic = BotEventHandler.throttleTraining(bot, true);
             if (runHeavyLogic) {
-                if (modCommandRegistry.isTrainingMode) {
+                if (!modCommandRegistry.enableReinforcementLearning) {
+                    LOGGER.debug("RL loop disabled; skipping detectAndReact.");
+                } else if (modCommandRegistry.isTrainingMode) {
                     try {
                         eventHandler.detectAndReact(rlAgent, distanceToHostileEntity, qTable);
                     } catch (IOException e) {
@@ -364,7 +368,7 @@ public class AutoFaceEntity {
                 FaceClosestEntity.faceClosestEntity(bot, nearbyEntities);
 
                 boolean runHeavyLogic = BotEventHandler.throttleTraining(bot, false);
-                if (runHeavyLogic && modCommandRegistry.isTrainingMode && !isHandlerTriggered) {
+                if (runHeavyLogic && modCommandRegistry.isTrainingMode && modCommandRegistry.enableReinforcementLearning && !isHandlerTriggered) {
                     isHandlerTriggered = true;
                     BotEventHandler eventHandler = new BotEventHandler(server, bot);
                     try {

@@ -288,7 +288,7 @@ public class FarmSkill implements Skill {
 
     private static SkillExecutionResult runWoodcutInline(ServerCommandSource source, SkillContext ctx) {
         try {
-            return new WoodcutSkill().execute(new SkillContext(source, ctx.sharedState()));
+            return new WoodcutSkill().execute(new SkillContext(source, ctx.sharedState(), java.util.Map.of("internal", true)));
         } catch (Exception e) {
             LOGGER.warn("Inline woodcut failed: {}", e.getMessage(), e);
             return SkillExecutionResult.failure("Woodcut error: " + e.getMessage());

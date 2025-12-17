@@ -41,8 +41,12 @@ replay_*.log
 
 # custom cleanup
 logs-prism/
+Logs-Prism/
 *.log
 *.tmp
+*.nbt
+*.dat
+*.mca
 sqlite-vec-macos-aarch64.tar.gz
 build/
 dist/

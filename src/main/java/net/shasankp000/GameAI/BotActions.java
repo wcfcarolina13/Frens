@@ -2,6 +2,7 @@ package net.shasankp000.GameAI;
 
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
+import net.minecraft.block.DoorBlock;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.mob.HostileEntity;
@@ -14,6 +15,7 @@ import net.minecraft.item.ItemPlacementContext;
 import net.minecraft.item.ItemUsageContext;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
+import net.minecraft.registry.tag.BlockTags;
 import net.minecraft.util.Hand;
 import net.minecraft.util.ActionResult;
 import net.minecraft.util.hit.BlockHitResult;
@@ -22,6 +24,7 @@ import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 
+import net.shasankp000.GameAI.services.MovementService;
 
 
 
@@ -35,6 +38,11 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.function.Predicate;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.function.Supplier;
 
 /**
  * Minimal action executor that replaces the old Carpet "player" commands.
@@ -52,19 +60,85 @@ public final class BotActions {
 
     private BotActions() {}
 
+    private static boolean onServerThread(ServerPlayerEntity bot) {
+        if (bot == null || bot.getCommandSource() == null || bot.getCommandSource().getServer() == null) {
+            return true;
+        }
+        return bot.getCommandSource().getServer().isOnThread();
+    }
+
+    private static boolean runOnServerThread(ServerPlayerEntity bot, Runnable action, long timeoutMs) {
+        if (bot == null || action == null) {
+            return false;
+        }
+        var server = bot.getCommandSource() != null ? bot.getCommandSource().getServer() : null;
+        if (server == null || server.isOnThread()) {
+            action.run();
+            return true;
+        }
+        CompletableFuture<Void> future = new CompletableFuture<>();
+        server.execute(() -> {
+            try {
+                action.run();
+                future.complete(null);
+            } catch (Throwable t) {
+                future.completeExceptionally(t);
+            }
+        });
+        try {
+            future.get(Math.max(250L, timeoutMs), TimeUnit.MILLISECONDS);
+            return true;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
+        } catch (ExecutionException | TimeoutException e) {
+            return false;
+        }
+    }
+
+    private static <T> T callOnServerThread(ServerPlayerEntity bot, Supplier<T> action, long timeoutMs, T fallback) {
+        if (bot == null || action == null) {
+            return fallback;
+        }
+        var server = bot.getCommandSource() != null ? bot.getCommandSource().getServer() : null;
+        if (server == null || server.isOnThread()) {
+            return action.get();
+        }
+        CompletableFuture<T> future = new CompletableFuture<>();
+        server.execute(() -> {
+            try {
+                future.complete(action.get());
+            } catch (Throwable t) {
+                future.completeExceptionally(t);
+            }
+        });
+        try {
+            return future.get(Math.max(250L, timeoutMs), TimeUnit.MILLISECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return fallback;
+        } catch (ExecutionException | TimeoutException e) {
+            return fallback;
+        }
+    }
+
     public static void moveForward(ServerPlayerEntity bot) {
-        moveRelative(bot, STEP_DISTANCE, false, 0, 0);
+        runOnServerThread(bot, () -> moveRelative(bot, STEP_DISTANCE, false, 0, 0), 750L);
     }
 
     public static void moveBackward(ServerPlayerEntity bot) {
-        moveRelative(bot, -STEP_DISTANCE, false, 0, 0);
+        runOnServerThread(bot, () -> moveRelative(bot, -STEP_DISTANCE, false, 0, 0), 750L);
     }
 
     public static void moveForwardStep(ServerPlayerEntity bot, double distance) {
-        moveRelative(bot, distance, false, 0, 0);
+        runOnServerThread(bot, () -> moveRelative(bot, distance, false, 0, 0), 750L);
     }
 
     public static void moveToward(ServerPlayerEntity bot, Vec3d target, double maxStep) {
+        if (!onServerThread(bot)) {
+            runOnServerThread(bot, () -> moveToward(bot, target, maxStep), 900L);
+            return;
+        }
         double dx = target.x - bot.getX();
         double dz = target.z - bot.getZ();
         double horizontal = Math.sqrt(dx * dx + dz * dz);
@@ -81,6 +155,10 @@ public final class BotActions {
      */
     public static void applyMovementInput(ServerPlayerEntity bot, Vec3d target, double maxImpulse) {
         if (bot == null || target == null) {
+            return;
+        }
+        if (!onServerThread(bot)) {
+            runOnServerThread(bot, () -> applyMovementInput(bot, target, maxImpulse), 900L);
             return;
         }
         Vec3d pos = new Vec3d(bot.getX(), bot.getY(), bot.getZ());
@@ -108,11 +186,13 @@ public final class BotActions {
     }
 
     public static void stop(ServerPlayerEntity bot) {
-        bot.setVelocity(Vec3d.ZERO);
-        bot.velocityDirty = true;
-        bot.setSprinting(false);
-        bot.setSneaking(false);
-        resetRangedState(bot);
+        runOnServerThread(bot, () -> {
+            bot.setVelocity(Vec3d.ZERO);
+            bot.velocityDirty = true;
+            bot.setSprinting(false);
+            bot.setSneaking(false);
+            resetRangedState(bot);
+        }, 900L);
     }
 
     public static void turnLeft(ServerPlayerEntity bot) {
@@ -127,6 +207,10 @@ public final class BotActions {
         if (bot == null) {
             return;
         }
+        if (!onServerThread(bot)) {
+            runOnServerThread(bot, () -> jump(bot), 900L);
+            return;
+        }
         // Prevent "multi-jump" / air-jump behavior caused by repeated calls while airborne.
         // Allow jumping only when grounded or swimming (vanilla-like controls).
         if (bot.isOnGround() || bot.isTouchingWater() || bot.isInLava()) {
@@ -135,11 +219,11 @@ public final class BotActions {
     }
 
     public static void sneak(ServerPlayerEntity bot, boolean value) {
-        bot.setSneaking(value);
+        runOnServerThread(bot, () -> bot.setSneaking(value), 900L);
     }
 
     public static void sprint(ServerPlayerEntity bot, boolean value) {
-        bot.setSprinting(value);
+        runOnServerThread(bot, () -> bot.setSprinting(value), 900L);
     }
 
     public static boolean selectBestWeapon(ServerPlayerEntity bot) {
@@ -247,25 +331,80 @@ public final class BotActions {
     }
 
     public static void useSelectedItem(ServerPlayerEntity bot) {
-        ItemStack stack = bot.getMainHandStack();
-        if (stack.isEmpty()) {
-            return;
-        }
-
-        ActionResult result = stack.use(bot.getEntityWorld(), bot, Hand.MAIN_HAND);
-        if (result.isAccepted()) {
-            bot.swingHand(Hand.MAIN_HAND, true);
-        }
+        runOnServerThread(bot, () -> {
+            ItemStack stack = bot.getMainHandStack();
+            if (stack.isEmpty()) {
+                return;
+            }
+            ActionResult result = stack.use(bot.getEntityWorld(), bot, Hand.MAIN_HAND);
+            if (result.isAccepted()) {
+                bot.swingHand(Hand.MAIN_HAND, true);
+            }
+        }, 1500L);
     }
 
     public static void selectHotbarSlot(ServerPlayerEntity bot, int index) {
-        bot.getInventory().setSelectedSlot(MathHelper.clamp(index, 0, 8));
+        runOnServerThread(bot, () -> bot.getInventory().setSelectedSlot(MathHelper.clamp(index, 0, 8)), 900L);
+    }
+
+    public static boolean ensureHotbarItem(ServerPlayerEntity bot, Item desired) {
+        if (bot == null || desired == null) {
+            return false;
+        }
+        PlayerInventory inventory = bot.getInventory();
+        int slot = findItemSlot(inventory, desired);
+        if (slot == -1) {
+            return false;
+        }
+        int hotbarSlot = slot;
+        if (hotbarSlot >= 9) {
+            int emptySlot = findEmptyHotbarSlot(inventory);
+            if (emptySlot == -1) {
+                emptySlot = 0;
+            }
+            swapInventoryStacks(inventory, slot, emptySlot);
+            hotbarSlot = emptySlot;
+        }
+        selectHotbarSlot(bot, hotbarSlot);
+        return true;
+    }
+
+    private static int findItemSlot(PlayerInventory inventory, Item desired) {
+        if (inventory == null || desired == null) {
+            return -1;
+        }
+        for (int i = 0; i < inventory.size(); i++) {
+            ItemStack stack = inventory.getStack(i);
+            if (!stack.isEmpty() && stack.isOf(desired)) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    public static boolean interactEntity(ServerPlayerEntity bot, Entity target, Hand hand) {
+        return callOnServerThread(bot, () -> {
+            if (bot == null || target == null || hand == null) {
+                return false;
+            }
+            ActionResult res = bot.interact(target, hand);
+            if (res.isAccepted()) {
+                bot.swingHand(hand, true);
+                return true;
+            }
+            return false;
+        }, 2000L, false);
     }
 
     public static boolean breakBlockAhead(ServerPlayerEntity bot) {
         ServerWorld world = bot.getCommandSource().getWorld();
         BlockPos targetPos = getRelativeBlockPos(bot, 1, 0);
-        if (!world.getBlockState(targetPos).isAir() && canBreak(world, targetPos, bot, false)) {
+        BlockState frontState = world.getBlockState(targetPos);
+        if (frontState.getBlock() instanceof DoorBlock) {
+            // Prefer opening doors rather than destroying them during escape routines.
+            return MovementService.tryOpenDoorAt(bot, targetPos);
+        }
+        if (!frontState.isAir() && canBreak(world, targetPos, bot, false)) {
             boolean success = breakBlock(world, targetPos, bot);
             if (success) {
                 return true;
@@ -274,7 +413,11 @@ public final class BotActions {
 
         // Try the block above-front if the direct block was air (stair carving)
         BlockPos upperPos = getRelativeBlockPos(bot, 1, 1);
-        if (!world.getBlockState(upperPos).isAir() && canBreak(world, upperPos, bot, false)) {
+        BlockState upperState = world.getBlockState(upperPos);
+        if (upperState.getBlock() instanceof DoorBlock) {
+            return MovementService.tryOpenDoorAt(bot, upperPos);
+        }
+        if (!upperState.isAir() && canBreak(world, upperPos, bot, false)) {
             boolean success = breakBlock(world, upperPos, bot);
             if (success) {
                 return true;
@@ -285,46 +428,47 @@ public final class BotActions {
     }
 
     public static boolean placeSupportBlock(ServerPlayerEntity bot) {
-        ServerWorld world = bot.getCommandSource().getWorld();
-        int slot = findPlaceableHotbarSlot(bot);
-        if (slot == -1) {
-            return false;
-        }
-
-        ItemStack stack = bot.getInventory().getStack(slot);
-        if (!(stack.getItem() instanceof BlockItem blockItem)) {
-            return false;
-        }
-
-        selectHotbarSlot(bot, slot);
-
-        BlockPos below = bot.getBlockPos().down();
-        BlockPos target = world.getBlockState(below).isAir() ? below : getRelativeBlockPos(bot, 0, -1);
-        if (!world.getBlockState(target).isAir()) {
-            // Try front-lower spot for stair stepping
-            target = getRelativeBlockPos(bot, 1, -1);
-        }
-
-        if (!world.getBlockState(target).isAir()) {
-            return false;
-        }
-
-        BlockState stateToPlace = blockItem.getBlock().getDefaultState();
-        if (!stateToPlace.canPlaceAt(world, target)) {
-            return false;
-        }
-
-        boolean placed = world.setBlockState(target, stateToPlace);
-        if (placed) {
-            stack.decrement(1);
-            if (stack.isEmpty()) {
-                bot.getInventory().setStack(slot, ItemStack.EMPTY);
+        return callOnServerThread(bot, () -> {
+            ServerWorld world = bot.getCommandSource().getWorld();
+            int slot = findPlaceableHotbarSlot(bot);
+            if (slot == -1) {
+                return false;
             }
-            bot.swingHand(Hand.MAIN_HAND, true);
-            return true;
-        }
 
-        return false;
+            ItemStack stack = bot.getInventory().getStack(slot);
+            if (!(stack.getItem() instanceof BlockItem blockItem)) {
+                return false;
+            }
+
+            selectHotbarSlot(bot, slot);
+
+            BlockPos below = bot.getBlockPos().down();
+            BlockPos target = world.getBlockState(below).isAir() ? below : getRelativeBlockPos(bot, 0, -1);
+            if (!world.getBlockState(target).isAir()) {
+                // Try front-lower spot for stair stepping
+                target = getRelativeBlockPos(bot, 1, -1);
+            }
+
+            if (!world.getBlockState(target).isAir()) {
+                return false;
+            }
+
+            BlockState stateToPlace = blockItem.getBlock().getDefaultState();
+            if (!stateToPlace.canPlaceAt(world, target)) {
+                return false;
+            }
+
+            boolean placed = world.setBlockState(target, stateToPlace);
+            if (placed) {
+                stack.decrement(1);
+                if (stack.isEmpty()) {
+                    bot.getInventory().setStack(slot, ItemStack.EMPTY);
+                }
+                bot.swingHand(Hand.MAIN_HAND, true);
+                return true;
+            }
+            return false;
+        }, 2500L, false);
     }
 
     public static boolean placeBlockAt(ServerPlayerEntity bot, BlockPos target) {
@@ -336,51 +480,53 @@ public final class BotActions {
     }
 
     public static boolean placeBlockAt(ServerPlayerEntity bot, BlockPos target, Direction face, List<Item> prioritizedBlocks) {
-        ServerWorld world = bot.getCommandSource().getWorld();
-        if (world == null || target == null) {
-            return false;
-        }
-        Direction placeFace = face == null ? Direction.UP : face;
-        if (!world.getBlockState(target).isAir() && world.getFluidState(target).isEmpty()) {
-            // Allow replacing snow layers/blocks to avoid placement failures
-            net.minecraft.block.BlockState state = world.getBlockState(target);
-            if (!state.isOf(net.minecraft.block.Blocks.SNOW) && !state.isOf(net.minecraft.block.Blocks.SNOW_BLOCK)) {
+        return callOnServerThread(bot, () -> {
+            ServerWorld world = bot.getCommandSource().getWorld();
+            if (world == null || target == null) {
                 return false;
             }
-            world.breakBlock(target, false);
-        }
-        // Avoid placing while standing inside the target
-        if (bot.getBoundingBox().intersects(new net.minecraft.util.math.Box(target))) {
-            return false;
-        }
-        if (!hasSupport(world, target)) {
-            return false;
-        }
-        int slot = findPreferredBlockItemSlot(bot, prioritizedBlocks);
-        if (slot == -1) {
-            return false;
-        }
-        PlayerInventory inventory = bot.getInventory();
-        slot = ensureHotbarAccess(bot, inventory, slot);
-        ItemStack stack = inventory.getStack(slot);
-        if (!(stack.getItem() instanceof BlockItem blockItem)) {
-            return false;
-        }
-        selectHotbarSlot(bot, slot);
-        BlockPos clickPos = target.offset(placeFace.getOpposite());
-        Vec3d hitVec = Vec3d.ofCenter(clickPos);
-        BlockHitResult hit = new BlockHitResult(hitVec, placeFace, clickPos, false);
-        ItemUsageContext usage = new ItemUsageContext(bot, Hand.MAIN_HAND, hit);
-        ItemPlacementContext placementContext = new ItemPlacementContext(usage);
-        ActionResult result = blockItem.place(placementContext);
-        if (result.isAccepted()) {
-            bot.swingHand(Hand.MAIN_HAND, true);
-            if (stack.isEmpty()) {
-                inventory.setStack(slot, ItemStack.EMPTY);
+            Direction placeFace = face == null ? Direction.UP : face;
+            if (!world.getBlockState(target).isAir() && world.getFluidState(target).isEmpty()) {
+                // Allow replacing snow layers/blocks to avoid placement failures
+                net.minecraft.block.BlockState state = world.getBlockState(target);
+                if (!state.isOf(net.minecraft.block.Blocks.SNOW) && !state.isOf(net.minecraft.block.Blocks.SNOW_BLOCK)) {
+                    return false;
+                }
+                world.breakBlock(target, false);
             }
-            return true;
-        }
-        return false;
+            // Avoid placing while standing inside the target
+            if (bot.getBoundingBox().intersects(new net.minecraft.util.math.Box(target))) {
+                return false;
+            }
+            if (!hasSupport(world, target)) {
+                return false;
+            }
+            int slot = findPreferredBlockItemSlot(bot, prioritizedBlocks);
+            if (slot == -1) {
+                return false;
+            }
+            PlayerInventory inventory = bot.getInventory();
+            slot = ensureHotbarAccess(bot, inventory, slot);
+            ItemStack stack = inventory.getStack(slot);
+            if (!(stack.getItem() instanceof BlockItem blockItem)) {
+                return false;
+            }
+            selectHotbarSlot(bot, slot);
+            BlockPos clickPos = target.offset(placeFace.getOpposite());
+            Vec3d hitVec = Vec3d.ofCenter(clickPos);
+            BlockHitResult hit = new BlockHitResult(hitVec, placeFace, clickPos, false);
+            ItemUsageContext usage = new ItemUsageContext(bot, Hand.MAIN_HAND, hit);
+            ItemPlacementContext placementContext = new ItemPlacementContext(usage);
+            ActionResult result = blockItem.place(placementContext);
+            if (result.isAccepted()) {
+                bot.swingHand(Hand.MAIN_HAND, true);
+                if (stack.isEmpty()) {
+                    inventory.setStack(slot, ItemStack.EMPTY);
+                }
+                return true;
+            }
+            return false;
+        }, 3500L, false);
     }
 
     private static boolean hasSupport(ServerWorld world, BlockPos target) {
@@ -432,6 +578,20 @@ public final class BotActions {
     private static boolean canBreak(ServerWorld world, BlockPos pos, ServerPlayerEntity bot, boolean forceBreak) {
         BlockState state = world.getBlockState(pos);
         if (state.isAir() || state.isOf(net.minecraft.block.Blocks.BEDROCK)) {
+            return false;
+        }
+        if (state.getBlock() instanceof DoorBlock) {
+            return false;
+        }
+        // Never grief player storage / beds during generic movement/unstuck logic.
+        if (state.isOf(Blocks.CHEST) || state.isOf(Blocks.TRAPPED_CHEST) || state.isOf(Blocks.BARREL) || state.isOf(Blocks.ENDER_CHEST)) {
+            return false;
+        }
+        if (state.isIn(BlockTags.BEDS) || state.isIn(BlockTags.SHULKER_BOXES)) {
+            return false;
+        }
+        // Avoid griefing player-built enclosures/rails: never break fences/walls/gates as part of generic "unstuck".
+        if (state.isIn(BlockTags.FENCES) || state.isIn(BlockTags.WALLS) || state.isIn(BlockTags.FENCE_GATES)) {
             return false;
         }
 
@@ -858,11 +1018,14 @@ public final class BotActions {
             return new Selection(Hand.OFF_HAND, off);
         }
 
-        for (int i = 0; i < 9; i++) {
-            ItemStack stack = bot.getInventory().getStack(i);
+        PlayerInventory inventory = bot.getInventory();
+        for (int i = 0; i < inventory.size(); i++) {
+            ItemStack stack = inventory.getStack(i);
             if (isRangedWeapon(stack)) {
-                selectHotbarSlot(bot, i);
-                return new Selection(Hand.MAIN_HAND, stack);
+                int hotbarSlot = ensureHotbarAccess(bot, inventory, i);
+                ItemStack moved = inventory.getStack(hotbarSlot);
+                selectHotbarSlot(bot, hotbarSlot);
+                return new Selection(Hand.MAIN_HAND, moved);
             }
         }
         return null;

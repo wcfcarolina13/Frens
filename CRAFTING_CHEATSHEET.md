@@ -16,7 +16,10 @@ Accepted item keys (case-insensitive):
 - `shears`
 - `furnace`
 - `chest` (places successive chests adjacent if count > 1)
+- `bed` / `beds` (requires 3 matching wool + 3 planks per bed; picks a craftable color)
 
 Notes:
-- Bot uses its own inventory only; reports how many were crafted if short on materials. For tools beyond basic wood/stone, it will list available materials; rerun with preferred material (e.g., `/bot craft axe 1 iron`).
+- Bot primarily uses its own inventory; reports how many were crafted if short on materials. For tools beyond basic wood/stone, rerun with preferred material (e.g., `/bot craft axe 1 iron`).
+- 3x3 crafts (e.g., `bed`, `chest`, `furnace`, `bucket`, tools) require a crafting table; if none is reachable, the bot will place one from inventory or craft+place one if it can.
+- When short on basic inputs, the bot will try to pull materials from nearby chests (within ~10 blocks) before giving up.
 - Placement ignores snow layers/blocks. For place, bot aligns to your look ray; retries up to 10 times before saying “I can’t reach that spot.”

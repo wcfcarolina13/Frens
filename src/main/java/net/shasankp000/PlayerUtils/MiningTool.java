@@ -1,7 +1,9 @@
 package net.shasankp000.PlayerUtils;
 
 import net.minecraft.block.BlockState;
+import net.minecraft.block.Blocks;
 import net.minecraft.item.ItemStack;
+import net.minecraft.registry.tag.BlockTags;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.util.Hand;
@@ -56,8 +58,14 @@ public class MiningTool {
 
         // Initialize targeting and tool selection directly (avoid server-thread join deadlock)
         try {
+            BlockState initialState = bot.getEntityWorld().getBlockState(targetBlockPos);
+            if (isNeverMineBlock(initialState)) {
+                miningResult.complete("⚠️ Refusing to mine a protected block.");
+                cleanup.run();
+                return miningResult;
+            }
             LookController.faceBlock(bot, targetBlockPos);
-            BlockState blockState = bot.getEntityWorld().getBlockState(targetBlockPos);
+            BlockState blockState = initialState;
             ItemStack bestTool = ToolSelector.selectBestToolForBlock(bot, blockState);
             LOGGER.debug("Preparing to mine {} with tool={} (creative={})",
                     targetBlockPos,
@@ -99,6 +107,11 @@ public class MiningTool {
                 
                 try {
                     BlockState currentState = bot.getEntityWorld().getBlockState(targetBlockPos);
+                    if (isNeverMineBlock(currentState)) {
+                        miningResult.complete("⚠️ Refusing to mine a protected block.");
+                        cleanup.run();
+                        return;
+                    }
                     if (currentState.isAir()) {
                         LOGGER.info("Mining complete at {}", targetBlockPos);
                         miningResult.complete("Mining complete!");
@@ -141,6 +154,20 @@ public class MiningTool {
         });
 
         return miningResult;
+    }
+
+    private static boolean isNeverMineBlock(BlockState state) {
+        if (state == null) {
+            return false;
+        }
+        // Never destroy player storage or beds; prefer nudging away / alternate routing.
+        if (state.isOf(Blocks.CHEST) || state.isOf(Blocks.TRAPPED_CHEST) || state.isOf(Blocks.BARREL) || state.isOf(Blocks.ENDER_CHEST)) {
+            return true;
+        }
+        if (state.isIn(BlockTags.BEDS) || state.isIn(BlockTags.SHULKER_BOXES)) {
+            return true;
+        }
+        return false;
     }
 
     private static void switchToTool(ServerPlayerEntity bot, ItemStack tool) {

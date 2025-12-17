@@ -9,12 +9,13 @@ Last updated: 2025-11-19. Navigation map for common code and docs.
 - `AGENT_RULES.md` — rules for LLM agents.
 - `CUSTOM_PROVIDERS.md` — running with non-OpenAI-compatible providers.
 - `DOCS_INDEX.md` — doc map/status.
+- `CRAFTING_CHEATSHEET.md` — crafting quick reference.
 - `archive/legacy_changelogs.md` — pre-2025 release notes.
-- Archived placeholders: `ASCENT_DESCENT_*`, `STAIRCASE_SIMPLIFICATION_PLAN.md`, `TASK_QUEUE.md`, `CRITICAL_ISSUES_ANALYSIS.md`, `DEBUG_GUIDE.md`, `TESTING_FEEDBACK_ANALYSIS.md` (do not update).
+- `archive/docs/INDEX.md` — archived planning notes and reports (do not update).
 
 ## Root / Build
 - `build.gradle`, `settings.gradle`, `gradle.properties`, `gradlew*`, `gradle/` — build configuration.
-- `LICENSE`, `eula.txt`, `logs-prism/`, `run/`, `tmp_collect*.json` — licensing, runtime artifacts, temp data.
+- `LICENSE`, `eula.txt`, `Logs-Prism/`, `run/`, `tmp_collect*.json` — licensing, runtime artifacts, temp data.
 
 ## Entry Points
 - `src/main/java/net/shasankp000/AIPlayer.java` — main mod entry.

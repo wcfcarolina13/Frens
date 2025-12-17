@@ -16,6 +16,7 @@ import net.shasankp000.ChatUtils.ChatUtils;
 import net.shasankp000.GameAI.BotActions;
 import net.shasankp000.GameAI.DropSweeper;
 import net.shasankp000.GameAI.services.MovementService;
+import net.shasankp000.GameAI.services.BlockInteractionService;
 import net.shasankp000.GameAI.services.WorkDirectionService;
 import net.shasankp000.GameAI.skills.Skill;
 import net.shasankp000.GameAI.skills.SkillContext;
@@ -675,6 +676,11 @@ public final class ShelterSkill implements Skill {
         if (chest == null) {
             BlockState state = world.getBlockState(chestPos);
             LOGGER.warn("Burrow deposit: chest not ready at {} (state={}); skipping deposit.", chestPos.toShortString(), state.getBlock().getName().getString());
+            return;
+        }
+        if (!BlockInteractionService.canInteract(bot, chestPos)) {
+            LOGGER.warn("Burrow deposit: chest {} not interactable from {}; skipping remote deposit.",
+                    chestPos.toShortString(), bot.getBlockPos().toShortString());
             return;
         }
         Integer moved = callOnServer(world, () -> moveCheapItems(bot, chest));

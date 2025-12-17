@@ -27,8 +27,6 @@ public class LookController {
         bot.setYaw(yaw);
         bot.setPitch(pitch);
 
-        System.out.printf("Facing block at %s with Yaw: %.2f Pitch: %.2f%n", targetPos, yaw, pitch);
-
         return "Facing block at " + targetPos + " with Yaw: " + yaw + " and Pitch: " + pitch;
     }
 
@@ -42,7 +40,5 @@ public class LookController {
 
         bot.setYaw((float) yaw);
         bot.setPitch((float) pitch);
-
-        System.out.printf("Facing entity %s at Yaw: %.2f Pitch: %.2f%n", target.getName().getString(), yaw, pitch);
     }
 }

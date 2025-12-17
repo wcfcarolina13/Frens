@@ -1736,7 +1736,7 @@ public final class MovementService {
     /**
      * Keep the bot buoyant so that shallow water crossings look like proper wading instead of sinking.
      */
-        private static void encourageSurfaceDrift(ServerPlayerEntity player) {
+            private static void encourageSurfaceDrift(ServerPlayerEntity player) {
         if (player == null) {
             return;
         }
@@ -1758,10 +1758,10 @@ public final class MovementService {
 
         boolean headSubmerged = world.getFluidState(feet.up()).isIn(FluidTags.WATER);
         if (headSubmerged) {
-            // Swim up
+            // Gentle swim up if submerged
             Vec3d velocity = player.getVelocity();
             if (velocity.y < 0.05D) {
-                player.addVelocity(0.0D, 0.06D, 0.0D);
+                player.addVelocity(0.0D, 0.04D, 0.0D); // Reduced lift
                 player.velocityDirty = true;
             }
         }

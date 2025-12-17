@@ -23,6 +23,7 @@ import net.shasankp000.Entity.LookController;
 import net.shasankp000.GameAI.BotActions;
 import net.shasankp000.GameAI.services.CraftingHelper;
 import net.shasankp000.GameAI.services.ChestStoreService;
+import net.shasankp000.GameAI.services.BlockInteractionService;
 import net.shasankp000.GameAI.services.MovementService;
 import net.shasankp000.GameAI.services.SkillResumeService;
 import net.shasankp000.GameAI.skills.Skill;
@@ -55,10 +56,12 @@ import java.util.concurrent.TimeoutException;
 public final class WoodcutSkill implements Skill {
 
     private static final Logger LOGGER = LoggerFactory.getLogger("skill-woodcut");
-    private static final int DEFAULT_TREE_COUNT = 1;
+    private static final int DEFAULT_TREE_COUNT_INTERNAL = 1;
+    private static final int DEFAULT_TREE_COUNT_STANDALONE = 4;
     private static final int DEFAULT_SEARCH_RADIUS = 12;
     private static final int DEFAULT_VERTICAL_RANGE = 6;
     private static final int MAX_FAILURES = 3;
+    private static final int SUNSET_TIME_OF_DAY = 12000;
     private static final double REACH_DISTANCE_SQ = 20.25D; // ~4.5 blocks (survival reach)
     private static final long PILLAR_STEP_DELAY_MS = 160L;
     private static final long MINING_TIMEOUT_MS = 12_000L;
@@ -98,9 +101,15 @@ public final class WoodcutSkill implements Skill {
         ServerPlayerEntity bot = Objects.requireNonNull(source.getPlayer(), "player");
         SkillResumeService.consumeResumeIntent(bot.getUuid());
 
-        int targetTrees = Math.max(1, getIntParameter(context.parameters(), "count", DEFAULT_TREE_COUNT));
+        boolean internal = getBooleanParameter(context.parameters(), "internal", false);
+        int defaultTrees = internal ? DEFAULT_TREE_COUNT_INTERNAL : DEFAULT_TREE_COUNT_STANDALONE;
+        int targetTrees = Math.max(1, getIntParameter(context.parameters(), "count", defaultTrees));
         int searchRadius = Math.max(6, getIntParameter(context.parameters(), "searchRadius", DEFAULT_SEARCH_RADIUS));
         int verticalRange = Math.max(4, getIntParameter(context.parameters(), "verticalRange", DEFAULT_VERTICAL_RANGE));
+        int startTimeOfDay = bot.getEntityWorld() != null ? (int) (bot.getEntityWorld().getTimeOfDay() % 24000L) : 0;
+        if (!internal && startTimeOfDay >= SUNSET_TIME_OF_DAY) {
+            return SkillExecutionResult.failure("It's getting late; I'll cut trees tomorrow.");
+        }
 
         if (!ensureAxeAvailable(source, bot)) {
             return SkillExecutionResult.failure("Out of axes and missing materials to craft one.");
@@ -121,6 +130,13 @@ public final class WoodcutSkill implements Skill {
         while (felled < targetTrees && failures < MAX_FAILURES) {
             if (SkillManager.shouldAbortSkill(bot)) {
                 return SkillExecutionResult.failure("woodcut paused due to nearby threat.");
+            }
+            if (!internal) {
+                int timeOfDay = (int) (bot.getEntityWorld().getTimeOfDay() % 24000L);
+                if (timeOfDay >= SUNSET_TIME_OF_DAY) {
+                    ChatUtils.sendSystemMessage(source, "It's getting late; I'm stopping woodcut for the day.");
+                    break;
+                }
             }
             if (!ensureWoodSpaceOrDeposit(source, bot)) {
                 return SkillExecutionResult.failure("Inventory full and no reachable chest to deposit wood.");
@@ -191,9 +207,23 @@ public final class WoodcutSkill implements Skill {
             return SkillExecutionResult.failure("Stopped after cutting " + felled + " tree(s); repeated failures reaching remaining targets (path/LOS/inventory).");
         }
         if (felled < targetTrees) {
-            return SkillExecutionResult.success("Stopped after cutting " + felled + " tree(s); no more safe targets.");
+            return SkillExecutionResult.success("Stopped after cutting " + felled + " tree(s).");
         }
         return SkillExecutionResult.success("Cut " + felled + " tree(s).");
+    }
+
+    private boolean getBooleanParameter(Map<String, Object> parameters, String key, boolean fallback) {
+        if (parameters == null || key == null) {
+            return fallback;
+        }
+        Object value = parameters.get(key);
+        if (value instanceof Boolean b) {
+            return b;
+        }
+        if (value instanceof String s) {
+            return "true".equalsIgnoreCase(s) || "1".equals(s) || "yes".equalsIgnoreCase(s);
+        }
+        return fallback;
     }
 
     private boolean fellTree(ServerCommandSource source, ServerPlayerEntity bot, TreeDetector.TreeTarget target) {
@@ -342,37 +372,74 @@ public final class WoodcutSkill implements Skill {
             ChatUtils.sendSystemMessage(source, "Inventory full and no reachable chest to stash wood. Pausing woodcut.");
             return false;
         }
-        LOGGER.info("Depositing wood into nearest container at {}", chestPos.get().toShortString());
+        if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
+            return false;
+        }
+        BlockPos containerPos = chestPos.get().toImmutable();
+        BlockPos stand = findContainerStand(world, bot, containerPos);
+        if (stand == null) {
+            LOGGER.warn("No safe stand position next to container {}", containerPos.toShortString());
+            return false;
+        }
+        LOGGER.info("Depositing wood into nearest container at {}", containerPos.toShortString());
         MovementService.MovementPlan plan = new MovementService.MovementPlan(
                 MovementService.Mode.DIRECT,
-                chestPos.get(),
-                chestPos.get(),
+                stand,
+                stand,
                 null,
                 null,
                 bot.getHorizontalFacing());
         MovementService.MovementResult move = MovementService.execute(source, bot, plan, false, true, false, false);
-        if (!move.success()) {
-            LOGGER.warn("Failed to reach chest at {} for deposit: {}", chestPos.get().toShortString(), move.detail());
+        if (!move.success() && !BlockInteractionService.canInteract(bot, containerPos)) {
+            LOGGER.warn("Failed to reach container at {} for deposit: {}", containerPos.toShortString(), move.detail());
             return false;
         }
-        if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
+        if (!BlockInteractionService.canInteract(bot, containerPos)) {
+            LOGGER.warn("Container {} not interactable after move; refusing remote deposit", containerPos.toShortString());
             return false;
         }
-        BlockState state = world.getBlockState(chestPos.get());
-        Inventory chestInv = resolveInventory(world, chestPos.get());
+        BlockState state = world.getBlockState(containerPos);
+        Inventory chestInv = resolveInventory(world, containerPos);
         if (chestInv == null) {
-            LOGGER.warn("Container at {} missing/invalid for deposit (state={}, be=null)", chestPos.get().toShortString(), state);
+            LOGGER.warn("Container at {} missing/invalid for deposit (state={}, be=null)", containerPos.toShortString(), state);
             return false;
         }
         int deposited = depositWood(bot, chestInv);
         if (deposited > 0) {
-            LOGGER.info("Deposited {} wood items into chest at {}", deposited, chestPos.get().toShortString());
+            LOGGER.info("Deposited {} wood items into chest at {}", deposited, containerPos.toShortString());
             ChatUtils.sendSystemMessage(source, "Deposited wood into nearby chest.");
             return true;
         } else {
-            LOGGER.info("No wood to deposit or chest full at {}", chestPos.get().toShortString());
+            LOGGER.info("No wood to deposit or chest full at {}", containerPos.toShortString());
             return false;
         }
+    }
+
+    private BlockPos findContainerStand(ServerWorld world, ServerPlayerEntity bot, BlockPos containerPos) {
+        if (world == null || bot == null || containerPos == null) {
+            return null;
+        }
+        BlockPos best = null;
+        double bestDist = Double.MAX_VALUE;
+        for (Direction dir : Direction.Type.HORIZONTAL) {
+            BlockPos stand = containerPos.offset(dir);
+            BlockPos below = stand.down();
+            if (!world.getBlockState(below).isSolidBlock(world, below)) {
+                continue;
+            }
+            if (!world.getBlockState(stand).getCollisionShape(world, stand).isEmpty()) {
+                continue;
+            }
+            if (!world.getBlockState(stand.up()).getCollisionShape(world, stand.up()).isEmpty()) {
+                continue;
+            }
+            double dist = bot.getBlockPos().getSquaredDistance(stand);
+            if (dist < bestDist) {
+                bestDist = dist;
+                best = stand.toImmutable();
+            }
+        }
+        return best;
     }
 
     private boolean prepareReach(ServerPlayerEntity bot,

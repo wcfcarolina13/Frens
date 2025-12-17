@@ -3,6 +3,7 @@ package net.shasankp000.PathFinding;
 import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
+import net.minecraft.block.DoorBlock;
 import net.minecraft.registry.tag.BlockTags;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
@@ -456,6 +457,14 @@ public class PathFinder {
 
     private static boolean isPassable(ServerWorld world, BlockPos pos) {
         BlockState blockState = world.getBlockState(pos);
+        if (blockState.getBlock() instanceof DoorBlock) {
+            // Plan through closed wooden doors (we can open them on approach).
+            // Iron doors remain blocked unless already open (redstone).
+            if (blockState.isOf(Blocks.IRON_DOOR)) {
+                return blockState.getCollisionShape(world, pos).isEmpty();
+            }
+            return true;
+        }
         return blockState.isAir() || blockState.isOf(Blocks.WATER) || blockState.getCollisionShape(world, pos).isEmpty();
     }
 

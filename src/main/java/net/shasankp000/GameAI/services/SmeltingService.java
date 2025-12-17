@@ -20,6 +20,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
 
 /**
  * Minimal smelting helper: inserts raw items into the first furnace the bot is looking at.
@@ -52,7 +53,7 @@ public static boolean startBatchCook(ServerPlayerEntity bot, ServerCommandSource
         }
         LOGGER.info("Smelting target={} approach={} commander={} bot={}", pos.toShortString(), approachPos.toShortString(), commander != null ? commander.getName().getString() : "bot", bot.getName().getString());
         var be = world.getBlockEntity(pos);
-        if (!(be instanceof net.minecraft.block.entity.AbstractFurnaceBlockEntity furnace)) {
+        if (!(be instanceof net.minecraft.block.entity.AbstractFurnaceBlockEntity)) {
             ChatUtils.sendSystemMessage(source, "That furnace is unavailable.");
             return false;
         }
@@ -70,53 +71,90 @@ public static boolean startBatchCook(ServerPlayerEntity bot, ServerCommandSource
             return false;
         }
 
-        // Walk to furnace (respect teleport preference)
+        // Run movement asynchronously so we don't block the server tick thread.
+        var server = source.getServer();
+        var worldKey = world.getRegistryKey();
+        UUID botId = bot.getUuid();
+        BlockPos furnacePos = pos.toImmutable();
+        BlockPos approach = approachPos.toImmutable();
         boolean allowTeleport = SkillPreferences.teleportDuringSkills(bot);
-        MovementService.MovementPlan plan = new MovementService.MovementPlan(
-                MovementService.Mode.DIRECT,
-                approachPos,
-                approachPos,
-                null,
-                null,
-                bot.getHorizontalFacing());
-        MovementService.MovementResult moveRes = MovementService.execute(bot.getCommandSource(), bot, plan, allowTeleport, true);
-        double reachSq = bot.getBlockPos().getSquaredDistance(pos);
-        if (!moveRes.success() || reachSq > STATION_REACH_SQ) {
-            LOGGER.warn("Smelting reach check failed: moved={} detail={} dist={} pos={}", moveRes.success(), moveRes.detail(), Math.sqrt(reachSq), pos.toShortString());
-            MovementService.clearRecentWalkAttempt(bot.getUuid());
-            boolean nudged = MovementService.nudgeTowardUntilClose(bot, approachPos, STATION_REACH_SQ, 2500L, 0.15, "smelt-nudge");
-            reachSq = bot.getBlockPos().getSquaredDistance(pos);
-            if (!nudged || reachSq > STATION_REACH_SQ) {
-                ChatUtils.sendSystemMessage(source, "Couldn't get close enough to use the furnace.");
-                return false;
-            }
-        }
 
-        int inserted = 0;
-        for (Map.Entry<Item, List<ItemStack>> entry : cookables.entrySet()) {
-            String name = entry.getKey().getName().getString();
-            for (ItemStack stack : entry.getValue()) {
-                if (insertIntoInput(furnace, stack.copy())) {
-                    consumeFromInventory(bot, stack);
-                    inserted++;
-                    ChatUtils.sendSystemMessage(source, "Added raw stack: " + name);
+        ChatUtils.sendSystemMessage(source, "Heading to the furnace...");
+
+        CompletableFuture.runAsync(() -> {
+            try {
+                MovementService.MovementPlan plan = new MovementService.MovementPlan(
+                        MovementService.Mode.DIRECT,
+                        approach,
+                        approach,
+                        null,
+                        null,
+                        bot.getHorizontalFacing());
+                MovementService.MovementResult moveRes = MovementService.execute(bot.getCommandSource(), bot, plan, allowTeleport, true);
+                if (!moveRes.success()) {
+                    MovementService.clearRecentWalkAttempt(botId);
+                    MovementService.nudgeTowardUntilClose(bot, approach, STATION_REACH_SQ, 2600L, 0.15, "smelt-nudge");
                 }
+            } catch (Exception e) {
+                LOGGER.warn("Smelt movement failed: {}", e.getMessage());
             }
-        }
 
-        if (inserted == 0) {
-            ChatUtils.sendSystemMessage(source, "No space to add raws.");
+            server.execute(() -> {
+                ServerWorld liveWorld = server.getWorld(worldKey);
+                ServerPlayerEntity liveBot = server.getPlayerManager().getPlayer(botId);
+                if (liveWorld == null || liveBot == null || liveBot.isRemoved()) {
+                    return;
+                }
+                var be2 = liveWorld.getBlockEntity(furnacePos);
+                if (!(be2 instanceof net.minecraft.block.entity.AbstractFurnaceBlockEntity furnace)) {
+                    ChatUtils.sendSystemMessage(source, "That furnace is unavailable.");
+                    return;
+                }
+                if (!ensureStationInteractable(liveBot, furnacePos, STATION_REACH_SQ)) {
+                    ChatUtils.sendSystemMessage(source, "Couldn't get close enough to use the furnace.");
+                    return;
+                }
+
+                int inserted = 0;
+                for (Map.Entry<Item, List<ItemStack>> entry : cookables.entrySet()) {
+                    String name = entry.getKey().getName().getString();
+                    for (ItemStack stack : entry.getValue()) {
+                        if (insertIntoInput(furnace, stack.copy())) {
+                            consumeFromInventory(liveBot, stack);
+                            inserted++;
+                            ChatUtils.sendSystemMessage(source, "Added raw stack: " + name);
+                        }
+                    }
+                }
+
+                if (inserted == 0) {
+                    ChatUtils.sendSystemMessage(source, "No space to add raws.");
+                    return;
+                }
+                if (useFuel) {
+                    maybeLoadFuel(liveBot, source, furnace, true);
+                } else if (hasFuel(liveBot)) {
+                    ChatUtils.sendSystemMessage(source, "Fuel available (leaves/planks/logs). Re-run with '/bot cook [item] fuel true' to use it.");
+                }
+                ChatUtils.sendSystemMessage(source, "Added " + inserted + " raw stacks to the furnace.");
+            });
+        });
+        return true;
+    }
+
+    private static boolean ensureStationInteractable(ServerPlayerEntity bot, BlockPos stationPos, double reachSq) {
+        if (bot == null || stationPos == null) {
             return false;
         }
-        if (useFuel) {
-            maybeLoadFuel(bot, source, furnace, true);
-        } else {
-            if (hasFuel(bot)) {
-                ChatUtils.sendSystemMessage(source, "Fuel available (leaves/planks/logs). Re-run with '/bot cook [item] fuel true' to use it.");
-            }
+        if (BlockInteractionService.canInteract(bot, stationPos, reachSq)) {
+            return true;
         }
-        ChatUtils.sendSystemMessage(source, "Added " + inserted + " raw stacks to the furnace.");
-        return true;
+        BlockPos blockingDoor = BlockInteractionService.findBlockingDoor(bot, stationPos, reachSq);
+        if (blockingDoor != null) {
+            MovementService.tryOpenDoorAt(bot, blockingDoor);
+            return BlockInteractionService.canInteract(bot, stationPos, reachSq);
+        }
+        return false;
     }
 
     private record StationTarget(BlockPos pos, BlockPos approach) {}

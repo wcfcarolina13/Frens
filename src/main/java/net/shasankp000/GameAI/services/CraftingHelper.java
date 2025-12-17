@@ -1,5 +1,8 @@
 package net.shasankp000.GameAI.services;
 
+import net.minecraft.block.Blocks;
+import net.minecraft.block.entity.ChestBlockEntity;
+import net.minecraft.inventory.Inventory;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
@@ -15,14 +18,21 @@ import net.minecraft.util.math.Vec3d;
 import net.shasankp000.ChatUtils.ChatUtils;
 import net.shasankp000.GameAI.BotActions;
 import net.shasankp000.GameAI.services.MovementService;
+import net.shasankp000.GameAI.services.BlockInteractionService;
 import net.shasankp000.GameAI.skills.SkillPreferences;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Optional;
 import java.util.List;
 import java.util.ArrayList;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
+import java.util.function.Predicate;
 
 /**
  * Minimal crafting helper focused on basic block crafts (starting with crafting tables).
@@ -33,6 +43,13 @@ public final class CraftingHelper {
     private static final Identifier CRAFTING_TABLE_ID = Identifier.of("minecraft", "crafting_table");
     private static final double STATION_REACH_SQ = 4.5D * 4.5D; // mimic player interact range
     private static final double COMMANDER_LOOK_RANGE = 24.0D;
+    private static final int CHEST_SEARCH_RADIUS = 10;
+    private static final int CRAFTING_TABLE_SEARCH_RADIUS = 40;
+    private static final int CRAFTING_TABLE_SEARCH_YSPAN = 6;
+    private static final double MAX_REMEMBERED_TABLE_DIST_SQ = 140.0D * 140.0D;
+    private static final Map<UUID, WorldPos> LAST_KNOWN_CRAFTING_TABLE = new java.util.concurrent.ConcurrentHashMap<>();
+
+    private record WorldPos(net.minecraft.registry.RegistryKey<net.minecraft.world.World> worldKey, BlockPos pos) {}
 
     private CraftingHelper() {
     }
@@ -69,12 +86,94 @@ public final class CraftingHelper {
             case "hoe" -> craftToolMaterialAware(bot, source, commander, amount, ToolKind.HOE, materialPreference);
             case "sword" -> craftToolMaterialAware(bot, source, commander, amount, ToolKind.SWORD, materialPreference);
             case "shield" -> craftShield(bot, source, commander, amount);
+            case "fishing_rod", "rod" -> craftFishingRod(bot, source, commander, amount);
             case "bucket" -> craftSimple(bot, source, commander, amount, Items.BUCKET, Items.IRON_INGOT, 3);
             case "shears" -> craftSimple(bot, source, commander, amount, Items.SHEARS, Items.IRON_INGOT, 2);
             case "furnace" -> craftCobbleBlock(bot, source, commander, amount, Items.FURNACE, 8);
             case "chest" -> craftWithPlanks(bot, source, commander, Identifier.of("minecraft", "chest"), 8, Items.CHEST, amount);
+            case "bed", "beds" -> craftBed(bot, source, commander, amount);
             default -> 0;
         };
+    }
+
+    private static int craftBed(ServerPlayerEntity bot, ServerCommandSource source, ServerPlayerEntity commander, int amount) {
+        if (bot == null || source == null) {
+            return 0;
+        }
+        if (!ensureCraftingStation(bot, source)) {
+            ChatUtils.sendSystemMessage(source, "I need a crafting table placed nearby to craft a bed.");
+            return 0;
+        }
+        // Choose a color based on available wool stacks (3 required per bed).
+        record BedRecipe(net.minecraft.item.Item wool, net.minecraft.item.Item bed, Identifier recipeId) {}
+        List<BedRecipe> recipes = List.of(
+                new BedRecipe(Items.WHITE_WOOL, Items.WHITE_BED, Identifier.of("minecraft", "white_bed")),
+                new BedRecipe(Items.BLACK_WOOL, Items.BLACK_BED, Identifier.of("minecraft", "black_bed")),
+                new BedRecipe(Items.BLUE_WOOL, Items.BLUE_BED, Identifier.of("minecraft", "blue_bed")),
+                new BedRecipe(Items.BROWN_WOOL, Items.BROWN_BED, Identifier.of("minecraft", "brown_bed")),
+                new BedRecipe(Items.CYAN_WOOL, Items.CYAN_BED, Identifier.of("minecraft", "cyan_bed")),
+                new BedRecipe(Items.GRAY_WOOL, Items.GRAY_BED, Identifier.of("minecraft", "gray_bed")),
+                new BedRecipe(Items.GREEN_WOOL, Items.GREEN_BED, Identifier.of("minecraft", "green_bed")),
+                new BedRecipe(Items.LIGHT_BLUE_WOOL, Items.LIGHT_BLUE_BED, Identifier.of("minecraft", "light_blue_bed")),
+                new BedRecipe(Items.LIGHT_GRAY_WOOL, Items.LIGHT_GRAY_BED, Identifier.of("minecraft", "light_gray_bed")),
+                new BedRecipe(Items.LIME_WOOL, Items.LIME_BED, Identifier.of("minecraft", "lime_bed")),
+                new BedRecipe(Items.MAGENTA_WOOL, Items.MAGENTA_BED, Identifier.of("minecraft", "magenta_bed")),
+                new BedRecipe(Items.ORANGE_WOOL, Items.ORANGE_BED, Identifier.of("minecraft", "orange_bed")),
+                new BedRecipe(Items.PINK_WOOL, Items.PINK_BED, Identifier.of("minecraft", "pink_bed")),
+                new BedRecipe(Items.PURPLE_WOOL, Items.PURPLE_BED, Identifier.of("minecraft", "purple_bed")),
+                new BedRecipe(Items.RED_WOOL, Items.RED_BED, Identifier.of("minecraft", "red_bed")),
+                new BedRecipe(Items.YELLOW_WOOL, Items.YELLOW_BED, Identifier.of("minecraft", "yellow_bed"))
+        );
+
+        BedRecipe chosen = null;
+        Map<Item, Integer> totals = countItemsInInventoryAndNearbyChests(
+                bot,
+                source,
+                recipes.stream().map(BedRecipe::wool).toList());
+        for (BedRecipe recipe : recipes) {
+            int count = totals.getOrDefault(recipe.wool(), 0);
+            if (count >= 3) {
+                chosen = recipe;
+                break;
+            }
+        }
+        if (chosen == null) {
+            ChatUtils.sendSystemMessage(source, "Beds need 3 matching wool and 3 planks per bed.");
+            return 0;
+        }
+        if (!hasRecipePermission(commander, source.getServer(), chosen.recipeId())) {
+            ChatUtils.sendSystemMessage(source, "I don't know how to craft that yet.");
+            return 0;
+        }
+
+        if (!ensurePlanksAvailable(bot, source, 3 * amount)) {
+            ChatUtils.sendSystemMessage(source, "Beds need 3 planks per bed.");
+            return 0;
+        }
+
+        int desiredWool = 3 * amount;
+        Item woolItem = chosen.wool();
+        int woolInInv = countItem(bot, woolItem);
+        if (woolInInv < desiredWool) {
+            withdrawFromNearbyChests(bot, source, s -> s.isOf(woolItem), desiredWool - woolInInv);
+        }
+
+        int plankCount = countPlanks(bot);
+        int woolCount = countItem(bot, woolItem);
+        int maxByPlanks = plankCount / 3;
+        int maxByWool = woolCount / 3;
+        int crafts = Math.min(amount, Math.min(maxByPlanks, maxByWool));
+        if (crafts <= 0) {
+            ChatUtils.sendSystemMessage(source, "Beds need 3 wool + 3 planks per bed.");
+            return 0;
+        }
+        if (!consumePlanks(bot, crafts * 3)) {
+            ChatUtils.sendSystemMessage(source, "I couldn't reserve planks for beds.");
+            return 0;
+        }
+        consumeItem(bot, chosen.wool(), crafts * 3);
+        distributeOutput(bot, chosen.bed(), crafts);
+        return crafts;
     }
 
     private static int countPlanks(ServerPlayerEntity bot) {
@@ -128,11 +227,20 @@ public final class CraftingHelper {
                                        int planksPerItem,
                                        net.minecraft.item.Item output,
                                        int amountRequested) {
+        if (!output.equals(Items.CRAFTING_TABLE)) {
+            if (!ensureCraftingStation(bot, source)) {
+                ChatUtils.sendSystemMessage(source, "I need a crafting table placed nearby to craft that.");
+                return 0;
+            }
+        }
         if (!hasRecipePermission(commander, source.getServer(), recipeId)) {
             ChatUtils.sendSystemMessage(source, "I don't know how to craft that yet.");
             return 0;
         }
-        ensurePlanksFromLogs(bot, planksPerItem * amountRequested);
+        if (!ensurePlanksAvailable(bot, source, planksPerItem * amountRequested)) {
+            ChatUtils.sendSystemMessage(source, "I need " + planksPerItem + " planks per craft.");
+            return 0;
+        }
         int plankCount = countPlanks(bot);
         int maxByPlanks = plankCount / planksPerItem;
         int crafts = Math.min(amountRequested, maxByPlanks);
@@ -151,7 +259,10 @@ public final class CraftingHelper {
     private static int craftSticks(ServerPlayerEntity bot, ServerCommandSource source, ServerPlayerEntity commander, int amount) {
         // 2 planks => 4 sticks
         int craftsNeeded = (int) Math.ceil(amount / 4.0);
-        ensurePlanksFromLogs(bot, craftsNeeded * 2);
+        if (!ensurePlanksAvailable(bot, source, craftsNeeded * 2)) {
+            ChatUtils.sendSystemMessage(source, "Sticks need 2 planks per craft.");
+            return 0;
+        }
         if (!hasRecipePermission(commander, source.getServer(), Identifier.of("minecraft", "stick"))) {
             ChatUtils.sendSystemMessage(source, "I don't know how to craft that yet.");
             return 0;
@@ -249,7 +360,9 @@ public final class CraftingHelper {
         int sticks = countItem(bot, Items.STICK);
 
         if (mat.headItem().equals(Items.OAK_PLANKS)) {
-            ensurePlanksFromLogs(bot, headCount * amount);
+            ensurePlanksAvailable(bot, source, headCount * amount);
+        } else {
+            ensureItemAvailable(bot, source, mat.headItem(), headCount * amount);
         }
         int heads = mat.headItem().equals(Items.OAK_PLANKS) ? countPlanks(bot) : countItem(bot, mat.headItem());
 
@@ -315,6 +428,12 @@ public final class CraftingHelper {
                                    ServerCommandSource source,
                                    ServerPlayerEntity commander,
                                    int amount) {
+        if (!ensureCraftingStation(bot, source)) {
+            ChatUtils.sendSystemMessage(source, "I need a crafting table placed nearby to craft a shield.");
+            return 0;
+        }
+        ensurePlanksAvailable(bot, source, 6 * amount);
+        ensureItemAvailable(bot, source, Items.IRON_INGOT, amount);
         int planks = countPlanks(bot);
         int iron = countItem(bot, Items.IRON_INGOT);
         int crafts = Math.min(amount, Math.min(planks / 6, iron / 1));
@@ -334,12 +453,21 @@ public final class CraftingHelper {
         BlockPos botPos = bot.getBlockPos();
         ServerWorld world = source.getWorld();
         BlockPos nearest = null;
-        int radius = 16;
-        int ySpan = 4;
+        int radius = CRAFTING_TABLE_SEARCH_RADIUS;
+        int ySpan = CRAFTING_TABLE_SEARCH_YSPAN;
+
+        // Prefer a remembered table location for this bot/world (fast, avoids large scans).
+        WorldPos remembered = LAST_KNOWN_CRAFTING_TABLE.get(bot.getUuid());
+        if (remembered != null && remembered.worldKey() != null && remembered.worldKey().equals(world.getRegistryKey())) {
+            BlockPos pos = remembered.pos();
+            if (pos != null && botPos.getSquaredDistance(pos) <= MAX_REMEMBERED_TABLE_DIST_SQ) {
+                nearest = pos.toImmutable();
+            }
+        }
 
         // First: use commander look target if it's a crafting table.
         BlockPos commanderLook = null;
-        if (source.getPlayer() != null) {
+        if (source.getPlayer() != null && (source.getServer() == null || source.getServer().isOnThread())) {
             var hit = source.getPlayer().raycast(COMMANDER_LOOK_RANGE, 0, false);
             if (hit instanceof net.minecraft.util.hit.BlockHitResult bhr) {
                 commanderLook = bhr.getBlockPos();
@@ -350,16 +478,59 @@ public final class CraftingHelper {
         }
 
         if (nearest == null) {
+            double best = Double.MAX_VALUE;
             for (BlockPos pos : BlockPos.iterate(botPos.add(-radius, -ySpan, -radius), botPos.add(radius, ySpan, radius))) {
-                if (world.getBlockState(pos).isOf(net.minecraft.block.Blocks.CRAFTING_TABLE)) {
-                    nearest = pos.toImmutable();
-                    break;
+                if (!world.isChunkLoaded(pos)) {
+                    continue;
                 }
+                if (world.getBlockState(pos).isOf(net.minecraft.block.Blocks.CRAFTING_TABLE)) {
+                    double distSq = botPos.getSquaredDistance(pos);
+                    if (distSq < best) {
+                        best = distSq;
+                        nearest = pos.toImmutable();
+                    }
+                }
+            }
+        }
+        if (nearest != null) {
+            // If the chunk is loaded and the remembered table is gone, drop it.
+            if (world.isChunkLoaded(nearest) && !world.getBlockState(nearest).isOf(net.minecraft.block.Blocks.CRAFTING_TABLE)) {
+                LAST_KNOWN_CRAFTING_TABLE.remove(bot.getUuid());
+                nearest = null;
             }
         }
         if (nearest != null) {
             double distSq = botPos.getSquaredDistance(nearest);
             LOGGER.info("Found nearby crafting table at {}", nearest.toShortString());
+            LAST_KNOWN_CRAFTING_TABLE.put(bot.getUuid(), new WorldPos(world.getRegistryKey(), nearest.toImmutable()));
+
+            // If this table is far enough that its chunk may be unloaded, approach conservatively first
+            // (avoid scanning standable blocks which can chunk-load and hitch).
+            if (!world.isChunkLoaded(nearest) && distSq > (CRAFTING_TABLE_SEARCH_RADIUS * (double) CRAFTING_TABLE_SEARCH_RADIUS)) {
+                boolean allowTeleport = SkillPreferences.teleportDuringSkills(bot);
+                List<BlockPos> approaches = List.of(
+                        nearest.north(),
+                        nearest.south(),
+                        nearest.east(),
+                        nearest.west()
+                );
+                for (BlockPos approach : approaches) {
+                    MovementService.MovementPlan plan = new MovementService.MovementPlan(
+                            MovementService.Mode.DIRECT,
+                            approach,
+                            approach,
+                            null,
+                            null,
+                            bot.getHorizontalFacing());
+                    MovementService.MovementResult res = MovementService.execute(bot.getCommandSource(), bot, plan, allowTeleport, true);
+                    if (res.success() || bot.getBlockPos().getSquaredDistance(nearest) <= STATION_REACH_SQ) {
+                        if (ensureStationInteractable(bot, nearest, STATION_REACH_SQ)) {
+                            return true;
+                        }
+                    }
+                }
+                // Fall through to the normal standable scan once the chunk is likely loaded.
+            }
             List<BlockPos> standables = findStandableOptions(world, nearest, 2);
             LOGGER.info("Standable options near crafting table ({}): {}", nearest.toShortString(), standables.size());
             if (standables.isEmpty()) {
@@ -368,32 +539,28 @@ public final class CraftingHelper {
             }
             BlockPos approach = standables.get(0);
             LOGGER.info("Selected approach {} (dist={})", approach.toShortString(), Math.sqrt(approach.getSquaredDistance(nearest)));
-            if (distSq > COMMANDER_LOOK_RANGE * COMMANDER_LOOK_RANGE && findItemInInventory(bot, Items.CRAFTING_TABLE) != -1) {
-                LOGGER.info("Existing table is far ({}). Will place inventory table instead.", Math.sqrt(distSq));
-            } else {
-                if (bot.getBlockPos().getSquaredDistance(approach) <= STATION_REACH_SQ) {
-                    return true;
-                }
-                boolean allowTeleport = SkillPreferences.teleportDuringSkills(bot);
-                MovementService.MovementPlan plan = new MovementService.MovementPlan(
-                        MovementService.Mode.DIRECT,
-                        approach,
-                        approach,
-                        null,
-                        null,
-                        bot.getHorizontalFacing());
-                MovementService.MovementResult res = MovementService.execute(bot.getCommandSource(), bot, plan, allowTeleport, true);
-                if (res.success() || bot.getBlockPos().getSquaredDistance(approach) <= STATION_REACH_SQ) {
-                    LOGGER.info("Reached crafting table approach {}", approach.toShortString());
-                    return true;
-                }
-                MovementService.clearRecentWalkAttempt(bot.getUuid());
-                boolean close = MovementService.nudgeTowardUntilClose(bot, approach, STATION_REACH_SQ, 1500L, 0.14, "craft-table-nudge");
-                if (!close) {
-                    LOGGER.warn("Failed to reach crafting table at {}", nearest.toShortString());
-                }
-                return close;
+            if (bot.getBlockPos().getSquaredDistance(approach) <= STATION_REACH_SQ) {
+                return ensureStationInteractable(bot, nearest, STATION_REACH_SQ);
             }
+            boolean allowTeleport = SkillPreferences.teleportDuringSkills(bot);
+            MovementService.MovementPlan plan = new MovementService.MovementPlan(
+                    MovementService.Mode.DIRECT,
+                    approach,
+                    approach,
+                    null,
+                    null,
+                    bot.getHorizontalFacing());
+            MovementService.MovementResult res = MovementService.execute(bot.getCommandSource(), bot, plan, allowTeleport, true);
+            if (res.success() || bot.getBlockPos().getSquaredDistance(approach) <= STATION_REACH_SQ) {
+                LOGGER.info("Reached crafting table approach {}", approach.toShortString());
+                return ensureStationInteractable(bot, nearest, STATION_REACH_SQ);
+            }
+            MovementService.clearRecentWalkAttempt(bot.getUuid());
+            boolean close = MovementService.nudgeTowardUntilClose(bot, approach, STATION_REACH_SQ, 2200L, 0.14, "craft-table-nudge");
+            if (!close) {
+                LOGGER.warn("Failed to reach crafting table at {}", nearest.toShortString());
+            }
+            return close && ensureStationInteractable(bot, nearest, STATION_REACH_SQ);
         }
 
         // Try placing from inventory
@@ -402,6 +569,7 @@ public final class CraftingHelper {
             BlockPos placeAt = botPos.offset(bot.getHorizontalFacing());
             BotActions.placeBlockAt(bot, placeAt, java.util.List.of(Items.CRAFTING_TABLE));
             LOGGER.info("Placed crafting table from inventory at {}", placeAt.toShortString());
+            LAST_KNOWN_CRAFTING_TABLE.put(bot.getUuid(), new WorldPos(world.getRegistryKey(), placeAt.toImmutable()));
             boolean allowTeleport = SkillPreferences.teleportDuringSkills(bot);
             MovementService.MovementPlan plan = new MovementService.MovementPlan(
                     MovementService.Mode.DIRECT,
@@ -423,11 +591,13 @@ public final class CraftingHelper {
 
         // Try crafting a crafting table from materials
         LOGGER.info("No crafting table found; attempting to craft one.");
+        ensurePlanksAvailable(bot, source, 4);
         boolean crafted = craftCraftingTable(source, bot, source.getPlayer(), 1);
         if (crafted && findItemInInventory(bot, Items.CRAFTING_TABLE) != -1) {
             BlockPos placeAt = botPos.offset(bot.getHorizontalFacing());
             BotActions.placeBlockAt(bot, placeAt, java.util.List.of(Items.CRAFTING_TABLE));
             LOGGER.info("Crafted and placed crafting table at {}", placeAt.toShortString());
+            LAST_KNOWN_CRAFTING_TABLE.put(bot.getUuid(), new WorldPos(world.getRegistryKey(), placeAt.toImmutable()));
             boolean allowTeleport = SkillPreferences.teleportDuringSkills(bot);
             MovementService.MovementPlan plan = new MovementService.MovementPlan(
                     MovementService.Mode.DIRECT,
@@ -450,6 +620,22 @@ public final class CraftingHelper {
         return false;
     }
 
+    private static boolean ensureStationInteractable(ServerPlayerEntity bot, BlockPos stationPos, double reachSq) {
+        if (bot == null || stationPos == null) {
+            return false;
+        }
+        if (BlockInteractionService.canInteract(bot, stationPos, reachSq)) {
+            return true;
+        }
+        // If something is blocking interaction (often a door), try to open it and re-check.
+        BlockPos blockingDoor = BlockInteractionService.findBlockingDoor(bot, stationPos, reachSq);
+        if (blockingDoor != null) {
+            MovementService.tryOpenDoorAt(bot, blockingDoor);
+            return BlockInteractionService.canInteract(bot, stationPos, reachSq);
+        }
+        return false;
+    }
+
     private static int craftSimple(ServerPlayerEntity bot,
                                    ServerCommandSource source,
                                    ServerPlayerEntity commander,
@@ -457,6 +643,15 @@ public final class CraftingHelper {
                                    net.minecraft.item.Item output,
                                    net.minecraft.item.Item input,
                                    int per) {
+        if (output.equals(Items.BUCKET)) {
+            if (!ensureCraftingStation(bot, source)) {
+                ChatUtils.sendSystemMessage(source, "I need a crafting table placed nearby to craft that.");
+                return 0;
+            }
+        }
+        if (input.equals(Items.IRON_INGOT)) {
+            ensureItemAvailable(bot, source, Items.IRON_INGOT, per * amount);
+        }
         int have = countItem(bot, input);
         int crafts = Math.min(amount, have / per);
         if (crafts <= 0) {
@@ -474,6 +669,13 @@ public final class CraftingHelper {
                                         int amount,
                                         net.minecraft.item.Item output,
                                         int per) {
+        if (output.equals(Items.FURNACE)) {
+            if (!ensureCraftingStation(bot, source)) {
+                ChatUtils.sendSystemMessage(source, "I need a crafting table placed nearby to craft that.");
+                return 0;
+            }
+        }
+        ensureCobbleAvailable(bot, source, per * amount);
         int cobble = countCobble(bot);
         int crafts = Math.min(amount, cobble / per);
         if (crafts <= 0) {
@@ -482,6 +684,29 @@ public final class CraftingHelper {
         }
         consumeCobble(bot, crafts * per);
         distributeOutput(bot, output, crafts);
+        return crafts;
+    }
+
+    private static int craftFishingRod(ServerPlayerEntity bot,
+                                       ServerCommandSource source,
+                                       ServerPlayerEntity commander,
+                                       int amount) {
+        if (!ensureCraftingStation(bot, source)) {
+            ChatUtils.sendSystemMessage(source, "Fishing rods require a nearby crafting table.");
+            return 0;
+        }
+        ensureSticks(bot, source, amount * 3);
+        ensureItemAvailable(bot, source, Items.STRING, amount * 2);
+        int sticks = countItem(bot, Items.STICK);
+        int strings = countItem(bot, Items.STRING);
+        int crafts = Math.min(amount, Math.min(sticks / 3, strings / 2));
+        if (crafts <= 0) {
+            ChatUtils.sendSystemMessage(source, "Fishing rods need 3 sticks and 2 strings each.");
+            return 0;
+        }
+        consumeItem(bot, Items.STICK, crafts * 3);
+        consumeItem(bot, Items.STRING, crafts * 2);
+        distributeOutput(bot, Items.FISHING_ROD, crafts);
         return crafts;
     }
 
@@ -570,6 +795,226 @@ public final class CraftingHelper {
         LOGGER.info("ensureSticks: needed={} before={} crafted={} after={} planks={}",
                 needed, have, crafted, after, countPlanks(bot));
         return after >= needed;
+    }
+
+    private static boolean ensurePlanksAvailable(ServerPlayerEntity bot, ServerCommandSource source, int neededPlanks) {
+        if (bot == null || source == null) {
+            return false;
+        }
+        int have = countPlanks(bot);
+        if (have >= neededPlanks) {
+            return true;
+        }
+        int missing = neededPlanks - have;
+        // Pull planks first, then logs (convert to planks).
+        withdrawFromNearbyChests(bot, source, s -> s.isIn(net.minecraft.registry.tag.ItemTags.PLANKS), missing);
+        have = countPlanks(bot);
+        if (have >= neededPlanks) {
+            return true;
+        }
+        missing = neededPlanks - have;
+        int logsNeeded = (int) Math.ceil(missing / 4.0);
+        withdrawFromNearbyChests(bot, source, s -> s.isIn(net.minecraft.registry.tag.ItemTags.LOGS), logsNeeded);
+        ensurePlanksFromLogs(bot, neededPlanks);
+        return countPlanks(bot) >= neededPlanks;
+    }
+
+    private static void ensureCobbleAvailable(ServerPlayerEntity bot, ServerCommandSource source, int neededCobble) {
+        if (bot == null || source == null) {
+            return;
+        }
+        int have = countCobble(bot);
+        if (have >= neededCobble) {
+            return;
+        }
+        int missing = neededCobble - have;
+        withdrawFromNearbyChests(bot, source,
+                s -> s.isOf(Items.COBBLESTONE) || s.isOf(Items.COBBLED_DEEPSLATE) || s.isOf(Items.BLACKSTONE),
+                missing);
+    }
+
+    private static void ensureItemAvailable(ServerPlayerEntity bot, ServerCommandSource source, Item item, int needed) {
+        if (bot == null || source == null || item == null) {
+            return;
+        }
+        int have = countItem(bot, item);
+        if (have >= needed) {
+            return;
+        }
+        withdrawFromNearbyChests(bot, source, s -> s.isOf(item), needed - have);
+    }
+
+    private static Map<Item, Integer> countItemsInInventoryAndNearbyChests(ServerPlayerEntity bot,
+                                                                          ServerCommandSource source,
+                                                                          List<Item> items) {
+        Map<Item, Integer> totals = new HashMap<>();
+        if (bot == null || source == null || items == null || items.isEmpty()) {
+            return totals;
+        }
+        for (Item item : items) {
+            totals.put(item, countItem(bot, item));
+        }
+        if (!(source.getWorld() instanceof ServerWorld world)) {
+            return totals;
+        }
+        Set<Item> itemSet = new HashSet<>(items);
+        for (BlockPos chestPos : findNearbyChests(world, bot.getBlockPos(), CHEST_SEARCH_RADIUS)) {
+            var be = world.getBlockEntity(chestPos);
+            if (!(be instanceof ChestBlockEntity chest)) {
+                continue;
+            }
+            for (int i = 0; i < chest.size(); i++) {
+                ItemStack stack = chest.getStack(i);
+                if (stack.isEmpty()) continue;
+                Item item = stack.getItem();
+                if (!itemSet.contains(item)) continue;
+                totals.put(item, totals.getOrDefault(item, 0) + stack.getCount());
+            }
+        }
+        return totals;
+    }
+
+    private static int withdrawFromNearbyChests(ServerPlayerEntity bot,
+                                               ServerCommandSource source,
+                                               Predicate<ItemStack> match,
+                                               int desired) {
+        if (bot == null || source == null || desired <= 0 || match == null) {
+            return 0;
+        }
+        if (!(source.getWorld() instanceof ServerWorld world)) {
+            return 0;
+        }
+        int moved = 0;
+        for (BlockPos chestPos : findNearbyChests(world, bot.getBlockPos(), CHEST_SEARCH_RADIUS)) {
+            if (moved >= desired) {
+                break;
+            }
+            var be = world.getBlockEntity(chestPos);
+            if (!(be instanceof ChestBlockEntity chest)) {
+                continue;
+            }
+            int available = countMatchingStacks(chest, match, desired - moved);
+            if (available <= 0) {
+                continue;
+            }
+            if (!moveNearBlock(bot, source, chestPos, STATION_REACH_SQ)) {
+                continue;
+            }
+            if (!BlockInteractionService.canInteract(bot, chestPos, STATION_REACH_SQ)) {
+                continue;
+            }
+            moved += withdrawFromInventory(chest, bot.getInventory(), match, desired - moved);
+        }
+        return moved;
+    }
+
+    private static List<BlockPos> findNearbyChests(ServerWorld world, BlockPos origin, int radius) {
+        List<BlockPos> chests = new ArrayList<>();
+        if (world == null || origin == null) {
+            return chests;
+        }
+        for (BlockPos pos : BlockPos.iterate(origin.add(-radius, -2, -radius), origin.add(radius, 2, radius))) {
+            if (!world.isChunkLoaded(pos)) {
+                continue;
+            }
+            var state = world.getBlockState(pos);
+            if (state.isOf(Blocks.CHEST) || state.isOf(Blocks.TRAPPED_CHEST)) {
+                chests.add(pos.toImmutable());
+            }
+        }
+        chests.sort(java.util.Comparator.comparingDouble(p -> p.getSquaredDistance(origin)));
+        return chests;
+    }
+
+    private static boolean moveNearBlock(ServerPlayerEntity bot, ServerCommandSource source, BlockPos target, double reachSq) {
+        if (bot == null || source == null || target == null) {
+            return false;
+        }
+        if (bot.getBlockPos().getSquaredDistance(target) <= reachSq) {
+            return true;
+        }
+        if (!(source.getWorld() instanceof ServerWorld world)) {
+            return false;
+        }
+        BlockPos stand = target;
+        List<BlockPos> standOptions = findStandableOptions(world, target, 2);
+        if (!standOptions.isEmpty()) {
+            stand = standOptions.get(0);
+        }
+        boolean allowTeleport = SkillPreferences.teleportDuringSkills(bot);
+        MovementService.MovementPlan plan = new MovementService.MovementPlan(
+                MovementService.Mode.DIRECT,
+                stand,
+                stand,
+                null,
+                null,
+                bot.getHorizontalFacing());
+        MovementService.MovementResult res = MovementService.execute(bot.getCommandSource(), bot, plan, allowTeleport, true);
+        return res.success() || bot.getBlockPos().getSquaredDistance(target) <= reachSq;
+    }
+
+    private static int withdrawFromInventory(Inventory from,
+                                            Inventory to,
+                                            Predicate<ItemStack> match,
+                                            int amount) {
+        int moved = 0;
+        for (int i = 0; i < from.size() && moved < amount; i++) {
+            ItemStack stack = from.getStack(i);
+            if (stack.isEmpty() || !match.test(stack)) {
+                continue;
+            }
+            int toMove = Math.min(stack.getCount(), amount - moved);
+            ItemStack split = stack.split(toMove);
+            if (split.isEmpty()) {
+                continue;
+            }
+            ItemStack remainder = insertIntoInventory(to, split);
+            if (!remainder.isEmpty()) {
+                // Put back what didn't fit.
+                stack.increment(remainder.getCount());
+                from.setStack(i, stack);
+                break;
+            }
+            moved += toMove;
+        }
+        return moved;
+    }
+
+    private static int countMatchingStacks(ChestBlockEntity chest,
+                                           Predicate<ItemStack> match,
+                                           int limit) {
+        if (chest == null || match == null || limit <= 0) {
+            return 0;
+        }
+        int total = 0;
+        for (int i = 0; i < chest.size() && total < limit; i++) {
+            ItemStack stack = chest.getStack(i);
+            if (stack.isEmpty() || !match.test(stack)) {
+                continue;
+            }
+            total += stack.getCount();
+        }
+        return total;
+    }
+
+    private static ItemStack insertIntoInventory(Inventory inv, ItemStack stack) {
+        ItemStack remaining = stack.copy();
+        for (int i = 0; i < inv.size(); i++) {
+            ItemStack slot = inv.getStack(i);
+            if (slot.isEmpty()) {
+                inv.setStack(i, remaining);
+                return ItemStack.EMPTY;
+            }
+            if (ItemStack.areItemsEqual(slot, remaining) && ItemStack.areEqual(slot, remaining) && slot.getCount() < slot.getMaxCount()) {
+                int canAdd = Math.min(slot.getMaxCount() - slot.getCount(), remaining.getCount());
+                slot.increment(canAdd);
+                remaining.decrement(canAdd);
+                if (remaining.isEmpty()) {
+                    return ItemStack.EMPTY;
+                }
+            }
+        }
+        return remaining;
     }
 
     private static void ensurePlanksFromLogs(ServerPlayerEntity bot, int neededExtra) {

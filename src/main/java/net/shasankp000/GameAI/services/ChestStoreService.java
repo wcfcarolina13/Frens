@@ -11,6 +11,7 @@ import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.util.hit.BlockHitResult;
+import net.shasankp000.Entity.LookController;
 import net.shasankp000.ChatUtils.ChatUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -25,8 +26,12 @@ import java.util.function.Predicate;
 public final class ChestStoreService {
 
     private static final Logger LOGGER = LoggerFactory.getLogger("chest-store");
+    private static final MovementFlags DEFAULT_MOVEMENT = new MovementFlags(null, true, true, true);
+    private static final MovementFlags WALK_ONLY = new MovementFlags(Boolean.FALSE, true, false, false);
 
     private ChestStoreService() {}
+
+    private record MovementFlags(Boolean allowTeleportOverride, boolean fastReplan, boolean allowPursuit, boolean allowSnap) {}
 
     public static int handleDeposit(ServerCommandSource source, ServerPlayerEntity bot, String amountRaw, String itemRaw) {
         return handleTransfer(source, bot, amountRaw, itemRaw, true);
@@ -58,7 +63,7 @@ public final class ChestStoreService {
 
         UUID botId = bot.getUuid();
         CompletableFuture.runAsync(() -> {
-            int moved = performStoreTransfer(source, botId, chestPos, amount, filter, deposit);
+            int moved = performStoreTransfer(source, botId, chestPos, amount, filter, deposit, DEFAULT_MOVEMENT);
             String action = deposit ? "Deposited" : "Withdrew";
             String fail = deposit ? "deposit" : "withdraw";
             server.execute(() -> ChatUtils.sendSystemMessage(source,
@@ -80,10 +85,128 @@ public final class ChestStoreService {
             return 0;
         }
 
-        return callOnServer(server, () -> {
-            return performStoreTransfer(source, bot.getUuid(), chestPos, Integer.MAX_VALUE, 
-                stack -> !excluded.contains(stack.getItem()), true);
-        }, 5000, 0);
+        return performStoreTransferWithBot(source, bot, chestPos, Integer.MAX_VALUE,
+                stack -> !excluded.contains(stack.getItem()), true, DEFAULT_MOVEMENT);
+    }
+
+    public static int depositMatching(ServerCommandSource source, ServerPlayerEntity bot, BlockPos chestPos, Predicate<ItemStack> matcher) {
+        if (bot == null || chestPos == null || source == null || matcher == null) {
+            return 0;
+        }
+        MinecraftServer server = source.getServer();
+        if (server == null) {
+            return 0;
+        }
+
+        return performStoreTransferWithBot(source, bot, chestPos, Integer.MAX_VALUE, matcher, true, DEFAULT_MOVEMENT);
+    }
+
+    public static int depositMatchingWalkOnly(ServerCommandSource source, ServerPlayerEntity bot, BlockPos chestPos, Predicate<ItemStack> matcher) {
+        if (bot == null || chestPos == null || source == null || matcher == null) {
+            return 0;
+        }
+        MinecraftServer server = source.getServer();
+        if (server == null) {
+            return 0;
+        }
+
+        return performStoreTransferWithBot(source, bot, chestPos, Integer.MAX_VALUE, matcher, true, WALK_ONLY);
+    }
+
+    private static int performStoreTransferWithBot(ServerCommandSource source,
+                                                   ServerPlayerEntity bot,
+                                                   BlockPos chestPos,
+                                                   int amount,
+                                                   Predicate<ItemStack> filter,
+                                                   boolean deposit,
+                                                   MovementFlags movement) {
+        if (source == null || bot == null || chestPos == null || filter == null) {
+            return 0;
+        }
+        MinecraftServer server = source.getServer();
+        if (server == null) {
+            return 0;
+        }
+
+        Boolean chestOk = callOnServer(server, () -> source.getWorld().getBlockEntity(chestPos) instanceof ChestBlockEntity, 800, Boolean.FALSE);
+        if (!Boolean.TRUE.equals(chestOk)) {
+            return 0;
+        }
+
+        if (deposit) {
+            int have = callOnServer(server, () -> countMatching(bot.getInventory(), filter), 800, 0);
+            if (have <= 0) {
+                return 0;
+            }
+        }
+
+        java.util.List<BlockPos> stands = callOnServer(server,
+                () -> findStandCandidatesNearChest(source.getWorld(), bot, chestPos),
+                1200,
+                java.util.List.of());
+        if (stands.isEmpty()) {
+            return 0;
+        }
+
+        MovementFlags flags = movement != null ? movement : DEFAULT_MOVEMENT;
+        boolean reached = false;
+        for (BlockPos stand : stands) {
+            BlockPos door = BlockInteractionService.findDoorAlongLine(bot, Vec3d.ofCenter(stand), 6.0D);
+            if (door != null) {
+                callOnServer(server, () -> MovementService.tryOpenDoorAt(bot, door), 800, Boolean.FALSE);
+                maybeStepThroughDoor(bot, door, stand);
+            }
+
+            MovementService.MovementPlan plan = new MovementService.MovementPlan(
+                    MovementService.Mode.DIRECT,
+                    stand,
+                    stand,
+                    null,
+                    null,
+                    bot.getHorizontalFacing());
+            MovementService.MovementResult move = MovementService.execute(
+                    bot.getCommandSource(),
+                    bot,
+                    plan,
+                    flags.allowTeleportOverride(),
+                    flags.fastReplan(),
+                    flags.allowPursuit(),
+                    flags.allowSnap()
+            );
+            double distSq = bot.getBlockPos().getSquaredDistance(stand);
+            if (move.success() || distSq <= BlockInteractionService.SURVIVAL_REACH_SQ) {
+                reached = true;
+                break;
+            }
+        }
+        if (!reached) {
+            return 0;
+        }
+
+        LookController.faceBlock(bot, chestPos);
+        if (!BlockInteractionService.canInteract(bot, chestPos)) {
+            // Try opening a nearby door and retry once before failing.
+            boolean opened = MovementService.tryOpenDoorToward(bot, chestPos);
+            if (opened) {
+                LookController.faceBlock(bot, chestPos);
+            }
+        }
+        if (!BlockInteractionService.canInteract(bot, chestPos)) {
+            LOGGER.info("Store interact blocked: botPos={} chestPos={}", bot.getBlockPos().toShortString(), chestPos.toShortString());
+            return 0;
+        }
+
+        Integer moved = callOnServer(server, () -> {
+            var be2 = source.getWorld().getBlockEntity(chestPos);
+            if (!(be2 instanceof ChestBlockEntity chest)) {
+                return 0;
+            }
+            if (deposit) {
+                return moveItems(bot.getInventory(), chest, filter, amount);
+            }
+            return moveItems(chest, bot.getInventory(), filter, amount);
+        }, 2500, 0);
+        return moved != null ? moved : 0;
     }
 
     private static int parseAmount(String raw, int fallback) {
@@ -119,7 +242,8 @@ public final class ChestStoreService {
                                            BlockPos chestPos,
                                            int amount,
                                            Predicate<ItemStack> filter,
-                                           boolean deposit) {
+                                           boolean deposit,
+                                           MovementFlags movement) {
         if (source == null || botId == null || chestPos == null) {
             return 0;
         }
@@ -144,60 +268,7 @@ public final class ChestStoreService {
             }
         }
 
-        java.util.List<BlockPos> stands = callOnServer(server,
-                () -> findStandCandidatesNearChest(source.getWorld(), bot, chestPos),
-                1200,
-                java.util.List.of());
-        if (stands.isEmpty()) {
-            return 0;
-        }
-        boolean reached = false;
-        for (BlockPos stand : stands) {
-            BlockPos door = BlockInteractionService.findDoorAlongLine(bot, Vec3d.ofCenter(stand), 6.0D);
-            if (door != null) {
-                callOnServer(server, () -> MovementService.tryOpenDoorAt(bot, door), 800, Boolean.FALSE);
-                maybeStepThroughDoor(bot, door, stand);
-            }
-            MovementService.MovementPlan plan = new MovementService.MovementPlan(
-                    MovementService.Mode.DIRECT,
-                    stand,
-                    stand,
-                    null,
-                    null,
-                    bot.getHorizontalFacing());
-            MovementService.MovementResult move = MovementService.execute(bot.getCommandSource(), bot, plan, false, true, true, false);
-            double distSq = bot.getBlockPos().getSquaredDistance(stand);
-            if (move.success() || distSq <= BlockInteractionService.SURVIVAL_REACH_SQ) {
-                reached = true;
-                break;
-            }
-        }
-        if (!reached) {
-            return 0;
-        }
-
-        if (!BlockInteractionService.canInteract(bot, chestPos)) {
-            BlockPos door = BlockInteractionService.findBlockingDoor(bot, chestPos, BlockInteractionService.SURVIVAL_REACH_SQ);
-            if (door != null) {
-                callOnServer(server, () -> MovementService.tryOpenDoorAt(bot, door), 800, Boolean.FALSE);
-            }
-        }
-        if (!BlockInteractionService.canInteract(bot, chestPos)) {
-            LOGGER.info("Store interact blocked: botPos={} chestPos={}", bot.getBlockPos().toShortString(), chestPos.toShortString());
-            return 0;
-        }
-
-        Integer moved = callOnServer(server, () -> {
-            var be2 = source.getWorld().getBlockEntity(chestPos);
-            if (!(be2 instanceof ChestBlockEntity chest)) {
-                return 0;
-            }
-            if (deposit) {
-                return moveItems(bot.getInventory(), chest, filter, amount);
-            }
-            return moveItems(chest, bot.getInventory(), filter, amount);
-        }, 2500, 0);
-        return moved != null ? moved : 0;
+        return performStoreTransferWithBot(source, bot, chestPos, amount, filter, deposit, movement);
     }
 
     private static java.util.List<BlockPos> findStandCandidatesNearChest(net.minecraft.world.World rawWorld, ServerPlayerEntity bot, BlockPos chestPos) {

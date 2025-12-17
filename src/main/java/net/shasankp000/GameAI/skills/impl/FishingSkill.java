@@ -11,10 +11,12 @@ import net.minecraft.item.Items;
 import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
+import net.minecraft.util.hit.HitResult;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.World;
+import net.minecraft.world.RaycastContext;
 import net.minecraft.registry.tag.FluidTags;
 import net.shasankp000.ChatUtils.ChatUtils;
 import net.shasankp000.Entity.LookController;
@@ -34,12 +36,13 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.lang.reflect.Field;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 
 public final class FishingSkill implements Skill {
@@ -48,6 +51,10 @@ public final class FishingSkill implements Skill {
     private static final int MAX_ATTEMPTS_PER_FISH = 6;
     private static final double APPROACH_REACH_SQ = 1.44D;
     private static final int WATER_SEARCH_RADIUS = 12;
+    private static final int MIN_CAST_DISTANCE_SQ = 16;   // >= 4 blocks away
+    private static final int MAX_CAST_DISTANCE_SQ = 100; // <= 10 blocks away
+    private static final int IDEAL_CAST_DISTANCE_SQ = 36; // ~6 blocks away
+    private static final double BOBBER_SEARCH_RADIUS = 24.0D;
     private static final long CAST_WAIT_MS = 6_000L;
     private static final long SWEEP_INTERVAL_MS = 3 * 60 * 1000L; // 3 minutes
     
@@ -57,11 +64,10 @@ public final class FishingSkill implements Skill {
             Items.TROPICAL_FISH,
             Items.PUFFERFISH
     );
-    private static final Set<Item> EXCLUDED_ITEMS = Set.of(
-            Items.FISHING_ROD
-    );
-
-    private static final record FishingSpot(BlockPos water, BlockPos stand) {}
+    private static final record FishingSpot(BlockPos water, BlockPos stand, BlockPos castTarget, List<BlockPos> standOptions) {}
+    private static final int CHEST_SCAN_RADIUS = 16;
+    private static final record StandCandidate(BlockPos pos, boolean adjacent) {}
+    private static final record StandOption(BlockPos stand, BlockPos castTarget, double score) {}
 
     private static final Field CAUGHT_FISH_FIELD = findCaughtFishField();
 
@@ -82,7 +88,20 @@ public final class FishingSkill implements Skill {
             return SkillExecutionResult.failure("Need a fishing rod (3 sticks + 2 strings) before fishing.");
         }
 
+        if (isInventoryFull(bot)) {
+            LOGGER.info("Inventory full at start of fishing. Attempting to store items before selecting a spot.");
+            Optional<BlockPos> storedChest = handleFullInventory(bot, source, bot.getBlockPos());
+            if (storedChest.isEmpty()) {
+                return SkillExecutionResult.failure("Inventory full and couldn't store items.");
+            }
+            if (!BotActions.ensureHotbarItem(bot, Items.FISHING_ROD)) {
+                return SkillExecutionResult.failure("Lost fishing rod during storage routine.");
+            }
+        }
+
+        long spotStart = System.nanoTime();
         FishingSpot spot = findFishingSpot(bot, WATER_SEARCH_RADIUS);
+        long spotElapsedMs = (System.nanoTime() - spotStart) / 1_000_000L;
         if (spot == null) {
             if (hasNearbyWater(bot, WATER_SEARCH_RADIUS)) {
                 return SkillExecutionResult.failure("No safe shoreline block to stand on.");
@@ -94,7 +113,31 @@ public final class FishingSkill implements Skill {
         // Use smarter navigation that can clear leaves
         boolean approached = navigateToSpot(source, bot, stand);
         if (!approached) {
+            for (BlockPos alt : spot.standOptions()) {
+                if (alt.equals(stand)) {
+                    continue;
+                }
+                if (navigateToSpot(source, bot, alt)) {
+                    stand = alt;
+                    approached = true;
+                    LOGGER.info("Switched to alternative fishing stand at {}", stand.toShortString());
+                    break;
+                }
+            }
+        }
+        if (!approached) {
             return SkillExecutionResult.failure("Can't reach the fishing spot (blocked?).");
+        }
+
+        ServerWorld world = (ServerWorld) bot.getEntityWorld();
+        BlockPos castTarget = chooseCastTarget(world, bot, stand, spot.water(), spot.castTarget());
+        LOGGER.info("Fishing spot chosen stand={} water={} cast={} options={}",
+                stand.toShortString(),
+                spot.water().toShortString(),
+                castTarget != null ? castTarget.toShortString() : "none",
+                spot.standOptions().size());
+        if (spotElapsedMs > 250L) {
+            LOGGER.info("Fishing spot search took {}ms", spotElapsedMs);
         }
         
         // Initial positioning adjustment
@@ -117,7 +160,6 @@ public final class FishingSkill implements Skill {
         int attempts = 0;
         int baseline = countFish(bot);
         long lastSweepTime = System.currentTimeMillis();
-        ServerWorld world = (ServerWorld) bot.getEntityWorld();
 
         String modeDesc = (targetFish == Integer.MAX_VALUE ? "until sunset" : targetFish + " catches") + (checkSunset && targetFish != Integer.MAX_VALUE ? " (or sunset)" : "");
         LOGGER.info("Starting fishing session for {} (mode: {})", bot.getName().getString(), modeDesc);
@@ -148,31 +190,89 @@ public final class FishingSkill implements Skill {
 
             if (isInventoryFull(bot)) {
                 LOGGER.info("Inventory full. Attempting to store items.");
-                boolean cleared = handleFullInventory(bot, source, stand);
-                if (!cleared) {
-                    ChatUtils.sendSystemMessage(source, "Inventory full and couldn't store items. Stopping.");
-                    break;
+                Optional<BlockPos> storedChest = handleFullInventory(bot, source, stand);
+                if (storedChest.isEmpty()) {
+                    return SkillExecutionResult.failure("Inventory full and couldn't store items.");
                 }
                 if (!BotActions.ensureHotbarItem(bot, Items.FISHING_ROD)) {
                     return SkillExecutionResult.failure("Lost fishing rod during storage routine.");
                 }
-                // Smart re-approach
-                navigateToSpot(source, bot, stand);
-                adjustPositionToWaterEdge(bot, spot.water());
+                // Re-evaluate best fishing spot after storage
+                FishingSpot newSpot = findFishingSpot(bot, WATER_SEARCH_RADIUS);
+                if (newSpot != null) {
+                    spot = newSpot;
+                    stand = newSpot.stand();
+                    LOGGER.info("Re-selected fishing spot after storage: stand={} water={}", stand.toShortString(), spot.water().toShortString());
+                    if (!navigateToSpot(source, bot, stand)) {
+                        return SkillExecutionResult.failure("Can't return to the fishing spot after storing items.");
+                    }
+                    adjustPositionToWaterEdge(bot, spot.water());
+                }
+                continue;
             }
 
-            aimTowardWater(bot, spot.water());
+            // Ensure we are on solid ground before casting; if not, try returning to our chosen stand first.
+            if (!isStandable(world, bot.getBlockPos()) || world.getFluidState(bot.getBlockPos()).isIn(FluidTags.WATER)) {
+                LOGGER.info("Bot is in water or not on solid ground; returning to fishing stand before casting.");
+                if (!navigateToSpot(source, bot, stand)) {
+                    FishingSpot recoverySpot = findFishingSpot(bot, WATER_SEARCH_RADIUS);
+                    if (recoverySpot != null) {
+                        spot = recoverySpot;
+                        stand = recoverySpot.stand();
+                        if (navigateToSpot(source, bot, stand)) {
+                            adjustPositionToWaterEdge(bot, spot.water());
+                        }
+                    }
+                } else {
+                    adjustPositionToWaterEdge(bot, spot.water());
+                }
+            }
+
+            castTarget = chooseCastTarget(world, bot, stand, spot.water(), castTarget);
+            if (castTarget == null) {
+                LOGGER.warn("No valid cast target found near {}; re-selecting fishing spot.", spot.water().toShortString());
+                FishingSpot recoverySpot = findFishingSpot(bot, WATER_SEARCH_RADIUS);
+                if (recoverySpot == null) {
+                    return SkillExecutionResult.failure("Can't find a valid fishing cast target.");
+                }
+                spot = recoverySpot;
+                stand = recoverySpot.stand();
+                if (!navigateToSpot(source, bot, stand)) {
+                    return SkillExecutionResult.failure("Can't reach a valid fishing spot.");
+                }
+                castTarget = chooseCastTarget(world, bot, stand, spot.water(), spot.castTarget());
+            }
+
+            aimTowardWater(bot, castTarget);
             BotActions.useSelectedItem(bot); // Cast
             
-            // Wait for bobber to land and check validity
+            // Wait for bobber to settle and check validity
             sleep(1200L);
             FishingBobberEntity bobber = findActiveBobber(bot);
-            if (bobber != null && !bobber.isTouchingWater()) {
-                 LOGGER.warn("Bad throw detected (on land). Retracting and adjusting.");
-                 BotActions.useSelectedItem(bot); // Retract
-                 attempts++;
-                 adjustPositionToWaterEdge(bot, spot.water());
-                 continue;
+            if (bobber != null) {
+                boolean ok = false;
+                long settleDeadline = System.currentTimeMillis() + 1000L;
+                while (System.currentTimeMillis() < settleDeadline && !SkillManager.shouldAbortSkill(bot)) {
+                    BlockPos bobberPos = bobber.getBlockPos();
+                    if (world.getFluidState(bobberPos).isIn(FluidTags.WATER) || bobber.isTouchingWater()) {
+                        ok = true;
+                        break;
+                    }
+                    sleep(150L);
+                }
+                if (!ok) {
+                    var bobberPos = bobber.getBlockPos();
+                    var bobberState = world.getBlockState(bobberPos);
+                    var bobberFluid = world.getFluidState(bobberPos);
+                    LOGGER.warn("Bad throw detected (bobber={} block={} fluid={}): retracting and adjusting.",
+                            bobberPos.toShortString(),
+                            bobberState.getBlock().getName().getString(),
+                            bobberFluid.isIn(FluidTags.WATER) ? "water" : "not-water");
+                    BotActions.useSelectedItem(bot); // Retract
+                    attempts++;
+                    adjustPositionToWaterEdge(bot, spot.water());
+                    continue;
+                }
             }
             
             boolean caughtFish = waitForBite(bot);
@@ -183,7 +283,8 @@ public final class FishingSkill implements Skill {
                  continue;
             }
 
-            aimTowardWater(bot, spot.water());
+            castTarget = chooseCastTarget(world, bot, stand, spot.water(), castTarget);
+            aimTowardWater(bot, castTarget != null ? castTarget : spot.water());
             BotActions.useSelectedItem(bot); // Reel in
             waitForBobberRemoval(bot);
             
@@ -217,28 +318,42 @@ public final class FishingSkill implements Skill {
     private boolean navigateToSpot(ServerCommandSource source, ServerPlayerEntity bot, BlockPos target) {
         // Use pathfinding first, disable pursuit fallback to avoid walking off cliffs
         MovementPlan plan = new MovementPlan(Mode.DIRECT, target, target, null, null, null);
-        MovementResult result = MovementService.execute(source, bot, plan, null, false, false, true);
-        
-        if (result.success()) return true;
-        
+        MovementResult result = MovementService.execute(source, bot, plan, Boolean.FALSE, false, false, false);
+        if (result.success()) {
+            return true;
+        }
+
+        String failureDetail = result.detail();
+
         // If failed, try clearing leaves towards target
         Direction dir = Direction.getFacing(target.getX() - bot.getX(), 0, target.getZ() - bot.getZ());
         if (MovementService.clearLeafObstruction(bot, dir)) {
-             // Retry if we cleared something
-             result = MovementService.execute(source, bot, plan, null, false, false, true);
-             if (result.success()) return true;
+            // Retry if we cleared something
+            result = MovementService.execute(source, bot, plan, Boolean.FALSE, false, false, false);
+            if (result.success()) {
+                return true;
+            }
+            failureDetail = result.detail();
         }
-        
+
         // Fallback: Safe nudge (only if very close)
         double distSq = bot.getBlockPos().getSquaredDistance(target);
         if (distSq <= 16.0) {
-             return safeNudge(bot, target);
+            boolean nudged = safeNudge(bot, target);
+            if (nudged) {
+                return true;
+            }
+            failureDetail = "safe nudge failed near " + target.toShortString();
         }
+        LOGGER.warn("Navigation to fishing spot {} failed: {}", target.toShortString(), failureDetail);
         return false;
     }
 
     private boolean safeNudge(ServerPlayerEntity bot, BlockPos target) {
         if (bot == null || target == null) return false;
+        // Only try to nudge if we are reasonably close
+        if (bot.getBlockPos().getSquaredDistance(target) > 25.0) return false;
+
         long deadline = System.currentTimeMillis() + 2500L;
         
         while (System.currentTimeMillis() < deadline) {
@@ -252,7 +367,8 @@ public final class FishingSkill implements Skill {
             BotActions.sprint(bot, false); // No sprint for safety
             
             // Safety check: is ground ahead?
-            Vec3d nextStep = new Vec3d(bot.getX(), bot.getY(), bot.getZ()).add(bot.getRotationVec(1.0f).multiply(0.5));
+            Vec3d currentPos = new Vec3d(bot.getX(), bot.getY(), bot.getZ());
+            Vec3d nextStep = currentPos.add(bot.getRotationVec(1.0f).multiply(0.6));
             BlockPos nextBlock = BlockPos.ofFloored(nextStep);
             if (bot.getEntityWorld().getBlockState(nextBlock.down()).getCollisionShape(bot.getEntityWorld(), nextBlock.down()).isEmpty()) {
                 // Edge detected!
@@ -260,7 +376,7 @@ public final class FishingSkill implements Skill {
                 return false;
             }
             
-            BotActions.moveForward(bot);
+            BotActions.applyMovementInput(bot, Vec3d.ofCenter(target), 0.2);
             // Small jump if needed
             if (target.getY() > bot.getY() + 0.6) {
                 BotActions.autoJumpIfNeeded(bot);
@@ -277,7 +393,6 @@ public final class FishingSkill implements Skill {
         DropSweeper.sweep(source, 10.0, 5.0, 15, 8000L);
         // Return to spot
         navigateToSpot(source, bot, returnPos);
-        aimTowardWater(bot, returnPos); // Rough re-aim, will be refined by loop
     }
 
     private void adjustPositionToWaterEdge(ServerPlayerEntity bot, BlockPos water) {
@@ -299,28 +414,40 @@ public final class FishingSkill implements Skill {
             // Take small steps forward
             for (int i = 0; i < 5; i++) {
                 Vec3d currentPos = new Vec3d(bot.getX(), bot.getY(), bot.getZ());
-                Vec3d nextPos = currentPos.add(bot.getRotationVec(1.0f).multiply(0.2));
-                BlockPos nextBlock = BlockPos.ofFloored(nextPos);
+                Vec3d nextStep = currentPos.add(bot.getRotationVec(1.0f).multiply(0.6));
+                BlockPos nextBlock = BlockPos.ofFloored(nextStep);
                 // Check if ground exists below next position
                 if (bot.getEntityWorld().getBlockState(nextBlock.down()).getCollisionShape(bot.getEntityWorld(), nextBlock.down()).isEmpty()) {
                     // Edge detected! Stop.
                     break;
                 }
                 
-                BotActions.moveForward(bot);
-                sleep(100L);
+                BotActions.applyMovementInput(bot, nextStep, 0.15);
+                sleep(150L);
+                BotActions.stop(bot);
                 
                 if (bot.getBlockPos().getSquaredDistance(water) < 3.0) break;
             }
-            BotActions.stop(bot);
         } finally {
             BotActions.sneak(bot, false);
         }
     }
 
-    private static boolean handleFullInventory(ServerPlayerEntity bot, ServerCommandSource source, BlockPos safeStand) {
+    private static Optional<BlockPos> handleFullInventory(ServerPlayerEntity bot, ServerCommandSource source, BlockPos safeStand) {
+        ArrowKeep arrowKeep = computeArrowKeep(bot);
+        for (BlockPos chest : findNearbyChests(bot, CHEST_SCAN_RADIUS)) {
+            LOGGER.info("Attempting to deposit into nearby chest at {}", chest.toShortString());
+            int deposited = ChestStoreService.depositMatchingWalkOnly(source, bot, chest, stack -> shouldStoreItem(stack, arrowKeep));
+            if (deposited > 0) {
+                LOGGER.info("Stored {} items in chest {}", deposited, chest.toShortString());
+                return Optional.of(chest);
+            }
+            LOGGER.info("Deposit attempt to chest {} yielded {} items", chest.toShortString(), deposited);
+        }
+
         BlockPos chestPos = findNearbyChestWithSpace(bot);
         if (chestPos == null) {
+            LOGGER.info("No nearby empty chest detected around {}; crafting/placing chest...", bot.getBlockPos().toShortString());
             if (!hasItem(bot, Items.CHEST)) {
                 CraftingHelper.craftGeneric(source, bot, source.getPlayer(), "chest", 1, null);
             }
@@ -330,38 +457,92 @@ public final class FishingSkill implements Skill {
         }
         if (chestPos != null) {
             LOGGER.info("Depositing items to chest at {}", chestPos.toShortString());
-            int deposited = ChestStoreService.depositAllExcept(source, bot, chestPos, EXCLUDED_ITEMS);
+            int deposited = ChestStoreService.depositMatchingWalkOnly(source, bot, chestPos, stack -> shouldStoreItem(stack, arrowKeep));
             if (deposited > 0) {
-                return true;
-            } else {
-                LOGGER.warn("Failed to deposit items to chest at {}", chestPos.toShortString());
+                LOGGER.info("Stored {} items in chest {}", deposited, chestPos.toShortString());
+                return Optional.of(chestPos);
             }
+            LOGGER.warn("Chest {} reachable but depositMatching returned {} items.", chestPos.toShortString(), deposited);
+        } else {
+            LOGGER.warn("Unable to locate or place a chest near {} during storage.", safeStand.toShortString());
         }
-        return !isInventoryFull(bot);
+        return Optional.empty();
     }
 
     private static BlockPos findNearbyChestWithSpace(ServerPlayerEntity bot) {
         ServerWorld world = (ServerWorld) bot.getEntityWorld();
         BlockPos origin = bot.getBlockPos();
         for (BlockPos pos : BlockPos.iterate(origin.add(-5, -2, -5), origin.add(5, 2, 5))) {
-            if (world.getBlockState(pos).isOf(Blocks.CHEST) || world.getBlockState(pos).isOf(Blocks.TRAPPED_CHEST)) {
+            if (!world.isChunkLoaded(pos)) {
+                continue;
+            }
+            if (!(world.getBlockState(pos).isOf(Blocks.CHEST) || world.getBlockState(pos).isOf(Blocks.TRAPPED_CHEST))) {
+                continue;
+            }
+            if (world.getBlockEntity(pos) instanceof ChestBlockEntity chest && chestHasSpace(chest)) {
                 return pos.toImmutable();
             }
         }
         return null;
     }
 
+    private static boolean chestHasSpace(ChestBlockEntity chest) {
+        if (chest == null) {
+            return false;
+        }
+        for (int i = 0; i < chest.size(); i++) {
+            ItemStack stack = chest.getStack(i);
+            if (stack.isEmpty()) {
+                return true;
+            }
+            if (stack.getCount() < stack.getMaxCount()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static List<BlockPos> findNearbyChests(ServerPlayerEntity bot, int radius) {
+        if (bot == null || radius <= 0) {
+            return List.of();
+        }
+        World world = bot.getEntityWorld();
+        if (!(world instanceof ServerWorld serverWorld)) {
+            return List.of();
+        }
+        BlockPos origin = bot.getBlockPos();
+        List<BlockPos> chests = new ArrayList<>();
+        for (BlockPos pos : BlockPos.iterate(origin.add(-radius, -2, -radius), origin.add(radius, 2, radius))) {
+            if (!serverWorld.isChunkLoaded(pos)) {
+                continue;
+            }
+            var state = serverWorld.getBlockState(pos);
+            if (state.isOf(Blocks.CHEST) || state.isOf(Blocks.TRAPPED_CHEST)) {
+                chests.add(pos.toImmutable());
+            }
+        }
+        chests.sort(Comparator.comparingDouble(p -> p.getSquaredDistance(origin)));
+        return chests;
+    }
+
     private static BlockPos placeChestNearby(ServerPlayerEntity bot, BlockPos near) {
         ServerWorld world = (ServerWorld) bot.getEntityWorld();
-        for (Direction dir : Direction.Type.HORIZONTAL) {
+        // Prefer positions that do not overwrite the stand and are slightly away from water
+        Direction[] prefs = Direction.values();
+        for (Direction dir : prefs) {
+            if (!dir.getAxis().isHorizontal()) {
+                continue;
+            }
             BlockPos candidate = near.offset(dir);
-            if (world.getBlockState(candidate).isAir() && 
-                world.getBlockState(candidate.down()).isSolidBlock(world, candidate.down())) {
-                
-                BotActions.placeBlockAt(bot, candidate, List.of(Items.CHEST));
-                if (world.getBlockState(candidate).isOf(Blocks.CHEST)) {
-                    return candidate;
-                }
+            if (!world.getBlockState(candidate).isAir()) {
+                continue;
+            }
+            if (!world.getBlockState(candidate.down()).isSolidBlock(world, candidate.down())) {
+                continue;
+            }
+            BotActions.placeBlockAt(bot, candidate, List.of(Items.CHEST));
+            if (world.getBlockState(candidate).isOf(Blocks.CHEST)) {
+                return candidate;
             }
         }
         return null;
@@ -393,17 +574,235 @@ public final class FishingSkill implements Skill {
             if (!world.getFluidState(water).isIn(FluidTags.WATER)) {
                 continue;
             }
-            BlockPos stand = findStandPosition(world, water, origin);
-            if (stand == null) {
+            if (!isOpenWaterSurface(world, water)) {
                 continue;
             }
-            double score = origin.getSquaredDistance(stand);
-            if (score < bestScore) {
-                bestScore = score;
-                best = new FishingSpot(water.toImmutable(), stand);
+
+            List<StandOption> options = findStandOptions(world, water, origin);
+            if (options.isEmpty()) {
+                continue;
+            }
+
+            StandOption primary = options.get(0);
+            if (primary.score() < bestScore) {
+                bestScore = primary.score();
+                best = new FishingSpot(
+                        water.toImmutable(),
+                        primary.stand(),
+                        primary.castTarget(),
+                        options.stream().map(StandOption::stand).toList()
+                );
             }
         }
         return best;
+    }
+
+    private static List<StandOption> findStandOptions(ServerWorld world, BlockPos water, BlockPos botPos) {
+        List<BlockPos> stands = findStandCandidates(world, water, botPos);
+        if (stands.isEmpty()) {
+            return List.of();
+        }
+
+        List<StandOption> options = new ArrayList<>();
+        for (BlockPos stand : stands) {
+            BlockPos castTarget = chooseCastTargetHeuristic(world, stand, water);
+            if (castTarget == null) {
+                continue;
+            }
+            double castDistSq = stand.getSquaredDistance(castTarget);
+            double castDistancePenalty = Math.abs(castDistSq - IDEAL_CAST_DISTANCE_SQ) / (double) IDEAL_CAST_DISTANCE_SQ;
+            int openness = countOpenWaterSurface(world, castTarget, 1);
+            int depth = estimateWaterDepth(world, castTarget, 6);
+
+            // Prefer open/deep water and a reasonable cast distance.
+            double quality = castDistancePenalty - openness * 0.35 - depth * 0.55;
+
+            // Weak travel penalty: don't let bot/commander position dominate the choice.
+            double travelPenalty = botPos.getSquaredDistance(stand) * 0.01;
+
+            options.add(new StandOption(stand.toImmutable(), castTarget.toImmutable(), quality + travelPenalty));
+        }
+
+        options.sort(Comparator.comparingDouble(StandOption::score));
+        return options;
+    }
+
+    private static BlockPos chooseCastTarget(ServerWorld world, ServerPlayerEntity bot, BlockPos stand, BlockPos waterAnchor, BlockPos preferred) {
+        if (world == null || bot == null || stand == null || waterAnchor == null) {
+            return null;
+        }
+
+        if (preferred != null && isOpenWaterSurface(world, preferred) && isCastPathClear(world, bot, preferred) && isReasonableCastDistance(stand, preferred)) {
+            return preferred;
+        }
+
+        return chooseCastTargetAlongLine(world, bot, stand, waterAnchor);
+    }
+
+    private static BlockPos chooseCastTargetHeuristic(ServerWorld world, BlockPos stand, BlockPos waterAnchor) {
+        return chooseCastTargetAlongLine(world, null, stand, waterAnchor);
+    }
+
+    private static BlockPos chooseCastTargetAlongLine(ServerWorld world, ServerPlayerEntity bot, BlockPos stand, BlockPos waterAnchor) {
+        if (world == null || stand == null || waterAnchor == null) {
+            return null;
+        }
+
+        Vec3d standCenter = Vec3d.ofCenter(stand);
+        Vec3d waterCenter = Vec3d.ofCenter(waterAnchor);
+        Vec3d dir = waterCenter.subtract(standCenter).multiply(1.0, 0.0, 1.0);
+        double lenSq = dir.lengthSquared();
+        if (lenSq < 1.0E-6) {
+            return isOpenWaterSurface(world, waterAnchor) ? waterAnchor.toImmutable() : null;
+        }
+        dir = dir.normalize();
+
+        BlockPos best = null;
+        double bestScore = Double.MAX_VALUE;
+
+        // Step into the water away from the shoreline, with small lateral wiggle room.
+        for (int step = 2; step <= 9; step++) {
+            Vec3d base = waterCenter.add(dir.multiply(step));
+            BlockPos basePos = BlockPos.ofFloored(base.x, waterAnchor.getY(), base.z);
+            for (int ox = -1; ox <= 1; ox++) {
+                for (int oz = -1; oz <= 1; oz++) {
+                    BlockPos probe = basePos.add(ox, 0, oz);
+                    BlockPos surface = findOpenWaterSurfaceAt(world, probe.getX(), probe.getZ(), waterAnchor.getY(), 2);
+                    if (surface == null) {
+                        continue;
+                    }
+                    if (!isReasonableCastDistance(stand, surface)) {
+                        continue;
+                    }
+                    if (bot != null && !isCastPathClear(world, bot, surface)) {
+                        continue;
+                    }
+
+                    double distSq = stand.getSquaredDistance(surface);
+                    double distPenalty = Math.abs(distSq - IDEAL_CAST_DISTANCE_SQ) / (double) IDEAL_CAST_DISTANCE_SQ;
+                    int openness = countOpenWaterSurface(world, surface, 1);
+                    int depth = estimateWaterDepth(world, surface, 6);
+                    double score = distPenalty - openness * 0.35 - depth * 0.55;
+
+                    if (score < bestScore) {
+                        bestScore = score;
+                        best = surface.toImmutable();
+                    }
+                }
+            }
+        }
+
+        if (best != null) {
+            return best;
+        }
+
+        BlockPos fallback = findOpenWaterSurfaceNear(world, waterAnchor, 2, 2);
+        if (fallback == null) {
+            return null;
+        }
+        if (bot != null && !isCastPathClear(world, bot, fallback)) {
+            return null;
+        }
+        return fallback.toImmutable();
+    }
+
+    private static BlockPos findOpenWaterSurfaceAt(ServerWorld world, int x, int z, int baseY, int verticalRadius) {
+        if (world == null) {
+            return null;
+        }
+        for (int dy = 0; dy <= verticalRadius; dy++) {
+            BlockPos up = new BlockPos(x, baseY + dy, z);
+            if (world.isChunkLoaded(up) && isOpenWaterSurface(world, up)) {
+                return up.toImmutable();
+            }
+            if (dy == 0) {
+                continue;
+            }
+            BlockPos down = new BlockPos(x, baseY - dy, z);
+            if (world.isChunkLoaded(down) && isOpenWaterSurface(world, down)) {
+                return down.toImmutable();
+            }
+        }
+        return null;
+    }
+
+    private static BlockPos findOpenWaterSurfaceNear(ServerWorld world, BlockPos around, int horizontalRadius, int verticalRadius) {
+        if (world == null || around == null || horizontalRadius < 0 || verticalRadius < 0) {
+            return null;
+        }
+        BlockPos best = null;
+        double bestDist = Double.MAX_VALUE;
+        int baseY = around.getY();
+        for (int dx = -horizontalRadius; dx <= horizontalRadius; dx++) {
+            for (int dz = -horizontalRadius; dz <= horizontalRadius; dz++) {
+                BlockPos surface = findOpenWaterSurfaceAt(world, around.getX() + dx, around.getZ() + dz, baseY, verticalRadius);
+                if (surface == null) {
+                    continue;
+                }
+                double distSq = around.getSquaredDistance(surface);
+                if (distSq < bestDist) {
+                    bestDist = distSq;
+                    best = surface.toImmutable();
+                }
+            }
+        }
+        return best;
+    }
+
+    private static boolean isReasonableCastDistance(BlockPos stand, BlockPos target) {
+        double distSq = stand.getSquaredDistance(target);
+        return distSq >= MIN_CAST_DISTANCE_SQ && distSq <= MAX_CAST_DISTANCE_SQ;
+    }
+
+    private static boolean isOpenWaterSurface(ServerWorld world, BlockPos pos) {
+        if (world == null || pos == null) {
+            return false;
+        }
+        if (!world.getFluidState(pos).isIn(FluidTags.WATER)) {
+            return false;
+        }
+        return isSpaceClear(world, pos.up());
+    }
+
+    private static int countOpenWaterSurface(ServerWorld world, BlockPos center, int radius) {
+        int count = 0;
+        for (BlockPos pos : BlockPos.iterate(center.add(-radius, 0, -radius), center.add(radius, 0, radius))) {
+            if (!world.isChunkLoaded(pos)) {
+                continue;
+            }
+            if (isOpenWaterSurface(world, pos)) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    private static int estimateWaterDepth(ServerWorld world, BlockPos surface, int maxDepth) {
+        int depth = 0;
+        for (int i = 0; i < maxDepth; i++) {
+            BlockPos pos = surface.down(i);
+            if (!world.isChunkLoaded(pos)) {
+                break;
+            }
+            if (!world.getFluidState(pos).isIn(FluidTags.WATER)) {
+                break;
+            }
+            depth++;
+        }
+        return depth;
+    }
+
+    private static boolean isCastPathClear(ServerWorld world, ServerPlayerEntity bot, BlockPos targetWater) {
+        Vec3d from = bot.getCameraPosVec(1.0F);
+        Vec3d to = Vec3d.ofCenter(targetWater).add(0.0, 0.15, 0.0);
+        var hit = world.raycast(new RaycastContext(
+                from,
+                to,
+                RaycastContext.ShapeType.COLLIDER,
+                RaycastContext.FluidHandling.NONE,
+                bot
+        ));
+        return hit.getType() == HitResult.Type.MISS;
     }
 
     private static boolean hasNearbyWater(ServerPlayerEntity bot, int radius) {
@@ -426,14 +825,12 @@ public final class FishingSkill implements Skill {
         return false;
     }
 
-    private static BlockPos findStandPosition(ServerWorld world, BlockPos water, BlockPos botPos) {
+    private static List<BlockPos> findStandCandidates(ServerWorld world, BlockPos water, BlockPos botPos) {
+        List<StandCandidate> candidates = new ArrayList<>();
         if (world == null || water == null || botPos == null) {
-            return null;
+            return List.of();
         }
-        BlockPos best = null;
-        double bestDist = Double.MAX_VALUE;
         
-        // Expanded search range for cliffs/ledges
         BlockPos min = water.add(-3, -1, -3);
         BlockPos max = water.add(3, 4, 3);
         
@@ -441,32 +838,32 @@ public final class FishingSkill implements Skill {
             if (candidate.equals(water)) {
                 continue;
             }
-            if (!isAdjacentToWater(candidate, water) && !canCastFrom(candidate, water)) {
+            boolean adjacent = isAdjacentToWater(candidate, water);
+            if (!adjacent && !canCastFrom(candidate, water)) {
                 continue;
             }
             if (!isStandable(world, candidate)) {
                 continue;
             }
-            double dist = botPos.getSquaredDistance(candidate);
-            if (dist < bestDist) {
-                bestDist = dist;
-                best = candidate;
-            }
+            candidates.add(new StandCandidate(candidate.toImmutable(), adjacent));
         }
-        if (best == null) {
+        if (candidates.isEmpty()) {
             BlockPos above = water.up();
             if (isStandable(world, above)) {
-                best = above;
+                candidates.add(new StandCandidate(above.toImmutable(), true));
             }
         }
-        return best;
+        candidates.sort(Comparator
+                .comparing((StandCandidate c) -> !c.adjacent())
+                .thenComparingDouble(c -> botPos.getSquaredDistance(c.pos())));
+        return candidates.stream().map(StandCandidate::pos).toList();
     }
     
     private static boolean canCastFrom(BlockPos stand, BlockPos water) {
         // Simple heuristic: if stand is higher than water and within casting distance
         int dy = stand.getY() - water.getY();
         double distSq = stand.getSquaredDistance(water);
-        return dy >= 0 && dy <= 5 && distSq <= 20.0;
+        return dy >= 0 && dy <= 5 && distSq <= MAX_CAST_DISTANCE_SQ;
     }
 
     private static boolean isAdjacentToWater(BlockPos candidate, BlockPos water) {
@@ -483,10 +880,11 @@ public final class FishingSkill implements Skill {
         if (world == null || pos == null) {
             return false;
         }
-        BlockState body = world.getBlockState(pos);
-        BlockState head = world.getBlockState(pos.up());
         BlockPos below = pos.down();
         BlockState belowState = world.getBlockState(below);
+        if (world.getFluidState(pos).isIn(FluidTags.WATER) || world.getFluidState(pos.up()).isIn(FluidTags.WATER)) {
+            return false;
+        }
         if (!isSpaceClear(world, pos) || !isSpaceClear(world, pos.up())) {
             return false;
         }
@@ -587,7 +985,7 @@ bot.getName().getString());
         if (!(world instanceof ServerWorld serverWorld)) {
             return null;
         }
-        var bbox = bot.getBoundingBox().expand(8.0D, 4.0D, 8.0D);
+        var bbox = bot.getBoundingBox().expand(BOBBER_SEARCH_RADIUS, 6.0D, BOBBER_SEARCH_RADIUS);
         for (FishingBobberEntity bobber : serverWorld.getEntitiesByClass(FishingBobberEntity.class, bbox, entity -> {
             var owner = entity.getPlayerOwner();
             return owner != null && Objects.equals(owner.getUuid(), bot.getUuid());
@@ -608,6 +1006,78 @@ bot.getName().getString());
             total += countItem(bot, fish);
         }
         return total;
+    }
+
+    private record ArrowKeep(boolean keepSpectral, int bestNormalArrowCount) {}
+
+    private static ArrowKeep computeArrowKeep(ServerPlayerEntity bot) {
+        if (bot == null) {
+            return new ArrowKeep(false, 0);
+        }
+        boolean hasSpectral = false;
+        int bestNormalCount = 0;
+        for (int i = 0; i < bot.getInventory().size(); i++) {
+            ItemStack stack = bot.getInventory().getStack(i);
+            if (stack == null || stack.isEmpty()) {
+                continue;
+            }
+            Item item = stack.getItem();
+            if (item == Items.SPECTRAL_ARROW) {
+                hasSpectral = true;
+            } else if (item == Items.ARROW) {
+                bestNormalCount = Math.max(bestNormalCount, stack.getCount());
+            }
+        }
+        return new ArrowKeep(hasSpectral, bestNormalCount);
+    }
+
+    private static boolean isArrowStack(ItemStack stack) {
+        if (stack == null || stack.isEmpty()) {
+            return false;
+        }
+        Item item = stack.getItem();
+        if (item == Items.ARROW || item == Items.SPECTRAL_ARROW) {
+            return true;
+        }
+        // Avoid compile-time dependencies on other arrow item types; treat anything with "arrow" key as an arrow.
+        String key = item.getTranslationKey();
+        return key != null && key.toLowerCase(java.util.Locale.ROOT).contains("arrow");
+    }
+
+    private static boolean shouldStoreItem(ItemStack stack, ArrowKeep arrowKeep) {
+        if (stack == null || stack.isEmpty()) {
+            return false;
+        }
+        Item item = stack.getItem();
+        if (item == Items.FISHING_ROD) {
+            return false;
+        }
+        if (item == Items.ROTTEN_FLESH) {
+            return true;
+        }
+        if (stack.getComponents().get(net.minecraft.component.DataComponentTypes.CUSTOM_NAME) != null) {
+            return false;
+        }
+        if (stack.getComponents().get(net.minecraft.component.DataComponentTypes.FOOD) != null) {
+            return false;
+        }
+        if (stack.isDamageable()) {
+            return false;
+        }
+        if (isArrowStack(stack)) {
+            // Keep best arrows: always keep spectral arrows; otherwise keep the largest normal arrow stack.
+            if (item == Items.SPECTRAL_ARROW) {
+                return !arrowKeep.keepSpectral();
+            }
+            if (item == Items.ARROW) {
+                return stack.getCount() < arrowKeep.bestNormalArrowCount();
+            }
+            // Unknown arrow type: default to keeping it (likely "best" tipped arrows).
+            return false;
+        }
+
+        // Default: store almost everything to free space (safer than stopping).
+        return true;
     }
 
     private static boolean isInventoryFull(ServerPlayerEntity bot) {

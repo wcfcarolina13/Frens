@@ -7,6 +7,7 @@ import net.shasankp000.GameAI.services.TaskService;
 import net.shasankp000.GameAI.skills.impl.CollectDirtSkill;
 import net.shasankp000.GameAI.skills.impl.DirtShovelSkill;
 import net.shasankp000.GameAI.skills.impl.DropSweepSkill;
+import net.shasankp000.GameAI.skills.impl.FishingSkill;
 import net.shasankp000.GameAI.skills.impl.MiningSkill;
 import net.shasankp000.GameAI.skills.impl.ShelterSkill;
 import net.shasankp000.GameAI.skills.impl.StripMineSkill;
@@ -35,6 +36,7 @@ public final class SkillManager {
         register(new StripMineSkill());
         register(new WoodcutSkill());
         register(new ShelterSkill());
+        register(new FishingSkill());
         register(new net.shasankp000.GameAI.skills.impl.FarmSkill());
         register(new net.shasankp000.GameAI.skills.impl.WoolSkill());
     }

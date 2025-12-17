@@ -116,6 +116,7 @@ public class modCommandRegistry {
     private static final ExecutorService skillExecutor = Executors.newCachedThreadPool();
     private static final double DEFAULT_GUARD_RADIUS = 6.0D;
     public static boolean isTrainingMode = false;
+    public static boolean enableReinforcementLearning = false;
     public static String botName = "";
     public static final Logger LOGGER = LoggerFactory.getLogger("mod-command-registry");
 
@@ -137,8 +138,8 @@ public class modCommandRegistry {
     public static void register() {
         CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> {
             dispatcher.register(
-                    literal("bot")
-                        .then(literal("spawn")
+	                    literal("bot")
+	                        .then(literal("spawn")
                                 .then(CommandManager.argument("bot_name", StringArgumentType.string())
                                         .then(CommandManager.argument("mode", StringArgumentType.string())
                                                 .executes(context -> {
@@ -159,11 +160,22 @@ public class modCommandRegistry {
                                                 })
                                         )
                                 )
-                        )
-                        .then(literal("llm")
-                                .then(literal("world")
-                                        .then(CommandManager.argument("mode", StringArgumentType.string())
-                                                .executes(context -> {
+	                        )
+	                        .then(literal("rl")
+	                                .then(CommandManager.argument("mode", StringArgumentType.string())
+	                                        .executes(context -> {
+	                                            boolean enabled = parseToggle(StringArgumentType.getString(context, "mode"));
+	                                            enableReinforcementLearning = enabled;
+	                                            ChatUtils.sendSystemMessage(context.getSource(),
+	                                                    "Reinforcement learning loop set to " + (enabled ? "on" : "off"));
+	                                            return 1;
+	                                        })
+	                                )
+	                        )
+	                        .then(literal("llm")
+	                                .then(literal("world")
+	                                        .then(CommandManager.argument("mode", StringArgumentType.string())
+	                                                .executes(context -> {
                                                     boolean enabled = parseToggle(StringArgumentType.getString(context, "mode"));
                                                     String key = context.getSource().getServer().getSaveProperties().getLevelName()
                                                             + ":" + context.getSource().getWorld().getRegistryKey().getValue();
@@ -226,9 +238,15 @@ public class modCommandRegistry {
                                                 null))
                                         .then(CommandManager.argument("arguments", StringArgumentType.greedyString())
                                                 .executes(context -> executeSkillTargets(context,
-                                                        StringArgumentType.getString(context, "skill_name"),
-                                                        StringArgumentType.getString(context, "arguments"))))
+                                                StringArgumentType.getString(context, "skill_name"),
+                                                StringArgumentType.getString(context, "arguments"))))
                                 )
+                        )
+                        .then(literal("fish")
+                                .executes(context -> executeSkillTargets(context, "fish", null))
+                                .then(CommandManager.argument("arguments", StringArgumentType.greedyString())
+                                        .executes(context -> executeSkillTargets(context, "fish",
+                                                StringArgumentType.getString(context, "arguments"))))
                         )
                         .then(literal("shelter")
                                 .then(literal("hovel")
@@ -1677,12 +1695,34 @@ public class modCommandRegistry {
         if (bot == null) {
             return 0;
         }
-        int crafted = CraftingHelper.craftGeneric(source, bot, commander, item, amount, material);
-        if (crafted > 0) {
-            ChatUtils.sendSystemMessage(source, "Crafted " + crafted + " " + item + (crafted == 1 ? "" : "s") + ".");
-            return 1;
+        UUID botUuid = bot.getUuid();
+        var ticketOpt = TaskService.beginSkill("craft", source, botUuid);
+        if (ticketOpt.isEmpty()) {
+            ChatUtils.sendSystemMessage(source, "Another task is already running.");
+            return 0;
         }
-        return 0;
+        TaskService.TaskTicket ticket = ticketOpt.get();
+
+        skillExecutor.submit(() -> {
+            int crafted = 0;
+            boolean success = false;
+            try {
+                crafted = CraftingHelper.craftGeneric(source, bot, commander, item, amount, material);
+                success = crafted > 0 && !TaskService.isAbortRequested(botUuid);
+                if (crafted > 0) {
+                    int finalCrafted = crafted;
+                    source.getServer().execute(() ->
+                            ChatUtils.sendSystemMessage(source, "Crafted " + finalCrafted + " " + item + (finalCrafted == 1 ? "" : "s") + "."));
+                }
+            } catch (Exception e) {
+                LOGGER.error("Unexpected error in /bot craft {}", item, e);
+                source.getServer().execute(() -> ChatUtils.sendSystemMessage(source, "An unexpected error occurred trying to craft that."));
+            } finally {
+                TaskService.complete(ticket, success);
+            }
+        });
+
+        return 1;
     }
 
     private static int executePlaceGeneric(CommandContext<ServerCommandSource> context, String item, int count, ServerPlayerEntity bot) {
@@ -2671,6 +2711,8 @@ public class modCommandRegistry {
             return 0;
         }
         String alias = bot.getName().getString();
+        String caller = context.getSource() != null ? context.getSource().getName() : "(unknown)";
+        LOGGER.info("Stop command invoked: caller={} targetBot={} trainingMode={}", caller, alias, isTrainingMode);
         // Ensure follow state is cleared so the bot truly stops.
         net.shasankp000.GameAI.BotEventHandler.stopFollowing(bot);
         stopMoving(server, context.getSource(), alias);
