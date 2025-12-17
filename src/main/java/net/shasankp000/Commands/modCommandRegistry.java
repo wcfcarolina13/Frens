@@ -115,7 +115,7 @@ public class modCommandRegistry {
 
     private static final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
     private static final ExecutorService skillExecutor = Executors.newCachedThreadPool();
-    private static final double DEFAULT_GUARD_RADIUS = 6.0D;
+    static final double DEFAULT_GUARD_RADIUS = 6.0D;
     public static boolean isTrainingMode = false;
     public static boolean enableReinforcementLearning = false;
     public static String botName = "";
@@ -203,141 +203,31 @@ public class modCommandRegistry {
                                 )
                         )
 
-                        .then(BotInventoryCommands.build())
-                        .then(BotSkillCommands.buildSkill())
-                        .then(BotSkillCommands.buildFish())
-                        .then(BotSkillCommands.buildShelter())
-                        .then(literal("stop")
-                                .executes(context -> executeStopTargets(context, (String) null))
-                                .then(CommandManager.argument("target", StringArgumentType.string())
-                                        .executes(context -> executeStopTargets(context,
-                                                StringArgumentType.getString(context, "target"))))
-                        )
-                        .then(literal("resume")
-                                .executes(context -> executeResumeTargets(context, (String) null))
-                                .then(CommandManager.argument("target", StringArgumentType.string())
-                                        .executes(context -> executeResumeTargets(context,
-                                                StringArgumentType.getString(context, "target"))))
-                        )
-                        .then(literal("heal")
-                                .executes(context -> executeHealTargets(context, (String) null))
-                                .then(CommandManager.argument("target", StringArgumentType.string())
-                                        .executes(context -> executeHealTargets(context,
-                                                StringArgumentType.getString(context, "target"))))
-                        )
-                        .then(BotUtilityCommands.buildDirection())
-                        .then(BotUtilityCommands.buildZone())
-                        .then(BotUtilityCommands.buildLookPlayer())
-                        .then(BotUtilityCommands.buildFollow())
-                        .then(literal("come")
-                                .executes(context -> executeComeTargets(context, null))
-                                .then(CommandManager.argument("bots", StringArgumentType.string())
-                                        .executes(context -> executeComeTargets(context,
-                                                StringArgumentType.getString(context, "bots"))))
-                        )
-                        .then(literal("guard")
-                                .executes(context -> executeGuard(context, getActiveBotOrThrow(context), DEFAULT_GUARD_RADIUS))
-                                .then(CommandManager.argument("radius", DoubleArgumentType.doubleArg(3.0D, 32.0D))
-                                        .executes(context -> executeGuard(context, getActiveBotOrThrow(context), DoubleArgumentType.getDouble(context, "radius")))
-                                )
-                                .then(CommandManager.argument("bot", EntityArgumentType.player())
-                                        .executes(context -> executeGuard(context, EntityArgumentType.getPlayer(context, "bot"), DEFAULT_GUARD_RADIUS))
-                                        .then(CommandManager.argument("radius", DoubleArgumentType.doubleArg(3.0D, 32.0D))
-                                                .executes(context -> executeGuard(context, EntityArgumentType.getPlayer(context, "bot"), DoubleArgumentType.getDouble(context, "radius")))
-                                        )
-                                )
-                        )
-                        .then(literal("patrol")
-                                .executes(context -> executeGuard(context, getActiveBotOrThrow(context), DEFAULT_GUARD_RADIUS))
-                                .then(CommandManager.argument("radius", DoubleArgumentType.doubleArg(3.0D, 32.0D))
-                                        .executes(context -> executeGuard(context, getActiveBotOrThrow(context), DoubleArgumentType.getDouble(context, "radius")))
-                                )
-                                .then(CommandManager.argument("bot", EntityArgumentType.player())
-                                        .executes(context -> executeGuard(context, EntityArgumentType.getPlayer(context, "bot"), DEFAULT_GUARD_RADIUS))
-                                        .then(CommandManager.argument("radius", DoubleArgumentType.doubleArg(3.0D, 32.0D))
-                                                .executes(context -> executeGuard(context, EntityArgumentType.getPlayer(context, "bot"), DoubleArgumentType.getDouble(context, "radius")))
-                                        )
-                                )
-                        )
-                        .then(literal("stay")
-                                .executes(context -> executeStay(context, getActiveBotOrThrow(context)))
-                                .then(CommandManager.argument("bot", EntityArgumentType.player())
-                                        .executes(context -> executeStay(context, EntityArgumentType.getPlayer(context, "bot")))
-                                )
-                        )
-                        .then(literal("stay_here")
-                                .executes(context -> executeStay(context, getActiveBotOrThrow(context)))
-                                .then(CommandManager.argument("bot", EntityArgumentType.player())
-                                        .executes(context -> executeStay(context, EntityArgumentType.getPlayer(context, "bot")))
-                                )
-                        )
-                        .then(literal("return_to_base")
-                                .executes(context -> executeReturnToBase(context, getActiveBotOrThrow(context), context.getSource().getPlayer()))
-                                .then(CommandManager.argument("bot", EntityArgumentType.player())
-                                        .executes(context -> executeReturnToBase(context, EntityArgumentType.getPlayer(context, "bot"), context.getSource().getPlayer()))
-                                )
-                        )
-                        .then(literal("return")
-                                .executes(context -> executeReturnToBase(context, getActiveBotOrThrow(context), context.getSource().getPlayer()))
-                                .then(CommandManager.argument("bot", EntityArgumentType.player())
-                                        .executes(context -> executeReturnToBase(context, EntityArgumentType.getPlayer(context, "bot"), context.getSource().getPlayer()))
-                                )
-                        )
-                        .then(literal("fight_with_me")
-                                .then(CommandManager.argument("mode", StringArgumentType.string())
-                                        .executes(context -> executeAssistToggle(context, getActiveBotOrThrow(context), parseAssistMode(StringArgumentType.getString(context, "mode"))))
-                                )
-                                .then(CommandManager.argument("bot", EntityArgumentType.player())
-                                        .then(CommandManager.argument("mode", StringArgumentType.string())
-                                                .executes(context -> executeAssistToggle(context, EntityArgumentType.getPlayer(context, "bot"), parseAssistMode(StringArgumentType.getString(context, "mode"))))
-                                        )
-                                )
-                        )
-                        .then(literal("defend")
-                                .then(literal("nearby")
-                                        .then(literal("bots")
-                                                .then(CommandManager.argument("mode", StringArgumentType.string())
-                                                        .executes(context -> executeDefendTargets(
-                                                                context,
-                                                                StringArgumentType.getString(context, "mode"),
-                                                                null))
-                                                        .then(CommandManager.argument("targets", StringArgumentType.string())
-                                                                .executes(context -> executeDefendTargets(
-                                                                        context,
-                                                                        StringArgumentType.getString(context, "mode"),
-                                                                        StringArgumentType.getString(context, "targets"))))
-                                                )
-                                        )
-                                )
-                        )
-                        .then(literal("stance")
-                                .then(CommandManager.argument("style", StringArgumentType.string())
-                                        .executes(context -> executeCombatStyle(context, getActiveBotOrThrow(context), parseCombatStyle(StringArgumentType.getString(context, "style"))))
-                                )
-                                .then(CommandManager.argument("bot", EntityArgumentType.player())
-                                        .then(CommandManager.argument("style", StringArgumentType.string())
-                                                .executes(context -> executeCombatStyle(context, EntityArgumentType.getPlayer(context, "bot"), parseCombatStyle(StringArgumentType.getString(context, "style"))))
-                                        )
-                                )
-                        )
-                        .then(literal("equip")
-                                .executes(context -> executeEquip(context, getActiveBotOrThrow(context)))
-                                .then(CommandManager.argument("bot", EntityArgumentType.player())
-                                        .executes(context -> {
-                                            ServerPlayerEntity resolvedBot = EntityArgumentType.getPlayer(context, "bot");
-                                            if (resolvedBot == null) {
-                                                context.getSource().sendError(Text.literal("Error: Bot '" + StringArgumentType.getString(context, "bot") + "' not found or not a player."));
-                                                LOGGER.warn("Resolved bot for /bot equip <bot_name> was null.");
-                                                return 0;
-                                            }
-                                            LOGGER.info("Resolved bot for /bot equip <bot_name>: {} ({})", resolvedBot.getName().getString(), resolvedBot.getUuid());
-                                            return executeEquip(context, resolvedBot);
-                                        })
-                                )
-                        )
-                        .then(literal("config")
-                                .then(literal("teleportDuringSkills")
-                                        .then(CommandManager.argument("mode", StringArgumentType.string())
+	                        .then(BotInventoryCommands.build())
+	                        .then(BotSkillCommands.buildSkill())
+	                        .then(BotSkillCommands.buildFish())
+	                        .then(BotSkillCommands.buildShelter())
+	                        .then(BotLifecycleCommands.buildStop())
+	                        .then(BotLifecycleCommands.buildResume())
+	                        .then(BotLifecycleCommands.buildHeal())
+	                        .then(BotUtilityCommands.buildDirection())
+	                        .then(BotUtilityCommands.buildZone())
+	                        .then(BotUtilityCommands.buildLookPlayer())
+	                        .then(BotUtilityCommands.buildFollow())
+	                        .then(BotMovementCommands.buildCome())
+	                        .then(BotMovementCommands.buildGuard())
+	                        .then(BotMovementCommands.buildPatrol())
+	                        .then(BotMovementCommands.buildStay("stay"))
+	                        .then(BotMovementCommands.buildStay("stay_here"))
+	                        .then(BotMovementCommands.buildReturn("return_to_base"))
+	                        .then(BotMovementCommands.buildReturn("return"))
+	                        .then(BotCombatCommands.buildAssist())
+	                        .then(BotCombatCommands.buildDefend())
+	                        .then(BotCombatCommands.buildStance())
+	                        .then(BotEquipCommands.build())
+	                        .then(literal("config")
+	                                .then(literal("teleportDuringSkills")
+	                                        .then(CommandManager.argument("mode", StringArgumentType.string())
                                                 .executes(context -> executeTeleportConfigTargets(
                                                         context,
                                                         null,
@@ -2237,7 +2127,7 @@ public class modCommandRegistry {
         return 1;
     }
 
-    private static int executeComeTargets(CommandContext<ServerCommandSource> context, String targetArg) throws CommandSyntaxException {
+    static int executeComeTargets(CommandContext<ServerCommandSource> context, String targetArg) throws CommandSyntaxException {
         ServerPlayerEntity commander = context.getSource().getPlayer();
         if (commander == null) {
             throw new SimpleCommandExceptionType(Text.literal("Only players can call bots to come to them.")).create();
@@ -2446,25 +2336,25 @@ public class modCommandRegistry {
         return 1;
     }
 
-    private static int executeGuard(CommandContext<ServerCommandSource> context, ServerPlayerEntity bot, double radius) {
+    static int executeGuard(CommandContext<ServerCommandSource> context, ServerPlayerEntity bot, double radius) {
         String result = BotEventHandler.setGuardMode(bot, radius);
         ChatUtils.sendSystemMessage(context.getSource(), result);
         return 1;
     }
 
-    private static int executeStay(CommandContext<ServerCommandSource> context, ServerPlayerEntity bot) {
+    static int executeStay(CommandContext<ServerCommandSource> context, ServerPlayerEntity bot) {
         String result = BotEventHandler.setStayMode(bot);
         ChatUtils.sendSystemMessage(context.getSource(), result);
         return 1;
     }
 
-    private static int executeReturnToBase(CommandContext<ServerCommandSource> context, ServerPlayerEntity bot, ServerPlayerEntity commander) {
+    static int executeReturnToBase(CommandContext<ServerCommandSource> context, ServerPlayerEntity bot, ServerPlayerEntity commander) {
         String result = BotEventHandler.setReturnToBase(bot, commander);
         ChatUtils.sendSystemMessage(context.getSource(), result);
         return 1;
     }
 
-    private static int executeEquip(CommandContext<ServerCommandSource> context, ServerPlayerEntity bot) {
+    static int executeEquip(CommandContext<ServerCommandSource> context, ServerPlayerEntity bot) {
         ServerPlayerEntity commander = null;
         try {
             commander = context.getSource().getPlayer();
@@ -2475,13 +2365,13 @@ public class modCommandRegistry {
         return 1;
     }
 
-    private static int executeAssistToggle(CommandContext<ServerCommandSource> context, ServerPlayerEntity bot, boolean enable) {
+    static int executeAssistToggle(CommandContext<ServerCommandSource> context, ServerPlayerEntity bot, boolean enable) {
         String result = BotEventHandler.toggleAssistAllies(bot, enable);
         ChatUtils.sendSystemMessage(context.getSource(), result);
         return 1;
     }
 
-    private static int executeDefendTargets(CommandContext<ServerCommandSource> context, String modeRaw, String targetArg) throws CommandSyntaxException {
+    static int executeDefendTargets(CommandContext<ServerCommandSource> context, String modeRaw, String targetArg) throws CommandSyntaxException {
         boolean enable = parseAssistMode(modeRaw);
         List<ServerPlayerEntity> bots = BotTargetingService.resolve(context.getSource(), targetArg);
         for (ServerPlayerEntity bot : bots) {
@@ -2496,7 +2386,7 @@ public class modCommandRegistry {
         return bots.size();
     }
 
-    private static int executeCombatStyle(CommandContext<ServerCommandSource> context, ServerPlayerEntity bot, BotEventHandler.CombatStyle style) {
+    static int executeCombatStyle(CommandContext<ServerCommandSource> context, ServerPlayerEntity bot, BotEventHandler.CombatStyle style) {
         String result = BotEventHandler.setCombatStyle(bot, style);
         ChatUtils.sendSystemMessage(context.getSource(), result);
         return 1;
@@ -2690,7 +2580,7 @@ public class modCommandRegistry {
         return String.join(", ", names) + " and " + last;
     }
 
-    private static int executeStopTargets(CommandContext<ServerCommandSource> context, String targetArg) throws CommandSyntaxException {
+    static int executeStopTargets(CommandContext<ServerCommandSource> context, String targetArg) throws CommandSyntaxException {
         List<ServerPlayerEntity> targets = BotTargetingService.resolve(context.getSource(), targetArg);
         boolean isAll = targetArg != null && "all".equalsIgnoreCase(targetArg.trim());
         return executeStopTargets(context, targets, isAll);
@@ -2713,7 +2603,7 @@ public class modCommandRegistry {
         return successes;
     }
 
-    private static int executeResumeTargets(CommandContext<ServerCommandSource> context, String targetArg) throws CommandSyntaxException {
+    static int executeResumeTargets(CommandContext<ServerCommandSource> context, String targetArg) throws CommandSyntaxException {
         List<ServerPlayerEntity> bots = BotTargetingService.resolve(context.getSource(), targetArg);
         boolean isAll = targetArg != null && "all".equalsIgnoreCase(targetArg.trim());
         return executeResumeTargets(context, bots, isAll);
@@ -2747,7 +2637,7 @@ public class modCommandRegistry {
         return 1;
     }
 
-    private static int executeHealTargets(CommandContext<ServerCommandSource> context, String targetArg) throws CommandSyntaxException {
+    static int executeHealTargets(CommandContext<ServerCommandSource> context, String targetArg) throws CommandSyntaxException {
         List<ServerPlayerEntity> bots = BotTargetingService.resolve(context.getSource(), targetArg);
         boolean isAll = targetArg != null && "all".equalsIgnoreCase(targetArg.trim());
         return executeHealTargets(context, bots, isAll);
@@ -3320,7 +3210,7 @@ public class modCommandRegistry {
         return successes;
     }
 
-    private static boolean parseAssistMode(String raw) throws CommandSyntaxException {
+    static boolean parseAssistMode(String raw) throws CommandSyntaxException {
         String normalized = raw.trim().toLowerCase(Locale.ROOT);
         return switch (normalized) {
             case "on", "enable", "enabled", "true", "yes", "y", "fight", "assist", "start" -> true;
@@ -3338,7 +3228,7 @@ public class modCommandRegistry {
         };
     }
 
-    private static BotEventHandler.CombatStyle parseCombatStyle(String raw) throws CommandSyntaxException {
+    static BotEventHandler.CombatStyle parseCombatStyle(String raw) throws CommandSyntaxException {
         String normalized = raw.trim().toLowerCase(Locale.ROOT);
         return switch (normalized) {
             case "aggressive", "aggro", "push", "attack" -> BotEventHandler.CombatStyle.AGGRESSIVE;
@@ -3349,7 +3239,7 @@ public class modCommandRegistry {
 
     private record SkillCommandInvocation(String target, String arguments, boolean each) {}
 
-    private static ServerPlayerEntity getActiveBotOrThrow(CommandContext<ServerCommandSource> context) throws CommandSyntaxException {
+    static ServerPlayerEntity getActiveBotOrThrow(CommandContext<ServerCommandSource> context) throws CommandSyntaxException {
         ServerPlayerEntity active = BotEventHandler.bot;
         if (active != null) {
             ServerPlayerEntity refreshed = context.getSource()
