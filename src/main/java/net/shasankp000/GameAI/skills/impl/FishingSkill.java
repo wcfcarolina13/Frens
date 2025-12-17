@@ -215,9 +215,9 @@ public final class FishingSkill implements Skill {
     }
 
     private boolean navigateToSpot(ServerCommandSource source, ServerPlayerEntity bot, BlockPos target) {
-        // Use pathfinding first
+        // Use pathfinding first, disable pursuit fallback to avoid walking off cliffs
         MovementPlan plan = new MovementPlan(Mode.DIRECT, target, target, null, null, null);
-        MovementResult result = MovementService.execute(source, bot, plan);
+        MovementResult result = MovementService.execute(source, bot, plan, null, false, false, true);
         
         if (result.success()) return true;
         
@@ -225,12 +225,50 @@ public final class FishingSkill implements Skill {
         Direction dir = Direction.getFacing(target.getX() - bot.getX(), 0, target.getZ() - bot.getZ());
         if (MovementService.clearLeafObstruction(bot, dir)) {
              // Retry if we cleared something
-             result = MovementService.execute(source, bot, plan);
+             result = MovementService.execute(source, bot, plan, null, false, false, true);
              if (result.success()) return true;
         }
         
-        // Fallback to nudge (linear pursuit) if pathfinding failed but we are close
-        return MovementService.nudgeTowardUntilClose(bot, target, APPROACH_REACH_SQ, 2600L, 0.16D, "fishing-approach-fallback");
+        // Fallback: Safe nudge (only if very close)
+        double distSq = bot.getBlockPos().getSquaredDistance(target);
+        if (distSq <= 16.0) {
+             return safeNudge(bot, target);
+        }
+        return false;
+    }
+
+    private boolean safeNudge(ServerPlayerEntity bot, BlockPos target) {
+        if (bot == null || target == null) return false;
+        long deadline = System.currentTimeMillis() + 2500L;
+        
+        while (System.currentTimeMillis() < deadline) {
+            double distSq = bot.getBlockPos().getSquaredDistance(target);
+            if (distSq <= APPROACH_REACH_SQ) {
+                BotActions.stop(bot);
+                return true;
+            }
+            
+            LookController.faceBlock(bot, target);
+            BotActions.sprint(bot, false); // No sprint for safety
+            
+            // Safety check: is ground ahead?
+            Vec3d nextStep = new Vec3d(bot.getX(), bot.getY(), bot.getZ()).add(bot.getRotationVec(1.0f).multiply(0.5));
+            BlockPos nextBlock = BlockPos.ofFloored(nextStep);
+            if (bot.getEntityWorld().getBlockState(nextBlock.down()).getCollisionShape(bot.getEntityWorld(), nextBlock.down()).isEmpty()) {
+                // Edge detected!
+                BotActions.stop(bot);
+                return false;
+            }
+            
+            BotActions.moveForward(bot);
+            // Small jump if needed
+            if (target.getY() > bot.getY() + 0.6) {
+                BotActions.autoJumpIfNeeded(bot);
+            }
+            
+            sleep(100L);
+        }
+        return false;
     }
 
     private void performSweep(ServerCommandSource source, ServerPlayerEntity bot, BlockPos returnPos) {
@@ -479,7 +517,8 @@ public final class FishingSkill implements Skill {
             FishingBobberEntity bobber = findActiveBobber(bot);
             boolean bite = hasFishBite(bobber);
             if (bite) {
-                LOGGER.info("Fishing bite detected near {} for {}", bobber != null ? bobber.getBlockPos().toShortString() : "unknown", bot.getName().getString());
+                LOGGER.info("Fishing bite detected near {} for {}", bobber != null ? bobber.getBlockPos().toShortString() : "unknown", 
+bot.getName().getString());
                 return true;
             }
             sleep(250L);

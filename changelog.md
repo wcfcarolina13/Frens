@@ -141,3 +141,12 @@ Historical record and reasoning. `TODO.md` is the source of truth for what’s n
     - Fixed a bug where bots would zombie-resume 'follow' mode after respawning even if ordered to stop.
     - Bots now correctly reset to IDLE state and enable 'Assist Allies' defense mode upon respawn.
     - Improved water physics: bots now swim properly (using the swimming pose) instead of bobbing unnaturally on the surface.
+
+### Fixed
+- **Bot Respawn & Navigation**:
+    - Fixed a bug where bots would zombie-resume 'follow' mode after respawning even if ordered to stop.
+    - Bots now correctly reset to IDLE state and enable 'Assist Allies' defense mode upon respawn.
+    - Improved water physics: bots now swim properly (using the swimming pose) instead of bobbing unnaturally on the surface.
+- **Fishing Skill Navigation**:
+    - Replaced simple nudging with robust pathfinding for approaching fishing spots, allowing the bot to navigate around obstacles.
+    - Added logic to automatically clear obstructing leaves when navigating to the water, ensuring the bot doesn't get stuck by trees.
