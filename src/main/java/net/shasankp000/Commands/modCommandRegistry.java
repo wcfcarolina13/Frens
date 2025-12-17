@@ -1232,6 +1232,37 @@ public class modCommandRegistry {
             if (existingBot != null) {
                 LOGGER.info("spawnBot: existing bot {} found, aborting active tasks", botName);
                 TaskService.forceAbort(existingBot.getUuid(), "§cSpawning bot '" + botName + "'.");
+
+                // IMPORTANT: avoid spawning a duplicate fake player with the same UUID (causes “Force-added player with duplicate UUID”
+                // and can lead to commands targeting a different in-memory instance than the one you see).
+                ServerWorld targetWorld = server.getWorld(dimType);
+                if (targetWorld == null) {
+                    LOGGER.error("spawnBot: world {} missing; cannot reposition existing bot {}", dimType.getValue(), botName);
+                    ChatUtils.sendSystemMessage(serverSource, "Error: world not available for spawning " + botName + ".");
+                    return;
+                }
+                if (!(existingBot instanceof createFakePlayer)) {
+                    ChatUtils.sendSystemMessage(serverSource,
+                            "Error: A real player named '" + botName + "' is online; cannot spawn a bot with that name.");
+                    return;
+                }
+
+                isTrainingMode = "training".equalsIgnoreCase(spawnMode);
+
+                existingBot.teleport(targetWorld, pos.x, pos.y, pos.z, java.util.Set.of(), (float) facing.y, (float) facing.x, true);
+                Objects.requireNonNull(existingBot.getAttributeInstance(EntityAttributes.KNOCKBACK_RESISTANCE)).setBaseValue(0.0);
+                existingBot.interactionManager.changeGameMode(mode);
+                RespawnHandler.registerRespawnListener(existingBot);
+                BotEventHandler.registerBot(existingBot);
+                ServerPlayerEntity owner = context.getSource().getEntity() instanceof ServerPlayerEntity player ? player : null;
+                if (owner != null) {
+                    AIPlayer.CONFIG.ensureOwner(botName, owner.getUuid(), owner.getName().getString());
+                }
+                AutoFaceEntity.startAutoFace(existingBot);
+
+                BotEventHandler.rememberSpawn(targetWorld, pos, facing.y, facing.x);
+                LOGGER.info("spawnBot: repositioned existing bot {} at {} (mode={})", botName, spawnPos.toShortString(), spawnMode);
+                return;
             }
 
             if (spawnMode.equals("training")) {
