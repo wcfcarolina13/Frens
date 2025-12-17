@@ -76,6 +76,7 @@ import net.shasankp000.GameAI.skills.SkillContext;
 import net.shasankp000.GameAI.skills.SkillExecutionResult;
 import net.shasankp000.GameAI.BotActions;
 import net.shasankp000.GameAI.services.ChestStoreService;
+import net.shasankp000.GameAI.services.DebugToggleService;
 import net.shasankp000.ui.BotInventoryAccess;
 import net.shasankp000.FunctionCaller.FunctionCallerV2;
 import net.shasankp000.ServiceLLMClients.LLMClient;
@@ -993,11 +994,11 @@ public class modCommandRegistry {
 
                                                                         double dangerDistance = DangerZoneDetector.detectDangerZone(bot, lavaRange, cliffRange, cliffDepth);
                                                                         if (dangerDistance > 0) {
-                                                                            System.out.println("Danger detected! Effective distance: " + dangerDistance);
+                                                                            DebugToggleService.debug(LOGGER, "Danger detected! Effective distance: {}", dangerDistance);
                                                                             ChatUtils.sendChatMessages(botSource, "Danger detected! Effective distance to danger: " + (int) dangerDistance + " blocks");
 
                                                                         } else {
-                                                                            System.out.println("No danger nearby.");
+                                                                            DebugToggleService.debug(LOGGER, "No danger nearby.");
                                                                             ChatUtils.sendChatMessages(botSource, "No danger nearby");
                                                                         }
 
@@ -1439,13 +1440,13 @@ public class modCommandRegistry {
 
                 ServerPlayerEntity bot = server.getPlayerManager().getPlayer(botName);
 
-                System.out.println("Preparing for connection to language model....");
+                DebugToggleService.debug(LOGGER, "Preparing for connection to language model....");
 
                 if (bot != null) {
 
                     Objects.requireNonNull(bot.getAttributeInstance(EntityAttributes.KNOCKBACK_RESISTANCE)).setBaseValue(0.0);
 
-                    System.out.println("Registering respawn listener....");
+                    DebugToggleService.debug(LOGGER, "Registering respawn listener....");
 
                     RespawnHandler.registerRespawnListener(bot);
                     BotEventHandler.registerBot(bot);
@@ -1456,11 +1457,11 @@ public class modCommandRegistry {
 
                     ollamaClient.botName = botName; // set the bot's name.
 
-                    System.out.println("Set bot's username to " + botName);
+                    DebugToggleService.debug(LOGGER, "Set bot's username to {}", botName);
 
                     String llmProvider = System.getProperty("aiplayer.llmMode", "ollama");
 
-                    System.out.println("Using provider: " + llmProvider);
+                    DebugToggleService.debug(LOGGER, "Using provider: {}", llmProvider);
 
                     switch (llmProvider) {
                         case "openai", "gpt", "google", "gemini", "anthropic", "claude", "xAI", "xai", "grok", "custom" -> {
