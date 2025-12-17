@@ -20,6 +20,26 @@ Pending work only. Completed items and rationale live in `changelog.md`.
 
 ## P2 — Medium
 
+### Post-Refactor Follow-Up (From Testing Notes)
+- [ ] **Guard/Patrol verification**: Run in-game tests for `/bot guard` and `/bot patrol` (basic start/stop, radius handling, and interaction with other tasks).
+
+### Follow / Come
+- [ ] **Follow stability**: Confirm follow continues after other tasks; verify advanced pathfinding stays reliable across dimensions/terrain.
+- [ ] **Come survival movement**: Remove nudge/snap behavior; prefer strict survival-style walking unless explicitly configured.
+- [ ] **Come better rerouting before mining tasks**: Try tighter-corner/vertical reroutes more confidently before suggesting descent/ascent/stripmine.
+- [ ] **Come tool crafting**: Auto-craft torches/shovels/pickaxes from available resources when needed during movement/tasks.
+
+### Shelter (Redo Needed)
+- [ ] **Shelter hovel redesign**: Current behavior buggy; redo planning/execution.
+- [ ] **Shelter resource acquisition flow**: If resources are missing, request permission to collect; resume should perform collection and continue build.
+- [ ] **Shelter options parameter**: Investigate what `options` currently controls for hovel/burrow; document and/or refactor.
+- [ ] **Shelter chest workflow**: While building, withdraw/deposit resources and place new chests to manage inventory; place new chests inside planned interior when possible.
+- [ ] **Burrow “descend-stripmine-descend”**: Restore intended method; compare with proven descent behavior from `come`.
+
+### Commands / UX
+- [ ] **Open command admin mode**: Make “open” distance-independent for admins.
+- [ ] **Command pruning review**: Evaluate whether `look_player` and `direction reset` are still needed; deprecate/remove if redundant.
+
 ### Inventory & Items
 - [ ] Bot item inventory view (chest-like interface)
 - [ ] Equipped section visible (armor, main hand, offhand)
@@ -63,12 +83,19 @@ Pending work only. Completed items and rationale live in `changelog.md`.
 - [ ] Furnace usage with various fuels
 - [ ] Hunger persistence and smart eating
 - [ ] Sleep integration (bed usage, warnings)
+- [ ] **Farm underground recovery**: Handle cases where bot is underground and can’t pillar upward due to overhead dirt; improve escape logic and add test coverage.
+- [ ] **Farm/Woodcut chest workflow**: Ensure both skills can place/store/use chests proactively for inventory/resource management.
+- [ ] **Farm irrigation leak patching**: If irrigation isn’t fillable, detect leakage cause and patch the leak (enclosure improvements).
 
 ### Mining & Resource Gathering
 - [ ] Tree chopping (safe climbing, late drop collection)
 - [ ] Strip mining with safety offset (sand, gravel, lava)
 - [ ] Cave/structure detection and reporting
 - [ ] Water encounter handling
+
+### Fishing (Enhancements)
+- [ ] **Fishing reach**: Extend “near water” search/acceptance radius somewhat.
+- [ ] **Water location memory**: Store/recall known water locations to guide fishing spot selection when not currently near water.
 
 ## P3 — Low
 
