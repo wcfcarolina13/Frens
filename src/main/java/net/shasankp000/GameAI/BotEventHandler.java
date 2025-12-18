@@ -35,6 +35,7 @@ import net.shasankp000.DangerZoneDetector.DangerZoneDetector;
 import net.shasankp000.Database.QTable;
 import net.shasankp000.Database.QTableStorage;
 import net.shasankp000.GameAI.services.BotPersistenceService;
+import net.shasankp000.GameAI.services.BotLifecycleService;
 import net.shasankp000.GameAI.services.BotRegistry;
 import net.shasankp000.GameAI.services.HealingService;
 import net.shasankp000.Database.StateActionPair;
@@ -78,8 +79,7 @@ public class BotEventHandler {
     private static MinecraftServer server = null;
     public static ServerPlayerEntity bot = null;
     private static final boolean DEBUG_RL = false;
-    // Stage-2 refactor: registry moved to BotRegistry.
-    private static UUID registeredBotUuid = null;
+    // Stage-2 refactor: primary bot selection moved to BotLifecycleService.
     public static final String qTableDir = LauncherEnvironment.getStorageDirectory("qtable_storage");
     private static final Object monitorLock = new Object();
     private static boolean isExecuting = false;
@@ -87,11 +87,7 @@ public class BotEventHandler {
     public static boolean botDied = false; // Flag to track if the bot died
     public static boolean hasRespawned = false; // flag to track if the bot has respawned before or not
     public static int botSpawnCount = 0;
-    private static Vec3d lastSpawnPosition = null;
-    private static RegistryKey<World> lastSpawnWorld = null;
-    private static float lastSpawnYaw = 0.0F;
-    private static float lastSpawnPitch = 0.0F;
-    private static String lastBotName = null;
+    // Stage-2 refactor: last spawn state moved to BotLifecycleService.
     private static State currentState = null;
     private static Vec3d lastKnownPosition = null;
     private static int stationaryTicks = 0;
@@ -235,7 +231,7 @@ public class BotEventHandler {
     private static final long SUFFOCATION_ALERT_COOLDOWN_TICKS = 20L; // 1 second for urgent warnings
     private static long lastBurialScanTick = -1L;
     private static volatile boolean externalOverrideActive = false;
-    private static volatile boolean pendingBotRespawn = false;
+    // Stage-2 refactor: lifecycle respawn flag moved to BotLifecycleService.
     public enum CombatStyle {
         AGGRESSIVE,
         EVASIVE
@@ -301,8 +297,9 @@ public class BotEventHandler {
     }
 
     private static CommandState primaryState() {
-        if (registeredBotUuid != null) {
-            return stateFor(registeredBotUuid);
+        UUID primaryUuid = BotLifecycleService.getPrimaryBotUuid();
+        if (primaryUuid != null) {
+            return stateFor(primaryUuid);
         }
         Iterator<UUID> iterator = BotRegistry.ids().iterator();
         if (iterator.hasNext()) {
@@ -316,7 +313,8 @@ public class BotEventHandler {
         if (state != null) {
             state.mode = mode;
         }
-        if (bot != null && registeredBotUuid != null && bot.getUuid().equals(registeredBotUuid)) {
+        UUID primaryUuid = BotLifecycleService.getPrimaryBotUuid();
+        if (bot != null && primaryUuid != null && bot.getUuid().equals(primaryUuid)) {
             CommandState primary = primaryState();
             if (primary != null) {
                 primary.mode = mode;
@@ -334,7 +332,8 @@ public class BotEventHandler {
         if (state != null) {
             state.followTargetUuid = targetUuid;
         }
-        if (bot != null && registeredBotUuid != null && bot.getUuid().equals(registeredBotUuid)) {
+        UUID primaryUuid = BotLifecycleService.getPrimaryBotUuid();
+        if (bot != null && primaryUuid != null && bot.getUuid().equals(primaryUuid)) {
             CommandState primary = primaryState();
             if (primary != null) {
                 primary.followTargetUuid = targetUuid;
@@ -360,7 +359,8 @@ public class BotEventHandler {
             state.guardCenter = center;
             state.guardRadius = radius;
         }
-        if (bot != null && registeredBotUuid != null && bot.getUuid().equals(registeredBotUuid)) {
+        UUID primaryUuid = BotLifecycleService.getPrimaryBotUuid();
+        if (bot != null && primaryUuid != null && bot.getUuid().equals(primaryUuid)) {
             CommandState primary = primaryState();
             if (primary != null) {
                 primary.guardCenter = center;
@@ -384,7 +384,8 @@ public class BotEventHandler {
         if (state != null) {
             state.baseTarget = base;
         }
-        if (bot != null && registeredBotUuid != null && bot.getUuid().equals(registeredBotUuid)) {
+        UUID primaryUuid = BotLifecycleService.getPrimaryBotUuid();
+        if (bot != null && primaryUuid != null && bot.getUuid().equals(primaryUuid)) {
             CommandState primary = primaryState();
             if (primary != null) {
                 primary.baseTarget = base;
@@ -410,7 +411,8 @@ public class BotEventHandler {
         if (state != null) {
             state.assistAllies = enable;
         }
-        if (bot != null && registeredBotUuid != null && bot.getUuid().equals(registeredBotUuid)) {
+        UUID primaryUuid = BotLifecycleService.getPrimaryBotUuid();
+        if (bot != null && primaryUuid != null && bot.getUuid().equals(primaryUuid)) {
             CommandState primary = primaryState();
             if (primary != null) {
                 primary.assistAllies = enable;
@@ -428,7 +430,8 @@ public class BotEventHandler {
         if (state != null) {
             state.shieldRaised = raised;
         }
-        if (bot != null && registeredBotUuid != null && bot.getUuid().equals(registeredBotUuid)) {
+        UUID primaryUuid = BotLifecycleService.getPrimaryBotUuid();
+        if (bot != null && primaryUuid != null && bot.getUuid().equals(primaryUuid)) {
             CommandState primary = primaryState();
             if (primary != null) {
                 primary.shieldRaised = raised;
@@ -451,7 +454,8 @@ public class BotEventHandler {
         if (state != null) {
             state.shieldDecisionTick = tick;
         }
-        if (bot != null && registeredBotUuid != null && bot.getUuid().equals(registeredBotUuid)) {
+        UUID primaryUuid = BotLifecycleService.getPrimaryBotUuid();
+        if (bot != null && primaryUuid != null && bot.getUuid().equals(primaryUuid)) {
             CommandState primary = primaryState();
             if (primary != null) {
                 primary.shieldDecisionTick = tick;
@@ -460,7 +464,8 @@ public class BotEventHandler {
     }
 
     public BotEventHandler(MinecraftServer server, ServerPlayerEntity bot) {
-        if (server != null && bot != null && (registeredBotUuid == null || registeredBotUuid.equals(bot.getUuid()))) {
+        UUID primaryUuid = BotLifecycleService.getPrimaryBotUuid();
+        if (server != null && bot != null && (primaryUuid == null || primaryUuid.equals(bot.getUuid()))) {
             registerBot(bot);
         }
     }
@@ -482,21 +487,18 @@ public class BotEventHandler {
     }
 
     public static void rememberSpawn(ServerWorld world, Vec3d pos, float yaw, float pitch) {
-        if (world != null) {
-            lastSpawnWorld = world.getRegistryKey();
-        }
-        lastSpawnPosition = pos;
-        lastSpawnYaw = yaw;
-        lastSpawnPitch = pitch;
+        BotLifecycleService.rememberSpawn(world, pos, yaw, pitch);
     }
 
     public static void ensureBotPresence(MinecraftServer srv) {
+        String lastBotName = BotLifecycleService.getLastBotName();
         if (srv == null || lastBotName == null) {
             return;
         }
         ServerPlayerEntity existing = null;
-        if (registeredBotUuid != null) {
-            existing = srv.getPlayerManager().getPlayer(registeredBotUuid);
+        UUID primaryUuid = BotLifecycleService.getPrimaryBotUuid();
+        if (primaryUuid != null) {
+            existing = srv.getPlayerManager().getPlayer(primaryUuid);
         }
         if (existing == null) {
             Iterator<UUID> iterator = BotRegistry.ids().iterator();
@@ -504,7 +506,7 @@ public class BotEventHandler {
                 UUID candidateId = iterator.next();
                 existing = srv.getPlayerManager().getPlayer(candidateId);
                 if (existing != null) {
-                    registeredBotUuid = candidateId;
+                    BotLifecycleService.setPrimaryBotUuid(candidateId);
                 }
             }
         }
@@ -515,17 +517,18 @@ public class BotEventHandler {
             registerBot(existing);
             return;
         }
-        if (pendingBotRespawn) {
+        if (BotLifecycleService.isPendingBotRespawn()) {
             return;
         }
 
-        RegistryKey<World> worldKey = lastSpawnWorld != null ? lastSpawnWorld : World.OVERWORLD;
+        BotLifecycleService.SpawnSnapshot snapshot = BotLifecycleService.getLastSpawn();
+        RegistryKey<World> worldKey = (snapshot != null && snapshot.worldKey() != null) ? snapshot.worldKey() : World.OVERWORLD;
         ServerWorld world = srv.getWorld(worldKey);
         if (world == null) {
             world = srv.getOverworld();
             worldKey = World.OVERWORLD;
         }
-        Vec3d spawn = lastSpawnPosition;
+        Vec3d spawn = snapshot != null ? snapshot.position() : null;
         if (spawn == null) {
             double centerX = world.getWorldBorder().getCenterX();
             double centerZ = world.getWorldBorder().getCenterZ();
@@ -536,10 +539,10 @@ public class BotEventHandler {
         }
         final RegistryKey<World> targetWorld = worldKey;
         final Vec3d spawnPos = spawn;
-        final float yaw = lastSpawnYaw;
-        final float pitch = lastSpawnPitch;
-        pendingBotRespawn = true;
-        UUID targetUuid = registeredBotUuid;
+        final float yaw = snapshot != null ? snapshot.yaw() : 0.0F;
+        final float pitch = snapshot != null ? snapshot.pitch() : 0.0F;
+        BotLifecycleService.setPendingBotRespawn(true);
+        UUID targetUuid = BotLifecycleService.getPrimaryBotUuid();
         srv.execute(() -> {
             if (targetUuid != null) {
                 TaskService.forceAbort(targetUuid, "§cRestoring bot after owner respawn.");
@@ -555,18 +558,18 @@ public class BotEventHandler {
             return;
         }
         BotRegistry.register(candidate.getUuid());
-        registeredBotUuid = candidate.getUuid();
+        BotLifecycleService.setPrimaryBotUuid(candidate.getUuid());
         BotEventHandler.bot = candidate;
         stateFor(candidate);
         MinecraftServer srv = candidate.getCommandSource().getServer();
         if (srv != null && (BotEventHandler.server == null || BotEventHandler.server == srv)) {
             BotEventHandler.server = srv;
         }
-        lastBotName = candidate.getName().getString();
+        BotLifecycleService.setLastBotName(candidate.getName().getString());
         if (candidate.getEntityWorld() instanceof ServerWorld serverWorld) {
             rememberSpawn(serverWorld, new Vec3d(candidate.getX(), candidate.getY(), candidate.getZ()), candidate.getYaw(), candidate.getPitch());
         }
-        pendingBotRespawn = false;
+        BotLifecycleService.setPendingBotRespawn(false);
         net.shasankp000.GameAI.services.BotControlApplier.applyToBot(candidate);
         
         // Proactively check if bot spawned inside blocks and needs to mine out
@@ -591,11 +594,12 @@ public class BotEventHandler {
         BotPersistenceService.removeBot(bot);
         clearState(bot);
         LAST_RL_SAMPLE_TICK.remove(uuid);
-        if (registeredBotUuid != null && registeredBotUuid.equals(uuid)) {
-            registeredBotUuid = null;
+        UUID primaryUuid = BotLifecycleService.getPrimaryBotUuid();
+        if (primaryUuid != null && primaryUuid.equals(uuid)) {
+            BotLifecycleService.setPrimaryBotUuid(null);
             Iterator<UUID> iterator = BotRegistry.ids().iterator();
             if (iterator.hasNext()) {
-                registeredBotUuid = iterator.next();
+                BotLifecycleService.setPrimaryBotUuid(iterator.next());
             }
         }
         if (BotEventHandler.bot != null && BotEventHandler.bot.getUuid().equals(uuid)) {
@@ -4607,7 +4611,7 @@ public class BotEventHandler {
 	        synchronized (monitorLock) {
 	            server = null;
 	            bot = null;
-	            registeredBotUuid = null;
+	            BotLifecycleService.clear();
 	            BotRegistry.clear();
 	            COMMAND_STATES.clear();
 	            LAST_RL_SAMPLE_TICK.clear();
@@ -4647,16 +4651,10 @@ public class BotEventHandler {
             
             isExecuting = false;
             externalOverrideActive = false;
-            pendingBotRespawn = false;
             botDied = false;
             hasRespawned = false;
             botSpawnCount = 0;
-            
-            lastSpawnPosition = null;
-            lastSpawnWorld = null;
-            lastSpawnYaw = 0.0F;
-            lastSpawnPitch = 0.0F;
-            lastBotName = null;
+
             currentState = null;
             lastKnownPosition = null;
             stationaryTicks = 0;

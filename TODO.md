@@ -65,6 +65,7 @@ Pending work only. Completed items and rationale live in `changelog.md`.
 
 ### Combat & Safety
 - [ ] Creeper evasion (sprint away when unarmed)
+- [ ] Enderman gaze safety: avoid looking at endermen unless already hostile (don’t aggro passive endermen)
 - [ ] Protected build zones (no-grief areas)
 - [ ] Follow/defend modes
 - [ ] Fight with teammates
