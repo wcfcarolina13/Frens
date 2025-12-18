@@ -1198,8 +1198,8 @@ public class BotEventHandler {
             state.followNoTeleport = false;
             state.followStopRange = 0.0D;
             state.followFixedGoal = null;
-            state.comeLastGoalDistSq = Double.NaN;
-            state.comeStagnantTicks = 0;
+            state.comeBestGoalDistSq = Double.NaN;
+            state.comeTicksSinceBest = 0;
             state.comeNextSkillTick = 0L;
         }
         setMode(bot, Mode.FOLLOW);
@@ -1243,8 +1243,8 @@ public class BotEventHandler {
             state.followNoTeleport = true;
             state.followStopRange = Math.max(1.5D, stopRange);
             state.followFixedGoal = null;
-            state.comeLastGoalDistSq = Double.NaN;
-            state.comeStagnantTicks = 0;
+            state.comeBestGoalDistSq = Double.NaN;
+            state.comeTicksSinceBest = 0;
             state.comeNextSkillTick = 0L;
         }
         setMode(bot, Mode.FOLLOW);
@@ -1286,8 +1286,8 @@ public class BotEventHandler {
             state.followNoTeleport = true;
             state.followStopRange = Math.max(1.5D, stopRange);
             state.followFixedGoal = fixedGoal.toImmutable();
-            state.comeLastGoalDistSq = Double.NaN;
-            state.comeStagnantTicks = 0;
+            state.comeBestGoalDistSq = Double.NaN;
+            state.comeTicksSinceBest = 0;
             state.comeNextSkillTick = 0L;
         }
         setMode(bot, Mode.FOLLOW);
@@ -1360,8 +1360,8 @@ public class BotEventHandler {
             state.followNoTeleport = false;
             state.followStopRange = 0.0D;
             state.followFixedGoal = null;
-            state.comeLastGoalDistSq = Double.NaN;
-            state.comeStagnantTicks = 0;
+            state.comeBestGoalDistSq = Double.NaN;
+            state.comeTicksSinceBest = 0;
             state.comeNextSkillTick = 0L;
         }
         if (bot != null) {
@@ -1634,21 +1634,24 @@ public class BotEventHandler {
 
         if (fixedGoal != null && state != null && srv != null) {
             double goalDistSq = bot.getBlockPos().getSquaredDistance(fixedGoal);
-            if (!Double.isFinite(state.comeLastGoalDistSq)) {
-                state.comeLastGoalDistSq = goalDistSq;
-                state.comeStagnantTicks = 0;
+            if (!Double.isFinite(state.comeBestGoalDistSq)) {
+                state.comeBestGoalDistSq = goalDistSq;
+                state.comeTicksSinceBest = 0;
             } else {
-                if (goalDistSq >= state.comeLastGoalDistSq - 0.01D) {
-                    state.comeStagnantTicks++;
+                // Only count progress if we beat the previous best by a meaningful amount.
+                if (goalDistSq <= state.comeBestGoalDistSq - 1.0D) {
+                    state.comeBestGoalDistSq = goalDistSq;
+                    state.comeTicksSinceBest = 0;
                 } else {
-                    state.comeStagnantTicks = 0;
+                    state.comeTicksSinceBest++;
                 }
-                state.comeLastGoalDistSq = goalDistSq;
             }
 
-            // If we've made no meaningful progress toward the fixed goal for a while, try a short,
-            // goal-directed mining plan (ascent/descent/stripmine) to escape tunnels/pits.
-            if (state.comeStagnantTicks >= 50 && srv.getTicks() >= state.comeNextSkillTick) {
+            // If we're vertically separated and have no LoS to the goal, try mining recovery sooner.
+            boolean verticalProblem = absDeltaY >= 6.0D && !canSee;
+            int triggerTicks = verticalProblem ? 25 : 60;
+
+            if (state.comeTicksSinceBest >= triggerTicks && srv.getTicks() >= state.comeNextSkillTick) {
                 if (triggerComeRecoverySkill(bot, target, fixedGoal, targetPos, deltaY, horizDistSq, srv, state)) {
                     return true;
                 }
@@ -3249,10 +3252,11 @@ public class BotEventHandler {
         Map<String, Object> params = new HashMap<>();
         params.put("direction", towardGoal);
 
-        // When we're mostly aligned but vertically separated, build stairs (ascent/descent).
-        if (Math.abs(dyBlocks) >= 3 && horizDist <= 6.0D) {
+        // When we're vertically separated (common: tunnel below the destination), build stairs first.
+        // We allow a moderate horizontal offset because stair-building still helps escape a narrow tunnel.
+        if (Math.abs(dyBlocks) >= 5 && horizDist <= 12.0D) {
             skillName = "collect_dirt";
-            int blocks = Math.min(10, Math.max(4, Math.abs(dyBlocks)));
+            int blocks = Math.min(12, Math.max(5, Math.abs(dyBlocks)));
             if (dyBlocks > 0) {
                 params.put("ascentBlocks", blocks);
                 rawArgs = "ascent " + blocks;
@@ -3280,8 +3284,8 @@ public class BotEventHandler {
 
         // Avoid spamming skill launches.
         state.comeNextSkillTick = server.getTicks() + 120L;
-        state.comeStagnantTicks = 0;
-        state.comeLastGoalDistSq = Double.NaN;
+        state.comeTicksSinceBest = 0;
+        state.comeBestGoalDistSq = Double.NaN;
 
         // Interrupt any active skill, then run the recovery skill asynchronously.
         final String finalSkillName = skillName;

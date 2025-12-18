@@ -35,6 +35,7 @@ Historical record and reasoning. `TODO.md` is the source of truth for what’s n
 - Commands: `/bot defend on|off` and `/bot defend nearby on|off` added as shorthands for the existing defend syntax.
 - Come: `/bot come` now walks to a fixed snapshot of the commander’s position at command time (doesn’t chase a moving target) and won’t “complete early” when directly below/above the destination.
 - Come: when stuck trying to reach a fixed goal (e.g., tunnel below the target), the bot will auto-attempt short `collect_dirt ascent|descent` or `stripmine` recovery steps, then resume coming to the destination.
+- Come: improved “stuck” detection to use best-distance tracking (robust to jitter) and trigger vertical recovery sooner when the goal is above/below without line-of-sight.
 - Follow: follow no longer runs blocking movement/path loops on the server thread; it now sprints when >2 blocks away and uses a wolf-style teleport catch-up only when far/stuck (with cooldown).
 - Storage: prevent “remote” chest deposits/withdrawals through doors/walls by requiring survival-like reach + line-of-sight checks before moving items.
 - Safety: rescue-from-burial/suffocation escape no longer mines doors; it will attempt to open them instead (prevents bots breaking enclosure doors).
