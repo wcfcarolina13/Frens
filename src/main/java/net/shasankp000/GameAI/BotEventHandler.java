@@ -38,6 +38,7 @@ import net.shasankp000.GameAI.services.BotPersistenceService;
 import net.shasankp000.GameAI.services.BotLifecycleService;
 import net.shasankp000.GameAI.services.BotRegistry;
 import net.shasankp000.GameAI.services.DropSweepService;
+import net.shasankp000.GameAI.services.GuardPatrolService;
 import net.shasankp000.GameAI.services.HealingService;
 import net.shasankp000.Database.StateActionPair;
 import net.shasankp000.Entity.AutoFaceEntity;
@@ -255,9 +256,6 @@ public class BotEventHandler {
         UUID followTargetUuid;
         boolean followNoTeleport;
         double followStopRange = 0.0D;
-        Vec3d guardCenter;
-        double guardRadius = 6.0D;
-        Vec3d patrolTarget;
         Vec3d baseTarget;
         boolean assistAllies;
         boolean shieldRaised;
@@ -350,29 +348,18 @@ public class BotEventHandler {
     }
 
     private static void setGuardState(ServerPlayerEntity bot, Vec3d center, double radius) {
-        CommandState state = stateFor(bot);
-        if (state != null) {
-            state.guardCenter = center;
-            state.guardRadius = radius;
+        if (bot == null) {
+            return;
         }
-        UUID primaryUuid = BotLifecycleService.getPrimaryBotUuid();
-        if (bot != null && primaryUuid != null && bot.getUuid().equals(primaryUuid)) {
-            CommandState primary = primaryState();
-            if (primary != null) {
-                primary.guardCenter = center;
-                primary.guardRadius = radius;
-            }
-        }
+        GuardPatrolService.setGuardState(bot.getUuid(), center, radius);
     }
 
     private static Vec3d getGuardCenter(ServerPlayerEntity bot) {
-        CommandState state = stateFor(bot);
-        return state != null ? state.guardCenter : null;
+        return bot == null ? null : GuardPatrolService.getGuardCenter(bot.getUuid());
     }
 
     private static double getGuardRadius(ServerPlayerEntity bot) {
-        CommandState state = stateFor(bot);
-        return state != null ? state.guardRadius : 6.0D;
+        return bot == null ? 6.0D : GuardPatrolService.getGuardRadius(bot.getUuid());
     }
 
     private static void setBaseTarget(ServerPlayerEntity bot, Vec3d base) {
@@ -1413,10 +1400,7 @@ public class BotEventHandler {
         setMode(bot, Mode.GUARD);
         setFollowTarget(bot, null);
         clearBase(bot);
-        CommandState state = stateFor(bot);
-        if (state != null) {
-            state.patrolTarget = null;
-        }
+        GuardPatrolService.setPatrolTarget(bot.getUuid(), null);
         sendBotMessage(bot, String.format(Locale.ROOT, "Guarding this area (radius %.1f blocks).", getGuardRadius(bot)));
         return "Guarding the area.";
     }
@@ -1427,10 +1411,7 @@ public class BotEventHandler {
         setMode(bot, Mode.PATROL);
         setFollowTarget(bot, null);
         clearBase(bot);
-        CommandState state = stateFor(bot);
-        if (state != null) {
-            state.patrolTarget = null;
-        }
+        GuardPatrolService.setPatrolTarget(bot.getUuid(), null);
         sendBotMessage(bot, String.format(Locale.ROOT, "Patrolling this area (radius %.1f blocks).", getGuardRadius(bot)));
         return "Patrolling the area.";
     }
@@ -1565,13 +1546,13 @@ public class BotEventHandler {
     }
 
     public static Vec3d getGuardCenterVec() {
-        CommandState state = primaryState();
-        return state != null ? state.guardCenter : null;
+        UUID primary = BotLifecycleService.getPrimaryBotUuid();
+        return primary != null ? GuardPatrolService.getGuardCenter(primary) : null;
     }
 
     public static double getGuardRadiusValue() {
-        CommandState state = primaryState();
-        return state != null ? state.guardRadius : 6.0D;
+        UUID primary = BotLifecycleService.getPrimaryBotUuid();
+        return GuardPatrolService.getGuardRadius(primary);
     }
 
     public static ServerPlayerEntity getFollowTarget() {
@@ -1806,8 +1787,8 @@ public class BotEventHandler {
     }
 
     private static boolean handleGuard(ServerPlayerEntity bot, CommandState state, List<Entity> nearbyEntities, List<Entity> hostileEntities) {
-        Vec3d center = state != null ? state.guardCenter : null;
-        double radius = state != null ? state.guardRadius : 6.0D;
+        Vec3d center = getGuardCenter(bot);
+        double radius = getGuardRadius(bot);
         if (center == null) {
             center = positionOf(bot);
             setGuardState(bot, center, radius);
@@ -1841,8 +1822,8 @@ public class BotEventHandler {
     }
 
     private static boolean handlePatrol(ServerPlayerEntity bot, CommandState state, List<Entity> nearbyEntities, List<Entity> hostileEntities) {
-        Vec3d center = state != null ? state.guardCenter : null;
-        double radius = state != null ? state.guardRadius : 6.0D;
+        Vec3d center = getGuardCenter(bot);
+        double radius = getGuardRadius(bot);
         if (center == null) {
             center = positionOf(bot);
             setGuardState(bot, center, radius);
@@ -1867,28 +1848,25 @@ public class BotEventHandler {
 
         double distanceFromCenter = positionOf(bot).distanceTo(center);
         if (distanceFromCenter > radius) {
-            if (state != null) {
-                state.patrolTarget = null;
-            }
+            GuardPatrolService.setPatrolTarget(bot.getUuid(), null);
             moveToward(bot, center, 2.0D, false);
             return true;
         }
 
-        Vec3d patrolTarget = state != null ? state.patrolTarget : null;
+        Vec3d patrolTarget = GuardPatrolService.getPatrolTarget(bot.getUuid());
         if (patrolTarget != null) {
             double dist = positionOf(bot).distanceTo(patrolTarget);
             if (dist > 1.35D) {
                 moveToward(bot, patrolTarget, 1.1D, false);
                 return true;
             }
-            if (state != null) {
-                state.patrolTarget = null;
-            }
+            GuardPatrolService.setPatrolTarget(bot.getUuid(), null);
         }
 
-        if (state != null && (state.patrolTarget == null) && RANDOM.nextDouble() < 0.08) {
-            state.patrolTarget = randomPointWithin(center, radius * 0.85D);
-            moveToward(bot, state.patrolTarget, 1.1D, false);
+        if (patrolTarget == null && RANDOM.nextDouble() < 0.08) {
+            Vec3d next = randomPointWithin(center, radius * 0.85D);
+            GuardPatrolService.setPatrolTarget(bot.getUuid(), next);
+            moveToward(bot, next, 1.1D, false);
             return true;
         }
 
