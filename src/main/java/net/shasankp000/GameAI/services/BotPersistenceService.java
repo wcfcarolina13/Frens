@@ -5,6 +5,7 @@ import net.minecraft.server.PlayerConfigEntry;
 import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
+import net.minecraft.text.Text;
 import net.minecraft.util.WorldSavePath;
 import net.shasankp000.AIPlayer;
 import net.shasankp000.Entity.createFakePlayer;
@@ -337,17 +338,30 @@ public final class BotPersistenceService {
     }
 
     public static void removeBot(ServerPlayerEntity bot) {
+        MinecraftServer server = extractServer(bot);
+        if (server == null) {
+            LOGGER.warn("Unable to remove fakeplayer '{}': bot not attached to a server.", bot.getName().getString());
+            return;
+        }
+
+        // Fake players can leave "ghosts" client-side if they aren't explicitly disconnected.
+        // Prefer the fake-player implementation's disconnect flow when available.
+        if (bot instanceof net.shasankp000.Entity.createFakePlayer fake) {
+            try {
+                fake.kill(Text.literal("Despawned"));
+            } catch (Exception e) {
+                LOGGER.warn("Failed to disconnect fakeplayer '{}': {}", bot.getName().getString(), e.getMessage());
+            }
+        }
+
         if (REMOVE_PLAYER == null) {
             LOGGER.warn("Unable to remove fakeplayer '{}': PlayerManager#remove method not resolved.", bot.getName().getString());
             return;
         }
         try {
-            MinecraftServer server = extractServer(bot);
-            if (server != null) {
-                // Remove player from the manager's player list and world
-                REMOVE_PLAYER.invoke(server.getPlayerManager(), bot);
-                LOGGER.info("Removed fakeplayer '{}' from PlayerManager.", bot.getName().getString());
-            }
+            // Remove player from the manager's player list and world
+            REMOVE_PLAYER.invoke(server.getPlayerManager(), bot);
+            LOGGER.info("Removed fakeplayer '{}' from PlayerManager.", bot.getName().getString());
         } catch (Exception e) {
             LOGGER.warn("Failed to remove fakeplayer '{}' from PlayerManager: {}", bot.getName().getString(), e.getMessage());
         }

@@ -265,6 +265,7 @@ public class BotEventHandler {
         double followStopRange = 0.0D;
         Vec3d guardCenter;
         double guardRadius = 6.0D;
+        Vec3d patrolTarget;
         Vec3d baseTarget;
         boolean assistAllies;
         boolean shieldRaised;
@@ -1412,6 +1413,10 @@ public class BotEventHandler {
         setMode(bot, Mode.GUARD);
         setFollowTarget(bot, null);
         clearBase(bot);
+        CommandState state = stateFor(bot);
+        if (state != null) {
+            state.patrolTarget = null;
+        }
         sendBotMessage(bot, String.format(Locale.ROOT, "Guarding this area (radius %.1f blocks).", getGuardRadius(bot)));
         return "Guarding the area.";
     }
@@ -1422,6 +1427,10 @@ public class BotEventHandler {
         setMode(bot, Mode.PATROL);
         setFollowTarget(bot, null);
         clearBase(bot);
+        CommandState state = stateFor(bot);
+        if (state != null) {
+            state.patrolTarget = null;
+        }
         sendBotMessage(bot, String.format(Locale.ROOT, "Patrolling this area (radius %.1f blocks).", getGuardRadius(bot)));
         return "Patrolling the area.";
     }
@@ -1838,33 +1847,30 @@ public class BotEventHandler {
                 return;
             }
             BlockPos dropPos = closest.getBlockPos().toImmutable();
-            boolean nudged = false;
-            long completionTime = System.currentTimeMillis();
+            long startedAt = System.currentTimeMillis();
+            boolean nudged;
             try {
                 nudged = DropSweeper.attemptManualNudge(bot, closest, dropPos);
-                completionTime = System.currentTimeMillis();
-                lastDropSweepMs = completionTime;
-                if (nudged) {
-                    dropRetryTimestamps.remove(dropPos);
-                    return;
-                }
-                dropRetryTimestamps.put(dropPos, completionTime);
-                CompletableFuture<Void> sweepFuture = CompletableFuture.runAsync(() -> {
-                    try {
-                        ServerCommandSource source = bot.getCommandSource().withSilent().withMaxLevel(4);
-                        DropSweeper.sweep(source, radius, verticalRange, 2, 3000L);
-                    } catch (Exception sweepError) {
-                        LOGGER.warn("Training drop sweep failed near {}: {}", dropPos, sweepError.getMessage());
-                    }
-                });
-                try {
-                    sweepFuture.get(3500, TimeUnit.MILLISECONDS);
-                } catch (Exception waitError) {
-                    LOGGER.warn("Training drop sweep wait interrupted: {}", waitError.getMessage());
-                }
-            } finally {
-                dropSweepInProgress.set(false);
+            } catch (Exception e) {
+                nudged = false;
             }
+            lastDropSweepMs = startedAt;
+            if (nudged) {
+                dropRetryTimestamps.remove(dropPos);
+                dropSweepInProgress.set(false);
+                return;
+            }
+            dropRetryTimestamps.put(dropPos, startedAt);
+            CompletableFuture.runAsync(() -> {
+                        try {
+                            ServerCommandSource source = bot.getCommandSource().withSilent().withMaxLevel(4);
+                            DropSweeper.sweep(source, radius, verticalRange, 2, 3000L);
+                        } catch (Exception sweepError) {
+                            LOGGER.warn("Training drop sweep failed near {}: {}", dropPos, sweepError.getMessage());
+                        }
+                    })
+                    .orTimeout(3500, TimeUnit.MILLISECONDS)
+                    .whenComplete((ignored, throwable) -> srv.execute(() -> dropSweepInProgress.set(false)));
             return;
         }
         if (now - lastDropSweepMs < DROP_SWEEP_COOLDOWN_MS) {
@@ -1970,13 +1976,28 @@ public class BotEventHandler {
 
         double distanceFromCenter = positionOf(bot).distanceTo(center);
         if (distanceFromCenter > radius) {
+            if (state != null) {
+                state.patrolTarget = null;
+            }
             moveToward(bot, center, 2.0D, false);
             return true;
         }
 
-        if (RANDOM.nextDouble() < 0.05) {
-            Vec3d wanderTarget = randomPointWithin(center, radius * 0.85D);
-            moveToward(bot, wanderTarget, 2.0D, false);
+        Vec3d patrolTarget = state != null ? state.patrolTarget : null;
+        if (patrolTarget != null) {
+            double dist = positionOf(bot).distanceTo(patrolTarget);
+            if (dist > 1.35D) {
+                moveToward(bot, patrolTarget, 1.1D, false);
+                return true;
+            }
+            if (state != null) {
+                state.patrolTarget = null;
+            }
+        }
+
+        if (state != null && (state.patrolTarget == null) && RANDOM.nextDouble() < 0.08) {
+            state.patrolTarget = randomPointWithin(center, radius * 0.85D);
+            moveToward(bot, state.patrolTarget, 1.1D, false);
             return true;
         }
 
