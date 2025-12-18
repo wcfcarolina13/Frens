@@ -126,12 +126,29 @@ public final class BotTargetingService {
         LAST_TARGET.remove(key);
     }
 
+    public static void forgetIfMatches(ServerCommandSource source, String alias) {
+        Object key = keyForSource(source);
+        String normalized = normalize(alias);
+        if (normalized == null) {
+            return;
+        }
+        String existing = LAST_TARGET.get(key);
+        if (existing != null && existing.equals(normalized)) {
+            LAST_TARGET.remove(key);
+        }
+    }
+
     /**
      * Explicitly remember that the provided source targeted the supplied alias.
      */
     public static void remember(ServerCommandSource source, String alias) {
         Object key = keyForSource(source);
         LAST_TARGET.put(key, normalize(alias));
+    }
+
+    public static String getRemembered(ServerCommandSource source) {
+        Object key = keyForSource(source);
+        return LAST_TARGET.get(key);
     }
 
     public static List<ServerPlayerEntity> resolveMany(ServerCommandSource source, List<String> aliases) throws CommandSyntaxException {

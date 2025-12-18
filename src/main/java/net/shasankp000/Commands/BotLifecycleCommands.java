@@ -9,6 +9,19 @@ final class BotLifecycleCommands {
 
     private BotLifecycleCommands() {}
 
+    static ArgumentBuilder<ServerCommandSource, ?> buildList() {
+        return CommandManager.literal("list")
+                .executes(modCommandRegistry::executeListBots);
+    }
+
+    static ArgumentBuilder<ServerCommandSource, ?> buildDespawn() {
+        return CommandManager.literal("despawn")
+                .executes(context -> modCommandRegistry.executeDespawnTargets(context, (String) null))
+                .then(CommandManager.argument("target", StringArgumentType.string())
+                        .executes(context -> modCommandRegistry.executeDespawnTargets(context,
+                                StringArgumentType.getString(context, "target"))));
+    }
+
     static ArgumentBuilder<ServerCommandSource, ?> buildStop() {
         return CommandManager.literal("stop")
                 .executes(context -> modCommandRegistry.executeStopTargets(context, (String) null))

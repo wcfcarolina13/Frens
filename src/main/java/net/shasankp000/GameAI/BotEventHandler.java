@@ -246,6 +246,7 @@ public class BotEventHandler {
         IDLE,
         FOLLOW,
         GUARD,
+        PATROL,
         STAY,
         RETURNING_BASE
     }
@@ -1195,6 +1196,9 @@ public class BotEventHandler {
             case GUARD -> {
                 return handleGuard(bot, state, nearbyEntities, augmentedHostiles);
             }
+            case PATROL -> {
+                return handlePatrol(bot, state, nearbyEntities, augmentedHostiles);
+            }
             case STAY -> {
                 if (!augmentedHostiles.isEmpty() && engageHostiles(bot, server, augmentedHostiles)) {
                     return true;
@@ -1412,6 +1416,16 @@ public class BotEventHandler {
         return "Guarding the area.";
     }
 
+    public static String setPatrolMode(ServerPlayerEntity bot, double radius) {
+        registerBot(bot);
+        setGuardState(bot, positionOf(bot), Math.max(3.0D, radius));
+        setMode(bot, Mode.PATROL);
+        setFollowTarget(bot, null);
+        clearBase(bot);
+        sendBotMessage(bot, String.format(Locale.ROOT, "Patrolling this area (radius %.1f blocks).", getGuardRadius(bot)));
+        return "Patrolling the area.";
+    }
+
     public static String setStayMode(ServerPlayerEntity bot) {
         registerBot(bot);
         setMode(bot, Mode.STAY);
@@ -1515,7 +1529,7 @@ public class BotEventHandler {
 
     public static boolean isPassiveMode() {
         Mode mode = getCurrentMode();
-        return mode == Mode.IDLE || mode == Mode.STAY || mode == Mode.GUARD;
+        return mode == Mode.IDLE || mode == Mode.STAY || mode == Mode.GUARD || mode == Mode.PATROL;
     }
 
     public static CombatStyle getCombatStyle() {
@@ -1924,13 +1938,44 @@ public class BotEventHandler {
         }
 
         double distanceFromCenter = positionOf(bot).distanceTo(center);
+        if (distanceFromCenter > 1.5D) {
+            moveToward(bot, center, 0.9D, false);
+            return true;
+        }
+
+        BotActions.stop(bot);
+        return true;
+    }
+
+    private static boolean handlePatrol(ServerPlayerEntity bot, CommandState state, List<Entity> nearbyEntities, List<Entity> hostileEntities) {
+        Vec3d center = state != null ? state.guardCenter : null;
+        double radius = state != null ? state.guardRadius : 6.0D;
+        if (center == null) {
+            center = positionOf(bot);
+            setGuardState(bot, center, radius);
+        }
+        MinecraftServer server = bot.getCommandSource().getServer();
+
+        if (!hostileEntities.isEmpty() && engageHostiles(bot, server, hostileEntities)) {
+            return true;
+        }
+
+        lowerShieldTracking(bot);
+
+        Entity nearestItem = findNearestItem(bot, nearbyEntities, radius);
+        if (nearestItem != null) {
+            collectNearbyDrops(bot, Math.max(radius, 4.0D));
+            return true;
+        }
+
+        double distanceFromCenter = positionOf(bot).distanceTo(center);
         if (distanceFromCenter > radius) {
             moveToward(bot, center, 2.0D, false);
             return true;
         }
 
-        if (RANDOM.nextDouble() < 0.02) {
-            Vec3d wanderTarget = randomPointWithin(center, radius * 0.6D);
+        if (RANDOM.nextDouble() < 0.05) {
+            Vec3d wanderTarget = randomPointWithin(center, radius * 0.85D);
             moveToward(bot, wanderTarget, 2.0D, false);
             return true;
         }
@@ -2167,7 +2212,7 @@ public class BotEventHandler {
             blockedTicks = 0;
         }
         int effectiveStagnant = Math.max(Math.max(stagnant, posStagnant), blockedTicks);
-        if (directBlocked && effectiveStagnant >= 3) {
+        if (directBlocked && posStagnant >= 5 && effectiveStagnant >= 10) {
             BlockPos directionGoal = navGoalBlock != null ? navGoalBlock : target.getBlockPos();
             Direction towardAction = directionGoal != null
                     ? approximateToward(bot.getBlockPos(), directionGoal)

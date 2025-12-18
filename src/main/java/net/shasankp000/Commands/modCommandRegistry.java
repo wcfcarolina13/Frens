@@ -207,6 +207,8 @@ public class modCommandRegistry {
 	                        .then(BotSkillCommands.buildSkill())
 	                        .then(BotSkillCommands.buildFish())
 	                        .then(BotSkillCommands.buildShelter())
+	                        .then(BotLifecycleCommands.buildList())
+	                        .then(BotLifecycleCommands.buildDespawn())
 	                        .then(BotLifecycleCommands.buildStop())
 	                        .then(BotLifecycleCommands.buildResume())
 	                        .then(BotLifecycleCommands.buildHeal())
@@ -1990,7 +1992,7 @@ public class modCommandRegistry {
 
         Runnable equipTask = () -> {
             DynamicRegistryManager.Immutable registryManager = server.getRegistryManager();
-            giveStack(bot, withEnchantments(registryManager, Items.DIAMOND_SWORD.getDefaultStack(),
+            giveStack(bot, withEnchantments(registryManager, Items.NETHERITE_SWORD.getDefaultStack(),
                     new int[]{5, 3},
                     (RegistryKey<Enchantment>[]) new RegistryKey[]{Enchantments.SHARPNESS, Enchantments.UNBREAKING}), commander);
 
@@ -1998,11 +2000,6 @@ public class modCommandRegistry {
                     new int[]{5, 3, 1},
                     (RegistryKey<Enchantment>[]) new RegistryKey[]{Enchantments.POWER, Enchantments.UNBREAKING, Enchantments.INFINITY}), commander);
             giveStack(bot, new ItemStack(Items.ARROW, 64), commander);
-            giveStack(bot, new ItemStack(Items.SPECTRAL_ARROW, 32), commander);
-
-            giveStack(bot, withEnchantments(registryManager, Items.CROSSBOW.getDefaultStack(),
-                    new int[]{3, 3},
-                    (RegistryKey<Enchantment>[]) new RegistryKey[]{Enchantments.QUICK_CHARGE, Enchantments.UNBREAKING}), commander);
 
             giveStack(bot, withEnchantments(registryManager, Items.SHIELD.getDefaultStack(),
                     new int[]{3},
@@ -2030,47 +2027,26 @@ public class modCommandRegistry {
             giveStack(bot, withEnchantments(registryManager, Items.NETHERITE_SHOVEL.getDefaultStack(),
                     new int[]{5, 3},
                     (RegistryKey<Enchantment>[]) new RegistryKey[]{Enchantments.EFFICIENCY, Enchantments.UNBREAKING}), commander);
-            // --- Additional "good" tools for testing: second copies + hoe ---
-            giveStack(bot, withEnchantments(registryManager, Items.NETHERITE_PICKAXE.getDefaultStack(),
-                    new int[]{5, 3, 1},
-                    (RegistryKey<Enchantment>[]) new RegistryKey[]{Enchantments.EFFICIENCY, Enchantments.UNBREAKING, Enchantments.MENDING}), commander);
-            giveStack(bot, withEnchantments(registryManager, Items.NETHERITE_SHOVEL.getDefaultStack(),
-                    new int[]{5, 3, 1},
-                    (RegistryKey<Enchantment>[]) new RegistryKey[]{Enchantments.EFFICIENCY, Enchantments.UNBREAKING, Enchantments.MENDING}), commander);
-            giveStack(bot, withEnchantments(registryManager, Items.NETHERITE_AXE.getDefaultStack(),
-                    new int[]{5, 3, 1},
-                    (RegistryKey<Enchantment>[]) new RegistryKey[]{Enchantments.EFFICIENCY, Enchantments.UNBREAKING, Enchantments.MENDING}), commander);
-            // Add two netherite hoes
             giveStack(bot, withEnchantments(registryManager, Items.NETHERITE_HOE.getDefaultStack(),
                     new int[]{5, 3, 1},
                     (RegistryKey<Enchantment>[]) new RegistryKey[]{Enchantments.EFFICIENCY, Enchantments.UNBREAKING, Enchantments.MENDING}), commander);
-            giveStack(bot, withEnchantments(registryManager, Items.NETHERITE_HOE.getDefaultStack(),
-                    new int[]{5, 3, 1},
-                    (RegistryKey<Enchantment>[]) new RegistryKey[]{Enchantments.EFFICIENCY, Enchantments.UNBREAKING, Enchantments.MENDING}), commander);
-            giveStack(bot, withEnchantments(registryManager, Items.FISHING_ROD.getDefaultStack(),
-                    new int[]{3, 3, 3, 1},
-                    (RegistryKey<Enchantment>[]) new RegistryKey[]{Enchantments.LURE, Enchantments.LUCK_OF_THE_SEA, Enchantments.UNBREAKING, Enchantments.MENDING}), commander);
             giveStack(bot, withEnchantments(registryManager, Items.FISHING_ROD.getDefaultStack(),
                     new int[]{3, 3, 3, 1},
                     (RegistryKey<Enchantment>[]) new RegistryKey[]{Enchantments.LURE, Enchantments.LUCK_OF_THE_SEA, Enchantments.UNBREAKING, Enchantments.MENDING}), commander);
 
-            giveStack(bot, new ItemStack(Items.GOLDEN_CARROT, 64), commander);
             giveStack(bot, new ItemStack(Items.COOKED_BEEF, 64), commander);
             giveStack(bot, new ItemStack(Items.TORCH, 64), commander);
-            giveStack(bot, new ItemStack(Items.SPONGE, 64), commander);
-            giveStack(bot, new ItemStack(Items.SCAFFOLDING, 64), commander);
+            giveStack(bot, new ItemStack(Items.TORCH, 64), commander);
+            giveStack(bot, new ItemStack(Items.WHEAT_SEEDS, 64), commander);
+            giveStack(bot, new ItemStack(Items.COMPASS, 1), commander);
 
             // --- Utility & building items for quick testing ---
             giveStack(bot, new ItemStack(Items.CRAFTING_TABLE), commander);
             giveStack(bot, new ItemStack(Items.FURNACE), commander);
-            giveStack(bot, new ItemStack(Items.CHEST, 2), commander);      // two chests
+            giveStack(bot, new ItemStack(Items.CHEST, 1), commander);
             giveStack(bot, new ItemStack(Items.WATER_BUCKET), commander);
             giveStack(bot, new ItemStack(Items.SHEARS), commander);
             giveStack(bot, new ItemStack(Items.WHITE_BED), commander);
-            giveStack(bot, new ItemStack(Items.LEAD, 2), commander);       // two leads
-            // Boats are non‑stackable; add twice
-            giveStack(bot, new ItemStack(Items.OAK_BOAT), commander);
-            giveStack(bot, new ItemStack(Items.OAK_BOAT), commander);
 
             armorUtils.autoEquipArmor(bot);
             CombatInventoryManager.ensureCombatLoadout(bot);
@@ -2337,24 +2313,35 @@ public class modCommandRegistry {
     }
 
     static int executeGuard(CommandContext<ServerCommandSource> context, ServerPlayerEntity bot, double radius) {
+        rememberTarget(context.getSource(), bot);
         String result = BotEventHandler.setGuardMode(bot, radius);
         ChatUtils.sendSystemMessage(context.getSource(), result);
         return 1;
     }
 
+    static int executePatrol(CommandContext<ServerCommandSource> context, ServerPlayerEntity bot, double radius) {
+        rememberTarget(context.getSource(), bot);
+        String result = BotEventHandler.setPatrolMode(bot, radius);
+        ChatUtils.sendSystemMessage(context.getSource(), result);
+        return 1;
+    }
+
     static int executeStay(CommandContext<ServerCommandSource> context, ServerPlayerEntity bot) {
+        rememberTarget(context.getSource(), bot);
         String result = BotEventHandler.setStayMode(bot);
         ChatUtils.sendSystemMessage(context.getSource(), result);
         return 1;
     }
 
     static int executeReturnToBase(CommandContext<ServerCommandSource> context, ServerPlayerEntity bot, ServerPlayerEntity commander) {
+        rememberTarget(context.getSource(), bot);
         String result = BotEventHandler.setReturnToBase(bot, commander);
         ChatUtils.sendSystemMessage(context.getSource(), result);
         return 1;
     }
 
     static int executeEquip(CommandContext<ServerCommandSource> context, ServerPlayerEntity bot) {
+        rememberTarget(context.getSource(), bot);
         ServerPlayerEntity commander = null;
         try {
             commander = context.getSource().getPlayer();
@@ -2363,6 +2350,50 @@ public class modCommandRegistry {
         equipDefaultLoadout(context.getSource().getServer(), bot, commander);
         ChatUtils.sendSystemMessage(context.getSource(), "Equipping loadout on " + bot.getName().getString() + ".");
         return 1;
+    }
+
+    static int executeListBots(CommandContext<ServerCommandSource> context) {
+        MinecraftServer server = context.getSource().getServer();
+        if (server == null) {
+            ChatUtils.sendSystemMessage(context.getSource(), "No server available.");
+            return 0;
+        }
+        List<String> names = new ArrayList<>();
+        for (ServerPlayerEntity player : server.getPlayerManager().getPlayerList()) {
+            if (player instanceof net.shasankp000.Entity.createFakePlayer) {
+                names.add(player.getName().getString());
+            }
+        }
+        names.sort(String.CASE_INSENSITIVE_ORDER);
+        String remembered = BotTargetingService.getRemembered(context.getSource());
+        if (names.isEmpty()) {
+            ChatUtils.sendSystemMessage(context.getSource(), "No active bots.");
+            return 1;
+        }
+        ChatUtils.sendSystemMessage(context.getSource(), "Active bots: " + String.join(", ", names));
+        if (remembered != null) {
+            ChatUtils.sendSystemMessage(context.getSource(), "Selected bot: " + remembered);
+        } else {
+            ChatUtils.sendSystemMessage(context.getSource(), "Selected bot: (none) — target one by name or use 'all'.");
+        }
+        return 1;
+    }
+
+    static int executeDespawnTargets(CommandContext<ServerCommandSource> context, String targetArg) throws CommandSyntaxException {
+        List<ServerPlayerEntity> targets = BotTargetingService.resolve(context.getSource(), targetArg);
+        boolean isAll = targetArg != null && "all".equalsIgnoreCase(targetArg.trim());
+        int successes = 0;
+        for (ServerPlayerEntity bot : targets) {
+            BotTargetingService.forgetIfMatches(context.getSource(), bot.getName().getString());
+            BotEventHandler.unregisterBot(bot);
+            successes++;
+        }
+        if (!targets.isEmpty()) {
+            String summary = formatBotList(targets, isAll);
+            String verb = (isAll || targets.size() > 1) ? "have" : "has";
+            ChatUtils.sendSystemMessage(context.getSource(), summary + " " + verb + " been despawned.");
+        }
+        return successes;
     }
 
     static int executeAssistToggle(CommandContext<ServerCommandSource> context, ServerPlayerEntity bot, boolean enable) {
@@ -3240,6 +3271,13 @@ public class modCommandRegistry {
     private record SkillCommandInvocation(String target, String arguments, boolean each) {}
 
     static ServerPlayerEntity getActiveBotOrThrow(CommandContext<ServerCommandSource> context) throws CommandSyntaxException {
+        try {
+            List<ServerPlayerEntity> remembered = BotTargetingService.resolve(context.getSource(), null);
+            if (!remembered.isEmpty()) {
+                return remembered.get(0);
+            }
+        } catch (CommandSyntaxException ignored) {
+        }
         ServerPlayerEntity active = BotEventHandler.bot;
         if (active != null) {
             ServerPlayerEntity refreshed = context.getSource()
@@ -3250,7 +3288,14 @@ public class modCommandRegistry {
                 return refreshed;
             }
         }
-        throw new SimpleCommandExceptionType(Text.literal("No active bot found. Specify a bot name or spawn one with /bot spawn.")).create();
+        throw new SimpleCommandExceptionType(Text.literal("No active bot found. Specify a bot name, 'all', or spawn one with /bot spawn.")).create();
+    }
+
+    private static void rememberTarget(ServerCommandSource source, ServerPlayerEntity bot) {
+        if (source == null || bot == null) {
+            return;
+        }
+        BotTargetingService.remember(source, bot.getName().getString());
     }
 
     private static @NotNull BlockPos getBlockPos(CommandContext<ServerCommandSource> context) {

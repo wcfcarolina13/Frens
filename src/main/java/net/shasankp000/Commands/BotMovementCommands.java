@@ -35,14 +35,14 @@ final class BotMovementCommands {
 
     static ArgumentBuilder<ServerCommandSource, ?> buildPatrol() {
         return CommandManager.literal("patrol")
-                .executes(context -> modCommandRegistry.executeGuard(context, modCommandRegistry.getActiveBotOrThrow(context), modCommandRegistry.DEFAULT_GUARD_RADIUS))
+                .executes(context -> modCommandRegistry.executePatrol(context, modCommandRegistry.getActiveBotOrThrow(context), modCommandRegistry.DEFAULT_GUARD_RADIUS))
                 .then(CommandManager.argument("radius", DoubleArgumentType.doubleArg(3.0D, 32.0D))
-                        .executes(context -> modCommandRegistry.executeGuard(context, modCommandRegistry.getActiveBotOrThrow(context), DoubleArgumentType.getDouble(context, "radius")))
+                        .executes(context -> modCommandRegistry.executePatrol(context, modCommandRegistry.getActiveBotOrThrow(context), DoubleArgumentType.getDouble(context, "radius")))
                 )
                 .then(CommandManager.argument("bot", EntityArgumentType.player())
-                        .executes(context -> modCommandRegistry.executeGuard(context, EntityArgumentType.getPlayer(context, "bot"), modCommandRegistry.DEFAULT_GUARD_RADIUS))
+                        .executes(context -> modCommandRegistry.executePatrol(context, EntityArgumentType.getPlayer(context, "bot"), modCommandRegistry.DEFAULT_GUARD_RADIUS))
                         .then(CommandManager.argument("radius", DoubleArgumentType.doubleArg(3.0D, 32.0D))
-                                .executes(context -> modCommandRegistry.executeGuard(context, EntityArgumentType.getPlayer(context, "bot"), DoubleArgumentType.getDouble(context, "radius")))
+                                .executes(context -> modCommandRegistry.executePatrol(context, EntityArgumentType.getPlayer(context, "bot"), DoubleArgumentType.getDouble(context, "radius")))
                         )
                 );
     }
@@ -61,4 +61,3 @@ final class BotMovementCommands {
                         .executes(context -> modCommandRegistry.executeReturnToBase(context, EntityArgumentType.getPlayer(context, "bot"), context.getSource().getPlayer())));
     }
 }
-
