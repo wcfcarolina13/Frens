@@ -45,6 +45,7 @@ import net.shasankp000.GameAI.services.BotRescueService;
 import net.shasankp000.GameAI.services.BotThreatService;
 import net.shasankp000.GameAI.services.BotStuckService;
 import net.shasankp000.GameAI.services.BotRLActionService;
+import net.shasankp000.GameAI.services.BotRLPersistenceThrottleService;
 import net.shasankp000.Database.StateActionPair;
 import net.shasankp000.Entity.AutoFaceEntity;
 import net.shasankp000.Entity.LookController;
@@ -109,8 +110,6 @@ public class BotEventHandler {
     // Stage-2 refactor: drop-sweep state moved to DropSweepService.
     // Stage-2 refactor: burial/suffocation rescue moved to BotRescueService.
     // Stage-2 refactor: follow/come state maps moved to FollowStateService.
-    private static final Map<UUID, Long> LAST_RL_PERSIST_MS = new ConcurrentHashMap<>();
-    private static final long RL_PERSIST_MIN_INTERVAL_MS = 15_000L;
     private static final long FOLLOW_SEALED_STATE_TTL_MS = 1_000L;
     private static final double FOLLOW_PERSONAL_SPACE = 1.6D; // prefer at least ~1 block gap
     private static final double FOLLOW_BACKUP_DISTANCE = 1.05D; // trigger backup after linger
@@ -3188,20 +3187,6 @@ public class BotEventHandler {
         BotRescueService.checkForSpawnInBlocks(bot);
     }
 
-    private static boolean shouldPersistRlNow(ServerPlayerEntity bot) {
-        if (bot == null) {
-            return false;
-        }
-        UUID id = bot.getUuid();
-        long now = System.currentTimeMillis();
-        long last = LAST_RL_PERSIST_MS.getOrDefault(id, -1L);
-        if (last >= 0 && (now - last) < RL_PERSIST_MIN_INTERVAL_MS) {
-            return false;
-        }
-        LAST_RL_PERSIST_MS.put(id, now);
-        return true;
-    }
-    
 
     public static void tickBurialRescue(MinecraftServer server) {
         BotRescueService.tickBurialRescue(server);
@@ -3369,7 +3354,7 @@ public class BotEventHandler {
         double qValue = rlAgentHook.calculateQValue(currentState, chosenAction, reward, nextState, qTable);
         qTable.addEntry(currentState, chosenAction, qValue, nextState);
 
-        if (shouldPersistRlNow(bot)) {
+        if (BotRLPersistenceThrottleService.shouldPersistNow(bot)) {
             QTableStorage.saveQTable(qTable, null);
             QTableStorage.saveEpsilon(rlAgentHook.getEpsilon(), qTableDir + "/epsilon.bin");
             LOGGER.info("Persisted Q-table and epsilon (throttled) after action {}", chosenAction);
@@ -3466,6 +3451,7 @@ public class BotEventHandler {
 		            LAST_RL_SAMPLE_TICK.clear();
 		            BotRescueService.reset();
 		            BotStuckService.resetAll();
+		            BotRLPersistenceThrottleService.resetAll();
 		            FollowStateService.reset();
 		            FollowDebugService.reset();
 		            DropSweepService.reset();
