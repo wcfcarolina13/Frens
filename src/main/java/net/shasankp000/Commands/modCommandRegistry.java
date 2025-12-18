@@ -2116,7 +2116,7 @@ public class modCommandRegistry {
         if (commander == null) {
             throw new SimpleCommandExceptionType(Text.literal("Only players can call bots to come to them.")).create();
         }
-        List<ServerPlayerEntity> bots = BotTargetingService.resolve(context.getSource(), targetArg);
+        List<ServerPlayerEntity> bots = resolveTargetBots(context, targetArg);
         boolean isAll = targetArg != null && "all".equalsIgnoreCase(targetArg.trim());
         int successes = 0;
         for (ServerPlayerEntity bot : bots) {
@@ -2125,7 +2125,7 @@ public class modCommandRegistry {
         if (!bots.isEmpty() && successes > 0) {
             String summary = formatBotList(bots, isAll);
             String verb = (isAll || bots.size() > 1) ? "are" : "is";
-            ChatUtils.sendSystemMessage(context.getSource(), summary + " " + verb + " heading to you.");
+            ChatUtils.sendSystemMessage(context.getSource(), summary + " " + verb + " heading to your last location.");
         }
         return successes;
     }
@@ -2146,7 +2146,8 @@ public class modCommandRegistry {
         if (!teleportAllowed) {
             // Come is a player-issued override; abort any running skill so follow-walk can take over immediately.
             TaskService.forceAbort(bot.getUuid(), "§cInterrupted by /bot come.");
-            BotEventHandler.setFollowModeWalk(bot, commander, 3.2D);
+            BlockPos goal = commander.getBlockPos().toImmutable();
+            BotEventHandler.setComeModeWalk(bot, commander, goal, 3.2D);
             return 1;
         }
 

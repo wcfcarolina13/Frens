@@ -1193,6 +1193,7 @@ public class BotEventHandler {
         if (state != null) {
             state.followNoTeleport = false;
             state.followStopRange = 0.0D;
+            state.followFixedGoal = null;
         }
         setMode(bot, Mode.FOLLOW);
         clearGuard(bot);
@@ -1234,6 +1235,7 @@ public class BotEventHandler {
         if (state != null) {
             state.followNoTeleport = true;
             state.followStopRange = Math.max(1.5D, stopRange);
+            state.followFixedGoal = null;
         }
         setMode(bot, Mode.FOLLOW);
         clearGuard(bot);
@@ -1263,11 +1265,55 @@ public class BotEventHandler {
         return "Walking to " + target.getName().getString() + ".";
     }
 
+    public static String setComeModeWalk(ServerPlayerEntity bot, ServerPlayerEntity commander, BlockPos fixedGoal, double stopRange) {
+        if (bot == null || fixedGoal == null) {
+            return "Unable to come — destination not found.";
+        }
+        registerBot(bot);
+        setFollowTarget(bot, commander != null ? commander.getUuid() : null);
+        BotCommandStateService.State state = stateFor(bot);
+        if (state != null) {
+            state.followNoTeleport = true;
+            state.followStopRange = Math.max(1.5D, stopRange);
+            state.followFixedGoal = fixedGoal.toImmutable();
+        }
+        setMode(bot, Mode.FOLLOW);
+        clearGuard(bot);
+        clearBase(bot);
+
+        UUID id = bot.getUuid();
+        FOLLOW_DOOR_PLAN.remove(id);
+        FOLLOW_WAYPOINTS.remove(id);
+        FOLLOW_LAST_DISTANCE_SQ.remove(id);
+        FOLLOW_STAGNANT_TICKS.remove(id);
+        FOLLOW_LAST_ESCAPE_DOOR_PLAN_MS.remove(id);
+        FOLLOW_PATH_INFLIGHT.remove(id);
+        FOLLOW_LAST_PATH_PLAN_MS.remove(id);
+        FOLLOW_LAST_PATH_TARGET.remove(id);
+        FOLLOW_LAST_PATH_LOG_MS.remove(id);
+        FOLLOW_LAST_PATH_FAIL_LOG_MS.remove(id);
+        FOLLOW_LAST_PATH_SKIP_LOG_MS.remove(id);
+        FOLLOW_LAST_DECISION_LOG_MS.remove(id);
+        FOLLOW_AVOID_DOOR_BASE.remove(id);
+        FOLLOW_AVOID_DOOR_UNTIL_MS.remove(id);
+        FOLLOW_REPLAN_AFTER_DOOR_MS.remove(id);
+        FOLLOW_LAST_BLOCK_POS.remove(id);
+        FOLLOW_POS_STAGNANT_TICKS.remove(id);
+        FOLLOW_DIRECT_BLOCKED_TICKS.remove(id);
+        FOLLOW_DOOR_RECOVERY.remove(id);
+
+        requestFollowPathPlanToGoal(bot, fixedGoal, true, "come-start");
+        sendBotMessage(bot, "Walking to your last location.");
+        return "Walking to your last location.";
+    }
+
     public static String stopFollowing(ServerPlayerEntity bot) {
         if (bot != null) {
             registerBot(bot);
         }
-        boolean wasFollowing = getMode(bot) == Mode.FOLLOW && getFollowTargetFor(bot) != null;
+        BotCommandStateService.State existingState = stateFor(bot);
+        boolean hadFixedGoal = existingState != null && existingState.followFixedGoal != null;
+        boolean wasFollowing = getMode(bot) == Mode.FOLLOW && (getFollowTargetFor(bot) != null || hadFixedGoal);
         setFollowTarget(bot, null);
         if (bot != null) {
             UUID id = bot.getUuid();
@@ -1300,6 +1346,7 @@ public class BotEventHandler {
         if (state != null) {
             state.followNoTeleport = false;
             state.followStopRange = 0.0D;
+            state.followFixedGoal = null;
         }
         if (bot != null) {
             BotActions.stop(bot);
@@ -1501,10 +1548,11 @@ public class BotEventHandler {
 
     private static boolean handleFollow(ServerPlayerEntity bot, BotCommandStateService.State state, MinecraftServer server, List<Entity> hostileEntities) {
         UUID targetUuid = state != null ? state.followTargetUuid : null;
+        BlockPos fixedGoal = state != null ? state.followFixedGoal : null;
         ServerPlayerEntity target = targetUuid != null && server != null
                 ? server.getPlayerManager().getPlayer(targetUuid)
                 : null;
-        if (target == null) {
+        if (target == null && fixedGoal == null) {
             setMode(bot, Mode.IDLE);
         setAssistAllies(bot, true);            setFollowTarget(bot, null);
 	            if (bot != null) {
@@ -1539,7 +1587,7 @@ public class BotEventHandler {
 	        }
 
         List<Entity> augmentedHostiles = new ArrayList<>(hostileEntities);
-        if (isAssistAllies(bot)) {
+        if (target != null && isAssistAllies(bot)) {
             augmentedHostiles.addAll(BotThreatService.findHostilesAround(target, 8.0D));
         }
 
@@ -1549,18 +1597,25 @@ public class BotEventHandler {
 
         lowerShieldTracking(bot);
 
-	        Vec3d targetPos = positionOf(target);
+	        Vec3d targetPos = fixedGoal != null ? Vec3d.ofCenter(fixedGoal) : positionOf(target);
 	        double distanceSq = bot.squaredDistanceTo(targetPos);
 	        double horizDistSq = horizontalDistanceSq(bot, targetPos);
-	        handleFollowPersonalSpace(bot, target, horizDistSq, targetPos);
+	        if (target != null) {
+	            handleFollowPersonalSpace(bot, target, horizDistSq, targetPos);
+	        }
         boolean forceWalk = state != null && state.followNoTeleport;
         double stopRange = state != null ? state.followStopRange : 0.0D;
         boolean allowTeleportPref = SkillPreferences.teleportDuringSkills(bot) && !forceWalk;
-        boolean canSee = bot.canSee(target);
-        double deltaY = target.getY() - bot.getY();
+        boolean canSee = target != null && bot.canSee(target);
+        if (fixedGoal != null) {
+            canSee = !isDirectRouteBlocked(bot, targetPos, fixedGoal);
+        }
+        double deltaY = fixedGoal != null
+                ? (targetPos.y - bot.getY())
+                : (target.getY() - bot.getY());
         double absDeltaY = Math.abs(deltaY);
         MinecraftServer srv = bot.getCommandSource().getServer();
-        if (bot.getEntityWorld() != target.getEntityWorld() && srv != null) {
+        if (target != null && bot.getEntityWorld() != target.getEntityWorld() && srv != null) {
             ServerWorld targetWorld = srv.getWorld(target.getEntityWorld().getRegistryKey());
             if (targetWorld != null) {
                 LOGGER.info("Follow dimension handoff: moving {} from {} to {} (target dim {})", bot.getName().getString(), bot.getEntityWorld().getRegistryKey().getValue(), targetWorld.getRegistryKey().getValue(), target.getEntityWorld().getRegistryKey().getValue());
@@ -1573,21 +1628,23 @@ public class BotEventHandler {
         }
         LOGGER.debug("Follow tick: bot={} target={} dist={}/{} dy={} forceWalk={} allowTpPref={} canSee={} stopRange={}",
                 bot.getName().getString(),
-                target.getName().getString(),
+                target != null ? target.getName().getString() : "goal",
                 Math.sqrt(distanceSq),
-                target.getBlockPos(),
+                fixedGoal != null ? fixedGoal : target.getBlockPos(),
                 String.format(Locale.ROOT, "%.2f", deltaY),
                 forceWalk,
                 allowTeleportPref,
                 canSee,
                 stopRange);
-        if (stopRange > 0 && horizDistSq <= stopRange * stopRange) {
+        // stopRange is used for "come"-style one-shot moves: do not stop if we're vertically far away
+        // (e.g., standing under the commander on a floor below).
+        if (stopRange > 0 && horizDistSq <= stopRange * stopRange && absDeltaY <= 2.0D) {
             stopFollowing(bot);
             return true;
         }
 
         UUID botId = bot.getUuid();
-        BlockPos navGoalBlock = target.getBlockPos();
+        BlockPos navGoalBlock = fixedGoal != null ? fixedGoal : target.getBlockPos();
         Vec3d navGoalPos = targetPos;
         boolean usingWaypoints = false;
         ArrayDeque<BlockPos> waypoints = FOLLOW_WAYPOINTS.get(botId);
@@ -1631,7 +1688,7 @@ public class BotEventHandler {
             if (waypoints.isEmpty()) {
                 FOLLOW_WAYPOINTS.remove(botId);
                 usingWaypoints = false;
-                navGoalBlock = target.getBlockPos();
+                navGoalBlock = fixedGoal != null ? fixedGoal : target.getBlockPos();
                 navGoalPos = targetPos;
                 waypointCount = 0;
             }
@@ -1647,7 +1704,7 @@ public class BotEventHandler {
 	                FOLLOW_DOOR_STUCK_TICKS.remove(botId);
 	                FOLLOW_DOOR_RECOVERY.remove(botId);
 	                usingWaypoints = false;
-	                navGoalBlock = target.getBlockPos();
+	                navGoalBlock = fixedGoal != null ? fixedGoal : target.getBlockPos();
 	                navGoalPos = targetPos;
 	                maybeLogFollowDecision(bot, "drop-waypoints: long-range target dist="
 	                        + String.format(Locale.ROOT, "%.2f", Math.sqrt(distanceSq)));
@@ -1657,7 +1714,7 @@ public class BotEventHandler {
         double progressDistSq = bot.getBlockPos().getSquaredDistance(navGoalBlock);
         boolean directBlocked = progressDistSq <= 36.0D && isDirectRouteBlocked(bot, navGoalPos, navGoalBlock);
         boolean botSealed = isSealedSpace(bot);
-        boolean commanderSealed = isSealedSpace(target);
+        boolean commanderSealed = target != null && isSealedSpace(target);
         maybeLogFollowStatus(bot, target, distanceSq, horizDistSq, canSee, directBlocked, usingWaypoints, navGoalBlock, waypointCount, botSealed, commanderSealed);
 
         if (handleFollowObstacles(bot, target, navGoalPos, navGoalBlock, progressDistSq, distanceSq, absDeltaY, canSee, directBlocked, allowTeleportPref, forceWalk, srv)) {
@@ -1986,6 +2043,8 @@ public class BotEventHandler {
         if (bot == null || target == null) {
             return false;
         }
+        BotCommandStateService.State st = stateFor(bot);
+        boolean fixedGoalActive = st != null && st.followFixedGoal != null;
         boolean botSealed = isSealedSpace(bot);
         boolean commanderSealed = isSealedSpace(target);
         boolean teleportPreferenceEnabled = SkillPreferences.teleportDuringSkills(bot);
@@ -2043,8 +2102,9 @@ public class BotEventHandler {
             }
         }
 
-        Vec3d commanderGoal = positionOf(target);
-        boolean commanderRouteBlocked = isDirectRouteBlocked(bot, commanderGoal, target.getBlockPos());
+        Vec3d commanderGoal = fixedGoalActive ? navGoalPos : positionOf(target);
+        BlockPos commanderGoalBlock = fixedGoalActive ? navGoalBlock : target.getBlockPos();
+        boolean commanderRouteBlocked = isDirectRouteBlocked(bot, commanderGoal, commanderGoalBlock);
         if (canSee && commanderRouteBlocked && isOpenDoorBetween(bot, target)) {
             commanderRouteBlocked = false;
         }
@@ -2064,9 +2124,11 @@ public class BotEventHandler {
             }
         }
 
-        boolean overrideApplied = applyLongRangeFollowOverride(bot, target, targetDistSq, navGoalBlock, canSee, directBlocked, botSealed, commanderSealed);
-        if (overrideApplied) {
-            directBlocked = false;
+        if (!fixedGoalActive) {
+            boolean overrideApplied = applyLongRangeFollowOverride(bot, target, targetDistSq, navGoalBlock, canSee, directBlocked, botSealed, commanderSealed);
+            if (overrideApplied) {
+                directBlocked = false;
+            }
         }
 
         boolean teleportDesired = shouldWolfTeleport(targetDistSq, absDeltaY, canSee, effectiveStagnant, server);
@@ -2214,7 +2276,11 @@ public class BotEventHandler {
                         return true;
                     }
                 }
-                requestFollowPathPlan(bot, target, true, "direct-blocked-stuck");
+                if (fixedGoalActive && navGoalBlock != null) {
+                    requestFollowPathPlanToGoal(bot, navGoalBlock, true, "direct-blocked-stuck");
+                } else {
+                    requestFollowPathPlan(bot, target, true, "direct-blocked-stuck");
+                }
             }
         }
 
@@ -2306,13 +2372,21 @@ public class BotEventHandler {
             }
         }
 
-        maybeRequestFollowPathPlan(bot, target, canSee, effectiveStagnant);
+        if (fixedGoalActive && navGoalBlock != null) {
+            maybeRequestFollowPathPlanToGoal(bot, navGoalBlock, canSee, effectiveStagnant);
+        } else {
+            maybeRequestFollowPathPlan(bot, target, canSee, effectiveStagnant);
+        }
 
         Long replanAfterDoor = FOLLOW_REPLAN_AFTER_DOOR_MS.remove(id);
         if (replanAfterDoor != null && (System.currentTimeMillis() - replanAfterDoor) < 4_500L) {
             ArrayDeque<BlockPos> waypoints = FOLLOW_WAYPOINTS.get(id);
             if (waypoints == null || waypoints.isEmpty()) {
-                requestFollowPathPlan(bot, target, true, "post-door");
+                if (fixedGoalActive && navGoalBlock != null) {
+                    requestFollowPathPlanToGoal(bot, navGoalBlock, true, "post-door");
+                } else {
+                    requestFollowPathPlan(bot, target, true, "post-door");
+                }
             }
         }
 
@@ -2320,7 +2394,7 @@ public class BotEventHandler {
         // - only when player has allowed teleport generally,
         // - only when far enough or when we've been stuck for a while,
         // - and never spam (cooldown).
-        if (allowTeleportPref && shouldWolfTeleport(targetDistSq, absDeltaY, canSee, effectiveStagnant, server)) {
+        if (!fixedGoalActive && allowTeleportPref && shouldWolfTeleport(targetDistSq, absDeltaY, canSee, effectiveStagnant, server)) {
             if (tryWolfTeleport(bot, target, server)) {
                 FOLLOW_LAST_DISTANCE_SQ.remove(id);
                 FOLLOW_STAGNANT_TICKS.remove(id);
@@ -2769,6 +2843,21 @@ public class BotEventHandler {
         requestFollowPathPlan(bot, target, stagnantTicks >= 10, "stagnant-" + stagnantTicks);
     }
 
+    private static void maybeRequestFollowPathPlanToGoal(ServerPlayerEntity bot, BlockPos goal, boolean canSee, int stagnantTicks) {
+        if (bot == null || goal == null) {
+            return;
+        }
+        if (canSee && stagnantTicks < 6) {
+            return;
+        }
+        UUID botId = bot.getUuid();
+        ArrayDeque<BlockPos> existing = FOLLOW_WAYPOINTS.get(botId);
+        if (existing != null && !existing.isEmpty() && stagnantTicks < 12) {
+            return;
+        }
+        requestFollowPathPlanToGoal(bot, goal, stagnantTicks >= 10, "stagnant-" + stagnantTicks);
+    }
+
     private static void requestFollowPathPlan(ServerPlayerEntity bot, ServerPlayerEntity target, boolean force, String reason) {
         if (bot == null || target == null) {
             return;
@@ -2934,6 +3023,158 @@ public class BotEventHandler {
             } catch (Throwable t) {
                 // Keep follow resilient; failures just fall back to local steering.
                 LOGGER.debug("Follow path plan failed: {}", t.getMessage());
+            }
+        });
+
+        FOLLOW_PATH_INFLIGHT.put(botId, task);
+        task.whenComplete((ignored, err) -> server.execute(() -> FOLLOW_PATH_INFLIGHT.remove(botId)));
+    }
+
+    private static void requestFollowPathPlanToGoal(ServerPlayerEntity bot, BlockPos goal, boolean force, String reason) {
+        if (bot == null || goal == null) {
+            return;
+        }
+        MinecraftServer server = bot.getCommandSource() != null ? bot.getCommandSource().getServer() : null;
+        if (server == null) {
+            maybeLogFollowPlanSkip(bot.getUuid(), "skip: no server (reason=" + reason + ")");
+            return;
+        }
+        if (!(bot.getEntityWorld() instanceof ServerWorld botWorld)) {
+            maybeLogFollowPlanSkip(bot.getUuid(), "skip: non-server world (reason=" + reason + ")");
+            return;
+        }
+
+        UUID botId = bot.getUuid();
+        long now = System.currentTimeMillis();
+        long last = FOLLOW_LAST_PATH_PLAN_MS.getOrDefault(botId, -1L);
+        long minInterval = force ? Math.min(650L, FollowPathService.PLAN_COOLDOWN_MS) : FollowPathService.PLAN_COOLDOWN_MS;
+        if (last >= 0 && (now - last) < minInterval) {
+            maybeLogFollowPlanSkip(botId, "skip: cooldown (" + (now - last) + "ms, reason=" + reason + ")");
+            return;
+        }
+        if (FOLLOW_PATH_INFLIGHT.containsKey(botId)) {
+            maybeLogFollowPlanSkip(botId, "skip: inflight (reason=" + reason + ")");
+            return;
+        }
+
+        BlockPos goalPos = goal.toImmutable();
+        BlockPos lastTarget = FOLLOW_LAST_PATH_TARGET.get(botId);
+        if (!force && lastTarget != null && lastTarget.getSquaredDistance(goalPos) <= 4.0D
+                && last >= 0 && (now - last) < FollowPathService.PLAN_COOLDOWN_MS * 2) {
+            maybeLogFollowPlanSkip(botId, "skip: same goal (reason=" + reason + ")");
+            return;
+        }
+        FOLLOW_LAST_PATH_PLAN_MS.put(botId, now);
+        FOLLOW_LAST_PATH_TARGET.put(botId, goalPos);
+
+        RegistryKey<World> worldKey = botWorld.getRegistryKey();
+
+        long lastLog = FOLLOW_LAST_PATH_LOG_MS.getOrDefault(botId, -1L);
+        if (lastLog < 0 || (now - lastLog) >= 5_000L) {
+            FOLLOW_LAST_PATH_LOG_MS.put(botId, now);
+            LOGGER.info("Follow path planning start (goal): bot={} botPos={} goal={} force={} reason={}",
+                    bot.getName().getString(),
+                    bot.getBlockPos().toShortString(),
+                    goalPos.toShortString(),
+                    force,
+                    reason == null ? "" : reason);
+        }
+
+        CompletableFuture<Void> task = CompletableFuture.runAsync(() -> {
+            try {
+                CompletableFuture<FollowPathService.FollowSnapshot> snapFuture = new CompletableFuture<>();
+                server.execute(() -> {
+                    try {
+                        ServerPlayerEntity liveBot = server.getPlayerManager().getPlayer(botId);
+                        ServerWorld world = server.getWorld(worldKey);
+                        if (liveBot == null || world == null || liveBot.getEntityWorld() != world) {
+                            snapFuture.complete(null);
+                            return;
+                        }
+                        snapFuture.complete(FollowPathService.capture(world, liveBot.getBlockPos(), goalPos, false));
+                    } catch (Throwable t) {
+                        snapFuture.complete(null);
+                    }
+                });
+
+                FollowPathService.FollowSnapshot snapshot;
+                try {
+                    snapshot = snapFuture.get(900, TimeUnit.MILLISECONDS);
+                } catch (Exception e) {
+                    snapshot = null;
+                }
+                if (snapshot == null) {
+                    maybeLogFollowPlanSkip(botId, "skip: snapshot null (reason=" + (reason == null ? "" : reason) + ")");
+                    return;
+                }
+                BlockPos avoidDoor = null;
+                long lastDoorMs = FOLLOW_LAST_DOOR_CROSS_MS.getOrDefault(botId, -1L);
+                if (lastDoorMs >= 0 && (System.currentTimeMillis() - lastDoorMs) < 5_000L) {
+                    avoidDoor = FOLLOW_LAST_DOOR_BASE.get(botId);
+                }
+                List<BlockPos> waypoints = FollowPathService.planWaypoints(snapshot, avoidDoor);
+                if (waypoints.isEmpty()) {
+                    CompletableFuture<FollowPathService.FollowSnapshot> escapeSnapFuture = new CompletableFuture<>();
+                    server.execute(() -> {
+                        try {
+                            ServerPlayerEntity liveBot = server.getPlayerManager().getPlayer(botId);
+                            ServerWorld world = server.getWorld(worldKey);
+                            if (liveBot == null || world == null || liveBot.getEntityWorld() != world) {
+                                escapeSnapFuture.complete(null);
+                                return;
+                            }
+                            BlockPos b = liveBot.getBlockPos();
+                            FollowPathService.FollowSnapshot attempt = FollowPathService.capture(world, b, goalPos, true);
+                            if (attempt == null) {
+                                attempt = FollowPathService.capture(world, b, b, true);
+                            }
+                            escapeSnapFuture.complete(attempt);
+                        } catch (Throwable t) {
+                            escapeSnapFuture.complete(null);
+                        }
+                    });
+
+                    FollowPathService.FollowSnapshot escapeSnapshot;
+                    try {
+                        escapeSnapshot = escapeSnapFuture.get(900, TimeUnit.MILLISECONDS);
+                    } catch (Exception e) {
+                        escapeSnapshot = null;
+                    }
+                    if (escapeSnapshot != null) {
+                        waypoints = FollowPathService.planEscapeWaypoints(escapeSnapshot, avoidDoor);
+                    }
+                }
+                if (waypoints.isEmpty()) {
+                    long lastFail = FOLLOW_LAST_PATH_FAIL_LOG_MS.getOrDefault(botId, -1L);
+                    long nowFail = System.currentTimeMillis();
+                    if (lastFail < 0 || (nowFail - lastFail) >= 4_500L) {
+                        FOLLOW_LAST_PATH_FAIL_LOG_MS.put(botId, nowFail);
+                        LOGGER.info("Follow path planning: no path found (bot={} goal={})", botId, goalPos.toShortString());
+                    }
+                    return;
+                }
+                final List<BlockPos> plannedWaypoints = List.copyOf(waypoints);
+                server.execute(() -> {
+                    ServerPlayerEntity liveBot = server.getPlayerManager().getPlayer(botId);
+                    if (liveBot == null) {
+                        return;
+                    }
+                    BotCommandStateService.State st = stateFor(liveBot);
+                    if (getMode(liveBot) != Mode.FOLLOW || st == null || st.followFixedGoal == null || !st.followFixedGoal.equals(goalPos)) {
+                        return;
+                    }
+                    FOLLOW_WAYPOINTS.put(botId, new ArrayDeque<>(plannedWaypoints));
+                    FOLLOW_DOOR_PLAN.remove(botId);
+                    FOLLOW_LAST_DISTANCE_SQ.remove(botId);
+                    FOLLOW_STAGNANT_TICKS.remove(botId);
+                    LOGGER.info("Follow planned {} waypoint(s): bot={} goal={} first={}",
+                            plannedWaypoints.size(),
+                            liveBot.getName().getString(),
+                            goalPos.toShortString(),
+                            plannedWaypoints.get(0).toShortString());
+                });
+            } catch (Throwable t) {
+                LOGGER.debug("Follow path plan (goal) failed: {}", t.getMessage());
             }
         });
 

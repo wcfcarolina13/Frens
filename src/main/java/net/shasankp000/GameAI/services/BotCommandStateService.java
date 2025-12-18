@@ -1,6 +1,7 @@
 package net.shasankp000.GameAI.services;
 
 import net.minecraft.server.network.ServerPlayerEntity;
+import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
 import net.shasankp000.GameAI.BotEventHandler;
 
@@ -18,6 +19,7 @@ public final class BotCommandStateService {
         public UUID followTargetUuid;
         public boolean followNoTeleport;
         public double followStopRange = 0.0D;
+        public BlockPos followFixedGoal;
         public Vec3d baseTarget;
         public boolean assistAllies;
         public boolean shieldRaised;
@@ -53,4 +55,3 @@ public final class BotCommandStateService {
         STATES.clear();
     }
 }
-
