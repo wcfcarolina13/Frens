@@ -42,6 +42,7 @@ import net.shasankp000.GameAI.services.DropSweepService;
 import net.shasankp000.GameAI.services.GuardPatrolService;
 import net.shasankp000.GameAI.services.HealingService;
 import net.shasankp000.GameAI.services.BotRescueService;
+import net.shasankp000.GameAI.services.BotThreatService;
 import net.shasankp000.Database.StateActionPair;
 import net.shasankp000.Entity.AutoFaceEntity;
 import net.shasankp000.Entity.LookController;
@@ -103,7 +104,6 @@ public class BotEventHandler {
     private static Vec3d lastSafePosition = null;
     private static final Random RANDOM = new Random();
     // Stage-2 refactor: drop-sweep state moved to DropSweepService.
-    private static final double ALLY_DEFENSE_RADIUS = 12.0D;
     // Stage-2 refactor: burial/suffocation rescue moved to BotRescueService.
     private static final Map<UUID, Long> LAST_FOLLOW_PLAN_MS = new ConcurrentHashMap<>();
     private static final Map<UUID, BlockPos> LAST_FOLLOW_TARGET_POS = new ConcurrentHashMap<>();
@@ -1140,7 +1140,12 @@ public class BotEventHandler {
 
         BotCommandStateService.State state = stateFor(bot);
         Mode mode = state != null ? state.mode : Mode.IDLE;
-        List<Entity> augmentedHostiles = augmentHostiles(bot, hostileEntities);
+        List<Entity> augmentedHostiles = BotThreatService.augmentHostiles(
+                bot,
+                hostileEntities,
+                isAssistAllies(bot),
+                server,
+                BotRegistry.ids());
 
         switch (mode) {
             case FOLLOW -> {
@@ -1172,59 +1177,6 @@ public class BotEventHandler {
                 return false;
             }
         }
-    }
-
-    private static List<Entity> augmentHostiles(ServerPlayerEntity bot, List<Entity> baseHostiles) {
-        List<Entity> base = baseHostiles == null ? Collections.emptyList() : baseHostiles;
-        if (!isAssistAllies(bot)) {
-            return base;
-        }
-        List<Entity> allyThreats = gatherAllyThreats(bot);
-        if (allyThreats.isEmpty()) {
-            return base;
-        }
-        Set<Integer> seen = new HashSet<>();
-        List<Entity> combined = new ArrayList<>();
-        for (Entity entity : base) {
-            if (entity != null && entity.isAlive() && seen.add(entity.getId())) {
-                combined.add(entity);
-            }
-        }
-        for (Entity entity : allyThreats) {
-            if (entity != null && entity.isAlive() && seen.add(entity.getId())) {
-                combined.add(entity);
-            }
-        }
-        return combined;
-    }
-
-    private static List<Entity> gatherAllyThreats(ServerPlayerEntity bot) {
-        if (server == null || bot == null) {
-            return Collections.emptyList();
-        }
-        ServerWorld botWorld = bot.getCommandSource().getWorld();
-        if (botWorld == null) {
-            return Collections.emptyList();
-        }
-        List<Entity> threats = new ArrayList<>();
-        double radiusSq = ALLY_DEFENSE_RADIUS * ALLY_DEFENSE_RADIUS;
-        for (UUID allyId : BotRegistry.ids()) {
-            if (allyId == null || allyId.equals(bot.getUuid())) {
-                continue;
-            }
-            ServerPlayerEntity ally = server.getPlayerManager().getPlayer(allyId);
-            if (ally == null || ally.isRemoved()) {
-                continue;
-            }
-            if (ally.getCommandSource().getWorld() != botWorld) {
-                continue;
-            }
-            if (ally.squaredDistanceTo(bot) > radiusSq) {
-                continue;
-            }
-            threats.addAll(findHostilesAround(ally, 8.0D));
-        }
-        return threats;
     }
 
     public static String setFollowMode(ServerPlayerEntity bot, ServerPlayerEntity target) {
@@ -1588,7 +1540,7 @@ public class BotEventHandler {
 
         List<Entity> augmentedHostiles = new ArrayList<>(hostileEntities);
         if (isAssistAllies(bot)) {
-            augmentedHostiles.addAll(findHostilesAround(target, 8.0D));
+            augmentedHostiles.addAll(BotThreatService.findHostilesAround(target, 8.0D));
         }
         if (externalOverrideActive) {
             LOGGER.debug("Skipping follow because external override is active.");
@@ -3423,7 +3375,7 @@ public class BotEventHandler {
     }
 
     private static List<Entity> findHostilesAround(ServerPlayerEntity player, double radius) {
-        return player.getEntityWorld().getOtherEntities(player, player.getBoundingBox().expand(radius), EntityUtil::isHostile);
+        return BotThreatService.findHostilesAround(player, radius);
     }
 
     private static Vec3d randomPointWithin(Vec3d center, double radius) {
