@@ -240,6 +240,15 @@ public final class BotActions {
         return false;
     }
 
+    public static boolean selectBestMeleeWeapon(ServerPlayerEntity bot) {
+        int weaponSlot = findMeleeWeaponSlot(bot);
+        if (weaponSlot != -1) {
+            selectHotbarSlot(bot, weaponSlot);
+            return true;
+        }
+        return false;
+    }
+
     public static boolean selectBestTool(ServerPlayerEntity bot, String preferKeyword, String avoidKeyword) {
         if (bot == null) {
             return false;
@@ -321,7 +330,9 @@ public final class BotActions {
                 .orElse(null);
 
         if (target != null) {
-            selectBestWeapon(bot);
+            if (!selectBestMeleeWeapon(bot)) {
+                selectBestWeapon(bot);
+            }
             double distanceSq = target.squaredDistanceTo(bot);
             if (distanceSq <= 9.0 && bot.canSee(target)) {
                 bot.attack(target);
@@ -642,6 +653,26 @@ public final class BotActions {
         for (int i = 0; i < 9; i++) {
             ItemStack stack = bot.getInventory().getStack(i);
             if (!stack.isEmpty() && isLikelyWeapon(stack)) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    private static int findMeleeWeaponSlot(ServerPlayerEntity bot) {
+        for (int i = 0; i < 9; i++) {
+            ItemStack stack = bot.getInventory().getStack(i);
+            if (stack.isEmpty()) {
+                continue;
+            }
+            if (stack.isOf(Items.BOW) || stack.isOf(Items.CROSSBOW)) {
+                continue;
+            }
+            if (stack.isOf(Items.TRIDENT)) {
+                return i;
+            }
+            String key = stack.getItem().getTranslationKey().toLowerCase(Locale.ROOT);
+            if (key.contains("sword") || key.contains("axe") || key.contains("mace") || key.contains("dagger")) {
                 return i;
             }
         }

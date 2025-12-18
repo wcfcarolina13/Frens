@@ -19,6 +19,7 @@ public final class GuardPatrolService {
     private static final Map<UUID, Vec3d> GUARD_CENTER = new ConcurrentHashMap<>();
     private static final Map<UUID, Double> GUARD_RADIUS = new ConcurrentHashMap<>();
     private static final Map<UUID, Vec3d> PATROL_TARGET = new ConcurrentHashMap<>();
+    private static final Map<UUID, Long> PATROL_NEXT_PICK_TICK = new ConcurrentHashMap<>();
 
     private GuardPatrolService() {}
 
@@ -52,6 +53,7 @@ public final class GuardPatrolService {
         GUARD_CENTER.remove(botId);
         GUARD_RADIUS.remove(botId);
         PATROL_TARGET.remove(botId);
+        PATROL_NEXT_PICK_TICK.remove(botId);
     }
 
     public static Vec3d getPatrolTarget(UUID botId) {
@@ -69,10 +71,24 @@ public final class GuardPatrolService {
         }
     }
 
+    public static long getNextPatrolPickTick(UUID botId) {
+        if (botId == null) {
+            return 0L;
+        }
+        return PATROL_NEXT_PICK_TICK.getOrDefault(botId, 0L);
+    }
+
+    public static void setNextPatrolPickTick(UUID botId, long tick) {
+        if (botId == null) {
+            return;
+        }
+        PATROL_NEXT_PICK_TICK.put(botId, Math.max(0L, tick));
+    }
+
     public static void reset() {
         GUARD_CENTER.clear();
         GUARD_RADIUS.clear();
         PATROL_TARGET.clear();
+        PATROL_NEXT_PICK_TICK.clear();
     }
 }
-

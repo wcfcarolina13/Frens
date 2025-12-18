@@ -2141,18 +2141,11 @@ public class modCommandRegistry {
             return 0;
         }
 
-        int deltaY = commander.getBlockY() - bot.getBlockY();
-        double horizontalDistance = Math.hypot(commander.getX() - bot.getX(), commander.getZ() - bot.getZ());
-
-        boolean closeEnoughForWalk = horizontalDistance <= 24.0D && Math.abs(deltaY) <= 6;
-        if (!teleportAllowed && closeEnoughForWalk) {
+        // Come should be "self-healing": keep replanning like follow-walk does, instead of relying on a single
+        // direct-path attempt that can be blocked by doorway/fence/corner geometry.
+        if (!teleportAllowed) {
             BotEventHandler.setFollowModeWalk(bot, commander, 3.2D);
             return 1;
-        }
-
-        if (!teleportAllowed && Math.abs(deltaY) >= 3 && horizontalDistance <= 2.5D) {
-            stagePlannedDig(context.getSource(), bot, commander, deltaY, horizontalDistance);
-            return 0;
         }
 
         MovementService.MovementPlan plan = new MovementService.MovementPlan(
@@ -2169,10 +2162,6 @@ public class modCommandRegistry {
 
         ChatUtils.sendSystemMessage(context.getSource(),
                 bot.getName().getString() + " could not reach you: " + result.detail());
-
-        if (!teleportAllowed) {
-            stagePlannedDig(context.getSource(), bot, commander, deltaY, horizontalDistance);
-        }
         return 0;
     }
 

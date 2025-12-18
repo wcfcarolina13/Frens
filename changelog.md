@@ -28,6 +28,11 @@ Historical record and reasoning. `TODO.md` is the source of truth for what’s n
 - Crafting: `/bot craft` now runs asynchronously (like skills) so moving to tables/chests no longer blocks the server tick thread; crafting-table searches avoid chunk-loading scans.
 - Crash fix: move bot item use/placement/hotbar changes and sheep shearing interactions onto the server thread to avoid `LegacyRandomSource` multi-thread crashes (1.21.10).
 - Follow/Movement: follow movement planning now enables sprint on mid-range walks, and door opening can trigger during close-pursuit/direct-walk stalls (not just during path-segment walking).
+- Come: when teleport is disabled, `/bot come` now uses follow-walk replanning instead of a one-shot direct-path attempt (reduces “could not reach you: direct: walk blocked” false failures).
+- Rescue: spawn-in-block checks no longer mine doors/trapdoors; they attempt interaction and nudge out to avoid griefing player builds.
+- Combat: close-range attacks prefer melee weapons over bows/crossbows when available.
+- Patrol: patrol target selection now uses a bounded cooldown (less “standing still” variance when nothing else is happening).
+- Commands: `/bot defend on|off` and `/bot defend nearby on|off` added as shorthands for the existing defend syntax.
 - Follow: follow no longer runs blocking movement/path loops on the server thread; it now sprints when >2 blocks away and uses a wolf-style teleport catch-up only when far/stuck (with cooldown).
 - Storage: prevent “remote” chest deposits/withdrawals through doors/walls by requiring survival-like reach + line-of-sight checks before moving items.
 - Safety: rescue-from-burial/suffocation escape no longer mines doors; it will attempt to open them instead (prevents bots breaking enclosure doors).

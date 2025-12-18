@@ -1766,6 +1766,9 @@ public class BotEventHandler {
         double distanceFromCenter = positionOf(bot).distanceTo(center);
         if (distanceFromCenter > radius) {
             GuardPatrolService.setPatrolTarget(bot.getUuid(), null);
+            if (server != null) {
+                GuardPatrolService.setNextPatrolPickTick(bot.getUuid(), server.getTicks() + 20L);
+            }
             moveToward(bot, center, 2.0D, false);
             return true;
         }
@@ -1778,13 +1781,21 @@ public class BotEventHandler {
                 return true;
             }
             GuardPatrolService.setPatrolTarget(bot.getUuid(), null);
+            if (server != null) {
+                GuardPatrolService.setNextPatrolPickTick(bot.getUuid(), server.getTicks() + 10L);
+            }
         }
 
-        if (patrolTarget == null && RANDOM.nextDouble() < 0.08) {
-            Vec3d next = randomPointWithin(center, radius * 0.85D);
-            GuardPatrolService.setPatrolTarget(bot.getUuid(), next);
-            moveToward(bot, next, 1.1D, false);
-            return true;
+        if (patrolTarget == null && server != null) {
+            long nowTick = server.getTicks();
+            long nextPickTick = GuardPatrolService.getNextPatrolPickTick(bot.getUuid());
+            if (nowTick >= nextPickTick) {
+                Vec3d next = randomPointWithin(center, radius * 0.85D);
+                GuardPatrolService.setPatrolTarget(bot.getUuid(), next);
+                GuardPatrolService.setNextPatrolPickTick(bot.getUuid(), nowTick + 40L + RANDOM.nextInt(40));
+                moveToward(bot, next, 1.1D, false);
+                return true;
+            }
         }
 
         BotActions.stop(bot);
@@ -1877,18 +1888,23 @@ public class BotEventHandler {
 
             if (now - getShieldDecisionTick(bot) >= 15) {
                 lowerShieldTracking(bot);
-                BotActions.selectBestWeapon(bot);
+                if (!BotActions.selectBestMeleeWeapon(bot)) {
+                    BotActions.selectBestWeapon(bot);
+                }
                 BotActions.attackNearest(bot, hostileEntities);
                 setShieldDecisionTick(bot, now);
             }
             return true;
         } else {
             lowerShieldTracking(bot);
-            boolean hasMelee = BotActions.selectBestWeapon(bot);
+            boolean hasMelee = BotActions.selectBestMeleeWeapon(bot);
             if (!hasMelee && hasRanged && closest instanceof LivingEntity living) {
                 BotActions.clearForceMelee(bot);
                 BotActions.performRangedAttack(bot, living, server.getTicks());
             } else {
+                if (!hasMelee) {
+                    BotActions.selectBestWeapon(bot);
+                }
                 BotActions.attackNearest(bot, hostileEntities);
             }
         }

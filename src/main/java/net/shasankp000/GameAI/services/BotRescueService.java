@@ -3,6 +3,7 @@ package net.shasankp000.GameAI.services;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
 import net.minecraft.block.DoorBlock;
+import net.minecraft.block.TrapdoorBlock;
 import net.minecraft.entity.damage.DamageSource;
 import net.minecraft.entity.damage.DamageTypes;
 import net.minecraft.registry.tag.BlockTags;
@@ -406,6 +407,23 @@ public final class BotRescueService {
         BlockState headState = world.getBlockState(head);
         BlockState feetState = world.getBlockState(feet);
 
+        // Doors/trapdoors are extremely common "spawn overlap" cases (doorways, interiors) and must never be mined.
+        // Prefer interaction + nudging so we don't grief player builds.
+        boolean doorOverlap = headState.getBlock() instanceof DoorBlock
+                || feetState.getBlock() instanceof DoorBlock
+                || headState.getBlock() instanceof TrapdoorBlock
+                || feetState.getBlock() instanceof TrapdoorBlock;
+        if (doorOverlap) {
+            if (headState.getBlock() instanceof DoorBlock || headState.getBlock() instanceof TrapdoorBlock) {
+                MovementService.tryOpenDoorAt(bot, head);
+            }
+            if (feetState.getBlock() instanceof DoorBlock || feetState.getBlock() instanceof TrapdoorBlock) {
+                MovementService.tryOpenDoorAt(bot, feet);
+            }
+            attemptEscapeMovement(bot, world, feet, head);
+            return;
+        }
+
         // If we're inside a protected block (chest/bed/fence/etc), never mine it; nudge out.
         if ((isRescueProtectedBlock(headState) && headState.blocksMovement() && !headState.getCollisionShape(world, head).isEmpty())
                 || (isRescueProtectedBlock(feetState) && feetState.blocksMovement() && !feetState.getCollisionShape(world, feet).isEmpty())) {
@@ -462,7 +480,9 @@ public final class BotRescueService {
             return false;
         }
         // Never mine player structures like fences/walls/gates as "escape"; nudge out instead.
-        return state.isIn(BlockTags.FENCES)
+        return state.getBlock() instanceof DoorBlock
+                || state.getBlock() instanceof TrapdoorBlock
+                || state.isIn(BlockTags.FENCES)
                 || state.isIn(BlockTags.WALLS)
                 || state.isIn(BlockTags.FENCE_GATES)
                 || state.isOf(Blocks.CHEST)
