@@ -63,6 +63,9 @@ import net.shasankp000.GameAI.services.MovementService;
 import net.shasankp000.GameAI.services.BlockInteractionService;
 import net.shasankp000.GameAI.services.FollowPathService;
 import net.shasankp000.GameAI.services.FollowDebugService;
+import net.shasankp000.GameAI.services.FollowStateService;
+import net.shasankp000.GameAI.services.FollowStateService.FollowDoorPlan;
+import net.shasankp000.GameAI.services.FollowStateService.FollowDoorRecovery;
 import net.shasankp000.GameAI.skills.SkillContext;
 import net.shasankp000.GameAI.skills.SkillExecutionResult;
 import net.shasankp000.GameAI.skills.SkillManager;
@@ -82,6 +85,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static net.shasankp000.GameAI.State.isStateConsistent;
+import static net.shasankp000.GameAI.services.FollowStateService.*;
 
 
 public class BotEventHandler {
@@ -110,41 +114,10 @@ public class BotEventHandler {
     private static final Random RANDOM = new Random();
     // Stage-2 refactor: drop-sweep state moved to DropSweepService.
     // Stage-2 refactor: burial/suffocation rescue moved to BotRescueService.
-    private static final Map<UUID, Long> LAST_FOLLOW_PLAN_MS = new ConcurrentHashMap<>();
-    private static final Map<UUID, BlockPos> LAST_FOLLOW_TARGET_POS = new ConcurrentHashMap<>();
+    // Stage-2 refactor: follow/come state maps moved to FollowStateService.
     private static final Map<UUID, Long> LAST_RL_PERSIST_MS = new ConcurrentHashMap<>();
     private static final long RL_PERSIST_MIN_INTERVAL_MS = 15_000L;
-    private static final Map<UUID, Long> FOLLOW_TOO_CLOSE_SINCE = new ConcurrentHashMap<>();
-    private static final Map<UUID, Double> FOLLOW_LAST_DISTANCE_SQ = new ConcurrentHashMap<>();
-    private static final Map<UUID, Integer> FOLLOW_STAGNANT_TICKS = new ConcurrentHashMap<>();
-    private static final Map<UUID, Long> FOLLOW_LAST_TELEPORT_TICK = new ConcurrentHashMap<>();
-    private static final Map<UUID, FollowDoorPlan> FOLLOW_DOOR_PLAN = new ConcurrentHashMap<>();
-    private static final Map<UUID, ArrayDeque<BlockPos>> FOLLOW_WAYPOINTS = new ConcurrentHashMap<>();
-    private static final Map<UUID, CompletableFuture<?>> FOLLOW_PATH_INFLIGHT = new ConcurrentHashMap<>();
-    private static final Map<UUID, Long> FOLLOW_LAST_PATH_PLAN_MS = new ConcurrentHashMap<>();
-    private static final Map<UUID, BlockPos> FOLLOW_LAST_PATH_TARGET = new ConcurrentHashMap<>();
-    private static final Map<UUID, BlockPos> FOLLOW_LAST_DOOR_BASE = new ConcurrentHashMap<>();
-    private static final Map<UUID, Long> FOLLOW_LAST_DOOR_CROSS_MS = new ConcurrentHashMap<>();
-    private static final Map<UUID, Long> FOLLOW_LAST_PATH_LOG_MS = new ConcurrentHashMap<>();
-    private static final Map<UUID, Long> FOLLOW_LAST_PATH_FAIL_LOG_MS = new ConcurrentHashMap<>();
-    // Stage-2 refactor: follow debug throttling moved to FollowDebugService.
-    private static final Map<UUID, Boolean> FOLLOW_SEALED_STATE = new ConcurrentHashMap<>();
-    private static final Map<UUID, Long> FOLLOW_SEALED_STATE_MS = new ConcurrentHashMap<>();
     private static final long FOLLOW_SEALED_STATE_TTL_MS = 1_000L;
-    private static final Map<UUID, Long> FOLLOW_REPLAN_AFTER_DOOR_MS = new ConcurrentHashMap<>();
-    private static final Map<UUID, Long> FOLLOW_LAST_ESCAPE_DOOR_PLAN_MS = new ConcurrentHashMap<>();
-    private static final Map<UUID, BlockPos> FOLLOW_DOOR_LAST_BLOCK = new ConcurrentHashMap<>();
-    private static final Map<UUID, Integer> FOLLOW_DOOR_STUCK_TICKS = new ConcurrentHashMap<>();
-    private static final Map<UUID, Integer> FOLLOW_DIRECT_BLOCKED_TICKS = new ConcurrentHashMap<>();
-    private static final Map<UUID, FollowDoorRecovery> FOLLOW_DOOR_RECOVERY = new ConcurrentHashMap<>();
-    private static final Map<UUID, BlockPos> FOLLOW_AVOID_DOOR_BASE = new ConcurrentHashMap<>();
-    private static final Map<UUID, Long> FOLLOW_AVOID_DOOR_UNTIL_MS = new ConcurrentHashMap<>();
-    private static final Map<UUID, Long> FOLLOW_LAST_BLOCKED_PROBE_MS = new ConcurrentHashMap<>();
-    private static final Map<UUID, BlockPos> FOLLOW_LAST_BLOCKED_PROBE_GOAL = new ConcurrentHashMap<>();
-    private static final Map<UUID, BlockPos> FOLLOW_LAST_BLOCKED_PROBE_BOTPOS = new ConcurrentHashMap<>();
-    private static final Map<UUID, Boolean> FOLLOW_LAST_BLOCKED_PROBE_RESULT = new ConcurrentHashMap<>();
-    private static final Map<UUID, BlockPos> FOLLOW_LAST_BLOCK_POS = new ConcurrentHashMap<>();
-    private static final Map<UUID, Integer> FOLLOW_POS_STAGNANT_TICKS = new ConcurrentHashMap<>();
     private static final double FOLLOW_PERSONAL_SPACE = 1.6D; // prefer at least ~1 block gap
     private static final double FOLLOW_BACKUP_DISTANCE = 1.05D; // trigger backup after linger
     private static final long FOLLOW_BACKUP_TRIGGER_MS = 3_000L;
@@ -154,33 +127,15 @@ public class BotEventHandler {
     private static final int FOLLOW_TELEPORT_COOLDOWN_TICKS = 40; // 2 seconds @20tps
     private static final long FOLLOW_POST_DOOR_AVOID_MS = 6_000L;
 
-    private record FollowDoorPlan(BlockPos doorBase, BlockPos approachPos, BlockPos stepThroughPos, long expiresAtMs, boolean stepping) {
-    }
-
-    private record FollowDoorRecovery(BlockPos goal, int remainingTicks) {
-    }
-
     private static BlockPos currentAvoidDoor(UUID botId) {
-        if (botId == null) {
-            return null;
-        }
-        long now = System.currentTimeMillis();
-        Long until = FOLLOW_AVOID_DOOR_UNTIL_MS.get(botId);
-        if (until == null || now >= until) {
-            FOLLOW_AVOID_DOOR_UNTIL_MS.remove(botId);
-            FOLLOW_AVOID_DOOR_BASE.remove(botId);
-            return null;
-        }
-        return FOLLOW_AVOID_DOOR_BASE.get(botId);
+        return FollowStateService.currentAvoidDoor(botId);
     }
 
     private static void avoidDoorFor(UUID botId, BlockPos doorBase, long durationMs, String reason) {
         if (botId == null || doorBase == null) {
             return;
         }
-        long until = System.currentTimeMillis() + Math.max(500L, durationMs);
-        FOLLOW_AVOID_DOOR_BASE.put(botId, doorBase.toImmutable());
-        FOLLOW_AVOID_DOOR_UNTIL_MS.put(botId, until);
+        FollowStateService.avoidDoorFor(botId, doorBase, Math.max(500L, durationMs));
         ServerPlayerEntity bot = server != null ? server.getPlayerManager().getPlayer(botId) : null;
         if (bot != null) {
             maybeLogFollowDecision(bot, "avoid-door: doorBase=" + doorBase.toShortString()
@@ -193,8 +148,8 @@ public class BotEventHandler {
         if (botId == null || doorBase == null) {
             return false;
         }
-        long lastDoorMs = FOLLOW_LAST_DOOR_CROSS_MS.getOrDefault(botId, -1L);
-        BlockPos lastDoor = FOLLOW_LAST_DOOR_BASE.get(botId);
+        long lastDoorMs = FollowStateService.FOLLOW_LAST_DOOR_CROSS_MS.getOrDefault(botId, -1L);
+        BlockPos lastDoor = FollowStateService.FOLLOW_LAST_DOOR_BASE.get(botId);
         if (lastDoorMs < 0 || lastDoor == null) {
             return false;
         }
@@ -1206,24 +1161,8 @@ public class BotEventHandler {
         // Kick off a follow plan immediately so "around the corner / door enclosures" work even when
         // the commander isn't standing in front of the door. This is async + bounded, so it won't block ticks.
         UUID id = bot.getUuid();
-        FOLLOW_DOOR_PLAN.remove(id);
-        FOLLOW_WAYPOINTS.remove(id);
-        FOLLOW_LAST_DISTANCE_SQ.remove(id);
-        FOLLOW_STAGNANT_TICKS.remove(id);
-        FOLLOW_LAST_ESCAPE_DOOR_PLAN_MS.remove(id);
-        FOLLOW_PATH_INFLIGHT.remove(id);
-        FOLLOW_LAST_PATH_PLAN_MS.remove(id);
-        FOLLOW_LAST_PATH_TARGET.remove(id);
-        FOLLOW_LAST_PATH_LOG_MS.remove(id);
-        FOLLOW_LAST_PATH_FAIL_LOG_MS.remove(id);
-            FollowDebugService.clear(id);
-            FOLLOW_AVOID_DOOR_BASE.remove(id);
-            FOLLOW_AVOID_DOOR_UNTIL_MS.remove(id);
-            FOLLOW_REPLAN_AFTER_DOOR_MS.remove(id);
-            FOLLOW_LAST_BLOCK_POS.remove(id);
-            FOLLOW_POS_STAGNANT_TICKS.remove(id);
-            FOLLOW_DIRECT_BLOCKED_TICKS.remove(id);
-            FOLLOW_DOOR_RECOVERY.remove(id);
+        FollowStateService.clearPlanning(id);
+        FollowDebugService.clear(id);
         requestFollowPathPlan(bot, target, true, "follow-start");
         sendBotMessage(bot, "Following " + target.getName().getString() + ".");
         return "Now following " + target.getName().getString() + ".";
@@ -1248,24 +1187,8 @@ public class BotEventHandler {
         clearGuard(bot);
         clearBase(bot);
         UUID id = bot.getUuid();
-        FOLLOW_DOOR_PLAN.remove(id);
-        FOLLOW_WAYPOINTS.remove(id);
-        FOLLOW_LAST_DISTANCE_SQ.remove(id);
-        FOLLOW_STAGNANT_TICKS.remove(id);
-        FOLLOW_LAST_ESCAPE_DOOR_PLAN_MS.remove(id);
-        FOLLOW_PATH_INFLIGHT.remove(id);
-        FOLLOW_LAST_PATH_PLAN_MS.remove(id);
-        FOLLOW_LAST_PATH_TARGET.remove(id);
-        FOLLOW_LAST_PATH_LOG_MS.remove(id);
-        FOLLOW_LAST_PATH_FAIL_LOG_MS.remove(id);
-            FollowDebugService.clear(id);
-            FOLLOW_AVOID_DOOR_BASE.remove(id);
-            FOLLOW_AVOID_DOOR_UNTIL_MS.remove(id);
-            FOLLOW_REPLAN_AFTER_DOOR_MS.remove(id);
-            FOLLOW_LAST_BLOCK_POS.remove(id);
-            FOLLOW_POS_STAGNANT_TICKS.remove(id);
-            FOLLOW_DIRECT_BLOCKED_TICKS.remove(id);
-            FOLLOW_DOOR_RECOVERY.remove(id);
+        FollowStateService.clearPlanning(id);
+        FollowDebugService.clear(id);
         requestFollowPathPlan(bot, target, true, "follow-start-walk");
         sendBotMessage(bot, "Walking to you.");
         return "Walking to " + target.getName().getString() + ".";
@@ -1291,24 +1214,8 @@ public class BotEventHandler {
         clearBase(bot);
 
         UUID id = bot.getUuid();
-        FOLLOW_DOOR_PLAN.remove(id);
-        FOLLOW_WAYPOINTS.remove(id);
-        FOLLOW_LAST_DISTANCE_SQ.remove(id);
-        FOLLOW_STAGNANT_TICKS.remove(id);
-        FOLLOW_LAST_ESCAPE_DOOR_PLAN_MS.remove(id);
-        FOLLOW_PATH_INFLIGHT.remove(id);
-        FOLLOW_LAST_PATH_PLAN_MS.remove(id);
-        FOLLOW_LAST_PATH_TARGET.remove(id);
-        FOLLOW_LAST_PATH_LOG_MS.remove(id);
-        FOLLOW_LAST_PATH_FAIL_LOG_MS.remove(id);
+        FollowStateService.clearPlanning(id);
         FollowDebugService.clear(id);
-        FOLLOW_AVOID_DOOR_BASE.remove(id);
-        FOLLOW_AVOID_DOOR_UNTIL_MS.remove(id);
-        FOLLOW_REPLAN_AFTER_DOOR_MS.remove(id);
-        FOLLOW_LAST_BLOCK_POS.remove(id);
-        FOLLOW_POS_STAGNANT_TICKS.remove(id);
-        FOLLOW_DIRECT_BLOCKED_TICKS.remove(id);
-        FOLLOW_DOOR_RECOVERY.remove(id);
 
         requestFollowPathPlanToGoal(bot, fixedGoal, true, "come-start");
         sendBotMessage(bot, "Walking to your last location.");
@@ -1325,29 +1232,8 @@ public class BotEventHandler {
         setFollowTarget(bot, null);
         if (bot != null) {
             UUID id = bot.getUuid();
-            FOLLOW_LAST_DISTANCE_SQ.remove(id);
-            FOLLOW_STAGNANT_TICKS.remove(id);
-            FOLLOW_LAST_TELEPORT_TICK.remove(id);
-            FOLLOW_DOOR_PLAN.remove(id);
-            FOLLOW_WAYPOINTS.remove(id);
-            FOLLOW_LAST_ESCAPE_DOOR_PLAN_MS.remove(id);
-            FOLLOW_PATH_INFLIGHT.remove(id);
-            FOLLOW_LAST_PATH_PLAN_MS.remove(id);
-            FOLLOW_LAST_PATH_TARGET.remove(id);
-            FOLLOW_LAST_DOOR_BASE.remove(id);
-            FOLLOW_LAST_DOOR_CROSS_MS.remove(id);
-            FOLLOW_LAST_PATH_LOG_MS.remove(id);
-            FOLLOW_LAST_PATH_FAIL_LOG_MS.remove(id);
+            FollowStateService.clearAll(id);
             FollowDebugService.clear(id);
-            FOLLOW_REPLAN_AFTER_DOOR_MS.remove(id);
-            FOLLOW_DOOR_LAST_BLOCK.remove(id);
-            FOLLOW_DOOR_STUCK_TICKS.remove(id);
-            FOLLOW_LAST_BLOCK_POS.remove(id);
-            FOLLOW_POS_STAGNANT_TICKS.remove(id);
-            FOLLOW_DIRECT_BLOCKED_TICKS.remove(id);
-            FOLLOW_DOOR_RECOVERY.remove(id);
-            FOLLOW_AVOID_DOOR_BASE.remove(id);
-            FOLLOW_AVOID_DOOR_UNTIL_MS.remove(id);
         }
         BotCommandStateService.State state = stateFor(bot);
         if (state != null) {
@@ -1567,29 +1453,8 @@ public class BotEventHandler {
         setAssistAllies(bot, true);            setFollowTarget(bot, null);
 	            if (bot != null) {
 	                UUID id = bot.getUuid();
-	                FOLLOW_LAST_DISTANCE_SQ.remove(id);
-	                FOLLOW_STAGNANT_TICKS.remove(id);
-	                FOLLOW_LAST_TELEPORT_TICK.remove(id);
-	                FOLLOW_DOOR_PLAN.remove(id);
-	                FOLLOW_WAYPOINTS.remove(id);
-                    FOLLOW_LAST_ESCAPE_DOOR_PLAN_MS.remove(id);
-	                FOLLOW_PATH_INFLIGHT.remove(id);
-	                FOLLOW_LAST_PATH_PLAN_MS.remove(id);
-	                FOLLOW_LAST_PATH_TARGET.remove(id);
-	                FOLLOW_LAST_DOOR_BASE.remove(id);
-	                FOLLOW_LAST_DOOR_CROSS_MS.remove(id);
-	                    FOLLOW_LAST_PATH_LOG_MS.remove(id);
-	                    FOLLOW_LAST_PATH_FAIL_LOG_MS.remove(id);
-	                    FollowDebugService.clear(id);
-	                    FOLLOW_REPLAN_AFTER_DOOR_MS.remove(id);
-	                    FOLLOW_DOOR_LAST_BLOCK.remove(id);
-	                    FOLLOW_DOOR_STUCK_TICKS.remove(id);
-		                FOLLOW_LAST_BLOCK_POS.remove(id);
-		                FOLLOW_POS_STAGNANT_TICKS.remove(id);
-                        FOLLOW_DIRECT_BLOCKED_TICKS.remove(id);
-                        FOLLOW_DOOR_RECOVERY.remove(id);
-                        FOLLOW_AVOID_DOOR_BASE.remove(id);
-                        FOLLOW_AVOID_DOOR_UNTIL_MS.remove(id);
+	                FollowStateService.clearAll(id);
+	                FollowDebugService.clear(id);
 		            }
 	            sendBotMessage(bot, "Follow target lost. Returning to idle.");
 	            return false;
@@ -1682,7 +1547,7 @@ public class BotEventHandler {
         BlockPos navGoalBlock = fixedGoal != null ? fixedGoal : target.getBlockPos();
         Vec3d navGoalPos = targetPos;
         boolean usingWaypoints = false;
-        ArrayDeque<BlockPos> waypoints = FOLLOW_WAYPOINTS.get(botId);
+        ArrayDeque<BlockPos> waypoints = FollowStateService.FOLLOW_WAYPOINTS.get(botId);
         int waypointCount = waypoints != null ? waypoints.size() : 0;
         if (waypoints != null) {
             while (!waypoints.isEmpty()) {
@@ -1709,10 +1574,10 @@ public class BotEventHandler {
 	                }
 	                if (bot.getBlockPos().getSquaredDistance(peek) <= FollowPathService.WAYPOINT_REACH_SQ) {
 	                    waypoints.pollFirst();
-	                    FOLLOW_LAST_DISTANCE_SQ.remove(botId);
-	                    FOLLOW_STAGNANT_TICKS.remove(botId);
-                    FOLLOW_LAST_BLOCK_POS.remove(botId);
-                    FOLLOW_POS_STAGNANT_TICKS.remove(botId);
+	                    FollowStateService.FOLLOW_LAST_DISTANCE_SQ.remove(botId);
+	                    FollowStateService.FOLLOW_STAGNANT_TICKS.remove(botId);
+                    FollowStateService.FOLLOW_LAST_BLOCK_POS.remove(botId);
+                    FollowStateService.FOLLOW_POS_STAGNANT_TICKS.remove(botId);
                     continue;
                 }
                 navGoalBlock = peek;
@@ -1721,7 +1586,7 @@ public class BotEventHandler {
                 break;
             }
             if (waypoints.isEmpty()) {
-                FOLLOW_WAYPOINTS.remove(botId);
+                FollowStateService.FOLLOW_WAYPOINTS.remove(botId);
                 usingWaypoints = false;
                 navGoalBlock = fixedGoal != null ? fixedGoal : target.getBlockPos();
                 navGoalPos = targetPos;
@@ -1733,11 +1598,11 @@ public class BotEventHandler {
 	        if (usingWaypoints && distanceSq >= 900.0D) { // ~30 blocks
 	            EnvironmentSnapshot env = analyzeEnvironment(bot);
 	            if (env != null && (!env.enclosed() || env.hasEscapeRoute())) {
-	                FOLLOW_WAYPOINTS.remove(botId);
-	                FOLLOW_DOOR_PLAN.remove(botId);
-	                FOLLOW_DOOR_LAST_BLOCK.remove(botId);
-	                FOLLOW_DOOR_STUCK_TICKS.remove(botId);
-	                FOLLOW_DOOR_RECOVERY.remove(botId);
+	                FollowStateService.FOLLOW_WAYPOINTS.remove(botId);
+	                FollowStateService.FOLLOW_DOOR_PLAN.remove(botId);
+	                FollowStateService.FOLLOW_DOOR_LAST_BLOCK.remove(botId);
+	                FollowStateService.FOLLOW_DOOR_STUCK_TICKS.remove(botId);
+	                FollowStateService.FOLLOW_DOOR_RECOVERY.remove(botId);
 	                usingWaypoints = false;
 	                navGoalBlock = fixedGoal != null ? fixedGoal : target.getBlockPos();
 	                navGoalPos = targetPos;
@@ -4179,32 +4044,8 @@ public class BotEventHandler {
 	            BotCommandStateService.clearAll();
 	            LAST_RL_SAMPLE_TICK.clear();
 	            BotRescueService.reset();
-	            LAST_FOLLOW_PLAN_MS.clear();
-	            LAST_FOLLOW_TARGET_POS.clear();
-	            FOLLOW_TOO_CLOSE_SINCE.clear();
-            FOLLOW_LAST_DISTANCE_SQ.clear();
-            FOLLOW_STAGNANT_TICKS.clear();
-            FOLLOW_LAST_TELEPORT_TICK.clear();
-            FOLLOW_DOOR_PLAN.clear();
-            FOLLOW_WAYPOINTS.clear();
-            FOLLOW_LAST_ESCAPE_DOOR_PLAN_MS.clear();
-            FOLLOW_PATH_INFLIGHT.clear();
-            FOLLOW_LAST_PATH_PLAN_MS.clear();
-            FOLLOW_LAST_PATH_TARGET.clear();
-            FOLLOW_LAST_DOOR_BASE.clear();
-            FOLLOW_LAST_DOOR_CROSS_MS.clear();
-	            FOLLOW_LAST_PATH_LOG_MS.clear();
-	            FOLLOW_LAST_PATH_FAIL_LOG_MS.clear();
+	            FollowStateService.reset();
 	            FollowDebugService.reset();
-	            FOLLOW_AVOID_DOOR_BASE.clear();
-	            FOLLOW_AVOID_DOOR_UNTIL_MS.clear();
-	            FOLLOW_REPLAN_AFTER_DOOR_MS.clear();
-	            FOLLOW_DOOR_LAST_BLOCK.clear();
-	            FOLLOW_DOOR_STUCK_TICKS.clear();
-	            FOLLOW_DIRECT_BLOCKED_TICKS.clear();
-	            FOLLOW_DOOR_RECOVERY.clear();
-	            FOLLOW_LAST_BLOCK_POS.clear();
-	            FOLLOW_POS_STAGNANT_TICKS.clear();
 	            DropSweepService.reset();
             
             isExecuting = false;
