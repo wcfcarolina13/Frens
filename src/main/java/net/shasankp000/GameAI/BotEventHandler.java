@@ -1932,7 +1932,11 @@ public class BotEventHandler {
 
         lowerShieldTracking(bot);
 
-        Entity nearestItem = findNearestItem(bot, nearbyEntities, radius);
+        if (dropSweepInProgress.get()) {
+            return true;
+        }
+
+        Entity nearestItem = findNearestDrop(bot, radius);
         if (nearestItem != null) {
             collectNearbyDrops(bot, Math.max(radius, 4.0D));
             return true;
@@ -1963,7 +1967,11 @@ public class BotEventHandler {
 
         lowerShieldTracking(bot);
 
-        Entity nearestItem = findNearestItem(bot, nearbyEntities, radius);
+        if (dropSweepInProgress.get()) {
+            return true;
+        }
+
+        Entity nearestItem = findNearestDrop(bot, radius);
         if (nearestItem != null) {
             collectNearbyDrops(bot, Math.max(radius, 4.0D));
             return true;
@@ -3562,6 +3570,24 @@ public class BotEventHandler {
                 .filter(entity -> entity instanceof net.minecraft.entity.ItemEntity)
                 .filter(entity -> entity.squaredDistanceTo(bot) <= radius * radius)
                 .min(Comparator.comparingDouble(entity -> entity.squaredDistanceTo(bot)))
+                .orElse(null);
+    }
+
+    private static Entity findNearestDrop(ServerPlayerEntity bot, double radius) {
+        if (bot == null) {
+            return null;
+        }
+        if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
+            return null;
+        }
+        double verticalRange = Math.max(6.0D, radius);
+        Box searchBox = bot.getBoundingBox().expand(radius, verticalRange, radius);
+        return world.getEntitiesByClass(
+                        ItemEntity.class,
+                        searchBox,
+                        drop -> drop.isAlive() && !drop.isRemoved() && drop.squaredDistanceTo(bot) > 1.0D)
+                .stream()
+                .min(Comparator.comparingDouble(bot::squaredDistanceTo))
                 .orElse(null);
     }
 

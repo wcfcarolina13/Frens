@@ -379,10 +379,20 @@ public final class BotPersistenceService {
             LOGGER.warn("Unable to remove fakeplayer '{}': PlayerManager#remove method not resolved.", bot.getName().getString());
         }
 
-        boolean removed = server.getPlayerManager().getPlayer(bot.getUuid()) == null;
+        boolean removed = server.getPlayerManager().getPlayer(bot.getUuid()) == null
+                && !server.getPlayerManager().getPlayerList().contains(bot);
         if (removed) {
             LOGGER.info("Removed fakeplayer '{}' from PlayerManager.", bot.getName().getString());
             return true;
+        }
+
+        try {
+            boolean listRemoved = server.getPlayerManager().getPlayerList().remove(bot);
+            if (listRemoved && server.getPlayerManager().getPlayer(bot.getUuid()) == null) {
+                LOGGER.info("Removed fakeplayer '{}' from PlayerManager player list.", bot.getName().getString());
+                return true;
+            }
+        } catch (Exception ignored) {
         }
 
         // Fallback attempt: find any method that looks like a removal hook for this runtime.
@@ -399,7 +409,8 @@ public final class BotPersistenceService {
             }
             try {
                 method.invoke(server.getPlayerManager(), bot);
-                if (server.getPlayerManager().getPlayer(bot.getUuid()) == null) {
+                if (server.getPlayerManager().getPlayer(bot.getUuid()) == null
+                        && !server.getPlayerManager().getPlayerList().contains(bot)) {
                     LOGGER.info("Removed fakeplayer '{}' from PlayerManager using fallback method {}.", bot.getName().getString(), method.getName());
                     return true;
                 }

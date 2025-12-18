@@ -1122,6 +1122,14 @@ public class modCommandRegistry {
 
             ServerPlayerEntity existingBot = server.getPlayerManager().getPlayer(botName);
             if (existingBot != null) {
+                if (existingBot.isRemoved() || !existingBot.isAlive()) {
+                    LOGGER.warn("spawnBot: found stale bot instance for {} (removed={} alive={}); forcing removal and respawn",
+                            botName, existingBot.isRemoved(), existingBot.isAlive());
+                    BotPersistenceService.removeBot(existingBot);
+                    existingBot = null;
+                }
+            }
+            if (existingBot != null) {
                 LOGGER.info("spawnBot: existing bot {} found, aborting active tasks", botName);
                 TaskService.forceAbort(existingBot.getUuid(), "§cSpawning bot '" + botName + "'.");
 
@@ -2360,7 +2368,7 @@ public class modCommandRegistry {
         }
         List<String> names = new ArrayList<>();
         for (ServerPlayerEntity player : server.getPlayerManager().getPlayerList()) {
-            if (player instanceof net.shasankp000.Entity.createFakePlayer) {
+            if (player instanceof net.shasankp000.Entity.createFakePlayer && !player.isRemoved() && player.isAlive()) {
                 names.add(player.getName().getString());
             }
         }
