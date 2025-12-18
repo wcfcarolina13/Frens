@@ -62,7 +62,11 @@ import net.shasankp000.GameAI.services.TaskService;
 import net.shasankp000.GameAI.services.MovementService;
 import net.shasankp000.GameAI.services.BlockInteractionService;
 import net.shasankp000.GameAI.services.FollowPathService;
+import net.shasankp000.GameAI.skills.SkillContext;
+import net.shasankp000.GameAI.skills.SkillExecutionResult;
+import net.shasankp000.GameAI.skills.SkillManager;
 import net.shasankp000.Entity.createFakePlayer;
+import net.shasankp000.FunctionCaller.FunctionCallerV2;
 import net.shasankp000.WorldUitls.isBlockItem;
 import net.shasankp000.GameAI.skills.SkillPreferences;
 import org.slf4j.Logger;
@@ -1194,6 +1198,9 @@ public class BotEventHandler {
             state.followNoTeleport = false;
             state.followStopRange = 0.0D;
             state.followFixedGoal = null;
+            state.comeLastGoalDistSq = Double.NaN;
+            state.comeStagnantTicks = 0;
+            state.comeNextSkillTick = 0L;
         }
         setMode(bot, Mode.FOLLOW);
         clearGuard(bot);
@@ -1236,6 +1243,9 @@ public class BotEventHandler {
             state.followNoTeleport = true;
             state.followStopRange = Math.max(1.5D, stopRange);
             state.followFixedGoal = null;
+            state.comeLastGoalDistSq = Double.NaN;
+            state.comeStagnantTicks = 0;
+            state.comeNextSkillTick = 0L;
         }
         setMode(bot, Mode.FOLLOW);
         clearGuard(bot);
@@ -1276,6 +1286,9 @@ public class BotEventHandler {
             state.followNoTeleport = true;
             state.followStopRange = Math.max(1.5D, stopRange);
             state.followFixedGoal = fixedGoal.toImmutable();
+            state.comeLastGoalDistSq = Double.NaN;
+            state.comeStagnantTicks = 0;
+            state.comeNextSkillTick = 0L;
         }
         setMode(bot, Mode.FOLLOW);
         clearGuard(bot);
@@ -1347,6 +1360,9 @@ public class BotEventHandler {
             state.followNoTeleport = false;
             state.followStopRange = 0.0D;
             state.followFixedGoal = null;
+            state.comeLastGoalDistSq = Double.NaN;
+            state.comeStagnantTicks = 0;
+            state.comeNextSkillTick = 0L;
         }
         if (bot != null) {
             BotActions.stop(bot);
@@ -1615,6 +1631,29 @@ public class BotEventHandler {
                 : (target.getY() - bot.getY());
         double absDeltaY = Math.abs(deltaY);
         MinecraftServer srv = bot.getCommandSource().getServer();
+
+        if (fixedGoal != null && state != null && srv != null) {
+            double goalDistSq = bot.getBlockPos().getSquaredDistance(fixedGoal);
+            if (!Double.isFinite(state.comeLastGoalDistSq)) {
+                state.comeLastGoalDistSq = goalDistSq;
+                state.comeStagnantTicks = 0;
+            } else {
+                if (goalDistSq >= state.comeLastGoalDistSq - 0.01D) {
+                    state.comeStagnantTicks++;
+                } else {
+                    state.comeStagnantTicks = 0;
+                }
+                state.comeLastGoalDistSq = goalDistSq;
+            }
+
+            // If we've made no meaningful progress toward the fixed goal for a while, try a short,
+            // goal-directed mining plan (ascent/descent/stripmine) to escape tunnels/pits.
+            if (state.comeStagnantTicks >= 50 && srv.getTicks() >= state.comeNextSkillTick) {
+                if (triggerComeRecoverySkill(bot, target, fixedGoal, targetPos, deltaY, horizDistSq, srv, state)) {
+                    return true;
+                }
+            }
+        }
         if (target != null && bot.getEntityWorld() != target.getEntityWorld() && srv != null) {
             ServerWorld targetWorld = srv.getWorld(target.getEntityWorld().getRegistryKey());
             if (targetWorld != null) {
@@ -3180,6 +3219,97 @@ public class BotEventHandler {
 
         FOLLOW_PATH_INFLIGHT.put(botId, task);
         task.whenComplete((ignored, err) -> server.execute(() -> FOLLOW_PATH_INFLIGHT.remove(botId)));
+    }
+
+    private static boolean triggerComeRecoverySkill(ServerPlayerEntity bot,
+                                                   ServerPlayerEntity commander,
+                                                   BlockPos goal,
+                                                   Vec3d goalPos,
+                                                   double deltaY,
+                                                   double horizDistSq,
+                                                   MinecraftServer server,
+                                                   BotCommandStateService.State state) {
+        if (bot == null || goal == null || goalPos == null || server == null || state == null) {
+            return false;
+        }
+        if (bot.isDead() || bot.isRemoved()) {
+            return false;
+        }
+
+        int dyBlocks = (int) Math.round(deltaY);
+        double horizDist = Math.sqrt(Math.max(0.0D, horizDistSq));
+
+        Direction towardGoal = approximateToward(bot.getBlockPos(), goal);
+        if (towardGoal == null || !towardGoal.getAxis().isHorizontal()) {
+            towardGoal = bot.getHorizontalFacing();
+        }
+
+        String skillName = null;
+        String rawArgs = null;
+        Map<String, Object> params = new HashMap<>();
+        params.put("direction", towardGoal);
+
+        // When we're mostly aligned but vertically separated, build stairs (ascent/descent).
+        if (Math.abs(dyBlocks) >= 3 && horizDist <= 6.0D) {
+            skillName = "collect_dirt";
+            int blocks = Math.min(10, Math.max(4, Math.abs(dyBlocks)));
+            if (dyBlocks > 0) {
+                params.put("ascentBlocks", blocks);
+                rawArgs = "ascent " + blocks;
+            } else {
+                params.put("descentBlocks", blocks);
+                rawArgs = "descent " + blocks;
+            }
+        } else if (horizDist >= 5.0D && horizDist <= 24.0D) {
+            // If horizontally offset in a tunnel, carve toward the goal a bit and try again.
+            skillName = "stripmine";
+            int length = (int) Math.min(14, Math.max(6, Math.ceil(horizDist) + 2));
+            params.put("count", length);
+            rawArgs = Integer.toString(length);
+        } else {
+            return false;
+        }
+
+        String announce = bot.getName().getString()
+                + " is blocked getting to your last location; attempting " + skillName + " (" + rawArgs + ").";
+        if (commander != null) {
+            ChatUtils.sendSystemMessage(commander.getCommandSource(), announce);
+        } else {
+            ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withMaxLevel(4), announce);
+        }
+
+        // Avoid spamming skill launches.
+        state.comeNextSkillTick = server.getTicks() + 120L;
+        state.comeStagnantTicks = 0;
+        state.comeLastGoalDistSq = Double.NaN;
+
+        // Interrupt any active skill, then run the recovery skill asynchronously.
+        final String finalSkillName = skillName;
+        final Map<String, Object> finalParams = Map.copyOf(params);
+        TaskService.forceAbort(bot.getUuid(), "§cInterrupted by /bot come recovery.");
+        CompletableFuture.runAsync(() -> {
+            try {
+                SkillContext ctx = new SkillContext(bot.getCommandSource(), FunctionCallerV2.getSharedState(), finalParams);
+                SkillExecutionResult result = SkillManager.runSkill(finalSkillName, ctx);
+                server.execute(() -> {
+                    if (commander != null) {
+                        ChatUtils.sendSystemMessage(commander.getCommandSource(), result.message());
+                    } else {
+                        ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withMaxLevel(4), result.message());
+                    }
+                });
+            } catch (Exception e) {
+                server.execute(() -> {
+                    String msg = "Come recovery failed: " + (e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName());
+                    if (commander != null) {
+                        ChatUtils.sendSystemMessage(commander.getCommandSource(), msg);
+                    } else {
+                        ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withMaxLevel(4), msg);
+                    }
+                });
+            }
+        });
+        return true;
     }
 
     private static void maybeLogFollowPlanSkip(UUID botId, String message) {

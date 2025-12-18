@@ -20,6 +20,9 @@ public final class BotCommandStateService {
         public boolean followNoTeleport;
         public double followStopRange = 0.0D;
         public BlockPos followFixedGoal;
+        public double comeLastGoalDistSq = Double.NaN;
+        public int comeStagnantTicks = 0;
+        public long comeNextSkillTick = 0L;
         public Vec3d baseTarget;
         public boolean assistAllies;
         public boolean shieldRaised;

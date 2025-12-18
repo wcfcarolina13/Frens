@@ -3,6 +3,7 @@ package net.shasankp000.GameAI.skills;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.shasankp000.GameAI.BotEventHandler;
 import net.shasankp000.GameAI.DropSweeper;
+import net.shasankp000.GameAI.services.BotCommandStateService;
 import net.shasankp000.GameAI.services.TaskService;
 import net.shasankp000.GameAI.skills.impl.CollectDirtSkill;
 import net.shasankp000.GameAI.skills.impl.DirtShovelSkill;
@@ -63,10 +64,15 @@ public final class SkillManager {
         TaskService.TaskTicket ticket = ticketOpt.get();
 
         UUID resumeFollowUuid = null;
+        net.minecraft.util.math.BlockPos resumeFixedGoal = null;
+        double resumeStopRange = 0.0D;
         if (botPlayer != null && BotEventHandler.getCurrentMode(botPlayer) == BotEventHandler.Mode.FOLLOW) {
             UUID currentFollow = BotEventHandler.getFollowTargetUuid(botPlayer);
-            if (currentFollow != null) {
-                resumeFollowUuid = currentFollow;
+            resumeFollowUuid = currentFollow;
+            BotCommandStateService.State st = BotCommandStateService.stateFor(botPlayer);
+            if (st != null) {
+                resumeFixedGoal = st.followFixedGoal;
+                resumeStopRange = st.followStopRange;
             }
             BotEventHandler.stopFollowing(botPlayer);
         }
@@ -106,10 +112,18 @@ public final class SkillManager {
                 LOGGER.warn("Drop sweep after skill '{}' failed: {}", name, sweepError.getMessage(), sweepError);
             }
             BotEventHandler.setExternalOverrideActive(false);
-            if (botPlayer != null && resumeFollowUuid != null && !abortRequested) {
-                ServerPlayerEntity target = context.botSource().getServer().getPlayerManager().getPlayer(resumeFollowUuid);
-                if (target != null) {
-                    BotEventHandler.setFollowMode(botPlayer, target);
+            if (botPlayer != null && !abortRequested) {
+                if (resumeFixedGoal != null) {
+                    ServerPlayerEntity target = resumeFollowUuid != null
+                            ? context.botSource().getServer().getPlayerManager().getPlayer(resumeFollowUuid)
+                            : null;
+                    double stopRange = resumeStopRange > 0.0D ? resumeStopRange : 3.2D;
+                    BotEventHandler.setComeModeWalk(botPlayer, target, resumeFixedGoal, stopRange);
+                } else if (resumeFollowUuid != null) {
+                    ServerPlayerEntity target = context.botSource().getServer().getPlayerManager().getPlayer(resumeFollowUuid);
+                    if (target != null) {
+                        BotEventHandler.setFollowMode(botPlayer, target);
+                    }
                 }
             }
             boolean success = result != null && result.success() && !abortRequested;
