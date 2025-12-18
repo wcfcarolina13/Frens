@@ -44,6 +44,7 @@ import net.shasankp000.GameAI.services.HealingService;
 import net.shasankp000.GameAI.services.BotRescueService;
 import net.shasankp000.GameAI.services.BotThreatService;
 import net.shasankp000.GameAI.services.BotStuckService;
+import net.shasankp000.GameAI.services.BotRLActionService;
 import net.shasankp000.Database.StateActionPair;
 import net.shasankp000.Entity.AutoFaceEntity;
 import net.shasankp000.Entity.LookController;
@@ -3448,129 +3449,7 @@ public class BotEventHandler {
 
 
     private static void performAction(String action) {
-        switch (action) {
-            case "moveForward" -> {
-                debugRL("Performing action: move forward");
-                BotActions.moveForward(bot);
-                AutoFaceEntity.isBotMoving = true;
-            }
-            case "moveBackward" -> {
-                debugRL("Performing action: move backward");
-                BotActions.moveBackward(bot);
-                AutoFaceEntity.isBotMoving = true;
-            }
-            case "turnLeft" -> {
-                debugRL("Performing action: turn left");
-                BotActions.turnLeft(bot);
-            }
-            case "turnRight" -> {
-                debugRL("Performing action: turn right");
-                BotActions.turnRight(bot);
-            }
-            case "jump" -> {
-                debugRL("Performing action: jump");
-                BotActions.jump(bot);
-            }
-            case "jumpForward" -> {
-                debugRL("Performing action: jump forward");
-                BotActions.jumpForward(bot);
-            }
-            case "sneak" -> {
-                debugRL("Performing action: sneak");
-                BotActions.sneak(bot, true);
-            }
-            case "sprint" -> {
-                debugRL("Performing action: sprint");
-                BotActions.sprint(bot, true);
-            }
-            case "unsneak" -> {
-                debugRL("Performing action: unsneak");
-                BotActions.sneak(bot, false);
-            }
-            case "unsprint" -> {
-                debugRL("Performing action: unsprint");
-                BotActions.sprint(bot, false);
-            }
-            case "stopMoving" -> {
-                debugRL("Performing action: stop moving");
-                BotActions.stop(bot);
-                AutoFaceEntity.isBotMoving = false;
-            }
-            case "useItem" -> {
-                debugRL("Performing action: use currently selected item");
-                BotActions.useSelectedItem(bot);
-            }
-            case "attack" -> {
-                debugRL("Performing action: attack");
-                List<Entity> hostiles = AutoFaceEntity.hostileEntities;
-                if (hostiles == null || hostiles.isEmpty()) {
-                    hostiles = AutoFaceEntity.detectNearbyEntities(bot, 10).stream()
-                            .filter(EntityUtil::isHostile)
-                            .toList();
-                }
-                if (!hostiles.isEmpty()) {
-                    FaceClosestEntity.faceClosestEntity(bot, hostiles);
-                    BotActions.attackNearest(bot, hostiles);
-                } else {
-                    debugRL("No hostile entities available to attack.");
-                }
-            }
-            case "hotbar1" -> {
-                debugRL("Performing action: Select hotbar slot 1");
-                BotActions.selectHotbarSlot(bot, 0);
-            }
-            case "hotbar2" -> {
-                debugRL("Performing action: Select hotbar slot 2");
-                BotActions.selectHotbarSlot(bot, 1);
-            }
-            case "hotbar3" -> {
-                debugRL("Performing action: Select hotbar slot 3");
-                BotActions.selectHotbarSlot(bot, 2);
-            }
-            case "hotbar4" -> {
-                debugRL("Performing action: Select hotbar slot 4");
-                BotActions.selectHotbarSlot(bot, 3);
-            }
-            case "hotbar5" -> {
-                debugRL("Performing action: Select hotbar slot 5");
-                BotActions.selectHotbarSlot(bot, 4);
-            }
-            case "hotbar6" -> {
-                debugRL("Performing action: Select hotbar slot 6");
-                BotActions.selectHotbarSlot(bot, 5);
-            }
-            case "hotbar7" -> {
-                debugRL("Performing action: Select hotbar slot 7");
-                BotActions.selectHotbarSlot(bot, 6);
-            }
-            case "hotbar8" -> {
-                debugRL("Performing action: Select hotbar slot 8");
-                BotActions.selectHotbarSlot(bot, 7);
-            }
-            case "hotbar9" -> {
-                debugRL("Performing action: Select hotbar slot 9");
-                BotActions.selectHotbarSlot(bot, 8);
-            }
-            case "breakBlock" -> {
-                debugRL("Performing action: break block ahead");
-                boolean success = BotActions.breakBlockAhead(bot);
-                if (!success) {
-                    debugRL("No suitable block to break ahead.");
-                }
-            }
-            case "placeSupportBlock" -> {
-                debugRL("Performing action: place support block");
-                boolean success = BotActions.placeSupportBlock(bot);
-                if (!success) {
-                    debugRL("Unable to place support block (no block or blocked space).");
-                }
-            }
-            case "escapeStairs" -> {
-                debugRL("Performing action: escape stairs");
-                BotActions.escapeStairs(bot);
-            }
-            default -> debugRL("Invalid action");
-        }
+        BotRLActionService.performAction(bot, action, BotEventHandler::debugRL);
     }
 
     /**
