@@ -241,12 +241,29 @@ public final class BotActions {
     }
 
     public static boolean selectBestMeleeWeapon(ServerPlayerEntity bot) {
-        int weaponSlot = findMeleeWeaponSlot(bot);
-        if (weaponSlot != -1) {
-            selectHotbarSlot(bot, weaponSlot);
-            return true;
+        if (bot == null) {
+            return false;
         }
-        return false;
+        PlayerInventory inventory = bot.getInventory();
+        int bestSlot = -1;
+        int bestScore = Integer.MIN_VALUE;
+
+        for (int slot = 0; slot < inventory.size(); slot++) {
+            ItemStack stack = inventory.getStack(slot);
+            int score = meleeWeaponScore(stack);
+            if (score > bestScore) {
+                bestScore = score;
+                bestSlot = slot;
+            }
+        }
+
+        if (bestSlot == -1 || bestScore <= 0) {
+            return false;
+        }
+
+        int hotbarSlot = ensureHotbarAccess(bot, inventory, bestSlot);
+        selectHotbarSlot(bot, hotbarSlot);
+        return true;
     }
 
     public static boolean selectBestTool(ServerPlayerEntity bot, String preferKeyword, String avoidKeyword) {
@@ -659,24 +676,33 @@ public final class BotActions {
         return -1;
     }
 
-    private static int findMeleeWeaponSlot(ServerPlayerEntity bot) {
-        for (int i = 0; i < 9; i++) {
-            ItemStack stack = bot.getInventory().getStack(i);
-            if (stack.isEmpty()) {
-                continue;
-            }
-            if (stack.isOf(Items.BOW) || stack.isOf(Items.CROSSBOW)) {
-                continue;
-            }
-            if (stack.isOf(Items.TRIDENT)) {
-                return i;
-            }
-            String key = stack.getItem().getTranslationKey().toLowerCase(Locale.ROOT);
-            if (key.contains("sword") || key.contains("axe") || key.contains("mace") || key.contains("dagger")) {
-                return i;
-            }
+    private static int meleeWeaponScore(ItemStack stack) {
+        if (stack == null || stack.isEmpty()) {
+            return 0;
         }
-        return -1;
+        if (stack.isOf(Items.BOW) || stack.isOf(Items.CROSSBOW)) {
+            return 0;
+        }
+
+        // Prefer swords first (player expectation for "defense"), then other melee options.
+        if (stack.isOf(Items.TRIDENT)) {
+            return 40;
+        }
+
+        String key = stack.getItem().getTranslationKey().toLowerCase(Locale.ROOT);
+        if (key.contains("sword")) {
+            return 100;
+        }
+        if (key.contains("mace")) {
+            return 85;
+        }
+        if (key.contains("axe")) {
+            return 70;
+        }
+        if (key.contains("dagger")) {
+            return 60;
+        }
+        return 0;
     }
 
     private static int findAnyOccupiedSlot(ServerPlayerEntity bot) {

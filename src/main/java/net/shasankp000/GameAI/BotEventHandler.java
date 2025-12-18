@@ -1542,10 +1542,6 @@ public class BotEventHandler {
         if (isAssistAllies(bot)) {
             augmentedHostiles.addAll(BotThreatService.findHostilesAround(target, 8.0D));
         }
-        if (externalOverrideActive) {
-            LOGGER.debug("Skipping follow because external override is active.");
-            return false;
-        }
 
         if (!augmentedHostiles.isEmpty() && engageHostiles(bot, server, augmentedHostiles)) {
             return true;

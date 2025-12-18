@@ -21,10 +21,9 @@ Pending work only. Completed items and rationale live in `changelog.md`.
 ## P2 — Medium
 
 ### Post-Refactor Follow-Up (From Testing Notes)
-- [ ] **Guard/Patrol verification**: Run in-game tests for `/bot guard` and `/bot patrol` (basic start/stop, radius handling, and interaction with other tasks).
+- [ ] **Guard verification**: Run in-game tests for `/bot guard` (basic start/stop, radius handling, and interaction with other tasks).
 - [ ] **Come verification**: Confirm `/bot come` reaches in one run (no “direct walk blocked” stall) and does not grief player-placed doors.
 - [ ] **Combat verification**: Confirm close-range combat switches from bow/crossbow to a melee weapon when available.
-- [ ] **Defend UX verification**: Confirm `/bot defend on|off` and `/bot defend nearby on|off` work as shorthands for the existing syntax.
 
 ### Follow / Come
 - [ ] **Follow stability**: Confirm follow continues after other tasks; verify advanced pathfinding stays reliable across dimensions/terrain.

@@ -2144,6 +2144,8 @@ public class modCommandRegistry {
         // Come should be "self-healing": keep replanning like follow-walk does, instead of relying on a single
         // direct-path attempt that can be blocked by doorway/fence/corner geometry.
         if (!teleportAllowed) {
+            // Come is a player-issued override; abort any running skill so follow-walk can take over immediately.
+            TaskService.forceAbort(bot.getUuid(), "§cInterrupted by /bot come.");
             BotEventHandler.setFollowModeWalk(bot, commander, 3.2D);
             return 1;
         }
