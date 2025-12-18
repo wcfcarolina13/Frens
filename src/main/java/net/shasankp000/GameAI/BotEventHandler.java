@@ -106,10 +106,6 @@ public class BotEventHandler {
     private static Vec3d lastKnownPosition = null;
     private static int stationaryTicks = 0;
     private static final int STUCK_TICK_THRESHOLD = 12;
-    private static final boolean SPARTAN_MODE_ENABLED = false;
-    private static boolean spartanModeActive = false;
-    private static int failedBlockBreakAttempts = 0;
-    private static final int MAX_FAILED_BLOCK_ATTEMPTS = 4;
     private static Vec3d lastSafePosition = null;
     private static final Random RANDOM = new Random();
     // Stage-2 refactor: drop-sweep state moved to DropSweepService.
@@ -602,7 +598,6 @@ public class BotEventHandler {
 
             EnvironmentSnapshot environmentSnapshot = analyzeEnvironment(bot);
             boolean threatDetected = shouldEnterCombat(!hostileEntities.isEmpty(), dangerDistance, hasSculkNearby);
-            handleSpartanMode(bot, environmentSnapshot, threatDetected);
             updateStuckTracker(bot, environmentSnapshot);
 
             debugRL("Nearby blocks: " + nearbyBlocks);
@@ -897,10 +892,6 @@ public class BotEventHandler {
                 .orElse(null);
     }
 
-    private static boolean isSpartanCandidate(EnvironmentSnapshot snapshot) {
-        return snapshot.enclosed() && !snapshot.hasEscapeRoute() && !snapshot.hasHeadroom();
-    }
-
     private static boolean shouldEnterCombat(boolean hostilesNearby, double dangerDistance, boolean hasSculkNearby) {
         boolean dangerProximity = dangerDistance > 0.0 && dangerDistance <= 5.0;
         return hostilesNearby || dangerProximity || hasSculkNearby;
@@ -926,41 +917,6 @@ public class BotEventHandler {
         return shouldEnterCombat(hostilesNearby, dangerDistance, hasSculkNearby);
     }
 
-    private static void handleSpartanMode(ServerPlayerEntity bot, EnvironmentSnapshot snapshot, boolean threatDetected) {
-        if (!SPARTAN_MODE_ENABLED) {
-            spartanModeActive = false;
-            failedBlockBreakAttempts = 0;
-            return;
-        }
-        boolean environmentTrigger = isSpartanCandidate(snapshot) && threatDetected;
-        boolean failureTrigger = threatDetected && failedBlockBreakAttempts >= MAX_FAILED_BLOCK_ATTEMPTS;
-        boolean candidate = environmentTrigger || failureTrigger;
-        if (candidate && !spartanModeActive) {
-            spartanModeActive = true;
-            BotActions.sneak(bot, false);
-            BotActions.selectBestWeapon(bot);
-            ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withMaxLevel(4),
-                    bot.getName().getString() + " is going Spartan mode! No escape route detected.");
-        } else if (!candidate && spartanModeActive) {
-            spartanModeActive = false;
-            failedBlockBreakAttempts = 0;
-        }
-    }
-
-    private static void registerBlockBreakResult(ServerPlayerEntity bot, boolean success) {
-        if (success) {
-            failedBlockBreakAttempts = 0;
-            return;
-        }
-
-        failedBlockBreakAttempts = Math.min(MAX_FAILED_BLOCK_ATTEMPTS, failedBlockBreakAttempts + 1);
-        if (failedBlockBreakAttempts >= MAX_FAILED_BLOCK_ATTEMPTS) {
-            EnvironmentSnapshot snapshot = analyzeEnvironment(bot);
-            boolean threatDetected = assessImmediateThreat(bot);
-            handleSpartanMode(bot, snapshot, threatDetected);
-        }
-    }
-
     private static void updateStuckTracker(ServerPlayerEntity bot, EnvironmentSnapshot environmentSnapshot) {
         Vec3d currentPos = new Vec3d(bot.getX(), bot.getY(), bot.getZ());
         if (lastKnownPosition == null) {
@@ -976,17 +932,6 @@ public class BotEventHandler {
         } else {
             stationaryTicks = 0;
             lastKnownPosition = currentPos;
-        }
-
-        if (isSpartanCandidate(environmentSnapshot)) {
-            lastKnownPosition = currentPos;
-            stationaryTicks = 0;
-            boolean threatDetected = assessImmediateThreat(bot);
-            if (!threatDetected) {
-                // Programmatic block breaking disabled - bot must mine out manually
-                LOGGER.info("Bot enclosed without active threats; bot must mine out manually.");
-            }
-            return;
         }
 
         // Check if we are stuck on farmland (partial block)
@@ -1010,10 +955,8 @@ public class BotEventHandler {
 
     public static void onBotRespawn(ServerPlayerEntity bot) {
         registerBot(bot);
-        spartanModeActive = false;
         stationaryTicks = 0;
         lastKnownPosition = null;
-        failedBlockBreakAttempts = 0;
 
         ServerPlayerEntity escortPlayer = findEscortPlayer(bot);
         Vec3d target = escortPlayer != null
@@ -3408,7 +3351,8 @@ public class BotEventHandler {
         );
 
         EnvironmentSnapshot nextEnv = analyzeEnvironment(bot);
-        if (!isSpartanCandidate(nextEnv)) {
+        boolean confinedNoEscape = nextEnv.enclosed() && !nextEnv.hasEscapeRoute() && !nextEnv.hasHeadroom();
+        if (!confinedNoEscape) {
             lastSafePosition = new Vec3d(bot.getX(), bot.getY(), bot.getZ());
         }
 
@@ -3518,7 +3462,8 @@ public class BotEventHandler {
         List<String> nearbyBlocks = blockDistanceLimitedSearch.detectNearbyBlocks();
 
         EnvironmentSnapshot environmentSnapshot = analyzeEnvironment(bot);
-        if (!isSpartanCandidate(environmentSnapshot)) {
+        boolean confinedNoEscape = environmentSnapshot.enclosed() && !environmentSnapshot.hasEscapeRoute() && !environmentSnapshot.hasHeadroom();
+        if (!confinedNoEscape) {
             lastSafePosition = new Vec3d(bot.getX(), bot.getY(), bot.getZ());
         }
 
@@ -3682,7 +3627,6 @@ public class BotEventHandler {
             case "breakBlock" -> {
                 debugRL("Performing action: break block ahead");
                 boolean success = BotActions.breakBlockAhead(bot);
-                registerBlockBreakResult(bot, success);
                 if (!success) {
                     debugRL("No suitable block to break ahead.");
                 }
@@ -3690,11 +3634,6 @@ public class BotEventHandler {
             case "placeSupportBlock" -> {
                 debugRL("Performing action: place support block");
                 boolean success = BotActions.placeSupportBlock(bot);
-                if (!success) {
-                    registerBlockBreakResult(bot, false);
-                } else {
-                    failedBlockBreakAttempts = 0;
-                }
                 if (!success) {
                     debugRL("Unable to place support block (no block or blocked space).");
                 }
@@ -3705,10 +3644,6 @@ public class BotEventHandler {
             }
             default -> debugRL("Invalid action");
         }
-    }
-
-    public static boolean isSpartanModeActive() {
-        return spartanModeActive;
     }
 
     /**
@@ -3737,8 +3672,6 @@ public class BotEventHandler {
             currentState = null;
             lastKnownPosition = null;
             stationaryTicks = 0;
-            spartanModeActive = false;
-            failedBlockBreakAttempts = 0;
             lastSafePosition = null;
             lastRespawnHandledTick = -1;
             

@@ -380,7 +380,7 @@ public class RLAgent {
         int solidNeighborCount = currentState.getSolidNeighborCount();
         boolean hasHeadroom = currentState.hasHeadroom();
         boolean hasEscapeRoute = currentState.hasEscapeRoute();
-        boolean spartanMode = BotEventHandler.isSpartanModeActive() || (enclosed && !hasEscapeRoute && !hasHeadroom);
+        boolean confinedNoEscape = enclosed && !hasEscapeRoute && !hasHeadroom;
 
         for (Action action : possibleActions) {
             double risk = 0.0;
@@ -460,7 +460,7 @@ public class RLAgent {
                         risk += 5.0; // Jumping is risky with low health
                     }
 
-                    if (spartanMode) {
+                    if (confinedNoEscape) {
                         risk -= 4.0;
                     } else if (enclosed && !hasEscapeRoute) {
                         risk -= 2.5; // jumping may help reach headroom while trapped
@@ -472,7 +472,7 @@ public class RLAgent {
 
                 case JUMP_FORWARD:
                     risk += 3.0;
-                    if (spartanMode) {
+                    if (confinedNoEscape) {
                         risk -= 3.0;
                     } else {
                         if (enclosed) {
@@ -495,7 +495,7 @@ public class RLAgent {
 
                     else {risk += 0.0;}
 
-                    if (spartanMode) {
+                    if (confinedNoEscape) {
                         risk += 15.0;
                     } else if (enclosed && !hasEscapeRoute) {
                         risk += 7.0;
@@ -514,7 +514,7 @@ public class RLAgent {
                         risk += 0.0; // pointless sneaking otherwise
                     }
 
-                    if (spartanMode) {
+                    if (confinedNoEscape) {
                         risk += 8.0;
                     } else if (enclosed && !hasEscapeRoute) {
                         risk += 2.0;
@@ -650,7 +650,7 @@ public class RLAgent {
                     }
 
                     // Final adjustments
-                    if (spartanMode) {
+                    if (confinedNoEscape) {
                         totalRisk -= 20.0;
                     }
 
@@ -660,7 +660,7 @@ public class RLAgent {
                     break;
 
                 case BREAK_BLOCK_FORWARD:
-                    if (spartanMode) {
+                    if (confinedNoEscape) {
                         risk += 8.0;
                     } else {
                         risk -= enclosed ? 6.0 : 1.5;
@@ -672,7 +672,7 @@ public class RLAgent {
                     break;
 
                 case PLACE_SUPPORT_BLOCK:
-                    if (spartanMode) {
+                    if (confinedNoEscape) {
                         risk += 6.0;
                     } else {
                         risk += 2.5;
@@ -689,7 +689,7 @@ public class RLAgent {
                     break;
 
                 case ESCAPE_STAIRS:
-                    if (spartanMode) {
+                    if (confinedNoEscape) {
                         risk += 10.0;
                     } else {
                         risk += 1.0;
@@ -767,7 +767,7 @@ public class RLAgent {
                             debug("Food selected when hungry. Risk reduced: " + risk);
                         }
 
-                        if (spartanMode && (hotbarItem.contains("Sword") || hotbarItem.contains("Axe") || hotbarItem.contains("Trident"))) {
+                        if (confinedNoEscape && (hotbarItem.contains("Sword") || hotbarItem.contains("Axe") || hotbarItem.contains("Trident"))) {
                             risk -= 5.0;
                         }
 
@@ -1211,9 +1211,9 @@ public class RLAgent {
                 }
         }
 
-        boolean spartanMode = BotEventHandler.isSpartanModeActive() || (enclosed && !hasEscapeRoute && !hasHeadroom);
+        boolean confinedNoEscape = enclosed && !hasEscapeRoute && !hasHeadroom;
 
-        if (spartanMode) {
+        if (confinedNoEscape) {
             reward -= 5;
         }
 
@@ -1446,7 +1446,7 @@ public class RLAgent {
             reward += 10; // Reward for having sound-dampening items in inventory
         }
 
-        if (spartanMode) {
+        if (confinedNoEscape) {
             if (actionTaken == Action.ATTACK) {
                 reward += 20;
             } else if (HOTBAR_INDEX.containsKey(actionTaken)) {

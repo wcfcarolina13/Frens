@@ -510,7 +510,7 @@ public class AutoFaceEntity {
         if (server == null || bot == null) {
             return;
         }
-        if (!BotEventHandler.isPassiveMode() || BotEventHandler.isSpartanModeActive()) {
+        if (!BotEventHandler.isPassiveMode()) {
             return;
         }
         if (hostileEntities != null && !hostileEntities.isEmpty()) {

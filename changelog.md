@@ -38,6 +38,7 @@ Historical record and reasoning. `TODO.md` is the source of truth for what’s n
 - Come: improved “stuck” detection to use best-distance tracking (robust to jitter) and trigger vertical recovery sooner when the goal is above/below without line-of-sight.
 - Commands: added `/bot regroup` as a clearer alias for `/bot come` (walk to the commander’s last location rather than live-follow).
 - Come: removed the old “blocked, run `/bot resume` to dig” staging path (now superseded by automatic recovery skills).
+- Refactor: removed obsolete Spartan mode; confined/no-escape handling now relies on environment checks plus the stuck/escape routines.
 - Refactor: extracted follow debug-log throttling to `FollowDebugService` (no behavior change).
 - Refactor: extracted follow/come state maps to `src/main/java/net/shasankp000/GameAI/services/FollowStateService.java` (behavior unchanged; BotEventHandler delegates state storage/reset).
 - Refactor: extracted follow waypoint planning to `src/main/java/net/shasankp000/GameAI/services/FollowPlannerService.java` (behavior unchanged; BotEventHandler delegates async planning and waypoint application checks).
