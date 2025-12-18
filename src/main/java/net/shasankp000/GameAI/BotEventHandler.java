@@ -37,6 +37,7 @@ import net.shasankp000.Database.QTableStorage;
 import net.shasankp000.GameAI.services.BotPersistenceService;
 import net.shasankp000.GameAI.services.BotLifecycleService;
 import net.shasankp000.GameAI.services.BotRegistry;
+import net.shasankp000.GameAI.services.DropSweepService;
 import net.shasankp000.GameAI.services.HealingService;
 import net.shasankp000.Database.StateActionPair;
 import net.shasankp000.Entity.AutoFaceEntity;
@@ -98,12 +99,7 @@ public class BotEventHandler {
     private static final int MAX_FAILED_BLOCK_ATTEMPTS = 4;
     private static Vec3d lastSafePosition = null;
     private static final Random RANDOM = new Random();
-    private static final long DROP_SWEEP_COOLDOWN_MS = 4000L;
-    private static volatile long lastDropSweepMs = 0L;
-    private static final AtomicBoolean dropSweepInProgress = new AtomicBoolean(false);
-    private static final long DROP_RETRY_COOLDOWN_MS = 15_000L;
-    private static final Map<BlockPos, Long> dropRetryTimestamps = new ConcurrentHashMap<>();
-    private static final double RL_MANUAL_NUDGE_DISTANCE_SQ = 4.0D;
+    // Stage-2 refactor: drop-sweep state moved to DropSweepService.
     private static final double ALLY_DEFENSE_RADIUS = 12.0D;
     // Track recent obstruction damage to gate escape mining (2s)
     private static final Map<UUID, Long> LAST_OBSTRUCT_DAMAGE_TICK = new ConcurrentHashMap<>();
@@ -1796,129 +1792,17 @@ public class BotEventHandler {
     }
 
     public static void collectNearbyDrops(ServerPlayerEntity bot, double radius) {
-        if (bot == null) {
-            return;
-        }
-        if (dropSweepInProgress.get()) {
-            return;
-        }
-        MinecraftServer srv = bot.getCommandSource().getServer();
-        if (srv == null) {
-            return;
-        }
         Mode currentMode = getMode(bot);
-        World rawWorld = bot.getEntityWorld();
-        if (!(rawWorld instanceof ServerWorld world)) {
-            return;
-        }
-        double verticalRange = Math.max(6.0D, radius);
-        Box searchBox = bot.getBoundingBox().expand(radius, verticalRange, radius);
-        List<ItemEntity> drops = world.getEntitiesByClass(
-                ItemEntity.class,
-                searchBox,
-                drop -> drop.isAlive() && !drop.isRemoved() && drop.squaredDistanceTo(bot) > 1.0D
-        );
-        long now = System.currentTimeMillis();
-        Iterator<ItemEntity> iterator = drops.iterator();
-        while (iterator.hasNext()) {
-            BlockPos pos = iterator.next().getBlockPos().toImmutable();
-            Long lastAttempt = dropRetryTimestamps.get(pos);
-            if (lastAttempt != null) {
-                if (now - lastAttempt < DROP_RETRY_COOLDOWN_MS) {
-                    iterator.remove();
-                    continue;
-                }
-                dropRetryTimestamps.remove(pos);
-            }
-        }
-        if (drops.isEmpty()) {
-            return;
-        }
         boolean trainingMode = net.shasankp000.Commands.modCommandRegistry.isTrainingMode;
         boolean commandDrivenSweep = currentMode == Mode.GUARD || currentMode == Mode.PATROL;
-
-        if (trainingMode) {
-            ItemEntity closest = drops.stream()
-                    .min(Comparator.comparingDouble(bot::squaredDistanceTo))
-                    .orElse(null);
-            if (closest == null) {
-                return;
-            }
-            double distanceSq = bot.squaredDistanceTo(closest);
-            // In training/IDLE, avoid long sweeps that fight the RL loop. But if the user explicitly
-            // put the bot into GUARD/PATROL, allow sweeping at normal ranges.
-            if (!commandDrivenSweep && distanceSq > RL_MANUAL_NUDGE_DISTANCE_SQ) {
-                dropRetryTimestamps.put(closest.getBlockPos().toImmutable(), now);
-                return;
-            }
-            if (!dropSweepInProgress.compareAndSet(false, true)) {
-                return;
-            }
-            BlockPos dropPos = closest.getBlockPos().toImmutable();
-            long startedAt = System.currentTimeMillis();
-            dropRetryTimestamps.put(dropPos, startedAt);
-            int maxTargets = commandDrivenSweep ? 6 : 2;
-            long durationMs = commandDrivenSweep ? 4500L : 3000L;
-            CompletableFuture<Void> sweepTask = CompletableFuture.runAsync(() -> {
-                        try {
-                            ServerCommandSource source = bot.getCommandSource().withSilent().withMaxLevel(4);
-                            DropSweeper.sweep(source, radius, verticalRange, maxTargets, durationMs);
-                        } catch (Exception sweepError) {
-                            LOGGER.warn("Training drop sweep failed near {}: {}", dropPos, sweepError.getMessage());
-                        }
-                    })
-                    .orTimeout(durationMs + 750L, TimeUnit.MILLISECONDS);
-            lastDropSweepMs = startedAt;
-            sweepTask.whenComplete((ignored, throwable) -> srv.execute(() -> dropSweepInProgress.set(false)));
-            return;
-        }
-        if (now - lastDropSweepMs < DROP_SWEEP_COOLDOWN_MS) {
-            return;
-        }
-        lastDropSweepMs = now;
-
-        Set<BlockPos> attemptedPositions = new HashSet<>();
-        for (ItemEntity drop : drops) {
-            attemptedPositions.add(drop.getBlockPos().toImmutable());
-        }
-        final Set<BlockPos> trackedPositions = Set.copyOf(attemptedPositions);
-        final ServerWorld trackedWorld = world;
-
-        dropSweepInProgress.set(true);
-        boolean trainingModeActive = net.shasankp000.Commands.modCommandRegistry.isTrainingMode;
-        boolean needOverride = !trainingModeActive && !isExternalOverrideActive();
-        if (needOverride) {
-            setExternalOverrideActive(true);
-        }
-        final boolean activatedOverride = needOverride;
-        CompletableFuture<Void> sweepFuture = CompletableFuture.runAsync(() -> {
-            try {
-                ServerCommandSource source = bot.getCommandSource().withSilent().withMaxLevel(4);
-                DropSweeper.sweep(source, radius, verticalRange, 4, 4000L);
-            } catch (Exception sweepError) {
-                LOGGER.warn("Drop sweep failed: {}", sweepError.getMessage(), sweepError);
-            }
-        }).orTimeout(4750, TimeUnit.MILLISECONDS);
-        sweepFuture.whenComplete((ignored, throwable) -> srv.execute(() -> {
-            long completionTime = System.currentTimeMillis();
-            for (BlockPos pos : trackedPositions) {
-                Box checkBox = Box.of(Vec3d.ofCenter(pos), 1.5D, 1.5D, 1.5D);
-                boolean stillPresent = !trackedWorld.getEntitiesByClass(
-                        ItemEntity.class,
-                        checkBox,
-                        entity -> entity.isAlive() && !entity.isRemoved()
-                ).isEmpty();
-                if (stillPresent) {
-                    dropRetryTimestamps.put(pos, completionTime);
-                } else {
-                    dropRetryTimestamps.remove(pos);
-                }
-            }
-            dropSweepInProgress.set(false);
-            if (activatedOverride) {
-                setExternalOverrideActive(false);
-            }
-        }));
+        DropSweepService.collectNearbyDrops(
+                bot,
+                radius,
+                trainingMode,
+                commandDrivenSweep,
+                BotEventHandler::isExternalOverrideActive,
+                BotEventHandler::setExternalOverrideActive
+        );
     }
 
     private static boolean handleGuard(ServerPlayerEntity bot, CommandState state, List<Entity> nearbyEntities, List<Entity> hostileEntities) {
@@ -1936,7 +1820,7 @@ public class BotEventHandler {
 
         lowerShieldTracking(bot);
 
-        if (dropSweepInProgress.get()) {
+        if (DropSweepService.isInProgress()) {
             return true;
         }
 
@@ -1971,7 +1855,7 @@ public class BotEventHandler {
 
         lowerShieldTracking(bot);
 
-        if (dropSweepInProgress.get()) {
+        if (DropSweepService.isInProgress()) {
             return true;
         }
 
@@ -4647,7 +4531,7 @@ public class BotEventHandler {
 	            FOLLOW_DOOR_RECOVERY.clear();
 	            FOLLOW_LAST_BLOCK_POS.clear();
 	            FOLLOW_POS_STAGNANT_TICKS.clear();
-	            dropRetryTimestamps.clear();
+	            DropSweepService.reset();
             
             isExecuting = false;
             externalOverrideActive = false;
@@ -4661,8 +4545,6 @@ public class BotEventHandler {
             spartanModeActive = false;
             failedBlockBreakAttempts = 0;
             lastSafePosition = null;
-            lastDropSweepMs = 0L;
-            dropSweepInProgress.set(false);
             lastBurialScanTick = -1L;
             lastRespawnHandledTick = -1;
             
