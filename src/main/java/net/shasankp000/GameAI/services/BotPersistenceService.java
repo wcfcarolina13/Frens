@@ -354,17 +354,61 @@ public final class BotPersistenceService {
             }
         }
 
-        if (REMOVE_PLAYER == null) {
+        boolean removed = tryRemoveFromPlayerManager(server, bot);
+        if (!removed) {
+            // Last-resort: ensure the entity is discarded so it is not still interactable.
+            try {
+                bot.discard();
+            } catch (Exception e) {
+                LOGGER.warn("Failed to discard fakeplayer '{}': {}", bot.getName().getString(), e.getMessage());
+            }
+        }
+    }
+
+    private static boolean tryRemoveFromPlayerManager(MinecraftServer server, ServerPlayerEntity bot) {
+        if (server == null || bot == null) {
+            return false;
+        }
+        if (REMOVE_PLAYER != null) {
+            try {
+                REMOVE_PLAYER.invoke(server.getPlayerManager(), bot);
+            } catch (Exception e) {
+                LOGGER.warn("Failed to remove fakeplayer '{}' from PlayerManager: {}", bot.getName().getString(), e.getMessage());
+            }
+        } else {
             LOGGER.warn("Unable to remove fakeplayer '{}': PlayerManager#remove method not resolved.", bot.getName().getString());
-            return;
         }
-        try {
-            // Remove player from the manager's player list and world
-            REMOVE_PLAYER.invoke(server.getPlayerManager(), bot);
+
+        boolean removed = server.getPlayerManager().getPlayer(bot.getUuid()) == null;
+        if (removed) {
             LOGGER.info("Removed fakeplayer '{}' from PlayerManager.", bot.getName().getString());
-        } catch (Exception e) {
-            LOGGER.warn("Failed to remove fakeplayer '{}' from PlayerManager: {}", bot.getName().getString(), e.getMessage());
+            return true;
         }
+
+        // Fallback attempt: find any method that looks like a removal hook for this runtime.
+        for (Method method : server.getPlayerManager().getClass().getMethods()) {
+            if (method.getParameterCount() != 1) {
+                continue;
+            }
+            if (!method.getName().toLowerCase().contains("remove")) {
+                continue;
+            }
+            if (!method.getParameterTypes()[0].isAssignableFrom(bot.getClass())
+                    && !method.getParameterTypes()[0].isAssignableFrom(ServerPlayerEntity.class)) {
+                continue;
+            }
+            try {
+                method.invoke(server.getPlayerManager(), bot);
+                if (server.getPlayerManager().getPlayer(bot.getUuid()) == null) {
+                    LOGGER.info("Removed fakeplayer '{}' from PlayerManager using fallback method {}.", bot.getName().getString(), method.getName());
+                    return true;
+                }
+            } catch (Exception ignored) {
+            }
+        }
+
+        LOGGER.warn("Fakeplayer '{}' still present after removal attempt.", bot.getName().getString());
+        return false;
     }
 
     public static void deletePlayerDataFile(MinecraftServer server, UUID playerUuid) {

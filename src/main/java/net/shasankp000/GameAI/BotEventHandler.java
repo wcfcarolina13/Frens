@@ -1802,6 +1802,7 @@ public class BotEventHandler {
         if (srv == null) {
             return;
         }
+        Mode currentMode = getMode(bot);
         World rawWorld = bot.getEntityWorld();
         if (!(rawWorld instanceof ServerWorld world)) {
             return;
@@ -1830,6 +1831,7 @@ public class BotEventHandler {
             return;
         }
         boolean trainingMode = net.shasankp000.Commands.modCommandRegistry.isTrainingMode;
+        boolean commandDrivenSweep = currentMode == Mode.GUARD || currentMode == Mode.PATROL;
 
         if (trainingMode) {
             ItemEntity closest = drops.stream()
@@ -1839,7 +1841,9 @@ public class BotEventHandler {
                 return;
             }
             double distanceSq = bot.squaredDistanceTo(closest);
-            if (distanceSq > RL_MANUAL_NUDGE_DISTANCE_SQ) {
+            // In training/IDLE, avoid long sweeps that fight the RL loop. But if the user explicitly
+            // put the bot into GUARD/PATROL, allow sweeping at normal ranges.
+            if (!commandDrivenSweep && distanceSq > RL_MANUAL_NUDGE_DISTANCE_SQ) {
                 dropRetryTimestamps.put(closest.getBlockPos().toImmutable(), now);
                 return;
             }
@@ -1848,29 +1852,20 @@ public class BotEventHandler {
             }
             BlockPos dropPos = closest.getBlockPos().toImmutable();
             long startedAt = System.currentTimeMillis();
-            boolean nudged;
-            try {
-                nudged = DropSweeper.attemptManualNudge(bot, closest, dropPos);
-            } catch (Exception e) {
-                nudged = false;
-            }
-            lastDropSweepMs = startedAt;
-            if (nudged) {
-                dropRetryTimestamps.remove(dropPos);
-                dropSweepInProgress.set(false);
-                return;
-            }
             dropRetryTimestamps.put(dropPos, startedAt);
-            CompletableFuture.runAsync(() -> {
+            int maxTargets = commandDrivenSweep ? 6 : 2;
+            long durationMs = commandDrivenSweep ? 4500L : 3000L;
+            CompletableFuture<Void> sweepTask = CompletableFuture.runAsync(() -> {
                         try {
                             ServerCommandSource source = bot.getCommandSource().withSilent().withMaxLevel(4);
-                            DropSweeper.sweep(source, radius, verticalRange, 2, 3000L);
+                            DropSweeper.sweep(source, radius, verticalRange, maxTargets, durationMs);
                         } catch (Exception sweepError) {
                             LOGGER.warn("Training drop sweep failed near {}: {}", dropPos, sweepError.getMessage());
                         }
                     })
-                    .orTimeout(3500, TimeUnit.MILLISECONDS)
-                    .whenComplete((ignored, throwable) -> srv.execute(() -> dropSweepInProgress.set(false)));
+                    .orTimeout(durationMs + 750L, TimeUnit.MILLISECONDS);
+            lastDropSweepMs = startedAt;
+            sweepTask.whenComplete((ignored, throwable) -> srv.execute(() -> dropSweepInProgress.set(false)));
             return;
         }
         if (now - lastDropSweepMs < DROP_SWEEP_COOLDOWN_MS) {
@@ -1899,7 +1894,7 @@ public class BotEventHandler {
             } catch (Exception sweepError) {
                 LOGGER.warn("Drop sweep failed: {}", sweepError.getMessage(), sweepError);
             }
-        });
+        }).orTimeout(4750, TimeUnit.MILLISECONDS);
         sweepFuture.whenComplete((ignored, throwable) -> srv.execute(() -> {
             long completionTime = System.currentTimeMillis();
             for (BlockPos pos : trackedPositions) {

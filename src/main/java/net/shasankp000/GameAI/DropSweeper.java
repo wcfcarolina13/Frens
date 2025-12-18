@@ -17,9 +17,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.Comparator;
-import java.util.HashMap;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.HashSet;
 import java.util.Set;
 
@@ -118,6 +118,7 @@ public final class DropSweeper {
             MovementService.clearRecentWalkAttempt(player.getUuid());
             MovementService.MovementResult movement = MovementService.execute(source, player, plan, false, false, true, true);
             LOGGER.info("Drop sweep movement ({}) -> {}", plan.mode(), movement.detail());
+            BotActions.stop(player);
             attempts++;
 
             boolean success = movement.success();
@@ -191,6 +192,28 @@ public final class DropSweeper {
             return false;
         }
 
+        // Never block the server thread (sleeping / waiting) just to pick up loot.
+        if (server.isOnThread()) {
+            try {
+                LookController.faceBlock(player, dropPos);
+                BotActions.sneak(player, false);
+                BlockPos current = player.getBlockPos();
+                int dy = dropPos.getY() - current.getY();
+                if (dy > 0) {
+                    BotActions.jumpForward(player);
+                } else {
+                    BotActions.moveForward(player);
+                    if (dy <= 0) {
+                        BotActions.jumpForward(player);
+                    }
+                }
+            } catch (Throwable ignored) {
+            } finally {
+                BotActions.stop(player);
+            }
+            return targetDrop.isRemoved() || player.squaredDistanceTo(targetDrop) <= PICKUP_DISTANCE_SQUARED;
+        }
+
         boolean collected = false;
         for (int attempt = 0; attempt < 3 && !collected; attempt++) {
             CompletableFuture<Void> future = new CompletableFuture<>();
@@ -216,14 +239,10 @@ public final class DropSweeper {
                 }
             };
 
-            if (server.isOnThread()) {
-                task.run();
-            } else {
-                server.execute(task);
-            }
+            server.execute(task);
 
             try {
-                future.get();
+                future.get(250, TimeUnit.MILLISECONDS);
             } catch (Exception e) {
                 LOGGER.warn("Drop sweep nudge attempt {} near {} errored: {}", attempt + 1, dropPos, e.getMessage());
                 break;
@@ -234,6 +253,7 @@ public final class DropSweeper {
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
             }
+            BotActions.stop(player);
 
             collected = targetDrop.isRemoved() || player.squaredDistanceTo(targetDrop) <= PICKUP_DISTANCE_SQUARED;
             if (!collected) {
