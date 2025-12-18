@@ -43,6 +43,7 @@ import net.shasankp000.GameAI.services.GuardPatrolService;
 import net.shasankp000.GameAI.services.HealingService;
 import net.shasankp000.GameAI.services.BotRescueService;
 import net.shasankp000.GameAI.services.BotThreatService;
+import net.shasankp000.GameAI.services.BotStuckService;
 import net.shasankp000.Database.StateActionPair;
 import net.shasankp000.Entity.AutoFaceEntity;
 import net.shasankp000.Entity.LookController;
@@ -103,10 +104,6 @@ public class BotEventHandler {
     public static int botSpawnCount = 0;
     // Stage-2 refactor: last spawn state moved to BotLifecycleService.
     private static State currentState = null;
-    private static Vec3d lastKnownPosition = null;
-    private static int stationaryTicks = 0;
-    private static final int STUCK_TICK_THRESHOLD = 12;
-    private static Vec3d lastSafePosition = null;
     private static final Random RANDOM = new Random();
     // Stage-2 refactor: drop-sweep state moved to DropSweepService.
     // Stage-2 refactor: burial/suffocation rescue moved to BotRescueService.
@@ -596,9 +593,9 @@ public class BotEventHandler {
             boolean hasSculkNearby = nearbyBlocks.stream()
                     .anyMatch(block -> block.contains("Sculk Sensor") || block.contains("Sculk Shrieker"));
 
-            EnvironmentSnapshot environmentSnapshot = analyzeEnvironment(bot);
+            BotStuckService.EnvironmentSnapshot environmentSnapshot = BotStuckService.analyzeEnvironment(bot);
             boolean threatDetected = shouldEnterCombat(!hostileEntities.isEmpty(), dangerDistance, hasSculkNearby);
-            updateStuckTracker(bot, environmentSnapshot);
+            BotStuckService.updateStuckTracker(bot, environmentSnapshot);
 
             debugRL("Nearby blocks: " + nearbyBlocks);
 
@@ -844,41 +841,6 @@ public class BotEventHandler {
         }
     }
 
-    private record EnvironmentSnapshot(boolean enclosed, int solidNeighborCount, boolean hasHeadroom, boolean hasEscapeRoute) {}
-
-    private static EnvironmentSnapshot analyzeEnvironment(ServerPlayerEntity bot) {
-        ServerWorld world = bot.getCommandSource().getWorld();
-        BlockPos pos = bot.getBlockPos();
-
-        int solidNeighbors = 0;
-        for (Direction direction : Direction.values()) {
-            if (direction == Direction.DOWN || direction == Direction.UP || direction.getAxis().isHorizontal()) {
-                BlockPos checkPos = pos.offset(direction);
-                if (isSolid(world, checkPos)) {
-                    solidNeighbors++;
-                }
-            }
-        }
-
-        boolean headroom = world.getBlockState(pos.up()).isAir();
-        boolean escapeRoute = false;
-        for (Direction direction : Direction.Type.HORIZONTAL) {
-            BlockPos forward = pos.offset(direction);
-            if (world.getBlockState(forward).isAir() && world.getBlockState(forward.up()).isAir()) {
-                escapeRoute = true;
-                break;
-            }
-        }
-
-        boolean enclosed = solidNeighbors >= 5;
-        return new EnvironmentSnapshot(enclosed, solidNeighbors, headroom, escapeRoute);
-    }
-
-    private static boolean isSolid(ServerWorld world, BlockPos pos) {
-        BlockState state = world.getBlockState(pos);
-        return !state.isAir() && !state.getCollisionShape(world, pos).isEmpty();
-    }
-
     private static ServerPlayerEntity findEscortPlayer(ServerPlayerEntity bot) {
         MinecraftServer srv = bot.getCommandSource().getServer();
         if (srv == null) {
@@ -917,58 +879,23 @@ public class BotEventHandler {
         return shouldEnterCombat(hostilesNearby, dangerDistance, hasSculkNearby);
     }
 
-    private static void updateStuckTracker(ServerPlayerEntity bot, EnvironmentSnapshot environmentSnapshot) {
-        Vec3d currentPos = new Vec3d(bot.getX(), bot.getY(), bot.getZ());
-        if (lastKnownPosition == null) {
-            lastKnownPosition = currentPos;
-            stationaryTicks = 0;
-            return;
-        }
-
-        // Reduced distance threshold to 0.01 (very strict) to catch subtle movements
-        double distanceSq = currentPos.squaredDistanceTo(lastKnownPosition);
-        if (distanceSq < 0.01) {
-            stationaryTicks++;
-        } else {
-            stationaryTicks = 0;
-            lastKnownPosition = currentPos;
-        }
-
-        // Check if we are stuck on farmland (partial block)
-        // If we've been stationary for a while, try to jump
-        // FIXED: Use bot.getCommandSource().getWorld() instead of bot.getWorld()
-        BlockState feetState = bot.getCommandSource().getWorld().getBlockState(bot.getBlockPos());
-        if (feetState.isOf(Blocks.FARMLAND) && stationaryTicks > 5) {
-             BotActions.jump(bot);
-        }
-
-        if (stationaryTicks >= STUCK_TICK_THRESHOLD || (environmentSnapshot.enclosed() && !environmentSnapshot.hasEscapeRoute())) {
-            LOGGER.info("Escape routine triggered (stationaryTicks={}, enclosed={}, hasEscapeRoute={})",
-                    stationaryTicks, environmentSnapshot.enclosed(), environmentSnapshot.hasEscapeRoute());
-            BotActions.escapeStairs(bot);
-            stationaryTicks = 0;
-            lastKnownPosition = new Vec3d(bot.getX(), bot.getY(), bot.getZ());
-        }
-    }
-
 
 
     public static void onBotRespawn(ServerPlayerEntity bot) {
         registerBot(bot);
-        stationaryTicks = 0;
-        lastKnownPosition = null;
+        BotStuckService.resetBot(bot.getUuid());
 
         ServerPlayerEntity escortPlayer = findEscortPlayer(bot);
         Vec3d target = escortPlayer != null
                 ? new Vec3d(escortPlayer.getX(), escortPlayer.getY(), escortPlayer.getZ())
-                : lastSafePosition;
+                : BotStuckService.getLastSafePosition(bot.getUuid());
         MinecraftServer srv = bot.getCommandSource().getServer();
         ServerWorld botWorld = bot.getCommandSource().getWorld();
         ServerWorld destinationWorld = botWorld;
 
         if (escortPlayer != null) {
             destinationWorld = escortPlayer.getCommandSource().getWorld();
-            lastSafePosition = new Vec3d(escortPlayer.getX(), escortPlayer.getY(), escortPlayer.getZ());
+            BotStuckService.setLastSafePosition(bot.getUuid(), new Vec3d(escortPlayer.getX(), escortPlayer.getY(), escortPlayer.getZ()));
         }
 
         if (target == null) {
@@ -995,7 +922,7 @@ public class BotEventHandler {
             lastRespawnHandledTick = srv.getTicks();
         }
 
-        lastSafePosition = target;
+        BotStuckService.setLastSafePosition(bot.getUuid(), target);
         TaskService.forceAbort(bot.getUuid(), "§cTask aborted due to bot respawn.");
         setExternalOverrideActive(false);
         setMode(bot, Mode.IDLE);
@@ -1539,11 +1466,11 @@ public class BotEventHandler {
 	        // If the commander is far away, do not let stale local waypoints keep us orbiting a doorway.
 	        // Once we're out of a tight enclosure, prioritise direct pursuit / long-range catch-up.
 	        if (usingWaypoints && distanceSq >= 900.0D) { // ~30 blocks
-	            EnvironmentSnapshot env = analyzeEnvironment(bot);
+	            BotStuckService.EnvironmentSnapshot env = BotStuckService.analyzeEnvironment(bot);
 	            if (env != null && (!env.enclosed() || env.hasEscapeRoute())) {
-	                FollowStateService.FOLLOW_WAYPOINTS.remove(botId);
-	                FollowStateService.FOLLOW_DOOR_PLAN.remove(botId);
-	                FollowStateService.FOLLOW_DOOR_LAST_BLOCK.remove(botId);
+		                FollowStateService.FOLLOW_WAYPOINTS.remove(botId);
+		                FollowStateService.FOLLOW_DOOR_PLAN.remove(botId);
+		                FollowStateService.FOLLOW_DOOR_LAST_BLOCK.remove(botId);
 	                FollowStateService.FOLLOW_DOOR_STUCK_TICKS.remove(botId);
 	                FollowStateService.FOLLOW_DOOR_RECOVERY.remove(botId);
 	                usingWaypoints = false;
@@ -2875,10 +2802,10 @@ public class BotEventHandler {
         if (bot == null || target == null || !canSee || directBlocked || targetDistSq < 625.0D || botSealed || commanderSealed) {
             return false;
         }
-        EnvironmentSnapshot env = analyzeEnvironment(bot);
-        if (env == null || env.enclosed()) {
-            return false;
-        }
+	        BotStuckService.EnvironmentSnapshot env = BotStuckService.analyzeEnvironment(bot);
+	        if (env == null || env.enclosed()) {
+	            return false;
+	        }
         UUID botId = bot.getUuid();
         boolean hadDoorPlan = FOLLOW_DOOR_PLAN.containsKey(botId);
         boolean hadWaypoints = FOLLOW_WAYPOINTS.containsKey(botId);
@@ -2934,11 +2861,11 @@ public class BotEventHandler {
         if (last >= 0 && (now - last) < FOLLOW_SEALED_STATE_TTL_MS) {
             return FOLLOW_SEALED_STATE.getOrDefault(id, false);
         }
-        EnvironmentSnapshot env = analyzeEnvironment(entity);
-        boolean sealed = env != null && env.enclosed() && !env.hasEscapeRoute() && hasClosedDoorNearby(entity, 4);
-        FOLLOW_SEALED_STATE_MS.put(id, now);
-        FOLLOW_SEALED_STATE.put(id, sealed);
-        return sealed;
+	        BotStuckService.EnvironmentSnapshot env = BotStuckService.analyzeEnvironment(entity);
+	        boolean sealed = env != null && env.enclosed() && !env.hasEscapeRoute() && hasClosedDoorNearby(entity, 4);
+	        FOLLOW_SEALED_STATE_MS.put(id, now);
+	        FOLLOW_SEALED_STATE.put(id, sealed);
+	        return sealed;
     }
 
     private static boolean hasClosedDoorNearby(ServerPlayerEntity entity, int radius) {
@@ -3350,11 +3277,11 @@ public class BotEventHandler {
                 isBlockItem.checkBlockItem(hotBarUtils.getSelectedHotbarItemStack(bot))
         );
 
-        EnvironmentSnapshot nextEnv = analyzeEnvironment(bot);
-        boolean confinedNoEscape = nextEnv.enclosed() && !nextEnv.hasEscapeRoute() && !nextEnv.hasHeadroom();
-        if (!confinedNoEscape) {
-            lastSafePosition = new Vec3d(bot.getX(), bot.getY(), bot.getZ());
-        }
+	        BotStuckService.EnvironmentSnapshot nextEnv = BotStuckService.analyzeEnvironment(bot);
+	        boolean confinedNoEscape = nextEnv.enclosed() && !nextEnv.hasEscapeRoute() && !nextEnv.hasHeadroom();
+	        if (!confinedNoEscape) {
+	            BotStuckService.setLastSafePosition(bot.getUuid(), new Vec3d(bot.getX(), bot.getY(), bot.getZ()));
+	        }
 
         String updatedTime = GetTime.getTimeOfWorld(bot) >= 12000 ? "night" : "day";
         String updatedDimension = bot.getCommandSource().getWorld().getRegistryKey().getValue().toString();
@@ -3461,11 +3388,11 @@ public class BotEventHandler {
 
         List<String> nearbyBlocks = blockDistanceLimitedSearch.detectNearbyBlocks();
 
-        EnvironmentSnapshot environmentSnapshot = analyzeEnvironment(bot);
-        boolean confinedNoEscape = environmentSnapshot.enclosed() && !environmentSnapshot.hasEscapeRoute() && !environmentSnapshot.hasHeadroom();
-        if (!confinedNoEscape) {
-            lastSafePosition = new Vec3d(bot.getX(), bot.getY(), bot.getZ());
-        }
+	        BotStuckService.EnvironmentSnapshot environmentSnapshot = BotStuckService.analyzeEnvironment(bot);
+	        boolean confinedNoEscape = environmentSnapshot.enclosed() && !environmentSnapshot.hasEscapeRoute() && !environmentSnapshot.hasHeadroom();
+	        if (!confinedNoEscape) {
+	            BotStuckService.setLastSafePosition(bot.getUuid(), new Vec3d(bot.getX(), bot.getY(), bot.getZ()));
+	        }
 
         SelectedItemDetails selectedItem = new SelectedItemDetails(
                 selectedItemStack.getItem().getName().getString(),
@@ -3656,12 +3583,13 @@ public class BotEventHandler {
 	            bot = null;
 	            BotLifecycleService.clear();
 	            BotRegistry.clear();
-	            BotCommandStateService.clearAll();
-	            LAST_RL_SAMPLE_TICK.clear();
-	            BotRescueService.reset();
-	            FollowStateService.reset();
-	            FollowDebugService.reset();
-	            DropSweepService.reset();
+		            BotCommandStateService.clearAll();
+		            LAST_RL_SAMPLE_TICK.clear();
+		            BotRescueService.reset();
+		            BotStuckService.resetAll();
+		            FollowStateService.reset();
+		            FollowDebugService.reset();
+		            DropSweepService.reset();
             
             isExecuting = false;
             externalOverrideActive = false;
@@ -3669,13 +3597,10 @@ public class BotEventHandler {
             hasRespawned = false;
             botSpawnCount = 0;
 
-            currentState = null;
-            lastKnownPosition = null;
-            stationaryTicks = 0;
-            lastSafePosition = null;
-            lastRespawnHandledTick = -1;
-            
-            LOGGER.info("BotEventHandler static state reset successfully.");
-        }
+		            currentState = null;
+		            lastRespawnHandledTick = -1;
+		            
+		            LOGGER.info("BotEventHandler static state reset successfully.");
+		        }
     }
 }
