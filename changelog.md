@@ -40,6 +40,7 @@ Historical record and reasoning. `TODO.md` is the source of truth for what’s n
 - Come: removed the old “blocked, run `/bot resume` to dig” staging path (now superseded by automatic recovery skills).
 - Refactor: extracted follow debug-log throttling to `FollowDebugService` (no behavior change).
 - Refactor: extracted follow/come state maps to `src/main/java/net/shasankp000/GameAI/services/FollowStateService.java` (behavior unchanged; BotEventHandler delegates state storage/reset).
+- Refactor: extracted follow waypoint planning to `src/main/java/net/shasankp000/GameAI/services/FollowPlannerService.java` (behavior unchanged; BotEventHandler delegates async planning and waypoint application checks).
 - Follow: follow no longer runs blocking movement/path loops on the server thread; it now sprints when >2 blocks away and uses a wolf-style teleport catch-up only when far/stuck (with cooldown).
 - Storage: prevent “remote” chest deposits/withdrawals through doors/walls by requiring survival-like reach + line-of-sight checks before moving items.
 - Safety: rescue-from-burial/suffocation escape no longer mines doors; it will attempt to open them instead (prevents bots breaking enclosure doors).
