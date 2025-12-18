@@ -37,6 +37,7 @@ import net.shasankp000.Database.QTableStorage;
 import net.shasankp000.GameAI.services.BotPersistenceService;
 import net.shasankp000.GameAI.services.BotLifecycleService;
 import net.shasankp000.GameAI.services.BotRegistry;
+import net.shasankp000.GameAI.services.BotCommandStateService;
 import net.shasankp000.GameAI.services.DropSweepService;
 import net.shasankp000.GameAI.services.GuardPatrolService;
 import net.shasankp000.GameAI.services.HealingService;
@@ -222,7 +223,7 @@ public class BotEventHandler {
         return last >= 0 && (now - last) <= OBSTRUCT_WINDOW_TICKS;
     }
 
-    private static final Map<UUID, CommandState> COMMAND_STATES = new ConcurrentHashMap<>();
+    // Stage-2 refactor: per-bot command state moved to BotCommandStateService.
     private static final Map<UUID, Long> LAST_RL_SAMPLE_TICK = new ConcurrentHashMap<>();
     private static final Map<UUID, Long> LAST_SUFFOCATION_ALERT_TICK = new ConcurrentHashMap<>();
     private static final long SUFFOCATION_ALERT_COOLDOWN_TICKS = 20L; // 1 second for urgent warnings
@@ -251,17 +252,6 @@ public class BotEventHandler {
         }
     }
 
-    private static final class CommandState {
-        Mode mode = Mode.IDLE;
-        UUID followTargetUuid;
-        boolean followNoTeleport;
-        double followStopRange = 0.0D;
-        Vec3d baseTarget;
-        boolean assistAllies;
-        boolean shieldRaised;
-        long shieldDecisionTick;
-    }
-
     public static boolean throttleTraining(ServerPlayerEntity bot, boolean urgent) {
         if (bot == null || bot.getCommandSource().getServer() == null) {
             return true;
@@ -276,21 +266,15 @@ public class BotEventHandler {
         return true;
     }
 
-    private static CommandState stateFor(ServerPlayerEntity bot) {
-        if (bot == null) {
-            return null;
-        }
-        return COMMAND_STATES.computeIfAbsent(bot.getUuid(), id -> new CommandState());
+    private static BotCommandStateService.State stateFor(ServerPlayerEntity bot) {
+        return BotCommandStateService.stateFor(bot);
     }
 
-    private static CommandState stateFor(UUID uuid) {
-        if (uuid == null) {
-            return null;
-        }
-        return COMMAND_STATES.computeIfAbsent(uuid, id -> new CommandState());
+    private static BotCommandStateService.State stateFor(UUID uuid) {
+        return BotCommandStateService.stateFor(uuid);
     }
 
-    private static CommandState primaryState() {
+    private static BotCommandStateService.State primaryState() {
         UUID primaryUuid = BotLifecycleService.getPrimaryBotUuid();
         if (primaryUuid != null) {
             return stateFor(primaryUuid);
@@ -303,13 +287,13 @@ public class BotEventHandler {
     }
 
     private static void setMode(ServerPlayerEntity bot, Mode mode) {
-        CommandState state = stateFor(bot);
+        BotCommandStateService.State state = stateFor(bot);
         if (state != null) {
             state.mode = mode;
         }
         UUID primaryUuid = BotLifecycleService.getPrimaryBotUuid();
         if (bot != null && primaryUuid != null && bot.getUuid().equals(primaryUuid)) {
-            CommandState primary = primaryState();
+            BotCommandStateService.State primary = primaryState();
             if (primary != null) {
                 primary.mode = mode;
             }
@@ -317,18 +301,18 @@ public class BotEventHandler {
     }
 
     private static Mode getMode(ServerPlayerEntity bot) {
-        CommandState state = stateFor(bot);
+        BotCommandStateService.State state = stateFor(bot);
         return state != null ? state.mode : Mode.IDLE;
     }
 
     private static void setFollowTarget(ServerPlayerEntity bot, UUID targetUuid) {
-        CommandState state = stateFor(bot);
+        BotCommandStateService.State state = stateFor(bot);
         if (state != null) {
             state.followTargetUuid = targetUuid;
         }
         UUID primaryUuid = BotLifecycleService.getPrimaryBotUuid();
         if (bot != null && primaryUuid != null && bot.getUuid().equals(primaryUuid)) {
-            CommandState primary = primaryState();
+            BotCommandStateService.State primary = primaryState();
             if (primary != null) {
                 primary.followTargetUuid = targetUuid;
             }
@@ -336,7 +320,7 @@ public class BotEventHandler {
     }
 
     private static UUID getFollowTargetFor(ServerPlayerEntity bot) {
-        CommandState state = stateFor(bot);
+        BotCommandStateService.State state = stateFor(bot);
         return state != null ? state.followTargetUuid : null;
     }
 
@@ -344,7 +328,7 @@ public class BotEventHandler {
         if (bot == null) {
             return;
         }
-        COMMAND_STATES.remove(bot.getUuid());
+        BotCommandStateService.clear(bot.getUuid());
     }
 
     private static void setGuardState(ServerPlayerEntity bot, Vec3d center, double radius) {
@@ -363,13 +347,13 @@ public class BotEventHandler {
     }
 
     private static void setBaseTarget(ServerPlayerEntity bot, Vec3d base) {
-        CommandState state = stateFor(bot);
+        BotCommandStateService.State state = stateFor(bot);
         if (state != null) {
             state.baseTarget = base;
         }
         UUID primaryUuid = BotLifecycleService.getPrimaryBotUuid();
         if (bot != null && primaryUuid != null && bot.getUuid().equals(primaryUuid)) {
-            CommandState primary = primaryState();
+            BotCommandStateService.State primary = primaryState();
             if (primary != null) {
                 primary.baseTarget = base;
             }
@@ -385,18 +369,18 @@ public class BotEventHandler {
     }
 
     private static Vec3d getBaseTarget(ServerPlayerEntity bot) {
-        CommandState state = stateFor(bot);
+        BotCommandStateService.State state = stateFor(bot);
         return state != null ? state.baseTarget : null;
     }
 
     private static void setAssistAllies(ServerPlayerEntity bot, boolean enable) {
-        CommandState state = stateFor(bot);
+        BotCommandStateService.State state = stateFor(bot);
         if (state != null) {
             state.assistAllies = enable;
         }
         UUID primaryUuid = BotLifecycleService.getPrimaryBotUuid();
         if (bot != null && primaryUuid != null && bot.getUuid().equals(primaryUuid)) {
-            CommandState primary = primaryState();
+            BotCommandStateService.State primary = primaryState();
             if (primary != null) {
                 primary.assistAllies = enable;
             }
@@ -404,18 +388,18 @@ public class BotEventHandler {
     }
 
     private static boolean isAssistAllies(ServerPlayerEntity bot) {
-        CommandState state = stateFor(bot);
+        BotCommandStateService.State state = stateFor(bot);
         return state != null && state.assistAllies;
     }
 
     private static void setShieldRaised(ServerPlayerEntity bot, boolean raised) {
-        CommandState state = stateFor(bot);
+        BotCommandStateService.State state = stateFor(bot);
         if (state != null) {
             state.shieldRaised = raised;
         }
         UUID primaryUuid = BotLifecycleService.getPrimaryBotUuid();
         if (bot != null && primaryUuid != null && bot.getUuid().equals(primaryUuid)) {
-            CommandState primary = primaryState();
+            BotCommandStateService.State primary = primaryState();
             if (primary != null) {
                 primary.shieldRaised = raised;
             }
@@ -423,23 +407,23 @@ public class BotEventHandler {
     }
 
     private static boolean isShieldRaised(ServerPlayerEntity bot) {
-        CommandState state = stateFor(bot);
+        BotCommandStateService.State state = stateFor(bot);
         return state != null && state.shieldRaised;
     }
 
     private static long getShieldDecisionTick(ServerPlayerEntity bot) {
-        CommandState state = stateFor(bot);
+        BotCommandStateService.State state = stateFor(bot);
         return state != null ? state.shieldDecisionTick : 0L;
     }
 
     private static void setShieldDecisionTick(ServerPlayerEntity bot, long tick) {
-        CommandState state = stateFor(bot);
+        BotCommandStateService.State state = stateFor(bot);
         if (state != null) {
             state.shieldDecisionTick = tick;
         }
         UUID primaryUuid = BotLifecycleService.getPrimaryBotUuid();
         if (bot != null && primaryUuid != null && bot.getUuid().equals(primaryUuid)) {
-            CommandState primary = primaryState();
+            BotCommandStateService.State primary = primaryState();
             if (primary != null) {
                 primary.shieldDecisionTick = tick;
             }
@@ -1173,7 +1157,7 @@ public class BotEventHandler {
             return false;
         }
 
-        CommandState state = stateFor(bot);
+        BotCommandStateService.State state = stateFor(bot);
         Mode mode = state != null ? state.mode : Mode.IDLE;
         List<Entity> augmentedHostiles = augmentHostiles(bot, hostileEntities);
 
@@ -1272,7 +1256,7 @@ public class BotEventHandler {
         }
         registerBot(bot);
         setFollowTarget(bot, target.getUuid());
-        CommandState state = stateFor(bot);
+        BotCommandStateService.State state = stateFor(bot);
         if (state != null) {
             state.followNoTeleport = false;
             state.followStopRange = 0.0D;
@@ -1313,7 +1297,7 @@ public class BotEventHandler {
         }
         registerBot(bot);
         setFollowTarget(bot, target.getUuid());
-        CommandState state = stateFor(bot);
+        BotCommandStateService.State state = stateFor(bot);
         if (state != null) {
             state.followNoTeleport = true;
             state.followStopRange = Math.max(1.5D, stopRange);
@@ -1379,7 +1363,7 @@ public class BotEventHandler {
             FOLLOW_AVOID_DOOR_BASE.remove(id);
             FOLLOW_AVOID_DOOR_UNTIL_MS.remove(id);
         }
-        CommandState state = stateFor(bot);
+        BotCommandStateService.State state = stateFor(bot);
         if (state != null) {
             state.followNoTeleport = false;
             state.followStopRange = 0.0D;
@@ -1509,7 +1493,7 @@ public class BotEventHandler {
     }
 
     public static Mode getCurrentMode() {
-        CommandState state = primaryState();
+        BotCommandStateService.State state = primaryState();
         return state != null ? state.mode : Mode.IDLE;
     }
 
@@ -1556,7 +1540,7 @@ public class BotEventHandler {
     }
 
     public static ServerPlayerEntity getFollowTarget() {
-        CommandState state = primaryState();
+        BotCommandStateService.State state = primaryState();
         UUID targetUuid = state != null ? state.followTargetUuid : null;
         if (targetUuid == null || server == null) {
             return null;
@@ -1569,7 +1553,7 @@ public class BotEventHandler {
     }
 
     public static UUID getFollowTargetUuid() {
-        CommandState state = primaryState();
+        BotCommandStateService.State state = primaryState();
         return state != null ? state.followTargetUuid : null;
     }
 
@@ -1582,7 +1566,7 @@ public class BotEventHandler {
         return message;
     }
 
-    private static boolean handleFollow(ServerPlayerEntity bot, CommandState state, MinecraftServer server, List<Entity> hostileEntities) {
+    private static boolean handleFollow(ServerPlayerEntity bot, BotCommandStateService.State state, MinecraftServer server, List<Entity> hostileEntities) {
         UUID targetUuid = state != null ? state.followTargetUuid : null;
         ServerPlayerEntity target = targetUuid != null && server != null
                 ? server.getPlayerManager().getPlayer(targetUuid)
@@ -1786,7 +1770,7 @@ public class BotEventHandler {
         );
     }
 
-    private static boolean handleGuard(ServerPlayerEntity bot, CommandState state, List<Entity> nearbyEntities, List<Entity> hostileEntities) {
+    private static boolean handleGuard(ServerPlayerEntity bot, BotCommandStateService.State state, List<Entity> nearbyEntities, List<Entity> hostileEntities) {
         Vec3d center = getGuardCenter(bot);
         double radius = getGuardRadius(bot);
         if (center == null) {
@@ -1821,7 +1805,7 @@ public class BotEventHandler {
         return true;
     }
 
-    private static boolean handlePatrol(ServerPlayerEntity bot, CommandState state, List<Entity> nearbyEntities, List<Entity> hostileEntities) {
+    private static boolean handlePatrol(ServerPlayerEntity bot, BotCommandStateService.State state, List<Entity> nearbyEntities, List<Entity> hostileEntities) {
         Vec3d center = getGuardCenter(bot);
         double radius = getGuardRadius(bot);
         if (center == null) {
@@ -1874,7 +1858,7 @@ public class BotEventHandler {
         return true;
     }
 
-    private static boolean handleReturnToBase(ServerPlayerEntity bot, CommandState state) {
+    private static boolean handleReturnToBase(ServerPlayerEntity bot, BotCommandStateService.State state) {
         Vec3d base = state != null ? state.baseTarget : null;
         if (base == null) {
             setMode(bot, Mode.IDLE);
@@ -2988,7 +2972,7 @@ public class BotEventHandler {
                     if (liveBot == null) {
                         return;
                     }
-                    CommandState st = stateFor(liveBot);
+                    BotCommandStateService.State st = stateFor(liveBot);
                     if (getMode(liveBot) != Mode.FOLLOW || st == null || st.followTargetUuid == null || !st.followTargetUuid.equals(targetId)) {
                         return;
                     }
@@ -4475,7 +4459,7 @@ public class BotEventHandler {
 	            bot = null;
 	            BotLifecycleService.clear();
 	            BotRegistry.clear();
-	            COMMAND_STATES.clear();
+	            BotCommandStateService.clearAll();
 	            LAST_RL_SAMPLE_TICK.clear();
 		            LAST_SUFFOCATION_ALERT_TICK.clear();
 	            LAST_OBSTRUCT_DAMAGE_TICK.clear();
