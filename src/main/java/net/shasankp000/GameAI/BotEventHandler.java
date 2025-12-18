@@ -70,6 +70,7 @@ import net.shasankp000.GameAI.services.FollowStateService;
 import net.shasankp000.GameAI.services.FollowPlannerService;
 import net.shasankp000.GameAI.services.FollowStateService.FollowDoorPlan;
 import net.shasankp000.GameAI.services.FollowStateService.FollowDoorRecovery;
+import net.shasankp000.GameAI.services.FollowMovementService;
 import net.shasankp000.GameAI.skills.SkillContext;
 import net.shasankp000.GameAI.skills.SkillExecutionResult;
 import net.shasankp000.GameAI.skills.SkillManager;
@@ -1735,67 +1736,11 @@ public class BotEventHandler {
     }
 
     private static void moveToward(ServerPlayerEntity bot, Vec3d target, double stopDistance, boolean sprint) {
-        Vec3d pos = positionOf(bot);
-        double dx = target.x - pos.x;
-        double dz = target.z - pos.z;
-        double distanceSq = dx * dx + dz * dz;
-        if (distanceSq <= stopDistance * stopDistance) {
-            BotActions.stop(bot);
-            return;
-        }
-
-        float yaw = (float) (Math.toDegrees(Math.atan2(-dx, dz)));
-        bot.setYaw(yaw);
-        bot.setHeadYaw(yaw);
-        bot.setBodyYaw(yaw);
-
-        lowerShieldTracking(bot);
-        BotActions.sprint(bot, sprint);
-        if (target.y - pos.y > 0.6D) {
-            BotActions.jump(bot);
-        } else {
-            BotActions.autoJumpIfNeeded(bot);
-        }
-        BotActions.applyMovementInput(bot, target, sprint ? 0.18 : 0.14);
-    }
-
-    private static void simplePursuitStep(ServerPlayerEntity bot, Vec3d targetPos, boolean allowCloseStop) {
-        if (bot == null || targetPos == null) {
-            return;
-        }
-        double distanceSq = horizontalDistanceSq(bot, targetPos);
-        if (allowCloseStop && distanceSq <= FOLLOW_PERSONAL_SPACE * FOLLOW_PERSONAL_SPACE) {
-            BotActions.stop(bot); // close enough, chill
-            return;
-        }
-        LookController.faceBlock(bot, BlockPos.ofFloored(targetPos));
-        boolean sprint = distanceSq > FOLLOW_SPRINT_DISTANCE_SQ;
-        BotActions.sprint(bot, sprint);
-        double dy = targetPos.y - bot.getY();
-        if (dy > 0.6D) {
-            BotActions.jump(bot);
-        } else if (distanceSq > 2.25D) {
-            BotActions.autoJumpIfNeeded(bot);
-        }
-        double impulse = sprint ? 0.22 : 0.16;
-        BotActions.applyMovementInput(bot, targetPos, impulse);
+        FollowMovementService.moveToward(bot, target, stopDistance, sprint, () -> lowerShieldTracking(bot));
     }
 
     private static void followInputStep(ServerPlayerEntity bot, Vec3d targetPos, double distanceSq, boolean allowCloseStop) {
-        // Keep this as a separate helper so follow logic never blocks the server tick thread.
-        simplePursuitStep(bot, targetPos, allowCloseStop);
-        // Clear transient stuck tracking once we've re-entered close range.
-        if (bot != null && distanceSq <= 2.25D) {
-            UUID id = bot.getUuid();
-            FOLLOW_LAST_DISTANCE_SQ.remove(id);
-            FOLLOW_STAGNANT_TICKS.remove(id);
-            FOLLOW_LAST_BLOCK_POS.remove(id);
-            FOLLOW_POS_STAGNANT_TICKS.remove(id);
-            FOLLOW_DIRECT_BLOCKED_TICKS.remove(id);
-            FOLLOW_DOOR_RECOVERY.remove(id);
-            FOLLOW_AVOID_DOOR_BASE.remove(id);
-            FOLLOW_AVOID_DOOR_UNTIL_MS.remove(id);
-        }
+        FollowMovementService.followInputStep(bot, targetPos, distanceSq, allowCloseStop, FOLLOW_PERSONAL_SPACE, FOLLOW_SPRINT_DISTANCE_SQ);
     }
 
     private static boolean handleFollowObstacles(ServerPlayerEntity bot,
@@ -3071,41 +3016,7 @@ public class BotEventHandler {
                                                   ServerPlayerEntity target,
                                                   double distanceSq,
                                                   Vec3d targetPos) {
-        if (bot == null || target == null || targetPos == null) {
-            return;
-        }
-        UUID id = bot.getUuid();
-        double closeSq = FOLLOW_BACKUP_DISTANCE * FOLLOW_BACKUP_DISTANCE;
-        if (distanceSq <= closeSq) {
-            long now = System.currentTimeMillis();
-            Long since = FOLLOW_TOO_CLOSE_SINCE.get(id);
-            if (since == null) {
-                FOLLOW_TOO_CLOSE_SINCE.put(id, now);
-            } else if (now - since >= FOLLOW_BACKUP_TRIGGER_MS) {
-                stepBack(bot, targetPos);
-            }
-        } else {
-            FOLLOW_TOO_CLOSE_SINCE.remove(id);
-        }
-    }
-
-    private static void stepBack(ServerPlayerEntity bot, Vec3d targetPos) {
-        if (bot == null || targetPos == null) {
-            return;
-        }
-        Vec3d botPos = positionOf(bot);
-        Vec3d away = new Vec3d(botPos.x - targetPos.x, 0, botPos.z - targetPos.z);
-        if (away.lengthSquared() < 1.0E-4) {
-            // Nudge with current facing if overlap
-            float yaw = bot.getYaw();
-            double dx = -Math.sin(Math.toRadians(yaw));
-            double dz = Math.cos(Math.toRadians(yaw));
-            away = new Vec3d(dx, 0, dz);
-        }
-        Vec3d target = botPos.add(away.normalize().multiply(1.8));
-        LookController.faceBlock(bot, BlockPos.ofFloored(target));
-        BotActions.sprint(bot, false);
-        BotActions.applyMovementInput(bot, target, 0.14);
+        FollowMovementService.handleFollowPersonalSpace(bot, target, distanceSq, targetPos, FOLLOW_BACKUP_DISTANCE, FOLLOW_BACKUP_TRIGGER_MS);
     }
 
     private static Entity findNearestItem(ServerPlayerEntity bot, List<Entity> entities, double radius) {

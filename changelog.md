@@ -42,6 +42,7 @@ Historical record and reasoning. `TODO.md` is the source of truth for what’s n
 - Refactor: extracted follow debug-log throttling to `FollowDebugService` (no behavior change).
 - Refactor: extracted follow/come state maps to `src/main/java/net/shasankp000/GameAI/services/FollowStateService.java` (behavior unchanged; BotEventHandler delegates state storage/reset).
 - Refactor: extracted follow waypoint planning to `src/main/java/net/shasankp000/GameAI/services/FollowPlannerService.java` (behavior unchanged; BotEventHandler delegates async planning and waypoint application checks).
+- Refactor: extracted follow movement helpers to `src/main/java/net/shasankp000/GameAI/services/FollowMovementService.java` (behavior unchanged; BotEventHandler delegates movement primitives).
 - Refactor: extracted stuck tracking + enclosure snapshot to `src/main/java/net/shasankp000/GameAI/services/BotStuckService.java` (now per-bot; no change for single-bot play).
 - Refactor: extracted RL action execution to `src/main/java/net/shasankp000/GameAI/services/BotRLActionService.java` (mechanical move; behavior unchanged).
 - Refactor: extracted RL persistence throttling to `src/main/java/net/shasankp000/GameAI/services/BotRLPersistenceThrottleService.java` (no behavior change).

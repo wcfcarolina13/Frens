@@ -111,6 +111,23 @@ public final class FollowStateService {
     }
 
     /**
+     * Clears short-lived stuck/blocked tracking that should not linger once the bot has re-entered close range.
+     */
+    public static void clearTransientCloseRange(UUID botId) {
+        if (botId == null) {
+            return;
+        }
+        FOLLOW_LAST_DISTANCE_SQ.remove(botId);
+        FOLLOW_STAGNANT_TICKS.remove(botId);
+        FOLLOW_LAST_BLOCK_POS.remove(botId);
+        FOLLOW_POS_STAGNANT_TICKS.remove(botId);
+        FOLLOW_DIRECT_BLOCKED_TICKS.remove(botId);
+        FOLLOW_DOOR_RECOVERY.remove(botId);
+        FOLLOW_AVOID_DOOR_BASE.remove(botId);
+        FOLLOW_AVOID_DOOR_UNTIL_MS.remove(botId);
+    }
+
+    /**
      * Clears all follow state including durable history.
      * Intended for stop/reset/disconnect scenarios.
      */
@@ -167,4 +184,3 @@ public final class FollowStateService {
         FOLLOW_POS_STAGNANT_TICKS.clear();
     }
 }
-
