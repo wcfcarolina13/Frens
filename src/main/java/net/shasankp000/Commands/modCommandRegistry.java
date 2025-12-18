@@ -2620,7 +2620,7 @@ public class modCommandRegistry {
     }
 
     static int executeStopTargets(CommandContext<ServerCommandSource> context, String targetArg) throws CommandSyntaxException {
-        List<ServerPlayerEntity> targets = BotTargetingService.resolve(context.getSource(), targetArg);
+        List<ServerPlayerEntity> targets = resolveTargetBots(context, targetArg);
         boolean isAll = targetArg != null && "all".equalsIgnoreCase(targetArg.trim());
         return executeStopTargets(context, targets, isAll);
     }
