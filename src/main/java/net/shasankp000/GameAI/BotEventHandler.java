@@ -62,6 +62,7 @@ import net.shasankp000.GameAI.services.TaskService;
 import net.shasankp000.GameAI.services.MovementService;
 import net.shasankp000.GameAI.services.BlockInteractionService;
 import net.shasankp000.GameAI.services.FollowPathService;
+import net.shasankp000.GameAI.services.FollowDebugService;
 import net.shasankp000.GameAI.skills.SkillContext;
 import net.shasankp000.GameAI.skills.SkillExecutionResult;
 import net.shasankp000.GameAI.skills.SkillManager;
@@ -126,10 +127,7 @@ public class BotEventHandler {
     private static final Map<UUID, Long> FOLLOW_LAST_DOOR_CROSS_MS = new ConcurrentHashMap<>();
     private static final Map<UUID, Long> FOLLOW_LAST_PATH_LOG_MS = new ConcurrentHashMap<>();
     private static final Map<UUID, Long> FOLLOW_LAST_PATH_FAIL_LOG_MS = new ConcurrentHashMap<>();
-    private static final Map<UUID, Long> FOLLOW_LAST_PATH_SKIP_LOG_MS = new ConcurrentHashMap<>();
-    private static final Map<UUID, Long> FOLLOW_LAST_DECISION_LOG_MS = new ConcurrentHashMap<>();
-    private static final Map<UUID, Long> FOLLOW_LAST_STATUS_LOG_MS = new ConcurrentHashMap<>();
-    private static final long FOLLOW_STATUS_LOG_INTERVAL_MS = 1_800L;
+    // Stage-2 refactor: follow debug throttling moved to FollowDebugService.
     private static final Map<UUID, Boolean> FOLLOW_SEALED_STATE = new ConcurrentHashMap<>();
     private static final Map<UUID, Long> FOLLOW_SEALED_STATE_MS = new ConcurrentHashMap<>();
     private static final long FOLLOW_SEALED_STATE_TTL_MS = 1_000L;
@@ -1218,8 +1216,7 @@ public class BotEventHandler {
         FOLLOW_LAST_PATH_TARGET.remove(id);
         FOLLOW_LAST_PATH_LOG_MS.remove(id);
         FOLLOW_LAST_PATH_FAIL_LOG_MS.remove(id);
-            FOLLOW_LAST_PATH_SKIP_LOG_MS.remove(id);
-            FOLLOW_LAST_DECISION_LOG_MS.remove(id);
+            FollowDebugService.clear(id);
             FOLLOW_AVOID_DOOR_BASE.remove(id);
             FOLLOW_AVOID_DOOR_UNTIL_MS.remove(id);
             FOLLOW_REPLAN_AFTER_DOOR_MS.remove(id);
@@ -1261,8 +1258,7 @@ public class BotEventHandler {
         FOLLOW_LAST_PATH_TARGET.remove(id);
         FOLLOW_LAST_PATH_LOG_MS.remove(id);
         FOLLOW_LAST_PATH_FAIL_LOG_MS.remove(id);
-            FOLLOW_LAST_PATH_SKIP_LOG_MS.remove(id);
-            FOLLOW_LAST_DECISION_LOG_MS.remove(id);
+            FollowDebugService.clear(id);
             FOLLOW_AVOID_DOOR_BASE.remove(id);
             FOLLOW_AVOID_DOOR_UNTIL_MS.remove(id);
             FOLLOW_REPLAN_AFTER_DOOR_MS.remove(id);
@@ -1305,8 +1301,7 @@ public class BotEventHandler {
         FOLLOW_LAST_PATH_TARGET.remove(id);
         FOLLOW_LAST_PATH_LOG_MS.remove(id);
         FOLLOW_LAST_PATH_FAIL_LOG_MS.remove(id);
-        FOLLOW_LAST_PATH_SKIP_LOG_MS.remove(id);
-        FOLLOW_LAST_DECISION_LOG_MS.remove(id);
+        FollowDebugService.clear(id);
         FOLLOW_AVOID_DOOR_BASE.remove(id);
         FOLLOW_AVOID_DOOR_UNTIL_MS.remove(id);
         FOLLOW_REPLAN_AFTER_DOOR_MS.remove(id);
@@ -1343,8 +1338,7 @@ public class BotEventHandler {
             FOLLOW_LAST_DOOR_CROSS_MS.remove(id);
             FOLLOW_LAST_PATH_LOG_MS.remove(id);
             FOLLOW_LAST_PATH_FAIL_LOG_MS.remove(id);
-            FOLLOW_LAST_PATH_SKIP_LOG_MS.remove(id);
-            FOLLOW_LAST_DECISION_LOG_MS.remove(id);
+            FollowDebugService.clear(id);
             FOLLOW_REPLAN_AFTER_DOOR_MS.remove(id);
             FOLLOW_DOOR_LAST_BLOCK.remove(id);
             FOLLOW_DOOR_STUCK_TICKS.remove(id);
@@ -1586,8 +1580,7 @@ public class BotEventHandler {
 	                FOLLOW_LAST_DOOR_CROSS_MS.remove(id);
 	                    FOLLOW_LAST_PATH_LOG_MS.remove(id);
 	                    FOLLOW_LAST_PATH_FAIL_LOG_MS.remove(id);
-	                    FOLLOW_LAST_PATH_SKIP_LOG_MS.remove(id);
-                        FOLLOW_LAST_DECISION_LOG_MS.remove(id);
+	                    FollowDebugService.clear(id);
 	                    FOLLOW_REPLAN_AFTER_DOOR_MS.remove(id);
 	                    FOLLOW_DOOR_LAST_BLOCK.remove(id);
 	                    FOLLOW_DOOR_STUCK_TICKS.remove(id);
@@ -3317,33 +3310,11 @@ public class BotEventHandler {
     }
 
     private static void maybeLogFollowPlanSkip(UUID botId, String message) {
-        if (botId == null || message == null) {
-            return;
-        }
-        long now = System.currentTimeMillis();
-        long last = FOLLOW_LAST_PATH_SKIP_LOG_MS.getOrDefault(botId, -1L);
-        if (last >= 0 && (now - last) < 5_000L) {
-            return;
-        }
-        FOLLOW_LAST_PATH_SKIP_LOG_MS.put(botId, now);
-        LOGGER.info("Follow path planning {}", message);
+        FollowDebugService.maybeLogPlanSkip(LOGGER, botId, message);
     }
 
     private static void maybeLogFollowDecision(ServerPlayerEntity bot, String message) {
-        if (bot == null || message == null) {
-            return;
-        }
-        UUID botId = bot.getUuid();
-        long now = System.currentTimeMillis();
-        long last = FOLLOW_LAST_DECISION_LOG_MS.getOrDefault(botId, -1L);
-        if (last >= 0 && (now - last) < 2_500L) {
-            return;
-        }
-        FOLLOW_LAST_DECISION_LOG_MS.put(botId, now);
-        LOGGER.info("Follow decision: bot={} botPos={} msg={}",
-                bot.getName().getString(),
-                bot.getBlockPos().toShortString(),
-                message);
+        FollowDebugService.maybeLogDecision(LOGGER, bot, message);
     }
 
     private static void maybeLogFollowStatus(ServerPlayerEntity bot,
@@ -3362,19 +3333,6 @@ public class BotEventHandler {
         }
         UUID botId = bot.getUuid();
         long now = System.currentTimeMillis();
-        long last = FOLLOW_LAST_STATUS_LOG_MS.getOrDefault(botId, -1L);
-        if (last >= 0 && (now - last) < FOLLOW_STATUS_LOG_INTERVAL_MS) {
-            return;
-        }
-
-        boolean shouldLog = targetDistSq >= 900.0D
-                || directBlocked
-                || usingWaypoints
-                || FOLLOW_DOOR_PLAN.get(botId) != null;
-        if (!shouldLog) {
-            return;
-        }
-        FOLLOW_LAST_STATUS_LOG_MS.put(botId, now);
 
         FollowDoorPlan doorPlan = FOLLOW_DOOR_PLAN.get(botId);
         String doorPlanStr = "";
@@ -3399,23 +3357,23 @@ public class BotEventHandler {
         String avoidStr = avoidDoor != null ? (" avoidDoor=" + avoidDoor.toShortString()) : "";
 
         String navGoalStr = navGoalBlock != null ? navGoalBlock.toShortString() : "";
-        LOGGER.info("Follow status: bot={} botPos={} target={} targetPos={} dist={} horiz={} canSee={} directBlocked={} usingWaypoints={} wp={} navGoal={} sealed={}/{}{}{}{}",
-                bot.getName().getString(),
-                bot.getBlockPos().toShortString(),
-                target.getName().getString(),
-                target.getBlockPos().toShortString(),
-                String.format(Locale.ROOT, "%.2f", Math.sqrt(targetDistSq)),
-                String.format(Locale.ROOT, "%.2f", Math.sqrt(horizDistSq)),
+        FollowDebugService.maybeLogStatus(
+                LOGGER,
+                bot,
+                target,
+                targetDistSq,
+                horizDistSq,
                 canSee,
                 directBlocked,
                 usingWaypoints,
                 waypointCount,
-                navGoalStr,
                 botSealed,
                 commanderSealed,
+                navGoalStr,
                 doorPlanStr,
                 lastDoorStr,
-                avoidStr);
+                avoidStr
+        );
     }
 
     private static boolean applyLongRangeFollowOverride(ServerPlayerEntity bot,
@@ -4237,8 +4195,7 @@ public class BotEventHandler {
             FOLLOW_LAST_DOOR_CROSS_MS.clear();
 	            FOLLOW_LAST_PATH_LOG_MS.clear();
 	            FOLLOW_LAST_PATH_FAIL_LOG_MS.clear();
-	            FOLLOW_LAST_PATH_SKIP_LOG_MS.clear();
-	            FOLLOW_LAST_DECISION_LOG_MS.clear();
+	            FollowDebugService.reset();
 	            FOLLOW_AVOID_DOOR_BASE.clear();
 	            FOLLOW_AVOID_DOOR_UNTIL_MS.clear();
 	            FOLLOW_REPLAN_AFTER_DOOR_MS.clear();

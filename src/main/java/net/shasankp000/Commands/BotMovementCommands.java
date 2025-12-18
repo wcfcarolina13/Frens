@@ -12,7 +12,15 @@ final class BotMovementCommands {
     private BotMovementCommands() {}
 
     static ArgumentBuilder<ServerCommandSource, ?> buildCome() {
-        return CommandManager.literal("come")
+        return buildComeLike("come");
+    }
+
+    static ArgumentBuilder<ServerCommandSource, ?> buildRegroup() {
+        return buildComeLike("regroup");
+    }
+
+    private static ArgumentBuilder<ServerCommandSource, ?> buildComeLike(String literal) {
+        return CommandManager.literal(literal)
                 .executes(context -> modCommandRegistry.executeComeTargets(context, null))
                 .then(CommandManager.argument("bots", StringArgumentType.string())
                         .executes(context -> modCommandRegistry.executeComeTargets(context,

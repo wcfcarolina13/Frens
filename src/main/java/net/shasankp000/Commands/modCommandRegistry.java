@@ -217,6 +217,7 @@ public class modCommandRegistry {
 	                        .then(BotUtilityCommands.buildLookPlayer())
 	                        .then(BotUtilityCommands.buildFollow())
 	                        .then(BotMovementCommands.buildCome())
+	                        .then(BotMovementCommands.buildRegroup())
 	                        .then(BotMovementCommands.buildGuard())
 	                        .then(BotMovementCommands.buildPatrol())
 	                        .then(BotMovementCommands.buildStay("stay"))
@@ -2166,36 +2167,6 @@ public class modCommandRegistry {
         ChatUtils.sendSystemMessage(context.getSource(),
                 bot.getName().getString() + " could not reach you: " + result.detail());
         return 0;
-    }
-
-    private static void stagePlannedDig(ServerCommandSource source,
-                                        ServerPlayerEntity bot,
-                                        ServerPlayerEntity commander,
-                                        int deltaY,
-                                        double horizontalDistance) {
-        Direction toCommander = Direction.getFacing(commander.getX() - bot.getX(), 0, commander.getZ() - bot.getZ());
-        String skillName;
-        String skillArgs;
-        if (Math.abs(deltaY) >= 2) {
-            skillName = "collect_dirt";
-            skillArgs = (deltaY > 0 ? "ascent " : "descent ") + Math.min(8, Math.abs(deltaY));
-        } else {
-            skillName = "stripmine";
-            int stripLength = (int) Math.min(14, Math.max(6, Math.ceil(horizontalDistance) + 2));
-            skillArgs = Integer.toString(stripLength);
-        }
-
-        if (toCommander.getAxis().isHorizontal()) {
-            WorkDirectionService.setDirection(bot.getUuid(), toCommander);
-        }
-
-        SkillResumeService.recordExecution(bot, skillName, skillArgs, source);
-        SkillResumeService.flagManualResume(bot);
-
-        String prompt = bot.getName().getString() + " is blocked. Run /bot resume "
-                + bot.getName().getString() + " to let me dig (" + skillName + " " + skillArgs + ").";
-        ChatUtils.sendSystemMessage(source, prompt);
-        ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withMaxLevel(4), prompt);
     }
 
     private static boolean hasNavigationTool(ServerPlayerEntity bot) {
