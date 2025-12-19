@@ -524,7 +524,14 @@ public final class BotActions {
             }
             // Avoid placing while standing inside the target
             if (bot.getBoundingBox().intersects(new net.minecraft.util.math.Box(target))) {
-                return false;
+                // Allow jump-pillaring: if the bot is airborne and placing into its current foot block,
+                // vanilla collision resolution will move the player upward instead of trapping them.
+                boolean allowJumpPillar = !bot.isOnGround()
+                        && target.equals(bot.getBlockPos())
+                        && bot.getY() > target.getY() + 0.05D;
+                if (!allowJumpPillar) {
+                    return false;
+                }
             }
             if (!hasSupport(world, target)) {
                 return false;

@@ -79,8 +79,10 @@ public class CollectDirtSkill implements Skill {
     private static final int MAX_EXPLORATION_ATTEMPTS_PER_CYCLE = 3;
     private static final int MAX_STALLED_FAILURES = 5;
     private static final long INVENTORY_MESSAGE_COOLDOWN_MS = 5000; // 5 seconds between messages
+    private static final long ESCAPE_COOLDOWN_MS = 15_000L;
     
     private static final Map<UUID, Long> LAST_INVENTORY_FULL_MESSAGE = new HashMap<>();
+    private static final Map<UUID, Long> LAST_ESCAPE_ATTEMPT = new HashMap<>();
     private static final List<Item> LAVA_SAFETY_BLOCKS = List.of(
             Items.COBBLESTONE,
             Items.COBBLED_DEEPSLATE,
@@ -831,6 +833,18 @@ public class CollectDirtSkill implements Skill {
         boolean closeEnough = distanceSqToDestination <= 9.0D;
         boolean success = goToReportedSuccess && closeEnough;
 
+        if (!success && shouldAttemptEscape(player)) {
+            boolean escaped = attemptVerticalEscape(source, player, originBlock);
+            if (escaped) {
+                result = GoTo.goTo(source, destination.getX(), destination.getY(), destination.getZ(), false);
+                goToReportedSuccess = isGoToSuccess(result);
+                postGoToBlock = player.getBlockPos();
+                distanceSqToDestination = postGoToBlock.getSquaredDistance(destination);
+                closeEnough = distanceSqToDestination <= 9.0D;
+                success = goToReportedSuccess && closeEnough;
+            }
+        }
+
         if (!success) {
             if (!goToReportedSuccess) {
                 LOGGER.warn("{} GoTo result indicates failure: {}", logContext, result);
@@ -865,6 +879,163 @@ public class CollectDirtSkill implements Skill {
             LOGGER.warn("{} navigation failed to {}: {}", logContext, destination, result);
         }
         return success;
+    }
+
+    private boolean shouldAttemptEscape(ServerPlayerEntity player) {
+        if (player == null) {
+            return false;
+        }
+        long now = System.currentTimeMillis();
+        Long last = LAST_ESCAPE_ATTEMPT.get(player.getUuid());
+        if (last != null && (now - last) < ESCAPE_COOLDOWN_MS) {
+            return false;
+        }
+        return true;
+    }
+
+    private boolean attemptVerticalEscape(ServerCommandSource source, ServerPlayerEntity player, BlockPos referencePos) {
+        if (source == null || player == null || !(player.getEntityWorld() instanceof ServerWorld world)) {
+            return false;
+        }
+        BlockPos start = player.getBlockPos();
+        if (!isLikelyTrappedInPit(world, start)) {
+            return false;
+        }
+        LAST_ESCAPE_ATTEMPT.put(player.getUuid(), System.currentTimeMillis());
+
+        ChatUtils.sendChatMessages(source.withSilent().withMaxLevel(4),
+                "I'm stuck down here — attempting a ladder or stair escape...");
+
+        boolean ladderAttempted = ensureLadders(source, player, 6);
+        if (ladderAttempted) {
+            Direction supportDir = pickLadderSupportDirection(world, start, 8);
+            if (supportDir != null) {
+                BlockPos exit = findLadderExit(world, start, supportDir, 8);
+                if (exit != null) {
+                    int neededHeight = Math.max(1, exit.getY() - start.getY());
+                    boolean placed = placeLadderColumn(world, player, start, supportDir, neededHeight);
+                    if (placed) {
+                        String moveResult = GoTo.goTo(source, exit.getX(), exit.getY(), exit.getZ(), false);
+                        if (isGoToSuccess(moveResult) || player.getBlockPos().getSquaredDistance(exit) <= 9.0D) {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+
+        int targetY = start.getY() + 4;
+        if (referencePos != null) {
+            targetY = Math.max(targetY, referencePos.getY());
+        }
+        SkillExecutionResult ascent = runAscent(new SkillContext(source, new HashMap<>(), new HashMap<>()), source, player, targetY);
+        return ascent.success() || player.getBlockY() >= targetY;
+    }
+
+    private boolean ensureLadders(ServerCommandSource source, ServerPlayerEntity player, int needed) {
+        if (source == null || player == null) {
+            return false;
+        }
+        int have = countInventoryItems(player, Set.of(Items.LADDER));
+        if (have >= needed) {
+            return true;
+        }
+        int crafted = net.shasankp000.GameAI.services.CraftingHelper.craftGeneric(source, player, source.getPlayer(), "ladder", needed - have, null);
+        return crafted > 0 || countInventoryItems(player, Set.of(Items.LADDER)) >= needed;
+    }
+
+    private boolean isLikelyTrappedInPit(ServerWorld world, BlockPos feet) {
+        if (world == null || feet == null) {
+            return false;
+        }
+        // If there's any adjacent walkable stand position, we're not trapped.
+        for (Direction dir : Direction.Type.HORIZONTAL) {
+            BlockPos neighborFoot = feet.offset(dir);
+            BlockPos neighborHead = neighborFoot.up();
+            BlockPos neighborBelow = neighborFoot.down();
+            if (isPassable(world, neighborFoot)
+                    && isPassable(world, neighborHead)
+                    && world.getBlockState(neighborBelow).isSolidBlock(world, neighborBelow)) {
+                return false;
+            }
+        }
+        // Otherwise consider "trapped" if all four horizontal neighbors at foot level are non-passable.
+        for (Direction dir : Direction.Type.HORIZONTAL) {
+            if (isPassable(world, feet.offset(dir))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private Direction pickLadderSupportDirection(ServerWorld world, BlockPos start, int scanHeight) {
+        if (world == null || start == null) {
+            return null;
+        }
+        Direction best = null;
+        int bestScore = -1;
+        for (Direction dir : Direction.Type.HORIZONTAL) {
+            int score = 0;
+            for (int dy = 0; dy <= scanHeight; dy++) {
+                BlockPos foot = start.up(dy);
+                BlockPos support = foot.offset(dir);
+                if (world.getBlockState(support).isSolidBlock(world, support)) {
+                    score++;
+                }
+            }
+            if (score > bestScore) {
+                bestScore = score;
+                best = dir;
+            }
+        }
+        return bestScore >= 2 ? best : null;
+    }
+
+    private BlockPos findLadderExit(ServerWorld world, BlockPos start, Direction supportDir, int scanHeight) {
+        if (world == null || start == null || supportDir == null) {
+            return null;
+        }
+        for (int dy = 1; dy <= scanHeight; dy++) {
+            BlockPos climbPos = start.up(dy);
+            if (!isPassable(world, climbPos) || !world.getBlockState(climbPos.offset(supportDir)).isSolidBlock(world, climbPos.offset(supportDir))) {
+                continue;
+            }
+            for (Direction dir : Direction.Type.HORIZONTAL) {
+                BlockPos exitFoot = climbPos.offset(dir);
+                BlockPos exitHead = exitFoot.up();
+                BlockPos exitBelow = exitFoot.down();
+                if (isPassable(world, exitFoot)
+                        && isPassable(world, exitHead)
+                        && world.getBlockState(exitBelow).isSolidBlock(world, exitBelow)) {
+                    return exitFoot.toImmutable();
+                }
+            }
+        }
+        return null;
+    }
+
+    private boolean placeLadderColumn(ServerWorld world, ServerPlayerEntity player, BlockPos start, Direction supportDir, int height) {
+        if (world == null || player == null || start == null || supportDir == null) {
+            return false;
+        }
+        boolean any = false;
+        Direction face = supportDir.getOpposite();
+        for (int dy = 0; dy < height; dy++) {
+            if (SkillManager.shouldAbortSkill(player)) {
+                break;
+            }
+            BlockPos pos = start.up(dy);
+            if (!isPassable(world, pos)) {
+                break;
+            }
+            BlockPos support = pos.offset(supportDir);
+            if (!world.getBlockState(support).isSolidBlock(world, support)) {
+                break;
+            }
+            boolean placed = BotActions.placeBlockAt(player, pos, face, List.of(Items.LADDER));
+            any = any || placed;
+        }
+        return any;
     }
 
     private boolean isGoToSuccess(String result) {

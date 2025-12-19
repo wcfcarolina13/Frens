@@ -91,9 +91,44 @@ public final class CraftingHelper {
             case "shears" -> craftSimple(bot, source, commander, amount, Items.SHEARS, Items.IRON_INGOT, 2);
             case "furnace" -> craftCobbleBlock(bot, source, commander, amount, Items.FURNACE, 8);
             case "chest" -> craftWithPlanks(bot, source, commander, Identifier.of("minecraft", "chest"), 8, Items.CHEST, amount);
+            case "ladder", "ladders" -> craftLadders(bot, source, commander, amount);
             case "bed", "beds" -> craftBed(bot, source, commander, amount);
             default -> 0;
         };
+    }
+
+    private static int craftLadders(ServerPlayerEntity bot, ServerCommandSource source, ServerPlayerEntity commander, int amountRequested) {
+        if (bot == null || source == null) {
+            return 0;
+        }
+        // Ladder: 7 sticks => 3 ladders (3x3 recipe)
+        if (!ensureCraftingStation(bot, source)) {
+            ChatUtils.sendSystemMessage(source, "I need a crafting table placed nearby to craft that.");
+            return 0;
+        }
+        if (!hasRecipePermission(commander, source.getServer(), Identifier.of("minecraft", "ladder"))) {
+            ChatUtils.sendSystemMessage(source, "I don't know how to craft that yet.");
+            return 0;
+        }
+
+        int craftsNeeded = (int) Math.ceil(amountRequested / 3.0);
+        int neededSticks = craftsNeeded * 7;
+        if (!ensureSticks(bot, source, neededSticks)) {
+            int haveSticks = countItem(bot, Items.STICK);
+            int planks = countPlanks(bot);
+            ChatUtils.sendSystemMessage(source, "Missing sticks for ladders; need " + neededSticks + ", have " + haveSticks + " (planks: " + planks + ").");
+            return 0;
+        }
+
+        int sticks = countItem(bot, Items.STICK);
+        int crafts = Math.min(craftsNeeded, sticks / 7);
+        if (crafts <= 0) {
+            ChatUtils.sendSystemMessage(source, "Missing sticks for ladders.");
+            return 0;
+        }
+        consumeItem(bot, Items.STICK, crafts * 7);
+        distributeOutput(bot, Items.LADDER, crafts * 3);
+        return crafts * 3;
     }
 
     private static int craftBed(ServerPlayerEntity bot, ServerCommandSource source, ServerPlayerEntity commander, int amount) {

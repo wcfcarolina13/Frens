@@ -890,6 +890,7 @@ public final class ShelterSkill implements Skill {
     private void patchGaps(ServerWorld world, ServerPlayerEntity bot, BlockPos center, int radius, int wallHeight, Direction doorSide, BuildCounters counters) {
         int floorY = center.getY();
         int roofY = floorY + wallHeight;
+        int upperStartY = floorY + 4;
         int roofHoles = 0;
         int wallHoles = 0;
         // Roof patch from perimeter -> center so support exists.
@@ -902,7 +903,10 @@ public final class ShelterSkill implements Skill {
                     BlockPos roof = center.add(dx, wallHeight, dz);
                     BlockState roofState = world.getBlockState(roof);
                     if (roofState.isAir() || roofState.isReplaceable() || roofState.isIn(BlockTags.LEAVES)) {
-                        if (placeBlock(bot, roof, counters)) {
+                        boolean placed = roof.getY() >= upperStartY
+                                ? placeBlockDirectIfWithinReach(bot, roof, counters)
+                                : placeBlock(bot, roof, counters);
+                        if (placed) {
                             roofHoles++;
                         }
                     }
@@ -922,7 +926,10 @@ public final class ShelterSkill implements Skill {
                     }
                     BlockState state = world.getBlockState(pos);
                     if (state.isAir() || state.isReplaceable() || state.isIn(BlockTags.LEAVES)) {
-                        if (placeBlock(bot, pos, counters)) {
+                        boolean placed = pos.getY() >= upperStartY
+                                ? placeBlockDirectIfWithinReach(bot, pos, counters)
+                                : placeBlock(bot, pos, counters);
+                        if (placed) {
                             wallHoles++;
                         }
                     }
@@ -1251,7 +1258,7 @@ public final class ShelterSkill implements Skill {
     private boolean ensureReach(ServerPlayerEntity bot, BlockPos target) {
         Vec3d center = Vec3d.ofCenter(target);
         Vec3d botPos = new Vec3d(bot.getX(), bot.getY(), bot.getZ());
-        double maxReachSq = 12.25D; // ~3.5 blocks to keep placement human-like
+        double maxReachSq = 20.25D; // ~4.5 blocks (survival reach)
         if (botPos.squaredDistanceTo(center) <= maxReachSq) {
             return true;
         }

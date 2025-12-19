@@ -111,6 +111,8 @@ Historical record and reasoning. `TODO.md` is the source of truth for what’s n
 - Safety: generic block-breaking logic refuses to break fences/walls/gates to avoid destroying player enclosures.
 - Cook: `/bot cook` now runs movement asynchronously (no server tick freeze) and requires true furnace interactability (reach + line-of-sight), opening/closing doors as needed.
 - Performance: removed per-step `stdout` spam from `LookController.faceBlock/faceEntity`.
+- Building: allow jump-pillaring placements (used by woodcut scaffolds and shelter scaffolds) by relaxing the “don’t place inside your own bounding box” guard when the bot is airborne and placing into its current foot block.
+- Mining: when `collect_dirt`/`mine` navigation fails because the bot is trapped in a vertical pit, it will attempt a ladder escape (craft/place/use when possible) and otherwise fall back to carving a short ascent staircase.
 
 ## 2025-11-18
 - Persistency and safety: inventory save timing fixed; drop sweeps stop breaking blocks and only collect items; bots break out when spawned in walls; upward stairs start in the controller’s facing direction (partial fix).
