@@ -264,6 +264,8 @@ public final class ShelterSkill implements Skill {
             }
             placeDoor(world, bot, center, radius, doorSide);
             ensureDoorwayOpen(world, bot, center, radius, doorSide);
+            // If we don't have a door item (or placement failed), keep the doorway as a clear opening.
+            ensureDoorwayOpen(world, bot, center, radius, doorSide);
             placeChest(world, bot, center, radius);
             placeTorches(world, bot, center, radius);
             // Final pre-sweep polish: re-level the interior and repatch any last gaps.
@@ -906,16 +908,35 @@ public final class ShelterSkill implements Skill {
             return false;
         }
         int floorY = center.getY();
-        BlockPos doorLower = center.offset(side, radius).up(1);
+        BlockPos doorLower = center.offset(side, radius);
         BlockPos doorUpper = doorLower.up(1);
         BlockState lower = world.getBlockState(doorLower);
         BlockState upper = world.getBlockState(doorUpper);
-        if ((!lower.isAir() && !lower.isReplaceable() && !lower.isIn(BlockTags.LEAVES)) ||
-                (!upper.isAir() && !upper.isReplaceable() && !upper.isIn(BlockTags.LEAVES))) {
+        if (!isDoorwayClearable(lower) || !isDoorwayClearable(upper)) {
             return false;
         }
-        BlockPos support = new BlockPos(doorLower.getX(), floorY, doorLower.getZ());
-        return !world.getBlockState(support).getCollisionShape(world, support).isEmpty();
+        BlockPos support = doorLower.down();
+        if (world.getBlockState(support).getCollisionShape(world, support).isEmpty()) {
+            return false;
+        }
+        BlockPos outside = center.offset(side, radius + 1);
+        BlockPos outsideSupport = outside.down();
+        if (!world.getFluidState(outside).isEmpty() || !world.getFluidState(outsideSupport).isEmpty()) {
+            return false;
+        }
+        return !world.getBlockState(outsideSupport).getCollisionShape(world, outsideSupport).isEmpty();
+    }
+
+    private boolean isDoorwayClearable(BlockState state) {
+        if (state == null) {
+            return false;
+        }
+        if (state.isAir()) return true;
+        if (state.isReplaceable()) return true;
+        if (state.isIn(BlockTags.LEAVES)) return true;
+        if (state.isOf(Blocks.SNOW) || state.isOf(Blocks.SNOW_BLOCK)) return true;
+        // Treat our own cheap build materials as clearable so we can carve a doorway if we closed it in.
+        return isLikelyRoofMaterial(state);
     }
 
     private boolean moveToBuildSite(ServerCommandSource source, ServerPlayerEntity bot, BlockPos center) {
@@ -1528,6 +1549,9 @@ public final class ShelterSkill implements Skill {
         }
         BlockPos doorLower = center.offset(doorSide, radius);
         BlockPos doorUpper = doorLower.up(1);
+        if (!ensureReach(bot, doorLower)) {
+            return;
+        }
         clearDoorSoft(world, bot, doorLower);
         clearDoorSoft(world, bot, doorUpper);
     }

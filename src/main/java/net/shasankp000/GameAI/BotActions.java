@@ -25,6 +25,7 @@ import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.RaycastContext;
+import net.minecraft.world.RaycastContext;
 
 import net.shasankp000.GameAI.services.MovementService;
 
@@ -562,11 +563,10 @@ public final class BotActions {
                 return false;
             }
             selectHotbarSlot(bot, slot);
-            Vec3d hitVec = Vec3d.ofCenter(support.clickPos());
-            if (!hasLineOfSight(world, bot, hitVec, support.clickPos())) {
+            BlockHitResult hit = computePlacementHit(world, bot, support);
+            if (hit == null) {
                 return false;
             }
-            BlockHitResult hit = new BlockHitResult(hitVec, support.face(), support.clickPos(), false);
             ItemUsageContext usage = new ItemUsageContext(bot, Hand.MAIN_HAND, hit);
             ItemPlacementContext placementContext = new ItemPlacementContext(usage);
             ActionResult result = blockItem.place(placementContext);
@@ -614,23 +614,45 @@ public final class BotActions {
         return null;
     }
 
-    private static boolean hasLineOfSight(ServerWorld world, ServerPlayerEntity bot, Vec3d target, BlockPos expectedHit) {
-        if (world == null || bot == null || target == null || expectedHit == null) {
-            return false;
+    private static BlockHitResult computePlacementHit(ServerWorld world, ServerPlayerEntity bot, Support support) {
+        if (world == null || bot == null || support == null) {
+            return null;
         }
         Vec3d start = bot.getEyePos();
+        Vec3d end = pointOnFace(support.clickPos(), support.face());
         RaycastContext ctx = new RaycastContext(
                 start,
-                target,
+                end,
                 RaycastContext.ShapeType.COLLIDER,
                 RaycastContext.FluidHandling.NONE,
                 bot
         );
         BlockHitResult hit = world.raycast(ctx);
-        if (hit.getType() == HitResult.Type.MISS) {
-            return true;
+        if (hit.getType() != HitResult.Type.BLOCK) {
+            return null;
         }
-        return hit.getType() == HitResult.Type.BLOCK && expectedHit.equals(hit.getBlockPos());
+        if (!support.clickPos().equals(hit.getBlockPos())) {
+            return null;
+        }
+        if (hit.getSide() != support.face()) {
+            return null;
+        }
+        return hit;
+    }
+
+    private static Vec3d pointOnFace(BlockPos pos, Direction face) {
+        Vec3d center = Vec3d.ofCenter(pos);
+        if (face == null) {
+            return center;
+        }
+        return switch (face) {
+            case UP -> center.add(0, 0.49, 0);
+            case DOWN -> center.add(0, -0.49, 0);
+            case NORTH -> center.add(0, 0, -0.49);
+            case SOUTH -> center.add(0, 0, 0.49);
+            case EAST -> center.add(0.49, 0, 0);
+            case WEST -> center.add(-0.49, 0, 0);
+        };
     }
 
     public static void escapeStairs(ServerPlayerEntity bot) {
