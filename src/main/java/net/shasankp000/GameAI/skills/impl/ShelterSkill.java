@@ -795,9 +795,10 @@ public final class ShelterSkill implements Skill {
         for (int dx = -radius; dx <= radius; dx++) {
             for (int dz = -radius; dz <= radius; dz++) {
                 boolean perimeter = Math.abs(dx) == radius || Math.abs(dz) == radius;
-                BlockPos floor = new BlockPos(center.getX() + dx, floorY, center.getZ() + dz);
-                BlockState floorState = world.getBlockState(floor);
-                if (floorState.isAir() || floorState.isReplaceable() || floorState.isIn(BlockTags.LEAVES) || floorState.isIn(BlockTags.LOGS)) {
+                // Floor support is the block *below* the standable foot layer.
+                BlockPos support = new BlockPos(center.getX() + dx, floorY - 1, center.getZ() + dz);
+                BlockState supportState = world.getBlockState(support);
+                if (supportState.isAir() || supportState.isReplaceable() || supportState.isIn(BlockTags.LEAVES) || supportState.isIn(BlockTags.LOGS)) {
                     needed++;
                 }
                 if (perimeter) {
@@ -1018,6 +1019,12 @@ public final class ShelterSkill implements Skill {
             if (SkillManager.shouldAbortSkill(bot)) {
                 return false;
             }
+            // Stop as soon as we're near-surface at our current X/Z (prevents long horizontal wander).
+            int currentSurfaceY = world.getTopY(net.minecraft.world.Heightmap.Type.MOTION_BLOCKING_NO_LEAVES, bot.getBlockX(), bot.getBlockZ());
+            if (bot.getBlockY() >= currentSurfaceY - 1) {
+                LOGGER.info("Surface escape: reached near-surface at current XZ (botY={} currentSurfaceY={})", bot.getBlockY(), currentSurfaceY);
+                return true;
+            }
             WorkDirectionService.setDirection(bot.getUuid(), digDir);
             Map<String, Object> ascentParams = new HashMap<>();
             int stepTargetY = Math.min(surfaceY, bot.getBlockY() + 10);
@@ -1099,10 +1106,15 @@ public final class ShelterSkill implements Skill {
                 return false;
             }
             int beforeY = bot.getBlockY();
+            int baseY = bot.getBlockY();
             BotActions.jump(bot);
             sleepQuiet(160L);
             // Place into the bot's current foot block *after jumping* (woodcut-style jump-pillaring).
             BlockPos placeAt = bot.getBlockPos();
+            // If our blockPos advanced during the jump, place at the previous cell underfoot to avoid sealing ourselves.
+            if (placeAt.getY() > baseY) {
+                placeAt = new BlockPos(placeAt.getX(), baseY, placeAt.getZ());
+            }
             if (!world.getBlockState(placeAt).isAir()) {
                 placeAt = placeAt.up();
             }
@@ -1294,9 +1306,11 @@ public final class ShelterSkill implements Skill {
                         mineSoft(bot, target);
                     }
                 }
-                BlockPos below = pos.down();
-                if (world.getBlockState(pos).isAir() && world.getBlockState(below).isAir()) {
-                    placeBlock(bot, pos);
+                // Only fill holes in the support layer; do not build a "raised floor" in the standable air layer.
+                BlockPos support = pos.down();
+                BlockState supportState = world.getBlockState(support);
+                if (supportState.isAir() || supportState.isReplaceable() || supportState.isIn(BlockTags.LEAVES) || supportState.isIn(BlockTags.LOGS) || supportState.isOf(Blocks.SNOW)) {
+                    placeBlock(bot, support);
                 }
             }
         }
@@ -1314,9 +1328,10 @@ public final class ShelterSkill implements Skill {
                     clearColumn(world, bot, column, floorY, roofY - 1);
                 }
                 // Ensure floor support
-                BlockPos floor = new BlockPos(column.getX(), floorY, column.getZ());
-                if (world.getBlockState(floor).isAir() || world.getBlockState(floor).isReplaceable()) {
-                    placeBlock(bot, floor, counters);
+                BlockPos support = new BlockPos(column.getX(), floorY - 1, column.getZ());
+                BlockState supportState = world.getBlockState(support);
+                if (supportState.isAir() || supportState.isReplaceable() || supportState.isIn(BlockTags.LEAVES) || supportState.isIn(BlockTags.LOGS) || supportState.isOf(Blocks.SNOW)) {
+                    placeBlock(bot, support, counters);
                 }
                 // Walls
                 if (perimeter) {

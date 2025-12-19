@@ -534,6 +534,14 @@ public final class BotActions {
                 boolean allowJumpPillar = !bot.isOnGround()
                         && target.equals(bot.getBlockPos())
                         && bot.getY() > target.getY() + 0.05D;
+                // Also allow placing into the block below the current foot block while airborne
+                // (the bot's blockPos can advance during a jump, but the intended pillar cell is still underfoot).
+                if (!allowJumpPillar) {
+                    BlockPos below = bot.getBlockPos().down();
+                    allowJumpPillar = !bot.isOnGround()
+                            && target.equals(below)
+                            && bot.getY() > below.getY() + 0.05D;
+                }
                 if (!allowJumpPillar) {
                     return false;
                 }
