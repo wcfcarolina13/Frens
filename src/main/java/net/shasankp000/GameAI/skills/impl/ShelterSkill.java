@@ -232,6 +232,10 @@ public final class ShelterSkill implements Skill {
         ensureDoorwayOpen(world, bot, center, radius, doorSide);
         placeChest(world, bot, center, radius);
         placeTorches(world, bot, center, radius);
+        // Final pre-sweep polish: re-level the interior and repatch any last gaps.
+        // (This catches late placement misses from scaffolding or odd footing near edges.)
+        levelInterior(world, bot, center, radius);
+        patchGaps(world, bot, center, radius, wallHeight, doorSide, counters);
         sweepDrops(source, 12.0, 5.0, 24, 12_000L);
         // Final cleanup deposit after sweeping, if a chest is available.
         ensureBuildChestAndDeposit(source, world, bot, center, radius);
@@ -629,7 +633,7 @@ public final class ShelterSkill implements Skill {
                 if (!isStandable(world, candidate)) {
                     continue;
                 }
-                if (hasLiquidInFootprint(world, candidate, radius)) {
+                if (hasUnsafeFootprintSupport(world, candidate, radius)) {
                     continue;
                 }
                 Flatness flatness = evaluateFlatness(world, candidate, radius);
@@ -712,6 +716,9 @@ public final class ShelterSkill implements Skill {
         int centerX = (minX + maxX) / 2;
         int centerZ = (minZ + maxZ) / 2;
         BlockPos center = new BlockPos(centerX, floorY, centerZ);
+        if (hasUnsafeFootprintSupport(world, center, radius)) {
+            return null;
+        }
         Direction doorSide = pickDoorSide(world, center, radius, bot.getHorizontalFacing());
         return new ExistingHovel(center, radius, doorSide);
     }
@@ -791,11 +798,28 @@ public final class ShelterSkill implements Skill {
         return headState.getCollisionShape(world, foot.up()).isEmpty();
     }
 
-    private boolean hasLiquidInFootprint(ServerWorld world, BlockPos center, int radius) {
+    /**
+     * Reject build sites that would require building over water/air (e.g., shoreline overhang).
+     * We intentionally prefer clearing trees (woodcut) over attempting to build over/into water.
+     */
+    private boolean hasUnsafeFootprintSupport(ServerWorld world, BlockPos center, int radius) {
+        if (world == null || center == null) {
+            return true;
+        }
+        int floorY = center.getY();
         for (int dx = -radius; dx <= radius; dx++) {
             for (int dz = -radius; dz <= radius; dz++) {
-                BlockPos pos = center.add(dx, 0, dz);
-                if (!world.getFluidState(pos).isEmpty() || !world.getFluidState(pos.down()).isEmpty()) {
+                BlockPos foot = new BlockPos(center.getX() + dx, floorY, center.getZ() + dz);
+                // If there's fluid at the intended floor height, we're directly in/over water.
+                if (!world.getFluidState(foot).isEmpty()) {
+                    return true;
+                }
+                BlockPos support = foot.down();
+                // If the support cell is fluid or non-solid (air), this is an overhang/drop/water edge.
+                if (!world.getFluidState(support).isEmpty()) {
+                    return true;
+                }
+                if (world.getBlockState(support).getCollisionShape(world, support).isEmpty()) {
                     return true;
                 }
             }
@@ -1423,12 +1447,33 @@ public final class ShelterSkill implements Skill {
         for (int dx = -radius; dx <= radius; dx++) {
             for (int dz = -radius; dz <= radius; dz++) {
                 BlockPos pos = center.add(dx, 0, dz);
+                boolean perimeter = Math.abs(dx) == radius || Math.abs(dz) == radius;
                 for (int y = floorY + 1; y <= floorY + 3; y++) {
                     BlockPos target = new BlockPos(pos.getX(), y, pos.getZ());
                     BlockState state = world.getBlockState(target);
                     if (state.isAir()) continue;
                     if (state.isIn(BlockTags.LEAVES) || state.isReplaceable() || state.isOf(Blocks.SNOW) || state.isIn(BlockTags.LOGS) || state.isIn(BlockTags.PLANKS)) {
                         mineSoft(bot, target);
+                    }
+                }
+                // Flatten interior bumps (avoid breaking chests/doors/etc; perimeter walls are handled elsewhere).
+                if (!perimeter) {
+                    BlockPos bump = new BlockPos(pos.getX(), floorY + 1, pos.getZ());
+                    BlockState bumpState = world.getBlockState(bump);
+                    if (!bumpState.isAir()
+                            && bumpState.getCollisionShape(world, bump).isEmpty() == false
+                            && !bumpState.isIn(BlockTags.DOORS)
+                            && !bumpState.isIn(BlockTags.BEDS)
+                            && !bumpState.isIn(BlockTags.SHULKER_BOXES)
+                            && !bumpState.isOf(Blocks.CHEST)
+                            && !bumpState.isOf(Blocks.TRAPPED_CHEST)
+                            && !bumpState.isOf(Blocks.BARREL)
+                            && !bumpState.isOf(Blocks.ENDER_CHEST)
+                            && !bumpState.isOf(Blocks.CRAFTING_TABLE)
+                            && !bumpState.isOf(Blocks.FURNACE)
+                            && !bumpState.isOf(Blocks.BLAST_FURNACE)
+                            && !bumpState.isOf(Blocks.SMOKER)) {
+                        mineSoft(bot, bump);
                     }
                 }
                 // Only fill holes in the support layer; do not build a "raised floor" in the standable air layer.
