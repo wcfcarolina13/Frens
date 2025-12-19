@@ -85,7 +85,7 @@ Pending work only. Completed items and rationale live in `changelog.md`.
 - [ ] Animal husbandry (shear, collect meat, pen animals)
 - [ ] Furnace usage with various fuels
 - [ ] Hunger persistence and smart eating
-- [ ] Sleep integration (bed usage, warnings)
+- [x] Sleep integration: `/bot sleep <alias|all|default>` finds/places/crafts a bed and sleeps.
 - [ ] **Farm underground recovery**: Handle cases where bot is underground and can’t pillar upward due to overhead dirt; improve escape logic and add test coverage.
 - [ ] **Farm/Woodcut chest workflow**: Ensure both skills can place/store/use chests proactively for inventory/resource management.
 - [ ] **Farm irrigation leak patching**: If irrigation isn’t fillable, detect leakage cause and patch the leak (enclosure improvements).

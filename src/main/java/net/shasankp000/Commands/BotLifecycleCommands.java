@@ -45,4 +45,12 @@ final class BotLifecycleCommands {
                         .executes(context -> modCommandRegistry.executeHealTargets(context,
                                 StringArgumentType.getString(context, "target"))));
     }
+
+    static ArgumentBuilder<ServerCommandSource, ?> buildSleep() {
+        return CommandManager.literal("sleep")
+                .executes(context -> modCommandRegistry.executeSleepTargets(context, (String) null))
+                .then(CommandManager.argument("target", StringArgumentType.string())
+                        .executes(context -> modCommandRegistry.executeSleepTargets(context,
+                                StringArgumentType.getString(context, "target"))));
+    }
 }

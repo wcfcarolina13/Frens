@@ -70,6 +70,7 @@ import net.shasankp000.GameAI.services.CraftingHelper;
 import net.shasankp000.GameAI.services.SmeltingService;
 import net.shasankp000.GameAI.services.ProtectedZoneService;
 import net.shasankp000.GameAI.services.SkillResumeService;
+import net.shasankp000.GameAI.services.SleepService;
 import net.shasankp000.GameAI.services.TaskService;
 import net.shasankp000.GameAI.services.WorkDirectionService;
 import net.shasankp000.GameAI.skills.SkillContext;
@@ -212,6 +213,7 @@ public class modCommandRegistry {
 	                        .then(BotLifecycleCommands.buildStop())
 	                        .then(BotLifecycleCommands.buildResume())
 	                        .then(BotLifecycleCommands.buildHeal())
+	                        .then(BotLifecycleCommands.buildSleep())
 	                        .then(BotUtilityCommands.buildDirection())
 	                        .then(BotUtilityCommands.buildZone())
 	                        .then(BotUtilityCommands.buildLookPlayer())
@@ -2728,6 +2730,47 @@ public class modCommandRegistry {
             ChatUtils.sendSystemMessage(context.getSource(), "None of the targeted bots could eat.");
         }
         return successes;
+    }
+
+    static int executeSleepTargets(CommandContext<ServerCommandSource> context, String targetArg) throws CommandSyntaxException {
+        ServerCommandSource source = context.getSource();
+        List<ServerPlayerEntity> bots = resolveTargetBots(context, targetArg);
+        boolean isAll = targetArg != null && "all".equalsIgnoreCase(targetArg.trim());
+
+        int scheduled = 0;
+        for (ServerPlayerEntity bot : bots) {
+            if (bot == null) {
+                continue;
+            }
+            UUID botUuid = bot.getUuid();
+            var ticketOpt = TaskService.beginSkill("sleep", source, botUuid);
+            if (ticketOpt.isEmpty()) {
+                ChatUtils.sendSystemMessage(source, bot.getName().getString() + " is busy.");
+                continue;
+            }
+            TaskService.TaskTicket ticket = ticketOpt.get();
+            scheduled++;
+
+            skillExecutor.submit(() -> {
+                boolean success = false;
+                try {
+                    success = SleepService.sleep(source, bot) && !TaskService.isAbortRequested(botUuid);
+                } catch (Exception e) {
+                    LOGGER.error("Unexpected error in /bot sleep for {}", bot.getName().getString(), e);
+                    source.getServer().execute(() ->
+                            ChatUtils.sendSystemMessage(source, "An unexpected error occurred while trying to sleep."));
+                } finally {
+                    TaskService.complete(ticket, success);
+                }
+            });
+        }
+
+        if (scheduled > 0) {
+            String summary = formatBotList(bots, isAll);
+            String verb = (isAll || bots.size() > 1) ? "are" : "is";
+            ChatUtils.sendSystemMessage(source, summary + " " + verb + " trying to sleep.");
+        }
+        return scheduled;
     }
 
     static int executeDirectionReset(CommandContext<ServerCommandSource> context, String targetArg) throws CommandSyntaxException {

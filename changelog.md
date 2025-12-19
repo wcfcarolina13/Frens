@@ -23,6 +23,7 @@ Historical record and reasoning. `TODO.md` is the source of truth for what’s n
 - Movement: improved “stuck under canopy” recovery by prioritizing clearing low headroom leaves (shears/harmless only), speeding up escape from dense forests.
 - Fishing: added a `/bot fish` skill that can craft a rod (3 sticks + 2 string), move to the shore, cast, wait for bites, and reel in fish while tracking successes.
 - Crafting: added bed crafting (selects a craftable color based on available matching wool) and enforced crafting-table requirements for 3x3 recipes; will place/craft a table, remember/seek the last known table, and can pull basic inputs from nearby chests.
+- Commands: added `/bot sleep <alias|all|default>` which finds/places/crafts a bed and attempts to sleep (survival reach enforced; no teleport).
 - Movement: bots can open/close doors while pathing (opens when blocked, closes after passing with a small delay).
 - Follow: reduced snap-teleport frequency; bots walk much farther before teleport catch-up is even considered.
 - Crafting: `/bot craft` now runs asynchronously (like skills) so moving to tables/chests no longer blocks the server tick thread; crafting-table searches avoid chunk-loading scans.
