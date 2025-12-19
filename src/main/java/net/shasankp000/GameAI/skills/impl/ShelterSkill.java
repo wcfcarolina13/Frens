@@ -424,6 +424,10 @@ public final class ShelterSkill implements Skill {
         BlockState state = bot.getEntityWorld().getBlockState(pos);
         if (state.isReplaceable() || state.isIn(BlockTags.LEAVES) || state.isOf(Blocks.SNOW)) {
             mineSoft(bot, pos);
+        } else if (state.isIn(BlockTags.LOGS)) {
+            if (bot.getEntityWorld() instanceof ServerWorld world && !TreeDetector.isNearHumanBlocks(world, pos, 3)) {
+                mineSoft(bot, pos);
+            }
         }
         net.shasankp000.Entity.LookController.faceBlock(bot, pos);
         boolean placed = BotActions.placeBlockAt(bot, pos, Direction.UP, List.of(blockItem));
@@ -1116,7 +1120,9 @@ public final class ShelterSkill implements Skill {
                 placeAt = new BlockPos(placeAt.getX(), baseY, placeAt.getZ());
             }
             if (!world.getBlockState(placeAt).isAir()) {
-                placeAt = placeAt.up();
+                // Don't try to place above our head; if the intended cell is occupied, abort pillar escape.
+                bot.setSneaking(wasSneaking);
+                return false;
             }
             boolean placed = BotActions.placeBlockAt(bot, placeAt, Direction.UP, SCAFFOLD_BLOCKS);
             sleepQuiet(160L);
