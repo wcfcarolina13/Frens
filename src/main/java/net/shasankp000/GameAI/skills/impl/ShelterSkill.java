@@ -88,6 +88,7 @@ public final class ShelterSkill implements Skill {
 
     private record ActiveBuildSite(BlockPos center, int radius, Direction doorSide, int wallHeight) {}
     private static final ThreadLocal<ActiveBuildSite> ACTIVE_BUILD_SITE = new ThreadLocal<>();
+    private static final ThreadLocal<Long> LAST_RECENTER_MS = ThreadLocal.withInitial(() -> 0L);
 
     @Override
     public String name() {
@@ -130,16 +131,23 @@ public final class ShelterSkill implements Skill {
             preferredDoorSide = dir;
         }
 
+        // If we're in water (common at shorelines), step onto nearby dry land first.
+        // Otherwise the "underground" check can misclassify shallow riverbeds and try to mine upward.
+        if (tryStepOutOfWater(source, bot, world)) {
+            origin = bot.getBlockPos();
+        }
+
         // If we're clearly underground, get to the surface first (then re-plan the hovel site).
         int surfaceY = world.getTopY(net.minecraft.world.Heightmap.Type.MOTION_BLOCKING_NO_LEAVES, origin.getX(), origin.getZ());
-        if (bot.getBlockY() < surfaceY - 3) {
+        boolean skyVisible = world.isSkyVisible(origin.up());
+        if (!skyVisible && bot.getBlockY() < surfaceY - 3) {
             boolean surfaced = tryReachSurface(source, bot, world, origin);
             if (surfaced) {
                 origin = bot.getBlockPos();
             }
         }
         surfaceY = world.getTopY(net.minecraft.world.Heightmap.Type.MOTION_BLOCKING_NO_LEAVES, origin.getX(), origin.getZ());
-        if (bot.getBlockY() < surfaceY - 2) {
+        if (!world.isSkyVisible(origin.up()) && bot.getBlockY() < surfaceY - 2) {
             return SkillExecutionResult.failure("I can't build a surface shelter while underground; I couldn't reach the surface.");
         }
 
@@ -197,6 +205,7 @@ public final class ShelterSkill implements Skill {
 
         try {
             ACTIVE_BUILD_SITE.set(new ActiveBuildSite(center, radius, doorSide, wallHeight));
+            LAST_RECENTER_MS.set(0L);
 
             int gathered = allowAutoGather ? ensureBuildStock(source, bot, neededBlocks, true, center) : 0;
             available = countBuildBlocks(bot);
@@ -258,6 +267,7 @@ public final class ShelterSkill implements Skill {
             return SkillExecutionResult.success("Shelter (hovel) built.");
         } finally {
             ACTIVE_BUILD_SITE.remove();
+            LAST_RECENTER_MS.remove();
         }
     }
 
@@ -1324,6 +1334,49 @@ public final class ShelterSkill implements Skill {
         return false;
     }
 
+    private boolean tryStepOutOfWater(ServerCommandSource source, ServerPlayerEntity bot, ServerWorld world) {
+        if (source == null || bot == null || world == null) {
+            return false;
+        }
+        BlockPos origin = bot.getBlockPos();
+        boolean inWater = !world.getFluidState(origin).isEmpty()
+                || !world.getFluidState(origin.down()).isEmpty()
+                || !world.getFluidState(origin.up()).isEmpty();
+        if (!inWater) {
+            return false;
+        }
+
+        BlockPos best = null;
+        double bestSq = Double.MAX_VALUE;
+        int radius = 10;
+        for (BlockPos pos : BlockPos.iterate(origin.add(-radius, -2, -radius), origin.add(radius, 2, radius))) {
+            if (!world.isChunkLoaded(pos)) {
+                continue;
+            }
+            BlockPos foot = pos.toImmutable();
+            if (!isStandable(world, foot)) {
+                continue;
+            }
+            if (!world.getFluidState(foot).isEmpty() || !world.getFluidState(foot.down()).isEmpty()) {
+                continue;
+            }
+            double sq = origin.getSquaredDistance(foot);
+            if (sq < bestSq) {
+                bestSq = sq;
+                best = foot;
+            }
+        }
+        if (best == null) {
+            return false;
+        }
+        var planOpt = MovementService.planLootApproach(bot, best, MovementService.MovementOptions.skillLoot());
+        if (planOpt.isEmpty()) {
+            return false;
+        }
+        MovementService.MovementResult res = MovementService.execute(source, bot, planOpt.get(), false, true, false, false);
+        return res.success();
+    }
+
     private void ensureClearBuildSiteWithWoodcut(ServerCommandSource source, ServerPlayerEntity bot, ServerWorld world, BlockPos center, int radius) {
         if (source == null || bot == null || world == null || center == null) {
             return;
@@ -1949,13 +2002,16 @@ public final class ShelterSkill implements Skill {
         if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
             return false;
         }
+        ServerCommandSource source = bot.getCommandSource();
+        if (buildSite != null) {
+            maybeRecenterToBuildSite(source, bot, world, buildSite);
+        }
         List<BlockPos> candidates = findStandableCandidatesNear(world, target, 5, 3, maxReachSq, bot.getBlockPos(), 8);
         if (candidates.isEmpty()) {
             LOGGER.warn("Shelter: no standable spot near {} for placement", target.toShortString());
             return false;
         }
 
-        ServerCommandSource source = bot.getCommandSource();
         if (tryCandidatesForReach(source, bot, target, candidates, maxReachSq)) {
             return true;
         }
@@ -1970,6 +2026,49 @@ public final class ShelterSkill implements Skill {
 
         LOGGER.warn("Shelter: could not approach within reach of {} after trying {} stand positions", target.toShortString(), candidates.size());
         return false;
+    }
+
+    private boolean maybeRecenterToBuildSite(ServerCommandSource source,
+                                            ServerPlayerEntity bot,
+                                            ServerWorld world,
+                                            ActiveBuildSite buildSite) {
+        if (source == null || bot == null || world == null || buildSite == null) {
+            return false;
+        }
+        long now = System.currentTimeMillis();
+        long last = LAST_RECENTER_MS.get() == null ? 0L : LAST_RECENTER_MS.get();
+        if (now - last < 2_500L) {
+            return false;
+        }
+        BlockPos center = buildSite.center();
+        int radius = buildSite.radius();
+        double maxDistSq = (radius + 10.0D) * (radius + 10.0D);
+        if (bot.getBlockPos().getSquaredDistance(center) <= maxDistSq) {
+            return false;
+        }
+
+        BlockPos stand = findStandableInside(world, center, radius, center, 3);
+        if (stand == null) {
+            // Try just outside the footprint (helps when inside is cluttered from combat).
+            stand = findStandableCandidatesNear(world, center, radius + 3, 2, 1600.0D, bot.getBlockPos(), 6)
+                    .stream()
+                    .findFirst()
+                    .orElse(null);
+        }
+        if (stand == null) {
+            return false;
+        }
+
+        LAST_RECENTER_MS.set(now);
+        var planOpt = MovementService.planLootApproach(bot, stand, MovementService.MovementOptions.skillLoot());
+        if (planOpt.isEmpty()) {
+            return false;
+        }
+        MovementService.MovementResult res = MovementService.execute(source, bot, planOpt.get(), false, true, false, false);
+        if (!res.success()) {
+            return false;
+        }
+        return true;
     }
 
     private boolean tryCandidatesForReach(ServerCommandSource source,
