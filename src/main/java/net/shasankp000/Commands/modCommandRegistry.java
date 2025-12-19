@@ -1047,6 +1047,46 @@ public class modCommandRegistry {
                                 )
                         )
                         .then(literal("open")
+                                .executes(ctx -> {
+                                    ServerCommandSource source = ctx.getSource();
+                                    ServerPlayerEntity viewer = source.getPlayer(); // returns null if console; handle below
+                                    if (viewer == null) {
+                                        source.sendError(Text.literal("Run from a player, not console."));
+                                        return 0;
+                                    }
+
+                                    List<ServerPlayerEntity> targets;
+                                    try {
+                                        targets = BotTargetingService.resolve(source, null);
+                                    } catch (CommandSyntaxException e) {
+                                        // Mirror /bot skill fallback behavior: if no remembered target, open the active bot.
+                                        targets = List.of(getActiveBotOrThrow(ctx));
+                                    }
+
+                                    if (targets.size() != 1) {
+                                        source.sendError(Text.literal("Specify exactly one bot to open."));
+                                        return 0;
+                                    }
+
+                                    ServerPlayerEntity bot = targets.get(0);
+                                    BotTargetingService.remember(source, bot.getGameProfile().name());
+
+                                    if (!InventoryAccessPolicy.canOpen(viewer, bot)) {
+                                        source.sendError(Text.literal("You don't have permission to open this bot's inventory."));
+                                        return 0;
+                                    }
+
+                                    boolean ok = BotInventoryAccess.openBotInventory(viewer, bot);
+                                    if (!ok) {
+                                        if (viewer.hasPermissionLevel(2)) {
+                                            source.sendError(Text.literal("Failed to open bot inventory."));
+                                        } else {
+                                            source.sendError(Text.literal("Out of range or wrong dimension."));
+                                        }
+                                        return 0;
+                                    }
+                                    return 1;
+                                })
                                 .then(CommandManager.argument("alias", StringArgumentType.string())
                                         .executes(ctx -> {
                                             ServerCommandSource source = ctx.getSource();
@@ -1057,12 +1097,13 @@ public class modCommandRegistry {
                                             }
 
                                             String alias = StringArgumentType.getString(ctx, "alias");
-                                            // Use existing targeting service if available:
-                                            ServerPlayerEntity bot = source.getServer().getPlayerManager().getPlayer(alias);
-                                            if (bot == null) {
-                                                source.sendError(Text.literal("Bot not found: " + alias));
+                                            List<ServerPlayerEntity> targets = BotTargetingService.resolve(source, alias);
+                                            if (targets.size() != 1) {
+                                                source.sendError(Text.literal("Specify exactly one bot to open."));
                                                 return 0;
                                             }
+                                            ServerPlayerEntity bot = targets.get(0);
+                                            BotTargetingService.remember(source, bot.getGameProfile().name());
 
                                             // Ownership / op check (see Section 3)
                                             if (!InventoryAccessPolicy.canOpen(viewer, bot)) {
@@ -2542,7 +2583,9 @@ public class modCommandRegistry {
             // If no explicit/remembered bot target exists for this sender, fall back to the "active bot"
             // selection that many non-broadcast commands use (keeps /bot skill usable without requiring an alias).
             if (invocation.target() == null) {
-                targets = List.of(getActiveBotOrThrow(context));
+                ServerPlayerEntity active = getActiveBotOrThrow(context);
+                BotTargetingService.remember(context.getSource(), active.getGameProfile().name());
+                targets = List.of(active);
             } else {
                 throw e;
             }

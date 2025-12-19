@@ -33,7 +33,7 @@ Pending work only. Completed items and rationale live in `changelog.md`.
 
 ### Shelter (Redo Needed)
 - [ ] **Shelter hovel redesign**: Current behavior buggy; redo planning/execution.
-- [ ] **Shelter resource acquisition flow**: If resources are missing, request permission to collect; resume should perform collection and continue build.
+- [ ] **Shelter resource acquisition flow**: Auto-collect/craft required materials by default; allow `ask|wait|manual` to pause and require `/bot resume <alias>` (or `proceed`) before gathering.
 - [ ] **Shelter options parameter**: Investigate what `options` currently controls for hovel/burrow; document and/or refactor.
 - [ ] **Shelter chest workflow**: While building, withdraw/deposit resources and place new chests to manage inventory; place new chests inside planned interior when possible.
 - [ ] **Burrow “descend-stripmine-descend”**: Restore intended method; compare with proven descent behavior from `come`.

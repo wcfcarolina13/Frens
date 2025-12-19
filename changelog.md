@@ -49,9 +49,11 @@ Historical record and reasoning. `TODO.md` is the source of truth for what’s n
 - Commands: `/bot skill` now accepts bot targets anywhere in the args (e.g., `ascend Jake 5`) and supports `ascend`/`descend` synonyms (defaulting to 5 blocks when no number is given).
 - UX: `/bot inventory` summary now includes bot stats (health/food/XP) so XP/level persistence is visible.
 - UX: `/bot open <alias>` is now distance/dimension independent for ops/admins; the GUI now shows bot XP progress/total XP alongside level.
-- Shelter: `/bot shelter hovel` now selects a nearby safer/flatter build site, uses terrain walls when available to reduce block needs, supports placing a door/chest when available, and uses `/bot resume <alias>` as a permission gate for auto-gathering materials.
+- Shelter: `/bot shelter hovel` now selects a nearby safer/flatter build site, uses terrain walls when available to reduce block needs, supports placing a door/chest when available, and can auto-gather materials (use `ask|wait|manual` to pause and require `/bot resume <alias>`).
 - Shelter: fixed hovel placement reach logic (avoid “standable but still out of reach” spots) and will report an incomplete build instead of claiming success when most placements fail.
 - Shelter: hovel placement now tries multiple nearby stand positions for each block and places the roof from perimeter → center for reliable support (reduces “swing but no block placed” frustration).
+- Shelter: hovel walls are now taller (+2 blocks) and will use temporary pillar scaffolds (then mine them back down) to place higher wall layers and roofs more reliably.
+- Commands: `/bot open` supports “last targeted bot” (no alias) and `/bot skill` now remembers the active-bot fallback target so follow/open/etc can default correctly after skill commands like `shelter hovel`.
 - Follow: follow no longer runs blocking movement/path loops on the server thread; it now sprints when >2 blocks away and uses a wolf-style teleport catch-up only when far/stuck (with cooldown).
 - Storage: prevent “remote” chest deposits/withdrawals through doors/walls by requiring survival-like reach + line-of-sight checks before moving items.
 - Safety: rescue-from-burial/suffocation escape no longer mines doors; it will attempt to open them instead (prevents bots breaking enclosure doors).

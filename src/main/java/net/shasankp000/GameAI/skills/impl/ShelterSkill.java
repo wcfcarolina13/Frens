@@ -21,6 +21,7 @@ import net.shasankp000.GameAI.services.WorkDirectionService;
 import net.shasankp000.GameAI.skills.Skill;
 import net.shasankp000.GameAI.skills.SkillContext;
 import net.shasankp000.GameAI.skills.SkillExecutionResult;
+import net.shasankp000.GameAI.skills.SkillManager;
 import net.shasankp000.GameAI.skills.impl.CollectDirtSkill;
 import net.shasankp000.GameAI.skills.impl.StripMineSkill;
 import net.shasankp000.GameAI.skills.support.TreeDetector;
@@ -31,6 +32,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -104,7 +106,7 @@ public final class ShelterSkill implements Skill {
 
         boolean resumeRequested = SkillResumeService.consumeResumeIntent(bot.getUuid());
         int radius = Math.max(2, Math.min(5, getInt(context, "radius", getInt(context, "count", 3))));
-        int wallHeight = 3;
+        int wallHeight = 5;
         Direction preferredDoorSide = null;
         Object directionParam = context.parameters().get("direction");
         if (directionParam instanceof Direction dir) {
@@ -122,7 +124,9 @@ public final class ShelterSkill implements Skill {
         int neededBlocks = estimatePlacementNeed(world, center, radius, wallHeight, doorSide);
         int available = countBuildBlocks(bot);
         LOGGER.info("Shelter: center={}, radius={}, wallHeight={}, estBlocks={}, available={}", center.toShortString(), radius, wallHeight, neededBlocks, available);
-        boolean allowAutoGather = resumeRequested || hasOption(context, "proceed", "collect", "gather", "auto");
+        boolean allowAutoGather = !hasOption(context, "ask", "confirm", "wait", "manual")
+                || resumeRequested
+                || hasOption(context, "proceed", "collect", "gather", "auto");
         announceResources(source, neededBlocks, available, allowAutoGather);
         int shortage = Math.max(0, neededBlocks - available);
         if (shortage > 0 && !allowAutoGather) {
@@ -146,14 +150,24 @@ public final class ShelterSkill implements Skill {
 
         // Clear interior and shape walls/roof
         levelInterior(world, bot, center, radius);
-        buildHovel(world, bot, center, radius, wallHeight, doorSide, counters);
-        buildRoof(world, bot, center, radius, wallHeight, counters);
-        // Patch pass to fill holes
+        int lowWallHeight = Math.min(wallHeight, 3);
+        buildHovel(world, bot, center, radius, lowWallHeight, doorSide, counters);
+        if (wallHeight > lowWallHeight) {
+            buildUpperShellAndRoofWithScaffolds(world, source, bot, center, radius, wallHeight, lowWallHeight, doorSide, counters);
+        } else {
+            buildRoof(world, bot, center, radius, wallHeight, counters);
+        }
+        // Patch pass to fill holes (run after scaffold phase so roof exists)
         patchGaps(world, bot, center, radius, wallHeight, doorSide, counters);
         if (hasGaps(world, center, radius, wallHeight, doorSide)) {
             LOGGER.warn("Shelter: gaps detected after first patch; gathering more and repatching.");
             ensureBuildStock(source, bot, estimateBlockNeed(radius, wallHeight) / 2, true, center);
             patchGaps(world, bot, center, radius, wallHeight, doorSide, counters);
+            if (hasGaps(world, center, radius, wallHeight, doorSide) && wallHeight > lowWallHeight) {
+                LOGGER.warn("Shelter: gaps remain after patch; rerunning scaffold pass for unreachable roof/walls.");
+                buildUpperShellAndRoofWithScaffolds(world, source, bot, center, radius, wallHeight, lowWallHeight, doorSide, counters);
+                patchGaps(world, bot, center, radius, wallHeight, doorSide, counters);
+            }
         }
         placeDoor(world, bot, center, radius, doorSide);
         placeChest(world, bot, center, radius);
@@ -172,6 +186,311 @@ public final class ShelterSkill implements Skill {
     }
 
     private record HovelPlan(BlockPos center, Direction doorSide) {}
+
+    private void buildUpperShellAndRoofWithScaffolds(ServerWorld world,
+                                                    ServerCommandSource source,
+                                                    ServerPlayerEntity bot,
+                                                    BlockPos center,
+                                                    int radius,
+                                                    int wallHeight,
+                                                    int lowWallHeight,
+                                                    Direction doorSide,
+                                                    BuildCounters counters) {
+        if (world == null || source == null || bot == null || center == null) {
+            return;
+        }
+        int floorY = center.getY();
+        int roofY = floorY + wallHeight;
+        int upperStartY = floorY + lowWallHeight + 1;
+        if (upperStartY > roofY) {
+            return;
+        }
+
+        List<BlockPos> scaffoldBases = computeScaffoldBases(world, center, radius);
+        if (scaffoldBases.isEmpty()) {
+            LOGGER.warn("Shelter scaffold: no viable base positions inside footprint; proceeding without scaffold.");
+            buildRoof(world, bot, center, radius, wallHeight, counters);
+            return;
+        }
+
+        for (BlockPos base : scaffoldBases) {
+            if (SkillManager.shouldAbortSkill(bot)) {
+                return;
+            }
+            if (!moveToBuildSite(source, bot, base)) {
+                continue;
+            }
+            List<BlockPos> placedPillar = new ArrayList<>();
+            int desiredFootY = roofY - 2;
+            int steps = Math.max(0, desiredFootY - bot.getBlockY());
+            if (steps > 0 && !pillarUp(bot, steps, placedPillar)) {
+                descendAndCleanup(bot, placedPillar);
+                continue;
+            }
+
+            placeUpperWallsDirect(world, bot, center, radius, upperStartY, roofY, doorSide, counters);
+            placeRoofDirect(world, bot, center, radius, roofY, counters);
+
+            descendAndCleanup(bot, placedPillar);
+        }
+    }
+
+    private List<BlockPos> computeScaffoldBases(ServerWorld world, BlockPos center, int radius) {
+        if (world == null || center == null) {
+            return List.of();
+        }
+        int interiorOffset = Math.max(0, radius - 2);
+        List<BlockPos> seeds = new ArrayList<>();
+        seeds.add(center);
+        if (interiorOffset > 0) {
+            seeds.add(center.add(interiorOffset, 0, interiorOffset));
+            seeds.add(center.add(interiorOffset, 0, -interiorOffset));
+            seeds.add(center.add(-interiorOffset, 0, interiorOffset));
+            seeds.add(center.add(-interiorOffset, 0, -interiorOffset));
+        }
+
+        List<BlockPos> bases = new ArrayList<>();
+        for (BlockPos seed : seeds) {
+            BlockPos candidate = findStandableInside(world, center, radius, seed, 2);
+            if (candidate != null && !bases.contains(candidate)) {
+                bases.add(candidate);
+            }
+        }
+        return bases;
+    }
+
+    private BlockPos findStandableInside(ServerWorld world, BlockPos center, int radius, BlockPos near, int searchRadius) {
+        if (world == null || center == null || near == null) {
+            return null;
+        }
+        BlockPos best = null;
+        double bestSq = Double.MAX_VALUE;
+        for (int dx = -searchRadius; dx <= searchRadius; dx++) {
+            for (int dz = -searchRadius; dz <= searchRadius; dz++) {
+                BlockPos foot = near.add(dx, 0, dz);
+                int relX = foot.getX() - center.getX();
+                int relZ = foot.getZ() - center.getZ();
+                if (Math.abs(relX) >= radius || Math.abs(relZ) >= radius) {
+                    continue; // stay inside the footprint
+                }
+                if (!isStandable(world, foot)) {
+                    continue;
+                }
+                double sq = near.getSquaredDistance(foot);
+                if (sq < bestSq) {
+                    bestSq = sq;
+                    best = foot.toImmutable();
+                }
+            }
+        }
+        return best;
+    }
+
+    private void placeUpperWallsDirect(ServerWorld world,
+                                       ServerPlayerEntity bot,
+                                       BlockPos center,
+                                       int radius,
+                                       int startY,
+                                       int endY,
+                                       Direction doorSide,
+                                       BuildCounters counters) {
+        if (world == null || bot == null || center == null) {
+            return;
+        }
+        int floorY = center.getY();
+        for (int dx = -radius; dx <= radius; dx++) {
+            for (int dz = -radius; dz <= radius; dz++) {
+                boolean perimeter = Math.abs(dx) == radius || Math.abs(dz) == radius;
+                if (!perimeter) {
+                    continue;
+                }
+                for (int y = startY; y <= endY; y++) {
+                    BlockPos pos = new BlockPos(center.getX() + dx, y, center.getZ() + dz);
+                    if (isDoorGap(pos, center, radius, doorSide, floorY)) {
+                        continue;
+                    }
+                    BlockState state = world.getBlockState(pos);
+                    if (!state.isAir() && !state.isReplaceable() && !state.isIn(BlockTags.LEAVES) && !state.isOf(Blocks.SNOW)) {
+                        continue;
+                    }
+                    placeBlockDirectIfWithinReach(bot, pos, counters);
+                }
+            }
+        }
+    }
+
+    private void placeRoofDirect(ServerWorld world,
+                                 ServerPlayerEntity bot,
+                                 BlockPos center,
+                                 int radius,
+                                 int roofY,
+                                 BuildCounters counters) {
+        if (world == null || bot == null || center == null) {
+            return;
+        }
+        for (int dx = -radius; dx <= radius; dx++) {
+            for (int dz = -radius; dz <= radius; dz++) {
+                BlockPos roof = new BlockPos(center.getX() + dx, roofY, center.getZ() + dz);
+                BlockState state = world.getBlockState(roof);
+                if (!state.isAir() && !state.isReplaceable() && !state.isIn(BlockTags.LEAVES) && !state.isOf(Blocks.SNOW)) {
+                    continue;
+                }
+                placeBlockDirectIfWithinReach(bot, roof, counters);
+            }
+        }
+    }
+
+    private boolean placeBlockDirectIfWithinReach(ServerPlayerEntity bot, BlockPos pos, BuildCounters counters) {
+        if (bot == null || pos == null) {
+            return false;
+        }
+        Vec3d center = Vec3d.ofCenter(pos);
+        Vec3d botPos = new Vec3d(bot.getX(), bot.getY(), bot.getZ());
+        double maxReachSq = 20.25D; // ~4.5 blocks (survival reach)
+        if (botPos.squaredDistanceTo(center) > maxReachSq) {
+            return false;
+        }
+        Item blockItem = selectBuildItem(bot);
+        if (blockItem == null) {
+            if (counters != null) {
+                counters.noMaterials++;
+            }
+            return false;
+        }
+        if (counters != null) {
+            counters.attemptedPlacements++;
+        }
+        BlockState state = bot.getEntityWorld().getBlockState(pos);
+        if (state.isReplaceable() || state.isIn(BlockTags.LEAVES) || state.isOf(Blocks.SNOW)) {
+            mineSoft(bot, pos);
+        }
+        net.shasankp000.Entity.LookController.faceBlock(bot, pos);
+        boolean placed = BotActions.placeBlockAt(bot, pos, Direction.UP, List.of(blockItem));
+        if (placed && counters != null) {
+            counters.placedBlocks++;
+        }
+        return placed;
+    }
+
+    private boolean pillarUp(ServerPlayerEntity bot, int steps, List<BlockPos> placedPillar) {
+        if (steps <= 0 || bot == null) {
+            return true;
+        }
+        if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
+            return false;
+        }
+        boolean wasSneaking = bot.isSneaking();
+        bot.setSneaking(true);
+        for (int i = 0; i < steps; i++) {
+            if (SkillManager.shouldAbortSkill(bot)) {
+                bot.setSneaking(wasSneaking);
+                return false;
+            }
+            BlockPos candidate = bot.getBlockPos();
+            if (!world.getBlockState(candidate).isAir()) {
+                candidate = candidate.up();
+            }
+            BotActions.jump(bot);
+            sleepQuiet(160L);
+            if (!world.getBlockState(candidate).isAir()) {
+                candidate = candidate.up();
+            }
+            if (!tryPlaceScaffold(bot, candidate)) {
+                bot.setSneaking(wasSneaking);
+                return false;
+            }
+            placedPillar.add(candidate.toImmutable());
+            sleepQuiet(160L);
+        }
+        bot.setSneaking(wasSneaking);
+        return true;
+    }
+
+    private boolean tryPlaceScaffold(ServerPlayerEntity bot, BlockPos target) {
+        if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
+            return false;
+        }
+        Item scaffold = selectBuildItem(bot);
+        if (scaffold == null) {
+            return false;
+        }
+        if (!isPlaceableTarget(world, target)) {
+            mineSoft(bot, target);
+        }
+        ensureSupportBlock(bot, target);
+        if (BotActions.placeBlockAt(bot, target, Direction.UP, List.of(scaffold))) {
+            return true;
+        }
+        for (Direction dir : Direction.Type.HORIZONTAL) {
+            BlockPos alt = target.offset(dir);
+            if (!isPlaceableTarget(world, alt)) {
+                mineSoft(bot, alt);
+            }
+            ensureSupportBlock(bot, alt);
+            if (BotActions.placeBlockAt(bot, alt, Direction.UP, List.of(scaffold))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private void ensureSupportBlock(ServerPlayerEntity bot, BlockPos target) {
+        if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
+            return;
+        }
+        BlockPos below = target.down();
+        BlockState belowState = world.getBlockState(below);
+        if (!belowState.getCollisionShape(world, below).isEmpty()) {
+            return;
+        }
+        if (!isPlaceableTarget(world, below)) {
+            mineSoft(bot, below);
+        }
+        Item scaffold = selectBuildItem(bot);
+        if (scaffold == null) {
+            return;
+        }
+        BotActions.placeBlockAt(bot, below, Direction.UP, List.of(scaffold));
+    }
+
+    private boolean isPlaceableTarget(ServerWorld world, BlockPos pos) {
+        BlockState state = world.getBlockState(pos);
+        return state.isAir() || state.isReplaceable() || state.isIn(BlockTags.LEAVES) || state.isOf(Blocks.SNOW);
+    }
+
+    private void descendAndCleanup(ServerPlayerEntity bot, List<BlockPos> placedPillar) {
+        if (bot == null || placedPillar == null || placedPillar.isEmpty()) {
+            return;
+        }
+        if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
+            return;
+        }
+        boolean wasSneaking = bot.isSneaking();
+        bot.setSneaking(true);
+        Collections.reverse(placedPillar);
+        for (BlockPos placed : placedPillar) {
+            if (SkillManager.shouldAbortSkill(bot)) {
+                bot.setSneaking(wasSneaking);
+                return;
+            }
+            if (world.getBlockState(placed).isAir()) {
+                continue;
+            }
+            net.shasankp000.Entity.LookController.faceBlock(bot, placed);
+            BotActions.selectBestTool(bot, "shovel", "pickaxe");
+            mineSoft(bot, placed);
+            sleepQuiet(80L);
+        }
+        bot.setSneaking(wasSneaking);
+    }
+
+    private void sleepQuiet(long ms) {
+        try {
+            Thread.sleep(ms);
+        } catch (InterruptedException ignored) {
+            Thread.currentThread().interrupt();
+        }
+    }
 
     private HovelPlan selectHovelPlan(ServerWorld world,
                                       ServerPlayerEntity bot,
