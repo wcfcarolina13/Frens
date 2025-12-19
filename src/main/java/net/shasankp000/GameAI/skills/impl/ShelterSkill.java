@@ -140,6 +140,17 @@ public final class ShelterSkill implements Skill {
             return SkillExecutionResult.failure("I can't build a surface shelter while underground; I couldn't reach the surface.");
         }
 
+        ExistingHovel existing = detectExistingShelter(world, bot, origin, radius, wallHeight);
+        if (existing != null) {
+            radius = existing.radius();
+            origin = existing.center();
+            if (preferredDoorSide == null) {
+                preferredDoorSide = existing.doorSide();
+            }
+            LOGGER.info("Shelter: detected existing footprint near origin; using center={} radius={} door={}",
+                    origin.toShortString(), radius, preferredDoorSide);
+        }
+
         HovelPlan plan = selectHovelPlan(world, bot, origin, radius, wallHeight, preferredDoorSide, context.sharedState(), resumeRequested);
         BlockPos center = plan.center();
         Direction doorSide = plan.doorSide();
@@ -237,6 +248,7 @@ public final class ShelterSkill implements Skill {
     }
 
     private record HovelPlan(BlockPos center, Direction doorSide) {}
+    private record ExistingHovel(BlockPos center, int radius, Direction doorSide) {}
 
     private void buildUpperShellAndRoofWithScaffolds(ServerWorld world,
                                                     ServerCommandSource source,
@@ -451,16 +463,19 @@ public final class ShelterSkill implements Skill {
                 bot.setSneaking(wasSneaking);
                 return false;
             }
-            BlockPos candidate = bot.getBlockPos();
-            if (!world.getBlockState(candidate).isAir()) {
-                candidate = candidate.up();
-            }
+            int baseY = bot.getBlockY();
             BotActions.jump(bot);
             sleepQuiet(160L);
-            if (!world.getBlockState(candidate).isAir()) {
-                candidate = candidate.up();
+            // Place into the bot's current foot block after jumping, but never above the pre-jump Y.
+            BlockPos placeAt = bot.getBlockPos();
+            if (placeAt.getY() > baseY) {
+                placeAt = new BlockPos(placeAt.getX(), baseY, placeAt.getZ());
             }
-            BlockPos placed = tryPlaceScaffold(bot, candidate);
+            if (!world.getBlockState(placeAt).isAir()) {
+                bot.setSneaking(wasSneaking);
+                return false;
+            }
+            BlockPos placed = tryPlaceScaffold(bot, placeAt);
             if (placed == null) {
                 bot.setSneaking(wasSneaking);
                 return false;
@@ -597,7 +612,7 @@ public final class ShelterSkill implements Skill {
         Direction bestDoor = fallbackDoor;
         double bestScore = Double.NEGATIVE_INFINITY;
 
-        int scanRadius = 12;
+        int scanRadius = 7;
         int originY = origin.getY();
         for (int dx = -scanRadius; dx <= scanRadius; dx++) {
             for (int dz = -scanRadius; dz <= scanRadius; dz++) {
@@ -624,7 +639,7 @@ public final class ShelterSkill implements Skill {
                 int naturalWalls = countNaturalWalls(world, candidate, radius, wallHeight);
                 int vegetation = countVegetationInShell(world, candidate, radius, wallHeight);
                 double distSq = origin.getSquaredDistance(candidate);
-                double score = naturalWalls * 1.75 - vegetation * 2.25 - distSq * 0.02 - flatness.maxDelta() * 6.0;
+                double score = naturalWalls * 1.75 - vegetation * 2.25 - distSq * 0.08 - flatness.maxDelta() * 6.0;
                 if (score > bestScore) {
                     bestScore = score;
                     best = candidate;
@@ -640,6 +655,65 @@ public final class ShelterSkill implements Skill {
         SharedStateUtils.setValue(sharedState, prefix + "door", bestDoor.name());
 
         return new HovelPlan(best, bestDoor);
+    }
+
+    private ExistingHovel detectExistingShelter(ServerWorld world,
+                                                ServerPlayerEntity bot,
+                                                BlockPos origin,
+                                                int requestedRadius,
+                                                int wallHeight) {
+        if (world == null || bot == null || origin == null) {
+            return null;
+        }
+        int floorY = origin.getY();
+        int scanRadius = Math.max(6, requestedRadius + 2);
+        int minX = Integer.MAX_VALUE;
+        int maxX = Integer.MIN_VALUE;
+        int minZ = Integer.MAX_VALUE;
+        int maxZ = Integer.MIN_VALUE;
+        int found = 0;
+
+        int minY = floorY + 1;
+        int maxY = floorY + Math.max(2, Math.min(wallHeight, 4));
+
+        for (BlockPos pos : BlockPos.iterate(origin.add(-scanRadius, 0, -scanRadius), origin.add(scanRadius, 0, scanRadius))) {
+            for (int y = minY; y <= maxY; y++) {
+                BlockPos wallPos = new BlockPos(pos.getX(), y, pos.getZ());
+                BlockState state = world.getBlockState(wallPos);
+                if (state.isAir() || state.isReplaceable()) {
+                    continue;
+                }
+                if (state.isIn(BlockTags.LEAVES) || state.isIn(BlockTags.LOGS)) {
+                    continue;
+                }
+                found++;
+                minX = Math.min(minX, wallPos.getX());
+                maxX = Math.max(maxX, wallPos.getX());
+                minZ = Math.min(minZ, wallPos.getZ());
+                maxZ = Math.max(maxZ, wallPos.getZ());
+            }
+        }
+
+        if (found < 16) {
+            return null;
+        }
+
+        int spanX = maxX - minX;
+        int spanZ = maxZ - minZ;
+        if (spanX < 4 || spanZ < 4) {
+            return null;
+        }
+        if (Math.abs(spanX - spanZ) > 3) {
+            return null;
+        }
+        int radius = Math.max(spanX, spanZ) / 2;
+        radius = Math.max(2, Math.min(6, radius));
+
+        int centerX = (minX + maxX) / 2;
+        int centerZ = (minZ + maxZ) / 2;
+        BlockPos center = new BlockPos(centerX, floorY, centerZ);
+        Direction doorSide = pickDoorSide(world, center, radius, bot.getHorizontalFacing());
+        return new ExistingHovel(center, radius, doorSide);
     }
 
     private int countVegetationInShell(ServerWorld world, BlockPos center, int radius, int wallHeight) {
@@ -864,19 +938,16 @@ public final class ShelterSkill implements Skill {
             return 0;
         }
         int before = available;
-        int collected = 0;
         int toGather = Math.max(0, needed - available);
         if (toGather <= 0) {
             return 0;
         }
 
         ChatUtils.sendSystemMessage(source,
-                "Gathering shelter materials: descending 6, stripmining for " + toGather + " blocks, then returning up the same stairs.");
+                "Gathering shelter materials nearby (staying near the build site).");
 
-        // Cleaner gather: carve a 6-block descent and then stripmine until we have enough blocks,
-        // then climb back up the same staircase (reverse direction).
         try {
-            collected = gatherBuildBlocksViaStairsAndStripmine(source, bot, needed, returnPos);
+            gatherBuildBlocksNearby(source, bot, needed, returnPos, 14);
         } catch (Exception e) {
             LOGGER.warn("Shelter gather errored: {}", e.getMessage());
         }
@@ -886,84 +957,132 @@ public final class ShelterSkill implements Skill {
         return Math.max(0, after - before);
     }
 
-    private int gatherBuildBlocksViaStairsAndStripmine(ServerCommandSource source, ServerPlayerEntity bot, int neededBlocks, BlockPos returnPos) {
+    private void gatherBuildBlocksNearby(ServerCommandSource source,
+                                         ServerPlayerEntity bot,
+                                         int neededBlocks,
+                                         BlockPos returnPos,
+                                         int maxHorizontalDistance) {
         if (source == null || bot == null) {
-            return 0;
+            return;
         }
         if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
-            return 0;
-        }
-        int before = countBuildBlocks(bot);
-        if (before >= neededBlocks) {
-            return 0;
+            return;
         }
 
-        BlockPos startPos = bot.getBlockPos();
-        int startY = startPos.getY();
-        Direction digDir = WorkDirectionService.getDirection(bot.getUuid()).orElse(bot.getHorizontalFacing());
-        WorkDirectionService.setDirection(bot.getUuid(), digDir);
-
-        LOGGER.info("Shelter gather: descending 6 blocks, then stripmining for shortfall (dir={})", digDir);
-
-        CollectDirtSkill stair = new CollectDirtSkill();
-        Map<String, Object> shared = new HashMap<>();
-        Map<String, Object> descentParams = new HashMap<>();
-        descentParams.put("descentBlocks", 6);
-        descentParams.put("issuerFacing", digDir.asString());
-        descentParams.put("lockDirection", true);
-        descentParams.put("strictWalk", true);
-        SkillExecutionResult descent = stair.execute(new SkillContext(source, shared, descentParams));
-        if (!descent.success()) {
-            LOGGER.warn("Shelter gather descent failed: {}", descent.message());
-            ChatUtils.sendSystemMessage(source, "Descent failed while gathering: " + descent.message());
+        int needed = Math.max(0, neededBlocks - countBuildBlocks(bot));
+        if (needed <= 0) {
+            return;
         }
 
-        StripMineSkill strip = new StripMineSkill();
-        int loops = 0;
-        while (countBuildBlocks(bot) < neededBlocks && loops < 8 && !SkillManager.shouldAbortSkill(bot)) {
-            ensureBuildChestAndDeposit(source, world, bot, returnPos != null ? returnPos : startPos, 12);
-            int shortfall = neededBlocks - countBuildBlocks(bot);
-            int segment = Math.max(4, Math.min(14, shortfall / 4));
-            Map<String, Object> stripParams = new HashMap<>();
-            stripParams.put("count", segment);
-            stripParams.put("issuerFacing", digDir.asString());
-            stripParams.put("lockDirection", true);
-            SkillExecutionResult stripRes = strip.execute(new SkillContext(source, shared, stripParams));
-            if (!stripRes.success()) {
-                LOGGER.warn("Shelter gather stripmine failed: {}", stripRes.message());
-                ChatUtils.sendSystemMessage(source, "Stripmine failed while gathering: " + stripRes.message());
-                break;
-            }
-            loops++;
-        }
+        BlockPos anchor = returnPos != null ? returnPos : bot.getBlockPos();
+        int anchorY = anchor.getY();
+        int gathered = 0;
 
-        // Return up the same staircase by reversing direction.
-        Direction climbDir = digDir.getOpposite();
-        WorkDirectionService.setDirection(bot.getUuid(), climbDir);
-        Map<String, Object> ascentParams = new HashMap<>();
-        ascentParams.put("ascentTargetY", startY);
-        ascentParams.put("issuerFacing", climbDir.asString());
-        ascentParams.put("lockDirection", true);
-        ascentParams.put("strictWalk", true);
-        SkillExecutionResult ascent = stair.execute(new SkillContext(source, shared, ascentParams));
-        if (!ascent.success()) {
-            LOGGER.warn("Shelter gather ascent failed: {}", ascent.message());
-            ChatUtils.sendSystemMessage(source, "Ascent failed while returning from gather: " + ascent.message());
-        }
+        int scan = Math.max(6, maxHorizontalDistance);
+        for (int dx = -scan; dx <= scan && gathered < needed; dx++) {
+            for (int dz = -scan; dz <= scan && gathered < needed; dz++) {
+                if (SkillManager.shouldAbortSkill(bot)) {
+                    return;
+                }
+                if (Math.abs(dx) + Math.abs(dz) < 3) {
+                    continue; // avoid chewing up the immediate build site
+                }
+                int x = anchor.getX() + dx;
+                int z = anchor.getZ() + dz;
+                int topY = world.getTopY(net.minecraft.world.Heightmap.Type.MOTION_BLOCKING_NO_LEAVES, x, z);
+                if (Math.abs(topY - anchorY) > 4) {
+                    continue;
+                }
+                BlockPos surfaceBlock = new BlockPos(x, topY - 1, z);
+                if (surfaceBlock.getSquaredDistance(anchor) > (double) scan * scan) {
+                    continue;
+                }
+                if (!isNearbyGatherCandidate(world, surfaceBlock)) {
+                    continue;
+                }
+                if (!mineNear(bot, source, surfaceBlock)) {
+                    continue;
+                }
+                gathered++;
 
-        // Snap back to the build site if we ended up offset.
-        if (returnPos != null) {
-            var planOpt = net.shasankp000.GameAI.services.MovementService.planLootApproach(bot, returnPos, net.shasankp000.GameAI.services.MovementService.MovementOptions.skillLoot());
-            if (planOpt.isPresent()) {
-                var res = net.shasankp000.GameAI.services.MovementService.execute(source, bot, planOpt.get(), false, true, false, false);
-                if (!res.success()) {
-                    LOGGER.warn("Shelter: failed to return to build site {} after gather: {}", returnPos.toShortString(), res.detail());
+                if (gathered % 10 == 0) {
+                    ensureBuildChestAndDeposit(source, world, bot, anchor, 10);
                 }
             }
         }
 
-        int after = countBuildBlocks(bot);
-        return Math.max(0, after - before);
+        // Return to the build site after gathering.
+        if (returnPos != null) {
+            var planOpt = MovementService.planLootApproach(bot, returnPos, MovementService.MovementOptions.skillLoot());
+            if (planOpt.isPresent()) {
+                MovementService.execute(source, bot, planOpt.get(), false, true, false, false);
+            }
+        }
+    }
+
+    private boolean isNearbyGatherCandidate(ServerWorld world, BlockPos pos) {
+        if (world == null || pos == null) {
+            return false;
+        }
+        BlockState state = world.getBlockState(pos);
+        if (state.isAir() || state.isReplaceable()) {
+            return false;
+        }
+        // Keep gather local and "shallow": prefer shovel-mineable surface blocks.
+        if (!state.isIn(BlockTags.SHOVEL_MINEABLE)) {
+            return false;
+        }
+        if (state.isIn(BlockTags.LEAVES) || state.isIn(BlockTags.LOGS)) {
+            return false;
+        }
+        BlockState above = world.getBlockState(pos.up());
+        return above.isAir() || above.isReplaceable();
+    }
+
+    private boolean mineNear(ServerPlayerEntity bot, ServerCommandSource source, BlockPos target) {
+        if (bot == null || source == null || target == null) {
+            return false;
+        }
+        if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
+            return false;
+        }
+        // Never mine the support block under the bot.
+        BlockPos foot = bot.getBlockPos();
+        if (target.equals(foot) || target.equals(foot.down())) {
+            return false;
+        }
+        if (!ensureMiningReach(bot, source, target)) {
+            return false;
+        }
+        BotActions.selectBestTool(bot, "shovel", "pickaxe");
+        mineSoft(bot, target);
+        return world.getBlockState(target).isAir() || world.getBlockState(target).isReplaceable();
+    }
+
+    private boolean ensureMiningReach(ServerPlayerEntity bot, ServerCommandSource source, BlockPos target) {
+        Vec3d center = Vec3d.ofCenter(target);
+        Vec3d botPos = new Vec3d(bot.getX(), bot.getY(), bot.getZ());
+        double maxReachSq = 20.25D;
+        if (botPos.squaredDistanceTo(center) <= maxReachSq) {
+            return true;
+        }
+        if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
+            return false;
+        }
+        List<BlockPos> candidates = findStandableCandidatesNear(world, target, 4, 2, maxReachSq, bot.getBlockPos(), 6);
+        for (BlockPos stand : candidates) {
+            if (stand == null) continue;
+            var planOpt = MovementService.planLootApproach(bot, stand, MovementService.MovementOptions.skillLoot());
+            if (planOpt.isEmpty()) continue;
+            var res = MovementService.execute(source, bot, planOpt.get(), false, true, false, false);
+            if (!res.success()) continue;
+            Vec3d newPos = new Vec3d(bot.getX(), bot.getY(), bot.getZ());
+            if (newPos.squaredDistanceTo(center) <= maxReachSq) {
+                net.shasankp000.Entity.LookController.faceBlock(bot, target);
+                return true;
+            }
+        }
+        return false;
     }
 
     private void clearObstructiveVegetation(ServerWorld world, ServerPlayerEntity bot, BlockPos center, int radius, int wallHeight) {
