@@ -18,6 +18,8 @@ Historical record and reasoning. `TODO.md` is the source of truth for what’s n
 - Shelter: added `/bot shelter hovel <alias?>` to build a quick dirt/cobble hovel (roofed, torches, fills gaps, gathers dirt if short).
 - Shelter: hovel now prefers staying near the build site for material gathering (shallow local dig only; no auto descent/stripmine), and can detect/complete nearby pre-existing shelter footprints.
 - Shelter: hovel siting rejects unsupported/water-edge footprints (won’t try to build walls over shoreline overhangs), and runs a final interior leveling + gap patch pass right before drop-sweeping.
+- Shelter: hovel placement now attempts a “double back and exit” when reach-moves fail inside the footprint (targets doorway/perimeter openings instead of endlessly pushing into walls).
+- Placement: block placement now clicks a real supporting block face (prevents “phantom place” attempts where the support check passed but the click target was air).
 - Farming: secured irrigation basins on uneven terrain (fills edges/underblocks, cleans stray flow), repair pass now levels plots to farm Y before re-till/plant, and leaves are broken with shears/harmless items (no axe wear).
 - Wool skill: peaceful shearing that crafts/equips shears if needed, detects pens vs. wild range (fence-aware search), collects drops, and auto-deposits bulk blocks to nearby chests to keep ≥5 free slots.
 - Wool: `/bot stop` now interrupts movement/drop-sweeps immediately; short-range moves avoid full pathfinding to reduce hitching.

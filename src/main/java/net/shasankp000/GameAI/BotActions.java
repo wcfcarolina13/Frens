@@ -518,7 +518,6 @@ public final class BotActions {
             if (distSq > SURVIVAL_REACH_SQ) {
                 return false;
             }
-            Direction placeFace = face == null ? Direction.UP : face;
             if (!world.getBlockState(target).isAir() && world.getFluidState(target).isEmpty()) {
                 // Allow replacing snow layers/blocks to avoid placement failures
                 net.minecraft.block.BlockState state = world.getBlockState(target);
@@ -546,7 +545,8 @@ public final class BotActions {
                     return false;
                 }
             }
-            if (!hasSupport(world, target)) {
+            Support support = resolvePlacementSupport(world, target, face);
+            if (support == null) {
                 return false;
             }
             int slot = findPreferredBlockItemSlot(bot, prioritizedBlocks);
@@ -560,9 +560,8 @@ public final class BotActions {
                 return false;
             }
             selectHotbarSlot(bot, slot);
-            BlockPos clickPos = target.offset(placeFace.getOpposite());
-            Vec3d hitVec = Vec3d.ofCenter(clickPos);
-            BlockHitResult hit = new BlockHitResult(hitVec, placeFace, clickPos, false);
+            Vec3d hitVec = Vec3d.ofCenter(support.clickPos());
+            BlockHitResult hit = new BlockHitResult(hitVec, support.face(), support.clickPos(), false);
             ItemUsageContext usage = new ItemUsageContext(bot, Hand.MAIN_HAND, hit);
             ItemPlacementContext placementContext = new ItemPlacementContext(usage);
             ActionResult result = blockItem.place(placementContext);
@@ -577,19 +576,37 @@ public final class BotActions {
         }, 3500L, false);
     }
 
-    private static boolean hasSupport(ServerWorld world, BlockPos target) {
-        // block below
-        if (world.getBlockState(target.down()).isSolidBlock(world, target.down())) {
-            return true;
+    private record Support(BlockPos clickPos, Direction face) {}
+
+    /**
+     * Resolve the actual block face we'd "right click" to place into {@code target}.
+     * This prevents phantom placements where the support check passes but the clickPos is air.
+     */
+    private static Support resolvePlacementSupport(ServerWorld world, BlockPos target, Direction preferredFace) {
+        if (world == null || target == null) {
+            return null;
         }
-        // any horizontal neighbor solid
+        Direction preferred = preferredFace == null ? Direction.UP : preferredFace;
+
+        // Prefer placing by clicking the block below (common for floors, pillars, etc).
+        BlockPos below = target.down();
+        if (preferred == Direction.UP && world.getBlockState(below).isSolidBlock(world, below)) {
+            return new Support(below, Direction.UP);
+        }
+
+        // Otherwise use a solid horizontal neighbor face pointing toward the target.
         for (Direction dir : Direction.Type.HORIZONTAL) {
             BlockPos neighbor = target.offset(dir);
             if (world.getBlockState(neighbor).isSolidBlock(world, neighbor)) {
-                return true;
+                return new Support(neighbor, dir.getOpposite());
             }
         }
-        return false;
+
+        // Last resort: if below is solid, allow non-UP preferred faces to still click below.
+        if (world.getBlockState(below).isSolidBlock(world, below)) {
+            return new Support(below, Direction.UP);
+        }
+        return null;
     }
 
     public static void escapeStairs(ServerPlayerEntity bot) {

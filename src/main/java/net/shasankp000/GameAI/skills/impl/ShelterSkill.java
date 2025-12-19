@@ -86,6 +86,9 @@ public final class ShelterSkill implements Skill {
         int noMaterials;
     }
 
+    private record ActiveBuildSite(BlockPos center, int radius, Direction doorSide, int wallHeight) {}
+    private static final ThreadLocal<ActiveBuildSite> ACTIVE_BUILD_SITE = new ThreadLocal<>();
+
     @Override
     public String name() {
         return "shelter";
@@ -192,63 +195,70 @@ public final class ShelterSkill implements Skill {
         // Ensure we have a nearby chest to dump junk if the build fills the inventory.
         ensureBuildChestAndDeposit(source, world, bot, center, radius);
 
-        int gathered = allowAutoGather ? ensureBuildStock(source, bot, neededBlocks, true, center) : 0;
-        available = countBuildBlocks(bot);
-        if (gathered + available < neededBlocks) {
-            int oldRadius = radius;
-            radius = Math.max(2, radius - 1);
-            neededBlocks = estimateBlockNeed(radius, wallHeight);
-            LOGGER.warn("Shelter: downsizing radius from {} to {} due to material shortfall. New estBlocks={}", oldRadius, radius, neededBlocks);
-        }
+        try {
+            ACTIVE_BUILD_SITE.set(new ActiveBuildSite(center, radius, doorSide, wallHeight));
 
-        BuildCounters counters = new BuildCounters();
-
-        // Clear interior and shape walls/roof
-        levelInterior(world, bot, center, radius);
-        clearObstructiveVegetation(world, bot, center, radius, wallHeight);
-        int lowWallHeight = Math.min(wallHeight, 3);
-        buildHovel(world, bot, center, radius, lowWallHeight, doorSide, counters);
-        ensureBuildChestAndDeposit(source, world, bot, center, radius);
-        if (wallHeight > lowWallHeight) {
-            buildUpperShellAndRoofWithScaffolds(world, source, bot, center, radius, wallHeight, lowWallHeight, doorSide, counters);
-        } else {
-            buildRoof(world, bot, center, radius, wallHeight, counters);
-        }
-        ensureBuildChestAndDeposit(source, world, bot, center, radius);
-        // Patch pass to fill holes (run after scaffold phase so roof exists)
-        patchGaps(world, bot, center, radius, wallHeight, doorSide, counters);
-        ensureBuildChestAndDeposit(source, world, bot, center, radius);
-        if (hasGaps(world, center, radius, wallHeight, doorSide)) {
-            LOGGER.warn("Shelter: gaps detected after first patch; gathering more and repatching.");
-            ensureBuildStock(source, bot, estimateBlockNeed(radius, wallHeight) / 2, true, center);
-            patchGaps(world, bot, center, radius, wallHeight, doorSide, counters);
-            if (hasGaps(world, center, radius, wallHeight, doorSide) && wallHeight > lowWallHeight) {
-                LOGGER.warn("Shelter: gaps remain after patch; rerunning scaffold pass for unreachable roof/walls.");
-                buildUpperShellAndRoofWithScaffolds(world, source, bot, center, radius, wallHeight, lowWallHeight, doorSide, counters);
-                patchGaps(world, bot, center, radius, wallHeight, doorSide, counters);
+            int gathered = allowAutoGather ? ensureBuildStock(source, bot, neededBlocks, true, center) : 0;
+            available = countBuildBlocks(bot);
+            if (gathered + available < neededBlocks) {
+                int oldRadius = radius;
+                radius = Math.max(2, radius - 1);
+                neededBlocks = estimateBlockNeed(radius, wallHeight);
+                LOGGER.warn("Shelter: downsizing radius from {} to {} due to material shortfall. New estBlocks={}", oldRadius, radius, neededBlocks);
+                ACTIVE_BUILD_SITE.set(new ActiveBuildSite(center, radius, doorSide, wallHeight));
             }
+
+            BuildCounters counters = new BuildCounters();
+
+            // Clear interior and shape walls/roof
+            levelInterior(world, bot, center, radius);
+            clearObstructiveVegetation(world, bot, center, radius, wallHeight);
+            int lowWallHeight = Math.min(wallHeight, 3);
+            buildHovel(world, bot, center, radius, lowWallHeight, doorSide, counters);
+            ensureBuildChestAndDeposit(source, world, bot, center, radius);
+            if (wallHeight > lowWallHeight) {
+                buildUpperShellAndRoofWithScaffolds(world, source, bot, center, radius, wallHeight, lowWallHeight, doorSide, counters);
+            } else {
+                buildRoof(world, bot, center, radius, wallHeight, counters);
+            }
+            ensureBuildChestAndDeposit(source, world, bot, center, radius);
+            // Patch pass to fill holes (run after scaffold phase so roof exists)
+            patchGaps(world, bot, center, radius, wallHeight, doorSide, counters);
+            ensureBuildChestAndDeposit(source, world, bot, center, radius);
+            if (hasGaps(world, center, radius, wallHeight, doorSide)) {
+                LOGGER.warn("Shelter: gaps detected after first patch; gathering more and repatching.");
+                ensureBuildStock(source, bot, estimateBlockNeed(radius, wallHeight) / 2, true, center);
+                patchGaps(world, bot, center, radius, wallHeight, doorSide, counters);
+                if (hasGaps(world, center, radius, wallHeight, doorSide) && wallHeight > lowWallHeight) {
+                    LOGGER.warn("Shelter: gaps remain after patch; rerunning scaffold pass for unreachable roof/walls.");
+                    buildUpperShellAndRoofWithScaffolds(world, source, bot, center, radius, wallHeight, lowWallHeight, doorSide, counters);
+                    patchGaps(world, bot, center, radius, wallHeight, doorSide, counters);
+                }
+            }
+            placeDoor(world, bot, center, radius, doorSide);
+            ensureDoorwayOpen(world, bot, center, radius, doorSide);
+            placeChest(world, bot, center, radius);
+            placeTorches(world, bot, center, radius);
+            // Final pre-sweep polish: re-level the interior and repatch any last gaps.
+            // (This catches late placement misses from scaffolding or odd footing near edges.)
+            levelInterior(world, bot, center, radius);
+            patchGaps(world, bot, center, radius, wallHeight, doorSide, counters);
+            sweepDrops(source, 12.0, 5.0, 24, 12_000L);
+            // Final cleanup deposit after sweeping, if a chest is available.
+            ensureBuildChestAndDeposit(source, world, bot, center, radius);
+            if (counters.attemptedPlacements > 0 && counters.placedBlocks < Math.max(8, (int) Math.round(counters.attemptedPlacements * 0.35))) {
+                String msg = "Hovel build incomplete: placed " + counters.placedBlocks + "/" + counters.attemptedPlacements
+                        + " blocks (reachFails=" + counters.reachFailures
+                        + ", noMaterials=" + counters.noMaterials + ").";
+                LOGGER.warn("Shelter: {}", msg);
+                ChatUtils.sendSystemMessage(source, msg + " Try rerunning on flatter ground or closer to open space.");
+                return SkillExecutionResult.failure("Shelter (hovel) incomplete.");
+            }
+            ChatUtils.sendSystemMessage(source, "Emergency hovel built.");
+            return SkillExecutionResult.success("Shelter (hovel) built.");
+        } finally {
+            ACTIVE_BUILD_SITE.remove();
         }
-        placeDoor(world, bot, center, radius, doorSide);
-        ensureDoorwayOpen(world, bot, center, radius, doorSide);
-        placeChest(world, bot, center, radius);
-        placeTorches(world, bot, center, radius);
-        // Final pre-sweep polish: re-level the interior and repatch any last gaps.
-        // (This catches late placement misses from scaffolding or odd footing near edges.)
-        levelInterior(world, bot, center, radius);
-        patchGaps(world, bot, center, radius, wallHeight, doorSide, counters);
-        sweepDrops(source, 12.0, 5.0, 24, 12_000L);
-        // Final cleanup deposit after sweeping, if a chest is available.
-        ensureBuildChestAndDeposit(source, world, bot, center, radius);
-        if (counters.attemptedPlacements > 0 && counters.placedBlocks < Math.max(8, (int) Math.round(counters.attemptedPlacements * 0.35))) {
-            String msg = "Hovel build incomplete: placed " + counters.placedBlocks + "/" + counters.attemptedPlacements
-                    + " blocks (reachFails=" + counters.reachFailures
-                    + ", noMaterials=" + counters.noMaterials + ").";
-            LOGGER.warn("Shelter: {}", msg);
-            ChatUtils.sendSystemMessage(source, msg + " Try rerunning on flatter ground or closer to open space.");
-            return SkillExecutionResult.failure("Shelter (hovel) incomplete.");
-        }
-        ChatUtils.sendSystemMessage(source, "Emergency hovel built.");
-        return SkillExecutionResult.success("Shelter (hovel) built.");
     }
 
     private record HovelPlan(BlockPos center, Direction doorSide) {}
@@ -1923,6 +1933,13 @@ public final class ShelterSkill implements Skill {
     }
 
     private boolean ensureReach(ServerPlayerEntity bot, BlockPos target) {
+        return ensureReach(bot, target, ACTIVE_BUILD_SITE.get());
+    }
+
+    private boolean ensureReach(ServerPlayerEntity bot, BlockPos target, ActiveBuildSite buildSite) {
+        if (bot == null || target == null) {
+            return false;
+        }
         Vec3d center = Vec3d.ofCenter(target);
         Vec3d botPos = new Vec3d(bot.getX(), bot.getY(), bot.getZ());
         double maxReachSq = 20.25D; // ~4.5 blocks (survival reach)
@@ -1938,26 +1955,172 @@ public final class ShelterSkill implements Skill {
             return false;
         }
 
+        ServerCommandSource source = bot.getCommandSource();
+        if (tryCandidatesForReach(source, bot, target, candidates, maxReachSq)) {
+            return true;
+        }
+
+        // If we're repeatedly blocked inside a structure footprint, try to explicitly exit and retry.
+        if (buildSite != null && tryExitBuildFootprint(source, bot, world, buildSite)) {
+            candidates = findStandableCandidatesNear(world, target, 5, 3, maxReachSq, bot.getBlockPos(), 8);
+            if (tryCandidatesForReach(source, bot, target, candidates, maxReachSq)) {
+                return true;
+            }
+        }
+
+        LOGGER.warn("Shelter: could not approach within reach of {} after trying {} stand positions", target.toShortString(), candidates.size());
+        return false;
+    }
+
+    private boolean tryCandidatesForReach(ServerCommandSource source,
+                                         ServerPlayerEntity bot,
+                                         BlockPos target,
+                                         List<BlockPos> candidates,
+                                         double maxReachSq) {
+        if (source == null || bot == null || target == null || candidates == null || candidates.isEmpty()) {
+            return false;
+        }
+        Vec3d targetCenter = Vec3d.ofCenter(target);
         for (BlockPos stand : candidates) {
             if (stand == null) {
                 continue;
             }
-            var planOpt = net.shasankp000.GameAI.services.MovementService.planLootApproach(bot, stand, net.shasankp000.GameAI.services.MovementService.MovementOptions.skillLoot());
+            var planOpt = MovementService.planLootApproach(bot, stand, MovementService.MovementOptions.skillLoot());
             if (planOpt.isEmpty()) {
                 continue;
             }
-            var res = net.shasankp000.GameAI.services.MovementService.execute(bot.getCommandSource(), bot, planOpt.get(), false, true, false, false);
+            var res = MovementService.execute(source, bot, planOpt.get(), false, true, false, false);
             if (!res.success()) {
                 continue;
             }
             Vec3d newPos = new Vec3d(bot.getX(), bot.getY(), bot.getZ());
-            if (newPos.squaredDistanceTo(center) <= maxReachSq) {
+            if (newPos.squaredDistanceTo(targetCenter) <= maxReachSq) {
                 net.shasankp000.Entity.LookController.faceBlock(bot, target);
                 return true;
             }
         }
-        LOGGER.warn("Shelter: could not approach within reach of {} after trying {} stand positions", target.toShortString(), candidates.size());
         return false;
+    }
+
+    private boolean tryExitBuildFootprint(ServerCommandSource source,
+                                         ServerPlayerEntity bot,
+                                         ServerWorld world,
+                                         ActiveBuildSite buildSite) {
+        if (source == null || bot == null || world == null || buildSite == null) {
+            return false;
+        }
+        BlockPos center = buildSite.center();
+        int radius = buildSite.radius();
+        Direction doorSide = buildSite.doorSide();
+        int floorY = center.getY();
+
+        BlockPos botPos = bot.getBlockPos();
+        boolean insideXZ = Math.abs(botPos.getX() - center.getX()) < radius && Math.abs(botPos.getZ() - center.getZ()) < radius;
+        boolean insideY = botPos.getY() >= floorY - 1 && botPos.getY() <= floorY + Math.max(2, buildSite.wallHeight() + 1);
+        if (!insideXZ || !insideY) {
+            return false;
+        }
+
+        // Prefer the planned doorway opening (or placed door) first.
+        if (doorSide != null) {
+            BlockPos insideApproach = center.offset(doorSide, Math.max(1, radius - 1));
+            BlockPos threshold = center.offset(doorSide, radius);
+            BlockPos outside = center.offset(doorSide, radius + 2);
+            if (attemptExitVia(source, bot, world, insideApproach, threshold, outside, floorY)) {
+                return true;
+            }
+        }
+
+        // Otherwise find any perimeter opening and step out.
+        BlockPos opening = findPerimeterExit(world, center, radius);
+        if (opening != null) {
+            BlockPos insideApproach = opening.offset(approximateToward(opening, center), 1);
+            BlockPos outside = opening.offset(approximateToward(center, opening), 2);
+            if (attemptExitVia(source, bot, world, insideApproach, opening, outside, floorY)) {
+                return true;
+            }
+        }
+
+        // Last resort: double back a couple steps to escape "push into wall" loops and let pathfinding replan.
+        BotActions.moveBackward(bot);
+        sleepQuiet(120L);
+        BotActions.moveBackward(bot);
+        sleepQuiet(120L);
+        return false;
+    }
+
+    private boolean attemptExitVia(ServerCommandSource source,
+                                   ServerPlayerEntity bot,
+                                   ServerWorld world,
+                                   BlockPos insideApproach,
+                                   BlockPos threshold,
+                                   BlockPos outside,
+                                   int floorY) {
+        if (insideApproach == null || threshold == null || outside == null) {
+            return false;
+        }
+        BlockPos approach = new BlockPos(insideApproach.getX(), floorY, insideApproach.getZ());
+        BlockPos doorFoot = new BlockPos(threshold.getX(), floorY, threshold.getZ());
+        BlockPos out = new BlockPos(outside.getX(), floorY, outside.getZ());
+        if (!isStandable(world, approach)) {
+            return false;
+        }
+        var planOpt = MovementService.planLootApproach(bot, approach, MovementService.MovementOptions.skillLoot());
+        if (planOpt.isEmpty() || !MovementService.execute(source, bot, planOpt.get(), false, true, false, false).success()) {
+            return false;
+        }
+
+        // If a door exists here, open it before stepping through.
+        MovementService.tryOpenDoorToward(bot, doorFoot);
+
+        // Step through the opening.
+        var outPlan = MovementService.planLootApproach(bot, out, MovementService.MovementOptions.skillLoot());
+        if (outPlan.isPresent() && MovementService.execute(source, bot, outPlan.get(), false, true, false, false).success()) {
+            return true;
+        }
+        return false;
+    }
+
+    private BlockPos findPerimeterExit(ServerWorld world, BlockPos center, int radius) {
+        if (world == null || center == null) {
+            return null;
+        }
+        int floorY = center.getY();
+        BlockPos best = null;
+        double bestSq = Double.MAX_VALUE;
+        for (int dx = -radius; dx <= radius; dx++) {
+            for (int dz = -radius; dz <= radius; dz++) {
+                boolean perimeter = Math.abs(dx) == radius || Math.abs(dz) == radius;
+                if (!perimeter) continue;
+                BlockPos foot = new BlockPos(center.getX() + dx, floorY, center.getZ() + dz);
+                BlockPos head = foot.up();
+                BlockPos aboveHead = foot.up(2);
+                if (!world.getBlockState(foot).getCollisionShape(world, foot).isEmpty()) continue;
+                if (!world.getBlockState(head).getCollisionShape(world, head).isEmpty()) continue;
+                if (!world.getBlockState(aboveHead).getCollisionShape(world, aboveHead).isEmpty()) continue;
+                BlockPos below = foot.down();
+                if (world.getBlockState(below).getCollisionShape(world, below).isEmpty()) continue;
+                if (!world.getFluidState(foot).isEmpty() || !world.getFluidState(below).isEmpty()) continue;
+                double sq = center.getSquaredDistance(foot);
+                if (sq < bestSq) {
+                    bestSq = sq;
+                    best = foot.toImmutable();
+                }
+            }
+        }
+        return best;
+    }
+
+    private Direction approximateToward(BlockPos from, BlockPos to) {
+        if (from == null || to == null) {
+            return Direction.NORTH;
+        }
+        int dx = to.getX() - from.getX();
+        int dz = to.getZ() - from.getZ();
+        if (Math.abs(dx) >= Math.abs(dz)) {
+            return dx >= 0 ? Direction.EAST : Direction.WEST;
+        }
+        return dz >= 0 ? Direction.SOUTH : Direction.NORTH;
     }
 
     private List<BlockPos> findStandableCandidatesNear(ServerWorld world,
