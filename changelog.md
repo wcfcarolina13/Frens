@@ -61,6 +61,8 @@ Historical record and reasoning. `TODO.md` is the source of truth for what’s n
 - Survival: enforce reach limits for mining and block placement to prevent “remote” digging/placing (no more surface trees breaking while the bot is deep underground).
 - CollectDirt: ascent/descent only rewind to a stored pause position when `/bot resume` was used; fresh commands no longer auto-return to old pause coordinates.
 - Shelter: when commanded to build underground, the bot now proactively escapes to the surface before selecting a hovel site; if it has a clear vertical shaft and scaffold blocks, it will attempt a woodcut-style pillar climb first.
+- Shelter: surface detection now uses `MOTION_BLOCKING_NO_LEAVES` and will refuse to claim success/build a surface hovel unless it actually reached near-surface Y.
+- CollectDirt: ascent/descent hazard scans no longer treat torches as blocking hazards (prevents false failures like “Cannot break placed torches” during surface escape).
 - Commands: `/bot open` supports “last targeted bot” (no alias) and `/bot skill` now remembers the active-bot fallback target so follow/open/etc can default correctly after skill commands like `shelter hovel`.
 - Follow: follow no longer runs blocking movement/path loops on the server thread; it now sprints when >2 blocks away and uses a wolf-style teleport catch-up only when far/stuck (with cooldown).
 - Storage: prevent “remote” chest deposits/withdrawals through doors/walls by requiring survival-like reach + line-of-sight checks before moving items.

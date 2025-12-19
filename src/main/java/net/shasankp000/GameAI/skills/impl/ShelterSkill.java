@@ -128,12 +128,16 @@ public final class ShelterSkill implements Skill {
         }
 
         // If we're clearly underground, get to the surface first (then re-plan the hovel site).
-        int surfaceY = world.getTopY(net.minecraft.world.Heightmap.Type.MOTION_BLOCKING, origin.getX(), origin.getZ());
+        int surfaceY = world.getTopY(net.minecraft.world.Heightmap.Type.MOTION_BLOCKING_NO_LEAVES, origin.getX(), origin.getZ());
         if (bot.getBlockY() < surfaceY - 3) {
             boolean surfaced = tryReachSurface(source, bot, world, origin);
             if (surfaced) {
                 origin = bot.getBlockPos();
             }
+        }
+        surfaceY = world.getTopY(net.minecraft.world.Heightmap.Type.MOTION_BLOCKING_NO_LEAVES, origin.getX(), origin.getZ());
+        if (bot.getBlockY() < surfaceY - 2) {
+            return SkillExecutionResult.failure("I can't build a surface shelter while underground; I couldn't reach the surface.");
         }
 
         HovelPlan plan = selectHovelPlan(world, bot, origin, radius, wallHeight, preferredDoorSide, context.sharedState(), resumeRequested);
@@ -595,7 +599,7 @@ public final class ShelterSkill implements Skill {
             for (int dz = -scanRadius; dz <= scanRadius; dz++) {
                 int x = origin.getX() + dx;
                 int z = origin.getZ() + dz;
-                int topY = world.getTopY(net.minecraft.world.Heightmap.Type.MOTION_BLOCKING, x, z);
+                int topY = world.getTopY(net.minecraft.world.Heightmap.Type.MOTION_BLOCKING_NO_LEAVES, x, z);
                 BlockPos candidate = new BlockPos(x, topY, z);
                 if (Math.abs(candidate.getY() - originY) > 3) {
                     continue;
@@ -995,7 +999,7 @@ public final class ShelterSkill implements Skill {
         if (source == null || bot == null || world == null || origin == null) {
             return false;
         }
-        int surfaceY = world.getTopY(net.minecraft.world.Heightmap.Type.MOTION_BLOCKING, origin.getX(), origin.getZ());
+        int surfaceY = world.getTopY(net.minecraft.world.Heightmap.Type.MOTION_BLOCKING_NO_LEAVES, origin.getX(), origin.getZ());
         if (bot.getBlockY() >= surfaceY - 2) {
             return false;
         }
@@ -1055,14 +1059,16 @@ public final class ShelterSkill implements Skill {
         }
         // Quick check: ensure we have enough vertical clearance to make pillaring plausible.
         BlockPos start = bot.getBlockPos();
-        int headroom = countOpenAbove(world, start, 6);
-        if (headroom < 4) {
+        int targetY = Math.max(start.getY() + 1, surfaceY - 1);
+        int shaftCheck = Math.min(16, Math.max(0, targetY - start.getY()));
+        int headroom = countOpenAbove(world, start, shaftCheck);
+        // Only pillar if this looks like a real shaft (lots of open air above).
+        if (headroom < Math.min(8, shaftCheck)) {
             return false;
         }
         if (!hasAnyScaffoldBlock(bot)) {
             return false;
         }
-        int targetY = Math.max(start.getY() + 1, surfaceY - 1);
         int maxSteps = Math.min(64, Math.max(0, targetY - start.getY()));
         if (maxSteps <= 0) {
             return false;
@@ -1095,8 +1101,12 @@ public final class ShelterSkill implements Skill {
             int beforeY = bot.getBlockY();
             BotActions.jump(bot);
             sleepQuiet(160L);
-            // Place into the current foot block (jump-pillaring). If this fails, bail out to ascent/stripmine.
-            boolean placed = BotActions.placeBlockAt(bot, feet, Direction.UP, SCAFFOLD_BLOCKS);
+            // Place into the bot's current foot block *after jumping* (woodcut-style jump-pillaring).
+            BlockPos placeAt = bot.getBlockPos();
+            if (!world.getBlockState(placeAt).isAir()) {
+                placeAt = placeAt.up();
+            }
+            boolean placed = BotActions.placeBlockAt(bot, placeAt, Direction.UP, SCAFFOLD_BLOCKS);
             sleepQuiet(160L);
             if (!placed) {
                 bot.setSneaking(wasSneaking);

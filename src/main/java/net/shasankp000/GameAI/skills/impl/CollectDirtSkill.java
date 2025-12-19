@@ -1255,6 +1255,9 @@ public class CollectDirtSkill implements Skill {
             BlockPos forward = currentFeet.offset(digDirection);
             BlockPos stairFoot = forward.down();
             List<BlockPos> workVolume = buildStraightStairVolume(forward, stairFoot);
+            workVolume = workVolume.stream()
+                    .filter(pos -> !isTorchBlock(player.getEntityWorld().getBlockState(pos)))
+                    .toList();
             DetectionResult detection = MiningHazardDetector.detect(player, workVolume, List.of(stairFoot), true);
             detection.adjacentWarnings().forEach(warning ->
                     ChatUtils.sendChatMessages(player.getCommandSource().withSilent().withMaxLevel(4), warning.chatMessage()));
@@ -1479,7 +1482,13 @@ public class CollectDirtSkill implements Skill {
         
         // 3. Scan headroom for hazards/rares before clearing, then break step block + 8 above it
         List<BlockPos> headroomVolume = new java.util.ArrayList<>();
-        for (int hh = 0; hh <= 8; hh++) headroomVolume.add(stepBlock.up(hh));
+        for (int hh = 0; hh <= 8; hh++) {
+            BlockPos pos = stepBlock.up(hh);
+            if (isTorchBlock(world.getBlockState(pos))) {
+                continue;
+            }
+            headroomVolume.add(pos);
+        }
         DetectionResult ascentDetection = MiningHazardDetector.detect(player, headroomVolume, java.util.List.of(stepBlock));
         ascentDetection.adjacentWarnings().forEach(w ->
                 ChatUtils.sendChatMessages(player.getCommandSource().withSilent().withMaxLevel(4), w.chatMessage()));
@@ -1625,6 +1634,19 @@ public class CollectDirtSkill implements Skill {
         future.cancel(true);
         LOGGER.warn("Mining {} timed out", blockPos);
         return false;
+    }
+
+    private boolean isTorchBlock(BlockState state) {
+        if (state == null) {
+            return false;
+        }
+        Block block = state.getBlock();
+        return block == Blocks.TORCH
+                || block == Blocks.WALL_TORCH
+                || block == Blocks.SOUL_TORCH
+                || block == Blocks.SOUL_WALL_TORCH
+                || block == Blocks.REDSTONE_TORCH
+                || block == Blocks.REDSTONE_WALL_TORCH;
     }
 
     private boolean isWithinStraightReach(ServerPlayerEntity player, BlockPos blockPos) {
