@@ -26,6 +26,7 @@ public class MiningTool {
 
     private static final long MINING_TICK_MS = 50;
     private static final long FAILSAFE_TIMEOUT_SECONDS = 12;
+    private static final double SURVIVAL_REACH_SQ = 4.5 * 4.5;
     public static final Logger LOGGER = LoggerFactory.getLogger("mining-tool");
 
     public static CompletableFuture<String> mineBlock(ServerPlayerEntity bot, BlockPos targetBlockPos) {
@@ -34,6 +35,16 @@ public class MiningTool {
 
         if (server == null) {
             miningResult.complete("⚠️ Cannot mine: server unavailable.");
+            return miningResult;
+        }
+        if (bot == null || targetBlockPos == null) {
+            miningResult.complete("⚠️ Cannot mine: invalid target.");
+            return miningResult;
+        }
+
+        double distSq = bot.squaredDistanceTo(targetBlockPos.getX() + 0.5, targetBlockPos.getY() + 0.5, targetBlockPos.getZ() + 0.5);
+        if (distSq > SURVIVAL_REACH_SQ) {
+            miningResult.complete("⚠️ Cannot mine: out of reach.");
             return miningResult;
         }
 
@@ -101,6 +112,13 @@ public class MiningTool {
                 if (SkillManager.shouldAbortSkill(bot)) {
                     LOGGER.info("Mining aborted for {} at {}", bot.getName().getString(), targetBlockPos);
                     miningResult.complete("⚠️ Mining aborted.");
+                    cleanup.run();
+                    return;
+                }
+
+                double tickDistSq = bot.squaredDistanceTo(targetBlockPos.getX() + 0.5, targetBlockPos.getY() + 0.5, targetBlockPos.getZ() + 0.5);
+                if (tickDistSq > SURVIVAL_REACH_SQ) {
+                    miningResult.complete("⚠️ Cannot mine: out of reach.");
                     cleanup.run();
                     return;
                 }

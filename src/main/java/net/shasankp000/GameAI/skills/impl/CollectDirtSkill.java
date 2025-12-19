@@ -228,7 +228,7 @@ public class CollectDirtSkill implements Skill {
                 LOGGER.info("Ascent mode: climbing from Y={} to Y={}", 
                            playerForAbortCheck.getBlockY(), targetY);
             }
-            return runAscent(context, source, playerForAbortCheck, targetY);
+            return runAscent(context, source, playerForAbortCheck, targetY, resumeRequested);
         }
 
         // Handle descent mode
@@ -243,7 +243,7 @@ public class CollectDirtSkill implements Skill {
                 LOGGER.info("Descent mode: descending from Y={} to Y={}", 
                            playerForAbortCheck.getBlockY(), targetY);
             }
-            return runDescent(context, source, playerForAbortCheck, targetY);
+            return runDescent(context, source, playerForAbortCheck, targetY, resumeRequested);
         }
 
         int collected = 0;
@@ -928,7 +928,7 @@ public class CollectDirtSkill implements Skill {
         if (referencePos != null) {
             targetY = Math.max(targetY, referencePos.getY());
         }
-        SkillExecutionResult ascent = runAscent(new SkillContext(source, new HashMap<>(), new HashMap<>()), source, player, targetY);
+        SkillExecutionResult ascent = runAscent(new SkillContext(source, new HashMap<>(), new HashMap<>()), source, player, targetY, false);
         return ascent.success() || player.getBlockY() >= targetY;
     }
 
@@ -1200,7 +1200,8 @@ public class CollectDirtSkill implements Skill {
     private SkillExecutionResult runDescent(SkillContext context,
                                            ServerCommandSource source,
                                            ServerPlayerEntity player,
-                                           int targetDepthY) {
+                                           int targetDepthY,
+                                           boolean resumeRequested) {
         if (player == null) {
             return SkillExecutionResult.failure("No bot available for descent.");
         }
@@ -1212,7 +1213,7 @@ public class CollectDirtSkill implements Skill {
         
         // Check if resuming from a paused position
         Optional<BlockPos> pausePos = WorkDirectionService.getPausePosition(player.getUuid());
-        if (pausePos.isPresent()) {
+        if (resumeRequested && pausePos.isPresent()) {
             BlockPos resumeTarget = pausePos.get();
             LOGGER.info("Descent resuming - navigating back to pause position {}", resumeTarget.toShortString());
             ChatUtils.sendChatMessages(source.withSilent().withMaxLevel(4), 
@@ -1326,7 +1327,8 @@ public class CollectDirtSkill implements Skill {
     private SkillExecutionResult runAscent(SkillContext context,
                                           ServerCommandSource source,
                                           ServerPlayerEntity player,
-                                          int targetY) {
+                                          int targetY,
+                                          boolean resumeRequested) {
         if (player == null) {
             return SkillExecutionResult.failure("No bot available for ascent.");
         }

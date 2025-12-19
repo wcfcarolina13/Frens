@@ -55,6 +55,7 @@ public final class BotActions {
     private static final float TURN_DEGREES = 20.0f;
     private static final int BOW_MIN_CHARGE_TICKS = 15;
     private static final int RANGED_COOLDOWN_TICKS = 20;
+    private static final double SURVIVAL_REACH_SQ = 4.5D * 4.5D;
 
     private static final Map<UUID, RangedAttackState> RANGED_STATE = new HashMap<>();
 
@@ -511,6 +512,10 @@ public final class BotActions {
         return callOnServerThread(bot, () -> {
             ServerWorld world = bot.getCommandSource().getWorld();
             if (world == null || target == null) {
+                return false;
+            }
+            double distSq = bot.squaredDistanceTo(target.getX() + 0.5, target.getY() + 0.5, target.getZ() + 0.5);
+            if (distSq > SURVIVAL_REACH_SQ) {
                 return false;
             }
             Direction placeFace = face == null ? Direction.UP : face;

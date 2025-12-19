@@ -983,27 +983,42 @@ public final class ShelterSkill implements Skill {
         CollectDirtSkill stair = new CollectDirtSkill();
         Map<String, Object> shared = new HashMap<>();
         Direction digDir = WorkDirectionService.getDirection(bot.getUuid()).orElse(bot.getHorizontalFacing());
-        for (int attempt = 0; attempt < 3; attempt++) {
+        int attempts = 0;
+        while (bot.getBlockY() < surfaceY - 1 && attempts < 10) {
             if (SkillManager.shouldAbortSkill(bot)) {
                 return false;
             }
             WorkDirectionService.setDirection(bot.getUuid(), digDir);
             Map<String, Object> ascentParams = new HashMap<>();
-            ascentParams.put("ascentTargetY", surfaceY);
+            int stepTargetY = Math.min(surfaceY, bot.getBlockY() + 10);
+            ascentParams.put("ascentTargetY", stepTargetY);
             ascentParams.put("issuerFacing", digDir.asString());
             ascentParams.put("lockDirection", true);
             ascentParams.put("strictWalk", true);
+            int beforeY = bot.getBlockY();
             SkillExecutionResult ascent = stair.execute(new SkillContext(source, shared, ascentParams));
-            if (ascent.success() && bot.getBlockY() >= surfaceY - 1) {
+            if (bot.getBlockY() >= surfaceY - 1) {
                 return true;
             }
 
-            StripMineSkill strip = new StripMineSkill();
-            Map<String, Object> stripParams = new HashMap<>();
-            stripParams.put("count", 6);
-            stripParams.put("issuerFacing", digDir.asString());
-            stripParams.put("lockDirection", true);
-            strip.execute(new SkillContext(source, shared, stripParams));
+            int afterY = bot.getBlockY();
+            boolean progressed = afterY > beforeY;
+            if (!ascent.success()) {
+                LOGGER.warn("Surface escape ascent step failed (progressed={}): {}", progressed, ascent.message());
+            }
+            if (!progressed) {
+                StripMineSkill strip = new StripMineSkill();
+                Map<String, Object> stripParams = new HashMap<>();
+                stripParams.put("count", 6);
+                stripParams.put("issuerFacing", digDir.asString());
+                stripParams.put("lockDirection", true);
+                SkillExecutionResult stripRes = strip.execute(new SkillContext(source, shared, stripParams));
+                if (!stripRes.success()) {
+                    LOGGER.warn("Surface escape stripmine failed: {}", stripRes.message());
+                    break;
+                }
+            }
+            attempts++;
         }
         return bot.getBlockY() >= surfaceY - 1;
     }
