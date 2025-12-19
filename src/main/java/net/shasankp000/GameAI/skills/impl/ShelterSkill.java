@@ -141,9 +141,18 @@ public final class ShelterSkill implements Skill {
         int surfaceY = world.getTopY(net.minecraft.world.Heightmap.Type.MOTION_BLOCKING_NO_LEAVES, origin.getX(), origin.getZ());
         boolean skyVisible = world.isSkyVisible(origin.up());
         if (!skyVisible && bot.getBlockY() < surfaceY - 3) {
-            boolean surfaced = tryReachSurface(source, bot, world, origin);
-            if (surfaced) {
+            // If we're simply under a roof/walls near the surface, relocate to a nearby sky-visible opening
+            // instead of trying to mine upward (which can hit shoreline water and abort).
+            if (tryRelocateToNearbySurfaceOpening(source, bot, world, origin, 8)) {
                 origin = bot.getBlockPos();
+                surfaceY = world.getTopY(net.minecraft.world.Heightmap.Type.MOTION_BLOCKING_NO_LEAVES, origin.getX(), origin.getZ());
+                skyVisible = world.isSkyVisible(origin.up());
+            }
+            if (!skyVisible && bot.getBlockY() < surfaceY - 3) {
+                boolean surfaced = tryReachSurface(source, bot, world, origin);
+                if (surfaced) {
+                    origin = bot.getBlockPos();
+                }
             }
         }
         surfaceY = world.getTopY(net.minecraft.world.Heightmap.Type.MOTION_BLOCKING_NO_LEAVES, origin.getX(), origin.getZ());
@@ -206,6 +215,8 @@ public final class ShelterSkill implements Skill {
         try {
             ACTIVE_BUILD_SITE.set(new ActiveBuildSite(center, radius, doorSide, wallHeight));
             LAST_RECENTER_MS.set(0L);
+            // If combat/defense dragged us far away, return near the build site before resuming placement loops.
+            maybeRecenterToBuildSite(source, bot, world, ACTIVE_BUILD_SITE.get());
 
             int gathered = allowAutoGather ? ensureBuildStock(source, bot, neededBlocks, true, center) : 0;
             available = countBuildBlocks(bot);
@@ -1354,6 +1365,51 @@ public final class ShelterSkill implements Skill {
                 continue;
             }
             BlockPos foot = pos.toImmutable();
+            if (!isStandable(world, foot)) {
+                continue;
+            }
+            if (!world.getFluidState(foot).isEmpty() || !world.getFluidState(foot.down()).isEmpty()) {
+                continue;
+            }
+            double sq = origin.getSquaredDistance(foot);
+            if (sq < bestSq) {
+                bestSq = sq;
+                best = foot;
+            }
+        }
+        if (best == null) {
+            return false;
+        }
+        var planOpt = MovementService.planLootApproach(bot, best, MovementService.MovementOptions.skillLoot());
+        if (planOpt.isEmpty()) {
+            return false;
+        }
+        MovementService.MovementResult res = MovementService.execute(source, bot, planOpt.get(), false, true, false, false);
+        return res.success();
+    }
+
+    private boolean tryRelocateToNearbySurfaceOpening(ServerCommandSource source,
+                                                      ServerPlayerEntity bot,
+                                                      ServerWorld world,
+                                                      BlockPos origin,
+                                                      int radius) {
+        if (source == null || bot == null || world == null || origin == null) {
+            return false;
+        }
+        // If we're already sky-visible, there's nothing to do.
+        if (world.isSkyVisible(origin.up())) {
+            return false;
+        }
+        BlockPos best = null;
+        double bestSq = Double.MAX_VALUE;
+        for (BlockPos pos : BlockPos.iterate(origin.add(-radius, -2, -radius), origin.add(radius, 2, radius))) {
+            if (!world.isChunkLoaded(pos)) {
+                continue;
+            }
+            BlockPos foot = pos.toImmutable();
+            if (!world.isSkyVisible(foot.up())) {
+                continue;
+            }
             if (!isStandable(world, foot)) {
                 continue;
             }
