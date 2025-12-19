@@ -53,6 +53,8 @@ Historical record and reasoning. `TODO.md` is the source of truth for what’s n
 - Shelter: fixed hovel placement reach logic (avoid “standable but still out of reach” spots) and will report an incomplete build instead of claiming success when most placements fail.
 - Shelter: hovel placement now tries multiple nearby stand positions for each block and places the roof from perimeter → center for reliable support (reduces “swing but no block placed” frustration).
 - Shelter: hovel walls are now taller (+2 blocks) and will use temporary pillar scaffolds (then mine them back down) to place higher wall layers and roofs more reliably.
+- Shelter: hovel now avoids “using trees as walls/roof” by scoring away from vegetation, clearing obstructive leaves/logs at the build site, and treating leaf/log blocks in the shell/roof as gaps to replace with proper build blocks.
+- Shelter: hovel resource gathering now prefers a cleaner “descent 6 + stripmine until enough blocks + climb back the same way” loop instead of roaming `collect_dirt`, and it will place/find a nearby chest to dump common junk when inventory fills during building.
 - Commands: `/bot open` supports “last targeted bot” (no alias) and `/bot skill` now remembers the active-bot fallback target so follow/open/etc can default correctly after skill commands like `shelter hovel`.
 - Follow: follow no longer runs blocking movement/path loops on the server thread; it now sprints when >2 blocks away and uses a wolf-style teleport catch-up only when far/stuck (with cooldown).
 - Storage: prevent “remote” chest deposits/withdrawals through doors/walls by requiring survival-like reach + line-of-sight checks before moving items.
