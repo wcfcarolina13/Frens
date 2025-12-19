@@ -2,6 +2,7 @@ package net.shasankp000.GameAI.skills.impl;
 
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
@@ -9,11 +10,13 @@ import net.minecraft.registry.tag.BlockTags;
 import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
+import net.minecraft.entity.Entity;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 import net.shasankp000.ChatUtils.ChatUtils;
 import net.shasankp000.GameAI.BotActions;
+import net.shasankp000.GameAI.BotEventHandler;
 import net.shasankp000.GameAI.DropSweeper;
 import net.shasankp000.GameAI.services.MovementService;
 import net.shasankp000.GameAI.services.BlockInteractionService;
@@ -31,6 +34,8 @@ import net.shasankp000.GameAI.skills.support.TreeDetector;
 import net.shasankp000.GameAI.services.SkillResumeService;
 import net.shasankp000.FunctionCaller.SharedStateUtils;
 import net.shasankp000.PlayerUtils.MiningTool;
+import net.shasankp000.Entity.AutoFaceEntity;
+import net.shasankp000.EntityUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -89,6 +94,7 @@ public final class ShelterSkill implements Skill {
     private record ActiveBuildSite(BlockPos center, int radius, Direction doorSide, int wallHeight) {}
     private static final ThreadLocal<ActiveBuildSite> ACTIVE_BUILD_SITE = new ThreadLocal<>();
     private static final ThreadLocal<Long> LAST_RECENTER_MS = ThreadLocal.withInitial(() -> 0L);
+    private static final ThreadLocal<Long> LAST_COMBAT_YIELD_MS = ThreadLocal.withInitial(() -> 0L);
 
     @Override
     public String name() {
@@ -280,6 +286,7 @@ public final class ShelterSkill implements Skill {
         } finally {
             ACTIVE_BUILD_SITE.remove();
             LAST_RECENTER_MS.remove();
+            LAST_COMBAT_YIELD_MS.remove();
         }
     }
 
@@ -451,6 +458,9 @@ public final class ShelterSkill implements Skill {
 
     private boolean placeBlockDirectIfWithinReach(ServerPlayerEntity bot, BlockPos pos, BuildCounters counters) {
         if (bot == null || pos == null) {
+            return false;
+        }
+        if (yieldToImmediateThreats(bot, 2_000L)) {
             return false;
         }
         Vec3d center = Vec3d.ofCenter(pos);
@@ -1876,6 +1886,9 @@ public final class ShelterSkill implements Skill {
     }
 
     private boolean placeBlock(ServerPlayerEntity bot, BlockPos pos, BuildCounters counters) {
+        if (yieldToImmediateThreats(bot, 2_000L)) {
+            return false;
+        }
         Item blockItem = selectBuildItem(bot);
         if (blockItem == null) {
             if (counters != null) {
@@ -2002,6 +2015,9 @@ public final class ShelterSkill implements Skill {
         if (!(bot.getEntityWorld() instanceof ServerWorld)) {
             return;
         }
+        if (yieldToImmediateThreats(bot, 2_000L)) {
+            return;
+        }
         try {
             MiningTool.mineBlock(bot, pos).get(3_000, TimeUnit.MILLISECONDS);
         } catch (Exception e) {
@@ -2109,6 +2125,9 @@ public final class ShelterSkill implements Skill {
         if (bot == null || target == null) {
             return false;
         }
+        if (yieldToImmediateThreats(bot, 3_500L)) {
+            return false;
+        }
         Vec3d center = Vec3d.ofCenter(target);
         Vec3d botPos = new Vec3d(bot.getX(), bot.getY(), bot.getZ());
         double maxReachSq = 20.25D; // ~4.5 blocks (survival reach)
@@ -2176,6 +2195,9 @@ public final class ShelterSkill implements Skill {
         }
 
         LAST_RECENTER_MS.set(now);
+        if (yieldToImmediateThreats(bot, 2_500L)) {
+            return false;
+        }
         var planOpt = MovementService.planLootApproach(bot, stand, MovementService.MovementOptions.skillLoot());
         if (planOpt.isEmpty()) {
             return false;
@@ -2183,6 +2205,61 @@ public final class ShelterSkill implements Skill {
         MovementService.MovementResult res = MovementService.execute(source, bot, planOpt.get(), false, true, false, false);
         if (!res.success()) {
             return false;
+        }
+        return true;
+    }
+
+    /**
+     * While building, if hostiles are nearby, temporarily yield so the bot can defend itself.
+     * This avoids "hopping around" from shelter movement fighting combat movement.
+     *
+     * @return true if hostiles are still present after waiting (caller should skip its action for now).
+     */
+    private boolean yieldToImmediateThreats(ServerPlayerEntity bot, long maxWaitMs) {
+        if (bot == null) {
+            return false;
+        }
+        MinecraftServer server = bot.getCommandSource() != null ? bot.getCommandSource().getServer() : null;
+        if (server == null) {
+            return false;
+        }
+        long now = System.currentTimeMillis();
+        long last = LAST_COMBAT_YIELD_MS.get() == null ? 0L : LAST_COMBAT_YIELD_MS.get();
+        // Throttle so multiple placement attempts in the same tick don't spam scans/sleeps.
+        if (now - last < 250L) {
+            return false;
+        }
+
+        List<Entity> hostiles = AutoFaceEntity.detectNearbyEntities(bot, 10.0D)
+                .stream()
+                .filter(EntityUtil::isHostile)
+                .toList();
+        if (hostiles.isEmpty()) {
+            return false;
+        }
+
+        LAST_COMBAT_YIELD_MS.set(now);
+        BotEventHandler.engageImmediateThreats(bot);
+
+        long deadline = now + Math.max(250L, maxWaitMs);
+        long lastEngage = now;
+        while (System.currentTimeMillis() < deadline) {
+            if (SkillManager.shouldAbortSkill(bot)) {
+                return true;
+            }
+            sleepQuiet(250L);
+            hostiles = AutoFaceEntity.detectNearbyEntities(bot, 10.0D)
+                    .stream()
+                    .filter(EntityUtil::isHostile)
+                    .toList();
+            if (hostiles.isEmpty()) {
+                return false;
+            }
+            long t = System.currentTimeMillis();
+            if (t - lastEngage >= 900L) {
+                BotEventHandler.engageImmediateThreats(bot);
+                lastEngage = t;
+            }
         }
         return true;
     }
