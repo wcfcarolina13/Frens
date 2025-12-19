@@ -1788,6 +1788,18 @@ public class modCommandRegistry {
         net.minecraft.item.ItemStack off = bot.getOffHandStack();
         lines.add("§6Offhand§r " + (off.isEmpty() ? "-" : formatItemForChat(off)));
 
+        // Stats (basic visibility for persistence verification)
+        float health = bot.getHealth();
+        float maxHealth = bot.getMaxHealth();
+        int food = bot.getHungerManager().getFoodLevel();
+        float saturation = bot.getHungerManager().getSaturationLevel();
+        int xpLevel = bot.experienceLevel;
+        float xpProgress = bot.experienceProgress;
+        int xpTotal = bot.totalExperience;
+        lines.add("§6Stats§r");
+        lines.add(String.format(Locale.ROOT, " Health: %.1f/%.1f  Food: %d  Sat: %.1f", health, maxHealth, food, saturation));
+        lines.add(String.format(Locale.ROOT, " XP: level %d (%.0f%%)  TotalXP: %d", xpLevel, xpProgress * 100.0F, xpTotal));
+
         String header = "Inventory for " + bot.getName().getString();
         sendPaged(source, header, lines);
         return 1;
@@ -2519,7 +2531,18 @@ public class modCommandRegistry {
 
     static int executeSkillTargets(CommandContext<ServerCommandSource> context, String skillName, String rawInput) throws CommandSyntaxException {
         SkillCommandInvocation invocation = parseSkillInvocation(context.getSource(), rawInput);
-        List<ServerPlayerEntity> targets = BotTargetingService.resolve(context.getSource(), invocation.target());
+        List<ServerPlayerEntity> targets;
+        try {
+            targets = BotTargetingService.resolve(context.getSource(), invocation.target());
+        } catch (CommandSyntaxException e) {
+            // If no explicit/remembered bot target exists for this sender, fall back to the "active bot"
+            // selection that many non-broadcast commands use (keeps /bot skill usable without requiring an alias).
+            if (invocation.target() == null) {
+                targets = List.of(getActiveBotOrThrow(context));
+            } else {
+                throw e;
+            }
+        }
         int successes = 0;
         String rawArgs = invocation.arguments();
 
@@ -3002,10 +3025,15 @@ public class modCommandRegistry {
             }
         }
         String target = null;
-        if (!tokens.isEmpty() && BotTargetingService.isKnownTarget(server, tokens.get(tokens.size() - 1))) {
-            target = tokens.remove(tokens.size() - 1);
-        } else if (!tokens.isEmpty() && BotTargetingService.isKnownTarget(server, tokens.get(0))) {
-            target = tokens.remove(0);
+        if (!tokens.isEmpty()) {
+            // Allow the target to appear anywhere in the skill argument list (e.g., "ascend Jake 5").
+            for (int i = tokens.size() - 1; i >= 0; i--) {
+                String token = tokens.get(i);
+                if (BotTargetingService.isKnownTarget(server, token)) {
+                    target = tokens.remove(i);
+                    break;
+                }
+            }
         }
         String arguments = tokens.isEmpty() ? null : String.join(" ", tokens);
         return new SkillCommandInvocation(target, arguments, each);
@@ -3027,16 +3055,22 @@ public class modCommandRegistry {
                 String token = tokens[i];
                 
                 // Check for ascent (relative: climb UP by N blocks)
-                if ("ascent".equalsIgnoreCase(token) && i + 1 < tokens.length) {
-                    String numStr = tokens[++i];
-                    try {
-                        ascentBlocks = Math.abs(Integer.parseInt(numStr)); // Always positive
-                        LOGGER.info("Parsed ascent: climb UP by {} blocks", ascentBlocks);
-                        continue;
-                    } catch (NumberFormatException ignored) {
-                        LOGGER.warn("Invalid ascent parameter '{}'", numStr);
-                        continue;
+                if ("ascent".equalsIgnoreCase(token) || "ascend".equalsIgnoreCase(token)) {
+                    // Support both "ascend 5" and "ascend" (default 5 blocks).
+                    if (i + 1 < tokens.length) {
+                        String numStr = tokens[i + 1];
+                        try {
+                            ascentBlocks = Math.abs(Integer.parseInt(numStr)); // Always positive
+                            i++;
+                            LOGGER.info("Parsed ascent: climb UP by {} blocks", ascentBlocks);
+                            continue;
+                        } catch (NumberFormatException ignored) {
+                            // Fall through to default below if the next token isn't a number.
+                        }
                     }
+                    ascentBlocks = 5;
+                    LOGGER.info("Parsed ascent: climb UP by {} blocks (default)", ascentBlocks);
+                    continue;
                 }
                 
                 // Check for ascent-y (absolute: climb UP to Y=N)
@@ -3053,7 +3087,12 @@ public class modCommandRegistry {
                 }
                 
                 // Check for descent (relative: dig DOWN by N blocks)
-                if ("descent".equalsIgnoreCase(token) && i + 1 < tokens.length) {
+                if ("descent".equalsIgnoreCase(token) || "descend".equalsIgnoreCase(token)) {
+                    if (i + 1 >= tokens.length) {
+                        descentBlocks = 5;
+                        LOGGER.info("Parsed descent: dig DOWN by {} blocks (default)", descentBlocks);
+                        continue;
+                    }
                     String numStr = tokens[++i];
                     try {
                         descentBlocks = Math.abs(Integer.parseInt(numStr)); // Always positive
