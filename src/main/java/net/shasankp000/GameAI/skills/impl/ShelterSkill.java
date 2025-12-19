@@ -892,24 +892,32 @@ public final class ShelterSkill implements Skill {
     }
 
     private Direction pickDoorSide(ServerWorld world, BlockPos center, int radius, Direction preferred) {
-        if (preferred != null && isDoorViable(world, center, radius, preferred)) {
-            return preferred;
-        }
+        Direction fallback = preferred != null ? preferred : Direction.NORTH;
+        Direction best = null;
+        int bestCost = Integer.MAX_VALUE;
         for (Direction dir : Direction.Type.HORIZONTAL) {
-            if (isDoorViable(world, center, radius, dir)) {
-                return dir;
+            if (!isDoorViable(world, center, radius, dir)) {
+                continue;
+            }
+            int cost = doorwayCarveCost(world, center, radius, dir);
+            if (cost < bestCost) {
+                bestCost = cost;
+                best = dir;
             }
         }
-        return preferred != null ? preferred : Direction.NORTH;
+        if (best != null) {
+            return best;
+        }
+        // If nothing is viable (water/cliff on all sides), keep the requested side so downstream logic is stable.
+        return fallback;
     }
 
     private boolean isDoorViable(ServerWorld world, BlockPos center, int radius, Direction side) {
         if (world == null || center == null || side == null) {
             return false;
         }
-        int floorY = center.getY();
-        BlockPos doorLower = center.offset(side, radius);
-        BlockPos doorUpper = doorLower.up(1);
+        BlockPos doorLower = doorLower(center, radius, side);
+        BlockPos doorUpper = doorUpper(doorLower);
         BlockState lower = world.getBlockState(doorLower);
         BlockState upper = world.getBlockState(doorUpper);
         if (!isDoorwayClearable(lower) || !isDoorwayClearable(upper)) {
@@ -919,12 +927,28 @@ public final class ShelterSkill implements Skill {
         if (world.getBlockState(support).getCollisionShape(world, support).isEmpty()) {
             return false;
         }
-        BlockPos outside = center.offset(side, radius + 1);
+        BlockPos outside = outsideStep(center, radius, side);
         BlockPos outsideSupport = outside.down();
         if (!world.getFluidState(outside).isEmpty() || !world.getFluidState(outsideSupport).isEmpty()) {
             return false;
         }
         return !world.getBlockState(outsideSupport).getCollisionShape(world, outsideSupport).isEmpty();
+    }
+
+    private int doorwayCarveCost(ServerWorld world, BlockPos center, int radius, Direction side) {
+        if (world == null || center == null || side == null) {
+            return Integer.MAX_VALUE;
+        }
+        BlockPos lower = doorLower(center, radius, side);
+        BlockPos upper = doorUpper(lower);
+        int cost = 0;
+        if (!world.getBlockState(lower).isAir()) cost++;
+        if (!world.getBlockState(upper).isAir()) cost++;
+        BlockPos outside = outsideStep(center, radius, side);
+        BlockPos outsideSupport = outside.down();
+        if (world.getBlockState(outsideSupport).getCollisionShape(world, outsideSupport).isEmpty()) cost += 4;
+        if (!world.getFluidState(outside).isEmpty() || !world.getFluidState(outsideSupport).isEmpty()) cost += 6;
+        return cost;
     }
 
     private boolean isDoorwayClearable(BlockState state) {
@@ -937,6 +961,22 @@ public final class ShelterSkill implements Skill {
         if (state.isOf(Blocks.SNOW) || state.isOf(Blocks.SNOW_BLOCK)) return true;
         // Treat our own cheap build materials as clearable so we can carve a doorway if we closed it in.
         return isLikelyRoofMaterial(state);
+    }
+
+    private BlockPos doorLower(BlockPos center, int radius, Direction side) {
+        return center.offset(side, radius);
+    }
+
+    private BlockPos doorUpper(BlockPos doorLower) {
+        return doorLower.up(1);
+    }
+
+    private BlockPos insideApproach(BlockPos center, int radius, Direction side) {
+        return center.offset(side, Math.max(1, radius - 1));
+    }
+
+    private BlockPos outsideStep(BlockPos center, int radius, Direction side) {
+        return center.offset(side, radius + 1);
     }
 
     private boolean moveToBuildSite(ServerCommandSource source, ServerPlayerEntity bot, BlockPos center) {
@@ -1000,8 +1040,8 @@ public final class ShelterSkill implements Skill {
         if (pos.getY() != floorY && pos.getY() != floorY + 1) {
             return false;
         }
-        BlockPos doorLower = center.offset(doorSide, radius);
-        return pos.equals(doorLower) || pos.equals(doorLower.up(1));
+        BlockPos lower = doorLower(center, radius, doorSide);
+        return pos.equals(lower) || pos.equals(doorUpper(lower));
     }
 
     private int estimateBlockNeed(int radius, int wallHeight) {
@@ -1544,16 +1584,25 @@ public final class ShelterSkill implements Skill {
     }
 
     private void ensureDoorwayOpen(ServerWorld world, ServerPlayerEntity bot, BlockPos center, int radius, Direction doorSide) {
-        if (world == null || bot == null || center == null || doorSide == null) {
+        if (world == null || bot == null || center == null) {
             return;
         }
-        BlockPos doorLower = center.offset(doorSide, radius);
-        BlockPos doorUpper = doorLower.up(1);
-        if (!ensureReach(bot, doorLower)) {
+        Direction chosen = pickDoorSide(world, center, radius, doorSide);
+        BlockPos lower = doorLower(center, radius, chosen);
+        BlockPos upper = doorUpper(lower);
+        BlockPos approach = insideApproach(center, radius, chosen);
+
+        // Move inside in front of the intended doorway so carving is always in-reach.
+        moveToBuildSite(bot.getCommandSource(), bot, approach);
+
+        BlockState lowerState = world.getBlockState(lower);
+        BlockState upperState = world.getBlockState(upper);
+        if (!isDoorwayClearable(lowerState) || !isDoorwayClearable(upperState)) {
+            LOGGER.warn("Shelter: doorway blocks not clearable at {} / {}", lower.toShortString(), upper.toShortString());
             return;
         }
-        clearDoorSoft(world, bot, doorLower);
-        clearDoorSoft(world, bot, doorUpper);
+        clearDoorSoft(world, bot, lower);
+        clearDoorSoft(world, bot, upper);
     }
 
     private void ensureBuildChestAndDeposit(ServerCommandSource source, ServerWorld world, ServerPlayerEntity bot, BlockPos center, int radius) {
@@ -1839,8 +1888,8 @@ public final class ShelterSkill implements Skill {
             return;
         }
         int floorY = center.getY();
-        BlockPos doorLower = center.offset(doorSide, radius);
-        BlockPos doorUpper = doorLower.up(1);
+        BlockPos doorLower = doorLower(center, radius, doorSide);
+        BlockPos doorUpper = doorUpper(doorLower);
         clearDoorSoft(world, bot, doorLower);
         clearDoorSoft(world, bot, doorUpper);
         if (!ensureReach(bot, doorLower)) {

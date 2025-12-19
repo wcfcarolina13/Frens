@@ -28,6 +28,7 @@ Historical record and reasoning. `TODO.md` is the source of truth for what’s n
 - Placement: block placement now requires line-of-sight to the supporting click block (prevents placing blocks “through” other blocks, e.g., placing above the roof while still inside).
 - Placement: placement hit results are now raycast-derived (must hit the intended support block *and face*), preventing “clicking the top face from below” exploits that allowed through-roof placements.
 - Shelter: doorway viability/clearing now uses the same floor-level door coordinates as the build logic and ensures the bot walks into reach before carving the opening.
+- Shelter: doorway selection now re-evaluates all sides at build time (lowest carve cost + safe outside step) and carves from an interior approach tile, so the bot can recover even if it forgot the original doorway location.
 - Farming: secured irrigation basins on uneven terrain (fills edges/underblocks, cleans stray flow), repair pass now levels plots to farm Y before re-till/plant, and leaves are broken with shears/harmless items (no axe wear).
 - Wool skill: peaceful shearing that crafts/equips shears if needed, detects pens vs. wild range (fence-aware search), collects drops, and auto-deposits bulk blocks to nearby chests to keep ≥5 free slots.
 - Wool: `/bot stop` now interrupts movement/drop-sweeps immediately; short-range moves avoid full pathfinding to reduce hitching.
