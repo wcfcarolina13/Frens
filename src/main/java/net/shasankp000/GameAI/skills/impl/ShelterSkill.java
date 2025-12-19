@@ -52,6 +52,17 @@ import java.util.concurrent.TimeUnit;
 public final class ShelterSkill implements Skill {
 
     private static final Logger LOGGER = LoggerFactory.getLogger("skill-shelter");
+    private static final List<Item> SCAFFOLD_BLOCKS = List.of(
+            Items.DIRT,
+            Items.COARSE_DIRT,
+            Items.ROOTED_DIRT,
+            Items.GRAVEL,
+            Items.SAND,
+            Items.RED_SAND,
+            Items.COBBLESTONE,
+            Items.COBBLED_DEEPSLATE,
+            Items.NETHERRACK
+    );
     private static final List<Item> BUILD_BLOCKS = List.of(
             Items.DIRT, Items.COARSE_DIRT, Items.ROOTED_DIRT,
             Items.COBBLESTONE, Items.COBBLED_DEEPSLATE,
@@ -114,6 +125,15 @@ public final class ShelterSkill implements Skill {
         Object directionParam = context.parameters().get("direction");
         if (directionParam instanceof Direction dir) {
             preferredDoorSide = dir;
+        }
+
+        // If we're clearly underground, get to the surface first (then re-plan the hovel site).
+        int surfaceY = world.getTopY(net.minecraft.world.Heightmap.Type.MOTION_BLOCKING, origin.getX(), origin.getZ());
+        if (bot.getBlockY() < surfaceY - 3) {
+            boolean surfaced = tryReachSurface(source, bot, world, origin);
+            if (surfaced) {
+                origin = bot.getBlockPos();
+            }
         }
 
         HovelPlan plan = selectHovelPlan(world, bot, origin, radius, wallHeight, preferredDoorSide, context.sharedState(), resumeRequested);
@@ -980,6 +1000,12 @@ public final class ShelterSkill implements Skill {
             return false;
         }
         ChatUtils.sendSystemMessage(source, "I'm underground; climbing toward the surface before building...");
+
+        // Prefer a direct pillar escape if we're in a vertical shaft with headroom.
+        if (tryPillarUpToSurface(bot, world, surfaceY)) {
+            return bot.getBlockY() >= surfaceY - 1;
+        }
+
         CollectDirtSkill stair = new CollectDirtSkill();
         Map<String, Object> shared = new HashMap<>();
         Direction digDir = WorkDirectionService.getDirection(bot.getUuid()).orElse(bot.getHorizontalFacing());
@@ -1021,6 +1047,100 @@ public final class ShelterSkill implements Skill {
             attempts++;
         }
         return bot.getBlockY() >= surfaceY - 1;
+    }
+
+    private boolean tryPillarUpToSurface(ServerPlayerEntity bot, ServerWorld world, int surfaceY) {
+        if (bot == null || world == null) {
+            return false;
+        }
+        // Quick check: ensure we have enough vertical clearance to make pillaring plausible.
+        BlockPos start = bot.getBlockPos();
+        int headroom = countOpenAbove(world, start, 6);
+        if (headroom < 4) {
+            return false;
+        }
+        if (!hasAnyScaffoldBlock(bot)) {
+            return false;
+        }
+        int targetY = Math.max(start.getY() + 1, surfaceY - 1);
+        int maxSteps = Math.min(64, Math.max(0, targetY - start.getY()));
+        if (maxSteps <= 0) {
+            return false;
+        }
+
+        LOGGER.info("Surface escape: attempting pillar climb {} steps from Y={} -> targetY={}", maxSteps, start.getY(), targetY);
+        boolean wasSneaking = bot.isSneaking();
+        bot.setSneaking(true);
+        int stalls = 0;
+        for (int i = 0; i < maxSteps; i++) {
+            if (SkillManager.shouldAbortSkill(bot)) {
+                bot.setSneaking(wasSneaking);
+                return false;
+            }
+            if (bot.getBlockY() >= targetY) {
+                bot.setSneaking(wasSneaking);
+                return true;
+            }
+            BlockPos feet = bot.getBlockPos();
+            // Need at least 2 blocks of air at/above feet to jump-pillar.
+            if (!world.getBlockState(feet).getCollisionShape(world, feet).isEmpty()) {
+                bot.setSneaking(wasSneaking);
+                return false;
+            }
+            if (!world.getBlockState(feet.up()).getCollisionShape(world, feet.up()).isEmpty()
+                    || !world.getBlockState(feet.up(2)).getCollisionShape(world, feet.up(2)).isEmpty()) {
+                bot.setSneaking(wasSneaking);
+                return false;
+            }
+            int beforeY = bot.getBlockY();
+            BotActions.jump(bot);
+            sleepQuiet(160L);
+            // Place into the current foot block (jump-pillaring). If this fails, bail out to ascent/stripmine.
+            boolean placed = BotActions.placeBlockAt(bot, feet, Direction.UP, SCAFFOLD_BLOCKS);
+            sleepQuiet(160L);
+            if (!placed) {
+                bot.setSneaking(wasSneaking);
+                return false;
+            }
+            int afterY = bot.getBlockY();
+            if (afterY <= beforeY) {
+                stalls++;
+                if (stalls >= 3) {
+                    bot.setSneaking(wasSneaking);
+                    return false;
+                }
+            } else {
+                stalls = 0;
+            }
+        }
+        bot.setSneaking(wasSneaking);
+        return bot.getBlockY() >= targetY;
+    }
+
+    private int countOpenAbove(ServerWorld world, BlockPos start, int max) {
+        int open = 0;
+        for (int i = 1; i <= max; i++) {
+            BlockPos pos = start.up(i);
+            if (!world.getBlockState(pos).getCollisionShape(world, pos).isEmpty()) {
+                break;
+            }
+            open++;
+        }
+        return open;
+    }
+
+    private boolean hasAnyScaffoldBlock(ServerPlayerEntity bot) {
+        if (bot == null) {
+            return false;
+        }
+        for (int i = 0; i < bot.getInventory().size(); i++) {
+            ItemStack stack = bot.getInventory().getStack(i);
+            if (stack.isEmpty()) continue;
+            if (SCAFFOLD_BLOCKS.contains(stack.getItem())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private void ensureClearBuildSiteWithWoodcut(ServerCommandSource source, ServerPlayerEntity bot, ServerWorld world, BlockPos center, int radius) {
