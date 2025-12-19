@@ -140,7 +140,8 @@ public final class ShelterSkill implements Skill {
         // If we're clearly underground, get to the surface first (then re-plan the hovel site).
         int surfaceY = world.getTopY(net.minecraft.world.Heightmap.Type.MOTION_BLOCKING_NO_LEAVES, origin.getX(), origin.getZ());
         boolean skyVisible = world.isSkyVisible(origin.up());
-        if (!skyVisible && bot.getBlockY() < surfaceY - 3) {
+        boolean underArtificialRoof = isLikelyUnderArtificialRoof(world, origin, 7);
+        if (!skyVisible && !underArtificialRoof && bot.getBlockY() < surfaceY - 3) {
             // If we're simply under a roof/walls near the surface, relocate to a nearby sky-visible opening
             // instead of trying to mine upward (which can hit shoreline water and abort).
             if (tryRelocateToNearbySurfaceOpening(source, bot, world, origin, 8)) {
@@ -156,7 +157,7 @@ public final class ShelterSkill implements Skill {
             }
         }
         surfaceY = world.getTopY(net.minecraft.world.Heightmap.Type.MOTION_BLOCKING_NO_LEAVES, origin.getX(), origin.getZ());
-        if (!world.isSkyVisible(origin.up()) && bot.getBlockY() < surfaceY - 2) {
+        if (!world.isSkyVisible(origin.up()) && !underArtificialRoof && bot.getBlockY() < surfaceY - 2) {
             return SkillExecutionResult.failure("I can't build a surface shelter while underground; I couldn't reach the surface.");
         }
 
@@ -1431,6 +1432,65 @@ public final class ShelterSkill implements Skill {
         }
         MovementService.MovementResult res = MovementService.execute(source, bot, planOpt.get(), false, true, false, false);
         return res.success();
+    }
+
+    /**
+     * Heuristic: if we're under a "flat-ish" roof made of common build materials, treat this as being indoors,
+     * not underground. This prevents surface-ascent mining from triggering when the bot is inside a completed hovel.
+     */
+    private boolean isLikelyUnderArtificialRoof(ServerWorld world, BlockPos origin, int maxScanUp) {
+        if (world == null || origin == null) {
+            return false;
+        }
+        int scan = Math.max(2, Math.min(12, maxScanUp));
+        BlockPos roof = null;
+        BlockState roofState = null;
+        for (int dy = 1; dy <= scan; dy++) {
+            BlockPos pos = origin.up(dy);
+            BlockState state = world.getBlockState(pos);
+            if (state.getCollisionShape(world, pos).isEmpty()) {
+                continue;
+            }
+            roof = pos;
+            roofState = state;
+            break;
+        }
+        if (roof == null || roofState == null) {
+            return false;
+        }
+        if (!isLikelyRoofMaterial(roofState)) {
+            return false;
+        }
+        // Count nearby matching blocks at the roof Y to confirm it's a roof plane, not a single block.
+        int count = 0;
+        int y = roof.getY();
+        int r = 2;
+        for (int dx = -r; dx <= r; dx++) {
+            for (int dz = -r; dz <= r; dz++) {
+                BlockPos pos = new BlockPos(origin.getX() + dx, y, origin.getZ() + dz);
+                BlockState state = world.getBlockState(pos);
+                if (state.getCollisionShape(world, pos).isEmpty()) {
+                    continue;
+                }
+                if (isLikelyRoofMaterial(state)) {
+                    count++;
+                }
+            }
+        }
+        return count >= 6;
+    }
+
+    private boolean isLikelyRoofMaterial(BlockState state) {
+        if (state == null) {
+            return false;
+        }
+        if (state.isIn(BlockTags.PLANKS)) return true;
+        if (state.isOf(Blocks.DIRT) || state.isOf(Blocks.COARSE_DIRT) || state.isOf(Blocks.ROOTED_DIRT)) return true;
+        if (state.isOf(Blocks.COBBLESTONE) || state.isOf(Blocks.COBBLED_DEEPSLATE)) return true;
+        if (state.isOf(Blocks.ANDESITE) || state.isOf(Blocks.DIORITE) || state.isOf(Blocks.GRANITE)) return true;
+        if (state.isOf(Blocks.SANDSTONE) || state.isOf(Blocks.RED_SANDSTONE)) return true;
+        if (state.isOf(Blocks.NETHERRACK)) return true;
+        return false;
     }
 
     private void ensureClearBuildSiteWithWoodcut(ServerCommandSource source, ServerPlayerEntity bot, ServerWorld world, BlockPos center, int radius) {

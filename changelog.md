@@ -22,6 +22,7 @@ Historical record and reasoning. `TODO.md` is the source of truth for what’s n
 - Placement: block placement now clicks a real supporting block face (prevents “phantom place” attempts where the support check passed but the click target was air).
 - Shelter: hovel no longer misclassifies shallow water/riverbeds as “underground”; if the bot is in water it steps onto nearby dry land first, and “underground” logic is now gated on sky visibility. Also added a lightweight recenter-to-build-site when the bot is dragged far away (e.g., after combat).
 - Shelter: hovel no longer treats “inside an unfinished/roofed hovel” as underground; if the bot is under a roof it will try to relocate to a nearby sky-visible, dry opening before attempting any surface-escape mining.
+- Shelter: improved “indoors vs underground” detection by treating common build-material roof planes overhead as being indoors (prevents false ascent when the bot is placed inside a completed/roofed hovel).
 - Farming: secured irrigation basins on uneven terrain (fills edges/underblocks, cleans stray flow), repair pass now levels plots to farm Y before re-till/plant, and leaves are broken with shears/harmless items (no axe wear).
 - Wool skill: peaceful shearing that crafts/equips shears if needed, detects pens vs. wild range (fence-aware search), collects drops, and auto-deposits bulk blocks to nearby chests to keep ≥5 free slots.
 - Wool: `/bot stop` now interrupts movement/drop-sweeps immediately; short-range moves avoid full pathfinding to reduce hitching.
