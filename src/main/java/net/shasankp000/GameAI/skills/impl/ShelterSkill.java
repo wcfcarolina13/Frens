@@ -161,13 +161,16 @@ public final class ShelterSkill implements Skill {
         clearObstructiveVegetation(world, bot, center, radius, wallHeight);
         int lowWallHeight = Math.min(wallHeight, 3);
         buildHovel(world, bot, center, radius, lowWallHeight, doorSide, counters);
+        ensureBuildChestAndDeposit(source, world, bot, center, radius);
         if (wallHeight > lowWallHeight) {
             buildUpperShellAndRoofWithScaffolds(world, source, bot, center, radius, wallHeight, lowWallHeight, doorSide, counters);
         } else {
             buildRoof(world, bot, center, radius, wallHeight, counters);
         }
+        ensureBuildChestAndDeposit(source, world, bot, center, radius);
         // Patch pass to fill holes (run after scaffold phase so roof exists)
         patchGaps(world, bot, center, radius, wallHeight, doorSide, counters);
+        ensureBuildChestAndDeposit(source, world, bot, center, radius);
         if (hasGaps(world, center, radius, wallHeight, doorSide)) {
             LOGGER.warn("Shelter: gaps detected after first patch; gathering more and repatching.");
             ensureBuildStock(source, bot, estimateBlockNeed(radius, wallHeight) / 2, true, center);
@@ -814,6 +817,9 @@ public final class ShelterSkill implements Skill {
             return 0;
         }
 
+        ChatUtils.sendSystemMessage(source,
+                "Gathering shelter materials: descending 6, stripmining for " + toGather + " blocks, then returning up the same stairs.");
+
         // Cleaner gather: carve a 6-block descent and then stripmine until we have enough blocks,
         // then climb back up the same staircase (reverse direction).
         try {
@@ -855,12 +861,13 @@ public final class ShelterSkill implements Skill {
         SkillExecutionResult descent = stair.execute(new SkillContext(source, shared, descentParams));
         if (!descent.success()) {
             LOGGER.warn("Shelter gather descent failed: {}", descent.message());
+            ChatUtils.sendSystemMessage(source, "Descent failed while gathering: " + descent.message());
         }
 
         StripMineSkill strip = new StripMineSkill();
         int loops = 0;
         while (countBuildBlocks(bot) < neededBlocks && loops < 8 && !SkillManager.shouldAbortSkill(bot)) {
-            ensureBuildChestAndDeposit(source, world, bot, returnPos != null ? returnPos : startPos, 3);
+            ensureBuildChestAndDeposit(source, world, bot, returnPos != null ? returnPos : startPos, 12);
             int shortfall = neededBlocks - countBuildBlocks(bot);
             int segment = Math.max(4, Math.min(14, shortfall / 4));
             Map<String, Object> stripParams = new HashMap<>();
@@ -870,6 +877,7 @@ public final class ShelterSkill implements Skill {
             SkillExecutionResult stripRes = strip.execute(new SkillContext(source, shared, stripParams));
             if (!stripRes.success()) {
                 LOGGER.warn("Shelter gather stripmine failed: {}", stripRes.message());
+                ChatUtils.sendSystemMessage(source, "Stripmine failed while gathering: " + stripRes.message());
                 break;
             }
             loops++;
@@ -885,6 +893,7 @@ public final class ShelterSkill implements Skill {
         SkillExecutionResult ascent = stair.execute(new SkillContext(source, shared, ascentParams));
         if (!ascent.success()) {
             LOGGER.warn("Shelter gather ascent failed: {}", ascent.message());
+            ChatUtils.sendSystemMessage(source, "Ascent failed while returning from gather: " + ascent.message());
         }
 
         // Snap back to the build site if we ended up offset.
@@ -952,7 +961,8 @@ public final class ShelterSkill implements Skill {
         if (emptySlots >= 3) {
             return;
         }
-        BlockPos chestPos = findChestNear(world, center, Math.max(3, radius));
+        ChatUtils.sendSystemMessage(source, "Inventory nearly full; stashing junk items into a nearby chest.");
+        BlockPos chestPos = findChestNear(world, center, Math.max(6, radius));
         if (chestPos == null) {
             // Try placing/crafting a chest inside the planned interior.
             if (!hasItem(bot, Items.CHEST)) {
@@ -973,12 +983,16 @@ public final class ShelterSkill implements Skill {
             }
         }
         if (chestPos == null) {
+            LOGGER.warn("Shelter: inventory full, but no chest available/placable for dumping.");
             return;
         }
 
         int deposited = ChestStoreService.depositMatchingWalkOnly(source, bot, chestPos, stack -> shouldDepositDuringBuild(stack));
         if (deposited > 0) {
             LOGGER.info("Shelter: deposited {} items into chest {}", deposited, chestPos.toShortString());
+            ChatUtils.sendSystemMessage(source, "Deposited " + deposited + " items into the chest.");
+        } else {
+            LOGGER.info("Shelter: inventory near-full but nothing matched deposit filter.");
         }
     }
 
