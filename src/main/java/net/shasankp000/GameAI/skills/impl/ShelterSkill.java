@@ -24,6 +24,8 @@ import net.shasankp000.GameAI.skills.SkillExecutionResult;
 import net.shasankp000.GameAI.skills.impl.CollectDirtSkill;
 import net.shasankp000.GameAI.skills.impl.StripMineSkill;
 import net.shasankp000.GameAI.skills.support.TreeDetector;
+import net.shasankp000.GameAI.services.SkillResumeService;
+import net.shasankp000.FunctionCaller.SharedStateUtils;
 import net.shasankp000.PlayerUtils.MiningTool;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -55,6 +57,12 @@ public final class ShelterSkill implements Skill {
             Items.BAMBOO_PLANKS, Items.CRIMSON_PLANKS, Items.WARPED_PLANKS
     );
 
+    private static final List<Item> DOOR_ITEMS = List.of(
+            Items.OAK_DOOR, Items.SPRUCE_DOOR, Items.BIRCH_DOOR, Items.JUNGLE_DOOR,
+            Items.ACACIA_DOOR, Items.DARK_OAK_DOOR, Items.MANGROVE_DOOR, Items.CHERRY_DOOR,
+            Items.BAMBOO_DOOR, Items.CRIMSON_DOOR, Items.WARPED_DOOR
+    );
+
     @Override
     public String name() {
         return "shelter";
@@ -67,11 +75,11 @@ public final class ShelterSkill implements Skill {
         if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
             return SkillExecutionResult.failure("No world available for shelter.");
         }
-        BlockPos center = bot.getBlockPos();
+        BlockPos origin = bot.getBlockPos();
         String type = getOption(context, "hovel");
         if ("burrow".equalsIgnoreCase(type)) {
             LOGGER.info("Burrow sequence start: descend 5 -> strip 5 -> descend 3 -> hollow");
-            SkillExecutionResult burrowResult = buildBurrow(source, bot, world, center);
+            SkillExecutionResult burrowResult = buildBurrow(source, bot, world, origin);
             if (!burrowResult.success()) {
                 return burrowResult;
             }
@@ -86,18 +94,33 @@ public final class ShelterSkill implements Skill {
             ChatUtils.sendSystemMessage(source, "Emergency burrow built.");
             return SkillExecutionResult.success("Shelter (burrow) built.");
         }
+
+        boolean resumeRequested = SkillResumeService.consumeResumeIntent(bot.getUuid());
         int radius = Math.max(2, Math.min(5, getInt(context, "radius", getInt(context, "count", 3))));
         int wallHeight = 3;
-        int roofY = center.getY() + wallHeight;
-        int neededBlocks = estimateBlockNeed(radius, wallHeight);
+        Direction preferredDoorSide = null;
+        Object directionParam = context.parameters().get("direction");
+        if (directionParam instanceof Direction dir) {
+            preferredDoorSide = dir;
+        }
+
+        HovelPlan plan = selectHovelPlan(world, bot, origin, radius, wallHeight, preferredDoorSide, context.sharedState(), resumeRequested);
+        BlockPos center = plan.center();
+        Direction doorSide = plan.doorSide();
+
+        if (!moveToBuildSite(source, bot, center)) {
+            return SkillExecutionResult.failure("I couldn't reach a safe spot to build a hovel.");
+        }
+
+        int neededBlocks = estimatePlacementNeed(world, center, radius, wallHeight, doorSide);
         int available = countBuildBlocks(bot);
         LOGGER.info("Shelter: center={}, radius={}, wallHeight={}, estBlocks={}, available={}", center.toShortString(), radius, wallHeight, neededBlocks, available);
-        boolean allowAutoGather = hasOption(context, "proceed", "collect", "gather", "auto");
+        boolean allowAutoGather = resumeRequested || hasOption(context, "proceed", "collect", "gather", "auto");
         announceResources(source, neededBlocks, available, allowAutoGather);
         int shortage = Math.max(0, neededBlocks - available);
         if (shortage > 0 && !allowAutoGather) {
             String waitMsg = "Shelter needs " + neededBlocks + " cheap blocks (have " + available + ", short " + shortage + "). "
-                    + "Supply at least " + shortage + " or rerun with 'proceed' to let me gather.";
+                    + "Run '/bot resume " + bot.getName().getString() + "' to allow me to gather the shortfall, or rerun with 'proceed'.";
             LOGGER.warn("Shelter paused for materials: {}", waitMsg);
             ChatUtils.sendSystemMessage(source, waitMsg);
             return SkillExecutionResult.failure("Shelter waiting for materials.");
@@ -114,18 +137,267 @@ public final class ShelterSkill implements Skill {
 
         // Clear interior and shape walls/roof
         levelInterior(world, bot, center, radius);
-        buildHovel(world, bot, center, radius, wallHeight);
+        buildHovel(world, bot, center, radius, wallHeight, doorSide);
         // Patch pass to fill holes
-        patchGaps(world, bot, center, radius, wallHeight);
-        if (hasGaps(world, center, radius, wallHeight)) {
+        patchGaps(world, bot, center, radius, wallHeight, doorSide);
+        if (hasGaps(world, center, radius, wallHeight, doorSide)) {
             LOGGER.warn("Shelter: gaps detected after first patch; gathering more and repatching.");
             ensureBuildStock(source, bot, estimateBlockNeed(radius, wallHeight) / 2, true, center);
-            patchGaps(world, bot, center, radius, wallHeight);
+            patchGaps(world, bot, center, radius, wallHeight, doorSide);
         }
+        placeDoor(world, bot, center, radius, doorSide);
+        placeChest(world, bot, center, radius);
         placeTorches(world, bot, center, radius);
         sweepDrops(source, 12.0, 5.0, 24, 12_000L);
         ChatUtils.sendSystemMessage(source, "Emergency hovel built.");
         return SkillExecutionResult.success("Shelter (hovel) built.");
+    }
+
+    private record HovelPlan(BlockPos center, Direction doorSide) {}
+
+    private HovelPlan selectHovelPlan(ServerWorld world,
+                                      ServerPlayerEntity bot,
+                                      BlockPos origin,
+                                      int radius,
+                                      int wallHeight,
+                                      Direction preferredDoorSide,
+                                      Map<String, Object> sharedState,
+                                      boolean resumeRequested) {
+        if (world == null || bot == null) {
+            return new HovelPlan(origin, preferredDoorSide != null ? preferredDoorSide : Direction.NORTH);
+        }
+        Direction fallbackDoor = preferredDoorSide != null ? preferredDoorSide : bot.getHorizontalFacing();
+        if (sharedState == null) {
+            sharedState = new HashMap<>();
+        }
+
+        String prefix = "shelter.hovel." + bot.getUuid() + ".";
+        if (resumeRequested) {
+            Object xObj = SharedStateUtils.getValue(sharedState, prefix + "center.x");
+            Object yObj = SharedStateUtils.getValue(sharedState, prefix + "center.y");
+            Object zObj = SharedStateUtils.getValue(sharedState, prefix + "center.z");
+            if (xObj instanceof Number x && yObj instanceof Number y && zObj instanceof Number z) {
+                BlockPos stored = new BlockPos(x.intValue(), y.intValue(), z.intValue());
+                Direction storedDoor = fallbackDoor;
+                Object doorObj = SharedStateUtils.getValue(sharedState, prefix + "door");
+                if (doorObj instanceof String str) {
+                    try {
+                        storedDoor = Direction.valueOf(str);
+                    } catch (IllegalArgumentException ignored) {
+                    }
+                }
+                return new HovelPlan(stored, storedDoor);
+            }
+        }
+
+        BlockPos best = origin;
+        Direction bestDoor = fallbackDoor;
+        double bestScore = Double.NEGATIVE_INFINITY;
+
+        int scanRadius = 12;
+        int originY = origin.getY();
+        for (int dx = -scanRadius; dx <= scanRadius; dx++) {
+            for (int dz = -scanRadius; dz <= scanRadius; dz++) {
+                int x = origin.getX() + dx;
+                int z = origin.getZ() + dz;
+                int topY = world.getTopY(net.minecraft.world.Heightmap.Type.MOTION_BLOCKING, x, z);
+                BlockPos candidate = new BlockPos(x, topY, z);
+                if (Math.abs(candidate.getY() - originY) > 3) {
+                    continue;
+                }
+                if (!isStandable(world, candidate)) {
+                    continue;
+                }
+                if (hasLiquidInFootprint(world, candidate, radius)) {
+                    continue;
+                }
+                Flatness flatness = evaluateFlatness(world, candidate, radius);
+                if (flatness.maxDelta() > 1) {
+                    continue;
+                }
+                int naturalWalls = countNaturalWalls(world, candidate, radius, wallHeight);
+                double distSq = origin.getSquaredDistance(candidate);
+                double score = naturalWalls * 1.75 - distSq * 0.02 - flatness.maxDelta() * 6.0;
+                if (score > bestScore) {
+                    bestScore = score;
+                    best = candidate;
+                }
+            }
+        }
+
+        bestDoor = pickDoorSide(world, best, radius, fallbackDoor);
+
+        SharedStateUtils.setValue(sharedState, prefix + "center.x", best.getX());
+        SharedStateUtils.setValue(sharedState, prefix + "center.y", best.getY());
+        SharedStateUtils.setValue(sharedState, prefix + "center.z", best.getZ());
+        SharedStateUtils.setValue(sharedState, prefix + "door", bestDoor.name());
+
+        return new HovelPlan(best, bestDoor);
+    }
+
+    private record Flatness(int minY, int maxY) {
+        int maxDelta() {
+            return maxY - minY;
+        }
+    }
+
+    private Flatness evaluateFlatness(ServerWorld world, BlockPos center, int radius) {
+        int minY = Integer.MAX_VALUE;
+        int maxY = Integer.MIN_VALUE;
+        for (int dx = -radius; dx <= radius; dx++) {
+            for (int dz = -radius; dz <= radius; dz++) {
+                int x = center.getX() + dx;
+                int z = center.getZ() + dz;
+                int topY = world.getTopY(net.minecraft.world.Heightmap.Type.MOTION_BLOCKING, x, z);
+                minY = Math.min(minY, topY);
+                maxY = Math.max(maxY, topY);
+            }
+        }
+        if (minY == Integer.MAX_VALUE) {
+            minY = center.getY();
+            maxY = center.getY();
+        }
+        return new Flatness(minY, maxY);
+    }
+
+    private boolean isStandable(ServerWorld world, BlockPos foot) {
+        if (world == null || foot == null) {
+            return false;
+        }
+        BlockPos below = foot.down();
+        BlockState belowState = world.getBlockState(below);
+        if (belowState.getCollisionShape(world, below).isEmpty()) {
+            return false;
+        }
+        BlockState footState = world.getBlockState(foot);
+        if (!footState.getCollisionShape(world, foot).isEmpty()) {
+            return false;
+        }
+        BlockState headState = world.getBlockState(foot.up());
+        return headState.getCollisionShape(world, foot.up()).isEmpty();
+    }
+
+    private boolean hasLiquidInFootprint(ServerWorld world, BlockPos center, int radius) {
+        for (int dx = -radius; dx <= radius; dx++) {
+            for (int dz = -radius; dz <= radius; dz++) {
+                BlockPos pos = center.add(dx, 0, dz);
+                if (!world.getFluidState(pos).isEmpty() || !world.getFluidState(pos.down()).isEmpty()) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private int countNaturalWalls(ServerWorld world, BlockPos center, int radius, int wallHeight) {
+        int floorY = center.getY();
+        int count = 0;
+        for (int dx = -radius; dx <= radius; dx++) {
+            for (int dz = -radius; dz <= radius; dz++) {
+                boolean perimeter = Math.abs(dx) == radius || Math.abs(dz) == radius;
+                if (!perimeter) continue;
+                for (int y = 1; y <= wallHeight; y++) {
+                    BlockPos pos = new BlockPos(center.getX() + dx, floorY + y, center.getZ() + dz);
+                    BlockState state = world.getBlockState(pos);
+                    if (!state.isAir() && !state.isReplaceable() && !state.isIn(BlockTags.LEAVES)) {
+                        count++;
+                    }
+                }
+            }
+        }
+        return count;
+    }
+
+    private Direction pickDoorSide(ServerWorld world, BlockPos center, int radius, Direction preferred) {
+        if (preferred != null && isDoorViable(world, center, radius, preferred)) {
+            return preferred;
+        }
+        for (Direction dir : Direction.Type.HORIZONTAL) {
+            if (isDoorViable(world, center, radius, dir)) {
+                return dir;
+            }
+        }
+        return preferred != null ? preferred : Direction.NORTH;
+    }
+
+    private boolean isDoorViable(ServerWorld world, BlockPos center, int radius, Direction side) {
+        if (world == null || center == null || side == null) {
+            return false;
+        }
+        int floorY = center.getY();
+        BlockPos doorLower = center.offset(side, radius).up(1);
+        BlockPos doorUpper = doorLower.up(1);
+        BlockState lower = world.getBlockState(doorLower);
+        BlockState upper = world.getBlockState(doorUpper);
+        if ((!lower.isAir() && !lower.isReplaceable() && !lower.isIn(BlockTags.LEAVES)) ||
+                (!upper.isAir() && !upper.isReplaceable() && !upper.isIn(BlockTags.LEAVES))) {
+            return false;
+        }
+        BlockPos support = new BlockPos(doorLower.getX(), floorY, doorLower.getZ());
+        return !world.getBlockState(support).getCollisionShape(world, support).isEmpty();
+    }
+
+    private boolean moveToBuildSite(ServerCommandSource source, ServerPlayerEntity bot, BlockPos center) {
+        if (bot == null || center == null) {
+            return false;
+        }
+        if (bot.getBlockPos().getSquaredDistance(center) <= 4.0D) {
+            return true;
+        }
+        var planOpt = MovementService.planLootApproach(bot, center, MovementService.MovementOptions.skillLoot());
+        if (planOpt.isEmpty()) {
+            return false;
+        }
+        var res = MovementService.execute(source, bot, planOpt.get(), false, true, false, false);
+        return res.success();
+    }
+
+    private int estimatePlacementNeed(ServerWorld world, BlockPos center, int radius, int wallHeight, Direction doorSide) {
+        int floorY = center.getY();
+        int roofY = floorY + wallHeight;
+        int needed = 0;
+        for (int dx = -radius; dx <= radius; dx++) {
+            for (int dz = -radius; dz <= radius; dz++) {
+                boolean perimeter = Math.abs(dx) == radius || Math.abs(dz) == radius;
+                BlockPos floor = new BlockPos(center.getX() + dx, floorY, center.getZ() + dz);
+                BlockState floorState = world.getBlockState(floor);
+                if (floorState.isAir() || floorState.isReplaceable() || floorState.isIn(BlockTags.LEAVES)) {
+                    needed++;
+                }
+                if (perimeter) {
+                    for (int y = floorY + 1; y <= roofY; y++) {
+                        BlockPos pos = new BlockPos(center.getX() + dx, y, center.getZ() + dz);
+                        if (isDoorGap(pos, center, radius, doorSide, floorY)) {
+                            continue;
+                        }
+                        BlockState state = world.getBlockState(pos);
+                        if (state.isAir() || state.isReplaceable() || state.isIn(BlockTags.LEAVES) || state.isOf(Blocks.SNOW)) {
+                            needed++;
+                        }
+                    }
+                }
+                BlockPos roof = new BlockPos(center.getX() + dx, roofY, center.getZ() + dz);
+                if (isDoorGap(roof, center, radius, doorSide, floorY)) {
+                    // roof is above door gap; still needs roof, so do not skip
+                }
+                BlockState roofState = world.getBlockState(roof);
+                if (roofState.isAir() || roofState.isReplaceable() || roofState.isIn(BlockTags.LEAVES)) {
+                    needed++;
+                }
+            }
+        }
+        return needed + 8;
+    }
+
+    private boolean isDoorGap(BlockPos pos, BlockPos center, int radius, Direction doorSide, int floorY) {
+        if (doorSide == null || pos == null || center == null) {
+            return false;
+        }
+        if (pos.getY() != floorY + 1 && pos.getY() != floorY + 2) {
+            return false;
+        }
+        BlockPos doorLower = center.offset(doorSide, radius).up(1);
+        return pos.equals(doorLower) || pos.equals(doorLower.up(1));
     }
 
     private int estimateBlockNeed(int radius, int wallHeight) {
@@ -218,7 +490,7 @@ public final class ShelterSkill implements Skill {
         }
     }
 
-    private void buildHovel(ServerWorld world, ServerPlayerEntity bot, BlockPos center, int radius, int wallHeight) {
+    private void buildHovel(ServerWorld world, ServerPlayerEntity bot, BlockPos center, int radius, int wallHeight, Direction doorSide) {
         int floorY = center.getY();
         int roofY = floorY + wallHeight;
         for (int dx = -radius; dx <= radius; dx++) {
@@ -238,6 +510,10 @@ public final class ShelterSkill implements Skill {
                 if (perimeter) {
                     for (int y = floorY + 1; y <= roofY; y++) {
                         BlockPos pos = new BlockPos(column.getX(), y, column.getZ());
+                        if (isDoorGap(pos, center, radius, doorSide, floorY)) {
+                            clearDoorSoft(world, bot, pos);
+                            continue;
+                        }
                         BlockState state = world.getBlockState(pos);
                         if (!state.isAir() && !state.isReplaceable()) {
                             continue; // terrain wall is fine
@@ -255,7 +531,7 @@ public final class ShelterSkill implements Skill {
         }
     }
 
-    private void patchGaps(ServerWorld world, ServerPlayerEntity bot, BlockPos center, int radius, int wallHeight) {
+    private void patchGaps(ServerWorld world, ServerPlayerEntity bot, BlockPos center, int radius, int wallHeight, Direction doorSide) {
         int floorY = center.getY();
         int roofY = floorY + wallHeight;
         int roofHoles = 0;
@@ -272,6 +548,9 @@ public final class ShelterSkill implements Skill {
                 if (perimeter) {
                     for (int y = floorY + 1; y <= roofY; y++) {
                         BlockPos pos = center.add(dx, y - floorY, dz);
+                        if (isDoorGap(pos, center, radius, doorSide, floorY)) {
+                            continue;
+                        }
                         BlockState state = world.getBlockState(pos);
                         if (state.isAir() || state.isReplaceable() || state.isIn(BlockTags.LEAVES)) {
                             wallHoles++;
@@ -282,6 +561,74 @@ public final class ShelterSkill implements Skill {
             }
         }
         LOGGER.info("Shelter patch summary: roofHolesFilled={} wallHolesFilled={}", roofHoles, wallHoles);
+    }
+
+    private void clearDoorSoft(ServerWorld world, ServerPlayerEntity bot, BlockPos pos) {
+        if (world == null || bot == null || pos == null) {
+            return;
+        }
+        BlockState state = world.getBlockState(pos);
+        if (state.isAir()) {
+            return;
+        }
+        if (state.isIn(BlockTags.LEAVES) || state.isReplaceable() || state.isOf(Blocks.SNOW)) {
+            mineSoft(bot, pos);
+        }
+    }
+
+    private void placeDoor(ServerWorld world, ServerPlayerEntity bot, BlockPos center, int radius, Direction doorSide) {
+        if (world == null || bot == null || center == null || doorSide == null) {
+            return;
+        }
+        Item doorItem = selectDoorItem(bot);
+        if (doorItem == null) {
+            return;
+        }
+        int floorY = center.getY();
+        BlockPos doorLower = center.offset(doorSide, radius).up(1);
+        BlockPos doorUpper = doorLower.up(1);
+        clearDoorSoft(world, bot, doorLower);
+        clearDoorSoft(world, bot, doorUpper);
+        if (!ensureReach(bot, doorLower)) {
+            return;
+        }
+        if (world.getBlockState(doorLower).isAir() && world.getBlockState(doorUpper).isAir()) {
+            BotActions.placeBlockAt(bot, doorLower, Direction.UP, List.of(doorItem));
+        }
+    }
+
+    private Item selectDoorItem(ServerPlayerEntity bot) {
+        for (int i = 0; i < bot.getInventory().size(); i++) {
+            ItemStack stack = bot.getInventory().getStack(i);
+            if (stack.isEmpty()) continue;
+            if (DOOR_ITEMS.contains(stack.getItem())) {
+                return stack.getItem();
+            }
+        }
+        return null;
+    }
+
+    private void placeChest(ServerWorld world, ServerPlayerEntity bot, BlockPos center, int radius) {
+        if (world == null || bot == null || center == null) {
+            return;
+        }
+        if (!hasItem(bot, Items.CHEST)) {
+            return;
+        }
+        int floorY = center.getY();
+        BlockPos placement = center.add(-radius + 1, 1, -radius + 1);
+        BlockPos floor = new BlockPos(placement.getX(), floorY, placement.getZ());
+        if (world.getBlockState(floor).getCollisionShape(world, floor).isEmpty()) {
+            return;
+        }
+        BlockState state = world.getBlockState(placement);
+        if (!state.isAir() && !state.isReplaceable()) {
+            return;
+        }
+        if (!ensureReach(bot, placement)) {
+            return;
+        }
+        BotActions.placeBlockAt(bot, placement, Direction.UP, List.of(Items.CHEST));
     }
 
     private void clearColumn(ServerWorld world, ServerPlayerEntity bot, BlockPos column, int floorY, int topY) {
@@ -566,7 +913,7 @@ public final class ShelterSkill implements Skill {
         return null;
     }
 
-    private boolean hasGaps(ServerWorld world, BlockPos center, int radius, int wallHeight) {
+    private boolean hasGaps(ServerWorld world, BlockPos center, int radius, int wallHeight, Direction doorSide) {
         int floorY = center.getY();
         int roofY = floorY + wallHeight;
         for (int dx = -radius; dx <= radius; dx++) {
@@ -580,6 +927,9 @@ public final class ShelterSkill implements Skill {
                 if (perimeter) {
                     for (int y = floorY + 1; y <= roofY; y++) {
                         BlockPos pos = center.add(dx, y - floorY, dz);
+                        if (isDoorGap(pos, center, radius, doorSide, floorY)) {
+                            continue;
+                        }
                         BlockState state = world.getBlockState(pos);
                         if (state.isAir() || state.isReplaceable() || state.isIn(BlockTags.LEAVES)) {
                             return true;

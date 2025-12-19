@@ -5,10 +5,10 @@ Pending work only. Completed items and rationale live in `changelog.md`.
 ## P0 — Critical
 - [ ] **Persist bot stats on respawn**: Health/XP/hunger restored with the same alias, logged on save/load, happens before spawn completes.
 - [x] **Upward stairs (ascent) simplification**: Walk-and-jump staircase that keeps controller-facing direction, mines only 3 blocks above each tread, climbs exactly one block per step, aborts with a clear message if Y does not increase.
-- [ ] **Escape when spawned in walls**: Suffocation escape checks all four corners from head to feet, uses tool-based mining only, and throttles alerts to avoid spam.
-- [ ] **Task lifecycle reset & busy-loop prevention**: `/bot stop`/respawn instantly clear the active ticket, release movement overrides, and prevent “Bot is busy” spam in idle RL loops.
-- [ ] **Drop collection in tricky terrain**: Drop sweeps handle shallow water by wading/bridging, hop safely into 1-block holes to vacuum items, and keep cooldown/backoff logic so navigation is not spammed.
-- [ ] **COME/Follow precipice handling**: If walking without teleport hits a large drop/cave, plan a bridge or alternate heading, or edge-scale ascent/descent instead of stalling.
+- [x] **Escape when spawned in walls**: Suffocation escape checks all four corners from head to feet, uses tool-based mining only, and throttles alerts to avoid spam.
+- [x] **Task lifecycle reset & busy-loop prevention**: `/bot stop`/respawn instantly clear the active ticket, release movement overrides, and prevent “Bot is busy” spam in idle RL loops.
+- [x] **Drop collection in tricky terrain**: Drop sweeps handle shallow water by wading/bridging, hop safely into 1-block holes to vacuum items, and keep cooldown/backoff logic so navigation is not spammed.
+- [x] **COME/Follow precipice handling**: If walking without teleport hits a large drop/cave, plan a bridge or alternate heading, or edge-scale ascent/descent instead of stalling.
 
 ## P1 — High
 - [ ] **Protected zones persistence**: JSON-backed zones (position, radius, creator, timestamp, dimension) saved on create/update and loaded on server start.
@@ -22,8 +22,8 @@ Pending work only. Completed items and rationale live in `changelog.md`.
 
 ### Post-Refactor Follow-Up (From Testing Notes)
 - [ ] **Guard verification**: Run in-game tests for `/bot guard` (basic start/stop, radius handling, and interaction with other tasks).
-- [ ] **Come verification**: Confirm `/bot come` reaches in one run (no “direct walk blocked” stall) and does not grief player-placed doors.
-- [ ] **Combat verification**: Confirm close-range combat switches from bow/crossbow to a melee weapon when available.
+- [x] **Come verification**: Confirm `/bot come` reaches in one run (no “direct walk blocked” stall) and does not grief player-placed doors.
+- [x] **Combat verification**: Confirm close-range combat switches from bow/crossbow to a melee weapon when available.
 
 ### Follow / Come
 - [ ] **Follow stability**: Confirm follow continues after other tasks; verify advanced pathfinding stays reliable across dimensions/terrain.
