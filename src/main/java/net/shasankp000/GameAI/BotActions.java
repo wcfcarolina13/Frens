@@ -19,10 +19,12 @@ import net.minecraft.registry.tag.BlockTags;
 import net.minecraft.util.Hand;
 import net.minecraft.util.ActionResult;
 import net.minecraft.util.hit.BlockHitResult;
+import net.minecraft.util.hit.HitResult;
 import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
+import net.minecraft.world.RaycastContext;
 
 import net.shasankp000.GameAI.services.MovementService;
 
@@ -561,6 +563,9 @@ public final class BotActions {
             }
             selectHotbarSlot(bot, slot);
             Vec3d hitVec = Vec3d.ofCenter(support.clickPos());
+            if (!hasLineOfSight(world, bot, hitVec, support.clickPos())) {
+                return false;
+            }
             BlockHitResult hit = new BlockHitResult(hitVec, support.face(), support.clickPos(), false);
             ItemUsageContext usage = new ItemUsageContext(bot, Hand.MAIN_HAND, hit);
             ItemPlacementContext placementContext = new ItemPlacementContext(usage);
@@ -607,6 +612,25 @@ public final class BotActions {
             return new Support(below, Direction.UP);
         }
         return null;
+    }
+
+    private static boolean hasLineOfSight(ServerWorld world, ServerPlayerEntity bot, Vec3d target, BlockPos expectedHit) {
+        if (world == null || bot == null || target == null || expectedHit == null) {
+            return false;
+        }
+        Vec3d start = bot.getEyePos();
+        RaycastContext ctx = new RaycastContext(
+                start,
+                target,
+                RaycastContext.ShapeType.COLLIDER,
+                RaycastContext.FluidHandling.NONE,
+                bot
+        );
+        BlockHitResult hit = world.raycast(ctx);
+        if (hit.getType() == HitResult.Type.MISS) {
+            return true;
+        }
+        return hit.getType() == HitResult.Type.BLOCK && expectedHit.equals(hit.getBlockPos());
     }
 
     public static void escapeStairs(ServerPlayerEntity bot) {

@@ -270,6 +270,7 @@ public final class ShelterSkill implements Skill {
             // (This catches late placement misses from scaffolding or odd footing near edges.)
             levelInterior(world, bot, center, radius);
             patchGaps(world, bot, center, radius, wallHeight, doorSide, counters);
+            ensureDoorwayOpen(world, bot, center, radius, doorSide);
             sweepDrops(source, 12.0, 5.0, 24, 12_000L);
             // Final cleanup deposit after sweeping, if a chest is available.
             ensureBuildChestAndDeposit(source, world, bot, center, radius);
@@ -778,7 +779,7 @@ public final class ShelterSkill implements Skill {
                 if (!perimeter) {
                     continue;
                 }
-                for (int y = floorY + 1; y <= roofY; y++) {
+                for (int y = floorY; y < roofY; y++) {
                     BlockPos pos = new BlockPos(center.getX() + dx, y, center.getZ() + dz);
                     BlockState state = world.getBlockState(pos);
                     if (state.isIn(BlockTags.LEAVES) || state.isIn(BlockTags.LOGS)) {
@@ -876,7 +877,7 @@ public final class ShelterSkill implements Skill {
             for (int dz = -radius; dz <= radius; dz++) {
                 boolean perimeter = Math.abs(dx) == radius || Math.abs(dz) == radius;
                 if (!perimeter) continue;
-                for (int y = 1; y <= wallHeight; y++) {
+                for (int y = 0; y < wallHeight; y++) {
                     BlockPos pos = new BlockPos(center.getX() + dx, floorY + y, center.getZ() + dz);
                     BlockState state = world.getBlockState(pos);
                     if (!state.isAir() && !state.isReplaceable() && !state.isIn(BlockTags.LEAVES)) {
@@ -974,10 +975,11 @@ public final class ShelterSkill implements Skill {
         if (doorSide == null || pos == null || center == null) {
             return false;
         }
-        if (pos.getY() != floorY + 1 && pos.getY() != floorY + 2) {
+        // Door occupies the two blocks the bot walks through (feet block and head block).
+        if (pos.getY() != floorY && pos.getY() != floorY + 1) {
             return false;
         }
-        BlockPos doorLower = center.offset(doorSide, radius).up(1);
+        BlockPos doorLower = center.offset(doorSide, radius);
         return pos.equals(doorLower) || pos.equals(doorLower.up(1));
     }
 
@@ -1524,7 +1526,7 @@ public final class ShelterSkill implements Skill {
         if (world == null || bot == null || center == null || doorSide == null) {
             return;
         }
-        BlockPos doorLower = center.offset(doorSide, radius).up(1);
+        BlockPos doorLower = center.offset(doorSide, radius);
         BlockPos doorUpper = doorLower.up(1);
         clearDoorSoft(world, bot, doorLower);
         clearDoorSoft(world, bot, doorUpper);
@@ -1694,7 +1696,7 @@ public final class ShelterSkill implements Skill {
                 }
                 // Walls
                 if (perimeter) {
-                    for (int y = floorY + 1; y <= roofY; y++) {
+                    for (int y = floorY; y < roofY; y++) {
                         BlockPos pos = new BlockPos(column.getX(), y, column.getZ());
                         if (isDoorGap(pos, center, radius, doorSide, floorY)) {
                             clearDoorSoft(world, bot, pos);
@@ -1771,7 +1773,7 @@ public final class ShelterSkill implements Skill {
                 if (!perimeter) {
                     continue;
                 }
-                for (int y = floorY + 1; y <= roofY; y++) {
+                for (int y = floorY; y < roofY; y++) {
                     BlockPos pos = center.add(dx, y - floorY, dz);
                     if (isDoorGap(pos, center, radius, doorSide, floorY)) {
                         continue;
@@ -1799,7 +1801,7 @@ public final class ShelterSkill implements Skill {
         if (state.isAir()) {
             return;
         }
-        if (state.isIn(BlockTags.LEAVES) || state.isReplaceable() || state.isOf(Blocks.SNOW)) {
+        if (state.isIn(BlockTags.LEAVES) || state.isReplaceable() || state.isOf(Blocks.SNOW) || isLikelyRoofMaterial(state)) {
             mineSoft(bot, pos);
         }
     }
@@ -1813,7 +1815,7 @@ public final class ShelterSkill implements Skill {
             return;
         }
         int floorY = center.getY();
-        BlockPos doorLower = center.offset(doorSide, radius).up(1);
+        BlockPos doorLower = center.offset(doorSide, radius);
         BlockPos doorUpper = doorLower.up(1);
         clearDoorSoft(world, bot, doorLower);
         clearDoorSoft(world, bot, doorUpper);
@@ -2362,6 +2364,8 @@ public final class ShelterSkill implements Skill {
             return false;
         }
 
+        clearDoorSoft(world, bot, doorFoot);
+        clearDoorSoft(world, bot, doorFoot.up(1));
         // If a door exists here, open it before stepping through.
         MovementService.tryOpenDoorToward(bot, doorFoot);
 

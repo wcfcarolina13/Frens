@@ -24,6 +24,8 @@ Historical record and reasoning. `TODO.md` is the source of truth for what’s n
 - Shelter: hovel no longer treats “inside an unfinished/roofed hovel” as underground; if the bot is under a roof it will try to relocate to a nearby sky-visible, dry opening before attempting any surface-escape mining.
 - Shelter: improved “indoors vs underground” detection by treating common build-material roof planes overhead as being indoors (prevents false ascent when the bot is placed inside a completed/roofed hovel).
 - Shelter: while building a hovel, the bot now yields briefly to nearby hostiles and triggers immediate defense (reduces “task movement fighting combat movement” hopping).
+- Shelter: door gap/walls are now aligned to the bot’s walking level (prevents “sealed in” hovels where the doorway existed only at head-height), and a final `ensureDoorwayOpen` runs right before drop-sweeping.
+- Placement: block placement now requires line-of-sight to the supporting click block (prevents placing blocks “through” other blocks, e.g., placing above the roof while still inside).
 - Farming: secured irrigation basins on uneven terrain (fills edges/underblocks, cleans stray flow), repair pass now levels plots to farm Y before re-till/plant, and leaves are broken with shears/harmless items (no axe wear).
 - Wool skill: peaceful shearing that crafts/equips shears if needed, detects pens vs. wild range (fence-aware search), collects drops, and auto-deposits bulk blocks to nearby chests to keep ≥5 free slots.
 - Wool: `/bot stop` now interrupts movement/drop-sweeps immediately; short-range moves avoid full pathfinding to reduce hitching.
