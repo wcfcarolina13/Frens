@@ -1070,14 +1070,18 @@ public class modCommandRegistry {
                                                 return 0;
                                             }
 
-                                            boolean ok = BotInventoryAccess.openBotInventory(viewer, bot);
-                                            if (!ok) {
-                                                source.sendError(Text.literal("Out of range or wrong dimension."));
-                                                return 0;
-                                            }
-                                            return 1;
-                                        })
-                                )
+	                                            boolean ok = BotInventoryAccess.openBotInventory(viewer, bot);
+	                                            if (!ok) {
+	                                                if (viewer.hasPermissionLevel(2)) {
+	                                                    source.sendError(Text.literal("Failed to open bot inventory."));
+	                                                } else {
+	                                                    source.sendError(Text.literal("Out of range or wrong dimension."));
+	                                                }
+	                                                return 0;
+	                                            }
+	                                            return 1;
+	                                        })
+	                                )
                         )
                         .then(CommandManager.argument("inline", StringArgumentType.greedyString())
                                 .executes(context -> executeInlineBotCommand(context, StringArgumentType.getString(context, "inline"))))

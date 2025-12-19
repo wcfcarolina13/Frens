@@ -4,7 +4,7 @@ Pending work only. Completed items and rationale live in `changelog.md`.
 
 ## P0 — Critical
 - [ ] **Persist bot stats on respawn**: Health/XP/hunger restored with the same alias, logged on save/load, happens before spawn completes.
-- [ ] **Upward stairs (ascent) simplification**: Walk-and-jump staircase that keeps controller-facing direction, mines only 3 blocks above each tread, climbs exactly one block per step, aborts with a clear message if Y does not increase.
+- [x] **Upward stairs (ascent) simplification**: Walk-and-jump staircase that keeps controller-facing direction, mines only 3 blocks above each tread, climbs exactly one block per step, aborts with a clear message if Y does not increase.
 - [ ] **Escape when spawned in walls**: Suffocation escape checks all four corners from head to feet, uses tool-based mining only, and throttles alerts to avoid spam.
 - [ ] **Task lifecycle reset & busy-loop prevention**: `/bot stop`/respawn instantly clear the active ticket, release movement overrides, and prevent “Bot is busy” spam in idle RL loops.
 - [ ] **Drop collection in tricky terrain**: Drop sweeps handle shallow water by wading/bridging, hop safely into 1-block holes to vacuum items, and keep cooldown/backoff logic so navigation is not spammed.
@@ -39,7 +39,7 @@ Pending work only. Completed items and rationale live in `changelog.md`.
 - [ ] **Burrow “descend-stripmine-descend”**: Restore intended method; compare with proven descent behavior from `come`.
 
 ### Commands / UX
-- [ ] **Open command admin mode**: Make “open” distance-independent for admins.
+- [x] **Open command admin mode**: Make “open” distance-independent for admins.
 - [ ] **Command pruning review**: Evaluate whether `look_player` and `direction reset` are still needed; deprecate/remove if redundant.
 
 ### Inventory & Items

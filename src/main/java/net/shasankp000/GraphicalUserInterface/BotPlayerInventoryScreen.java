@@ -22,7 +22,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
     private static final int SECTION_WIDTH = 176;
     private static final int SECTION_HEIGHT = 166;
     private static final int BLOCK_GAP = 12;
-    private static final int STATS_AREA_HEIGHT = 28;
+    private static final int STATS_AREA_HEIGHT = 48;
     private OtherClientPlayerEntity fallbackBot;
     private final String botAlias;
     private float lastMouseX;
@@ -58,6 +58,9 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         float health = handler.getBotHealth();
         float maxHealth = handler.getBotMaxHealth();
         int hunger = handler.getBotHunger();
+        int level = handler.getBotLevel();
+        float xpProgress = handler.getBotXpProgress();
+        int totalXp = handler.getBotTotalExperience();
 
         String healthLabel = String.format("Health: %.1f / %.1f", health, maxHealth);
         context.drawText(this.textRenderer, healthLabel, x, y, 0xFFEFEFEF, false);
@@ -65,6 +68,10 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         String hungerLabel = "Hunger: " + hunger;
         context.drawText(this.textRenderer, hungerLabel, x, y + 20, 0xFFEFEFEF, false);
         drawBar(context, x, y + 30, 120, 6, MathHelper.clamp(hunger / 20f, 0.0f, 1.0f), 0xFFE3C05C);
+
+        String xpLabel = String.format("XP: L%d (%d)  %.0f%%", level, totalXp, xpProgress * 100.0F);
+        context.drawText(this.textRenderer, xpLabel, x + 130, y, 0xFFEFEFEF, false);
+        drawBar(context, x + 130, y + 10, 120, 6, xpProgress, 0xFF4FA3E3);
     }
 
     private void drawBar(DrawContext context, int x, int y, int width, int height, float value, int color) {

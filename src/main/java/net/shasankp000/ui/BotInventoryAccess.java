@@ -10,8 +10,11 @@ public final class BotInventoryAccess {
     /** Unified entry point for opening the bot inventory UI. */
     public static boolean openBotInventory(ServerPlayerEntity viewer, ServerPlayerEntity bot) {
         if (viewer == null || bot == null) return false;
-        if (viewer.getEntityWorld() != bot.getEntityWorld()) return false;
-        if (viewer.squaredDistanceTo(bot) > 64.0) return false;
+        // Admin/operator QoL: allow remote opens regardless of distance/dimension.
+        if (!viewer.hasPermissionLevel(2)) {
+            if (viewer.getEntityWorld() != bot.getEntityWorld()) return false;
+            if (viewer.squaredDistanceTo(bot) > 64.0) return false;
+        }
 
         viewer.openHandledScreen(new net.minecraft.screen.SimpleNamedScreenHandlerFactory(
                 (syncId, playerInv, player) ->

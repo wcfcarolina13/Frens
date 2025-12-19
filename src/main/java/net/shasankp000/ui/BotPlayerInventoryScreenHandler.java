@@ -46,7 +46,7 @@ public class BotPlayerInventoryScreenHandler extends ScreenHandler {
         this.playerInventory = playerInventory;
         this.botInventory = botInventory;
         this.botRef = botRef;
-        this.botStats = new ArrayPropertyDelegate(4);
+        this.botStats = new ArrayPropertyDelegate(6);
         this.addProperties(this.botStats);
         refreshStats();
 
@@ -91,6 +91,9 @@ public class BotPlayerInventoryScreenHandler extends ScreenHandler {
     @Override
     public boolean canUse(PlayerEntity player) {
         if (botRef == null) return true;
+        if (player instanceof ServerPlayerEntity serverPlayer && serverPlayer.hasPermissionLevel(2)) {
+            return true;
+        }
         return player.getEntityWorld() == botRef.getEntityWorld() && player.squaredDistanceTo(botRef) <= 64.0;
     }
 
@@ -137,6 +140,8 @@ public class BotPlayerInventoryScreenHandler extends ScreenHandler {
         botStats.set(1, (int) Math.round(botRef.getMaxHealth() * 10));
         botStats.set(2, botRef.getHungerManager().getFoodLevel());
         botStats.set(3, botRef.experienceLevel);
+        botStats.set(4, (int) Math.round(botRef.experienceProgress * 1000.0F));
+        botStats.set(5, botRef.totalExperience);
     }
 
     public float getBotHealth() {
@@ -153,6 +158,14 @@ public class BotPlayerInventoryScreenHandler extends ScreenHandler {
 
     public int getBotLevel() {
         return botStats.get(3);
+    }
+
+    public float getBotXpProgress() {
+        return Math.max(0.0F, Math.min(1.0F, botStats.get(4) / 1000.0F));
+    }
+
+    public int getBotTotalExperience() {
+        return botStats.get(5);
     }
 
     public int getSectionWidth() {

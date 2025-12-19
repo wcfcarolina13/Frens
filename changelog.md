@@ -48,6 +48,7 @@ Historical record and reasoning. `TODO.md` is the source of truth for what’s n
 - Refactor: extracted RL persistence throttling to `src/main/java/net/shasankp000/GameAI/services/BotRLPersistenceThrottleService.java` (no behavior change).
 - Commands: `/bot skill` now accepts bot targets anywhere in the args (e.g., `ascend Jake 5`) and supports `ascend`/`descend` synonyms (defaulting to 5 blocks when no number is given).
 - UX: `/bot inventory` summary now includes bot stats (health/food/XP) so XP/level persistence is visible.
+- UX: `/bot open <alias>` is now distance/dimension independent for ops/admins; the GUI now shows bot XP progress/total XP alongside level.
 - Follow: follow no longer runs blocking movement/path loops on the server thread; it now sprints when >2 blocks away and uses a wolf-style teleport catch-up only when far/stuck (with cooldown).
 - Storage: prevent “remote” chest deposits/withdrawals through doors/walls by requiring survival-like reach + line-of-sight checks before moving items.
 - Safety: rescue-from-burial/suffocation escape no longer mines doors; it will attempt to open them instead (prevents bots breaking enclosure doors).
