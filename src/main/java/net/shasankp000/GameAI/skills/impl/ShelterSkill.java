@@ -26,6 +26,7 @@ import net.shasankp000.GameAI.skills.SkillExecutionResult;
 import net.shasankp000.GameAI.skills.SkillManager;
 import net.shasankp000.GameAI.skills.impl.CollectDirtSkill;
 import net.shasankp000.GameAI.skills.impl.StripMineSkill;
+import net.shasankp000.GameAI.skills.impl.WoodcutSkill;
 import net.shasankp000.GameAI.skills.support.TreeDetector;
 import net.shasankp000.GameAI.services.SkillResumeService;
 import net.shasankp000.FunctionCaller.SharedStateUtils;
@@ -120,8 +121,19 @@ public final class ShelterSkill implements Skill {
         Direction doorSide = plan.doorSide();
 
         if (!moveToBuildSite(source, bot, center)) {
-            return SkillExecutionResult.failure("I couldn't reach a safe spot to build a hovel.");
+            boolean surfaced = tryReachSurface(source, bot, world, origin);
+            if (surfaced) {
+                origin = bot.getBlockPos();
+                plan = selectHovelPlan(world, bot, origin, radius, wallHeight, preferredDoorSide, context.sharedState(), resumeRequested);
+                center = plan.center();
+                doorSide = plan.doorSide();
+            }
+            if (!moveToBuildSite(source, bot, center)) {
+                return SkillExecutionResult.failure("I couldn't reach a safe spot to build a hovel.");
+            }
         }
+
+        ensureClearBuildSiteWithWoodcut(source, bot, world, center, radius);
 
         // Pre-clear leaf litter / tree overhang so we don't end up "using trees as walls/roof".
         clearObstructiveVegetation(world, bot, center, radius, wallHeight);
@@ -182,6 +194,7 @@ public final class ShelterSkill implements Skill {
             }
         }
         placeDoor(world, bot, center, radius, doorSide);
+        ensureDoorwayOpen(world, bot, center, radius, doorSide);
         placeChest(world, bot, center, radius);
         placeTorches(world, bot, center, radius);
         sweepDrops(source, 12.0, 5.0, 24, 12_000L);
@@ -342,14 +355,24 @@ public final class ShelterSkill implements Skill {
         if (world == null || bot == null || center == null) {
             return;
         }
-        for (int dx = -radius; dx <= radius; dx++) {
-            for (int dz = -radius; dz <= radius; dz++) {
-                BlockPos roof = new BlockPos(center.getX() + dx, roofY, center.getZ() + dz);
-                BlockState state = world.getBlockState(roof);
-                if (!state.isAir() && !state.isReplaceable() && !state.isIn(BlockTags.LEAVES) && !state.isOf(Blocks.SNOW)) {
-                    continue;
+        // Perimeter -> center so each placement has neighbor support.
+        for (int ring = radius; ring >= 0; ring--) {
+            for (int dx = -ring; dx <= ring; dx++) {
+                for (int dz = -ring; dz <= ring; dz++) {
+                    if (Math.max(Math.abs(dx), Math.abs(dz)) != ring) {
+                        continue;
+                    }
+                    BlockPos roof = new BlockPos(center.getX() + dx, roofY, center.getZ() + dz);
+                    BlockState state = world.getBlockState(roof);
+                    if (!state.isAir()
+                            && !state.isReplaceable()
+                            && !state.isIn(BlockTags.LEAVES)
+                            && !state.isIn(BlockTags.LOGS)
+                            && !state.isOf(Blocks.SNOW)) {
+                        continue;
+                    }
+                    placeBlockDirectIfWithinReach(bot, roof, counters);
                 }
-                placeBlockDirectIfWithinReach(bot, roof, counters);
             }
         }
     }
@@ -409,31 +432,32 @@ public final class ShelterSkill implements Skill {
             if (!world.getBlockState(candidate).isAir()) {
                 candidate = candidate.up();
             }
-            if (!tryPlaceScaffold(bot, candidate)) {
+            BlockPos placed = tryPlaceScaffold(bot, candidate);
+            if (placed == null) {
                 bot.setSneaking(wasSneaking);
                 return false;
             }
-            placedPillar.add(candidate.toImmutable());
+            placedPillar.add(placed.toImmutable());
             sleepQuiet(160L);
         }
         bot.setSneaking(wasSneaking);
         return true;
     }
 
-    private boolean tryPlaceScaffold(ServerPlayerEntity bot, BlockPos target) {
+    private BlockPos tryPlaceScaffold(ServerPlayerEntity bot, BlockPos target) {
         if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
-            return false;
+            return null;
         }
         Item scaffold = selectBuildItem(bot);
         if (scaffold == null) {
-            return false;
+            return null;
         }
         if (!isPlaceableTarget(world, target)) {
             mineSoft(bot, target);
         }
         ensureSupportBlock(bot, target);
         if (BotActions.placeBlockAt(bot, target, Direction.UP, List.of(scaffold))) {
-            return true;
+            return target;
         }
         for (Direction dir : Direction.Type.HORIZONTAL) {
             BlockPos alt = target.offset(dir);
@@ -442,10 +466,10 @@ public final class ShelterSkill implements Skill {
             }
             ensureSupportBlock(bot, alt);
             if (BotActions.placeBlockAt(bot, alt, Direction.UP, List.of(scaffold))) {
-                return true;
+                return alt;
             }
         }
-        return false;
+        return null;
     }
 
     private void ensureSupportBlock(ServerPlayerEntity bot, BlockPos target) {
@@ -858,6 +882,7 @@ public final class ShelterSkill implements Skill {
         descentParams.put("descentBlocks", 6);
         descentParams.put("issuerFacing", digDir.asString());
         descentParams.put("lockDirection", true);
+        descentParams.put("strictWalk", true);
         SkillExecutionResult descent = stair.execute(new SkillContext(source, shared, descentParams));
         if (!descent.success()) {
             LOGGER.warn("Shelter gather descent failed: {}", descent.message());
@@ -890,6 +915,7 @@ public final class ShelterSkill implements Skill {
         ascentParams.put("ascentTargetY", startY);
         ascentParams.put("issuerFacing", climbDir.asString());
         ascentParams.put("lockDirection", true);
+        ascentParams.put("strictWalk", true);
         SkillExecutionResult ascent = stair.execute(new SkillContext(source, shared, ascentParams));
         if (!ascent.success()) {
             LOGGER.warn("Shelter gather ascent failed: {}", ascent.message());
@@ -943,6 +969,70 @@ public final class ShelterSkill implements Skill {
                 mineSoft(bot, p);
             }
         }
+    }
+
+    private boolean tryReachSurface(ServerCommandSource source, ServerPlayerEntity bot, ServerWorld world, BlockPos origin) {
+        if (source == null || bot == null || world == null || origin == null) {
+            return false;
+        }
+        int surfaceY = world.getTopY(net.minecraft.world.Heightmap.Type.MOTION_BLOCKING, origin.getX(), origin.getZ());
+        if (bot.getBlockY() >= surfaceY - 2) {
+            return false;
+        }
+        ChatUtils.sendSystemMessage(source, "I'm underground; climbing toward the surface before building...");
+        CollectDirtSkill stair = new CollectDirtSkill();
+        Map<String, Object> shared = new HashMap<>();
+        Direction digDir = WorkDirectionService.getDirection(bot.getUuid()).orElse(bot.getHorizontalFacing());
+        for (int attempt = 0; attempt < 3; attempt++) {
+            if (SkillManager.shouldAbortSkill(bot)) {
+                return false;
+            }
+            WorkDirectionService.setDirection(bot.getUuid(), digDir);
+            Map<String, Object> ascentParams = new HashMap<>();
+            ascentParams.put("ascentTargetY", surfaceY);
+            ascentParams.put("issuerFacing", digDir.asString());
+            ascentParams.put("lockDirection", true);
+            ascentParams.put("strictWalk", true);
+            SkillExecutionResult ascent = stair.execute(new SkillContext(source, shared, ascentParams));
+            if (ascent.success() && bot.getBlockY() >= surfaceY - 1) {
+                return true;
+            }
+
+            StripMineSkill strip = new StripMineSkill();
+            Map<String, Object> stripParams = new HashMap<>();
+            stripParams.put("count", 6);
+            stripParams.put("issuerFacing", digDir.asString());
+            stripParams.put("lockDirection", true);
+            strip.execute(new SkillContext(source, shared, stripParams));
+        }
+        return bot.getBlockY() >= surfaceY - 1;
+    }
+
+    private void ensureClearBuildSiteWithWoodcut(ServerCommandSource source, ServerPlayerEntity bot, ServerWorld world, BlockPos center, int radius) {
+        if (source == null || bot == null || world == null || center == null) {
+            return;
+        }
+        int density = countVegetationInShell(world, center, radius, 5);
+        if (density < 18) {
+            return;
+        }
+        ChatUtils.sendSystemMessage(source, "Build site is too dense with trees; clearing space with woodcut...");
+        WoodcutSkill woodcut = new WoodcutSkill();
+        Map<String, Object> params = new HashMap<>();
+        params.put("count", 2);
+        params.put("searchRadius", Math.max(10, radius + 8));
+        params.put("verticalRange", 8);
+        woodcut.execute(new SkillContext(source, new HashMap<>(), params));
+    }
+
+    private void ensureDoorwayOpen(ServerWorld world, ServerPlayerEntity bot, BlockPos center, int radius, Direction doorSide) {
+        if (world == null || bot == null || center == null || doorSide == null) {
+            return;
+        }
+        BlockPos doorLower = center.offset(doorSide, radius).up(1);
+        BlockPos doorUpper = doorLower.up(1);
+        clearDoorSoft(world, bot, doorLower);
+        clearDoorSoft(world, bot, doorUpper);
     }
 
     private void ensureBuildChestAndDeposit(ServerCommandSource source, ServerWorld world, ServerPlayerEntity bot, BlockPos center, int radius) {

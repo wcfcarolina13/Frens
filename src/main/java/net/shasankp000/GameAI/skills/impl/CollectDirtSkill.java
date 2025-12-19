@@ -1207,6 +1207,8 @@ public class CollectDirtSkill implements Skill {
         if (player.getBlockY() <= targetDepthY) {
             return SkillExecutionResult.success("Already at or below target depth " + targetDepthY + ".");
         }
+
+        boolean strictWalk = getBooleanParameter(context, "strictWalk", false);
         
         // Check if resuming from a paused position
         Optional<BlockPos> pausePos = WorkDirectionService.getPausePosition(player.getUuid());
@@ -1288,9 +1290,10 @@ public class CollectDirtSkill implements Skill {
 
             MovementService.MovementPlan plan =
                     new MovementService.MovementPlan(MovementService.Mode.DIRECT, stairFoot, stairFoot, null, null, digDirection);
-            // Allow pursuit and a single snap during stair descent to avoid "no walkable path" stalls,
-            // but keep teleport disabled to remain human-like.
-            MovementService.MovementResult moveResult = MovementService.execute(source, player, plan, false, true, true, true);
+            boolean allowPursuit = true;
+            boolean allowSnap = !strictWalk;
+            // When strictWalk is enabled, do not snap during descent; stick to held-input walking only.
+            MovementService.MovementResult moveResult = MovementService.execute(source, player, plan, false, true, allowPursuit, allowSnap);
             if (!moveResult.success()) {
                 return SkillExecutionResult.failure("Descent aborted: failed to advance (" + moveResult.detail() + ").");
             }
