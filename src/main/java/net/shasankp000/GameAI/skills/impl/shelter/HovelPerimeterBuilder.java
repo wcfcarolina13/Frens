@@ -47,7 +47,7 @@ import java.util.concurrent.TimeUnit;
 public final class HovelPerimeterBuilder {
 
     private static final Logger LOGGER = LoggerFactory.getLogger("skill-shelter");
-    private static final double REACH_DISTANCE_SQ = 20.25D; // ~4.5 blocks
+    private static final double REACH_DISTANCE_SQ = 20.25D; 
     private static final long PLACEMENT_DELAY_MS = 20L;
 
     private static final List<Item> BUILD_BLOCKS = List.of(
@@ -84,38 +84,29 @@ public final class HovelPerimeterBuilder {
         Direction doorSide = plan.doorSide();
 
         if (!moveToBuildSite(source, bot, center)) {
-            return SkillExecutionResult.failure("I couldn\t reach a safe spot to build a hovel.");
+            return SkillExecutionResult.failure("I could not reach a safe spot to build a hovel.");
         }
 
         BuildCounters counters = new BuildCounters();
-        
-        // 1. Level Site
         ChatUtils.sendSystemMessage(source, "Hovel: leveling build site...");
         levelBuildSite(world, bot, center, radius, counters);
         
-        // 2. Resource Check
         int needed = estimatePlacementNeed(world, center, radius, wallHeight, doorSide);
-        int available = countBuildBlocks(bot);
-        if (available < needed) {
+        if (countBuildBlocks(bot) < needed) {
             ensureBuildStock(source, bot, needed, center);
         }
 
-        // 3. Generate Blueprint
         List<BlockPos> walls = generateWallBlueprint(center, radius, wallHeight, doorSide);
         List<BlockPos> roof = generateRoofBlueprint(center, radius, wallHeight);
 
-        // 4. Build Walls (Lower part from outside)
         ChatUtils.sendSystemMessage(source, "Hovel: building walls...");
         buildFromOutside(world, source, bot, center, radius, walls, counters);
 
-        // 5. Build Upper Walls and Roof from inside
         ChatUtils.sendSystemMessage(source, "Hovel: completing roof...");
         buildFromInside(world, source, bot, center, radius, wallHeight, walls, roof, counters);
 
-        // 6. Final Touches
         ensureDoorwayOpen(world, bot, center, radius, doorSide);
         placeInsideTorches(world, bot, center, radius);
-        
         sweepDrops(source, radius + 5, 6.0, 60, 5000L);
 
         int missing = countMissing(world, walls) + countMissing(world, roof);
@@ -164,9 +155,8 @@ public final class HovelPerimeterBuilder {
             ensureRingStandable(world, bot, ringPos);
             if (!moveToRingPos(source, bot, ringPos)) continue;
 
-            // Try to place reachable lower wall blocks
             walls.stream()
-                .filter(p -> p.getY() <= center.getY() + 2) // only reach lower layers from outside
+                .filter(p -> p.getY() <= center.getY() + 2)
                 .filter(p -> isMissing(world, p))
                 .filter(p -> bot.getEyePos().squaredDistanceTo(Vec3d.ofCenter(p)) <= REACH_DISTANCE_SQ)
                 .forEach(p -> placeBlockDirectIfWithinReach(bot, p, counters));
@@ -175,28 +165,36 @@ public final class HovelPerimeterBuilder {
 
     private void buildFromInside(ServerWorld world, ServerCommandSource source, ServerPlayerEntity bot, BlockPos center, int radius, int height, List<BlockPos> walls, List<BlockPos> roof, BuildCounters counters) {
         if (!moveToRingPos(source, bot, center)) {
-            // If we cant get to center, try to get as close as possible
             moveToBuildSite(source, bot, center);
         }
 
-        // Pillar up to reach roof
         int pillarHeight = Math.min(3, height - 1);
         List<BlockPos> pillar = new ArrayList<>();
         if (pillarUp(bot, pillarHeight, pillar)) {
-            // Build all missing wall and roof blocks from the pillar
             List<BlockPos> allGoal = new ArrayList<>(walls);
             allGoal.addAll(roof);
             
-            // Iterate a few times to handle block dependencies
-            for (int i = 0; i < 2; i++) {
+            boolean madeProgress = true;
+            int stuckCycles = 0;
+            while (madeProgress && stuckCycles < 10) {
+                if (SkillManager.shouldAbortSkill(bot)) break;
+                int startPlaced = counters.placedBlocks;
+                
                 allGoal.stream()
                     .filter(p -> isMissing(world, p))
                     .filter(p -> bot.getEyePos().squaredDistanceTo(Vec3d.ofCenter(p)) <= REACH_DISTANCE_SQ)
                     .sorted(Comparator.comparingInt(BlockPos::getY))
                     .forEach(p -> placeBlockDirectIfWithinReach(bot, p, counters));
+                
+                if (counters.placedBlocks > startPlaced) {
+                    madeProgress = true;
+                    stuckCycles = 0;
+                } else {
+                    madeProgress = false;
+                    stuckCycles++;
+                }
             }
             
-            // Descent
             Collections.reverse(pillar);
             for (BlockPos p : pillar) {
                 mineSoft(bot, p);
@@ -216,21 +214,16 @@ public final class HovelPerimeterBuilder {
 
     private boolean placeBlockDirectIfWithinReach(ServerPlayerEntity bot, BlockPos pos, BuildCounters counters) {
         if (!isMissing((ServerWorld)bot.getEntityWorld(), pos)) return true;
-        
         if (bot.getEyePos().squaredDistanceTo(Vec3d.ofCenter(pos)) > REACH_DISTANCE_SQ) {
             if (counters != null) counters.reachFailures++;
             return false;
         }
-
         Item item = selectBuildItem(bot);
         if (item == null) {
             if (counters != null) counters.noMaterials++;
             return false;
         }
-
         if (counters != null) counters.attemptedPlacements++;
-        
-        // Face the block
         net.shasankp000.Entity.LookController.faceBlock(bot, pos);
         boolean ok = BotActions.placeBlockAt(bot, pos, Direction.UP, List.of(item));
         if (ok && counters != null) counters.placedBlocks++;
@@ -242,7 +235,6 @@ public final class HovelPerimeterBuilder {
         if (steps <= 0) return true;
         Item item = selectBuildItem(bot);
         if (item == null) return false;
-
         for (int i = 0; i < steps; i++) {
             if (SkillManager.shouldAbortSkill(bot)) return false;
             BlockPos current = bot.getBlockPos();
@@ -250,9 +242,7 @@ public final class HovelPerimeterBuilder {
             sleepQuiet(150L);
             if (BotActions.placeBlockAt(bot, current, Direction.UP, List.of(item))) {
                 placed.add(current.toImmutable());
-            } else {
-                return false;
-            }
+            } else { return false; }
             sleepQuiet(150L);
         }
         return true;
@@ -260,10 +250,7 @@ public final class HovelPerimeterBuilder {
 
     private void placeInsideTorches(ServerWorld world, ServerPlayerEntity bot, BlockPos center, int radius) {
         if (radius < 2) return;
-        List<BlockPos> targets = List.of(
-            center.add(radius-1, 0, radius-1),
-            center.add(-(radius-1), 0, -(radius-1))
-        );
+        List<BlockPos> targets = List.of(center.add(radius-1, 0, radius-1), center.add(-(radius-1), 0, -(radius-1)));
         for (BlockPos p : targets) {
             if (isMissing(world, p) && world.getBlockState(p.down()).isSolidBlock(world, p.down())) {
                 BotActions.placeBlockAt(bot, p, Direction.UP, List.of(Items.TORCH));
@@ -271,19 +258,15 @@ public final class HovelPerimeterBuilder {
         }
     }
 
-    // --- Utility Methods (mostly preserved) ---
-
     private HovelPlan resolvePlan(ServerWorld world, ServerPlayerEntity bot, BlockPos origin, int radius, Direction preferredDoorSide, Map<String, Object> sharedState, boolean resumeRequested) {
         Direction door = preferredDoorSide != null ? preferredDoorSide : bot.getHorizontalFacing();
-        return new HovelPlan(origin, door); // Simplified for robustness
+        return new HovelPlan(origin, door);
     }
 
     private boolean moveToRingPos(ServerCommandSource source, ServerPlayerEntity bot, BlockPos ringPos) {
         if (bot.getBlockPos().equals(ringPos)) return true;
-        
-        MovementService.MovementPlan plan = new MovementService.MovementPlan(
-                MovementService.Mode.DIRECT, ringPos, ringPos, null, null, Direction.UP);
-        MovementService.MovementResult res = MovementService.execute(source, bot, plan, false, true, true, false);
+        MovementService.MovementPlan plan = new MovementService.MovementPlan(MovementService.Mode.DIRECT, ringPos, ringPos, null, null, Direction.UP);
+        MovementService.execute(source, bot, plan, false, true, true, false);
         return bot.getBlockPos().getSquaredDistance(ringPos) <= 2.25D;
     }
 
@@ -292,7 +275,7 @@ public final class HovelPerimeterBuilder {
         for (int x = center.getX() - r; x <= center.getX() + r; x++) ring.add(new BlockPos(x, y, center.getZ() - r));
         for (int z = center.getZ() - r + 1; z <= center.getZ() + r; z++) ring.add(new BlockPos(center.getX() + r, y, z));
         for (int x = center.getX() + r - 1; x >= center.getX() - r; x--) ring.add(new BlockPos(x, y, center.getZ() + r));
-        for (int z = center.getZ() + r - 1; z > center.getZ() - r; z--) ring.add(new BlockPos(center.getX() - r, y, z));
+        for (int z = Math.max(center.getZ() + r - 1, center.getZ() - r + 1); z > center.getZ() - r; z--) ring.add(new BlockPos(center.getX() - r, y, z));
         return ring;
     }
 
@@ -300,20 +283,17 @@ public final class HovelPerimeterBuilder {
         if (bot.getBlockPos().getSquaredDistance(center) <= 4.0D) return true;
         var planOpt = MovementService.planLootApproach(bot, center, MovementService.MovementOptions.skillLoot());
         if (planOpt.isEmpty()) return false;
-        var res = MovementService.execute(source, bot, planOpt.get(), false, true, true, false);
-        return res.success();
+        return MovementService.execute(source, bot, planOpt.get(), false, true, true, false).success();
     }
 
     private void levelBuildSite(ServerWorld world, ServerPlayerEntity bot, BlockPos center, int radius, BuildCounters counters) {
         int floorY = center.getY();
         for (int dx = -radius - 1; dx <= radius + 1; dx++) {
             for (int dz = -radius - 1; dz <= radius + 1; dz++) {
-                // Clear headroom
                 for (int y = floorY + 3; y >= floorY; y--) {
                     BlockPos p = new BlockPos(center.getX() + dx, y, center.getZ() + dz);
                     if (!isMissing(world, p)) mineSoft(bot, p);
                 }
-                // Fill support
                 BlockPos support = new BlockPos(center.getX() + dx, floorY - 1, center.getZ() + dz);
                 if (isMissing(world, support)) placeBlockDirectIfWithinReach(bot, support, counters);
             }
@@ -322,9 +302,7 @@ public final class HovelPerimeterBuilder {
 
     private void mineSoft(ServerPlayerEntity bot, BlockPos pos) {
         if (bot.getEyePos().squaredDistanceTo(Vec3d.ofCenter(pos)) > REACH_DISTANCE_SQ) return;
-        try {
-            MiningTool.mineBlock(bot, pos).get(3, TimeUnit.SECONDS);
-        } catch (Exception ignored) {}
+        try { MiningTool.mineBlock(bot, pos).get(3, TimeUnit.SECONDS); } catch (Exception ignored) {}
     }
 
     private void sleepQuiet(long ms) {
@@ -385,16 +363,5 @@ public final class HovelPerimeterBuilder {
 
     private void sweepDrops(ServerCommandSource source, double radius, double vRange, int maxTargets, long durationMs) {
         try { DropSweeper.sweep(source.withSilent(), radius, vRange, maxTargets, durationMs); } catch (Exception ignored) {}
-    }
-
-    private boolean hasOption(SkillContext context, String... names) {
-        Object opts = context.parameters().get("options");
-        if (opts instanceof List<?> list) {
-            for (Object o : list) {
-                String s = String.valueOf(o).toLowerCase();
-                for (String n : names) if (s.equals(n)) return true;
-            }
-        }
-        return false;
     }
 }
