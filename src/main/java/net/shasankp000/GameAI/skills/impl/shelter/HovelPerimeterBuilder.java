@@ -268,7 +268,7 @@ public final class HovelPerimeterBuilder {
             }
             ensureRingStandable(world, bot, ringPos);
             if (!moveToRingPos(source, bot, ringPos)) {
-                LOGGER.debug("Shelter: could not move to ring tile {}", ringPos);
+                LOGGER.warn("Shelter: could not move to ring tile {} (pos={})", ringPos, bot.getBlockPos());
                 continue;
             }
             BlockPos interior = offsetTowardCenter(center, ringPos);
@@ -302,11 +302,12 @@ public final class HovelPerimeterBuilder {
         }
         MovementService.MovementPlan direct = new MovementService.MovementPlan(
                 MovementService.Mode.DIRECT, ringPos, ringPos, null, null, Direction.UP);
-        MovementService.MovementResult directRes = MovementService.execute(source, bot, direct, false, true, true, false);
-        if (directRes.success() && bot.getBlockPos().getSquaredDistance(ringPos) <= 0.25D) {
-            return true;
+        MovementService.MovementResult res = MovementService.execute(source, bot, direct, false, true, true, false);
+        boolean ok = res.success() && bot.getBlockPos().getSquaredDistance(ringPos) <= 0.25D;
+        if (!ok) {
+            LOGGER.warn("Shelter: failed to reach ring tile {} (distSq={}, res={})", ringPos, bot.getBlockPos().getSquaredDistance(ringPos), res.detail());
         }
-        return moveToBuildSite(source, bot, ringPos) && bot.getBlockPos().getSquaredDistance(ringPos) <= 0.25D;
+        return ok;
     }
 
     private boolean buildRoofByWalk(ServerWorld world,
@@ -679,7 +680,7 @@ public final class HovelPerimeterBuilder {
     }
 
     private boolean moveToBuildSite(ServerCommandSource source, ServerPlayerEntity bot, BlockPos center) {
-        if (bot.getBlockPos().getSquaredDistance(center) <= 4.0D) {
+        if (bot.getBlockPos().getSquaredDistance(center) <= 2.25D) {
             return true;
         }
         var planOpt = MovementService.planLootApproach(bot, center, MovementService.MovementOptions.skillLoot());
@@ -964,16 +965,9 @@ public final class HovelPerimeterBuilder {
     }
 
     private boolean isAdjacentPlacement(ServerPlayerEntity bot, BlockPos pos) {
-        if (bot == null || pos == null) {
-            return false;
-        }
-        BlockPos base = bot.getBlockPos();
-        int dx = Math.abs(pos.getX() - base.getX());
-        int dy = Math.abs(pos.getY() - base.getY());
-        int dz = Math.abs(pos.getZ() - base.getZ());
-        return dx <= 1 && dy <= 1 && dz <= 1;
+        BlockPos bp = bot.getBlockPos();
+        return Math.abs(bp.getX()-pos.getX())<=1 && Math.abs(bp.getY()-pos.getY())<=1 && Math.abs(bp.getZ()-pos.getZ())<=1;
     }
-
     private boolean canPlaceWithSight(ServerPlayerEntity bot, BlockPos pos) {
         if (bot == null || pos == null) {
             return false;
