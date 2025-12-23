@@ -336,6 +336,10 @@ public final class HovelPerimeterBuilder {
                 }
                 stepped[0] = true;
 
+                // Clear any incidental clutter that could block small roof movements
+                // (e.g., grass/flowers from an incomplete roof, or replaceables like snow layers).
+                prepareScaffoldBase(world, bot);
+
                 // Walk multiple roof rings (outer -> inner) and place missing blocks from multiple angles.
                 // Limiting to a few inner rings keeps it safe/time-bounded while improving coverage.
                 int ringMin = Math.max(0, radius - 6);
@@ -395,6 +399,9 @@ public final class HovelPerimeterBuilder {
                     nudgeToStand(world, bot, entryStand, 1500L);
                 }
 
+                // Re-stabilize at the entry before attempting the crucial roof->pillar transition.
+                prepareScaffoldBase(world, bot);
+
                 // Try to get back to the pillar top so we can tear it down cleanly.
                 if (isStandable(world, pillarTop)) {
                     if (!nudgeToStand(world, bot, pillarTop, 1200L)) {
@@ -404,6 +411,11 @@ public final class HovelPerimeterBuilder {
                         }
                         nudgeToStand(world, bot, pillarTop, 1200L);
                     }
+                }
+
+                // Stabilize on the pillar top before teardown (prevents drift-induced falls).
+                if (bot.getBlockPos().getSquaredDistance(pillarTop) <= 1.0D) {
+                    prepareScaffoldBase(world, bot);
                 }
 
                 // Only tear down if we are safely back on the pillar top.
