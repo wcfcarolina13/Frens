@@ -1402,6 +1402,22 @@ public final class HovelPerimeterBuilder {
 
     private boolean moveToBuildSite(ServerCommandSource source, ServerPlayerEntity bot, BlockPos center) {
         if (bot.getBlockPos().getSquaredDistance(center) <= 4.0D) return true;
+
+        // Fast path: attempt a cheap direct approach first. This avoids expensive path planning
+        // when hopping between close-by build stations.
+        MovementService.MovementPlan direct = new MovementService.MovementPlan(
+                MovementService.Mode.DIRECT,
+                center,
+                center,
+                null,
+                null,
+                Direction.UP
+        );
+        MovementService.MovementResult directRes = MovementService.execute(source, bot, direct, false, true, true, false);
+        if (directRes.success()) {
+            return true;
+        }
+
         var planOpt = MovementService.planLootApproach(bot, center, MovementService.MovementOptions.skillLoot());
         return planOpt.isPresent() && MovementService.execute(source, bot, planOpt.get(), false, true, true, false).success();
     }
