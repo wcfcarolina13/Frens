@@ -51,6 +51,11 @@ sqlite-vec-macos-aarch64.tar.gz
 build/
 dist/
 
+# python (tools)
+__pycache__/
+*.pyc
+*.pyo
+
 # API keys and sensitive config files
 config/
 *_config.json
