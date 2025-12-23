@@ -7,13 +7,17 @@ import net.minecraft.block.entity.BarrelBlockEntity;
 import net.minecraft.block.entity.BlockEntity;
 import net.minecraft.block.entity.ChestBlockEntity;
 import net.minecraft.fluid.FluidState;
+import net.minecraft.registry.Registries;
 import net.minecraft.registry.tag.FluidTags;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
+import net.minecraft.util.Identifier;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import net.shasankp000.GameAI.services.ProtectedZoneService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -34,6 +38,8 @@ import java.util.concurrent.TimeoutException;
  * area for dangerous drops, liquids, structural blocks, chests, and valuable ores.
  */
 public final class MiningHazardDetector {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger("mining-hazards");
 
     private static final Map<Block, Block> DEEPSLATE_VARIANTS = Map.ofEntries(
             Map.entry(Blocks.DIAMOND_ORE, Blocks.DEEPSLATE_DIAMOND_ORE),
@@ -222,7 +228,11 @@ public final class MiningHazardDetector {
         }
         
         FluidState fluid = world.getFluidState(pos);
-        if (fluid.isIn(FluidTags.LAVA)) {
+        if (isLavaLike(fluid)) {
+            Identifier id = Registries.FLUID.getId(fluid.getFluid());
+            if (id != null && !"minecraft:lava".equals(id.toString())) {
+                LOGGER.info("MiningHazardDetector: lava-like fluid detected at {} (fluid={})", pos.toShortString(), id);
+            }
             return hazard(pos, "There's lava ahead.", true);
         }
         if (fluid.isIn(FluidTags.WATER)) {
@@ -247,6 +257,21 @@ public final class MiningHazardDetector {
             return hazard(pos, "I found a structure.", true);
         }
         return null;
+    }
+
+    private static boolean isLavaLike(FluidState fluid) {
+        if (fluid == null || fluid.isEmpty()) {
+            return false;
+        }
+        if (fluid.isIn(FluidTags.LAVA)) {
+            return true;
+        }
+        Identifier id = Registries.FLUID.getId(fluid.getFluid());
+        if (id == null) {
+            return false;
+        }
+        String path = id.getPath().toLowerCase(java.util.Locale.ROOT);
+        return path.contains("lava") || path.contains("molten");
     }
 
     private static boolean isDangerousDrop(ServerWorld world, BlockPos foot) {

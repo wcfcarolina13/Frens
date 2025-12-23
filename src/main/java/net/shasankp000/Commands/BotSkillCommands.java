@@ -46,6 +46,20 @@ final class BotSkillCommands {
                                                         + StringArgumentType.getString(context, "options"))))
                         )
                 )
+                .then(CommandManager.literal("hovel2")
+                        .executes(context -> modCommandRegistry.executeSkillTargets(context, "shelter", "hovel2"))
+                        .then(CommandManager.argument("options", StringArgumentType.greedyString())
+                                .executes(context -> modCommandRegistry.executeSkillTargets(context, "shelter",
+                                        "hovel2 " + StringArgumentType.getString(context, "options"))))
+                        .then(CommandManager.argument("target", StringArgumentType.string())
+                                .executes(context -> modCommandRegistry.executeSkillTargets(context, "shelter",
+                                        StringArgumentType.getString(context, "target") + " hovel2"))
+                                .then(CommandManager.argument("options", StringArgumentType.greedyString())
+                                        .executes(context -> modCommandRegistry.executeSkillTargets(context, "shelter",
+                                                StringArgumentType.getString(context, "target") + " hovel2 "
+                                                        + StringArgumentType.getString(context, "options"))))
+                        )
+                )
                 .then(CommandManager.literal("burrow")
                         .executes(context -> modCommandRegistry.executeSkillTargets(context, "shelter", "burrow"))
                         .then(CommandManager.argument("options", StringArgumentType.greedyString())

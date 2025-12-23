@@ -19,6 +19,7 @@ import net.shasankp000.Database.QTable;
 import net.shasankp000.GameAI.BotActions;
 import net.shasankp000.GameAI.BotEventHandler;
 import net.shasankp000.GameAI.services.HealingService;
+import net.shasankp000.GameAI.services.SneakLockService;
 import net.shasankp000.GameAI.services.TaskService;
 import net.shasankp000.GameAI.services.SkillResumeService;
 import net.shasankp000.GameAI.RLAgent;
@@ -62,6 +63,12 @@ public class AutoFaceEntity {
     private static final double EMOTE_MAX_DISTANCE = 6.0D;
     private static final double EMOTE_LOOK_THRESHOLD = 0.65D;
     private static final Random EMOTE_RANDOM = new Random();
+    private static final long EMOTE_CROUCH_MS = 900L;
+    private static final ScheduledExecutorService EMOTE_EXECUTOR = Executors.newSingleThreadScheduledExecutor(runnable -> {
+        Thread t = new Thread(runnable, "ambient-emote");
+        t.setDaemon(true);
+        return t;
+    });
     private static final long DANGER_MESSAGE_COOLDOWN_MS = 4000L;
     public static boolean botBusy;
     private static boolean botExecutingTask;
@@ -510,7 +517,11 @@ public class AutoFaceEntity {
         if (server == null || bot == null) {
             return;
         }
-        if (!BotEventHandler.isPassiveMode()) {
+        // Never emote unless truly idle; this avoids interfering with follow/guard/patrol and any active skills.
+        if (BotEventHandler.getCurrentMode(bot) != BotEventHandler.Mode.IDLE) {
+            return;
+        }
+        if (isBotExecutingTask() || SneakLockService.isLocked(bot.getUuid())) {
             return;
         }
         if (hostileEntities != null && !hostileEntities.isEmpty()) {
@@ -539,8 +550,13 @@ public class AutoFaceEntity {
         }
 
         ServerPlayerEntity player = target.get();
-        bot.lookAt(EntityAnchorArgumentType.EntityAnchor.EYES, player.getEyePos());
-        performWave(bot);
+        server.execute(() -> bot.lookAt(EntityAnchorArgumentType.EntityAnchor.EYES, player.getEyePos()));
+        // 70% wave, 30% crouch as a quick "ack" emote.
+        if (EMOTE_RANDOM.nextDouble() < 0.30D) {
+            performCrouch(bot, server);
+        } else {
+            server.execute(() -> performWave(bot));
+        }
         lastEmoteTick = serverTicks;
     }
 
@@ -573,6 +589,34 @@ public class AutoFaceEntity {
         } else {
             bot.swingHand(Hand.MAIN_HAND, true);
         }
+    }
+
+    private static void performCrouch(ServerPlayerEntity bot, MinecraftServer server) {
+        if (bot == null || server == null) {
+            return;
+        }
+        UUID id = bot.getUuid();
+        server.execute(() -> {
+            if (BotEventHandler.getCurrentMode(bot) != BotEventHandler.Mode.IDLE) {
+                return;
+            }
+            if (SneakLockService.isLocked(id) || isBotExecutingTask()) {
+                return;
+            }
+            BotActions.sneak(bot, true);
+        });
+        EMOTE_EXECUTOR.schedule(() -> server.execute(() -> {
+            if (bot.isRemoved()) {
+                return;
+            }
+            if (BotEventHandler.getCurrentMode(bot) != BotEventHandler.Mode.IDLE) {
+                return;
+            }
+            if (SneakLockService.isLocked(id) || isBotExecutingTask()) {
+                return;
+            }
+            BotActions.sneak(bot, false);
+        }), EMOTE_CROUCH_MS, TimeUnit.MILLISECONDS);
     }
 
     private static void broadcastDangerAlert(ServerPlayerEntity bot) {

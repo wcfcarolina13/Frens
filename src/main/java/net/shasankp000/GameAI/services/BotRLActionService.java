@@ -6,6 +6,7 @@ import net.shasankp000.Entity.AutoFaceEntity;
 import net.shasankp000.Entity.FaceClosestEntity;
 import net.shasankp000.EntityUtil;
 import net.shasankp000.GameAI.BotActions;
+import net.shasankp000.GameAI.services.SneakLockService;
 
 import java.util.List;
 import java.util.function.Consumer;
@@ -62,7 +63,9 @@ public final class BotRLActionService {
             }
             case "unsneak" -> {
                 debugFn.accept("Performing action: unsneak");
-                BotActions.sneak(bot, false);
+                if (!SneakLockService.isLocked(bot.getUuid())) {
+                    BotActions.sneak(bot, false);
+                }
             }
             case "unsprint" -> {
                 debugFn.accept("Performing action: unsprint");
@@ -150,4 +153,3 @@ public final class BotRLActionService {
         }
     }
 }
-

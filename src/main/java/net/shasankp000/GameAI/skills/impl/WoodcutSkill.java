@@ -2,7 +2,6 @@ package net.shasankp000.GameAI.skills.impl;
 
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
-import net.minecraft.inventory.Inventory;
 import net.minecraft.item.BlockItem;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
@@ -37,6 +36,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.HashMap;
@@ -139,7 +139,7 @@ public final class WoodcutSkill implements Skill {
                 }
             }
             if (!ensureWoodSpaceOrDeposit(source, bot)) {
-                return SkillExecutionResult.failure("Inventory full and no reachable chest to deposit wood.");
+                return SkillExecutionResult.failure("Inventory full; couldn't deposit wood into any chest.");
             }
             logDetectionSummary(bot, searchRadius, verticalRange, visitedBases);
             Optional<TreeDetector.TreeTarget> targetOpt = TreeDetector.findNearestTree(bot, searchRadius, verticalRange, visitedBases);
@@ -366,80 +366,57 @@ public final class WoodcutSkill implements Skill {
         if (!needsDeposit) {
             return true;
         }
-        Optional<BlockPos> chestPos = findNearestChest(bot, 18, 6);
-        if (chestPos.isEmpty()) {
-            LOGGER.warn("Inventory full and no chest nearby for deposit.");
-            ChatUtils.sendSystemMessage(source, "Inventory full and no reachable chest to stash wood. Pausing woodcut.");
+        if (woodCount <= 0) {
+            LOGGER.warn("Inventory full but no wood detected for deposit; pausing woodcut.");
             return false;
         }
-        if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
-            return false;
+
+        List<BlockPos> candidates = findNearbyChests(bot, 18, 6);
+        for (BlockPos chestPos : candidates) {
+            int moved = ChestStoreService.depositMatchingWalkOnly(source, bot, chestPos, this::isWoodStack);
+            LOGGER.info("Woodcut deposit attempt: chest={} moved={}", chestPos.toShortString(), moved);
+            if (moved > 0) {
+                ChatUtils.sendSystemMessage(source, "Deposited wood into a nearby chest.");
+                return true;
+            }
         }
-        BlockPos containerPos = chestPos.get().toImmutable();
-        BlockPos stand = findContainerStand(world, bot, containerPos);
-        if (stand == null) {
-            LOGGER.warn("No safe stand position next to container {}", containerPos.toShortString());
-            return false;
+
+        BlockPos placed = ChestStoreService.placeChestNearBot(source, bot, true);
+        if (placed != null) {
+            int moved = ChestStoreService.depositMatchingWalkOnly(source, bot, placed, this::isWoodStack);
+            LOGGER.info("Woodcut deposit attempt (placed chest): chest={} moved={}", placed.toShortString(), moved);
+            if (moved > 0) {
+                ChatUtils.sendSystemMessage(source, "Deposited wood into the new chest.");
+                return true;
+            }
         }
-        LOGGER.info("Depositing wood into nearest container at {}", containerPos.toShortString());
-        MovementService.MovementPlan plan = new MovementService.MovementPlan(
-                MovementService.Mode.DIRECT,
-                stand,
-                stand,
-                null,
-                null,
-                bot.getHorizontalFacing());
-        MovementService.MovementResult move = MovementService.execute(source, bot, plan, false, true, false, false);
-        if (!move.success() && !BlockInteractionService.canInteract(bot, containerPos)) {
-            LOGGER.warn("Failed to reach container at {} for deposit: {}", containerPos.toShortString(), move.detail());
-            return false;
-        }
-        if (!BlockInteractionService.canInteract(bot, containerPos)) {
-            LOGGER.warn("Container {} not interactable after move; refusing remote deposit", containerPos.toShortString());
-            return false;
-        }
-        BlockState state = world.getBlockState(containerPos);
-        Inventory chestInv = resolveInventory(world, containerPos);
-        if (chestInv == null) {
-            LOGGER.warn("Container at {} missing/invalid for deposit (state={}, be=null)", containerPos.toShortString(), state);
-            return false;
-        }
-        int deposited = depositWood(bot, chestInv);
-        if (deposited > 0) {
-            LOGGER.info("Deposited {} wood items into chest at {}", deposited, containerPos.toShortString());
-            ChatUtils.sendSystemMessage(source, "Deposited wood into nearby chest.");
-            return true;
-        } else {
-            LOGGER.info("No wood to deposit or chest full at {}", containerPos.toShortString());
-            return false;
-        }
+
+        LOGGER.warn("Inventory full and couldn't deposit wood (no reachable/usable chest, or chests are full).");
+        ChatUtils.sendSystemMessage(source, "Inventory is full and I couldn't deposit wood (no reachable chest or chests are full).");
+        return false;
     }
 
-    private BlockPos findContainerStand(ServerWorld world, ServerPlayerEntity bot, BlockPos containerPos) {
-        if (world == null || bot == null || containerPos == null) {
-            return null;
+    private List<BlockPos> findNearbyChests(ServerPlayerEntity bot, int radius, int vertical) {
+        if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
+            return List.of();
         }
-        BlockPos best = null;
-        double bestDist = Double.MAX_VALUE;
-        for (Direction dir : Direction.Type.HORIZONTAL) {
-            BlockPos stand = containerPos.offset(dir);
-            BlockPos below = stand.down();
-            if (!world.getBlockState(below).isSolidBlock(world, below)) {
+        BlockPos origin = bot.getBlockPos();
+        List<BlockPos> found = new ArrayList<>();
+        int scanned = 0;
+        for (BlockPos pos : BlockPos.iterate(origin.add(-radius, -vertical, -radius), origin.add(radius, vertical, radius))) {
+            if (!world.isChunkLoaded(pos)) {
                 continue;
             }
-            if (!world.getBlockState(stand).getCollisionShape(world, stand).isEmpty()) {
+            BlockState state = world.getBlockState(pos);
+            if (!state.isOf(Blocks.CHEST) && !state.isOf(Blocks.TRAPPED_CHEST)) {
                 continue;
             }
-            if (!world.getBlockState(stand.up()).getCollisionShape(world, stand.up()).isEmpty()) {
-                continue;
-            }
-            double dist = bot.getBlockPos().getSquaredDistance(stand);
-            if (dist < bestDist) {
-                bestDist = dist;
-                best = stand.toImmutable();
-            }
+            scanned++;
+            found.add(pos.toImmutable());
         }
-        return best;
+        found.sort(Comparator.comparingDouble(p -> p.getSquaredDistance(origin)));
+        LOGGER.info("Chest scan: scanned={} found={} nearest={}", scanned, found.size(), found.isEmpty() ? "none" : found.get(0).toShortString());
+        return found;
     }
 
     private boolean prepareReach(ServerPlayerEntity bot,
@@ -1306,78 +1283,6 @@ public final class WoodcutSkill implements Skill {
         return total;
     }
 
-    private Optional<BlockPos> findNearestChest(ServerPlayerEntity bot, int radius, int vertical) {
-        if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
-            return Optional.empty();
-        }
-        BlockPos origin = bot.getBlockPos();
-        double best = Double.MAX_VALUE;
-        BlockPos bestPos = null;
-        int scanned = 0;
-        int invCount = 0;
-        for (BlockPos pos : BlockPos.iterate(origin.add(-radius, -vertical, -radius), origin.add(radius, vertical, radius))) {
-            var state = world.getBlockState(pos);
-            if (!state.isOf(Blocks.CHEST) && !state.isOf(Blocks.TRAPPED_CHEST) && !state.isOf(Blocks.BARREL)) {
-                continue;
-            }
-            scanned++;
-            Inventory inv = resolveInventory(world, pos);
-            if (inv == null) {
-                continue;
-            }
-            invCount++;
-            double d = origin.getSquaredDistance(pos);
-            if (d < best) {
-                best = d;
-                bestPos = pos.toImmutable();
-            }
-        }
-        LOGGER.info("Chest scan: scanned={} withInventory={} best={}", scanned, invCount, bestPos == null ? "none" : bestPos.toShortString());
-        return Optional.ofNullable(bestPos);
-    }
-
-    private Inventory resolveInventory(ServerWorld world, BlockPos pos) {
-        var be = world.getBlockEntity(pos);
-        if (be instanceof Inventory inv) {
-            return inv;
-        }
-        if (world.getServer() == null) {
-            return null;
-        }
-        final java.util.concurrent.CompletableFuture<Inventory> future = new java.util.concurrent.CompletableFuture<>();
-        world.getServer().execute(() -> {
-            var be2 = world.getBlockEntity(pos);
-            future.complete(be2 instanceof Inventory inv2 ? inv2 : null);
-        });
-        try {
-            return future.get(300, java.util.concurrent.TimeUnit.MILLISECONDS);
-        } catch (Exception e) {
-            future.cancel(true);
-            return null;
-        }
-    }
-
-    private int depositWood(ServerPlayerEntity bot, Inventory chestInv) {
-        int moved = 0;
-        for (int i = 0; i < bot.getInventory().size(); i++) {
-            ItemStack stack = bot.getInventory().getStack(i);
-            if (stack.isEmpty()) {
-                continue;
-            }
-            if (!isWoodStack(stack)) {
-                continue;
-            }
-            ItemStack toMove = stack.copy();
-            ItemStack leftover = insertInto(chestInv, toMove);
-            int deposited = toMove.getCount() - leftover.getCount();
-            if (deposited > 0) {
-                moved += deposited;
-                stack.decrement(deposited);
-                bot.getInventory().setStack(i, stack);
-            }
-        }
-        return moved;
-    }
 
     private boolean isWoodStack(ItemStack stack) {
         if (stack.isEmpty()) {
@@ -1394,23 +1299,6 @@ public final class WoodcutSkill implements Skill {
             return state.isIn(BlockTags.LOGS) || state.isIn(BlockTags.PLANKS);
         }
         return false;
-    }
-
-    private ItemStack insertInto(Inventory inv, ItemStack stack) {
-        ItemStack remaining = stack.copy();
-        for (int i = 0; i < inv.size() && !remaining.isEmpty(); i++) {
-            ItemStack slot = inv.getStack(i);
-            if (slot.isEmpty()) {
-                inv.setStack(i, remaining.copy());
-                return ItemStack.EMPTY;
-            }
-            if (ItemStack.areItemsEqual(slot, remaining) && ItemStack.areEqual(slot, remaining) && slot.getCount() < slot.getMaxCount()) {
-                int canAdd = Math.min(slot.getMaxCount() - slot.getCount(), remaining.getCount());
-                slot.increment(canAdd);
-                remaining.decrement(canAdd);
-            }
-        }
-        return remaining;
     }
 
     private void cleanupNearbyScaffold(ServerPlayerEntity bot, BlockPos base) {

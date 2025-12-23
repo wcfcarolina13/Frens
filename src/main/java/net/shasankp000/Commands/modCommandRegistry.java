@@ -372,34 +372,58 @@ public class modCommandRegistry {
                                 .then(CommandManager.argument("bot", EntityArgumentType.player())
                                         .executes(context -> executeCook(context, EntityArgumentType.getPlayer(context, "bot"), null, false)))
                         )
-                        .then(literal("store")
-                                .then(literal("deposit")
-                                        .then(CommandManager.argument("amount", StringArgumentType.string())
-                                                .then(CommandManager.argument("item", StringArgumentType.string())
-                                                        .executes(context -> executeStoreDeposit(context,
-                                                                StringArgumentType.getString(context, "amount"),
-                                                                StringArgumentType.getString(context, "item"),
-                                                                getActiveBotOrThrow(context)))
-                                                        .then(CommandManager.argument("bot", EntityArgumentType.player())
-                                                                .executes(context -> executeStoreDeposit(context,
-                                                                        StringArgumentType.getString(context, "amount"),
-                                                                        StringArgumentType.getString(context, "item"),
-                                                                        EntityArgumentType.getPlayer(context, "bot"))))))
-                                )
-                                .then(literal("withdraw")
-                                        .then(CommandManager.argument("amount", StringArgumentType.string())
-                                                .then(CommandManager.argument("item", StringArgumentType.string())
-                                                        .executes(context -> executeStoreWithdraw(context,
-                                                                StringArgumentType.getString(context, "amount"),
-                                                                StringArgumentType.getString(context, "item"),
-                                                                getActiveBotOrThrow(context)))
-                                                        .then(CommandManager.argument("bot", EntityArgumentType.player())
-                                                                .executes(context -> executeStoreWithdraw(context,
-                                                                        StringArgumentType.getString(context, "amount"),
-                                                                        StringArgumentType.getString(context, "item"),
-                                                                        EntityArgumentType.getPlayer(context, "bot"))))))
-                                )
-                        )
+	                        .then(literal("store")
+	                                .then(literal("deposit")
+	                                        .executes(context -> executeStoreDeposit(context, "all", "", getActiveBotOrThrow(context)))
+	                                        .then(CommandManager.argument("bot", EntityArgumentType.player())
+	                                                .executes(context -> executeStoreDeposit(context, "all", "", EntityArgumentType.getPlayer(context, "bot"))))
+	                                        .then(CommandManager.argument("amount", StringArgumentType.string())
+	                                                .executes(context -> executeStoreDeposit(context,
+	                                                        StringArgumentType.getString(context, "amount"),
+	                                                        "",
+	                                                        getActiveBotOrThrow(context)))
+	                                                .then(CommandManager.argument("bot", EntityArgumentType.player())
+	                                                        .executes(context -> executeStoreDeposit(context,
+	                                                                StringArgumentType.getString(context, "amount"),
+	                                                                "",
+	                                                                EntityArgumentType.getPlayer(context, "bot"))))
+	                                                .then(CommandManager.argument("item", StringArgumentType.string())
+	                                                        .executes(context -> executeStoreDeposit(context,
+	                                                                StringArgumentType.getString(context, "amount"),
+	                                                                StringArgumentType.getString(context, "item"),
+	                                                                getActiveBotOrThrow(context)))
+	                                                        .then(CommandManager.argument("bot", EntityArgumentType.player())
+	                                                                .executes(context -> executeStoreDeposit(context,
+	                                                                        StringArgumentType.getString(context, "amount"),
+	                                                                        StringArgumentType.getString(context, "item"),
+	                                                                        EntityArgumentType.getPlayer(context, "bot"))))))
+	                                )
+	                                .then(literal("withdraw")
+	                                        .executes(context -> executeStoreWithdraw(context, "all", "", getActiveBotOrThrow(context)))
+	                                        .then(CommandManager.argument("bot", EntityArgumentType.player())
+	                                                .executes(context -> executeStoreWithdraw(context, "all", "", EntityArgumentType.getPlayer(context, "bot"))))
+	                                        .then(CommandManager.argument("amount", StringArgumentType.string())
+	                                                .executes(context -> executeStoreWithdraw(context,
+	                                                        StringArgumentType.getString(context, "amount"),
+	                                                        "",
+	                                                        getActiveBotOrThrow(context)))
+	                                                .then(CommandManager.argument("bot", EntityArgumentType.player())
+	                                                        .executes(context -> executeStoreWithdraw(context,
+	                                                                StringArgumentType.getString(context, "amount"),
+	                                                                "",
+	                                                                EntityArgumentType.getPlayer(context, "bot"))))
+	                                                .then(CommandManager.argument("item", StringArgumentType.string())
+	                                                        .executes(context -> executeStoreWithdraw(context,
+	                                                                StringArgumentType.getString(context, "amount"),
+	                                                                StringArgumentType.getString(context, "item"),
+	                                                                getActiveBotOrThrow(context)))
+	                                                        .then(CommandManager.argument("bot", EntityArgumentType.player())
+	                                                                .executes(context -> executeStoreWithdraw(context,
+	                                                                        StringArgumentType.getString(context, "amount"),
+	                                                                        StringArgumentType.getString(context, "item"),
+	                                                                        EntityArgumentType.getPlayer(context, "bot"))))))
+	                                )
+	                        )
                         .then(literal("debug_serialization")
                                 .then(CommandManager.argument("bot", EntityArgumentType.player())
                                         .executes(context -> {
@@ -960,47 +984,33 @@ public class modCommandRegistry {
                                 })
                         )
 
-                        .then(literal("stopAllMovementTasks")
-
-                        .then(literal("forget")
-                                .then(CommandManager.argument("alias", StringArgumentType.string())
-                                        .executes(context -> {
-                                            String alias = StringArgumentType.getString(context, "alias");
-                                            MinecraftServer server = context.getSource().getServer();
-                                            ServerPlayerEntity bot = server.getPlayerManager().getPlayer(alias);
-
-                                            if (bot == null) {
-                                                context.getSource().sendError(Text.literal("Bot '" + alias + "' not found."));
-                                                return 0;
-                                            }
-
-                                            // Unregister from mod's internal tracking, which calls BotPersistenceService.removeBot()
-                                            BotEventHandler.unregisterBot(bot);
-
-                                            // Explicitly delete player data file
-                                            BotPersistenceService.deletePlayerDataFile(server, bot.getUuid());
-
-                                            // Clear from mod's config if present
-                                            AIPlayer.CONFIG.removeBotEntry(alias);
-                                            AIPlayer.CONFIG.save();
-
-                                            context.getSource().sendFeedback(() -> Text.literal("§aBot '" + alias + "' has been forgotten."), false);
-                                            LOGGER.info("Bot '{}' (UUID {}) has been forgotten and its data deleted.", alias, bot.getUuid());
-                                            return 1;
-                                        }))
-                        )
-                                .executes(context -> {
-
-                                    MinecraftServer server = context.getSource().getServer(); // gets the minecraft server
-                                    ServerCommandSource serverSource = server.getCommandSource();
-                                    PathTracer.flushAllMovementTasks();
-
-                                    ChatUtils.sendSystemMessage(serverSource, "Flushed all movement tasks");
-
-                                    return 1;
-
-                                })
-                        )
+	                        .then(literal("forget")
+	                                .then(CommandManager.argument("alias", StringArgumentType.string())
+	                                        .executes(context -> {
+	                                            String alias = StringArgumentType.getString(context, "alias");
+	                                            MinecraftServer server = context.getSource().getServer();
+	                                            ServerPlayerEntity bot = server.getPlayerManager().getPlayer(alias);
+	
+	                                            if (bot == null) {
+	                                                context.getSource().sendError(Text.literal("Bot '" + alias + "' not found."));
+	                                                return 0;
+	                                            }
+	
+	                                            // Unregister from mod's internal tracking, which calls BotPersistenceService.removeBot()
+	                                            BotEventHandler.unregisterBot(bot);
+	
+	                                            // Explicitly delete player data file
+	                                            BotPersistenceService.deletePlayerDataFile(server, bot.getUuid());
+	
+	                                            // Clear from mod's config if present
+	                                            AIPlayer.CONFIG.removeBotEntry(alias);
+	                                            AIPlayer.CONFIG.save();
+	
+	                                            context.getSource().sendFeedback(() -> Text.literal("§aBot '" + alias + "' has been forgotten."), false);
+	                                            LOGGER.info("Bot '{}' (UUID {}) has been forgotten and its data deleted.", alias, bot.getUuid());
+	                                            return 1;
+	                                        }))
+	                        )
                         .then(literal("give")
                                 // /bot give <item> [count]
                                 .then(CommandManager.argument("item", StringArgumentType.string())
@@ -2577,6 +2587,7 @@ public class modCommandRegistry {
     }
 
     static int executeSkillTargets(CommandContext<ServerCommandSource> context, String skillName, String rawInput) throws CommandSyntaxException {
+        skillName = normalizeSkillName(skillName);
         SkillCommandInvocation invocation = parseSkillInvocation(context.getSource(), rawInput);
         List<ServerPlayerEntity> targets;
         try {
@@ -2635,6 +2646,17 @@ public class modCommandRegistry {
         }
 
         return successes;
+    }
+
+    private static String normalizeSkillName(String raw) {
+        if (raw == null) {
+            return "";
+        }
+        String normalized = raw.trim().toLowerCase(Locale.ROOT);
+        return switch (normalized) {
+            case "woodcutting", "chopwood", "chop_wood", "chop-wood" -> "woodcut";
+            default -> normalized;
+        };
     }
 
     private static String formatBotList(List<ServerPlayerEntity> bots, boolean isAll) {

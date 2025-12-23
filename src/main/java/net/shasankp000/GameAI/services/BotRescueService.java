@@ -49,6 +49,21 @@ public final class BotRescueService {
 
     private BotRescueService() {}
 
+    private static boolean isClimbableNonBlocking(BlockState state) {
+        if (state == null) {
+            return false;
+        }
+        // Ladders/vines/scaffolding are intentionally "in-block" during climbing and should not
+        // trigger burial rescue or get mined as "stuck" blocks.
+        return state.isOf(Blocks.LADDER)
+                || state.isOf(Blocks.VINE)
+                || state.isOf(Blocks.SCAFFOLDING)
+                || state.isOf(Blocks.WEEPING_VINES)
+                || state.isOf(Blocks.WEEPING_VINES_PLANT)
+                || state.isOf(Blocks.TWISTING_VINES)
+                || state.isOf(Blocks.TWISTING_VINES_PLANT);
+    }
+
     public static void reset() {
         LAST_SUFFOCATION_ALERT_TICK.clear();
         LAST_OBSTRUCT_DAMAGE_TICK.clear();
@@ -100,12 +115,14 @@ public final class BotRescueService {
                 && !headState.isOf(Blocks.WATER)
                 && !headState.isOf(Blocks.WHEAT)
                 && !headState.getCollisionShape(world, head).isEmpty()
+                && !isClimbableNonBlocking(headState)
                 && !isRescueProtectedBlock(headState);
         boolean feetBlocked = !feetState.isAir()
                 && !feetState.isOf(Blocks.WATER)
                 && !feetState.isOf(Blocks.FARMLAND)
                 && !feetState.isOf(Blocks.WHEAT)
                 && !feetState.getCollisionShape(world, feet).isEmpty()
+                && !isClimbableNonBlocking(feetState)
                 && !isRescueProtectedBlock(feetState);
 
         // Being "in" a door block is common during doorway traversal and should not trigger burial rescue
@@ -498,7 +515,10 @@ public final class BotRescueService {
         if (recent == null) {
             return false;
         }
-        return recent.isOf(DamageTypes.IN_WALL);
+        // getRecentDamageSource() can remain "sticky" for a while after the actual event, which can cause
+        // burial-rescue to fight intentional tight-space tasks (e.g., descent stairwells). Gate on the
+        // short, explicit damage window tracked by noteObstructDamage().
+        return recent.isOf(DamageTypes.IN_WALL) && tookRecentObstructDamage(bot);
     }
 
     @SuppressWarnings("unused")
@@ -595,7 +615,8 @@ public final class BotRescueService {
             BlockState headState = world.getBlockState(checkHead);
 
             // Found adjacent clear space
-            if (feetState.isAir() && headState.isAir()) {
+            if ((feetState.isAir() || isClimbableNonBlocking(feetState))
+                    && (headState.isAir() || isClimbableNonBlocking(headState))) {
                 Vec3d targetPos = Vec3d.ofCenter(checkFeet);
                 Vec3d currentPos = new Vec3d(bot.getX(), bot.getY(), bot.getZ());
                 Vec3d direction = targetPos.subtract(currentPos).normalize();

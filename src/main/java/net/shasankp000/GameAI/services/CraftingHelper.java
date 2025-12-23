@@ -538,6 +538,11 @@ public final class CraftingHelper {
             double distSq = botPos.getSquaredDistance(nearest);
             LOGGER.info("Found nearby crafting table at {}", nearest.toShortString());
             LAST_KNOWN_CRAFTING_TABLE.put(bot.getUuid(), new WorldPos(world.getRegistryKey(), nearest.toImmutable()));
+            if (distSq > 36.0D) { // >6 blocks away
+                ChatUtils.sendSystemMessage(source,
+                        "Give me a moment — I'll use the crafting table at "
+                                + nearest.getX() + ", " + nearest.getY() + ", " + nearest.getZ() + ".");
+            }
 
             // If this table is far enough that its chunk may be unloaded, approach conservatively first
             // (avoid scanning standable blocks which can chunk-load and hitch).
@@ -601,8 +606,27 @@ public final class CraftingHelper {
         // Try placing from inventory
         int slot = findItemInInventory(bot, Items.CRAFTING_TABLE);
         if (slot != -1) {
-            BlockPos placeAt = botPos.offset(bot.getHorizontalFacing());
-            BotActions.placeBlockAt(bot, placeAt, java.util.List.of(Items.CRAFTING_TABLE));
+            BlockPos placeAt = findNearbyStationPlacement(world, botPos);
+            if (placeAt == null) {
+                placeAt = botPos.offset(bot.getHorizontalFacing());
+            }
+            boolean placed = BotActions.placeBlockAt(bot, placeAt, java.util.List.of(Items.CRAFTING_TABLE));
+            if (!placed || !world.getBlockState(placeAt).isOf(net.minecraft.block.Blocks.CRAFTING_TABLE)) {
+                // Fallback: try a few nearby cells if the forward placement failed (blocked/fluids/odd footing).
+                for (BlockPos alt : findNearbyStationPlacementOptions(world, botPos)) {
+                    if (BotActions.placeBlockAt(bot, alt, java.util.List.of(Items.CRAFTING_TABLE))
+                            && world.getBlockState(alt).isOf(net.minecraft.block.Blocks.CRAFTING_TABLE)) {
+                        placeAt = alt.toImmutable();
+                        placed = true;
+                        break;
+                    }
+                }
+            }
+            if (!placed || !world.getBlockState(placeAt).isOf(net.minecraft.block.Blocks.CRAFTING_TABLE)) {
+                LOGGER.warn("Failed to place crafting table from inventory near {}", botPos.toShortString());
+                ChatUtils.sendSystemMessage(source, "I couldn't place a crafting table here.");
+                return false;
+            }
             LOGGER.info("Placed crafting table from inventory at {}", placeAt.toShortString());
             LAST_KNOWN_CRAFTING_TABLE.put(bot.getUuid(), new WorldPos(world.getRegistryKey(), placeAt.toImmutable()));
             boolean allowTeleport = SkillPreferences.teleportDuringSkills(bot);
@@ -629,8 +653,26 @@ public final class CraftingHelper {
         ensurePlanksAvailable(bot, source, 4);
         boolean crafted = craftCraftingTable(source, bot, source.getPlayer(), 1);
         if (crafted && findItemInInventory(bot, Items.CRAFTING_TABLE) != -1) {
-            BlockPos placeAt = botPos.offset(bot.getHorizontalFacing());
-            BotActions.placeBlockAt(bot, placeAt, java.util.List.of(Items.CRAFTING_TABLE));
+            BlockPos placeAt = findNearbyStationPlacement(world, botPos);
+            if (placeAt == null) {
+                placeAt = botPos.offset(bot.getHorizontalFacing());
+            }
+            boolean placed = BotActions.placeBlockAt(bot, placeAt, java.util.List.of(Items.CRAFTING_TABLE));
+            if (!placed || !world.getBlockState(placeAt).isOf(net.minecraft.block.Blocks.CRAFTING_TABLE)) {
+                for (BlockPos alt : findNearbyStationPlacementOptions(world, botPos)) {
+                    if (BotActions.placeBlockAt(bot, alt, java.util.List.of(Items.CRAFTING_TABLE))
+                            && world.getBlockState(alt).isOf(net.minecraft.block.Blocks.CRAFTING_TABLE)) {
+                        placeAt = alt.toImmutable();
+                        placed = true;
+                        break;
+                    }
+                }
+            }
+            if (!placed || !world.getBlockState(placeAt).isOf(net.minecraft.block.Blocks.CRAFTING_TABLE)) {
+                LOGGER.warn("Crafted a crafting table but failed to place it near {}", botPos.toShortString());
+                ChatUtils.sendSystemMessage(source, "I crafted a crafting table but couldn't place it here.");
+                return false;
+            }
             LOGGER.info("Crafted and placed crafting table at {}", placeAt.toShortString());
             LAST_KNOWN_CRAFTING_TABLE.put(bot.getUuid(), new WorldPos(world.getRegistryKey(), placeAt.toImmutable()));
             boolean allowTeleport = SkillPreferences.teleportDuringSkills(bot);
@@ -652,6 +694,80 @@ public final class CraftingHelper {
 
         LOGGER.info("No crafting table within {} blocks of {}", radius, botPos.toShortString());
         ChatUtils.sendSystemMessage(source, "I need a crafting table nearby to craft that.");
+        return false;
+    }
+
+    private static BlockPos findNearbyStationPlacement(ServerWorld world, BlockPos origin) {
+        List<BlockPos> options = findNearbyStationPlacementOptions(world, origin);
+        return options.isEmpty() ? null : options.get(0);
+    }
+
+    private static List<BlockPos> findNearbyStationPlacementOptions(ServerWorld world, BlockPos origin) {
+        if (world == null || origin == null) {
+            return List.of();
+        }
+        List<BlockPos> candidates = new ArrayList<>();
+        for (net.minecraft.util.math.Direction dir : net.minecraft.util.math.Direction.Type.HORIZONTAL) {
+            candidates.add(origin.offset(dir));
+        }
+        for (int dx = -2; dx <= 2; dx++) {
+            for (int dz = -2; dz <= 2; dz++) {
+                if (dx == 0 && dz == 0) continue;
+                candidates.add(origin.add(dx, 0, dz));
+            }
+        }
+        List<BlockPos> valid = new ArrayList<>();
+        for (BlockPos pos : candidates) {
+            if (!world.isChunkLoaded(pos)) {
+                continue;
+            }
+            BlockPos below = pos.down();
+            if (!world.isChunkLoaded(below)) {
+                continue;
+            }
+            if (!world.getFluidState(pos).isEmpty() || !world.getFluidState(below).isEmpty()) {
+                continue;
+            }
+            if (world.getBlockState(below).getCollisionShape(world, below).isEmpty()) {
+                continue;
+            }
+            net.minecraft.block.BlockState state = world.getBlockState(pos);
+            if (!state.isAir() && !state.isReplaceable() && !state.isOf(net.minecraft.block.Blocks.SNOW)) {
+                continue;
+            }
+            if (!hasAnyAdjacentStand(world, pos)) {
+                continue;
+            }
+            valid.add(pos.toImmutable());
+        }
+        valid.sort(java.util.Comparator.comparingDouble(p -> p.getSquaredDistance(origin)));
+        return valid;
+    }
+
+    private static boolean hasAnyAdjacentStand(ServerWorld world, BlockPos stationPos) {
+        if (world == null || stationPos == null) {
+            return false;
+        }
+        for (net.minecraft.util.math.Direction dir : net.minecraft.util.math.Direction.Type.HORIZONTAL) {
+            BlockPos stand = stationPos.offset(dir);
+            BlockPos below = stand.down();
+            if (!world.isChunkLoaded(stand) || !world.isChunkLoaded(below)) {
+                continue;
+            }
+            if (!world.getFluidState(stand).isEmpty() || !world.getFluidState(below).isEmpty()) {
+                continue;
+            }
+            if (world.getBlockState(below).getCollisionShape(world, below).isEmpty()) {
+                continue;
+            }
+            if (!world.getBlockState(stand).getCollisionShape(world, stand).isEmpty()) {
+                continue;
+            }
+            if (!world.getBlockState(stand.up()).getCollisionShape(world, stand.up()).isEmpty()) {
+                continue;
+            }
+            return true;
+        }
         return false;
     }
 

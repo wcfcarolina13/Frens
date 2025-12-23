@@ -9,6 +9,10 @@ import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public class ChatUtils {
     private static final Logger LOGGER = LoggerFactory.getLogger("ai-player");
@@ -17,8 +21,13 @@ public class ChatUtils {
     private static final int MAX_CHAT_LENGTH = 100;
     private static final long MESSAGE_DELAY_MS = 2500L;
 
-    // We no longer use a separate scheduler for chat messages.
-    // The server's main thread will handle scheduling internally.
+    private static final AtomicInteger CHAT_THREAD_ID = new AtomicInteger(0);
+    // Shared scheduler for delayed chat parts (avoid spawning a new Thread per delayed message part).
+    private static final ScheduledExecutorService CHAT_DELAY_EXECUTOR = Executors.newSingleThreadScheduledExecutor(runnable -> {
+        Thread thread = new Thread(runnable, "chat-utils-delay-" + CHAT_THREAD_ID.incrementAndGet());
+        thread.setDaemon(true);
+        return thread;
+    });
 
     /**
      * Send a message from the bot with optional delay.
@@ -68,16 +77,11 @@ public class ChatUtils {
 
         // Schedule the next part if there are more to send and a delay is requested.
         if (withDelay && partIndex < messageParts.size() - 1) {
-            // Schedule a new task on the main thread after a delay.
-            // This prevents freezing the main thread.
-            new Thread(() -> {
-                try {
-                    Thread.sleep(MESSAGE_DELAY_MS);
-                    server.execute(() -> scheduleAndSendMessages(server, source, messageParts, partIndex + 1, true));
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                }
-            }).start();
+            CHAT_DELAY_EXECUTOR.schedule(
+                    () -> server.execute(() -> scheduleAndSendMessages(server, source, messageParts, partIndex + 1, true)),
+                    MESSAGE_DELAY_MS,
+                    TimeUnit.MILLISECONDS
+            );
         }
     }
 

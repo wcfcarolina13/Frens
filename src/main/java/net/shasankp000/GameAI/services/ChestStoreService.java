@@ -1,25 +1,38 @@
 package net.shasankp000.GameAI.services;
 
+import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
 import net.minecraft.block.entity.ChestBlockEntity;
 import net.minecraft.inventory.Inventory;
+import net.minecraft.item.BlockItem;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
+import net.minecraft.item.Items;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.network.ServerPlayerEntity;
+import net.minecraft.server.world.ServerWorld;
+import net.minecraft.registry.RegistryKey;
+import net.minecraft.world.World;
 import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.util.hit.BlockHitResult;
 import net.shasankp000.Entity.LookController;
 import net.shasankp000.ChatUtils.ChatUtils;
+import net.shasankp000.GameAI.BotActions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Predicate;
 
@@ -28,10 +41,59 @@ public final class ChestStoreService {
     private static final Logger LOGGER = LoggerFactory.getLogger("chest-store");
     private static final MovementFlags DEFAULT_MOVEMENT = new MovementFlags(null, true, true, true);
     private static final MovementFlags WALK_ONLY = new MovementFlags(Boolean.FALSE, true, false, false);
+    private static final int DEFAULT_CHEST_SEARCH_RADIUS = 12;
+    private static final int DEFAULT_CHEST_SEARCH_YSPAN = 6;
+    private static final double MAX_REMEMBERED_CHEST_DIST_SQ = 140.0D * 140.0D;
+    private static final Map<UUID, WorldPos> LAST_PLACED_CHEST = new ConcurrentHashMap<>();
+
+    private static final Set<Item> DEFAULT_STORE_ITEMS = Set.of(
+            // Materials commonly used for building / scaffolding
+            Items.COBBLESTONE,
+            Items.COBBLED_DEEPSLATE,
+            Items.STONE,
+            Items.ANDESITE,
+            Items.DIORITE,
+            Items.GRANITE,
+            Items.TUFF,
+            Items.DEEPSLATE,
+            Items.DIRT,
+            Items.COARSE_DIRT,
+            Items.ROOTED_DIRT,
+            Items.GRASS_BLOCK,
+            Items.SAND,
+            Items.RED_SAND,
+            Items.GRAVEL,
+            Items.NETHERRACK,
+            Items.BLACKSTONE,
+            Items.BASALT,
+            Items.SMOOTH_BASALT,
+            Items.CLAY,
+            Items.BRICKS,
+            Items.GLASS,
+            Items.TORCH,
+            Items.LADDER,
+            Items.SCAFFOLDING,
+            Items.STICK,
+            Items.COAL,
+            Items.CHARCOAL,
+
+            // Common mob drops
+            Items.ROTTEN_FLESH,
+            Items.BONE,
+            Items.ARROW,
+            Items.STRING,
+            Items.GUNPOWDER,
+            Items.SPIDER_EYE,
+            Items.SLIME_BALL,
+            Items.LEATHER,
+            Items.FEATHER,
+            Items.ENDER_PEARL
+    );
 
     private ChestStoreService() {}
 
     private record MovementFlags(Boolean allowTeleportOverride, boolean fastReplan, boolean allowPursuit, boolean allowSnap) {}
+    private record WorldPos(RegistryKey<World> worldKey, BlockPos pos) {}
 
     public static int handleDeposit(ServerCommandSource source, ServerPlayerEntity bot, String amountRaw, String itemRaw) {
         return handleTransfer(source, bot, amountRaw, itemRaw, true);
@@ -42,9 +104,7 @@ public final class ChestStoreService {
     }
 
     private static int handleTransfer(ServerCommandSource source, ServerPlayerEntity bot, String amountRaw, String itemRaw, boolean deposit) {
-        BlockPos chestPos = resolveChestPos(source);
-        if (chestPos == null || bot == null) {
-            ChatUtils.sendSystemMessage(source, "Look at a chest.");
+        if (bot == null || source == null) {
             return 0;
         }
         MinecraftServer server = source.getServer();
@@ -52,17 +112,36 @@ public final class ChestStoreService {
             return 0;
         }
         int amount = parseAmount(amountRaw, Integer.MAX_VALUE);
-        String itemName = itemRaw != null ? itemRaw.toLowerCase(Locale.ROOT) : "";
-        
-        server.execute(() -> ChatUtils.sendSystemMessage(source, "Heading to the chest to " + (deposit ? "deposit" : "withdraw") + " items..."));
-        
-        Predicate<ItemStack> filter = stack -> {
-            if (itemName.isBlank()) return true;
-            return stack.getName().getString().toLowerCase(Locale.ROOT).contains(itemName);
-        };
+        String itemName = itemRaw != null ? itemRaw.trim().toLowerCase(Locale.ROOT) : "";
+        BlockPos lookedAt = resolveChestPos(source);
 
         UUID botId = bot.getUuid();
         CompletableFuture.runAsync(() -> {
+            BlockPos chestPos = lookedAt;
+            if (chestPos == null) {
+                chestPos = resolveRememberedChest(source, botId);
+            }
+            if (chestPos == null) {
+                chestPos = findNearbyChest(source, botId, DEFAULT_CHEST_SEARCH_RADIUS, DEFAULT_CHEST_SEARCH_YSPAN);
+            }
+            if (chestPos == null && deposit) {
+                ServerPlayerEntity liveBot = callOnServer(server, () -> server.getPlayerManager().getPlayer(botId), 800, null);
+                if (liveBot != null && !liveBot.isRemoved()) {
+                    chestPos = placeChestNearBot(source, liveBot, true);
+                }
+            }
+            if (chestPos == null) {
+                String msg = deposit
+                        ? "No chest targeted or nearby; I couldn't place one to deposit into."
+                        : "No chest targeted or nearby to withdraw from. Look at a chest or stand near one.";
+                server.execute(() -> ChatUtils.sendSystemMessage(source, msg));
+                return;
+            }
+
+            server.execute(() -> ChatUtils.sendSystemMessage(source,
+                    "Heading to the chest to " + (deposit ? "deposit" : "withdraw") + " items..."));
+
+            Predicate<ItemStack> filter = buildFilterForTransfer(source, chestPos, itemName, deposit);
             int moved = performStoreTransfer(source, botId, chestPos, amount, filter, deposit, DEFAULT_MOVEMENT);
             String action = deposit ? "Deposited" : "Withdrew";
             String fail = deposit ? "deposit" : "withdraw";
@@ -70,6 +149,261 @@ public final class ChestStoreService {
                     moved > 0 ? action + " " + moved + " items." : "Couldn't " + fail + " (unreachable, blocked, or no matching items)."));
         });
         return 1;
+    }
+
+    private static Predicate<ItemStack> buildFilterForTransfer(ServerCommandSource source, BlockPos chestPos, String itemName, boolean deposit) {
+        if (itemName == null || itemName.isBlank()) {
+            if (deposit) {
+                Set<Item> chestItems = snapshotChestItemTypes(source, chestPos);
+                if (!chestItems.isEmpty()) {
+                    LOGGER.info("Store default deposit: matching {} item types already in chest at {}",
+                            chestItems.size(), chestPos != null ? chestPos.toShortString() : "null");
+                    return stack -> {
+                        if (stack == null || stack.isEmpty()) {
+                            return false;
+                        }
+                        return chestItems.contains(stack.getItem()) || isDefaultStoreItem(stack);
+                    };
+                }
+                return ChestStoreService::isDefaultStoreItem;
+            }
+            return ChestStoreService::isDefaultStoreItem;
+        }
+        return buildFilter(itemName);
+    }
+
+    private static Predicate<ItemStack> buildFilter(String itemName) {
+        if (itemName == null || itemName.isBlank()) {
+            return ChestStoreService::isDefaultStoreItem;
+        }
+        if ("all".equals(itemName) || "*".equals(itemName) || "everything".equals(itemName)) {
+            return stack -> true;
+        }
+        return stack -> stack.getName().getString().toLowerCase(Locale.ROOT).contains(itemName);
+    }
+
+    private static boolean isDefaultStoreItem(ItemStack stack) {
+        if (stack == null || stack.isEmpty()) {
+            return false;
+        }
+        if (stack.isIn(net.minecraft.registry.tag.ItemTags.LOGS_THAT_BURN)
+                || stack.isIn(net.minecraft.registry.tag.ItemTags.PLANKS)) {
+            return true;
+        }
+        if (DEFAULT_STORE_ITEMS.contains(stack.getItem())) {
+            return true;
+        }
+        if (stack.getItem() instanceof BlockItem) {
+            // Catch most "builder blocks" without over-matching tools/food.
+            String name = stack.getName().getString().toLowerCase(Locale.ROOT);
+            return name.contains("stone")
+                    || name.contains("cobble")
+                    || name.contains("dirt")
+                    || name.contains("sand")
+                    || name.contains("gravel")
+                    || name.contains("leaf")
+                    || name.contains("leaves");
+        }
+        return false;
+    }
+
+    private static BlockPos resolveRememberedChest(ServerCommandSource source, UUID botId) {
+        if (source == null || botId == null) {
+            return null;
+        }
+        WorldPos remembered = LAST_PLACED_CHEST.get(botId);
+        if (remembered == null || remembered.pos() == null || remembered.worldKey() == null) {
+            return null;
+        }
+        if (source.getWorld() == null || !remembered.worldKey().equals(source.getWorld().getRegistryKey())) {
+            return null;
+        }
+        ServerPlayerEntity bot = source.getServer() != null ? source.getServer().getPlayerManager().getPlayer(botId) : null;
+        if (bot == null) {
+            return null;
+        }
+        BlockPos pos = remembered.pos();
+        if (bot.getBlockPos().getSquaredDistance(pos) > MAX_REMEMBERED_CHEST_DIST_SQ) {
+            return null;
+        }
+        if (source.getWorld().isChunkLoaded(pos)) {
+            BlockState state = source.getWorld().getBlockState(pos);
+            if (state.isOf(Blocks.CHEST) || state.isOf(Blocks.TRAPPED_CHEST)) {
+                return pos.toImmutable();
+            }
+        }
+        return null;
+    }
+
+    private static Set<Item> snapshotChestItemTypes(ServerCommandSource source, BlockPos chestPos) {
+        if (source == null || chestPos == null) {
+            return Set.of();
+        }
+        MinecraftServer server = source.getServer();
+        if (server == null) {
+            return Set.of();
+        }
+        return callOnServer(server, () -> {
+            var be = source.getWorld().getBlockEntity(chestPos);
+            if (!(be instanceof Inventory inv)) {
+                return Set.of();
+            }
+            Set<Item> types = new HashSet<>();
+            for (int i = 0; i < inv.size(); i++) {
+                ItemStack stack = inv.getStack(i);
+                if (stack == null || stack.isEmpty()) {
+                    continue;
+                }
+                types.add(stack.getItem());
+            }
+            return Set.copyOf(types);
+        }, 1200, Set.of());
+    }
+
+    private static BlockPos findNearbyChest(ServerCommandSource source, UUID botId, int radius, int ySpan) {
+        if (source == null || botId == null) {
+            return null;
+        }
+        MinecraftServer server = source.getServer();
+        if (server == null) {
+            return null;
+        }
+        return callOnServer(server, () -> {
+            ServerPlayerEntity bot = server.getPlayerManager().getPlayer(botId);
+            if (bot == null || bot.isRemoved()) {
+                return null;
+            }
+            if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
+                return null;
+            }
+            BlockPos origin = bot.getBlockPos();
+            double best = Double.MAX_VALUE;
+            BlockPos bestPos = null;
+            for (BlockPos pos : BlockPos.iterate(origin.add(-radius, -ySpan, -radius), origin.add(radius, ySpan, radius))) {
+                if (!world.isChunkLoaded(pos)) {
+                    continue;
+                }
+                BlockState state = world.getBlockState(pos);
+                if (!state.isOf(Blocks.CHEST) && !state.isOf(Blocks.TRAPPED_CHEST)) {
+                    continue;
+                }
+                double d = origin.getSquaredDistance(pos);
+                if (d < best) {
+                    best = d;
+                    bestPos = pos.toImmutable();
+                }
+            }
+            return bestPos;
+        }, 1200, null);
+    }
+
+    public static BlockPos placeChestNearBot(ServerCommandSource source, ServerPlayerEntity bot, boolean announce) {
+        if (source == null || bot == null) {
+            return null;
+        }
+        MinecraftServer server = source.getServer();
+        if (server == null) {
+            return null;
+        }
+        if (countItem(bot, Items.CHEST) <= 0) {
+            int crafted = CraftingHelper.craftGeneric(source, bot, source.getPlayer(), "chest", 1, null);
+            if (crafted <= 0 && countItem(bot, Items.CHEST) <= 0) {
+                LOGGER.warn("Store: no chest in inventory and couldn't craft one.");
+                return null;
+            }
+        }
+
+        BlockPos origin = bot.getBlockPos();
+        List<BlockPos> candidates = new ArrayList<>();
+        for (Direction dir : Direction.Type.HORIZONTAL) {
+            candidates.add(origin.offset(dir));
+        }
+        for (int dx = -2; dx <= 2; dx++) {
+            for (int dz = -2; dz <= 2; dz++) {
+                if (dx == 0 && dz == 0) continue;
+                candidates.add(origin.add(dx, 0, dz));
+            }
+        }
+
+        BlockPos placed = callOnServer(server, () -> {
+            if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
+                return null;
+            }
+            for (BlockPos pos : candidates) {
+                BlockPos below = pos.down();
+                if (!world.getBlockState(below).isSolidBlock(world, below)) {
+                    continue;
+                }
+                if (!world.getFluidState(pos).isEmpty() || !world.getFluidState(below).isEmpty()) {
+                    continue;
+                }
+                BlockState state = world.getBlockState(pos);
+                if (!state.isAir() && !state.isReplaceable()) {
+                    continue;
+                }
+                // Ensure at least one adjacent standable spot exists for interacting with the chest after placing.
+                if (!hasAnyAdjacentStand(world, pos)) {
+                    continue;
+                }
+                boolean ok = BotActions.placeBlockAt(bot, pos, Direction.UP, List.of(Items.CHEST));
+                if (!ok) {
+                    continue;
+                }
+                BlockState now = world.getBlockState(pos);
+                if (now.isOf(Blocks.CHEST) || now.isOf(Blocks.TRAPPED_CHEST)) {
+                    return pos.toImmutable();
+                }
+            }
+            return null;
+        }, 2000, null);
+
+        if (placed != null && announce) {
+            BlockPos announcePos = placed;
+            server.execute(() -> ChatUtils.sendSystemMessage(source,
+                    "Placed a chest at " + announcePos.getX() + ", " + announcePos.getY() + ", " + announcePos.getZ() + "."));
+        }
+        if (placed != null) {
+            LAST_PLACED_CHEST.put(bot.getUuid(), new WorldPos(source.getWorld().getRegistryKey(), placed.toImmutable()));
+        }
+        return placed;
+    }
+
+    private static boolean hasAnyAdjacentStand(ServerWorld world, BlockPos chestPos) {
+        if (world == null || chestPos == null) {
+            return false;
+        }
+        for (Direction dir : Direction.Type.HORIZONTAL) {
+            BlockPos stand = chestPos.offset(dir);
+            BlockPos below = stand.down();
+            if (!world.getFluidState(stand).isEmpty() || !world.getFluidState(below).isEmpty()) {
+                continue;
+            }
+            if (world.getBlockState(below).getCollisionShape(world, below).isEmpty()) {
+                continue;
+            }
+            if (!world.getBlockState(stand).getCollisionShape(world, stand).isEmpty()) {
+                continue;
+            }
+            if (!world.getBlockState(stand.up()).getCollisionShape(world, stand.up()).isEmpty()) {
+                continue;
+            }
+            return true;
+        }
+        return false;
+    }
+
+    private static int countItem(ServerPlayerEntity bot, Item item) {
+        if (bot == null || item == null) {
+            return 0;
+        }
+        int total = 0;
+        for (int i = 0; i < bot.getInventory().size(); i++) {
+            ItemStack stack = bot.getInventory().getStack(i);
+            if (stack.isOf(item)) {
+                total += stack.getCount();
+            }
+        }
+        return total;
     }
 
     public static int depositAll(ServerCommandSource source, ServerPlayerEntity bot, BlockPos chestPos) {

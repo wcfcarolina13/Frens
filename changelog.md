@@ -14,7 +14,10 @@ Historical record and reasoning. `TODO.md` is the source of truth for what’s n
 ## Unreleased
 - Woodcut: tighter unreachable-log cap (4 skips), wider drop sweep sized to the job footprint, and confirmed sapling replant stays on; aborts still trigger a sweep.
 - Woodcut (standalone): defaults to a small target count and stops at sunset with a clear chat message (internal woodcut calls are unaffected).
-- Chest use: bot auto-deposits wood to nearby chests/barrels; documented `/bot store deposit|withdraw <amount|all> <item> [bot]`.
+- Chest use: woodcut deposits via `ChestStoreService` (stand-candidate + door-aware); if nearby chests are full/unusable it will place a new chest near the bot and announce coordinates.
+- Commands: `/bot skill woodcutting ...` now aliases to `woodcut` (reduces “unknown skill” typos).
+- Store: `/bot store deposit|withdraw` now supports no-arg defaults; when not looking at a chest it will prefer the last chest it placed, otherwise use a nearby chest (or place one for deposits). Default deposit now “matches what’s already in the chest” (e.g., chest has oak logs ⇒ deposit oak logs); if the chest is empty it falls back to construction materials + common mob drops. Default deposit also includes construction/clutter items so it can be used as a general stash when you’re trying to make space. Use item filter `all`/`*` to match everything.
+- Crafting: crafting-table placement is now more robust (avoids fluids and blocked tiles, and retries nearby placements) so “logs → planks → place table → chest” works more reliably for storage automation.
 - Shelter: added `/bot shelter hovel <alias?>` to build a quick dirt/cobble hovel (roofed, torches, fills gaps, gathers dirt if short).
 - Shelter: hovel now prefers staying near the build site for material gathering (shallow local dig only; no auto descent/stripmine), and can detect/complete nearby pre-existing shelter footprints.
 - Shelter: hovel siting rejects unsupported/water-edge footprints (won’t try to build walls over shoreline overhangs), and runs a final interior leveling + gap patch pass right before drop-sweeping.
@@ -25,10 +28,57 @@ Historical record and reasoning. `TODO.md` is the source of truth for what’s n
 - Shelter: improved “indoors vs underground” detection by treating common build-material roof planes overhead as being indoors (prevents false ascent when the bot is placed inside a completed/roofed hovel).
 - Shelter: while building a hovel, the bot now yields briefly to nearby hostiles and triggers immediate defense (reduces “task movement fighting combat movement” hopping).
 - Shelter: door gap/walls are now aligned to the bot’s walking level (prevents “sealed in” hovels where the doorway existed only at head-height), and a final `ensureDoorwayOpen` runs right before drop-sweeping.
+- Shelter: hovel build now uses a perimeter ring wall pass plus a roof serpentine walk to place reachable blocks under survival reach/LOS rules, and restored shelter option parsing/placement helpers to keep burrow stripmine stable.
+- Shelter: leveling keeps the foot layer clear (no fill) after aligning wall placement to the ground so walls use natural support blocks.
+- Shelter: align wall base and doorway to foot level, and lower the roof plane to match so wall placements have proper ground support; add ring-pass placement stats for diagnosing zero-placement runs.
+- Shelter: move wall placement back to start at y+1 with a y+2 door gap, lift the roof plane to match wallHeight, and pick roof pillar bases from ground Y so roof building can start reliably.
+- Shelter: allow adjacent placements to bypass strict LOS checks when a solid support is present (prevents false reach failures on wall and roof placements while staying within survival reach).
+- Shelter: ring wall pass now requires standable ring tiles and uses a direct ring-step move to get adjacent before attempting placements, reducing long-range LOS failures.
+- Shelter: added detailed wall/roof placement logging plus scaffold teardown/step diagnostics so we can trace exactly why each target fails during the perimeter pass.
 - Placement: block placement now requires line-of-sight to the supporting click block (prevents placing blocks “through” other blocks, e.g., placing above the roof while still inside).
 - Placement: placement hit results are now raycast-derived (must hit the intended support block *and face*), preventing “clicking the top face from below” exploits that allowed through-roof placements.
 - Shelter: doorway viability/clearing now uses the same floor-level door coordinates as the build logic and ensures the bot walks into reach before carving the opening.
+- Shelter: `ensureDoorwayOpen` now reliably carves a 2×2 passage (inside + outside), can carve through most breakable blocks (not just “soft”/roof materials), and logs doorway carve attempts for easier debugging.
+- Shelter: timeboxed/attempt-capped “nearby materials gather” to avoid long pathing loops that prevent the hovel build (and doorway carving) from ever starting; added gather progress logging.
+- Shelter: hovel now fills the support layer and places the first wall layers using a “station-based” placement pass (few movement steps, many placements per stop) to reduce per-block pathfinding churn and incomplete low walls on uneven terrain.
 - Shelter: doorway selection now re-evaluates all sides at build time (lowest carve cost + safe outside step) and carves from an interior approach tile, so the bot can recover even if it forgot the original doorway location.
+- Shelter: `hovel2` now runs the leveling pass and then builds walls + roof primarily from a central scaffold tower perch (always crouching), using direct-within-reach placements to minimize path churn; for larger radii it may add a few auxiliary perches, then falls back to a single gap-patch pass if anything remains unreachable.
+- Shelter: improved `pillarUp` reliability (clears soft headroom, allows replaceables in the foot cell, waits for Y to actually increase) and added clearer logs/chat for the `hovel2` tower build.
+- Shelter: fixed `hovel2` tower perch falling by enforcing sneaking via `BotActions.sneak(...)` (server-thread safe) instead of direct `setSneaking(...)`, and reasserting sneak after moves and before placement passes.
+- Shelter: added `SneakLockService` and used it during `hovel2` builds to prevent movement/RL/stop routines from turning sneaking off mid-build (bots should stay crouched on the tower perch until completion).
+- Shelter: fixed `hovel2` tower reach failures by building walls layer-by-layer while ascending the center tower (vertical distance counts toward reach, so a single top perch cannot place lower wall layers).
+- Shelter: `hovel2` tower build now retries each wall layer/roof pass until all *in-reach* missing targets are confirmed placed (or progress stalls), instead of ascending immediately after a single sweep.
+- Shelter: `hovel2` roof placement from the tower now fills ring-by-ring (outer → inner) and places farthest targets first to avoid line-of-sight blocking that disproportionately caused missed corner blocks.
+- Shelter: build-site moves now fall back to `GoTo.goTo` routefinding if the short-range MovementService stepper gets stuck (reduces “infinite jump/step on one block” stalls when approaching build stations).
+- Shelter: hovel siting now avoids shorelines and farms (rejects candidates with nearby fluids or farmland/crops), and shelter clearing refuses to break farmland/crops (prevents griefing farm plots).
+- Shelter: `hovel2` now attempts corner-focused auxiliary pillars (woodcut-style pillar + teardown) before the general patch pass to finish tricky corner/roof placements without wandering.
+- Shelter: reach-move candidate stepping now falls back to `GoTo.goTo` to reduce “stuck stepping” when moving between stand positions during placement.
+- Shelter: `hovel2` now tears down its central tower scaffolding after building, and caps the roof-center hole (it may need to drop 1 block to avoid the placement bounding-box intersection check).
+- Shelter: added light placement throttling during high-volume roof/wall passes to reduce server-thread task flooding (helps mitigate build-related tick lag).
+- Shelter: `hovel2` now over-collects build blocks (3× estimate) and avoids mining near/under the active footprint while gathering (prevents “gathering changed the math” placement issues).
+- Shelter: `hovel2` no longer crafts ladders during tower builds (prevents wandering to far-away crafting tables).
+- Shelter: improved scaffolding cleanup by using a safe teardown that never breaks roof/wall cells, plus strict vertical pillaring for `hovel2` tower/aux pillars to avoid messy exterior offsets.
+- Shelter: added a final roof-center cap attempt after all teardown/patching, to handle cases where the cap block was previously removed during cleanup.
+- Shelter: `CraftingHelper` now tells chat when it’s heading to a nearby crafting table (coords) so “ran off” trips are understandable.
+- Shelter: `hovel2` now runs a final drop sweep around the build site.
+- Shelter: shelter material gathering now prefers a descent-based dig at a safe distance first (then falls back to a small surface gather), and avoids mining near the active build footprint to prevent corner holes/terrain distortion.
+- Shelter: `hovel2` final roof cap pass now fills any remaining roof holes from a temporary center pillar instead of only trying the single center cell.
+- Shelter: `hovel2` roof cap now avoids player/target collision by capping from a lower foot Y (and falls back to small auxiliary cap pillars near remaining holes).
+- Shelter: scaffolding support blocks placed for pillaring are now tracked and included in teardown; teardown now ensures reach before mining so fewer “mystery” exterior columns remain.
+- Shelter: corner pillar passes now prefer exterior bases and target full adjacent wall spans, with build blocks allowed for scaffolding and teardown covering them.
+- Shelter: pillar-up attempts now retry jump/placement per step to reduce stalled scaffold climbs.
+- Drop sweep: disabled MovementService snap-forward during drop sweeps to avoid visible “teleport” snaps during survival-style cleanup.
+- Shelter: added lightweight `hovel2` stage timing logs (leveling / tower build / cap / drop sweep) to help identify build-related lag.
+- Mining: `MiningTool.mineBlock(...)` now uses a shared scheduled executor (instead of spinning up a new thread/executor per block) to reduce tick spikes in heavily modded instances.
+- Mining (descent): stair-descent mining now retries transient failures/timeouts (falling blocks, slow breaks) and pauses with clearer chat + coordinates instead of hard-aborting without context.
+- Mining (descent): avoid canceling `MiningTool` futures on slow breaks; align wait timeouts to MiningTool’s failsafe and mark the bot as “in ascent mode” during descent so burial-rescue doesn’t fight the intentional 1×2 stairwell.
+- Mining hazards: lava detection now treats “lava-like” modded fluids (ids containing `lava`/`molten`) as lava hazards so the bot will announce and pause appropriately.
+- Chat: delayed multi-part chat now uses a shared scheduler (no per-message `new Thread(...)`), reducing thread churn during heavy automation.
+- Emotes: ambient bot emotes now run only when the bot is truly `IDLE` (never during follow/guard/patrol or active skills), and can optionally do a brief crouch “ack” emote in addition to waving.
+- UI: bot inventory screen shift-click routing no longer dumps arbitrary items into armor/offhand; only armor auto-fills armor slots and shields auto-fill offhand, everything else prefers hotbar then main.
+- Shelter: `hovel2` tower pillaring uses the same underfoot placement strategy as woodcut pillaring (more reliable on uneven terrain/snow), with a fallback to the regular `pillarUp` when strict tower pillaring fails.
+- Shelter: `hovel2` corner completion now prefers auxiliary perches inside the footprint to reduce exterior teardown mess; scaffolding teardown uses the full reach helper and keeps sneak asserted until teardown completes.
+- Shelter: `hovel2` no longer claims success if wall/roof targets remain missing; it reports an incomplete build with remaining target count.
 - Farming: secured irrigation basins on uneven terrain (fills edges/underblocks, cleans stray flow), repair pass now levels plots to farm Y before re-till/plant, and leaves are broken with shears/harmless items (no axe wear).
 - Wool skill: peaceful shearing that crafts/equips shears if needed, detects pens vs. wild range (fence-aware search), collects drops, and auto-deposits bulk blocks to nearby chests to keep ≥5 free slots.
 - Wool: `/bot stop` now interrupts movement/drop-sweeps immediately; short-range moves avoid full pathfinding to reduce hitching.
@@ -116,6 +166,16 @@ Historical record and reasoning. `TODO.md` is the source of truth for what’s n
 - Follow: reduced “door magnet” behavior by only considering door subgoals when blocked or lacking LoS, clearing stale waypoints when the commander is close/visible, and adding a short per-door cooldown when a door plan aborts or fails to open (prevents endlessly re-picking the same door).
 - Follow: door traversal now prefers standing directly in front/behind doors (based on door facing), triggers “double back” recovery sooner, and no longer marks a door as “crossed” while the bot is still standing inside the door block (fixes a common stuck/oscillation loop).
 - Follow: reverted a regression where door traversal could oscillate by dynamically re-picking front/back tiles each tick; door plans are stable again, and doorway recovery now prioritizes an explicit 2–3 block retreat before any micro-nudges (more reliable “double back and try again”).
+- Rescue: burial/suffocation rescue no longer treats ladders/vines/scaffolding as “stuck blocks” (prevents rescue from mining ladders during shaft escapes and breaking navigation).
+- Shelter: hovel build now detects falling into pits/shafts mid-build and attempts a ladder escape (craft/place ladders + move to an exit) with a pillar-climb fallback; scaffolding pillaring now uses cheap scaffold blocks explicitly, places ladders on pillars when available, and logs scaffold activity.
+- Shelter: scaffold stations for upper walls/roof now prefer exterior ring positions (no dependency on an early doorway), place upper walls “one side at a time”, and bias roof placement per-side to reduce out-of-reach/blocked attempts; will also place an exterior ladder column when ladders are available.
+- Shelter: hovel siting no longer treats water blocks as standable; if no valid site is found in the initial scan it will do a wider “dry/flat” fallback search instead of defaulting to the current (possibly waterlogged) position.
+- Shelter: hovel now stabilizes the support layer for the footprint plus a 1-block outer ring before any other work, reducing undercut “nooks” where the bot gets stuck; scaffolding phase crafts a small set of ladders when possible and sneaks while placing upper walls/roof.
+- Shelter: hovel upper build now prefers a roof-edge perimeter pass (move to top-edge waypoints, sneak, place walls/roof within reach) and will fall back to building from the roof edge even if it can’t path out via the doorway.
+- Shelter: added experimental `hovel2` mode; initial step selects a build site and levels/stabilizes the footprint (fills support layer + clears foot-level obstructions) to reduce “stuck under the build” nooks before any building starts.
+- Shelter: `hovel2` leveling now runs a second verification sweep (re-fill supports + re-clear foot-level obstructions) to catch a few missed blocks on the first pass.
+- Shelter: `hovel2` leveling now also cuts down raised blocks above the target floor and fills shallow undercuts (up to 2 blocks deep) below the intended ground plane (Y=floor-1), preventing leftover “grass islands” and holes like in the leveling screenshots.
+- Commands: `/bot shelter hovel2` wired as a first-class subcommand (matches `hovel`/`burrow` syntax, including optional target and options).
 - Follow/Training: paused the RL training loop while the bot is in a player-commanded mode (FOLLOW/skills/etc) to prevent training actions from canceling follow movement, and added INFO logging to show who invoked `/bot stop` when follow is unexpectedly canceled.
 - Training/Performance: throttled Q-table + epsilon persistence (reduces server hitching from frequent disk writes during RL steps).
 - Training/Performance: added `/bot rl on|off` hard toggle to disable the RL loop entirely (prevents background “thinking” during normal play/follow).
@@ -207,3 +267,64 @@ Historical record and reasoning. `TODO.md` is the source of truth for what’s n
 - **Fishing Skill Navigation**:
     - Replaced simple nudging with robust pathfinding for approaching fishing spots, allowing the bot to navigate around obstacles.
     - Added logic to automatically clear obstructing leaves when navigating to the water, ensuring the bot doesn't get stuck by trees.
+
+### Fixed
+- **Mining descent**:
+    - Skip aborting when only out-of-reach headroom blocks remain in the stairwell, preventing premature pauses.
+- **Shelter hovel2**:
+    - Prefer strict vertical scaffold pillaring for the central tower to avoid messy offset scaffolding.
+    - Use direct pillar teardown for hovel2 auxiliary perches to reduce leftover scaffold columns.
+    - Verified descent reliability and headroom reach in live testing.
+    - Allow exterior pillar scaffolding on corner/roof gap passes so the bot can reach remaining edge targets.
+    - Require line-of-sight for direct placement targets to keep survival-style behavior.
+    - Iterate corner/roof gap passes to place all reachable blocks before stepping down.
+    - Remove GoTo fallback moves during shelter builds to prevent wall phasing.
+    - Require line-of-sight for soft block breaking to stop remote snow clears.
+    - Loosen placement LOS checks to validate support-block visibility (allows placing into air targets without wall phasing).
+    - Allow pursuit-based walking when moving to hovel2 perches to avoid stalling without teleporting.
+    - Add short horizontal scaffold-step attempts during corner/roof patching to reach nearby gaps.
+    - Fix placement reach checks for air targets by validating support visibility instead of target visibility.
+    - Exit the footprint before exterior gap passes/drop sweep so the bot can reach outside targets.
+    - Allow scaffold-step extension to use structure blocks when no scaffold blocks are available.
+    - Give leveling more passes to clear remaining foot-level obstructions.
+- **Shelter hovel refactor**:
+    - Unified hovel/​hovel2 into a simpler corner-pillar build with explicit roof fill and drop-sweep completion.
+    - Preserve survival-only movement by avoiding teleport/snap while still exiting interiors for exterior targets.
+    - Removed legacy hovel2 tower/roof-cap routines and unused perch helpers to cut redundancy.
+    - Focus corner pillars on near-corner targets to avoid looping over the full wall each pass.
+
+## [2025-12-22]
+### Fixed
+- **Shelter Hovel Refactor & Improvements**:
+    - Refactored `ShelterSkill.java` into `HovelPerimeterBuilder` and `BurrowBuilder` for better maintainability.
+    - Improved hovel leveling: Bot now moves to multiple points (center and corners) to ensure full reach when clearing the site.
+    - Enhanced wall/roof building: Bot now builds all reachable blocks from the outside ring walk, including upper wall layers and roof edges.
+    - Robust roof completion: `buildFromInside` now uses multiple pillar points for hovels with radius >= 4, ensuring full roof coverage without reach failures.
+    - Ensured doorway preservation during all building phases to prevent bot entrapment.
+
+- **Shelter Hovel (Reachability Fix)**:
+    - Enabled teleportation during the site leveling phase to ensure the bot can clear terrain obstructions that prevent movement.
+    - Relaxed movement strictness during the wall-building phase: bot now attempts to build even if it cannot perfectly reach the exact ring position.
+
+- **Shelter Hovel (Robustness)**:
+    - Fixed `pillarUp` reliability by adding an explicit wait loop for the bot to become airborne before placing blocks below.
+    - Added `patchWalls` phase: after the initial ring build, the bot specifically targets and moves to any remaining missing wall blocks to ensure completion.
+    - Improved `recoverFromFall` to be more persistent and smarter about clearing obstructions above the head before pillaring.
+
+- **Shelter Hovel (Recovery Refinement)**:
+    - `recoverFromFall` logic strengthened: now retries pillaring up to 5 times instead of aborting immediately on first failure.
+    - Added proactive obstruction clearing: bot now clears blocks 2 and 3 meters above head before attempting a recovery jump to prevent head-bumping.
+
+- **Shelter Hovel (Dynamic Scaffolding)**:
+    - Implemented a "move closer" fallback in "patchWalls" to ensure blocks just out of reach from the ring path are attempted from a better position.
+    - "PillarUp" now actively waits for the bot to become airborne, fixing cases where placement failed due to the bot still being grounded.
+    - "RecoverFromFall" now retries intelligently and clears obstructions more aggressively.
+
+- **Shelter Hovel (Opportunistic Pillaring)**:
+    - Implemented a general-purpose pillaring fallback: if any block is horizontally reachable but vertically too high, the bot will now automatically pillar up 1 block to place it, then tear down the pillar.
+    - Improved `pillarUp` stability by centering the bot on the block before jumping to prevent slipping off edges during scaffolding.
+    - Added proactive headroom clearing to `pillarUp` to ensure jump height is sufficient for block placement.
+
+- **Shelter Hovel (Efficiency & Logic)**:
+    - Implemented a "Smart Ring Walk": Bot now skips ring positions that do not have any reachable missing blocks, drastically reducing time spent pathfinding around the perimeter.
+    - Optimized Roof Build Order: Bot now builds the roof from the outer edges inward (using wall support) rather than trying to place floating blocks in the center first.

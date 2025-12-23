@@ -17,7 +17,6 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
-import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -28,6 +27,17 @@ public class MiningTool {
     private static final long FAILSAFE_TIMEOUT_SECONDS = 12;
     private static final double SURVIVAL_REACH_SQ = 4.5 * 4.5;
     public static final Logger LOGGER = LoggerFactory.getLogger("mining-tool");
+
+    private static final AtomicInteger MINING_THREAD_ID = new AtomicInteger(0);
+    /**
+     * Shared executor to avoid spawning a brand-new thread/executor per mined block (which can cause huge lag spikes
+     * and thread churn in heavily modded servers/worlds).
+     */
+    private static final ScheduledExecutorService MINING_EXECUTOR = Executors.newScheduledThreadPool(2, runnable -> {
+        Thread thread = new Thread(runnable, "mining-tool-" + MINING_THREAD_ID.incrementAndGet());
+        thread.setDaemon(true);
+        return thread;
+    });
 
     public static CompletableFuture<String> mineBlock(ServerPlayerEntity bot, BlockPos targetBlockPos) {
         CompletableFuture<String> miningResult = new CompletableFuture<>();
@@ -48,20 +58,7 @@ public class MiningTool {
             return miningResult;
         }
 
-        ThreadFactory threadFactory = runnable -> {
-            Thread thread = new Thread(runnable, "mining-tool");
-            thread.setDaemon(true);
-            return thread;
-        };
-
-        ScheduledExecutorService miningExecutor = Executors.newSingleThreadScheduledExecutor(threadFactory);
-        AtomicBoolean shutdown = new AtomicBoolean(false);
-
-        Runnable cleanup = () -> {
-            if (shutdown.compareAndSet(false, true)) {
-                miningExecutor.shutdownNow();
-            }
-        };
+        AtomicBoolean canceled = new AtomicBoolean(false);
 
         AtomicInteger requiredTicksHolder = new AtomicInteger(1);
         AtomicInteger ticksElapsed = new AtomicInteger(0);
@@ -72,7 +69,6 @@ public class MiningTool {
             BlockState initialState = bot.getEntityWorld().getBlockState(targetBlockPos);
             if (isNeverMineBlock(initialState)) {
                 miningResult.complete("⚠️ Refusing to mine a protected block.");
-                cleanup.run();
                 return miningResult;
             }
             LookController.faceBlock(bot, targetBlockPos);
@@ -88,7 +84,6 @@ public class MiningTool {
             float delta = blockState.calcBlockBreakingDelta(bot, bot.getEntityWorld(), targetBlockPos);
             if (delta <= 0.0f) {
                 miningResult.complete("⚠️ Failed to initialize mining: block breaking delta <= 0");
-                cleanup.run();
                 return miningResult;
             }
             int requiredTicks = Math.max(1, (int) Math.ceil(1.0f / delta));
@@ -97,14 +92,15 @@ public class MiningTool {
         } catch (Throwable t) {
             LOGGER.error("Failed to prepare mining task at {}", targetBlockPos, t);
             miningResult.complete("⚠️ Failed to initialize mining: " + t.getMessage());
-            cleanup.run();
             return miningResult;
         }
 
-        ScheduledFuture<?> task = miningExecutor.scheduleAtFixedRate(() -> {
+        ScheduledFuture<?> task = MINING_EXECUTOR.scheduleAtFixedRate(() -> {
+            if (canceled.get()) {
+                return;
+            }
             server.execute(() -> {
                 if (miningResult.isDone()) {
-                    cleanup.run();
                     return;
                 }
                 
@@ -112,14 +108,12 @@ public class MiningTool {
                 if (SkillManager.shouldAbortSkill(bot)) {
                     LOGGER.info("Mining aborted for {} at {}", bot.getName().getString(), targetBlockPos);
                     miningResult.complete("⚠️ Mining aborted.");
-                    cleanup.run();
                     return;
                 }
 
                 double tickDistSq = bot.squaredDistanceTo(targetBlockPos.getX() + 0.5, targetBlockPos.getY() + 0.5, targetBlockPos.getZ() + 0.5);
                 if (tickDistSq > SURVIVAL_REACH_SQ) {
                     miningResult.complete("⚠️ Cannot mine: out of reach.");
-                    cleanup.run();
                     return;
                 }
                 
@@ -127,13 +121,11 @@ public class MiningTool {
                     BlockState currentState = bot.getEntityWorld().getBlockState(targetBlockPos);
                     if (isNeverMineBlock(currentState)) {
                         miningResult.complete("⚠️ Refusing to mine a protected block.");
-                        cleanup.run();
                         return;
                     }
                     if (currentState.isAir()) {
                         LOGGER.info("Mining complete at {}", targetBlockPos);
                         miningResult.complete("Mining complete!");
-                        cleanup.run();
                         return;
                     }
 
@@ -146,19 +138,17 @@ public class MiningTool {
                             LOGGER.debug("Mining attempt {} for {} did not complete yet", attempts, targetBlockPos);
                             if (attempts > 5) {
                                 miningResult.complete("⚠️ Mining halted before completion.");
-                                cleanup.run();
                             }
                         }
                     }
                 } catch (Throwable t) {
                     LOGGER.error("Error during mining tick at {}", targetBlockPos, t);
                     miningResult.complete("⚠️ Mining failed: " + t.getMessage());
-                    cleanup.run();
                 }
             });
         }, 0, MINING_TICK_MS, TimeUnit.MILLISECONDS);
 
-        ScheduledFuture<?> timeoutTask = miningExecutor.schedule(() -> {
+        ScheduledFuture<?> timeoutTask = MINING_EXECUTOR.schedule(() -> {
             if (!miningResult.isDone()) {
                 LOGGER.warn("Mining timeout reached for {}", targetBlockPos);
                 miningResult.complete("⚠️ Mining attempt timed out.");
@@ -168,7 +158,7 @@ public class MiningTool {
         miningResult.whenComplete((result, error) -> {
             task.cancel(true);
             timeoutTask.cancel(true);
-            cleanup.run();
+            canceled.set(true);
         });
 
         return miningResult;

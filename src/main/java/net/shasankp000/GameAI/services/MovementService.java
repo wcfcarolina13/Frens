@@ -17,6 +17,7 @@ import net.minecraft.world.World;
 import net.minecraft.registry.tag.BlockTags;
 import net.minecraft.registry.tag.FluidTags;
 import net.shasankp000.GameAI.BotActions;
+import net.shasankp000.GameAI.services.SneakLockService;
 import net.shasankp000.GameAI.skills.SkillPreferences;
 import net.shasankp000.GameAI.services.BlockInteractionService;
 import net.shasankp000.Entity.LookController;
@@ -1752,7 +1753,7 @@ public final class MovementService {
         }
         
         player.setSwimming(true);
-        if (player.isSneaking()) {
+        if (player.isSneaking() && !SneakLockService.isLocked(player.getUuid())) {
             player.setSneaking(false);
         }
 

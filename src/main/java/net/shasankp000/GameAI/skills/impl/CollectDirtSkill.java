@@ -1209,6 +1209,11 @@ public class CollectDirtSkill implements Skill {
             return SkillExecutionResult.success("Already at or below target depth " + targetDepthY + ".");
         }
 
+        // Use the same "mining mode" flag as ascent to avoid aggressive burial-rescue logic fighting
+        // an intentional 1x2 stairwell tunnel.
+        TaskService.setAscentMode(player.getUuid(), true);
+
+        try {
         boolean strictWalk = getBooleanParameter(context, "strictWalk", false);
         
         // Check if resuming from a paused position
@@ -1269,21 +1274,25 @@ public class CollectDirtSkill implements Skill {
                 return SkillExecutionResult.failure(hazard.failureMessage());
             }
 
-            for (BlockPos block : workVolume) {
-                BlockState state = player.getEntityWorld().getBlockState(block);
-                if (state.isAir()) {
-                    continue;
-                }
+                for (BlockPos block : workVolume) {
+                    BlockState state = player.getEntityWorld().getBlockState(block);
+                    if (state.isAir()) {
+                        continue;
+                    }
                 Block blockType = state.getBlock();
                 if (blockType == Blocks.TORCH || blockType == Blocks.WALL_TORCH || 
                     blockType == Blocks.SOUL_TORCH || blockType == Blocks.SOUL_WALL_TORCH ||
                     blockType == Blocks.REDSTONE_TORCH || blockType == Blocks.REDSTONE_WALL_TORCH) {
                     continue;
                 }
-                if (!mineStraightStairBlock(player, block)) {
-                    return SkillExecutionResult.failure("Descent aborted: unable to clear the stairwell.");
+                    if (!mineStraightStairBlock(player, block)) {
+                    WorkDirectionService.setPausePosition(player.getUuid(), player.getBlockPos());
+                    SkillResumeService.flagManualResume(player);
+                    ChatUtils.sendChatMessages(player.getCommandSource().withSilent().withMaxLevel(4),
+                            "I couldn't clear a block in the stairwell at " + block.getX() + ", " + block.getY() + ", " + block.getZ() + ". I'll pause here.");
+                    return SkillExecutionResult.failure("Descent paused: unable to clear stairwell at " + block + ".");
+                    }
                 }
-            }
 
             BlockPos support = stairFoot.down();
             if (!hasSolidSupport(player, support)) {
@@ -1299,12 +1308,21 @@ public class CollectDirtSkill implements Skill {
             // When strictWalk is enabled, do not snap during descent; stick to held-input walking only.
             MovementService.MovementResult moveResult = MovementService.execute(source, player, plan, false, true, allowPursuit, allowSnap);
             if (!moveResult.success()) {
+                WorkDirectionService.setPausePosition(player.getUuid(), player.getBlockPos());
+                SkillResumeService.flagManualResume(player);
+                ChatUtils.sendChatMessages(player.getCommandSource().withSilent().withMaxLevel(4),
+                        "I'm stuck trying to step down to " + stairFoot.getX() + ", " + stairFoot.getY() + ", " + stairFoot.getZ()
+                                + " (" + moveResult.detail() + "). I'll pause here.");
                 return SkillExecutionResult.failure("Descent aborted: failed to advance (" + moveResult.detail() + ").");
             }
             BlockPos postMove = player.getBlockPos();
             if (!postMove.equals(stairFoot)) {
                 boolean nudged = attemptManualNudge(player, stairFoot);
                 if (!nudged && !player.getBlockPos().equals(stairFoot)) {
+                    WorkDirectionService.setPausePosition(player.getUuid(), player.getBlockPos());
+                    SkillResumeService.flagManualResume(player);
+                    ChatUtils.sendChatMessages(player.getCommandSource().withSilent().withMaxLevel(4),
+                            "I couldn't reach the next stair at " + stairFoot.getX() + ", " + stairFoot.getY() + ", " + stairFoot.getZ() + ". I'll pause here.");
                     return SkillExecutionResult.failure("Descent aborted: movement stalled before reaching " + stairFoot + ".");
                 }
             }
@@ -1323,6 +1341,9 @@ public class CollectDirtSkill implements Skill {
         }
 
         return SkillExecutionResult.success("Descended " + carvedSteps + " steps to Y=" + player.getBlockY() + ".");
+        } finally {
+            TaskService.setAscentMode(player.getUuid(), false);
+        }
     }
     
     // ==================== ASCENT METHOD (Walk-and-jump upward) ====================
@@ -1587,6 +1608,15 @@ public class CollectDirtSkill implements Skill {
             return true; // Skip torches, treat as already cleared
         }
 
+        if (!(player.getEntityWorld() instanceof ServerWorld world)) {
+            return false;
+        }
+
+        // If the target is already non-solid and non-fluid, treat as cleared.
+        if (isPassableForStairs(world, blockPos)) {
+            return true;
+        }
+
         // Select the best tool per block type (gravel/sand => shovel; pickaxe for others)
         String toolKeyword = null;
         if (state.isIn(net.minecraft.registry.tag.BlockTags.SHOVEL_MINEABLE)) {
@@ -1595,45 +1625,76 @@ public class CollectDirtSkill implements Skill {
             toolKeyword = "pickaxe";
         }
         BotActions.selectBestTool(player, toolKeyword != null ? toolKeyword : preferredTool, "sword");
-        
-        if (!isWithinStraightReach(player, blockPos)) {
-            return false;
-        }
-        LookController.faceBlock(player, blockPos);
-        CompletableFuture<String> future = MiningTool.mineBlock(player, blockPos);
-        long deadline = System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(6);
-        while (System.currentTimeMillis() < deadline) {
+
+        // In heavily modded worlds, some blocks can "re-fill" quickly (falling blocks, delayed updates).
+        // Treat mining timeouts/hiccups as transient and retry a couple times before aborting the descent.
+        for (int attempt = 1; attempt <= 3; attempt++) {
             if (SkillManager.shouldAbortSkill(player)) {
-                future.cancel(true);
                 return false;
             }
-            long waitWindow = Math.min(200L, deadline - System.currentTimeMillis());
+            if (!isWithinStraightReach(player, blockPos)) {
+                int dy = blockPos.getY() - player.getBlockY();
+                if (dy > 2) {
+                    LOGGER.debug("Descent skipping out-of-reach headroom block at {} (botPos={}, dy={})",
+                            blockPos.toShortString(), player.getBlockPos().toShortString(), dy);
+                    return true;
+                }
+                return false;
+            }
+            LookController.faceBlock(player, blockPos);
+            CompletableFuture<String> future = MiningTool.mineBlock(player, blockPos);
             try {
-                String result = future.get(waitWindow, TimeUnit.MILLISECONDS);
-                if (result == null || !result.toLowerCase(Locale.ROOT).contains("complete")) {
-                    LOGGER.warn("Mining {} returned unexpected result: {}", blockPos, result);
-                    return false;
+                // MiningTool has its own failsafe timeout; here we just wait for the outcome of this attempt.
+                // Use a timeout >= MiningTool's failsafe (12s) so slow tools don't get canceled early.
+                String result = future.get(13, TimeUnit.SECONDS);
+                if (result != null && result.toLowerCase(Locale.ROOT).contains("out of reach")) {
+                    LOGGER.warn("Descent mining attempt {}/3 out-of-reach at {} (botPos={} dist={})",
+                            attempt,
+                            blockPos.toShortString(),
+                            player.getBlockPos().toShortString(),
+                            String.format("%.2f", Math.sqrt(player.squaredDistanceTo(Vec3d.ofCenter(blockPos)))));
+                } else if (result != null && result.startsWith("⚠️")) {
+                    LOGGER.warn("Descent mining attempt {}/3 returned '{}' at {} (botPos={})",
+                            attempt, result, blockPos.toShortString(), player.getBlockPos().toShortString());
                 }
-                if (!player.getEntityWorld().getBlockState(blockPos).isAir()) {
-                    LOGGER.warn("{} still present after mining attempt", blockPos);
-                    return false;
-                }
-                return true;
             } catch (TimeoutException timeout) {
-                // continue polling
+                // Don't cancel: canceling the future stops the MiningTool task early.
+                LOGGER.warn("Descent mining attempt {}/3 timed out waiting at {} (state={})",
+                        attempt,
+                        blockPos.toShortString(),
+                        world.getBlockState(blockPos).getBlock().getName().getString());
             } catch (InterruptedException interrupted) {
                 Thread.currentThread().interrupt();
-                future.cancel(true);
                 return false;
             } catch (Exception e) {
-                LOGGER.warn("Mining {} failed", blockPos, e);
-                future.cancel(true);
+                LOGGER.warn("Descent mining attempt {}/3 failed at {}: {}", attempt, blockPos.toShortString(), e.getMessage());
+            }
+
+            if (isPassableForStairs(world, blockPos)) {
+                return true;
+            }
+            // If it wasn't cleared, wait briefly (lets falling blocks settle / fluids update) and retry.
+            try {
+                Thread.sleep(180L);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
                 return false;
             }
         }
-        future.cancel(true);
-        LOGGER.warn("Mining {} timed out", blockPos);
+        LOGGER.warn("Descent aborted: couldn't clear {} after multiple mining attempts (state={})",
+                blockPos.toShortString(),
+                world.getBlockState(blockPos).getBlock().getName().getString());
         return false;
+    }
+
+    private boolean isPassableForStairs(ServerWorld world, BlockPos pos) {
+        if (world == null || pos == null) {
+            return false;
+        }
+        if (!world.getFluidState(pos).isEmpty()) {
+            return false;
+        }
+        return world.getBlockState(pos).getCollisionShape(world, pos).isEmpty();
     }
 
     private boolean isTorchBlock(BlockState state) {
@@ -1654,7 +1715,8 @@ public class CollectDirtSkill implements Skill {
             return false;
         }
         Vec3d center = Vec3d.ofCenter(blockPos);
-        return player.squaredDistanceTo(center.x, center.y, center.z) <= 25.0D;
+        // Match BotActions/MiningTool survival reach (~4.5 blocks).
+        return player.squaredDistanceTo(center.x, center.y, center.z) <= 20.25D;
     }
 
     private boolean hasSolidSupport(ServerPlayerEntity player, BlockPos support) {
@@ -1979,7 +2041,24 @@ public class CollectDirtSkill implements Skill {
     }
 
     private boolean isLava(ServerWorld world, BlockPos pos) {
-        return world.getFluidState(pos).isIn(net.minecraft.registry.tag.FluidTags.LAVA);
+        if (world == null || pos == null) {
+            return false;
+        }
+        var fluid = world.getFluidState(pos);
+        if (fluid.isEmpty()) {
+            return false;
+        }
+        if (fluid.isIn(net.minecraft.registry.tag.FluidTags.LAVA)) {
+            return true;
+        }
+        // Modded worlds sometimes use lava-like fluids that are not tagged as LAVA.
+        // Fall back to a conservative registry-id heuristic.
+        Identifier id = Registries.FLUID.getId(fluid.getFluid());
+        if (id == null) {
+            return false;
+        }
+        String path = id.getPath().toLowerCase(Locale.ROOT);
+        return path.contains("lava") || path.contains("molten");
     }
 
     private boolean isPassable(ServerWorld world, BlockPos pos) {

@@ -2,9 +2,13 @@ package net.shasankp000.ui;
 
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.entity.player.PlayerInventory;
+import net.minecraft.component.DataComponentTypes;
+import net.minecraft.component.type.EquippableComponent;
+import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.inventory.Inventory;
 import net.minecraft.inventory.SimpleInventory;
 import net.minecraft.item.ItemStack;
+import net.minecraft.item.Items;
 import net.minecraft.screen.ArrayPropertyDelegate;
 import net.minecraft.screen.PropertyDelegate;
 import net.minecraft.screen.ScreenHandler;
@@ -19,6 +23,10 @@ import net.shasankp000.GameAI.services.BotInventoryStorageService;
 public class BotPlayerInventoryScreenHandler extends ScreenHandler {
     private static final int BOT_SLOT_COUNT = 41;
     private static final int PLAYER_SLOT_COUNT = 41;
+    private static final int ARMOR_AND_OFFHAND_SLOTS = 5;
+    private static final int MAIN_GRID_SLOTS = 27;
+    private static final int HOTBAR_SLOTS = 9;
+    private static final int SECTION_TOTAL_SLOTS = ARMOR_AND_OFFHAND_SLOTS + MAIN_GRID_SLOTS + HOTBAR_SLOTS;
     private static final int SECTION_WIDTH = 176;
     private static final int BLOCK_GAP = 12;
     private static final int ARMOR_X = 8;
@@ -105,11 +113,13 @@ public class BotPlayerInventoryScreenHandler extends ScreenHandler {
             ItemStack original = slot.getStack();
             newStack = original.copy();
 
+            boolean moved;
             if (index < BOT_SLOT_COUNT) {
-                if (!this.insertItem(original, BOT_SLOT_COUNT, BOT_SLOT_COUNT + PLAYER_SLOT_COUNT, true)) {
-                    return ItemStack.EMPTY;
-                }
-            } else if (!this.insertItem(original, 0, BOT_SLOT_COUNT, false)) {
+                moved = moveIntoSection(original, BOT_SLOT_COUNT, false);
+            } else {
+                moved = moveIntoSection(original, 0, true);
+            }
+            if (!moved) {
                 return ItemStack.EMPTY;
             }
 
@@ -126,6 +136,65 @@ public class BotPlayerInventoryScreenHandler extends ScreenHandler {
             slot.onTakeItem(player, original);
         }
         return newStack;
+    }
+
+    /**
+     * Shift-click routing that avoids dumping arbitrary items into armor/offhand slots.
+     *
+     * <p>Policy:
+     * - Armor items -> their matching armor slot (if empty), otherwise main/hotbar
+     * - Shields -> offhand slot (if empty), otherwise main/hotbar
+     * - Everything else -> hotbar first, then main grid
+     *
+     * <p>This only affects shift-click insertion order; manual drag/drop can still place items anywhere.
+     */
+    private boolean moveIntoSection(ItemStack stack, int sectionStart, boolean fromPlayerToBot) {
+        if (stack == null || stack.isEmpty()) {
+            return false;
+        }
+        int armorStart = sectionStart;
+        int offhandIndex = sectionStart + 4;
+        int mainStart = sectionStart + ARMOR_AND_OFFHAND_SLOTS;
+        int hotbarStart = mainStart + MAIN_GRID_SLOTS;
+        int sectionEnd = sectionStart + SECTION_TOTAL_SLOTS;
+
+        // 1) Dedicated slots for matching equipment (only when empty).
+        EquippableComponent equippable = stack.get(DataComponentTypes.EQUIPPABLE);
+        EquipmentSlot eqSlot = equippable != null ? equippable.slot() : null;
+        if (eqSlot == EquipmentSlot.HEAD || eqSlot == EquipmentSlot.CHEST || eqSlot == EquipmentSlot.LEGS || eqSlot == EquipmentSlot.FEET) {
+            int target = armorSlotIndexFor(eqSlot, sectionStart);
+            if (target >= sectionStart && target < sectionStart + 4 && !this.slots.get(target).hasStack()) {
+                if (this.insertItem(stack, target, target + 1, false)) {
+                    return true;
+                }
+            }
+        } else if (stack.isOf(Items.SHIELD)) {
+            if (!this.slots.get(offhandIndex).hasStack()) {
+                if (this.insertItem(stack, offhandIndex, offhandIndex + 1, false)) {
+                    return true;
+                }
+            }
+        }
+
+        // 2) Prefer hotbar first (weapons/tools/food go here), then main grid.
+        if (this.insertItem(stack, hotbarStart, sectionEnd, false)) {
+            return true;
+        }
+        if (this.insertItem(stack, mainStart, hotbarStart, false)) {
+            return true;
+        }
+
+        // Never spill arbitrary items into armor/offhand via shift-click.
+        return false;
+    }
+
+    private int armorSlotIndexFor(EquipmentSlot slot, int sectionStart) {
+        // Slot order in this handler is FEET, LEGS, CHEST, HEAD.
+        if (slot == EquipmentSlot.FEET) return sectionStart;
+        if (slot == EquipmentSlot.LEGS) return sectionStart + 1;
+        if (slot == EquipmentSlot.CHEST) return sectionStart + 2;
+        if (slot == EquipmentSlot.HEAD) return sectionStart + 3;
+        return -1;
     }
 
     @Override

@@ -32,15 +32,27 @@ Pending work only. Completed items and rationale live in `changelog.md`.
 - [ ] **Come tool crafting**: Auto-craft torches/shovels/pickaxes from available resources when needed during movement/tasks.
 
 ### Shelter (Redo Needed)
-- [ ] **Shelter hovel redesign**: Current behavior buggy; redo planning/execution.
+- [ ] **Shelter hovel perimeter-walk verification**: Confirm ring-walk wall placement finishes all reachable blocks, preserves the doorway gap, and avoids stalling.
+- [ ] **Hovel roof serpentine walk**: Validate pillar-to-roof + serpentine walk reliably fills roof cells and tears down support blocks safely.
+- [ ] **Hovel exterior patch reach**: Ensure the bot exits the footprint to reach exterior targets and re-enters via the doorway (no wall phasing).
+- [ ] **Hovel leveling sweep check**: Re-verify base-level hole fill + obstruction clearing math after the refactor (foot layer should stay clear).
+- [ ] **ShelterSkill refactor**: Split `ShelterSkill.java` into smaller hovel/burrow builder classes and tighten shared primitives/logging.
+- [ ] **ScaffoldService extraction**: Centralize pillaring/scaffolding + ladder placement so shelter/woodcut/mining can reuse the same “climb to work height” logic.
+- [ ] **LeafClearService extraction**: Centralize “clear leaf blocks along path/headroom” (from follow) so other skills can reuse it when navigation fails due to leaf litter.
+- [ ] **Hovel top-walk build**: Prefer climbing (ladder) to roof-edge, sneak-walk the perimeter, and place roof/walls by layers from above for fewer reach/path failures.
 - [ ] **Shelter resource acquisition flow**: Auto-collect/craft required materials by default; allow `ask|wait|manual` to pause and require `/bot resume <alias>` (or `proceed`) before gathering.
 - [ ] **Shelter options parameter**: Investigate what `options` currently controls for hovel/burrow; document and/or refactor.
 - [ ] **Shelter chest workflow**: While building, withdraw/deposit resources and place new chests to manage inventory; place new chests inside planned interior when possible.
 - [ ] **Burrow “descend-stripmine-descend”**: Restore intended method; compare with proven descent behavior from `come`.
+### Mining (Verification)
+- [x] **Descent reliability**: Ensure slow pickaxes don’t cause early pauses (no premature mining-cancel), burial-rescue doesn’t fight the stairwell, and lava hazards always announce clearly.
+- [x] **Descent headroom reach**: Verify descent no longer pauses on out-of-reach stairwell headroom blocks; confirm it continues to step down safely.
 
 ### Commands / UX
 - [x] **Open command admin mode**: Make “open” distance-independent for admins.
 - [ ] **Command pruning review**: Evaluate whether `look_player` and `direction reset` are still needed; deprecate/remove if redundant.
+- [ ] **Elder Scrolls-style dialogue menu** Conversation topics, commands, quests
+- [ ] **Elder Scrolls-style Journal** Conversation topics, quests, important information with simple filter search
 
 ### Inventory & Items
 - [ ] Bot item inventory view (chest-like interface)
@@ -59,6 +71,7 @@ Pending work only. Completed items and rationale live in `changelog.md`.
 - [ ] Cross-realm teleport command
 - [ ] Water-aware pickup (wade/bridge)
 - [ ] Edge/hole pickup (hop down safely)
+- [ ] Add shelves and any kind of container to no-break list (bot cannot mine out of it if it is stuck. Use a snap reposition instead)
 
 ### Fishing (Verification)
 - [ ] Verify leaf-block clearing when fishing requires navigating far from shoreline
@@ -71,6 +84,7 @@ Pending work only. Completed items and rationale live in `changelog.md`.
 - [ ] Protected build zones (no-grief areas)
 - [ ] Follow/defend modes
 - [ ] Fight with teammates
+- [ ] **Water-bucket clutch on deadly falls (low priority)**: If bot has a water bucket and detects a lethal fall, attempt to place water under itself just before impact to avoid death.
 
 ### Crafting & Building
 - [ ] Place and use crafting table, furnace, chest
@@ -87,7 +101,7 @@ Pending work only. Completed items and rationale live in `changelog.md`.
 - [ ] Hunger persistence and smart eating
 - [x] Sleep integration: `/bot sleep <alias|all|default>` finds/places/crafts a bed and sleeps.
 - [ ] **Farm underground recovery**: Handle cases where bot is underground and can’t pillar upward due to overhead dirt; improve escape logic and add test coverage.
-- [ ] **Farm/Woodcut chest workflow**: Ensure both skills can place/store/use chests proactively for inventory/resource management.
+- [ ] **Farm chest workflow**: Ensure the farm skill can place/store/use chests proactively for inventory/resource management.
 - [ ] **Farm irrigation leak patching**: If irrigation isn’t fillable, detect leakage cause and patch the leak (enclosure improvements).
 
 ### Mining & Resource Gathering

@@ -25,9 +25,9 @@ import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.RaycastContext;
-import net.minecraft.world.RaycastContext;
 
 import net.shasankp000.GameAI.services.MovementService;
+import net.shasankp000.GameAI.services.SneakLockService;
 
 
 
@@ -194,7 +194,9 @@ public final class BotActions {
             bot.setVelocity(Vec3d.ZERO);
             bot.velocityDirty = true;
             bot.setSprinting(false);
-            bot.setSneaking(false);
+            if (!SneakLockService.isLocked(bot.getUuid())) {
+                bot.setSneaking(false);
+            }
             resetRangedState(bot);
         }, 900L);
     }
@@ -217,12 +219,15 @@ public final class BotActions {
         }
         // Prevent "multi-jump" / air-jump behavior caused by repeated calls while airborne.
         // Allow jumping only when grounded or swimming (vanilla-like controls).
-        if (bot.isOnGround() || bot.isTouchingWater() || bot.isInLava()) {
+        if (bot.isOnGround() || bot.isClimbing() || bot.isTouchingWater() || bot.isInLava()) {
             bot.jump();
         }
     }
 
     public static void sneak(ServerPlayerEntity bot, boolean value) {
+        if (!value && bot != null && SneakLockService.isLocked(bot.getUuid())) {
+            return;
+        }
         runOnServerThread(bot, () -> bot.setSneaking(value), 900L);
     }
 
@@ -583,6 +588,26 @@ public final class BotActions {
 
     private record Support(BlockPos clickPos, Direction face) {}
 
+    private static boolean isClickablePlacementSupport(ServerWorld world, BlockPos pos) {
+        if (world == null || pos == null) {
+            return false;
+        }
+        BlockState state = world.getBlockState(pos);
+        if (state.isAir()) {
+            return false;
+        }
+        // Avoid using fluid blocks (water/lava) as support for precise placement.
+        if (!state.getFluidState().isEmpty()) {
+            return false;
+        }
+        // Replaceable blocks (grass, vines, etc.) are unreliable supports for raycast + placement.
+        if (state.isReplaceable()) {
+            return false;
+        }
+        // Accept any block with collision as a clickable support (includes scaffolding, slabs, stairs, etc.).
+        return !state.getCollisionShape(world, pos).isEmpty();
+    }
+
     /**
      * Resolve the actual block face we'd "right click" to place into {@code target}.
      * This prevents phantom placements where the support check passes but the clickPos is air.
@@ -595,20 +620,20 @@ public final class BotActions {
 
         // Prefer placing by clicking the block below (common for floors, pillars, etc).
         BlockPos below = target.down();
-        if (preferred == Direction.UP && world.getBlockState(below).isSolidBlock(world, below)) {
+        if (preferred == Direction.UP && isClickablePlacementSupport(world, below)) {
             return new Support(below, Direction.UP);
         }
 
         // Otherwise use a solid horizontal neighbor face pointing toward the target.
         for (Direction dir : Direction.Type.HORIZONTAL) {
             BlockPos neighbor = target.offset(dir);
-            if (world.getBlockState(neighbor).isSolidBlock(world, neighbor)) {
+            if (isClickablePlacementSupport(world, neighbor)) {
                 return new Support(neighbor, dir.getOpposite());
             }
         }
 
         // Last resort: if below is solid, allow non-UP preferred faces to still click below.
-        if (world.getBlockState(below).isSolidBlock(world, below)) {
+        if (isClickablePlacementSupport(world, below)) {
             return new Support(below, Direction.UP);
         }
         return null;
@@ -1221,7 +1246,6 @@ public final class BotActions {
         selectHotbarSlot(bot, hoeSlot);
 
         // Simulate right-click on the block
-        ServerWorld world = bot.getCommandSource().getWorld();
         ItemStack hoeStack = bot.getMainHandStack();
         ActionResult result = hoeStack.useOnBlock(new net.minecraft.item.ItemUsageContext(bot, Hand.MAIN_HAND, new net.minecraft.util.hit.BlockHitResult(Vec3d.ofCenter(targetPos), Direction.UP, targetPos, false)));
 
