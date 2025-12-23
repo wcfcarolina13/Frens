@@ -57,6 +57,22 @@ public final class HovelPerimeterBuilder {
 
     private record HovelPlan(BlockPos center, Direction doorSide) {}
 
+    private static final class StandableCache {
+        private final Map<BlockPos, BlockPos> cache = new HashMap<>();
+
+        BlockPos resolve(ServerWorld world, BlockPos seed, int searchRadius, java.util.function.Function<BlockPos, BlockPos> resolver) {
+            if (world == null || seed == null) return null;
+            BlockPos key = seed.toImmutable();
+            BlockPos hit = cache.get(key);
+            if (hit != null) return hit;
+            BlockPos out = resolver.apply(key);
+            if (out != null) {
+                cache.put(key, out.toImmutable());
+            }
+            return out;
+        }
+    }
+
     private static final class BuildCounters {
         int attemptedPlacements = 0;
         int placedBlocks = 0;
@@ -127,6 +143,8 @@ public final class HovelPerimeterBuilder {
         List<BlockPos> walls = HovelBlueprint.generateWallBlueprint(center, radius, wallHeight, doorSide);
         List<BlockPos> roof = HovelBlueprint.generateRoofBlueprint(center, radius, wallHeight);
 
+        StandableCache standableCache = new StandableCache();
+
         // Build targets in a stable, layer-by-layer scaffold loop.
         // Key behavior change:
         // - Move to a station ONCE
@@ -134,16 +152,32 @@ public final class HovelPerimeterBuilder {
         // - Scaffold upward one layer at a time
         // - At each layer: place everything within reach
         // - Teardown scaffold only after the station is exhausted
-        ChatUtils.sendSystemMessage(source, "Hovel: building walls/roof (layer-by-layer scaffolding)...");
+        ChatUtils.sendSystemMessage(source, "Hovel: building walls (layer-by-layer scaffolding)...");
+        buildByStationsLayered(world, source, bot, center, radius, wallHeight, walls, counters, standableCache);
+
+        // Quick sweep for wall stragglers from multiple angles.
+        if (countMissing(world, walls) > 0) {
+            ChatUtils.sendSystemMessage(source, "Hovel: wall finishing sweep...");
+            finalStationSweep(world, source, bot, center, radius, walls, counters, standableCache);
+        }
+
+        // Exterior walk patch is especially good at fixing the "single window" hole.
+        if (countMissing(world, walls) > 0) {
+            ChatUtils.sendSystemMessage(source, "Hovel: exterior wall patch...");
+            exteriorWallPerimeterPatch(world, source, bot, center, radius, walls, counters);
+        }
+
+        ChatUtils.sendSystemMessage(source, "Hovel: building roof...");
+        buildByStationsLayered(world, source, bot, center, radius, wallHeight, roof, counters, standableCache);
+
         List<BlockPos> allTargets = new ArrayList<>(walls.size() + roof.size());
         allTargets.addAll(walls);
         allTargets.addAll(roof);
-        buildByStationsLayered(world, source, bot, center, radius, wallHeight, allTargets, counters);
 
         // One more non-scaffold sweep from stations to catch stragglers without per-block movement.
         if (countMissing(world, allTargets) > 0) {
             ChatUtils.sendSystemMessage(source, "Hovel: finishing sweep...");
-            finalStationSweep(world, source, bot, center, radius, allTargets, counters);
+            finalStationSweep(world, source, bot, center, radius, allTargets, counters, standableCache);
         }
 
         // If we still have missing roof/edge blocks, do a dedicated roof pass:
@@ -163,14 +197,7 @@ public final class HovelPerimeterBuilder {
         // Last angle sweep.
         if (countMissing(world, allTargets) > 0) {
             ChatUtils.sendSystemMessage(source, "Hovel: final sweep...");
-            finalStationSweep(world, source, bot, center, radius, allTargets, counters);
-        }
-
-        // Walk the exterior perimeter and patch missing wall blocks.
-        // This targets the common "single window" hole scenario where stations miss one mid-wall block.
-        if (countMissing(world, walls) > 0) {
-            ChatUtils.sendSystemMessage(source, "Hovel: exterior wall patch...");
-            exteriorWallPerimeterPatch(world, source, bot, center, radius, walls, counters);
+            finalStationSweep(world, source, bot, center, radius, allTargets, counters, standableCache);
         }
 
         // If roof is still incomplete, fall back to scaffold-based roof patching (doesn't require stepping onto the roof).
@@ -179,8 +206,8 @@ public final class HovelPerimeterBuilder {
             patchRoofWithScaffolds(world, source, bot, center, radius, wallHeight, roof, counters);
         }
 
-        ensureDoorwayOpen(world, bot, center, radius, doorSide);
-        placeDoorIfAvailable(world, bot, center, radius, doorSide);
+        ensureDoorwayOpen(world, source, bot, center, radius, doorSide);
+        placeDoorIfAvailable(world, source, bot, center, radius, doorSide);
         placeWallTorches(world, source, bot, center, radius);
 
         int missing = countMissing(world, walls) + countMissing(world, roof);
@@ -278,6 +305,7 @@ public final class HovelPerimeterBuilder {
 
         List<BlockPos> pillar = new ArrayList<>();
         final boolean[] stepped = new boolean[] { false };
+        final boolean[] onPillarForTeardown = new boolean[] { false };
         try {
             withSneakLock(bot, () -> {
                 if (SkillManager.shouldAbortSkill(bot)) {
@@ -377,9 +405,20 @@ public final class HovelPerimeterBuilder {
                         nudgeToStand(world, bot, pillarTop, 1200L);
                     }
                 }
+
+                // Only tear down if we are safely back on the pillar top.
+                onPillarForTeardown[0] = bot.getBlockPos().withY(towerTopY).equals(pillarTop)
+                        || bot.getBlockPos().equals(pillarTop)
+                        || bot.getBlockPos().getSquaredDistance(pillarTop) <= 1.0D;
             });
         } finally {
-            teardownScaffolding(bot, pillar, Collections.emptySet(), allTargets, counters);
+            if (onPillarForTeardown[0]) {
+                teardownScaffolding(bot, pillar, Collections.emptySet(), allTargets, counters);
+            } else {
+                // Safety: if we couldn't get back onto the pillar, do NOT tear it down.
+                // Leaving a stray pillar is better than the bot attempting an unsafe roof leap.
+                LOGGER.info("Roof pass: skipping pillar teardown because bot did not return to pillarTop (side={}, base={})", side, pillarBase);
+            }
         }
 
         if (stepped[0]) {
@@ -463,15 +502,21 @@ public final class HovelPerimeterBuilder {
             if (SkillManager.shouldAbortSkill(bot)) {
                 return false;
             }
+            // Horizontal-only convergence is far more reliable than full XYZ convergence
+            // (player Y can fluctuate while on edges/slabs/steps).
             Vec3d pos = new Vec3d(bot.getX(), bot.getY(), bot.getZ());
-            if (pos.squaredDistanceTo(target) <= 0.16D) { // ~0.4 blocks
+            double dx = pos.x - target.x;
+            double dz = pos.z - target.z;
+            if ((dx * dx + dz * dz) <= 0.16D) { // ~0.4 blocks
                 return true;
             }
             BotActions.moveToward(bot, target, 0.45);
             sleepQuiet(60L);
         }
         Vec3d pos = new Vec3d(bot.getX(), bot.getY(), bot.getZ());
-        return pos.squaredDistanceTo(target) <= 0.25D;
+        double dx = pos.x - target.x;
+        double dz = pos.z - target.z;
+        return (dx * dx + dz * dz) <= 0.25D;
     }
 
     /**
@@ -491,7 +536,8 @@ public final class HovelPerimeterBuilder {
                                        int radius,
                                        int wallHeight,
                                        List<BlockPos> allTargets,
-                                       BuildCounters counters) {
+                                       BuildCounters counters,
+                                       StandableCache standableCache) {
         if (world == null || source == null || bot == null || center == null || allTargets == null) {
             return;
         }
@@ -505,6 +551,17 @@ public final class HovelPerimeterBuilder {
 
         LinkedHashSet<BlockPos> stationSeeds = new LinkedHashSet<>();
         stationSeeds.add(center);
+
+        // Interior stations (these were historically the most reliable for fixing mid-wall slits/holes).
+        int inner = Math.max(0, radius - 1);
+        stationSeeds.add(center.add(inner, 0, inner));
+        stationSeeds.add(center.add(-inner, 0, inner));
+        stationSeeds.add(center.add(-inner, 0, -inner));
+        stationSeeds.add(center.add(inner, 0, -inner));
+        stationSeeds.add(center.add(inner, 0, 0));
+        stationSeeds.add(center.add(-inner, 0, 0));
+        stationSeeds.add(center.add(0, 0, inner));
+        stationSeeds.add(center.add(0, 0, -inner));
 
         // Outer ring stations (handle larger radii / awkward terrain)
         stationSeeds.add(center.add(stationDist, 0, stationDist));
@@ -524,7 +581,10 @@ public final class HovelPerimeterBuilder {
                 return;
             }
 
-            BlockPos base = findNearbyStandable(world, seed.withY(floorY), 5);
+            BlockPos seedY = seed.withY(floorY);
+            BlockPos base = (standableCache == null)
+                    ? findNearbyStandable(world, seedY, 5)
+                    : standableCache.resolve(world, seedY, 5, (s) -> findNearbyStandable(world, s, 5));
             if (base == null) {
                 continue;
             }
@@ -549,7 +609,8 @@ public final class HovelPerimeterBuilder {
                                    BlockPos center,
                                    int radius,
                                    List<BlockPos> allTargets,
-                                   BuildCounters counters) {
+                                   BuildCounters counters,
+                                   StandableCache standableCache) {
         int floorY = center.getY();
         int stationDist = radius + 2;
         List<BlockPos> bases = List.of(
@@ -571,7 +632,10 @@ public final class HovelPerimeterBuilder {
             if (countMissing(world, allTargets) == 0) {
                 return;
             }
-            BlockPos base = findNearbyStandable(world, seed.withY(floorY), 5);
+            BlockPos seedY = seed.withY(floorY);
+            BlockPos base = (standableCache == null)
+                    ? findNearbyStandable(world, seedY, 5)
+                    : standableCache.resolve(world, seedY, 5, (s) -> findNearbyStandable(world, s, 5));
             if (base == null) {
                 continue;
             }
@@ -1047,11 +1111,15 @@ public final class HovelPerimeterBuilder {
                                           List<BlockPos> targets,
                                           BuildCounters counters) {
         Vec3d eye = bot.getEyePos();
-        // Place closer blocks first (reduces "half-placed" holes).
+        // IMPORTANT ordering:
+        // - Place lower-Y blocks first (prevents "floating" slits where upper blocks fail due to missing supports)
+        // - Within the same Y, place closer blocks first to reduce half-placed rings.
         List<BlockPos> inRange = targets.stream()
                 .filter(p -> isMissing(world, p))
                 .filter(p -> eye.squaredDistanceTo(Vec3d.ofCenter(p)) <= REACH_DISTANCE_SQ)
-                .sorted(Comparator.comparingDouble(p -> eye.squaredDistanceTo(Vec3d.ofCenter(p))))
+            .sorted(Comparator
+                .comparingInt(BlockPos::getY)
+                .thenComparingDouble(p -> eye.squaredDistanceTo(Vec3d.ofCenter(p))))
                 .toList();
 
         int placed = 0;
@@ -1342,14 +1410,32 @@ public final class HovelPerimeterBuilder {
         return (radius * 2 + 1) * (radius * 2 + 1) * 2 + (radius * 8 * height) + 64;
     }
 
-    private void ensureDoorwayOpen(ServerWorld world, ServerPlayerEntity bot, BlockPos center, int radius, Direction doorSide) {
-        if (doorSide == null) return;
+    private void ensureDoorwayOpen(ServerWorld world,
+                                  ServerCommandSource source,
+                                  ServerPlayerEntity bot,
+                                  BlockPos center,
+                                  int radius,
+                                  Direction doorSide) {
+        if (world == null || bot == null || center == null || doorSide == null) return;
         BlockPos doorPos = center.offset(doorSide, radius);
+
+        // Try to get close enough that the carve is actually in reach.
+        BlockPos insideSeed = center.offset(doorSide, Math.max(0, radius - 1)).withY(center.getY());
+        BlockPos inside = findNearbyStandable(world, insideSeed, 4);
+        if (inside != null && source != null) {
+            moveToBuildSite(source, bot, inside);
+        }
+
         mineSoft(bot, doorPos.withY(center.getY() + 1));
         mineSoft(bot, doorPos.withY(center.getY() + 2));
     }
 
-    private void placeDoorIfAvailable(ServerWorld world, ServerPlayerEntity bot, BlockPos center, int radius, Direction doorSide) {
+    private void placeDoorIfAvailable(ServerWorld world,
+                                      ServerCommandSource source,
+                                      ServerPlayerEntity bot,
+                                      BlockPos center,
+                                      int radius,
+                                      Direction doorSide) {
         if (world == null || bot == null || center == null || doorSide == null) {
             return;
         }
@@ -1377,7 +1463,7 @@ public final class HovelPerimeterBuilder {
         BlockPos doorPos = center.offset(doorSide, radius).withY(floorY + 1);
 
         // Make sure the doorway is clear and has a support block below.
-        ensureDoorwayOpen(world, bot, center, radius, doorSide);
+        ensureDoorwayOpen(world, source, bot, center, radius, doorSide);
         BlockPos below = doorPos.down();
         if (isMissing(world, below)) {
             BotActions.placeBlockAt(bot, below, Direction.UP, PILLAR_BLOCKS);
@@ -1387,8 +1473,22 @@ public final class HovelPerimeterBuilder {
         BlockPos insideSeed = center.offset(doorSide, Math.max(0, radius - 1)).withY(floorY);
         BlockPos inside = findNearbyStandable(world, insideSeed, 4);
         if (inside != null) {
-            moveToBuildSite(bot.getCommandSource(), bot, inside);
+            if (source != null) {
+                moveToBuildSite(source, bot, inside);
+            }
         }
+
+        // If we're still not in reach, try an exterior stance.
+        if (!BlockInteractionService.canInteract(bot, doorPos, REACH_DISTANCE_SQ)) {
+            BlockPos outsideSeed = center.offset(doorSide, radius + 2).withY(floorY);
+            BlockPos outside = findNearbyStandable(world, outsideSeed, 5);
+            if (outside != null && source != null) {
+                moveToBuildSite(source, bot, outside);
+            }
+        }
+
+        // Final carve attempt if we got closer.
+        ensureDoorwayOpen(world, source, bot, center, radius, doorSide);
 
         // Face outward so the door tends to open outward.
         net.shasankp000.Entity.LookController.faceBlock(bot, doorPos.offset(doorSide));
@@ -1428,15 +1528,16 @@ public final class HovelPerimeterBuilder {
             moveToBuildSite(source, bot, inside);
         }
 
-        int y = floorY + 2;
+        // Place standing torches on top of the interior floor (y = floor + 1).
+        int y = floorY + 1;
         List<BlockPos> targets = List.of(
-                // north wall (torch sits on inner air, attaches to wall at z = cz - radius)
+            // north interior
                 new BlockPos(center.getX(), y, center.getZ() - radius + 1),
-                // south wall
+            // south interior
                 new BlockPos(center.getX(), y, center.getZ() + radius - 1),
-                // west wall
+            // west interior
                 new BlockPos(center.getX() - radius + 1, y, center.getZ()),
-                // east wall
+            // east interior
                 new BlockPos(center.getX() + radius - 1, y, center.getZ())
         );
 
@@ -1449,17 +1550,26 @@ public final class HovelPerimeterBuilder {
             if (state.isReplaceable() && !state.isAir()) {
                 mineSoft(bot, p);
             }
+            // Ensure there's a floor block to place the torch on.
+            if (isMissing(world, p.down())) {
+                BotActions.placeBlockAt(bot, p.down(), Direction.UP, PILLAR_BLOCKS);
+                sleepQuiet(40L);
+            }
+
             if ((world.getBlockState(p).isAir() || world.getBlockState(p).isReplaceable())
+                    && !isMissing(world, p.down())
                     && BlockInteractionService.canInteract(bot, p, REACH_DISTANCE_SQ)) {
                 BotActions.placeBlockAt(bot, p, Direction.UP, List.of(Items.TORCH));
                 sleepQuiet(60L);
             }
         }
 
-        // Fallback: if wall placement failed due to geometry, at least place two floor torches.
+        // Fallback: if the main targets are blocked, at least place two interior corner torches.
         List<BlockPos> floorTargets = List.of(
-                center.add(radius - 1, 1, radius - 1),
-                center.add(-(radius - 1), 1, -(radius - 1))
+            center.add(radius - 1, 1, radius - 1),
+            center.add(-(radius - 1), 1, radius - 1),
+            center.add(radius - 1, 1, -(radius - 1)),
+            center.add(-(radius - 1), 1, -(radius - 1))
         );
         for (BlockPos p : floorTargets) {
             if (SkillManager.shouldAbortSkill(bot)) {
