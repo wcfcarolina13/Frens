@@ -962,6 +962,7 @@ public final class HovelPerimeterBuilder {
                 // Walk multiple roof rings (outer -> inner) and place missing blocks from multiple angles.
                 // Limiting to a few inner rings keeps it safe/time-bounded while improving coverage.
                 int ringMin = Math.max(0, radius - 6);
+                roofWalk:
                 for (int ring = radius; ring >= ringMin; ring -= 1) {
                     if (SkillManager.shouldAbortSkill(bot)) {
                         return;
@@ -987,14 +988,16 @@ public final class HovelPerimeterBuilder {
                             return;
                         }
                         if (step % 8 == 0 && countMissing(world, allTargets) == 0) {
-                            return;
+                            // IMPORTANT: don't return early from the roof pass runnable.
+                            // We still need to snap back to the access pillar for safe teardown/descent.
+                            break roofWalk;
                         }
 
                         // If we fell off the roof plane, abort the roof-walk quickly.
                         // The later scaffold-based roof patch stage will finish the job without requiring roof traversal.
                         if (stepped[0] && bot.getBlockY() < roofY) {
                             fellOffRoof[0] = true;
-                            return;
+                            break roofWalk;
                         }
 
                         BlockPos roofBlock = perimeter.get((startIdx + step) % perimeter.size());
@@ -1012,7 +1015,7 @@ public final class HovelPerimeterBuilder {
                         // Try to move to this stand cell; if it fails, keep placing from where we are.
                         if (stepped[0] && bot.getBlockY() < roofY) {
                             fellOffRoof[0] = true;
-                            return;
+                            break roofWalk;
                         }
                         if (isStandable(world, stand)) {
                             nudgeToStand(world, bot, stand, 1200L);
