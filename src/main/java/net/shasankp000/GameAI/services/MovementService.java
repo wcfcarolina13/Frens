@@ -1804,38 +1804,66 @@ public final class MovementService {
             return false;
         }
         BlockPos start = bot.getBlockPos();
-        Direction toward = approximateToward(start, goal);
-        if (!toward.getAxis().isHorizontal()) {
-            toward = bot.getHorizontalFacing();
+
+        // Build a small ordered set of candidate directions.
+        int dx = goal.getX() - start.getX();
+        int dz = goal.getZ() - start.getZ();
+
+        Direction primary;
+        Direction secondary;
+        if (Math.abs(dx) >= Math.abs(dz)) {
+            primary = dx >= 0 ? Direction.EAST : Direction.WEST;
+            secondary = dz >= 0 ? Direction.SOUTH : Direction.NORTH;
+        } else {
+            primary = dz >= 0 ? Direction.SOUTH : Direction.NORTH;
+            secondary = dx >= 0 ? Direction.EAST : Direction.WEST;
         }
 
-        BlockPos front = start.offset(toward);
-        BlockState frontState = world.getBlockState(front);
-        if (frontState.getBlock() instanceof DoorBlock) {
-            return false;
-        }
-        if (frontState.getCollisionShape(world, front).isEmpty()) {
-            return false;
-        }
-        // Don't try to climb tall collision shapes (fences/walls); treat them as true obstacles.
-        double maxY = frontState.getCollisionShape(world, front).getMax(Direction.Axis.Y);
-        if (maxY > 1.01D) {
-            return false;
+        Direction[] candidates = new Direction[] {
+                primary,
+                secondary,
+                primary.rotateYClockwise(),
+                primary.rotateYCounterclockwise(),
+                primary.getOpposite()
+        };
+
+        for (Direction toward : candidates) {
+            if (toward == null || !toward.getAxis().isHorizontal()) {
+                continue;
+            }
+            BlockPos front = start.offset(toward);
+            BlockState frontState = world.getBlockState(front);
+            if (frontState.getBlock() instanceof DoorBlock) {
+                continue;
+            }
+            if (frontState.getCollisionShape(world, front).isEmpty()) {
+                continue;
+            }
+            // Don't try to climb tall collision shapes (fences/walls); treat them as true obstacles.
+            double maxY = frontState.getCollisionShape(world, front).getMax(Direction.Axis.Y);
+            if (maxY > 1.01D) {
+                continue;
+            }
+
+            BlockPos step = front.up();
+            if (!isSolidStandable(world, step.down(), step)) {
+                continue;
+            }
+
+            LOGGER.debug("step-up assist [{}]: from={} dir={} front={} step={}",
+                    label,
+                    start.toShortString(),
+                    toward,
+                    front.toShortString(),
+                    step.toShortString());
+
+            // nudgeToward will jump automatically for dy>0.6
+            if (nudgeTowardUntilClose(bot, step, 2.25D, 1200L, 0.18, label + "-stepup")) {
+                return true;
+            }
         }
 
-        BlockPos step = front.up();
-        if (!isSolidStandable(world, step.down(), step)) {
-            return false;
-        }
-
-        LOGGER.debug("step-up assist [{}]: from={} front={} step={}",
-                label,
-                start.toShortString(),
-                front.toShortString(),
-                step.toShortString());
-
-        // nudgeToward will jump automatically for dy>0.6
-        return nudgeTowardUntilClose(bot, step, 2.25D, 1200L, 0.18, label + "-stepup");
+        return false;
     }
 
     private static void snapTo(ServerPlayerEntity player, BlockPos target) {

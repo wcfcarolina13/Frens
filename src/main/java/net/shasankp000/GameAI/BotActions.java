@@ -186,7 +186,6 @@ public final class BotActions {
 
         bot.addVelocity(impulse.x, 0, impulse.z);
         bot.velocityDirty = true;
-        bot.velocityModified = true;
     }
 
     public static void stop(ServerPlayerEntity bot) {
@@ -879,7 +878,30 @@ public final class BotActions {
                         newY -= 1.0;
                         targetPos = stepDownPos;
                     } else {
-                        // No safe step up or down -> don't move to avoid suffocation/clipping.
+                        // No safe step up or down -> apply a small physics-based "escape" nudge.
+                        // This helps in corner-wedge situations where discrete step movement can't resolve collisions.
+                        Vec3d pos = new Vec3d(bot.getX(), bot.getY(), bot.getZ());
+                        Vec3d forward = new Vec3d(dx, 0, dz);
+                        if (forward.lengthSquared() > 1.0E-6) {
+                            Vec3d dir = forward.normalize();
+                            if (bot.isOnGround()) {
+                                // Attempt a hop; autoJumpIfNeeded can miss diagonals, so do a direct jump too.
+                                autoJumpIfNeeded(bot);
+                                jump(bot);
+                            }
+
+                            // Prefer a slight sidestep if forward is blocked.
+                            Vec3d left = new Vec3d(-dir.z, 0, dir.x);
+                            Vec3d right = new Vec3d(dir.z, 0, -dir.x);
+                            BlockPos leftProbe = BlockPos.ofFloored(pos.x + left.x * 0.65D, pos.y, pos.z + left.z * 0.65D);
+                            BlockPos rightProbe = BlockPos.ofFloored(pos.x + right.x * 0.65D, pos.y, pos.z + right.z * 0.65D);
+                            boolean leftClear = hasMovementClearance(world, leftProbe);
+                            boolean rightClear = hasMovementClearance(world, rightProbe);
+                            Vec3d escapeDir = (leftClear && !rightClear) ? left : (rightClear && !leftClear) ? right : dir;
+
+                            Vec3d escapeTarget = pos.add(escapeDir.multiply(Math.max(0.9D, Math.abs(distance) * 1.6D)));
+                            applyMovementInput(bot, escapeTarget, 0.22D);
+                        }
                         return;
                     }
                 }
@@ -935,13 +957,46 @@ public final class BotActions {
             return;
         }
         ServerWorld world = bot.getCommandSource().getWorld();
-        BlockPos front = getRelativeBlockPos(bot, 1, 0);
+
+        // Use current motion direction when possible (better for diagonal moves); otherwise fall back to yaw.
+        Vec3d vel = bot.getVelocity();
+        double dirX = vel.x;
+        double dirZ = vel.z;
+        double magSq = dirX * dirX + dirZ * dirZ;
+        if (magSq < 1.0E-4) {
+            double yawRad = Math.toRadians(bot.getYaw());
+            dirX = -Math.sin(yawRad);
+            dirZ = Math.cos(yawRad);
+            magSq = dirX * dirX + dirZ * dirZ;
+        }
+        if (magSq < 1.0E-6) {
+            return;
+        }
+        double invMag = 1.0 / Math.sqrt(magSq);
+        dirX *= invMag;
+        dirZ *= invMag;
+
+        // Probe the block we're about to collide with (continuous direction -> blockpos).
+        // 0.65 is enough to reach into the neighboring cell even when standing near an edge.
+        BlockPos front = BlockPos.ofFloored(bot.getX() + dirX * 0.65D, bot.getY(), bot.getZ() + dirZ * 0.65D);
         BlockPos frontAbove = front.up();
 
-        boolean obstacleAhead = !world.getBlockState(front).isAir();
-        boolean headSpace = world.getBlockState(frontAbove).isAir();
+        BlockState frontState = world.getBlockState(front);
+        if (frontState.getBlock() instanceof DoorBlock) {
+            return; // doors handled elsewhere; don't bunny-hop at them
+        }
+        if (frontState.getCollisionShape(world, front).isEmpty()) {
+            return;
+        }
+        // Don't attempt to jump over tall collision shapes (fences/walls); that's a real obstacle.
+        double maxY = frontState.getCollisionShape(world, front).getMax(Direction.Axis.Y);
+        if (maxY > 1.01D) {
+            return;
+        }
 
-        if (obstacleAhead && headSpace) {
+        boolean headSpace = world.getBlockState(frontAbove).getCollisionShape(world, frontAbove).isEmpty()
+                && world.getBlockState(frontAbove.up()).getCollisionShape(world, frontAbove.up()).isEmpty();
+        if (headSpace) {
             jump(bot);
         }
     }

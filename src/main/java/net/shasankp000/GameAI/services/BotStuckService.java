@@ -98,6 +98,88 @@ public final class BotStuckService {
         return new EnvironmentSnapshot(enclosed, solidNeighbors, headroom, escapeRoute);
     }
 
+    private static boolean isStandable(ServerWorld world, BlockPos stand) {
+        if (world == null || stand == null) {
+            return false;
+        }
+        BlockPos foot = stand.down();
+        return !world.getBlockState(foot).getCollisionShape(world, foot).isEmpty()
+                && world.getBlockState(stand).getCollisionShape(world, stand).isEmpty()
+                && world.getBlockState(stand.up()).getCollisionShape(world, stand.up()).isEmpty();
+    }
+
+    private static int countSolidNeighbors(ServerWorld world, BlockPos pos) {
+        if (world == null || pos == null) {
+            return 0;
+        }
+        int solid = 0;
+        for (Direction d : Direction.Type.HORIZONTAL) {
+            if (isSolid(world, pos.offset(d))) {
+                solid++;
+            }
+        }
+        if (isSolid(world, pos.down())) {
+            solid++;
+        }
+        if (isSolid(world, pos.up())) {
+            solid++;
+        }
+        return solid;
+    }
+
+    /**
+     * Corner/pit escape: try to move to a nearby standable tile (prefer 1-block-up exits and open space).
+     * This avoids getting wedged against a wall where "forward" motion can't resolve collisions.
+     */
+    private static boolean tryEscapeHop(ServerPlayerEntity bot, String label) {
+        if (bot == null || bot.isRemoved()) {
+            return false;
+        }
+        ServerWorld world = bot.getCommandSource().getWorld();
+        BlockPos start = bot.getBlockPos();
+
+        BlockPos best = null;
+        double bestScore = Double.POSITIVE_INFINITY;
+
+        for (int dy = -1; dy <= 1; dy++) {
+            for (int dx = -2; dx <= 2; dx++) {
+                for (int dz = -2; dz <= 2; dz++) {
+                    if (dx == 0 && dz == 0) {
+                        continue;
+                    }
+                    if (Math.abs(dx) + Math.abs(dz) > 2) {
+                        continue;
+                    }
+                    BlockPos cand = start.add(dx, dy, dz);
+                    if (!isStandable(world, cand)) {
+                        continue;
+                    }
+                    int elevation = cand.getY() - start.getY();
+                    int solids = countSolidNeighbors(world, cand);
+                    double distSq = cand.getSquaredDistance(start);
+                    // Prefer stepping up and moving into open space.
+                    double score = distSq * 0.6D + solids * 1.6D - elevation * 5.0D;
+                    if (score < bestScore) {
+                        bestScore = score;
+                        best = cand.toImmutable();
+                    }
+                }
+            }
+        }
+
+        if (best == null) {
+            return false;
+        }
+
+        LOGGER.debug("stuck-escape hop [{}]: from={} to={} score={}",
+                label,
+                start.toShortString(),
+                best.toShortString(),
+                String.format(java.util.Locale.ROOT, "%.2f", bestScore));
+
+        return MovementService.nudgeTowardUntilClose(bot, best, 2.25D, 1900L, 0.22D, "stuck-escape-" + label);
+    }
+
     private static boolean isSolid(ServerWorld world, BlockPos pos) {
         BlockState state = world.getBlockState(pos);
         return !state.isAir() && !state.getCollisionShape(world, pos).isEmpty();
@@ -141,7 +223,13 @@ public final class BotStuckService {
                     ticks,
                     environmentSnapshot != null && environmentSnapshot.enclosed(),
                     environmentSnapshot == null || environmentSnapshot.hasEscapeRoute());
-            BotActions.escapeStairs(bot);
+
+            // First try to escape by moving to a nearby open/standable spot (handles corner wedging).
+            boolean escaped = tryEscapeHop(bot, "primary") || tryEscapeHop(bot, "fallback");
+            if (!escaped) {
+                BotActions.escapeStairs(bot);
+            }
+
             STATIONARY_TICKS.put(botId, 0);
             LAST_KNOWN_POSITION.put(botId, new Vec3d(bot.getX(), bot.getY(), bot.getZ()));
         }
