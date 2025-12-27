@@ -1025,16 +1025,20 @@ public final class HovelPerimeterBuilder {
 
                 // Snap-teleport only if we're on the roof plane and not already on the pillar.
                 // This avoids disrupting the roof walk when the bot isn't actually on the roof.
-                if (!isOnPillarTop(bot, pillarTop)
-                        && isStandable(world, pillarTop)
+                BlockPos exitTop = pickRoofExitTop(world, bot, pillarTop);
+                if (exitTop != null
+                        && !isOnPillarTop(bot, exitTop)
+                        && stepped[0]
                         && bot.getBlockY() >= roofY
-                        && isInsideFootprint(bot.getBlockPos(), center, radius)) {
+                        && isStandable(world, exitTop)) {
                     BotActions.stop(bot);
                     BotActions.sneak(bot, true);
+                    LOGGER.info("Roof pass: snapping back to roof access pillarTop={} (preferred={}, pending={})",
+                            exitTop, pillarTop, pendingRoofPillars.size());
                     bot.teleport(world,
-                            pillarTop.getX() + 0.5D,
-                            pillarTop.getY(),
-                            pillarTop.getZ() + 0.5D,
+                            exitTop.getX() + 0.5D,
+                            exitTop.getY(),
+                            exitTop.getZ() + 0.5D,
                             EnumSet.noneOf(PositionFlag.class),
                             bot.getYaw(),
                             bot.getPitch(),
@@ -1068,6 +1072,40 @@ public final class HovelPerimeterBuilder {
         // Treat a fall as "we stepped onto the roof" so the caller doesn't keep attempting more roof sides.
         // Subsequent scaffold roof patching will handle any remaining holes.
         return stepped[0] || fellOffRoof[0];
+    }
+
+    /**
+     * Choose a roof-exit perch top deterministically.
+     *
+     * <p>Primary goal is to return to the pillar we just built (so we can safely tear it down).
+     * If that top isn't standable (rare: clutter/leaves/snow/blocks), fall back to another known
+     * still-present roof access pillar top so we don't oscillate or get stranded on the roof.</p>
+     */
+    private BlockPos pickRoofExitTop(ServerWorld world, ServerPlayerEntity bot, BlockPos preferredTop) {
+        if (world == null || bot == null) {
+            return preferredTop;
+        }
+        if (preferredTop != null && isStandable(world, preferredTop)) {
+            return preferredTop;
+        }
+
+        BlockPos botPos = bot.getBlockPos();
+        BlockPos best = null;
+        double bestSq = Double.MAX_VALUE;
+
+        // Only consider pillars we explicitly kept because we could not tear them down.
+        // These are safe candidates for "snap back to perch".
+        for (RoofPillar pillar : pendingRoofPillars) {
+            if (pillar == null || pillar.base() == null) continue;
+            BlockPos top = pillar.base().withY(pillar.topY());
+            if (!isStandable(world, top)) continue;
+            double d = distSqXZ(botPos, top);
+            if (d < bestSq) {
+                bestSq = d;
+                best = top.toImmutable();
+            }
+        }
+        return best != null ? best : preferredTop;
     }
 
     private boolean nudgeToStand(ServerWorld world, ServerPlayerEntity bot, BlockPos stand, long timeoutMs) {
