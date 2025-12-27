@@ -784,6 +784,14 @@ public final class MovementService {
                         sameBlockSteps = 0;
                         continue;
                     }
+                    // Common micro-obstacle case: a single placed block in the walking line. If yaw is slightly off,
+                    // BotActions.autoJumpIfNeeded() may miss it (cardinal-only). Try a directed step-up.
+                    if (tryStepUpToward(player, segment.end(), "walkSegment")) {
+                        stagnantSteps = 0;
+                        lastDistanceSq = Double.MAX_VALUE;
+                        sameBlockSteps = 0;
+                        continue;
+                    }
                     // Local corner probe: try a nearby standable tile to break out of collision jitter.
                     if (tryLocalUnstick(player, segment.end(), "walkSegment")) {
                         stagnantSteps = 0;
@@ -822,6 +830,12 @@ public final class MovementService {
             // Hard anti-wall-hump trigger: if we're stuck in the same block AND not improving, stop pushing and escape.
             if (sameBlockSteps >= STUCK_SAME_BLOCK_STEPS_TRIGGER && stagnantSteps >= STUCK_STAGNANT_STEPS_TRIGGER) {
                 BotActions.stop(player);
+                if (tryStepUpToward(player, segment.end(), "walkSegment-stuck")) {
+                    stagnantSteps = 0;
+                    lastDistanceSq = Double.MAX_VALUE;
+                    sameBlockSteps = 0;
+                    continue;
+                }
                 if (tryDoorEscapeToward(player, segment.end(), null, "walkSegment-stuck")) {
                     stagnantSteps = 0;
                     lastDistanceSq = Double.MAX_VALUE;
@@ -1352,6 +1366,12 @@ public final class MovementService {
                         sameBlockSteps = 0;
                         continue;
                     }
+                    if (tryStepUpToward(player, destination, "walkDirect")) {
+                        stagnantSteps = 0;
+                        lastDistanceSq = Double.MAX_VALUE;
+                        sameBlockSteps = 0;
+                        continue;
+                    }
                     if (tryLocalUnstick(player, destination, "walkDirect")) {
                         stagnantSteps = 0;
                         lastDistanceSq = Double.MAX_VALUE;
@@ -1386,6 +1406,12 @@ public final class MovementService {
             }
             if (sameBlockSteps >= STUCK_SAME_BLOCK_STEPS_TRIGGER && stagnantSteps >= STUCK_STAGNANT_STEPS_TRIGGER) {
                 BotActions.stop(player);
+                if (tryStepUpToward(player, destination, "walkDirect-stuck")) {
+                    stagnantSteps = 0;
+                    lastDistanceSq = Double.MAX_VALUE;
+                    sameBlockSteps = 0;
+                    continue;
+                }
                 if (tryDoorEscapeToward(player, destination, null, "walkDirect-stuck")) {
                     stagnantSteps = 0;
                     lastDistanceSq = Double.MAX_VALUE;
@@ -1546,6 +1572,12 @@ public final class MovementService {
                         sameBlockSteps = 0;
                         continue;
                     }
+                    if (tryStepUpToward(bot, target, label)) {
+                        stagnant = 0;
+                        best = Double.MAX_VALUE;
+                        sameBlockSteps = 0;
+                        continue;
+                    }
                     if (tryLocalUnstick(bot, target, label)) {
                         stagnant = 0;
                         best = Double.MAX_VALUE;
@@ -1564,6 +1596,12 @@ public final class MovementService {
 
             if (sameBlockSteps >= STUCK_SAME_BLOCK_STEPS_TRIGGER && stagnant >= STUCK_STAGNANT_STEPS_TRIGGER) {
                 BotActions.stop(bot);
+                if (tryStepUpToward(bot, target, label + "-stuck")) {
+                    stagnant = 0;
+                    best = Double.MAX_VALUE;
+                    sameBlockSteps = 0;
+                    continue;
+                }
                 if (tryDoorEscapeToward(bot, target, null, label + "-stuck")) {
                     stagnant = 0;
                     best = Double.MAX_VALUE;
@@ -1747,6 +1785,57 @@ public final class MovementService {
                 String.format(Locale.ROOT, "%.2f", bestScore));
         BotActions.stop(bot);
         return nudgeTowardUntilClose(bot, best, 2.25D, 1400L, 0.18, label + "-unstick");
+    }
+
+    /**
+     * Directed 1-block step-up assist.
+     *
+     * <p>Why: our movement input is velocity-based and diagonal moves can leave yaw slightly off.
+     * In that situation {@link BotActions#autoJumpIfNeeded(ServerPlayerEntity)} (cardinal-facing)
+     * may miss a single block directly in the movement line (often a bot-placed dirt/cobble).
+     * This helper uses the goal vector to identify the blocking cell and attempts to hop onto it.
+     */
+    private static boolean tryStepUpToward(ServerPlayerEntity bot, BlockPos goal, String label) {
+        if (bot == null || goal == null) {
+            return false;
+        }
+        ServerWorld world = getWorld(bot);
+        if (world == null) {
+            return false;
+        }
+        BlockPos start = bot.getBlockPos();
+        Direction toward = approximateToward(start, goal);
+        if (!toward.getAxis().isHorizontal()) {
+            toward = bot.getHorizontalFacing();
+        }
+
+        BlockPos front = start.offset(toward);
+        BlockState frontState = world.getBlockState(front);
+        if (frontState.getBlock() instanceof DoorBlock) {
+            return false;
+        }
+        if (frontState.getCollisionShape(world, front).isEmpty()) {
+            return false;
+        }
+        // Don't try to climb tall collision shapes (fences/walls); treat them as true obstacles.
+        double maxY = frontState.getCollisionShape(world, front).getMax(Direction.Axis.Y);
+        if (maxY > 1.01D) {
+            return false;
+        }
+
+        BlockPos step = front.up();
+        if (!isSolidStandable(world, step.down(), step)) {
+            return false;
+        }
+
+        LOGGER.debug("step-up assist [{}]: from={} front={} step={}",
+                label,
+                start.toShortString(),
+                front.toShortString(),
+                step.toShortString());
+
+        // nudgeToward will jump automatically for dy>0.6
+        return nudgeTowardUntilClose(bot, step, 2.25D, 1200L, 0.18, label + "-stepup");
     }
 
     private static void snapTo(ServerPlayerEntity player, BlockPos target) {
