@@ -62,6 +62,7 @@ public final class SkillManager {
             return SkillExecutionResult.failure("Another skill is already running.");
         }
         TaskService.TaskTicket ticket = ticketOpt.get();
+        TaskService.attachExecutingThread(ticket, Thread.currentThread());
 
         UUID resumeFollowUuid = null;
         net.minecraft.util.math.BlockPos resumeFixedGoal = null;
@@ -87,8 +88,20 @@ public final class SkillManager {
                 result = SkillExecutionResult.failure(reason);
             }
             return result;
+        } catch (Throwable t) {
+            LOGGER.error("Skill '{}' crashed: {}", name, t.getMessage(), t);
+            result = SkillExecutionResult.failure("Skill '" + name + "' crashed: " + (t.getMessage() != null ? t.getMessage() : t.getClass().getSimpleName()));
+            return result;
         } finally {
             boolean abortRequested = TaskService.isAbortRequested(botUuid);
+            String abortReason = TaskService.getCancelReason(botUuid).orElse("");
+            String resultMsg = result != null ? result.message() : "null";
+            LOGGER.info("Skill '{}' exit: success={} abortRequested={} reason='{}' message='{}'",
+                    name,
+                    result != null && result.success(),
+                    abortRequested,
+                    abortReason,
+                    resultMsg);
             try {
                 // Only perform post-task drop_sweep if inventory isn't full and the skill permits it.
                 // Woodcut handles its own sweep after completion to avoid tower disruption.
@@ -133,7 +146,7 @@ public final class SkillManager {
 
     public static boolean shouldAbortSkill(ServerPlayerEntity botPlayer) {
         UUID botUuid = botPlayer != null ? botPlayer.getUuid() : null;
-        return TaskService.isAbortRequested(botUuid);
+        return Thread.currentThread().isInterrupted() || TaskService.isAbortRequested(botUuid);
     }
 
     public static boolean requestSkillPause(ServerPlayerEntity bot, String reason) {

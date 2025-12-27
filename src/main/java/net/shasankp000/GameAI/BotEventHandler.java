@@ -1021,6 +1021,7 @@ public class BotEventHandler {
         if (state != null) {
             state.followNoTeleport = false;
             state.followStopRange = 0.0D;
+            state.followStandoffRange = 0.0D;
             state.followFixedGoal = null;
             state.comeBestGoalDistSq = Double.NaN;
             state.comeTicksSinceBest = 0;
@@ -1049,6 +1050,7 @@ public class BotEventHandler {
         if (state != null) {
             state.followNoTeleport = true;
             state.followStopRange = Math.max(1.5D, stopRange);
+            state.followStandoffRange = 0.0D;
             state.followFixedGoal = null;
             state.comeBestGoalDistSq = Double.NaN;
             state.comeTicksSinceBest = 0;
@@ -1075,6 +1077,7 @@ public class BotEventHandler {
         if (state != null) {
             state.followNoTeleport = true;
             state.followStopRange = Math.max(1.5D, stopRange);
+            state.followStandoffRange = 0.0D;
             state.followFixedGoal = fixedGoal.toImmutable();
             state.comeBestGoalDistSq = Double.NaN;
             state.comeTicksSinceBest = 0;
@@ -1110,6 +1113,7 @@ public class BotEventHandler {
         if (state != null) {
             state.followNoTeleport = false;
             state.followStopRange = 0.0D;
+            state.followStandoffRange = 0.0D;
             state.followFixedGoal = null;
             state.comeBestGoalDistSq = Double.NaN;
             state.comeTicksSinceBest = 0;
@@ -1123,6 +1127,56 @@ public class BotEventHandler {
             sendBotMessage(bot, "Stopping follow command.");
         }
         return wasFollowing ? "Bot stopped following." : "Bot is not currently following anyone.";
+    }
+
+    /**
+     * Follow a player, but keep a larger "standoff" distance while the bot has line-of-sight.
+     * If line-of-sight breaks (around corners/doors), normal pursuit + planning should resume.
+     */
+    public static String setFollowModeDistance(ServerPlayerEntity bot, ServerPlayerEntity target, double standoffRange) {
+        if (isExternalOverrideActive()) {
+            sendBotMessage(bot, "Busy with another task right now.");
+            return "Bot is busy executing another task. Try again after it finishes.";
+        }
+        if (target == null) {
+            return "Unable to follow — target not found.";
+        }
+        registerBot(bot);
+        setFollowTarget(bot, target.getUuid());
+        BotCommandStateService.State state = stateFor(bot);
+        if (state != null) {
+            state.followNoTeleport = false;
+            state.followStopRange = 0.0D;
+            state.followStandoffRange = Math.max(0.0D, standoffRange);
+            state.followFixedGoal = null;
+            state.comeBestGoalDistSq = Double.NaN;
+            state.comeTicksSinceBest = 0;
+            state.comeNextSkillTick = 0L;
+        }
+        setMode(bot, Mode.FOLLOW);
+        clearGuard(bot);
+        clearBase(bot);
+
+        UUID id = bot.getUuid();
+        FollowStateService.clearPlanning(id);
+        FollowDebugService.clear(id);
+        requestFollowPathPlan(bot, target, true, "follow-distance-start");
+        sendBotMessage(bot, "Following " + target.getName().getString() + " at a distance.");
+        return "Now following " + target.getName().getString() + " at a distance.";
+    }
+
+    /**
+     * Adjust the current follow standoff distance (0 disables standoff and reverts to default follow spacing).
+     */
+    public static void setFollowStandoffRange(ServerPlayerEntity bot, double standoffRange) {
+        if (bot == null) {
+            return;
+        }
+        registerBot(bot);
+        BotCommandStateService.State state = stateFor(bot);
+        if (state != null) {
+            state.followStandoffRange = Math.max(0.0D, standoffRange);
+        }
     }
 
     public static String setGuardMode(ServerPlayerEntity bot, double radius) {
@@ -1491,9 +1545,13 @@ public class BotEventHandler {
         if (handleFollowObstacles(bot, target, navGoalPos, navGoalBlock, progressDistSq, distanceSq, absDeltaY, canSee, directBlocked, allowTeleportPref, forceWalk, srv)) {
             return true;
         }
-        // Personal space applies even when following waypoints; otherwise the bot can "pile onto" the commander
+        // Personal space / standoff applies even when following waypoints; otherwise the bot can "pile onto" the commander
         // when the final waypoint is near the player.
-        double personalSpaceSq = FOLLOW_PERSONAL_SPACE * FOLLOW_PERSONAL_SPACE;
+        double desiredSpace = FOLLOW_PERSONAL_SPACE;
+        if (target != null && state != null && state.followStandoffRange > 0.0D) {
+            desiredSpace = Math.max(desiredSpace, state.followStandoffRange);
+        }
+        double personalSpaceSq = desiredSpace * desiredSpace;
         if (canSee && !directBlocked && horizDistSq <= personalSpaceSq) {
             FOLLOW_WAYPOINTS.remove(botId);
             FOLLOW_DOOR_PLAN.remove(botId);
@@ -1504,11 +1562,11 @@ public class BotEventHandler {
         if (usingWaypoints) {
             double sprintDistanceSq = Math.max(distanceSq, progressDistSq);
             boolean sprint = sprintDistanceSq > FOLLOW_SPRINT_DISTANCE_SQ;
-            moveToward(bot, navGoalPos, 0.85D, sprint);
+            moveToward(bot, navGoalPos, 1.0D, sprint);
         } else {
             // If we're physically blocked (glass/fence/door), don't "settle" just because we're close in Euclidean distance.
             boolean allowCloseStop = canSee && !directBlocked;
-            followInputStep(bot, targetPos, horizDistSq, allowCloseStop);
+            followInputStep(bot, targetPos, horizDistSq, allowCloseStop, desiredSpace);
         }
         return true;
     }
@@ -1739,8 +1797,8 @@ public class BotEventHandler {
         FollowMovementService.moveToward(bot, target, stopDistance, sprint, () -> lowerShieldTracking(bot));
     }
 
-    private static void followInputStep(ServerPlayerEntity bot, Vec3d targetPos, double distanceSq, boolean allowCloseStop) {
-        FollowMovementService.followInputStep(bot, targetPos, distanceSq, allowCloseStop, FOLLOW_PERSONAL_SPACE, FOLLOW_SPRINT_DISTANCE_SQ);
+    private static void followInputStep(ServerPlayerEntity bot, Vec3d targetPos, double distanceSq, boolean allowCloseStop, double followPersonalSpace) {
+        FollowMovementService.followInputStep(bot, targetPos, distanceSq, allowCloseStop, followPersonalSpace, FOLLOW_SPRINT_DISTANCE_SQ);
     }
 
     private static boolean handleFollowObstacles(ServerPlayerEntity bot,

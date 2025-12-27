@@ -15,6 +15,8 @@ import net.minecraft.util.math.MathHelper;
 import net.shasankp000.ui.BotPlayerInventoryScreenHandler;
 
 import java.nio.charset.StandardCharsets;
+import java.util.List;
+import java.util.Locale;
 import java.util.UUID;
 
 public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventoryScreenHandler> {
@@ -23,10 +25,56 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
     private static final int SECTION_HEIGHT = 166;
     private static final int BLOCK_GAP = 12;
     private static final int STATS_AREA_HEIGHT = 48;
+    private static final int TOPIC_PADDING = 6;
+    private static final int TOPIC_ROW_HEIGHT = 10;
+    private static final int TOPIC_CONTROL_GAP = 2;
+    private static final double FOLLOW_DISTANCE_STEP = 1.0D;
+    private static final double FOLLOW_DISTANCE_MIN = 1.0D;
+    private static final double FOLLOW_DISTANCE_MAX = 64.0D;
+    private static final double FOLLOW_DISTANCE_DEFAULT = 4.0D;
     private OtherClientPlayerEntity fallbackBot;
     private final String botAlias;
     private float lastMouseX;
     private float lastMouseY;
+    private int topicScrollIndex;
+
+    private enum TopicAction {
+        FOLLOW,
+        GUARD,
+        PATROL,
+        SKILL_FISH,
+        SKILL_WOODCUT,
+        SKILL_MINING,
+        SKILL_STRIPMINE,
+        SKILL_ASCENT,
+        SKILL_DESCENT
+    }
+
+    private static final class TopicEntry {
+        private final String label;
+        private final TopicAction action;
+        private final boolean toggle;
+        private final int indent;
+
+        private TopicEntry(String label, TopicAction action, boolean toggle, int indent) {
+            this.label = label;
+            this.action = action;
+            this.toggle = toggle;
+            this.indent = indent;
+        }
+    }
+
+    private static final List<TopicEntry> TOPIC_ENTRIES = List.of(
+            new TopicEntry("Follow", TopicAction.FOLLOW, true, 0),
+            new TopicEntry("Guard", TopicAction.GUARD, true, 0),
+            new TopicEntry("Patrol", TopicAction.PATROL, true, 0),
+            new TopicEntry("Fishing", TopicAction.SKILL_FISH, false, 0),
+            new TopicEntry("Woodcut", TopicAction.SKILL_WOODCUT, false, 0),
+            new TopicEntry("Mining", TopicAction.SKILL_MINING, false, 0),
+            new TopicEntry("Stripmine", TopicAction.SKILL_STRIPMINE, false, 1),
+            new TopicEntry("Ascent", TopicAction.SKILL_ASCENT, false, 1),
+            new TopicEntry("Descent", TopicAction.SKILL_DESCENT, false, 1)
+    );
 
     public BotPlayerInventoryScreen(BotPlayerInventoryScreenHandler handler, PlayerInventory inventory, Text title) {
         super(handler, inventory, title);
@@ -51,6 +99,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         int statsTop = y + SECTION_HEIGHT + 2;
         context.fill(x, statsTop, x + SECTION_WIDTH, statsTop + STATS_AREA_HEIGHT - 4, 0xC0101010);
         drawBotStats(context, x + 6, statsTop + 6);
+        drawTopicPanel(context, x + SECTION_WIDTH + BLOCK_GAP, statsTop, mouseX, mouseY);
     }
 
     private void drawBotStats(DrawContext context, int x, int y) {
@@ -60,7 +109,6 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         int hunger = handler.getBotHunger();
         int level = handler.getBotLevel();
         float xpProgress = handler.getBotXpProgress();
-        int totalXp = handler.getBotTotalExperience();
 
         String healthLabel = String.format("Health: %.1f / %.1f", health, maxHealth);
         context.drawText(this.textRenderer, healthLabel, x, y, 0xFFEFEFEF, false);
@@ -69,9 +117,11 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         context.drawText(this.textRenderer, hungerLabel, x, y + 20, 0xFFEFEFEF, false);
         drawBar(context, x, y + 30, 120, 6, MathHelper.clamp(hunger / 20f, 0.0f, 1.0f), 0xFFE3C05C);
 
-        String xpLabel = String.format("XP: L%d (%d)  %.0f%%", level, totalXp, xpProgress * 100.0F);
-        context.drawText(this.textRenderer, xpLabel, x + 130, y, 0xFFEFEFEF, false);
-        drawBar(context, x + 130, y + 10, 120, 6, xpProgress, 0xFF4FA3E3);
+        int xpAreaX = x + 130;
+        int xpAreaW = Math.max(40, SECTION_WIDTH - 136);
+        String xpLabel = "XP L" + level;
+        context.drawText(this.textRenderer, xpLabel, xpAreaX, y, 0xFFEFEFEF, false);
+        drawBar(context, xpAreaX, y + 10, xpAreaW, 6, xpProgress, 0xFF4FA3E3);
     }
 
     private void drawBar(DrawContext context, int x, int y, int width, int height, float value, int color) {
@@ -85,11 +135,332 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         context.fill(x + 1, y + 1, x + 1 + filled, y + height - 1, color);
     }
 
+    private void drawTopicPanel(DrawContext context, int panelX, int panelY, int mouseX, int mouseY) {
+        int panelWidth = SECTION_WIDTH;
+        int panelHeight = STATS_AREA_HEIGHT - 4;
+        context.fill(panelX, panelY, panelX + panelWidth, panelY + panelHeight, 0xC0101010);
+
+        context.drawText(this.textRenderer, "Topics", panelX + TOPIC_PADDING, panelY + 2, 0xFFE6D7A3, false);
+        int rowX = panelX + TOPIC_PADDING;
+        int rowY = panelY + 2 + this.textRenderer.fontHeight + 1;
+        int rowW = panelWidth - TOPIC_PADDING * 2;
+        int listHeight = panelHeight - (rowY - panelY);
+        int visibleRows = Math.max(1, listHeight / TOPIC_ROW_HEIGHT);
+        clampTopicScroll(visibleRows);
+
+        for (int i = 0; i < visibleRows; i++) {
+            int entryIndex = topicScrollIndex + i;
+            if (entryIndex >= TOPIC_ENTRIES.size()) {
+                break;
+            }
+            TopicEntry entry = TOPIC_ENTRIES.get(entryIndex);
+            int currentY = rowY + i * TOPIC_ROW_HEIGHT;
+            if (entry.action == TopicAction.FOLLOW) {
+                drawFollowRow(context, rowX, currentY, rowW, mouseX, mouseY);
+            } else {
+                boolean active = isEntryActive(entry.action);
+                drawTopicRow(context, rowX, currentY, rowW, entry, active, mouseX, mouseY);
+            }
+        }
+    }
+
+    private void drawFollowRow(DrawContext context, int rowX, int rowY, int rowW, int mouseX, int mouseY) {
+        boolean active = isFollowActive();
+        boolean hover = mouseX >= rowX && mouseX < rowX + rowW
+                && mouseY >= rowY && mouseY < rowY + TOPIC_ROW_HEIGHT;
+        int baseRow = active ? 0xFF3A2C14 : 0xFF1A1A1A;
+        int rowColor = hover ? (active ? 0xFF4A3720 : 0xFF2A2A2A) : baseRow;
+        context.fill(rowX, rowY, rowX + rowW, rowY + TOPIC_ROW_HEIGHT, rowColor);
+
+        int controlSize = TOPIC_ROW_HEIGHT - 2;
+        int controlY = rowY + 1;
+        int plusX = rowX + rowW - controlSize;
+        int minusX = plusX - TOPIC_CONTROL_GAP - controlSize;
+
+        String status = active ? "ON" : "OFF";
+        int statusX = minusX - TOPIC_CONTROL_GAP - this.textRenderer.getWidth(status);
+        String distanceLabel = formatFollowDistance();
+        int distX = statusX - TOPIC_CONTROL_GAP - this.textRenderer.getWidth(distanceLabel);
+        int labelX = rowX + 4;
+
+        if (distX < labelX + 40) {
+            distX = labelX + 40;
+        }
+
+        context.drawText(this.textRenderer, "Follow", labelX, rowY + 1, 0xFFEFEFEF, false);
+        context.drawText(this.textRenderer, distanceLabel, distX, rowY + 1, 0xFFE6D7A3, false);
+        context.drawText(this.textRenderer, status, statusX, rowY + 1, active ? 0xFFE6D7A3 : 0xFFB0B0B0, false);
+
+        drawControlBox(context, minusX, controlY, controlSize, "-", mouseX, mouseY);
+        drawControlBox(context, plusX, controlY, controlSize, "+", mouseX, mouseY);
+    }
+
+    private void drawTopicRow(DrawContext context, int rowX, int rowY, int rowW, TopicEntry entry,
+                              boolean active, int mouseX, int mouseY) {
+        boolean hover = mouseX >= rowX && mouseX < rowX + rowW
+                && mouseY >= rowY && mouseY < rowY + TOPIC_ROW_HEIGHT;
+        int baseRow = active ? 0xFF3A2C14 : 0xFF1A1A1A;
+        int rowColor = hover ? (active ? 0xFF4A3720 : 0xFF2A2A2A) : baseRow;
+        context.fill(rowX, rowY, rowX + rowW, rowY + TOPIC_ROW_HEIGHT, rowColor);
+
+        int textY = rowY + 1;
+        int labelX = rowX + 4 + entry.indent * 8;
+        String label = entry.indent > 0 ? "- " + entry.label : entry.label;
+        context.drawText(this.textRenderer, label, labelX, textY, 0xFFEFEFEF, false);
+
+        String status = entry.toggle ? (active ? "ON" : "OFF") : "RUN";
+        int statusX = rowX + rowW - 4 - this.textRenderer.getWidth(status);
+        int statusColor = entry.toggle ? (active ? 0xFFE6D7A3 : 0xFFB0B0B0)
+                : (hover ? 0xFFE6D7A3 : 0xFFB0B0B0);
+        context.drawText(this.textRenderer, status, statusX, textY, statusColor, false);
+    }
+
+    private void drawControlBox(DrawContext context, int x, int y, int size, String label, int mouseX, int mouseY) {
+        boolean hover = mouseX >= x && mouseX < x + size && mouseY >= y && mouseY < y + size;
+        int fill = hover ? 0xFF2F2F2F : 0xFF1A1A1A;
+        context.fill(x, y, x + size, y + size, fill);
+        int textX = x + (size - this.textRenderer.getWidth(label)) / 2;
+        int textY = y + 1;
+        context.drawText(this.textRenderer, label, textX, textY, 0xFFEFEFEF, false);
+    }
+
+    private String formatFollowDistance() {
+        double value = getFollowDistance();
+        if (value <= 0.0D) {
+            return "D--";
+        }
+        return "D" + String.format(Locale.ROOT, "%.1f", value);
+    }
+
     @Override
     protected void drawForeground(DrawContext context, int mouseX, int mouseY) {
         context.drawText(this.textRenderer, this.botAlias, this.titleX, this.titleY, 0x404040, false);
         context.drawText(this.textRenderer, "Level: " + this.handler.getBotLevel(), this.titleX + 90, this.titleY, 0x404040, false);
         context.drawText(this.textRenderer, this.playerInventoryTitle, this.playerInventoryTitleX, this.playerInventoryTitleY, 0x404040, false);
+    }
+
+    @Override
+    public boolean mouseClicked(net.minecraft.client.gui.Click click, boolean isInside) {
+        int adjust = getFollowAdjustDirection(click.x(), click.y());
+        if (adjust != 0) {
+            adjustFollowDistance(adjust);
+            return true;
+        }
+        TopicEntry entry = getTopicEntryAt(click.x(), click.y());
+        if (entry != null) {
+            handleTopicEntry(entry);
+            return true;
+        }
+        return super.mouseClicked(click, isInside);
+    }
+
+    @Override
+    public boolean mouseScrolled(double mouseX, double mouseY, double horizontalAmount, double verticalAmount) {
+        if (isMouseOverTopicPanel(mouseX, mouseY)) {
+            int listHeight = getTopicListHeight();
+            int visibleRows = Math.max(1, listHeight / TOPIC_ROW_HEIGHT);
+            int maxScroll = Math.max(0, TOPIC_ENTRIES.size() - visibleRows);
+            if (maxScroll == 0) {
+                return false;
+            }
+            int delta = verticalAmount > 0 ? -1 : (verticalAmount < 0 ? 1 : 0);
+            if (delta != 0) {
+                topicScrollIndex = MathHelper.clamp(topicScrollIndex + delta, 0, maxScroll);
+                return true;
+            }
+        }
+        return super.mouseScrolled(mouseX, mouseY, horizontalAmount, verticalAmount);
+    }
+
+    private TopicEntry getTopicEntryAt(double mouseX, double mouseY) {
+        if (!isMouseOverTopicPanel(mouseX, mouseY)) {
+            return null;
+        }
+        int rowX = getTopicRowX();
+        int rowY = getTopicListTop();
+        int rowW = getTopicRowWidth();
+        int listHeight = getTopicListHeight();
+        int visibleRows = Math.max(1, listHeight / TOPIC_ROW_HEIGHT);
+        clampTopicScroll(visibleRows);
+        if (mouseX < rowX || mouseX >= rowX + rowW || mouseY < rowY || mouseY >= rowY + listHeight) {
+            return null;
+        }
+        int rowIndex = (int) ((mouseY - rowY) / TOPIC_ROW_HEIGHT);
+        if (rowIndex < 0 || rowIndex >= visibleRows) {
+            return null;
+        }
+        int entryIndex = topicScrollIndex + rowIndex;
+        if (entryIndex < 0 || entryIndex >= TOPIC_ENTRIES.size()) {
+            return null;
+        }
+        return TOPIC_ENTRIES.get(entryIndex);
+    }
+
+    private int getFollowAdjustDirection(double mouseX, double mouseY) {
+        int followIndex = 0;
+        int listHeight = getTopicListHeight();
+        int visibleRows = Math.max(1, listHeight / TOPIC_ROW_HEIGHT);
+        clampTopicScroll(visibleRows);
+        int visibleStart = topicScrollIndex;
+        int visibleEnd = topicScrollIndex + visibleRows;
+        if (followIndex < visibleStart || followIndex >= visibleEnd) {
+            return 0;
+        }
+
+        int rowX = getTopicRowX();
+        int rowY = getTopicListTop() + (followIndex - visibleStart) * TOPIC_ROW_HEIGHT;
+        int rowW = getTopicRowWidth();
+        int controlSize = TOPIC_ROW_HEIGHT - 2;
+        int controlY = rowY + 1;
+        int plusX = rowX + rowW - controlSize;
+        int minusX = plusX - TOPIC_CONTROL_GAP - controlSize;
+
+        if (mouseY >= controlY && mouseY < controlY + controlSize) {
+            if (mouseX >= plusX && mouseX < plusX + controlSize) {
+                return 1;
+            }
+            if (mouseX >= minusX && mouseX < minusX + controlSize) {
+                return -1;
+            }
+        }
+        return 0;
+    }
+
+    private void handleTopicEntry(TopicEntry entry) {
+        switch (entry.action) {
+            case FOLLOW -> toggleFollow();
+            case GUARD -> toggleGuard();
+            case PATROL -> togglePatrol();
+            case SKILL_FISH -> runSkillCommand("fish", null);
+            case SKILL_WOODCUT -> runSkillCommand("woodcut", null);
+            case SKILL_MINING -> runSkillCommand("mining", null);
+            case SKILL_STRIPMINE -> runSkillCommand("stripmine", null);
+            case SKILL_ASCENT -> runSkillCommand("mining", "ascent");
+            case SKILL_DESCENT -> runSkillCommand("mining", "descent");
+        }
+    }
+
+    private boolean isEntryActive(TopicAction action) {
+        return switch (action) {
+            case FOLLOW -> isFollowActive();
+            case GUARD -> isGuardActive();
+            case PATROL -> isPatrolActive();
+            default -> false;
+        };
+    }
+
+    private void runSkillCommand(String skillName, String action) {
+        String botTarget = formatBotTarget();
+        String args = action != null && !action.isBlank()
+                ? action + " " + botTarget
+                : botTarget;
+        String command = "bot skill " + skillName + " " + args;
+        sendChatCommand(command);
+    }
+
+    private boolean isMouseOverTopicPanel(double mouseX, double mouseY) {
+        int panelX = getTopicPanelX();
+        int panelY = getTopicPanelY();
+        int panelW = getTopicPanelWidth();
+        int panelH = getTopicPanelHeight();
+        return mouseX >= panelX && mouseX < panelX + panelW
+                && mouseY >= panelY && mouseY < panelY + panelH;
+    }
+
+    private int getTopicPanelX() {
+        return this.x + SECTION_WIDTH + BLOCK_GAP;
+    }
+
+    private int getTopicPanelY() {
+        return this.y + SECTION_HEIGHT + 2;
+    }
+
+    private int getTopicPanelWidth() {
+        return SECTION_WIDTH;
+    }
+
+    private int getTopicPanelHeight() {
+        return STATS_AREA_HEIGHT - 4;
+    }
+
+    private int getTopicRowX() {
+        return getTopicPanelX() + TOPIC_PADDING;
+    }
+
+    private int getTopicRowWidth() {
+        return getTopicPanelWidth() - TOPIC_PADDING * 2;
+    }
+
+    private int getTopicListTop() {
+        return getTopicPanelY() + 2 + this.textRenderer.fontHeight + 1;
+    }
+
+    private int getTopicListHeight() {
+        return getTopicPanelHeight() - (getTopicListTop() - getTopicPanelY());
+    }
+
+    private void clampTopicScroll(int visibleRows) {
+        int maxScroll = Math.max(0, TOPIC_ENTRIES.size() - visibleRows);
+        topicScrollIndex = MathHelper.clamp(topicScrollIndex, 0, maxScroll);
+    }
+
+    private boolean isFollowActive() {
+        return this.handler != null && this.handler.isBotFollowing();
+    }
+
+    private boolean isGuardActive() {
+        return this.handler != null && this.handler.isBotGuarding();
+    }
+
+    private boolean isPatrolActive() {
+        return this.handler != null && this.handler.isBotPatrolling();
+    }
+
+    private double getFollowDistance() {
+        return this.handler != null ? this.handler.getBotFollowDistance() : 0.0D;
+    }
+
+    private String formatBotTarget() {
+        if (botAlias.contains(" ")) {
+            return "\"" + botAlias + "\"";
+        }
+        return botAlias;
+    }
+
+    private void toggleFollow() {
+        String botTarget = formatBotTarget();
+        String command = isFollowActive() ? "bot follow stop " + botTarget : "bot follow " + botTarget;
+        sendChatCommand(command);
+    }
+
+    private void adjustFollowDistance(int direction) {
+        double current = getFollowDistance();
+        double base = current > 0.0D ? current : FOLLOW_DISTANCE_DEFAULT;
+        double next = base + (FOLLOW_DISTANCE_STEP * direction);
+        next = MathHelper.clamp(next, FOLLOW_DISTANCE_MIN, FOLLOW_DISTANCE_MAX);
+        String botTarget = formatBotTarget();
+        String command = "bot follow-distance " + String.format(Locale.ROOT, "%.1f", next) + " " + botTarget;
+        sendChatCommand(command);
+    }
+
+    private void toggleGuard() {
+        String botTarget = formatBotTarget();
+        String command = isGuardActive() ? "bot stop " + botTarget : "bot guard " + botTarget;
+        sendChatCommand(command);
+    }
+
+    private void togglePatrol() {
+        String botTarget = formatBotTarget();
+        String command = isPatrolActive() ? "bot stop " + botTarget : "bot patrol " + botTarget;
+        sendChatCommand(command);
+    }
+
+    private void sendChatCommand(String command) {
+        if (this.client == null || this.client.getNetworkHandler() == null) {
+            return;
+        }
+        String raw = command.startsWith("/") ? command.substring(1) : command;
+        this.client.getNetworkHandler().sendChatCommand(raw);
     }
 
     @Override

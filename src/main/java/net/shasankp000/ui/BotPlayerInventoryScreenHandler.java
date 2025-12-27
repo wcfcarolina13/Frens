@@ -15,6 +15,8 @@ import net.minecraft.screen.ScreenHandler;
 import net.minecraft.screen.slot.Slot;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.shasankp000.AIPlayer;
+import net.shasankp000.GameAI.BotEventHandler;
+import net.shasankp000.GameAI.services.BotCommandStateService;
 import net.shasankp000.GameAI.services.BotInventoryStorageService;
 
 /**
@@ -54,7 +56,7 @@ public class BotPlayerInventoryScreenHandler extends ScreenHandler {
         this.playerInventory = playerInventory;
         this.botInventory = botInventory;
         this.botRef = botRef;
-        this.botStats = new ArrayPropertyDelegate(6);
+        this.botStats = new ArrayPropertyDelegate(10);
         this.addProperties(this.botStats);
         refreshStats();
 
@@ -211,6 +213,13 @@ public class BotPlayerInventoryScreenHandler extends ScreenHandler {
         botStats.set(3, botRef.experienceLevel);
         botStats.set(4, (int) Math.round(botRef.experienceProgress * 1000.0F));
         botStats.set(5, botRef.totalExperience);
+        BotCommandStateService.State state = BotCommandStateService.stateFor(botRef);
+        BotEventHandler.Mode mode = state != null ? state.mode : BotEventHandler.Mode.IDLE;
+        botStats.set(6, mode == BotEventHandler.Mode.FOLLOW ? 1 : 0);
+        botStats.set(7, mode == BotEventHandler.Mode.GUARD ? 1 : 0);
+        botStats.set(8, mode == BotEventHandler.Mode.PATROL ? 1 : 0);
+        double followDistance = state != null ? state.followStandoffRange : 0.0D;
+        botStats.set(9, (int) Math.round(Math.max(0.0D, followDistance) * 10.0D));
     }
 
     public float getBotHealth() {
@@ -235,6 +244,22 @@ public class BotPlayerInventoryScreenHandler extends ScreenHandler {
 
     public int getBotTotalExperience() {
         return botStats.get(5);
+    }
+
+    public boolean isBotFollowing() {
+        return botStats.get(6) != 0;
+    }
+
+    public boolean isBotGuarding() {
+        return botStats.get(7) != 0;
+    }
+
+    public boolean isBotPatrolling() {
+        return botStats.get(8) != 0;
+    }
+
+    public double getBotFollowDistance() {
+        return botStats.get(9) / 10.0D;
     }
 
     public int getSectionWidth() {

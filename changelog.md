@@ -28,6 +28,20 @@ Historical record and reasoning. `TODO.md` is the source of truth for what’s n
 - Shelter: improved “indoors vs underground” detection by treating common build-material roof planes overhead as being indoors (prevents false ascent when the bot is placed inside a completed/roofed hovel).
 - Shelter: while building a hovel, the bot now yields briefly to nearby hostiles and triggers immediate defense (reduces “task movement fighting combat movement” hopping).
 - Shelter: door gap/walls are now aligned to the bot’s walking level (prevents “sealed in” hovels where the doorway existed only at head-height), and a final `ensureDoorwayOpen` runs right before drop-sweeping.
+- Shelter: hovel stage messages now route to the command issuer’s chat (so build stages are visible in-game) and redundant door/interior chat calls were removed to reduce spam.
+- Shelter: hovel base-perimeter patch now re-enters via the doorway and avoids placing support blocks on carpet/snow cover; exterior ring movement adds a short hop fallback for uneven terrain.
+- Shelter: foundation beam phase now announces start, emits a slow-progress heartbeat, and reports a timeout corner before continuing.
+- Shelter: hovel leveling now clears a one-block buffer ring for safer perimeter walking; roof-perimeter access uses doorway/perimeter routing and wall finishing sweep was disabled to reduce redundant passes.
+- Shelter: exterior patch starts from the closest ring waypoint; interior amenities/leveling now prioritize nearest targets, and outside destinations force perimeter waypoint routing before direct moves.
+- Shelter: leveling now fills perimeter/base holes and trims buffer-ring height; doorway routing now always stages at the doorfront and then uses a straight-line step inside/outside before continuing.
+- Shelter: roof perimeter exit now requires standing on the pillar top before teardown to avoid breaking the scaffold while still on the roof.
+- Shelter: leveling now clears replaceable cover (grass/flowers/carpets) before filling holes; roof pillar leftovers are cleared at the base after the roof phase, and door placement now reports failures.
+- Shelter: disabled diagonal scaffold corner patch; roof perimeter no longer tries to return to the pillar before teardown, and doorway placement now steps one block away before placing doors.
+- Shelter: roof pillar cleanup now snapshots pending pillars to avoid ConcurrentModificationException during perimeter cleanup passes.
+- Shelter: roof pillar cleanup now approaches via nearby standable cells and tries clearing from ring positions; door placement avoids standing in the doorway.
+- Shelter: removed wall corner diagonal scaffold pass, initial roof build sweep, finishing sweep, and base perimeter patch stages to reduce stage bloat and pathing stalls; foundation beam retries now stop early when no progress is detected.
+- Shelter: roof exit can snap-teleport to the access pillar for teardown, and door placement now prefers a farther outside stance to avoid blocking itself.
+- Shelter: interior cleanup no longer forces a roof-pillar cleanup run from inside; roof pass now snap-teleports to the pillar top only when the bot is already on the roof plane to avoid disruptive falls.
 - Shelter: hovel build now uses a perimeter ring wall pass plus a roof serpentine walk to place reachable blocks under survival reach/LOS rules, and restored shelter option parsing/placement helpers to keep burrow stripmine stable.
 - Shelter: leveling keeps the foot layer clear (no fill) after aligning wall placement to the ground so walls use natural support blocks.
 - Shelter: align wall base and doorway to foot level, and lower the roof plane to match so wall placements have proper ground support; add ring-pass placement stats for diagnosing zero-placement runs.
@@ -38,6 +52,11 @@ Historical record and reasoning. `TODO.md` is the source of truth for what’s n
 - Placement: block placement now requires line-of-sight to the supporting click block (prevents placing blocks “through” other blocks, e.g., placing above the roof while still inside).
 - Placement: placement hit results are now raycast-derived (must hit the intended support block *and face*), preventing “clicking the top face from below” exploits that allowed through-roof placements.
 - Shelter: doorway viability/clearing now uses the same floor-level door coordinates as the build logic and ensures the bot walks into reach before carving the opening.
+- Shelter: hovel exterior routing now exits via the doorway using path planning, stays on a 1-block perimeter ring, avoids reusing scaffold bases, and clears interior scaffolds up to the roof plane during final leveling.
+- Shelter: add detailed hovel leveling + skill exit logging to diagnose early aborts during site clearing.
+- Shelter: fix stack overflow in hovel movement pathing caused by recursive `pathMove` calls.
+- Shelter: foundation beam checks no longer abort builds; missing beam segments are cached and scaffold-patched after wall passes.
+- Shelter: add stage-aware chat messaging and doorway-based interior re-entry for final cleanup/amenities; delay scaffold-column fills until descent completes.
 - Shelter: `ensureDoorwayOpen` now reliably carves a 2×2 passage (inside + outside), can carve through most breakable blocks (not just “soft”/roof materials), and logs doorway carve attempts for easier debugging.
 - Shelter: timeboxed/attempt-capped “nearby materials gather” to avoid long pathing loops that prevent the hovel build (and doorway carving) from ever starting; added gather progress logging.
 - Shelter: hovel now fills the support layer and places the first wall layers using a “station-based” placement pass (few movement steps, many placements per stop) to reduce per-block pathfinding churn and incomplete low walls on uneven terrain.

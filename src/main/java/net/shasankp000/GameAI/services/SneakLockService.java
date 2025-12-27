@@ -42,5 +42,16 @@ public final class SneakLockService {
         AtomicInteger v = LOCKS.get(botId);
         return v != null && v.get() > 0;
     }
+
+    /**
+     * Force-clear all locks for this bot.
+     * Intended for emergency cleanup paths like /bot stop or server shutdown.
+     */
+    public static void clear(UUID botId) {
+        if (botId == null) {
+            return;
+        }
+        LOCKS.remove(botId);
+    }
 }
 

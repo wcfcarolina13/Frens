@@ -2,6 +2,7 @@ package net.shasankp000.Commands;
 
 import com.mojang.brigadier.builder.ArgumentBuilder;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
+import com.mojang.brigadier.arguments.DoubleArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import net.minecraft.command.argument.EntityArgumentType;
 import net.minecraft.server.command.CommandManager;
@@ -79,6 +80,37 @@ final class BotUtilityCommands {
                         .executes(context -> modCommandRegistry.executeFollowTargets(context,
                                 null,
                                 EntityArgumentType.getPlayer(context, "player"))));
+    }
+
+    static ArgumentBuilder<ServerCommandSource, ?> buildFollowDistance() {
+        return CommandManager.literal("follow-distance")
+                .then(CommandManager.literal("reset")
+                        .executes(context -> modCommandRegistry.executeFollowDistanceResetTargets(context, null))
+                        .then(CommandManager.argument("target", StringArgumentType.string())
+                                .executes(context -> modCommandRegistry.executeFollowDistanceResetTargets(context,
+                                        StringArgumentType.getString(context, "target"))))
+                )
+                .then(CommandManager.argument("distance", DoubleArgumentType.doubleArg(1.0D, 64.0D))
+                        // Default: active bot(s) follow the command issuer with a standoff.
+                        .executes(context -> modCommandRegistry.executeFollowDistanceTargets(
+                                context,
+                                null,
+                                context.getSource().getPlayer(),
+                                DoubleArgumentType.getDouble(context, "distance")))
+                        .then(CommandManager.argument("bots", StringArgumentType.string())
+                                .executes(context -> modCommandRegistry.executeFollowDistanceTargets(
+                                        context,
+                                        StringArgumentType.getString(context, "bots"),
+                                        context.getSource().getPlayer(),
+                                        DoubleArgumentType.getDouble(context, "distance")))
+                                .then(CommandManager.argument("player", EntityArgumentType.player())
+                                        .executes(context -> modCommandRegistry.executeFollowDistanceTargets(
+                                                context,
+                                                StringArgumentType.getString(context, "bots"),
+                                                EntityArgumentType.getPlayer(context, "player"),
+                                                DoubleArgumentType.getDouble(context, "distance"))))
+                        )
+                );
     }
 }
 

@@ -103,9 +103,7 @@ public class AIPlayer implements ModInitializer {
             if (hand != net.minecraft.util.Hand.MAIN_HAND) return net.minecraft.util.ActionResult.PASS;
             if (!(entity instanceof net.minecraft.server.network.ServerPlayerEntity bot)) return net.minecraft.util.ActionResult.PASS;
 
-            // Gesture: either empty main hand OR sneaking (to override item-in-hand use)
-            boolean openGesture = player.isSneaking() || player.getMainHandStack().isEmpty();
-            if (!openGesture) return net.minecraft.util.ActionResult.PASS;
+            // Always allow the shared inventory view, regardless of held item.
 
             // Simple debounce per bot to prevent rapid re-open/close edge cases
             long now = System.currentTimeMillis();
@@ -190,11 +188,16 @@ public class AIPlayer implements ModInitializer {
             });
         });
 
-        ServerLifecycleEvents.SERVER_STOPPING.register(server -> BotPersistenceService.saveAll(server));
+        ServerLifecycleEvents.SERVER_STOPPING.register(server -> {
+            net.shasankp000.GameAI.services.TaskService.resetAll("§cServer stopping; aborting active tasks.");
+            BotPersistenceService.saveAll(server);
+        });
 
         ServerLifecycleEvents.SERVER_STOPPED.register(server -> {
             BotEventHandler.resetAll();
             AutoFaceEntity.onServerStopped(server);
+            // Integrated-server world reloads keep mod static state alive. Ensure task locks don't leak across reloads.
+            net.shasankp000.GameAI.services.TaskService.resetAll("§cServer stopped; clearing task state.");
             try {
                 if (modelManager.isModelLoaded() || loadedBERTModelIntoMemory) {
                     modelManager.unloadModel();

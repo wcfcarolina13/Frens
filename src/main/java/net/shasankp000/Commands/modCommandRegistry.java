@@ -218,6 +218,7 @@ public class modCommandRegistry {
 	                        .then(BotUtilityCommands.buildZone())
 	                        .then(BotUtilityCommands.buildLookPlayer())
 	                        .then(BotUtilityCommands.buildFollow())
+                            .then(BotUtilityCommands.buildFollowDistance())
 	                        .then(BotMovementCommands.buildCome())
 	                        .then(BotMovementCommands.buildRegroup())
 	                        .then(BotMovementCommands.buildGuard())
@@ -2181,6 +2182,64 @@ public class modCommandRegistry {
         return 1;
     }
 
+    private static int executeFollowDistance(CommandContext<ServerCommandSource> context,
+                                             ServerPlayerEntity bot,
+                                             ServerPlayerEntity target,
+                                             double distance) {
+        if (bot == null || target == null) {
+            return 0;
+        }
+        BotEventHandler.setFollowModeDistance(bot, target, distance);
+        return 1;
+    }
+
+    static int executeFollowDistanceTargets(CommandContext<ServerCommandSource> context,
+                                            String targetArg,
+                                            ServerPlayerEntity followTarget,
+                                            double distance) throws CommandSyntaxException {
+        if (followTarget == null) {
+            throw new SimpleCommandExceptionType(Text.literal("Specify a player for the bots to follow.")).create();
+        }
+        if (!Double.isFinite(distance) || distance < 1.0D) {
+            throw new SimpleCommandExceptionType(Text.literal("Distance must be at least 1.0." )).create();
+        }
+        List<ServerPlayerEntity> bots = BotTargetingService.resolve(context.getSource(), targetArg);
+        boolean isAll = targetArg != null && "all".equalsIgnoreCase(targetArg.trim());
+
+        int successes = 0;
+        for (ServerPlayerEntity bot : bots) {
+            successes += executeFollowDistance(context, bot, followTarget, distance);
+        }
+        if (!bots.isEmpty()) {
+            String summary = formatBotList(bots, isAll);
+            boolean plural = isAll || bots.size() > 1;
+            String verb = plural ? "are" : "is";
+            ChatUtils.sendSystemMessage(context.getSource(), summary + " " + verb + " following "
+                    + followTarget.getName().getString() + " (distance " + String.format(Locale.ROOT, "%.1f", distance) + ").");
+        }
+        return successes;
+    }
+
+    static int executeFollowDistanceResetTargets(CommandContext<ServerCommandSource> context,
+                                                 String targetArg) throws CommandSyntaxException {
+        List<ServerPlayerEntity> bots = BotTargetingService.resolve(context.getSource(), targetArg);
+        boolean isAll = targetArg != null && "all".equalsIgnoreCase(targetArg.trim());
+
+        int successes = 0;
+        for (ServerPlayerEntity bot : bots) {
+            if (bot == null) {
+                continue;
+            }
+            BotEventHandler.setFollowStandoffRange(bot, 0.0D);
+            successes++;
+        }
+        if (!bots.isEmpty()) {
+            String summary = formatBotList(bots, isAll);
+            ChatUtils.sendSystemMessage(context.getSource(), summary + " reset follow distance.");
+        }
+        return successes;
+    }
+
     static int executeComeTargets(CommandContext<ServerCommandSource> context, String targetArg) throws CommandSyntaxException {
         ServerPlayerEntity commander = context.getSource().getPlayer();
         if (commander == null) {
@@ -2581,6 +2640,11 @@ public class modCommandRegistry {
         stopMoving(server, context.getSource(), alias);
         TaskService.forceAbort(bot.getUuid(), "§cCurrent task aborted via /bot stop.");
         net.shasankp000.PathFinding.PathTracer.flushAllMovementTasks();
+        // Emergency cleanup: clear crouch locks / task flags so the bot isn't left "busy".
+        net.shasankp000.GameAI.services.SneakLockService.clear(bot.getUuid());
+        net.shasankp000.Entity.AutoFaceEntity.setBotExecutingTask(false);
+        net.shasankp000.GameAI.BotActions.sneak(bot, false);
+        net.shasankp000.GameAI.BotActions.stop(bot);
         ChatUtils.sendSystemMessage(context.getSource(), "Stopping " + alias + "...");
         SkillResumeService.clear(bot.getUuid());
         return 1;
@@ -3289,7 +3353,7 @@ public class modCommandRegistry {
 
         skillExecutor.submit(() -> {
             try {
-                SkillContext skillContext = new SkillContext(bot.getCommandSource(), FunctionCallerV2.getSharedState(), params);
+                SkillContext skillContext = new SkillContext(bot.getCommandSource(), FunctionCallerV2.getSharedState(), params, source);
                 SkillExecutionResult result = SkillManager.runSkill(skillName, skillContext);
                 source.getServer().execute(() -> ChatUtils.sendSystemMessage(source, result.message()));
             } catch (Exception e) {

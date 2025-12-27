@@ -41,6 +41,7 @@ public final class TaskService {
         private final AtomicReference<State> state;
         private final AtomicBoolean cancelRequested;
         private final AtomicReference<String> cancelReason;
+        private final AtomicReference<Thread> executingThread;
 
         TaskTicket(String name, ServerCommandSource source, UUID botUuid) {
             this.name = name;
@@ -50,6 +51,7 @@ public final class TaskService {
             this.state = new AtomicReference<>(State.RUNNING);
             this.cancelRequested = new AtomicBoolean(false);
             this.cancelReason = new AtomicReference<>("");
+            this.executingThread = new AtomicReference<>(null);
         }
 
         public String name() {
@@ -66,6 +68,23 @@ public final class TaskService {
 
         public Instant createdAt() {
             return createdAt;
+        }
+
+        public void attachExecutingThread(Thread thread) {
+            if (thread == null) {
+                return;
+            }
+            executingThread.set(thread);
+        }
+
+        public void interruptExecutingThread() {
+            Thread t = executingThread.get();
+            if (t != null) {
+                try {
+                    t.interrupt();
+                } catch (Exception ignored) {
+                }
+            }
         }
 
         public State state() {
@@ -96,6 +115,7 @@ public final class TaskService {
             cancelRequested.set(false);
             cancelReason.set("");
             state.set(State.IDLE);
+            executingThread.set(null);
         }
 
         public boolean matches(UUID candidate) {
@@ -141,6 +161,17 @@ public final class TaskService {
         return Optional.of(ticket);
     }
 
+    /**
+     * Records which thread is executing the active skill for this ticket.
+     * This enables /bot stop and server shutdown to interrupt long-running/hung skills.
+     */
+    public static void attachExecutingThread(TaskTicket ticket, Thread thread) {
+        if (ticket == null || thread == null) {
+            return;
+        }
+        ticket.attachExecutingThread(thread);
+    }
+
     public static boolean requestPause(UUID botUuid, String reason) {
         TaskTicket ticket = ACTIVE.get(key(botUuid));
         if (ticket == null) {
@@ -181,7 +212,9 @@ public final class TaskService {
             finalState = State.ABORTED;
         }
         ticket.setState(finalState);
-        ACTIVE.remove(key(ticket.botUuid()));
+        // Only remove if the ACTIVE slot still points at this exact ticket instance.
+        // This prevents stale/hung skill threads from accidentally clearing a newer task.
+        ACTIVE.remove(key(ticket.botUuid()), ticket);
         LOGGER.info("Task '{}' finished with state {}", ticket.name(), finalState);
         
         // After task completion, check if bot is stuck in blocks and needs rescue
@@ -267,7 +300,29 @@ public final class TaskService {
                     : "§cHalting current task.");
             LOGGER.warn("Task '{}' aborted: {}", ticket.name(), ticket.cancelReason());
         }
+        // Best-effort: interrupt the executing thread so long-running loops/sleeps unwind promptly.
+        ticket.interruptExecutingThread();
         // Don't remove ticket from ACTIVE here - let skill detect cancelRequest and finish naturally
         // Ticket will be removed when task completes in finishTask()
+    }
+
+    /**
+     * Hard reset of all in-memory task state. Intended for integrated-server world reloads.
+     * <p>
+     * Note: this does not guarantee background skill threads are fully stopped, but it does:
+     * - request cancel for all known tickets
+     * - interrupt their executing threads
+     * - clear the ACTIVE slot map so new worlds don't inherit stale task locks
+     */
+    public static void resetAll(String reason) {
+        Collection<TaskTicket> tickets = new ArrayList<>(ACTIVE.values());
+        for (TaskTicket ticket : tickets) {
+            try {
+                abortTicket(ticket, reason);
+            } catch (Exception ignored) {
+            }
+        }
+        ACTIVE.clear();
+        IN_ASCENT_MODE.clear();
     }
 }

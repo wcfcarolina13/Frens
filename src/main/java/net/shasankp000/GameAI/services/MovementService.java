@@ -17,9 +17,7 @@ import net.minecraft.world.World;
 import net.minecraft.registry.tag.BlockTags;
 import net.minecraft.registry.tag.FluidTags;
 import net.shasankp000.GameAI.BotActions;
-import net.shasankp000.GameAI.services.SneakLockService;
 import net.shasankp000.GameAI.skills.SkillPreferences;
-import net.shasankp000.GameAI.services.BlockInteractionService;
 import net.shasankp000.Entity.LookController;
 import net.shasankp000.PathFinding.GoTo;
 import net.shasankp000.PathFinding.PathFinder;
@@ -54,6 +52,9 @@ public final class MovementService {
     private static final double PATH_SAME_TARGET_DISTANCE_SQ = 9.0D; // ~3 blocks
     private static final long PATH_ATTEMPT_MIN_INTERVAL_MS = 400L;
     private static final long PATH_FAILURE_BACKOFF_MS = 2500L;
+    // Hard anti-stuck tuning: stop pushing into walls; try local "turn the corner" probes before giving up.
+    private static final int STUCK_SAME_BLOCK_STEPS_TRIGGER = 10; // ~350ms at 35ms sleeps
+    private static final int STUCK_STAGNANT_STEPS_TRIGGER = 4;
     private static final ScheduledExecutorService DOOR_CLOSE_SCHEDULER = Executors.newSingleThreadScheduledExecutor(r -> {
         Thread t = new Thread(r, "bot-door-close");
         t.setDaemon(true);
@@ -502,7 +503,8 @@ public final class MovementService {
             LOGGER.info("Movement choosing walk only: {} -> {}", player.getName().getString(), destination);
             WalkResult walkResult = walkTo(source, player, destination, mode, label, fastReplan, allowSnap);
             if (!walkResult.success() && allowPursuit) {
-                boolean pursued = pursuitUntilClose(player, destination, TimeUnit.SECONDS.toMillis(3), CLOSE_ENOUGH_DISTANCE_SQ, label);
+                long pursuitBudget = fastReplan ? 1200L : TimeUnit.SECONDS.toMillis(3);
+                boolean pursued = pursuitUntilClose(player, destination, pursuitBudget, CLOSE_ENOUGH_DISTANCE_SQ, label);
                 if (pursued) {
                     return new MovementResult(true, mode, destination, label + ": pursuit fallback");
                 }
@@ -558,6 +560,15 @@ public final class MovementService {
             return recordAttempt(player != null ? player.getUuid() : null, destination,
                     new WalkResult(false, currentPos, label + ": no world/destination for walking"));
         }
+        // Guard: if the caller requests a non-standable destination, adjust to a nearby standable tile.
+        // This prevents repeated attempts to "walk into" solid blocks.
+        if (!isSolidStandable(world, destination.down(), destination)) {
+            BlockPos fallback = findNearbyStandable(world, destination, 2, 2);
+            if (fallback != null && !fallback.equals(destination)) {
+                LOGGER.debug("walkTo adjusted non-standable dest: {} -> {} label={}", destination.toShortString(), fallback.toShortString(), label);
+                destination = fallback;
+            }
+        }
         if (abortRequested(player)) {
             BotActions.stop(player);
             return recordAttempt(player.getUuid(), destination,
@@ -581,7 +592,7 @@ public final class MovementService {
             double distSq = currentPos.getSquaredDistance(destination);
             int dy = Math.abs(destination.getY() - currentPos.getY());
             if (distSq <= 144.0D && dy <= 2) {
-                boolean direct = walkDirect(player, destination, fastReplan ? 2200L : 3600L);
+                boolean direct = walkDirect(player, destination, fastReplan ? 900L : 2400L);
                 if (direct) {
                     return recordAttempt(player.getUuid(), destination,
                             new WalkResult(true, destination, label + ": walked directly"));
@@ -608,7 +619,7 @@ public final class MovementService {
                     segments.size(),
                     segments.peek());
             if (segments.isEmpty()) {
-                boolean straightWalk = walkDirect(player, destination, fastReplan ? TimeUnit.SECONDS.toMillis(3) : TimeUnit.SECONDS.toMillis(6));
+                boolean straightWalk = walkDirect(player, destination, fastReplan ? 1400L : 3500L);
                 if (straightWalk) {
                     return recordAttempt(player.getUuid(), destination,
                             new WalkResult(true, destination, label + ": walked directly (no path)"));
@@ -720,11 +731,20 @@ public final class MovementService {
 
         double lastDistanceSq = Double.MAX_VALUE;
         int stagnantSteps = 0;
+        BlockPos lastBlockPos = player.getBlockPos();
+        int sameBlockSteps = 0;
 
         for (int steps = 0; System.currentTimeMillis() < endTime && steps < maxSteps; steps++) {
             if (abortRequested(player)) {
                 BotActions.stop(player);
                 return new SegmentResult(false, false);
+            }
+            BlockPos currentBlock = player.getBlockPos();
+            if (currentBlock.equals(lastBlockPos)) {
+                sameBlockSteps++;
+            } else {
+                lastBlockPos = currentBlock;
+                sameBlockSteps = 0;
             }
             double distanceSq = player.squaredDistanceTo(target);
             if (distanceSq <= CLOSE_ENOUGH_DISTANCE_SQ) {
@@ -737,29 +757,59 @@ public final class MovementService {
             // Bail out early if we stopped making progress (e.g., collision).
             if (distanceSq >= lastDistanceSq - 0.01) {
                 stagnantSteps++;
-	                if (stagnantSteps == 3) {
-	                    if (tryOpenDoorToward(player, segment.end())) {
-	                        stagnantSteps = 0;
-	                        lastDistanceSq = Double.MAX_VALUE;
-	                        continue;
-	                    }
-	                    // If the door is already open but we're not crossing the threshold, step through it decisively.
-	                    if (tryTraverseDoorway(player, segment.end(), "walkSegment")) {
-	                        stagnantSteps = 0;
-	                        lastDistanceSq = Double.MAX_VALUE;
-	                        continue;
-	                    }
-	                    if (tryDoorSubgoalToward(player, segment.end(), "walkSegment")) {
-	                        stagnantSteps = 0;
-	                        lastDistanceSq = Double.MAX_VALUE;
-	                        continue;
-	                    }
-	                }
+                if (stagnantSteps == 3) {
+                    if (tryOpenDoorToward(player, segment.end())) {
+                        stagnantSteps = 0;
+                        lastDistanceSq = Double.MAX_VALUE;
+                        sameBlockSteps = 0;
+                        continue;
+                    }
+                    // If the door is already open but we're not crossing the threshold, step through it decisively.
+                    if (tryTraverseDoorway(player, segment.end(), "walkSegment")) {
+                        stagnantSteps = 0;
+                        lastDistanceSq = Double.MAX_VALUE;
+                        sameBlockSteps = 0;
+                        continue;
+                    }
+                    if (tryDoorSubgoalToward(player, segment.end(), "walkSegment")) {
+                        stagnantSteps = 0;
+                        lastDistanceSq = Double.MAX_VALUE;
+                        sameBlockSteps = 0;
+                        continue;
+                    }
+                    // Around-corner escape: allow temporary distance increases if that's what it takes.
+                    if (tryDoorEscapeToward(player, segment.end(), null, "walkSegment")) {
+                        stagnantSteps = 0;
+                        lastDistanceSq = Double.MAX_VALUE;
+                        sameBlockSteps = 0;
+                        continue;
+                    }
+                    // Local corner probe: try a nearby standable tile to break out of collision jitter.
+                    if (tryLocalUnstick(player, segment.end(), "walkSegment")) {
+                        stagnantSteps = 0;
+                        lastDistanceSq = Double.MAX_VALUE;
+                        sameBlockSteps = 0;
+                        continue;
+                    }
+                }
                 if (stagnantSteps >= 5) {
                     if (trySidestepAround(player, segment.end())) {
                         // Reset progress tracking after a successful sidestep.
                         stagnantSteps = 0;
                         lastDistanceSq = Double.MAX_VALUE;
+                        sameBlockSteps = 0;
+                        continue;
+                    }
+                    if (tryDoorEscapeToward(player, segment.end(), null, "walkSegment-hard")) {
+                        stagnantSteps = 0;
+                        lastDistanceSq = Double.MAX_VALUE;
+                        sameBlockSteps = 0;
+                        continue;
+                    }
+                    if (tryLocalUnstick(player, segment.end(), "walkSegment-hard")) {
+                        stagnantSteps = 0;
+                        lastDistanceSq = Double.MAX_VALUE;
+                        sameBlockSteps = 0;
                         continue;
                     }
                     LOGGER.debug("walkSegment stalled near {} dist={}", segment.end(), Math.sqrt(distanceSq));
@@ -769,13 +819,31 @@ public final class MovementService {
                 stagnantSteps = 0;
                 lastDistanceSq = distanceSq;
             }
+            // Hard anti-wall-hump trigger: if we're stuck in the same block AND not improving, stop pushing and escape.
+            if (sameBlockSteps >= STUCK_SAME_BLOCK_STEPS_TRIGGER && stagnantSteps >= STUCK_STAGNANT_STEPS_TRIGGER) {
+                BotActions.stop(player);
+                if (tryDoorEscapeToward(player, segment.end(), null, "walkSegment-stuck")) {
+                    stagnantSteps = 0;
+                    lastDistanceSq = Double.MAX_VALUE;
+                    sameBlockSteps = 0;
+                    continue;
+                }
+                if (tryLocalUnstick(player, segment.end(), "walkSegment-stuck")) {
+                    stagnantSteps = 0;
+                    lastDistanceSq = Double.MAX_VALUE;
+                    sameBlockSteps = 0;
+                    continue;
+                }
+            }
             if (!inputStepToward(player, segment.end(), target, segment.sprint(), segment.jump())) {
+                BotActions.stop(player);
                 return new SegmentResult(false, false);
             }
             sleep(35L);
         }
         double remaining = Math.sqrt(player.squaredDistanceTo(target));
         LOGGER.debug("walkSegment timed out near {} remainingDist={}", segment.end(), remaining);
+        BotActions.stop(player);
         // Force a small snap forward when very close to planned segment end to avoid infinite loop.
         if (allowSnap && remaining <= 2.2D) {
             LOGGER.warn("walkSegment snap forward to {}", segment.end());
@@ -974,7 +1042,7 @@ public final class MovementService {
         DOOR_CLOSE_SCHEDULER.schedule(() -> server.execute(() -> {
             ServerWorld world = server.getWorld(worldKey);
             ServerPlayerEntity bot = server.getPlayerManager().getPlayer(botUuid);
-            if (world == null || bot == null || bot.isRemoved() || !world.isChunkLoaded(doorPos)) {
+            if (world == null || bot == null || bot.isRemoved() || !world.isChunkLoaded(doorPos.getX() >> 4, doorPos.getZ() >> 4)) {
                 return;
             }
             BlockState state = world.getBlockState(doorPos);
@@ -1105,9 +1173,6 @@ public final class MovementService {
             }
         }
         // If we're stuck against leaves (common with foliage), clear leaf blocks around headroom using shears/hand.
-        BlockPos front = start.offset(toward);
-        BlockPos head = start.up(2);
-        BlockPos ceiling = start.up(3);
         List<BlockPos> candidates = leafCandidates(start, toward);
         int cleared = 0;
         for (BlockPos leaf : candidates) {
@@ -1191,7 +1256,6 @@ public final class MovementService {
         }
         BlockPos start = player.getBlockPos();
         List<BlockPos> candidates = leafCandidates(start, toward);
-        int cleared = 0;
         for (BlockPos leaf : candidates) {
             if (isBreakableLeaf(world, leaf) && isWithinReach(player, leaf)) {
                 LOGGER.debug("clearLeafObstruction: breaking leaf at {}", leaf.toShortString());
@@ -1237,11 +1301,20 @@ public final class MovementService {
         double lastDistanceSq = Double.MAX_VALUE;
         int stagnantSteps = 0;
         boolean sprint = shouldSprintForDestination(player, destination);
+        BlockPos lastBlockPos = player.getBlockPos();
+        int sameBlockSteps = 0;
 
         for (int steps = 0; System.currentTimeMillis() < deadline && steps < maxSteps; steps++) {
             if (abortRequested(player)) {
                 BotActions.stop(player);
                 return false;
+            }
+            BlockPos currentBlock = player.getBlockPos();
+            if (currentBlock.equals(lastBlockPos)) {
+                sameBlockSteps++;
+            } else {
+                lastBlockPos = currentBlock;
+                sameBlockSteps = 0;
             }
             double distanceSq = player.squaredDistanceTo(target);
             if (distanceSq <= CLOSE_ENOUGH_DISTANCE_SQ) {
@@ -1250,30 +1323,59 @@ public final class MovementService {
             }
             if (distanceSq >= lastDistanceSq - 0.01) {
                 stagnantSteps++;
-	                if (stagnantSteps == 3) {
-	                    if (tryOpenDoorToward(player, destination)) {
-	                        stagnantSteps = 0;
-	                        lastDistanceSq = Double.MAX_VALUE;
-	                        continue;
-	                    }
-	                    // Door might already be open; commit to stepping through the doorway to avoid frame-jitter stalls.
-	                    if (tryTraverseDoorway(player, destination, "walkDirect")) {
-	                        stagnantSteps = 0;
-	                        lastDistanceSq = Double.MAX_VALUE;
-	                        continue;
-	                    }
-	                    // If the target is around a corner (enclosure exit), raycasts may never intersect the door;
-	                    // treat a nearby door as a sub-goal to escape and continue.
-	                    if (tryDoorSubgoalToward(player, destination, "walkDirect")) {
-	                        stagnantSteps = 0;
-	                        lastDistanceSq = Double.MAX_VALUE;
-	                        continue;
-	                    }
-	                }
+                if (stagnantSteps == 3) {
+                    if (tryOpenDoorToward(player, destination)) {
+                        stagnantSteps = 0;
+                        lastDistanceSq = Double.MAX_VALUE;
+                        sameBlockSteps = 0;
+                        continue;
+                    }
+                    // Door might already be open; commit to stepping through the doorway to avoid frame-jitter stalls.
+                    if (tryTraverseDoorway(player, destination, "walkDirect")) {
+                        stagnantSteps = 0;
+                        lastDistanceSq = Double.MAX_VALUE;
+                        sameBlockSteps = 0;
+                        continue;
+                    }
+                    // If the target is around a corner (enclosure exit), raycasts may never intersect the door;
+                    // treat a nearby door as a sub-goal to escape and continue.
+                    if (tryDoorSubgoalToward(player, destination, "walkDirect")) {
+                        stagnantSteps = 0;
+                        lastDistanceSq = Double.MAX_VALUE;
+                        sameBlockSteps = 0;
+                        continue;
+                    }
+                    // Broader escape: allow detours that temporarily worsen distance (adjacent-wall doors, corners).
+                    if (tryDoorEscapeToward(player, destination, null, "walkDirect")) {
+                        stagnantSteps = 0;
+                        lastDistanceSq = Double.MAX_VALUE;
+                        sameBlockSteps = 0;
+                        continue;
+                    }
+                    if (tryLocalUnstick(player, destination, "walkDirect")) {
+                        stagnantSteps = 0;
+                        lastDistanceSq = Double.MAX_VALUE;
+                        sameBlockSteps = 0;
+                        continue;
+                    }
+                }
                 if (stagnantSteps >= 5) {
                     if (trySidestepAround(player, destination)) {
                         stagnantSteps = 0;
                         lastDistanceSq = Double.MAX_VALUE;
+                        sameBlockSteps = 0;
+                        continue;
+                    }
+                    if (tryDoorEscapeToward(player, destination, null, "walkDirect-hard")) {
+                        stagnantSteps = 0;
+                        lastDistanceSq = Double.MAX_VALUE;
+                        sameBlockSteps = 0;
+                        continue;
+                    }
+                    if (tryLocalUnstick(player, destination, "walkDirect-hard")) {
+                        stagnantSteps = 0;
+                        lastDistanceSq = Double.MAX_VALUE;
+                        sameBlockSteps = 0;
                         continue;
                     }
                     break;
@@ -1282,11 +1384,28 @@ public final class MovementService {
                 stagnantSteps = 0;
                 lastDistanceSq = distanceSq;
             }
+            if (sameBlockSteps >= STUCK_SAME_BLOCK_STEPS_TRIGGER && stagnantSteps >= STUCK_STAGNANT_STEPS_TRIGGER) {
+                BotActions.stop(player);
+                if (tryDoorEscapeToward(player, destination, null, "walkDirect-stuck")) {
+                    stagnantSteps = 0;
+                    lastDistanceSq = Double.MAX_VALUE;
+                    sameBlockSteps = 0;
+                    continue;
+                }
+                if (tryLocalUnstick(player, destination, "walkDirect-stuck")) {
+                    stagnantSteps = 0;
+                    lastDistanceSq = Double.MAX_VALUE;
+                    sameBlockSteps = 0;
+                    continue;
+                }
+            }
             if (!inputStepToward(player, destination, target, sprint, false)) {
+                BotActions.stop(player);
                 return false;
             }
             sleep(35L);
         }
+        BotActions.stop(player);
         return false;
     }
 
@@ -1336,6 +1455,7 @@ public final class MovementService {
                 noProgress++;
                 if (noProgress >= 7) {
                     LOGGER.debug("nudgeToward stalled [{}]: bestDist={}", label, Math.sqrt(best));
+                    BotActions.stop(bot);
                     break;
                 }
             } else {
@@ -1344,6 +1464,7 @@ public final class MovementService {
             }
         }
         LOGGER.warn("nudgeToward failed [{}]: finalDist={}", label, Math.sqrt(bot.getBlockPos().getSquaredDistance(target)));
+        BotActions.stop(bot);
         return bot.getBlockPos().getSquaredDistance(target) <= reachSq;
     }
 
@@ -1361,6 +1482,8 @@ public final class MovementService {
         long deadline = System.currentTimeMillis() + timeoutMs;
         double best = bot.getBlockPos().getSquaredDistance(target);
         int stagnant = 0;
+        BlockPos lastBlockPos = bot.getBlockPos();
+        int sameBlockSteps = 0;
         LOGGER.debug("pursuit start [{}]: from={} to={} dist={}", label, bot.getBlockPos().toShortString(), target.toShortString(), Math.sqrt(best));
         while (System.currentTimeMillis() < deadline) {
             if (abortRequested(bot)) {
@@ -1372,6 +1495,13 @@ public final class MovementService {
                 BotActions.stop(bot);
                 LOGGER.debug("pursuit success [{}]: dist={}", label, Math.sqrt(distSq));
                 return true;
+            }
+            BlockPos currentBlock = bot.getBlockPos();
+            if (currentBlock.equals(lastBlockPos)) {
+                sameBlockSteps++;
+            } else {
+                lastBlockPos = currentBlock;
+                sameBlockSteps = 0;
             }
             boolean sprint = distSq > 9.0D;
             runOnServerThread(bot, () -> LookController.faceBlock(bot, target));
@@ -1393,18 +1523,33 @@ public final class MovementService {
                     if (tryOpenDoorToward(bot, target)) {
                         stagnant = 0;
                         best = Double.MAX_VALUE;
+                        sameBlockSteps = 0;
                         continue;
                     }
                     // If the door is already open but we're not getting through, commit to stepping through the doorway.
                     if (tryTraverseDoorway(bot, target, label)) {
                         stagnant = 0;
                         best = Double.MAX_VALUE;
+                        sameBlockSteps = 0;
                         continue;
                     }
                     // If the target is around a corner, the blocking door may not be on the ray to the target.
                     if (tryDoorSubgoalToward(bot, target, label)) {
                         stagnant = 0;
                         best = Double.MAX_VALUE;
+                        sameBlockSteps = 0;
+                        continue;
+                    }
+                    if (tryDoorEscapeToward(bot, target, null, label)) {
+                        stagnant = 0;
+                        best = Double.MAX_VALUE;
+                        sameBlockSteps = 0;
+                        continue;
+                    }
+                    if (tryLocalUnstick(bot, target, label)) {
+                        stagnant = 0;
+                        best = Double.MAX_VALUE;
+                        sameBlockSteps = 0;
                         continue;
                     }
                 }
@@ -1416,8 +1561,25 @@ public final class MovementService {
                 best = nowDist;
                 stagnant = 0;
             }
+
+            if (sameBlockSteps >= STUCK_SAME_BLOCK_STEPS_TRIGGER && stagnant >= STUCK_STAGNANT_STEPS_TRIGGER) {
+                BotActions.stop(bot);
+                if (tryDoorEscapeToward(bot, target, null, label + "-stuck")) {
+                    stagnant = 0;
+                    best = Double.MAX_VALUE;
+                    sameBlockSteps = 0;
+                    continue;
+                }
+                if (tryLocalUnstick(bot, target, label + "-stuck")) {
+                    stagnant = 0;
+                    best = Double.MAX_VALUE;
+                    sameBlockSteps = 0;
+                    continue;
+                }
+            }
         }
         LOGGER.warn("pursuit failed [{}]: finalDist={}", label, Math.sqrt(bot.getBlockPos().getSquaredDistance(target)));
+        BotActions.stop(bot);
         return false;
     }
 
@@ -1497,6 +1659,94 @@ public final class MovementService {
         }
         tryOpenDoorAt(bot, plan.doorBase());
         return nudgeTowardUntilClose(bot, plan.stepThroughPos(), 2.25D, 2000L, 0.22, label + "-door-step");
+    }
+
+    /**
+     * Broader door escape helper that can pick an adjacent-wall doorway even if it initially increases goal distance.
+     */
+    private static boolean tryDoorEscapeToward(ServerPlayerEntity bot, BlockPos goal, BlockPos avoidDoorBase, String label) {
+        if (bot == null) {
+            return false;
+        }
+        BlockPos avoid = avoidDoorBase;
+        for (int attempt = 0; attempt < 2; attempt++) {
+            DoorSubgoalPlan plan = findDoorEscapePlan(bot, goal, avoid);
+            if (plan == null) {
+                return false;
+            }
+            avoid = plan.doorBase();
+
+            maybeLogDoor(bot, plan.doorBase(), "door-escape: label=" + label
+                    + " approach=" + plan.approachPos().toShortString()
+                    + " step=" + plan.stepThroughPos().toShortString()
+                    + " improve=" + String.format(Locale.ROOT, "%.2f", plan.improveSq()));
+
+            BlockPos botPos = bot.getBlockPos();
+            boolean approached = botPos.getSquaredDistance(plan.approachPos()) <= 2.25D
+                    || nudgeTowardUntilClose(bot, plan.approachPos(), 2.25D, 2200L, 0.18, label + "-door-escape-approach");
+            if (!approached) {
+                continue;
+            }
+            tryOpenDoorAt(bot, plan.doorBase());
+            if (nudgeTowardUntilClose(bot, plan.stepThroughPos(), 2.25D, 2600L, 0.22, label + "-door-escape-step")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Local unstick probe: pick a nearby standable tile (within 2 blocks) and move there.
+     * This is a generic "turn a corner" maneuver to break collision jitter.
+     */
+    private static boolean tryLocalUnstick(ServerPlayerEntity bot, BlockPos goal, String label) {
+        if (bot == null) {
+            return false;
+        }
+        ServerWorld world = getWorld(bot);
+        if (world == null) {
+            return false;
+        }
+        BlockPos start = bot.getBlockPos();
+
+        BlockPos best = null;
+        double bestScore = Double.POSITIVE_INFINITY;
+
+        for (int dy = -1; dy <= 1; dy++) {
+            for (int dx = -2; dx <= 2; dx++) {
+                for (int dz = -2; dz <= 2; dz++) {
+                    if (dx == 0 && dz == 0) {
+                        continue;
+                    }
+                    // Diamond radius (more corner-friendly than square).
+                    if (Math.abs(dx) + Math.abs(dz) > 2) {
+                        continue;
+                    }
+                    BlockPos cand = start.add(dx, dy, dz);
+                    if (!isSolidStandable(world, cand.down(), cand)) {
+                        continue;
+                    }
+                    // Prefer staying level; stepping up/down is allowed but penalized.
+                    double score = (goal != null ? cand.getSquaredDistance(goal) : cand.getSquaredDistance(start)) + (Math.abs(dy) * 4.0D);
+                    if (score < bestScore) {
+                        bestScore = score;
+                        best = cand.toImmutable();
+                    }
+                }
+            }
+        }
+
+        if (best == null) {
+            return false;
+        }
+        LOGGER.debug("local-unstick [{}]: from={} to={} goal={} score={}",
+                label,
+                start.toShortString(),
+                best.toShortString(),
+                goal != null ? goal.toShortString() : "null",
+                String.format(Locale.ROOT, "%.2f", bestScore));
+        BotActions.stop(bot);
+        return nudgeTowardUntilClose(bot, best, 2.25D, 1400L, 0.18, label + "-unstick");
     }
 
     private static void snapTo(ServerPlayerEntity player, BlockPos target) {

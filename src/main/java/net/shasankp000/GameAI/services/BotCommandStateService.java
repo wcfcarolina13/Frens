@@ -19,6 +19,11 @@ public final class BotCommandStateService {
         public UUID followTargetUuid;
         public boolean followNoTeleport;
         public double followStopRange = 0.0D;
+        /**
+         * When >0, FOLLOW mode keeps this horizontal distance from the commander while the bot has LoS
+         * (i.e., "standoff" follow). When LoS breaks, the bot will still pursue/path-plan normally.
+         */
+        public double followStandoffRange = 0.0D;
         public BlockPos followFixedGoal;
         public double comeBestGoalDistSq = Double.NaN;
         public int comeTicksSinceBest = 0;

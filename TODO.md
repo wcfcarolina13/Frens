@@ -35,6 +35,22 @@ Pending work only. Completed items and rationale live in `changelog.md`.
 - [ ] **Shelter hovel perimeter-walk verification**: Confirm ring-walk wall placement finishes all reachable blocks, preserves the doorway gap, and avoids stalling.
 - [ ] **Hovel roof serpentine walk**: Validate pillar-to-roof + serpentine walk reliably fills roof cells and tears down support blocks safely.
 - [ ] **Hovel exterior patch reach**: Ensure the bot exits the footprint to reach exterior targets and re-enters via the doorway (no wall phasing).
+- [ ] **Hovel path-planner exits + perimeter ring**: Verify doorway-based exits, 1-block exterior ring walking, and no interior scaffold leftovers after build.
+- [ ] **Hovel abort logging check**: Confirm new stage + exit logging captures early abort reasons during leveling.
+- [ ] **Hovel stack overflow fix**: Verify hovel no longer crashes after leveling due to pathMove recursion.
+- [ ] **Hovel foundation beam persistence**: Confirm beam failures no longer abort builds and missing beams get scaffold-patched later without repeated checks.
+- [ ] **Hovel interior entry**: Ensure final cleanup/amenities use doorway pathing to re-enter from outside without wall-humping.
+- [ ] **Hovel scaffold descent**: Confirm scaffold pillars no longer self-fill before the bot descends off the roof.
+- [ ] **Hovel stage chat visibility**: Verify stage messages show in the command issuer’s chat during the build.
+- [ ] **Hovel perimeter uneven terrain**: Verify perimeter ring movement hops 1-block rises without stalling on corners.
+- [ ] **Hovel foundation beam heartbeat**: Confirm foundation phase reports start/slow progress/timeout in chat.
+- [ ] **Hovel waypoint routing per stage**: Verify roof perimeter + roof access + wall patch stages use doorway/perimeter routing without wall-humping.
+- [ ] **Hovel amenities stay interior**: Confirm torch/door placement and final leveling don't drift outside once interior entry succeeds.
+- [ ] **Hovel perimeter leveling**: Verify perimeter + buffer ring holes are filled and tall blocks trimmed so foundation beams succeed.
+- [ ] **Hovel roof scaffold cleanup**: Verify leftover roof pillars are cleared after roof phase if teardown fails.
+- [ ] **Hovel roof exit simplification**: Confirm roof pass no longer waits on pillar return and relies on cleanup instead.
+- [ ] **Hovel roof pillar cleanup crash**: Confirm cleanup no longer triggers ConcurrentModificationException.
+- [ ] **Hovel roof pillar perimeter clearing**: Verify cleanup can approach/clear pillars even when base is blocked.
 - [ ] **Hovel leveling sweep check**: Re-verify base-level hole fill + obstruction clearing math after the refactor (foot layer should stay clear).
 - [ ] **ShelterSkill refactor**: Split `ShelterSkill.java` into smaller hovel/burrow builder classes and tighten shared primitives/logging.
 - [ ] **ScaffoldService extraction**: Centralize pillaring/scaffolding + ladder placement so shelter/woodcut/mining can reuse the same “climb to work height” logic.
@@ -51,6 +67,7 @@ Pending work only. Completed items and rationale live in `changelog.md`.
 ### Commands / UX
 - [x] **Open command admin mode**: Make “open” distance-independent for admins.
 - [ ] **Command pruning review**: Evaluate whether `look_player` and `direction reset` are still needed; deprecate/remove if redundant.
+- [ ] **New command: `/bot follow-distance`**: Configure follow standoff distance so the bot idles or trails a few extra blocks away, but will pursue/path-plan when it loses line-of-sight (e.g., you turn a corner or drop into a hole).
 - [ ] **Elder Scrolls-style dialogue menu** Conversation topics, commands, quests
 - [ ] **Elder Scrolls-style Journal** Conversation topics, quests, important information with simple filter search
 

@@ -15,6 +15,8 @@ import java.util.UUID;
  */
 public final class FollowMovementService {
 
+    private static final double MIN_FOLLOW_DISTANCE = 1.0D;
+    private static final double MIN_FOLLOW_DISTANCE_SQ = MIN_FOLLOW_DISTANCE * MIN_FOLLOW_DISTANCE;
     private static final double CLOSE_RANGE_CLEAR_DISTANCE_SQ = 2.25D;
 
     private FollowMovementService() {}
@@ -98,7 +100,12 @@ public final class FollowMovementService {
             return;
         }
         double distanceSq = horizontalDistanceSq(bot, targetPos);
-        if (allowCloseStop && distanceSq <= followPersonalSpace * followPersonalSpace) {
+        if (distanceSq <= MIN_FOLLOW_DISTANCE_SQ) {
+            stepBack(bot, targetPos);
+            return;
+        }
+        double stopDistance = Math.max(followPersonalSpace, MIN_FOLLOW_DISTANCE);
+        if (allowCloseStop && distanceSq <= stopDistance * stopDistance) {
             BotActions.stop(bot);
             return;
         }
