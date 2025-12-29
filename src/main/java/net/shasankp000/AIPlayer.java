@@ -18,6 +18,7 @@ import net.minecraft.command.permission.PermissionPredicate;
 import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.shasankp000.ChatUtils.BERTModel.BertModelManager;
+import net.shasankp000.ChatUtils.BotAmbientChatter;
 import net.shasankp000.ChatUtils.ChatUtils;
 import net.shasankp000.ChatUtils.NLPProcessor;
 import net.shasankp000.Commands.configCommand;
@@ -121,6 +122,9 @@ public class AIPlayer implements ModInitializer {
                 Identifier.of(MOD_ID, "bot_player_inventory"),
                 new ScreenHandlerType<>(net.shasankp000.ui.BotPlayerInventoryScreenHandler::clientFactory, FeatureFlags.VANILLA_FEATURES)
         );
+
+        // Register bot dialogue sound events
+        net.shasankp000.ChatUtils.BotDialogueSounds.registerAll();
 
         UseEntityCallback.EVENT.register((player, world, hand, entity, hit) -> {
             if (world.isClient()) return net.minecraft.util.ActionResult.PASS;
@@ -249,6 +253,8 @@ public class AIPlayer implements ModInitializer {
             // Integrated-server world reloads also keep scheduler state alive; clear idle-hobby backoff so
             // "idle hobbies = on" resumes automatically when re-entering the world.
             net.shasankp000.GameAI.services.BotIdleHobbiesService.resetSession();
+            // Clear ambient chatter scheduler state too.
+            BotAmbientChatter.resetSession();
             try {
                 if (modelManager.isModelLoaded() || loadedBERTModelIntoMemory) {
                     modelManager.unloadModel();
@@ -362,6 +368,7 @@ public class AIPlayer implements ModInitializer {
         ServerTickEvents.END_SERVER_TICK.register(BotAutoReturnSunsetService::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(BotIdleHobbiesService::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(BotAmbientSocialChatService::onServerTick);
+        ServerTickEvents.END_SERVER_TICK.register(BotAmbientChatter::onServerTick);
 
         ServerMessageEvents.CHAT_MESSAGE.register((message, sender, params) -> {
             String raw = message.getContent().getString();

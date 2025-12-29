@@ -38,6 +38,9 @@ import net.minecraft.util.math.Vec2f;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.GameMode;
 import net.minecraft.world.World;
+import net.minecraft.sound.SoundEvent;
+import net.shasankp000.ChatUtils.BotDialoguePlayer;
+import net.shasankp000.ChatUtils.BotDialogueSounds;
 import net.shasankp000.ChatUtils.ChatUtils;
 import net.shasankp000.DangerZoneDetector.DangerZoneDetector;
 import net.shasankp000.Database.QTableExporter;
@@ -224,6 +227,7 @@ public class modCommandRegistry {
 	                        .then(BotUtilityCommands.buildLookPlayer())
 	                        .then(BotUtilityCommands.buildFollow())
                             .then(BotUtilityCommands.buildFollowDistance())
+                            .then(BotUtilityCommands.buildSoundTest())
                             .then(BotHomeCommands.buildAutoReturnSunset())
                             .then(BotHomeCommands.buildAutoReturnSunsetGuardPatrolEligible())
                             .then(BotHomeCommands.buildAutoReturnSunsetPreferLastBed())
@@ -2255,6 +2259,42 @@ public class modCommandRegistry {
         if (!bots.isEmpty()) {
             String summary = formatBotList(bots, isAll);
             ChatUtils.sendSystemMessage(context.getSource(), summary + " reset follow distance.");
+        }
+        return successes;
+    }
+
+    static int executeSoundTestTargets(CommandContext<ServerCommandSource> context,
+                                       String targetArg) throws CommandSyntaxException {
+        List<ServerPlayerEntity> bots = BotTargetingService.resolve(context.getSource(), targetArg);
+        boolean isAll = targetArg != null && "all".equalsIgnoreCase(targetArg.trim());
+
+        // Pick a random test sound from available greetings/idle lines
+        SoundEvent[] testSounds = {
+                BotDialogueSounds.LINE_GREETING_HEY,
+                BotDialogueSounds.LINE_GREETING_GOOD_TO_SEE,
+                BotDialogueSounds.LINE_IDLE_ALL_QUIET,
+                BotDialogueSounds.LINE_IDLE_HERE_IF_NEEDED,
+                BotDialogueSounds.LINE_IDLE_STILL_STANDING
+        };
+
+        int successes = 0;
+        for (ServerPlayerEntity bot : bots) {
+            if (bot == null) {
+                continue;
+            }
+            SoundEvent sound = testSounds[new java.util.Random().nextInt(testSounds.length)];
+            // Use forcePlaySound to bypass config check - this is a test command
+            if (BotDialoguePlayer.forcePlaySound(bot, sound)) {
+                successes++;
+                ChatUtils.sendSystemMessage(context.getSource(),
+                        "§aPlayed sound test for " + bot.getName().getString() + " (sound: " + sound.id().getPath() + ")");
+            } else {
+                ChatUtils.sendSystemMessage(context.getSource(),
+                        "§cCould not play sound for " + bot.getName().getString());
+            }
+        }
+        if (bots.isEmpty()) {
+            ChatUtils.sendSystemMessage(context.getSource(), "§cNo bots found to test sound.");
         }
         return successes;
     }

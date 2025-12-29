@@ -522,6 +522,7 @@ public class ManualConfig {
         private boolean pauseOnFullInventory;
         private boolean teleportDuringDropSweep = false;
         private boolean llmEnabled = true;
+        private boolean voicedDialogue = true;
 
         public boolean isAutoSpawn() {
             return autoSpawn;
@@ -574,6 +575,14 @@ public class ManualConfig {
 
         public void setLlmEnabled(boolean llmEnabled) {
             this.llmEnabled = llmEnabled;
+        }
+
+        public boolean isVoicedDialogue() {
+            return voicedDialogue;
+        }
+
+        public void setVoicedDialogue(boolean voicedDialogue) {
+            this.voicedDialogue = voicedDialogue;
         }
     }
 }

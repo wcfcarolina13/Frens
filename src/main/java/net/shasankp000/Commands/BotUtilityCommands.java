@@ -129,5 +129,14 @@ final class BotUtilityCommands {
                         )
                 );
     }
+
+    static ArgumentBuilder<ServerCommandSource, ?> buildSoundTest() {
+        return CommandManager.literal("sound_test")
+                .executes(context -> modCommandRegistry.executeSoundTestTargets(context, null))
+                .then(CommandManager.argument("bots", StringArgumentType.string())
+                        .executes(context -> modCommandRegistry.executeSoundTestTargets(
+                                context,
+                                StringArgumentType.getString(context, "bots"))));
+    }
 }
 

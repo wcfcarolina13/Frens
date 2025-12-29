@@ -103,6 +103,11 @@ public class ChatUtils {
             // Now use the formattedMessage to build the final colored message.
             String coloredMessage = formattedMessage;
 
+            // Play dialogue sound for the first message part only
+            // This avoids playing the sound multiple times for split messages
+            if (partIndex == 0) {
+                BotDialoguePlayer.tryPlayDialogue(source, coloredMessage);
+            }
 
             LOGGER.info("Broadcasting message part {}: '{}' from source: {}", partIndex, coloredMessage, sourceName);
 

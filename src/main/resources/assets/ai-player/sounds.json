@@ -1,0 +1,1734 @@
+{
+  "bot.greeting": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/greeting_hey__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/greeting_hey__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/greeting_good_to_see__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/greeting_good_to_see__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/greeting_welcome_back__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/greeting_welcome_back__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/greeting_there_you_are__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/greeting_there_you_are__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      }
+    ],
+    "attenuation_distance": 8
+  },
+  "bot.touch": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/touch_hmm__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/touch_hmm__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/touch_yeah__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/touch_yeah__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/touch_what_need__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/touch_what_need__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/touch_need_something__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/touch_need_something__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      }
+    ],
+    "attenuation_distance": 8
+  },
+  "bot.status": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/status_hungry__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/status_hungry__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/status_find_food__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/status_find_food__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/status_snack_time__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/status_snack_time__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/status_need_breather__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/status_need_breather__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/status_not_best__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/status_not_best__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/status_too_many_hits__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/status_too_many_hits__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/status_late_heading_home__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/status_late_heading_home__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      }
+    ],
+    "attenuation_distance": 8
+  },
+  "bot.idle": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/idle_all_quiet__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/idle_all_quiet__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/idle_still_standing__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/idle_still_standing__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/idle_taking_it_easy__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/idle_taking_it_easy__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/idle_here_if_needed__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/idle_here_if_needed__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/idle_enjoying_calm__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/idle_enjoying_calm__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/context_fish_earlier__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/context_fish_earlier__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/context_smells_fish__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/context_smells_fish__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/context_fish_cooperating__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/context_fish_cooperating__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/context_warming_earlier__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/context_warming_earlier__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/context_breather_sometimes__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/context_breather_sometimes__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/context_campfire_wonders__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/context_campfire_wonders__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/context_listening__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/context_listening__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      }
+    ],
+    "attenuation_distance": 8
+  },
+  "bot.skill": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/skill_fishing_watching__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/skill_fishing_watching__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/skill_fishing_biting__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/skill_fishing_biting__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/skill_fishing_good_spot__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/skill_fishing_good_spot__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/skill_woodcut_careful__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/skill_woodcut_careful__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/skill_woodcut_tidying__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/skill_woodcut_tidying__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/skill_woodcut_few_more__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/skill_woodcut_few_more__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/skill_hangout_fire__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/skill_hangout_fire__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/skill_hangout_nice_quiet__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/skill_hangout_nice_quiet__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/skill_hangout_breather__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/skill_hangout_breather__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/skill_sleep_trying__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/skill_sleep_trying__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/skill_sleep_finding_bed__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/skill_sleep_finding_bed__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/skill_sleep_long_day__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/skill_sleep_long_day__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/skill_hangout_fire_bit__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/skill_hangout_fire_bit__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/skill_hangout_bit__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/skill_hangout_bit__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/skill_hangout_short_breather__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/skill_hangout_short_breather__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/skill_fish_session_done__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/skill_fish_session_done__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/skill_fish_sunset__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/skill_fish_sunset__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      }
+    ],
+    "attenuation_distance": 8
+  },
+  "bot.mode": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/mode_follow_behind__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/mode_follow_behind__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/mode_follow_lead__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/mode_follow_lead__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/mode_follow_keeping_up__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/mode_follow_keeping_up__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/mode_guard_clear__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/mode_guard_clear__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/mode_guard_nothing_past__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/mode_guard_nothing_past__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/mode_guard_quiet__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/mode_guard_quiet__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/mode_patrol_rounds__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/mode_patrol_rounds__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/mode_patrol_area__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/mode_patrol_area__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/mode_patrol_perimeter__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/mode_patrol_perimeter__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/mode_return_heading__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/mode_return_heading__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/mode_return_on_way__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/mode_return_on_way__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/mode_return_returning__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/mode_return_returning__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/mode_stay_holding__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/mode_stay_holding__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/mode_stay_right_here__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/mode_stay_right_here__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/mode_stay_standing_by__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/mode_stay_standing_by__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      }
+    ],
+    "attenuation_distance": 8
+  },
+  "bot.warning": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/warning_suffocating__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/warning_suffocating__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/warning_drop_ahead__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/warning_drop_ahead__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/warning_stuck__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/warning_stuck__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/warning_banged_up__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/warning_banged_up__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/warning_not_full_strength__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/warning_not_full_strength__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/warning_prefer_chicken__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/warning_prefer_chicken__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      }
+    ],
+    "attenuation_distance": 8
+  },
+  "bot.line.greeting_hey": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/greeting_hey__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/greeting_hey__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      }
+    ],
+    "attenuation_distance": 8
+  },
+  "bot.line.greeting_good_to_see": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/greeting_good_to_see__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/greeting_good_to_see__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      }
+    ],
+    "attenuation_distance": 8
+  },
+  "bot.line.greeting_welcome_back": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/greeting_welcome_back__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/greeting_welcome_back__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      }
+    ],
+    "attenuation_distance": 8
+  },
+  "bot.line.greeting_there_you_are": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/greeting_there_you_are__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/greeting_there_you_are__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      }
+    ],
+    "attenuation_distance": 8
+  },
+  "bot.line.touch_hmm": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/touch_hmm__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/touch_hmm__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      }
+    ],
+    "attenuation_distance": 8
+  },
+  "bot.line.touch_yeah": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/touch_yeah__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/touch_yeah__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      }
+    ],
+    "attenuation_distance": 8
+  },
+  "bot.line.touch_what_need": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/touch_what_need__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/touch_what_need__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      }
+    ],
+    "attenuation_distance": 8
+  },
+  "bot.line.touch_need_something": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/touch_need_something__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/touch_need_something__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      }
+    ],
+    "attenuation_distance": 8
+  },
+  "bot.line.status_hungry": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/status_hungry__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/status_hungry__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      }
+    ],
+    "attenuation_distance": 8
+  },
+  "bot.line.status_find_food": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/status_find_food__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/status_find_food__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      }
+    ],
+    "attenuation_distance": 8
+  },
+  "bot.line.status_snack_time": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/status_snack_time__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/status_snack_time__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      }
+    ],
+    "attenuation_distance": 8
+  },
+  "bot.line.status_need_breather": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/status_need_breather__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/status_need_breather__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      }
+    ],
+    "attenuation_distance": 8
+  },
+  "bot.line.status_not_best": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/status_not_best__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/status_not_best__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      }
+    ],
+    "attenuation_distance": 8
+  },
+  "bot.line.status_too_many_hits": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/status_too_many_hits__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/status_too_many_hits__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      }
+    ],
+    "attenuation_distance": 8
+  },
+  "bot.line.idle_all_quiet": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/idle_all_quiet__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/idle_all_quiet__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      }
+    ],
+    "attenuation_distance": 8
+  },
+  "bot.line.idle_still_standing": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/idle_still_standing__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/idle_still_standing__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      }
+    ],
+    "attenuation_distance": 8
+  },
+  "bot.line.idle_taking_it_easy": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/idle_taking_it_easy__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/idle_taking_it_easy__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      }
+    ],
+    "attenuation_distance": 8
+  },
+  "bot.line.idle_here_if_needed": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/idle_here_if_needed__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/idle_here_if_needed__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      }
+    ],
+    "attenuation_distance": 8
+  },
+  "bot.line.idle_enjoying_calm": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/idle_enjoying_calm__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/idle_enjoying_calm__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      }
+    ],
+    "attenuation_distance": 8
+  },
+  "bot.line.skill_fishing_watching": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/skill_fishing_watching__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/skill_fishing_watching__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      }
+    ],
+    "attenuation_distance": 8
+  },
+  "bot.line.skill_fishing_biting": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/skill_fishing_biting__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/skill_fishing_biting__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      }
+    ],
+    "attenuation_distance": 8
+  },
+  "bot.line.skill_fishing_good_spot": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/skill_fishing_good_spot__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/skill_fishing_good_spot__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      }
+    ],
+    "attenuation_distance": 8
+  },
+  "bot.line.skill_woodcut_careful": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/skill_woodcut_careful__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/skill_woodcut_careful__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      }
+    ],
+    "attenuation_distance": 8
+  },
+  "bot.line.skill_woodcut_tidying": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/skill_woodcut_tidying__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/skill_woodcut_tidying__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      }
+    ],
+    "attenuation_distance": 8
+  },
+  "bot.line.skill_woodcut_few_more": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/skill_woodcut_few_more__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/skill_woodcut_few_more__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      }
+    ],
+    "attenuation_distance": 8
+  },
+  "bot.line.skill_hangout_fire": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/skill_hangout_fire__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/skill_hangout_fire__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      }
+    ],
+    "attenuation_distance": 8
+  },
+  "bot.line.skill_hangout_nice_quiet": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/skill_hangout_nice_quiet__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/skill_hangout_nice_quiet__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      }
+    ],
+    "attenuation_distance": 8
+  },
+  "bot.line.skill_hangout_breather": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/skill_hangout_breather__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/skill_hangout_breather__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      }
+    ],
+    "attenuation_distance": 8
+  },
+  "bot.line.skill_sleep_trying": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/skill_sleep_trying__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/skill_sleep_trying__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      }
+    ],
+    "attenuation_distance": 8
+  },
+  "bot.line.skill_sleep_finding_bed": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/skill_sleep_finding_bed__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/skill_sleep_finding_bed__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      }
+    ],
+    "attenuation_distance": 8
+  },
+  "bot.line.skill_sleep_long_day": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/skill_sleep_long_day__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/skill_sleep_long_day__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      }
+    ],
+    "attenuation_distance": 8
+  },
+  "bot.line.mode_follow_behind": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/mode_follow_behind__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/mode_follow_behind__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      }
+    ],
+    "attenuation_distance": 8
+  },
+  "bot.line.mode_follow_lead": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/mode_follow_lead__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/mode_follow_lead__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      }
+    ],
+    "attenuation_distance": 8
+  },
+  "bot.line.mode_follow_keeping_up": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/mode_follow_keeping_up__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/mode_follow_keeping_up__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      }
+    ],
+    "attenuation_distance": 8
+  },
+  "bot.line.mode_guard_clear": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/mode_guard_clear__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/mode_guard_clear__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      }
+    ],
+    "attenuation_distance": 8
+  },
+  "bot.line.mode_guard_nothing_past": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/mode_guard_nothing_past__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/mode_guard_nothing_past__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      }
+    ],
+    "attenuation_distance": 8
+  },
+  "bot.line.mode_guard_quiet": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/mode_guard_quiet__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/mode_guard_quiet__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      }
+    ],
+    "attenuation_distance": 8
+  },
+  "bot.line.mode_patrol_rounds": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/mode_patrol_rounds__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/mode_patrol_rounds__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      }
+    ],
+    "attenuation_distance": 8
+  },
+  "bot.line.mode_patrol_area": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/mode_patrol_area__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/mode_patrol_area__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      }
+    ],
+    "attenuation_distance": 8
+  },
+  "bot.line.mode_patrol_perimeter": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/mode_patrol_perimeter__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/mode_patrol_perimeter__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      }
+    ],
+    "attenuation_distance": 8
+  },
+  "bot.line.mode_return_heading": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/mode_return_heading__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/mode_return_heading__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      }
+    ],
+    "attenuation_distance": 8
+  },
+  "bot.line.mode_return_on_way": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/mode_return_on_way__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/mode_return_on_way__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      }
+    ],
+    "attenuation_distance": 8
+  },
+  "bot.line.mode_return_returning": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/mode_return_returning__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/mode_return_returning__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      }
+    ],
+    "attenuation_distance": 8
+  },
+  "bot.line.mode_stay_holding": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/mode_stay_holding__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/mode_stay_holding__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      }
+    ],
+    "attenuation_distance": 8
+  },
+  "bot.line.mode_stay_right_here": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/mode_stay_right_here__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/mode_stay_right_here__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      }
+    ],
+    "attenuation_distance": 8
+  },
+  "bot.line.mode_stay_standing_by": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/mode_stay_standing_by__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/mode_stay_standing_by__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      }
+    ],
+    "attenuation_distance": 8
+  },
+  "bot.line.warning_suffocating": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/warning_suffocating__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/warning_suffocating__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      }
+    ],
+    "attenuation_distance": 8
+  },
+  "bot.line.warning_drop_ahead": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/warning_drop_ahead__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/warning_drop_ahead__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      }
+    ],
+    "attenuation_distance": 8
+  },
+  "bot.line.warning_stuck": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/warning_stuck__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/warning_stuck__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      }
+    ],
+    "attenuation_distance": 8
+  },
+  "bot.line.warning_banged_up": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/warning_banged_up__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/warning_banged_up__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      }
+    ],
+    "attenuation_distance": 8
+  },
+  "bot.line.warning_not_full_strength": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/warning_not_full_strength__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/warning_not_full_strength__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      }
+    ],
+    "attenuation_distance": 8
+  },
+  "bot.line.warning_prefer_chicken": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/warning_prefer_chicken__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/warning_prefer_chicken__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      }
+    ],
+    "attenuation_distance": 8
+  },
+  "bot.line.skill_hangout_fire_bit": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/skill_hangout_fire_bit__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/skill_hangout_fire_bit__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      }
+    ],
+    "attenuation_distance": 8
+  },
+  "bot.line.skill_hangout_bit": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/skill_hangout_bit__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/skill_hangout_bit__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      }
+    ],
+    "attenuation_distance": 8
+  },
+  "bot.line.skill_hangout_short_breather": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/skill_hangout_short_breather__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/skill_hangout_short_breather__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      }
+    ],
+    "attenuation_distance": 8
+  },
+  "bot.line.status_late_heading_home": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/status_late_heading_home__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/status_late_heading_home__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      }
+    ],
+    "attenuation_distance": 8
+  },
+  "bot.line.skill_fish_session_done": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/skill_fish_session_done__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/skill_fish_session_done__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      }
+    ],
+    "attenuation_distance": 8
+  },
+  "bot.line.skill_fish_sunset": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/skill_fish_sunset__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/skill_fish_sunset__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      }
+    ],
+    "attenuation_distance": 8
+  },
+  "bot.line.context_fish_earlier": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/context_fish_earlier__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/context_fish_earlier__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      }
+    ],
+    "attenuation_distance": 8
+  },
+  "bot.line.context_smells_fish": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/context_smells_fish__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/context_smells_fish__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      }
+    ],
+    "attenuation_distance": 8
+  },
+  "bot.line.context_fish_cooperating": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/context_fish_cooperating__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/context_fish_cooperating__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      }
+    ],
+    "attenuation_distance": 8
+  },
+  "bot.line.context_warming_earlier": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/context_warming_earlier__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/context_warming_earlier__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      }
+    ],
+    "attenuation_distance": 8
+  },
+  "bot.line.context_breather_sometimes": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/context_breather_sometimes__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/context_breather_sometimes__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      }
+    ],
+    "attenuation_distance": 8
+  },
+  "bot.line.context_campfire_wonders": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/context_campfire_wonders__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/context_campfire_wonders__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      }
+    ],
+    "attenuation_distance": 8
+  },
+  "bot.line.context_listening": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/context_listening__01",
+        "weight": 1,
+        "attenuation_distance": 8
+      },
+      {
+        "name": "ai-player:dialogue/context_listening__02",
+        "weight": 1,
+        "attenuation_distance": 8
+      }
+    ],
+    "attenuation_distance": 8
+  }
+}

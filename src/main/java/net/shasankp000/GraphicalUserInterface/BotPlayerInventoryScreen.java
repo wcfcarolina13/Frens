@@ -13,6 +13,8 @@ import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.text.Text;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.math.MathHelper;
+import net.shasankp000.AIPlayer;
+import net.shasankp000.FilingSystem.ManualConfig;
 import net.shasankp000.ui.BotPlayerInventoryScreenHandler;
 
 import java.nio.charset.StandardCharsets;
@@ -65,6 +67,9 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         AUTO_RETURN_SUNSET,
         AUTO_RETURN_SUNSET_GUARD_PATROL,
         IDLE_HOBBIES,
+        VOICED_DIALOGUE,
+        TELEPORT_SKILLS,
+        TELEPORT_DROP_SWEEP,
         BASES,
         SKILL_FISH,
         SKILL_WOODCUT,
@@ -97,6 +102,9 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             new TopicEntry("Auto Home @ Sunset", TopicAction.AUTO_RETURN_SUNSET, true, 0),
             new TopicEntry("Guard/Patrol eligible", TopicAction.AUTO_RETURN_SUNSET_GUARD_PATROL, true, 1),
             new TopicEntry("Idle Hobbies", TopicAction.IDLE_HOBBIES, true, 0),
+            new TopicEntry("Voiced Dialogue", TopicAction.VOICED_DIALOGUE, true, 0),
+            new TopicEntry("TP during Skills", TopicAction.TELEPORT_SKILLS, true, 0),
+            new TopicEntry("TP during Sweeps", TopicAction.TELEPORT_DROP_SWEEP, true, 0),
             new TopicEntry("Bases…", TopicAction.BASES, false, 0),
             new TopicEntry("Fishing", TopicAction.SKILL_FISH, false, 0),
             new TopicEntry("Woodcut", TopicAction.SKILL_WOODCUT, false, 0),
@@ -601,6 +609,9 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case AUTO_RETURN_SUNSET -> toggleAutoReturnSunset();
             case AUTO_RETURN_SUNSET_GUARD_PATROL -> toggleAutoReturnSunsetGuardPatrol();
             case IDLE_HOBBIES -> toggleIdleHobbies();
+            case VOICED_DIALOGUE -> toggleVoicedDialogue();
+            case TELEPORT_SKILLS -> toggleTeleportSkills();
+            case TELEPORT_DROP_SWEEP -> toggleTeleportDropSweep();
             case BASES -> openBasesManager();
             case SKILL_FISH -> runSkillCommand("fish", null);
             case SKILL_WOODCUT -> runSkillCommand("woodcut", null);
@@ -619,6 +630,9 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case AUTO_RETURN_SUNSET -> isAutoReturnAtSunsetActive();
             case AUTO_RETURN_SUNSET_GUARD_PATROL -> isAutoReturnGuardPatrolEligibleActive();
             case IDLE_HOBBIES -> isIdleHobbiesActive();
+            case VOICED_DIALOGUE -> isVoicedDialogueActive();
+            case TELEPORT_SKILLS -> isTeleportSkillsActive();
+            case TELEPORT_DROP_SWEEP -> isTeleportDropSweepActive();
             default -> false;
         };
     }
@@ -769,6 +783,39 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         String botTarget = formatBotTarget();
         String command = "bot idle_hobbies toggle " + botTarget;
         sendChatCommand(command);
+    }
+
+    private boolean isVoicedDialogueActive() {
+        ManualConfig.BotControlSettings settings = AIPlayer.CONFIG.getEffectiveBotControl(botAlias);
+        return settings != null && settings.isVoicedDialogue();
+    }
+
+    private void toggleVoicedDialogue() {
+        ManualConfig.BotControlSettings settings = AIPlayer.CONFIG.getOrCreateBotControl(botAlias);
+        settings.setVoicedDialogue(!settings.isVoicedDialogue());
+        AIPlayer.CONFIG.save();
+    }
+
+    private boolean isTeleportSkillsActive() {
+        ManualConfig.BotControlSettings settings = AIPlayer.CONFIG.getEffectiveBotControl(botAlias);
+        return settings != null && settings.isTeleportDuringSkills();
+    }
+
+    private void toggleTeleportSkills() {
+        ManualConfig.BotControlSettings settings = AIPlayer.CONFIG.getOrCreateBotControl(botAlias);
+        settings.setTeleportDuringSkills(!settings.isTeleportDuringSkills());
+        AIPlayer.CONFIG.save();
+    }
+
+    private boolean isTeleportDropSweepActive() {
+        ManualConfig.BotControlSettings settings = AIPlayer.CONFIG.getEffectiveBotControl(botAlias);
+        return settings != null && settings.isTeleportDuringDropSweep();
+    }
+
+    private void toggleTeleportDropSweep() {
+        ManualConfig.BotControlSettings settings = AIPlayer.CONFIG.getOrCreateBotControl(botAlias);
+        settings.setTeleportDuringDropSweep(!settings.isTeleportDuringDropSweep());
+        AIPlayer.CONFIG.save();
     }
 
     private void openBasesManager() {
