@@ -4,10 +4,6 @@
 
 > This project is a heavily modified fork of [shasankp000/AI-Player](https://github.com/shasankp000/AI-player). The original project aimed to add a "second player" to the game. This fork has evolved into a comprehensive AI companion system with extensive skill automation and survival mechanics.
 
-## About
-
-A minecraft mod which aims to add a "second player" into the game which will actually be intelligent.
-
 ## Features
 
 ### 🤖 Intelligent Bot Companions
