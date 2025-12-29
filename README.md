@@ -1,8 +1,8 @@
 # Frens
 
-**An advanced AI companion mod for Minecraft that adds intelligent, personality-driven bots with survival skills, natural language understanding, and autonomous behaviors.**
+**An NPC companion mod for Minecraft that adds intelligent, personality-driven bots with survival skills, natural language understanding, and autonomous behaviors (that's the direction, at least. WIP).**
 
-> This project is a heavily modified fork of [shasankp000/AI-Player](https://github.com/shasankp000/AI-player). The original project aimed to add a "second player" to the game. This fork has evolved into a comprehensive AI companion system with extensive skill automation and survival mechanics.
+> This project is a heavily modified fork of [shasankp000/AI-Player](https://github.com/shasankp000/AI-player). The original project aimed to add a "second player" to the game. This fork has evolved into a comprehensive NPC companion system with extensive skill automation and survival mechanics. More AI/LLM elements will be incorporated in the future.
 
 ## Features
 
