@@ -229,9 +229,45 @@ public final class DialogueTextMapper {
         EXACT_MAP.put("I'm suffocating!", BotDialogueSounds.LINE_WARNING_SUFFOCATING);
         EXACT_MAP.put("There's a drop ahead.", BotDialogueSounds.LINE_WARNING_DROP_AHEAD);
         EXACT_MAP.put("I'm stuck down here - attempting a ladder or stair escape...", BotDialogueSounds.LINE_WARNING_STUCK);
+        // Additional warning variations
+        EXACT_MAP.put("I'm stuck!", BotDialogueSounds.LINE_WARNING_STUCK);
 
         // ============ OTHER STATUS ============
         EXACT_MAP.put("It's getting late; heading home.", BotDialogueSounds.LINE_STATUS_LATE_HEADING_HOME);
+        EXACT_MAP.put("It's getting late-heading home.", BotDialogueSounds.LINE_STATUS_LATE_HEADING_HOME);
+
+        // ============ ADDITIONAL HANGOUT LINES ============
+        // From HangoutSkill.java
+        EXACT_MAP.put("I'll hang out by the fire for a bit.", BotDialogueSounds.LINE_SKILL_HANGOUT_FIRE_BIT);
+        EXACT_MAP.put("I'll hang out for a bit.", BotDialogueSounds.LINE_SKILL_HANGOUT_BIT);
+        EXACT_MAP.put("Taking a short breather.", BotDialogueSounds.LINE_SKILL_HANGOUT_SHORT_BREATHER);
+
+        // ============ ADDITIONAL MODE CONFIRMATIONS ============
+        // Return mode variations
+        EXACT_MAP.put("Returning to base.", BotDialogueSounds.LINE_MODE_RETURN_RETURNING);
+        EXACT_MAP.put("On my way back to base.", BotDialogueSounds.LINE_MODE_RETURN_ON_WAY);
+        EXACT_MAP.put("Heading home before it gets too dark.", BotDialogueSounds.LINE_MODE_RETURN_HEADING);
+        
+        // Follow mode variations
+        EXACT_MAP.put("Lead the way.", BotDialogueSounds.LINE_MODE_FOLLOW_LEAD);
+        EXACT_MAP.put("Keeping up.", BotDialogueSounds.LINE_MODE_FOLLOW_KEEPING_UP);
+        PATTERN_MAP.put(patternWithName("I'm right behind you, {name}."), BotDialogueSounds.LINE_MODE_FOLLOW_BEHIND);
+        
+        // Stay mode variations  
+        EXACT_MAP.put("Holding position.", BotDialogueSounds.LINE_MODE_STAY_HOLDING);
+        EXACT_MAP.put("I'll stay right here.", BotDialogueSounds.LINE_MODE_STAY_RIGHT_HERE);
+        EXACT_MAP.put("Standing by.", BotDialogueSounds.LINE_MODE_STAY_STANDING_BY);
+        EXACT_MAP.put("Staying put here.", BotDialogueSounds.LINE_MODE_STAY_HOLDING);
+        
+        // Guard mode variations
+        EXACT_MAP.put("All clear. I'm keeping watch.", BotDialogueSounds.LINE_MODE_GUARD_CLEAR);
+        EXACT_MAP.put("Guard duty. Nothing gets past me.", BotDialogueSounds.LINE_MODE_GUARD_NOTHING_PAST);
+        EXACT_MAP.put("Quiet so far.", BotDialogueSounds.LINE_MODE_GUARD_QUIET);
+        
+        // Patrol mode variations
+        EXACT_MAP.put("Doing my rounds.", BotDialogueSounds.LINE_MODE_PATROL_ROUNDS);
+        EXACT_MAP.put("Patrolling the area.", BotDialogueSounds.LINE_MODE_PATROL_AREA);
+        EXACT_MAP.put("Just checking the perimeter.", BotDialogueSounds.LINE_MODE_PATROL_PERIMETER);
 
         LOGGER.info("Initialized {} exact mappings and {} pattern mappings", EXACT_MAP.size(), PATTERN_MAP.size());
     }
