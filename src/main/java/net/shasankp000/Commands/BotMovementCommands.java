@@ -16,7 +16,19 @@ final class BotMovementCommands {
     }
 
     static ArgumentBuilder<ServerCommandSource, ?> buildRegroup() {
-        return buildComeLike("regroup");
+        return CommandManager.literal("regroup")
+                .executes(context -> modCommandRegistry.executeRegroupTargets(context, null))
+                .then(CommandManager.argument("bots", StringArgumentType.string())
+                        .executes(context -> modCommandRegistry.executeRegroupTargets(context,
+                                StringArgumentType.getString(context, "bots"))));
+    }
+
+    static ArgumentBuilder<ServerCommandSource, ?> buildGoToLook() {
+        return CommandManager.literal("go_to_look")
+                .executes(context -> modCommandRegistry.executeGoToLookTargets(context, null))
+                .then(CommandManager.argument("bots", StringArgumentType.string())
+                        .executes(context -> modCommandRegistry.executeGoToLookTargets(context,
+                                StringArgumentType.getString(context, "bots"))));
     }
 
     private static ArgumentBuilder<ServerCommandSource, ?> buildComeLike(String literal) {

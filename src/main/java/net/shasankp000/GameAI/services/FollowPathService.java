@@ -616,4 +616,46 @@ public final class FollowPathService {
         }
         return !canSee;
     }
+
+    /**
+     * Checks if a target position is reachable from the start position using bounded A* planning.
+     * This is useful for pre-filtering targets before committing to navigation.
+     *
+     * @param snapshot    The pre-captured collision snapshot.
+     * @param targetPos   The position to check reachability for.
+     * @return true if a path exists, false otherwise.
+     */
+    public static boolean isReachable(FollowSnapshot snapshot, BlockPos targetPos) {
+        if (snapshot == null || targetPos == null) {
+            return false;
+        }
+        BlockPos start = snapshot.start();
+        if (!snapshot.inBounds(start) || !snapshot.inBounds(targetPos)) {
+            return false;
+        }
+
+        BlockPos startStand = findNearestStandable(snapshot, start, 2);
+        if (startStand == null) {
+            return false;
+        }
+
+        // If already at target, it's reachable.
+        if (startStand.getSquaredDistance(targetPos) <= 2.25D) {
+            return true;
+        }
+
+        List<BlockPos> goalCandidates = findGoalCandidates(snapshot, targetPos, 2);
+        if (goalCandidates.isEmpty()) {
+            BlockPos nearGoal = findNearestStandable(snapshot, targetPos, 3);
+            if (nearGoal != null) {
+                goalCandidates = List.of(nearGoal);
+            }
+        }
+        if (goalCandidates.isEmpty()) {
+            return false;
+        }
+
+        List<BlockPos> path = aStar(snapshot, startStand, new HashSet<>(goalCandidates));
+        return !path.isEmpty();
+    }
 }

@@ -42,14 +42,14 @@ public class RayCasting {
             System.out.println("Block detected at: " + hitResult.getBlockPos());
             checkOutput = "Block detected in front at " + hitResult.getBlockPos().getX() + ", " + hitResult.getBlockPos().getY() + ", " + hitResult.getBlockPos().getZ();
 
-            ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withMaxLevel(4), "Block detected in front at " + hitResult.getBlockPos().getX() + ", " + hitResult.getBlockPos().getY() + ", " + hitResult.getBlockPos().getZ());
+            ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS), "Block detected in front at " + hitResult.getBlockPos().getX() + ", " + hitResult.getBlockPos().getY() + ", " + hitResult.getBlockPos().getZ());
             
         } else if (hitResult.getType() == HitResult.Type.MISS) {
             System.out.println("Nothing detected in front by raycast");
 
             checkOutput = "No block detected in front";
 
-            ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withMaxLevel(4), "No block detected in front");
+            ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS), "No block detected in front");
         }
 
     }

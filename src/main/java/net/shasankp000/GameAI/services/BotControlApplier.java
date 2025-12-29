@@ -99,7 +99,7 @@ public final class BotControlApplier {
             String mode = settings.getSpawnMode();
             Runnable task = () -> {
                 CommandDispatcher<ServerCommandSource> dispatcher = server.getCommandManager().getDispatcher();
-                ServerCommandSource source = server.getCommandSource().withSilent().withMaxLevel(4);
+                ServerCommandSource source = server.getCommandSource().withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS);
                 ManualConfig.BotSpawn spawn = AIPlayer.CONFIG.getBotSpawn(alias);
                 if (spawn != null) {
                     Identifier id = Identifier.tryParse(spawn.dimension());

@@ -30,6 +30,8 @@ import net.minecraft.text.Text;
 import net.minecraft.item.Items;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
+import net.minecraft.util.hit.BlockHitResult;
+import net.minecraft.util.hit.HitResult;
 import net.shasankp000.CommandUtils;
 import net.shasankp000.GameAI.llm.LLMOrchestrator;
 import net.minecraft.util.math.Vec2f;
@@ -49,6 +51,9 @@ import net.shasankp000.FilingSystem.ManualConfig;
 import net.shasankp000.AIPlayer;
 import net.shasankp000.GameAI.BotEventHandler;
 import net.shasankp000.GameAI.services.BotPersistenceService;
+import net.shasankp000.GameAI.services.BotHomeService;
+import net.shasankp000.GameAI.services.BotIdleHobbiesService;
+import net.shasankp000.GameAI.services.SafePositionService;
 import net.shasankp000.GameAI.State;
 import net.shasankp000.GameAI.StateActions;
 import java.io.ByteArrayOutputStream;
@@ -219,8 +224,15 @@ public class modCommandRegistry {
 	                        .then(BotUtilityCommands.buildLookPlayer())
 	                        .then(BotUtilityCommands.buildFollow())
                             .then(BotUtilityCommands.buildFollowDistance())
+                            .then(BotHomeCommands.buildAutoReturnSunset())
+                            .then(BotHomeCommands.buildAutoReturnSunsetGuardPatrolEligible())
+                            .then(BotHomeCommands.buildAutoReturnSunsetPreferLastBed())
+                            .then(BotHomeCommands.buildIdleHobbies())
+                            .then(BotHomeCommands.buildIdleNow())
+                            .then(BotHomeCommands.buildBase())
 	                        .then(BotMovementCommands.buildCome())
 	                        .then(BotMovementCommands.buildRegroup())
+                            .then(BotMovementCommands.buildGoToLook())
 	                        .then(BotMovementCommands.buildGuard())
 	                        .then(BotMovementCommands.buildPatrol())
 	                        .then(BotMovementCommands.buildStay("stay"))
@@ -561,13 +573,13 @@ public class modCommandRegistry {
 
                                                     switch (direction) {
                                                         case "left", "right", "back" -> {
-                                                            turnTool.turn(bot.getCommandSource().withSilent().withMaxLevel(4), direction);
+                                                            turnTool.turn(bot.getCommandSource().withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS), direction);
 
                                                             LOGGER.info("Now facing {} which is in {} in {} axis", direction, bot.getFacing().getId(), bot.getFacing().getAxis().getId());
                                                         }
                                                         default -> {
                                                             server.execute(() -> {
-                                                                ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withMaxLevel(4), "Invalid parameters! Accepted parameters: left, right, back only!");
+                                                                ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS), "Invalid parameters! Accepted parameters: left, right, back only!");
                                                             });
                                                         }
                                                     }
@@ -618,7 +630,7 @@ public class modCommandRegistry {
                                             AutoFaceEntity.isBotMoving = false;
 
                                             server.execute(() -> {
-                                                ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withMaxLevel(4), "Autoface module reset complete.");
+                                                ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS), "Autoface module reset complete.");
                                             });
 
                                             return 1;
@@ -772,7 +784,7 @@ public class modCommandRegistry {
                                                                 .executes(context -> {
 
                                                                     ServerPlayerEntity bot = EntityArgumentType.getPlayer(context, "bot");
-                                                                    ServerCommandSource botSource = bot.getCommandSource().withSilent().withMaxLevel(4);
+                                                                    ServerCommandSource botSource = bot.getCommandSource().withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS);
                                                                     MinecraftServer server = botSource.getServer();
 
                                                                     int lavaRange = IntegerArgumentType.getInteger(context, "lavaRange");     // Range to check for lava blocks
@@ -807,7 +819,7 @@ public class modCommandRegistry {
                                 .then(CommandManager.argument("bot", EntityArgumentType.player())
                                         .executes(context -> {
                                             ServerPlayerEntity bot = EntityArgumentType.getPlayer(context, "bot");
-                                            ServerCommandSource botSource = bot.getCommandSource().withSilent().withMaxLevel(4);
+                                            ServerCommandSource botSource = bot.getCommandSource().withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS);
 
                                             List<ItemStack> hotbarItems = hotBarUtils.getHotbarItems(bot);
 
@@ -850,7 +862,7 @@ public class modCommandRegistry {
 
                                             ServerPlayerEntity bot = EntityArgumentType.getPlayer(context, "bot");
 
-                                            ServerCommandSource botSource = bot.getCommandSource().withSilent().withMaxLevel(4);
+                                            ServerCommandSource botSource = bot.getCommandSource().withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS);
 
                                             String selectedItem = hotBarUtils.getSelectedHotbarItemStack(bot).getItem().getName().getString();
 
@@ -869,7 +881,7 @@ public class modCommandRegistry {
 
                                             ServerPlayerEntity bot = EntityArgumentType.getPlayer(context, "bot");
 
-                                            ServerCommandSource botSource = bot.getCommandSource().withSilent().withMaxLevel(4);
+                                            ServerCommandSource botSource = bot.getCommandSource().withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS);
 
                                             int botHungerLevel = getPlayerHunger.getBotHungerLevel(bot);
 
@@ -887,7 +899,7 @@ public class modCommandRegistry {
 
                                             ServerPlayerEntity bot = EntityArgumentType.getPlayer(context, "bot");
 
-                                            ServerCommandSource botSource = bot.getCommandSource().withSilent().withMaxLevel(4);
+                                            ServerCommandSource botSource = bot.getCommandSource().withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS);
 
                                             int botHungerLevel = getPlayerOxygen.getBotOxygenLevel(bot);
 
@@ -903,7 +915,7 @@ public class modCommandRegistry {
 
                                             ServerPlayerEntity bot = EntityArgumentType.getPlayer(context, "bot");
 
-                                            ServerCommandSource botSource = bot.getCommandSource().withSilent().withMaxLevel(4);
+                                            ServerCommandSource botSource = bot.getCommandSource().withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS);
 
                                             int botHealthLevel = (int) bot.getHealth();
 
@@ -920,7 +932,7 @@ public class modCommandRegistry {
 
                                             ServerPlayerEntity bot = EntityArgumentType.getPlayer(context, "bot");
 
-                                            ServerCommandSource botSource = bot.getCommandSource().withSilent().withMaxLevel(4);
+                                            ServerCommandSource botSource = bot.getCommandSource().withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS);
 
                                             ItemStack selectedItemStack = hotBarUtils.getSelectedHotbarItemStack(bot);
 
@@ -1091,7 +1103,7 @@ public class modCommandRegistry {
 
                                     boolean ok = BotInventoryAccess.openBotInventory(viewer, bot);
                                     if (!ok) {
-                                        if (viewer.hasPermissionLevel(2)) {
+                                        if (AIPlayer.isOperator(viewer)) {
                                             source.sendError(Text.literal("Failed to open bot inventory."));
                                         } else {
                                             source.sendError(Text.literal("Out of range or wrong dimension."));
@@ -1126,7 +1138,7 @@ public class modCommandRegistry {
 
 	                                            boolean ok = BotInventoryAccess.openBotInventory(viewer, bot);
 	                                            if (!ok) {
-	                                                if (viewer.hasPermissionLevel(2)) {
+	                                                if (AIPlayer.isOperator(viewer)) {
 	                                                    source.sendError(Text.literal("Failed to open bot inventory."));
 	                                                } else {
 	                                                    source.sendError(Text.literal("Out of range or wrong dimension."));
@@ -1335,7 +1347,7 @@ public class modCommandRegistry {
 
                             ChatUtils.sendSystemMessage(serverSource,
                                     "Please wait while " + botName + " connects to " + llmClient.getProvider() + "'s servers.");
-                            LLMServiceHandler.sendInitialResponse(bot.getCommandSource().withSilent().withMaxLevel(4), llmClient);
+                            LLMServiceHandler.sendInitialResponse(bot.getCommandSource().withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS), llmClient);
 
                             new Thread(() -> {
                                 try {
@@ -1375,7 +1387,7 @@ public class modCommandRegistry {
                                     }
 
                                     // initialization succeeded, continue:
-                                    ollamaClient.sendInitialResponse(bot.getCommandSource().withSilent().withMaxLevel(4));
+                                    ollamaClient.sendInitialResponse(bot.getCommandSource().withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS));
                                     AutoFaceEntity.startAutoFace(bot);
                                 } catch (Exception e) {
                                     LOGGER.error("Error in Ollama initialization thread for bot {}", botName, e);
@@ -1404,7 +1416,7 @@ public class modCommandRegistry {
                                     }
 
                                     // initialization succeeded, continue:
-                                    ollamaClient.sendInitialResponse(bot.getCommandSource().withSilent().withMaxLevel(4));
+                                    ollamaClient.sendInitialResponse(bot.getCommandSource().withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS));
                                     AutoFaceEntity.startAutoFace(bot);
                                 } catch (Exception e) {
                                     LOGGER.error("Error in Ollama initialization thread (default case) for bot {}", botName, e);
@@ -1485,7 +1497,7 @@ public class modCommandRegistry {
 
             String botName = bot.getName().getLiteralString();
 
-            ServerCommandSource botSource = bot.getCommandSource().withLevel(2).withSilent().withMaxLevel(4);
+            ServerCommandSource botSource = bot.getCommandSource().withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS);
             moveForward(server, botSource, botName);
 
             scheduler.schedule(new BotStopTask(server, botSource, botName), travelTime, TimeUnit.SECONDS);
@@ -1537,7 +1549,7 @@ public class modCommandRegistry {
 
         if (bot != null) {
 
-            ServerCommandSource botSource = bot.getCommandSource().withMaxLevel(4).withSilent();
+            ServerCommandSource botSource = bot.getCommandSource().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS).withSilent();
             ChatUtils.sendChatMessages(botSource, response);
 
         }
@@ -1690,8 +1702,13 @@ public class modCommandRegistry {
             return;  // stop here if no bot
         }
 
+        // Commander-directed movement should preempt idle hobbies.
+        interruptAmbientHobbyIfAny(bot, "§cInterrupted by /bot go_to.");
+        // If we ordered a directed move, wait longer before starting a new idle hobby.
+        BotIdleHobbiesService.snoozeFor(bot, 3_600L);
+
         String botName = bot.getName().getLiteralString();
-        ServerCommandSource botSource = bot.getCommandSource().withLevel(2).withSilent().withMaxLevel(4);
+        ServerCommandSource botSource = bot.getCommandSource().withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS);
 
         server.sendMessage(Text.literal("Finding the shortest path to the target, please wait patiently if the game seems hung"));
 
@@ -1770,7 +1787,7 @@ public class modCommandRegistry {
                 sb.append(lines.get(i));
                 if (i + 1 < to) sb.append("\n");
             }
-            ChatUtils.sendChatMessages(source.withSilent().withMaxLevel(4), sb.toString());
+            ChatUtils.sendChatMessages(source.withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS), sb.toString());
         }
     }
 
@@ -1903,14 +1920,14 @@ public class modCommandRegistry {
 
 
         if (itemQuery == null || itemQuery.isBlank()) {
-            ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withMaxLevel(4),
+            ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS),
                     "You need to specify an item id, e.g., iron_ingot");
             return 0;
         }
 
         Item item = resolveItemFromQuery(itemQuery);
         if (item == null || item == Items.AIR) {
-            ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withMaxLevel(4),
+            ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS),
                     "I don't recognize that item.");
             return 0;
         }
@@ -1928,7 +1945,7 @@ public class modCommandRegistry {
         }
 
         if (candidateSlots.isEmpty()) {
-            ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withMaxLevel(4), "I don't have that");
+            ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS), "I don't have that");
             return 1;
         }
 
@@ -1963,7 +1980,7 @@ public class modCommandRegistry {
         }
 
         if (removed.isEmpty()) {
-            ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withMaxLevel(4), "I don't have that");
+            ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS), "I don't have that");
             return 1;
         }
 
@@ -1993,7 +2010,7 @@ public class modCommandRegistry {
         }
 
         String itemName = removed.get(0).getName().getString();
-        ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withMaxLevel(4),
+        ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS),
                 "Gave " + totalGiven + " × " + itemName + " to " + recipient.getName().getString());
 
         return totalGiven;
@@ -2130,7 +2147,7 @@ public class modCommandRegistry {
             armorUtils.autoEquipArmor(bot);
             CombatInventoryManager.ensureCombatLoadout(bot);
 
-            ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withMaxLevel(4),
+            ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS),
                     "Loadout equipped! Stay sharp out there.");
         };
 
@@ -2178,6 +2195,7 @@ public class modCommandRegistry {
     }
 
     private static int executeFollow(CommandContext<ServerCommandSource> context, ServerPlayerEntity bot, ServerPlayerEntity target) {
+        interruptAmbientHobbyIfAny(bot, "§cInterrupted by /bot follow.");
         BotEventHandler.setFollowMode(bot, target);
         return 1;
     }
@@ -2189,6 +2207,7 @@ public class modCommandRegistry {
         if (bot == null || target == null) {
             return 0;
         }
+        interruptAmbientHobbyIfAny(bot, "§cInterrupted by /bot follow distance.");
         BotEventHandler.setFollowModeDistance(bot, target, distance);
         return 1;
     }
@@ -2249,7 +2268,7 @@ public class modCommandRegistry {
         boolean isAll = targetArg != null && "all".equalsIgnoreCase(targetArg.trim());
         int successes = 0;
         for (ServerPlayerEntity bot : bots) {
-            successes += executeCome(context, bot, commander);
+            successes += executeCome(context, bot, commander, true);
         }
         if (!bots.isEmpty() && successes > 0) {
             String summary = formatBotList(bots, isAll);
@@ -2259,10 +2278,122 @@ public class modCommandRegistry {
         return successes;
     }
 
-    private static int executeCome(CommandContext<ServerCommandSource> context, ServerPlayerEntity bot, ServerPlayerEntity commander) {
+    static int executeRegroupTargets(CommandContext<ServerCommandSource> context, String targetArg) throws CommandSyntaxException {
+        ServerPlayerEntity commander = context.getSource().getPlayer();
+        if (commander == null) {
+            throw new SimpleCommandExceptionType(Text.literal("Only players can regroup bots to them.")).create();
+        }
+        List<ServerPlayerEntity> bots = resolveTargetBots(context, targetArg);
+        boolean isAll = targetArg != null && "all".equalsIgnoreCase(targetArg.trim());
+        int successes = 0;
+        for (ServerPlayerEntity bot : bots) {
+            // Safe regroup: do not launch come-recovery digging skills (ascent/stripmine).
+            successes += executeCome(context, bot, commander, false);
+        }
+        if (!bots.isEmpty() && successes > 0) {
+            String summary = formatBotList(bots, isAll);
+            String verb = (isAll || bots.size() > 1) ? "are" : "is";
+            ChatUtils.sendSystemMessage(context.getSource(), summary + " " + verb + " regrouping to you.");
+        }
+        return successes;
+    }
+
+    static int executeGoToLookTargets(CommandContext<ServerCommandSource> context, String targetArg) throws CommandSyntaxException {
+        ServerCommandSource source = context.getSource();
+        ServerPlayerEntity commander = source.getPlayer();
+        if (commander == null) {
+            throw new SimpleCommandExceptionType(Text.literal("Only players can direct bots to a look target.")).create();
+        }
+        if (!(commander.getEntityWorld() instanceof ServerWorld commanderWorld)) {
+            return 0;
+        }
+
+        // Raycast; if we don't hit a block within range (sky/horizon), treat as "too far".
+        final double maxDistance = 64.0D;
+        HitResult hit = commander.raycast(maxDistance, 1.0F, false);
+        if (!(hit instanceof BlockHitResult bhr) || hit.getType() == HitResult.Type.MISS) {
+            ChatUtils.sendSystemMessage(source, "that's too far");
+            return 0;
+        }
+
+        BlockPos raw = bhr.getBlockPos().offset(bhr.getSide()).toImmutable();
+        BlockPos goal = SafePositionService.findSafeNear(commanderWorld, raw, 8);
+        if (goal == null) {
+            // Fall back to trying the clicked block column.
+            goal = SafePositionService.findSafeNear(commanderWorld, bhr.getBlockPos().toImmutable(), 8);
+        }
+        if (goal == null) {
+            ChatUtils.sendSystemMessage(source, "that's too far");
+            return 0;
+        }
+
+        List<ServerPlayerEntity> bots;
+        boolean isAll = targetArg != null && "all".equalsIgnoreCase(targetArg.trim());
+        if (targetArg == null) {
+            bots = new ArrayList<>();
+            for (ServerPlayerEntity candidate : BotEventHandler.getRegisteredBots(source.getServer())) {
+                if (candidate == null || candidate.isRemoved()) {
+                    continue;
+                }
+                if (candidate.getEntityWorld() != commanderWorld) {
+                    continue;
+                }
+                if (BotEventHandler.getCurrentMode(candidate) != BotEventHandler.Mode.FOLLOW) {
+                    continue;
+                }
+                if (!commander.getUuid().equals(BotEventHandler.getFollowTargetUuid(candidate))) {
+                    continue;
+                }
+                bots.add(candidate);
+            }
+        } else {
+            bots = resolveTargetBots(context, targetArg);
+        }
+
+        if (bots.isEmpty()) {
+            ChatUtils.sendSystemMessage(source, "No bots are following you.");
+            return 0;
+        }
+
+        int successes = 0;
+        for (ServerPlayerEntity bot : bots) {
+            if (bot == null || bot.isRemoved()) {
+                continue;
+            }
+            if (bot.getEntityWorld() != commanderWorld) {
+                continue;
+            }
+            if (BotEventHandler.getCurrentMode(bot) != BotEventHandler.Mode.FOLLOW
+                    || !commander.getUuid().equals(BotEventHandler.getFollowTargetUuid(bot))) {
+                continue;
+            }
+
+            // Player-issued override: interrupt any running skill so follow-walk can take over.
+            TaskService.forceAbort(bot.getUuid(), "§cInterrupted by /bot go_to_look.");
+            // After a commander-directed move, wait longer before starting idle hobbies.
+            BotIdleHobbiesService.snoozeFor(bot, 3_600L);
+            BotEventHandler.setComeModeWalk(bot, commander, goal, 3.2D, true);
+            successes++;
+        }
+
+        if (successes > 0) {
+            String summary = formatBotList(bots, isAll);
+            String verb = (isAll || bots.size() > 1) ? "are" : "is";
+            ChatUtils.sendSystemMessage(source, summary + " " + verb + " heading to where you're looking.");
+        }
+        return successes;
+    }
+
+    private static int executeCome(CommandContext<ServerCommandSource> context,
+                                  ServerPlayerEntity bot,
+                                  ServerPlayerEntity commander,
+                                  boolean allowRecoverySkills) {
         if (bot == null || commander == null) {
             return 0;
         }
+
+        // Commander-issued override: always preempt idle hobbies.
+        interruptAmbientHobbyIfAny(bot, "§cInterrupted by /bot come.");
         boolean teleportAllowed = SkillPreferences.teleportDuringSkills(bot);
         if (!teleportAllowed && !bot.canSee(commander) && !hasNavigationTool(bot)) {
             ChatUtils.sendSystemMessage(context.getSource(),
@@ -2275,18 +2406,44 @@ public class modCommandRegistry {
         if (!teleportAllowed) {
             // Come is a player-issued override; abort any running skill so follow-walk can take over immediately.
             TaskService.forceAbort(bot.getUuid(), "§cInterrupted by /bot come.");
+            BotIdleHobbiesService.snoozeFor(bot, 3_600L);
             BlockPos goal = commander.getBlockPos().toImmutable();
-            BotEventHandler.setComeModeWalk(bot, commander, goal, 3.2D);
+            // Use a nearby 2-block-headroom goal when possible; even in walk-only mode this helps avoid
+            // targeting positions right on a cliff lip / cave mouth where pathing tends to oscillate.
+            net.minecraft.server.world.ServerWorld commanderWorld = commander.getEntityWorld() instanceof net.minecraft.server.world.ServerWorld sw ? sw : null;
+            if (commanderWorld != null) {
+                BlockPos safe = net.shasankp000.GameAI.services.SafePositionService.findForwardSafeSpot(commanderWorld, commander);
+                if (safe == null) {
+                    safe = net.shasankp000.GameAI.services.SafePositionService.findSafeNear(commanderWorld, goal, 8);
+                }
+                if (safe != null) {
+                    goal = safe;
+                }
+            }
+            BotEventHandler.setComeModeWalk(bot, commander, goal, 3.2D, allowRecoverySkills);
             return 1;
         }
 
+        BlockPos rawGoal = commander.getBlockPos().toImmutable();
+        BlockPos safeGoal = null;
+        net.minecraft.server.world.ServerWorld commanderWorld = commander.getEntityWorld() instanceof net.minecraft.server.world.ServerWorld sw ? sw : null;
+        if (commanderWorld != null) {
+            safeGoal = net.shasankp000.GameAI.services.SafePositionService.findForwardSafeSpot(commanderWorld, commander);
+            if (safeGoal == null) {
+                safeGoal = net.shasankp000.GameAI.services.SafePositionService.findSafeNear(commanderWorld, rawGoal, 8);
+            }
+        }
+        BlockPos goal = safeGoal != null ? safeGoal : rawGoal;
+
+        BotIdleHobbiesService.snoozeFor(bot, 3_600L);
+
         MovementService.MovementPlan plan = new MovementService.MovementPlan(
-                MovementService.Mode.DIRECT,
-                commander.getBlockPos(),
-                commander.getBlockPos(),
-                null,
-                null,
-                bot.getHorizontalFacing());
+            MovementService.Mode.DIRECT,
+            goal,
+            goal,
+            null,
+            null,
+            bot.getHorizontalFacing());
         MovementService.MovementResult result = MovementService.execute(bot.getCommandSource(), bot, plan, false);
         if (result.success()) {
             return 1;
@@ -2407,12 +2564,14 @@ public class modCommandRegistry {
     }
 
     private static int executeFollowStop(CommandContext<ServerCommandSource> context, ServerPlayerEntity bot) {
+        interruptAmbientHobbyIfAny(bot, "§cInterrupted by /bot follow stop.");
         BotEventHandler.stopFollowing(bot);
         return 1;
     }
 
     static int executeGuard(CommandContext<ServerCommandSource> context, ServerPlayerEntity bot, double radius) {
         rememberTarget(context.getSource(), bot);
+        interruptAmbientHobbyIfAny(bot, "§cInterrupted by /bot guard.");
         String result = BotEventHandler.setGuardMode(bot, radius);
         ChatUtils.sendSystemMessage(context.getSource(), result);
         return 1;
@@ -2420,6 +2579,7 @@ public class modCommandRegistry {
 
     static int executePatrol(CommandContext<ServerCommandSource> context, ServerPlayerEntity bot, double radius) {
         rememberTarget(context.getSource(), bot);
+        interruptAmbientHobbyIfAny(bot, "§cInterrupted by /bot patrol.");
         String result = BotEventHandler.setPatrolMode(bot, radius);
         ChatUtils.sendSystemMessage(context.getSource(), result);
         return 1;
@@ -2427,6 +2587,7 @@ public class modCommandRegistry {
 
     static int executeStay(CommandContext<ServerCommandSource> context, ServerPlayerEntity bot) {
         rememberTarget(context.getSource(), bot);
+        interruptAmbientHobbyIfAny(bot, "§cInterrupted by /bot stay.");
         String result = BotEventHandler.setStayMode(bot);
         ChatUtils.sendSystemMessage(context.getSource(), result);
         return 1;
@@ -2434,6 +2595,7 @@ public class modCommandRegistry {
 
     static int executeReturnToBase(CommandContext<ServerCommandSource> context, ServerPlayerEntity bot, ServerPlayerEntity commander) {
         rememberTarget(context.getSource(), bot);
+        interruptAmbientHobbyIfAny(bot, "§cInterrupted by /bot return_base.");
         String result = BotEventHandler.setReturnToBase(bot, commander);
         ChatUtils.sendSystemMessage(context.getSource(), result);
         return 1;
@@ -2635,6 +2797,8 @@ public class modCommandRegistry {
         String alias = bot.getName().getString();
         String caller = context.getSource() != null ? context.getSource().getName() : "(unknown)";
         LOGGER.info("Stop command invoked: caller={} targetBot={} trainingMode={}", caller, alias, isTrainingMode);
+        // Cancel any in-flight drop sweep so it doesn't keep driving movement after /stop.
+        net.shasankp000.GameAI.services.DropSweepService.requestCancel(bot, "command-stop");
         // Ensure follow state is cleared so the bot truly stops.
         net.shasankp000.GameAI.BotEventHandler.stopFollowing(bot);
         stopMoving(server, context.getSource(), alias);
@@ -2847,6 +3011,24 @@ public class modCommandRegistry {
                             ChatUtils.sendSystemMessage(source, "An unexpected error occurred while trying to sleep."));
                 } finally {
                     TaskService.complete(ticket, success);
+
+                    // If idle hobbies are enabled, automatically resume after a short pause.
+                    // (The resume helper will wait until the bot is no longer sleeping.)
+                    try {
+                        var srv = source.getServer();
+                        srv.execute(() -> {
+                            try {
+                                net.shasankp000.GameAI.services.BotIdleResumeService.scheduleResumeIfEnabled(
+                                        srv,
+                                        bot,
+                                        400L,
+                                        "sleep-command"
+                                );
+                            } catch (Throwable ignored) {
+                            }
+                        });
+                    } catch (Throwable ignored) {
+                    }
                 }
             });
         }
@@ -2857,6 +3039,495 @@ public class modCommandRegistry {
             ChatUtils.sendSystemMessage(source, summary + " " + verb + " trying to sleep.");
         }
         return scheduled;
+    }
+
+    static int executeAutoReturnSunsetSetTargets(CommandContext<ServerCommandSource> context,
+                                                 String targetArg,
+                                                 boolean enabled) throws CommandSyntaxException {
+        ServerCommandSource source = context.getSource();
+        List<ServerPlayerEntity> bots = resolveTargetBots(context, targetArg);
+        boolean isAll = targetArg != null && "all".equalsIgnoreCase(targetArg.trim());
+
+        int successes = 0;
+        for (ServerPlayerEntity bot : bots) {
+            if (bot == null) {
+                continue;
+            }
+            if (BotHomeService.setAutoReturnAtSunset(bot, enabled)) {
+                successes++;
+            }
+        }
+
+        if (!bots.isEmpty()) {
+            String summary = formatBotList(bots, isAll);
+            ChatUtils.sendSystemMessage(source, summary + " auto-return at sunset " + (enabled ? "enabled" : "disabled") + ".");
+        }
+        return successes;
+    }
+
+    static int executeAutoReturnSunsetToggleTargets(CommandContext<ServerCommandSource> context,
+                                                    String targetArg) throws CommandSyntaxException {
+        ServerCommandSource source = context.getSource();
+        List<ServerPlayerEntity> bots = resolveTargetBots(context, targetArg);
+        boolean isAll = targetArg != null && "all".equalsIgnoreCase(targetArg.trim());
+
+        int successes = 0;
+        int enabledCount = 0;
+        for (ServerPlayerEntity bot : bots) {
+            if (bot == null) {
+                continue;
+            }
+            if (!BotHomeService.toggleAutoReturnAtSunset(bot)) {
+                continue;
+            }
+            successes++;
+            if (BotHomeService.isAutoReturnAtSunset(bot)) {
+                enabledCount++;
+            }
+        }
+
+        if (!bots.isEmpty()) {
+            String summary = formatBotList(bots, isAll);
+            if (isAll || bots.size() > 1) {
+                ChatUtils.sendSystemMessage(source, summary + " auto-return at sunset enabled for " + enabledCount + "/" + bots.size() + ".");
+            } else if (bots.size() == 1) {
+                boolean on = BotHomeService.isAutoReturnAtSunset(bots.getFirst());
+                ChatUtils.sendSystemMessage(source, summary + " auto-return at sunset is now " + (on ? "ON" : "OFF") + ".");
+            }
+        }
+        return successes;
+    }
+
+    static int executeAutoReturnSunsetGuardPatrolSetTargets(CommandContext<ServerCommandSource> context,
+                                                            String targetArg,
+                                                            boolean enabled) throws CommandSyntaxException {
+        ServerCommandSource source = context.getSource();
+        List<ServerPlayerEntity> bots = resolveTargetBots(context, targetArg);
+        boolean isAll = targetArg != null && "all".equalsIgnoreCase(targetArg.trim());
+
+        int successes = 0;
+        for (ServerPlayerEntity bot : bots) {
+            if (bot == null) {
+                continue;
+            }
+            if (BotHomeService.setAutoReturnGuardPatrolEligible(bot, enabled)) {
+                successes++;
+            }
+        }
+
+        if (!bots.isEmpty()) {
+            String summary = formatBotList(bots, isAll);
+            ChatUtils.sendSystemMessage(source,
+                    summary + " sunset auto-return eligibility for guard/patrol " + (enabled ? "enabled" : "disabled") + ".");
+        }
+        return successes;
+    }
+
+    static int executeAutoReturnSunsetGuardPatrolToggleTargets(CommandContext<ServerCommandSource> context,
+                                                               String targetArg) throws CommandSyntaxException {
+        ServerCommandSource source = context.getSource();
+        List<ServerPlayerEntity> bots = resolveTargetBots(context, targetArg);
+        boolean isAll = targetArg != null && "all".equalsIgnoreCase(targetArg.trim());
+
+        int successes = 0;
+        int enabledCount = 0;
+        for (ServerPlayerEntity bot : bots) {
+            if (bot == null) {
+                continue;
+            }
+            if (!BotHomeService.toggleAutoReturnGuardPatrolEligible(bot)) {
+                continue;
+            }
+            successes++;
+            if (BotHomeService.isAutoReturnGuardPatrolEligible(bot)) {
+                enabledCount++;
+            }
+        }
+
+        if (!bots.isEmpty()) {
+            String summary = formatBotList(bots, isAll);
+            if (isAll || bots.size() > 1) {
+                ChatUtils.sendSystemMessage(source,
+                        summary + " guard/patrol eligibility enabled for " + enabledCount + "/" + bots.size() + ".");
+            } else if (bots.size() == 1) {
+                boolean on = BotHomeService.isAutoReturnGuardPatrolEligible(bots.getFirst());
+                ChatUtils.sendSystemMessage(source,
+                        summary + " guard/patrol eligibility is now " + (on ? "ON" : "OFF") + ".");
+            }
+        }
+        return successes;
+    }
+
+    static int executeAutoReturnSunsetPreferLastBedSetTargets(CommandContext<ServerCommandSource> context,
+                                                             String targetArg,
+                                                             boolean enabled) throws CommandSyntaxException {
+        ServerCommandSource source = context.getSource();
+        List<ServerPlayerEntity> bots = resolveTargetBots(context, targetArg);
+        boolean isAll = targetArg != null && "all".equalsIgnoreCase(targetArg.trim());
+
+        int successes = 0;
+        for (ServerPlayerEntity bot : bots) {
+            if (bot == null) {
+                continue;
+            }
+            if (BotHomeService.setAutoReturnPreferLastBedAtSunset(bot, enabled)) {
+                successes++;
+            }
+        }
+
+        if (!bots.isEmpty()) {
+            String summary = formatBotList(bots, isAll);
+            ChatUtils.sendSystemMessage(source,
+                    summary + " sunset home preference set to " + (enabled ? "LAST_BED" : "DEFAULT") + ".");
+        }
+        return successes;
+    }
+
+    static int executeAutoReturnSunsetPreferLastBedToggleTargets(CommandContext<ServerCommandSource> context,
+                                                                String targetArg) throws CommandSyntaxException {
+        ServerCommandSource source = context.getSource();
+        List<ServerPlayerEntity> bots = resolveTargetBots(context, targetArg);
+        boolean isAll = targetArg != null && "all".equalsIgnoreCase(targetArg.trim());
+
+        int successes = 0;
+        int enabledCount = 0;
+        for (ServerPlayerEntity bot : bots) {
+            if (bot == null) {
+                continue;
+            }
+            if (!BotHomeService.toggleAutoReturnPreferLastBedAtSunset(bot)) {
+                continue;
+            }
+            successes++;
+            if (BotHomeService.isAutoReturnPreferLastBedAtSunset(bot)) {
+                enabledCount++;
+            }
+        }
+
+        if (!bots.isEmpty()) {
+            String summary = formatBotList(bots, isAll);
+            if (isAll || bots.size() > 1) {
+                ChatUtils.sendSystemMessage(source,
+                        summary + " sunset home preference LAST_BED enabled for " + enabledCount + "/" + bots.size() + ".");
+            } else if (bots.size() == 1) {
+                boolean on = BotHomeService.isAutoReturnPreferLastBedAtSunset(bots.getFirst());
+                ChatUtils.sendSystemMessage(source,
+                        summary + " sunset home preference is now " + (on ? "LAST_BED" : "DEFAULT") + ".");
+            }
+        }
+        return successes;
+    }
+
+    static int executeIdleHobbiesSetTargets(CommandContext<ServerCommandSource> context,
+                                            String targetArg,
+                                            boolean enabled) throws CommandSyntaxException {
+        ServerCommandSource source = context.getSource();
+        List<ServerPlayerEntity> bots = resolveTargetBots(context, targetArg);
+        boolean isAll = targetArg != null && "all".equalsIgnoreCase(targetArg.trim());
+
+        int successes = 0;
+        for (ServerPlayerEntity bot : bots) {
+            if (bot == null) {
+                continue;
+            }
+            if (BotHomeService.setIdleHobbiesEnabled(bot, enabled)) {
+                successes++;
+
+                // If enabling, allow the scheduler to act immediately (useful after a recent command snoozed it).
+                if (enabled) {
+                    BotIdleHobbiesService.requestDecisionNow(bot);
+                }
+            }
+        }
+
+        if (!bots.isEmpty()) {
+            String summary = formatBotList(bots, isAll);
+            ChatUtils.sendSystemMessage(source,
+                    summary + " idle hobbies " + (enabled ? "enabled" : "disabled") + ".");
+        }
+        return successes;
+    }
+
+    static int executeIdleHobbiesSetAndIdleTargets(CommandContext<ServerCommandSource> context,
+                                                  String targetArg,
+                                                  boolean enabled) throws CommandSyntaxException {
+        ServerCommandSource source = context.getSource();
+        List<ServerPlayerEntity> bots = resolveTargetBots(context, targetArg);
+        boolean isAll = targetArg != null && "all".equalsIgnoreCase(targetArg.trim());
+
+        int successes = 0;
+        int idled = 0;
+        for (ServerPlayerEntity bot : bots) {
+            if (bot == null) {
+                continue;
+            }
+            if (!BotHomeService.setIdleHobbiesEnabled(bot, enabled)) {
+                continue;
+            }
+            successes++;
+
+            if (!enabled) {
+                continue;
+            }
+
+            // Don't override command/system tasks.
+            try {
+                var active = TaskService.getActiveTaskInfo(bot.getUuid());
+                if (active.isPresent() && active.get().origin() != TaskService.Origin.AMBIENT) {
+                    continue;
+                }
+                // If an ambient hobby is running, stop it so the bot can restart immediately.
+                if (active.isPresent() && active.get().origin() == TaskService.Origin.AMBIENT) {
+                    TaskService.forceAbort(bot.getUuid(), "§cInterrupted by /bot idle_hobbies on_and_idle.");
+                }
+            } catch (Throwable ignored) {
+            }
+
+            BotEventHandler.setIdleMode(bot, true);
+            BotIdleHobbiesService.requestDecisionNow(bot);
+            idled++;
+        }
+
+        if (!bots.isEmpty()) {
+            String summary = formatBotList(bots, isAll);
+            if (enabled) {
+                ChatUtils.sendSystemMessage(source, summary + " idle hobbies enabled (and idling now) for " + idled + "/" + bots.size() + ".");
+            } else {
+                ChatUtils.sendSystemMessage(source, summary + " idle hobbies disabled.");
+            }
+        }
+        return successes;
+    }
+
+    static int executeIdleHobbiesToggleTargets(CommandContext<ServerCommandSource> context,
+                                               String targetArg) throws CommandSyntaxException {
+        ServerCommandSource source = context.getSource();
+        List<ServerPlayerEntity> bots = resolveTargetBots(context, targetArg);
+        boolean isAll = targetArg != null && "all".equalsIgnoreCase(targetArg.trim());
+
+        int successes = 0;
+        int enabledCount = 0;
+        for (ServerPlayerEntity bot : bots) {
+            if (bot == null) {
+                continue;
+            }
+            if (!BotHomeService.toggleIdleHobbiesEnabled(bot)) {
+                continue;
+            }
+            successes++;
+            if (BotHomeService.isIdleHobbiesEnabled(bot)) {
+                enabledCount++;
+                BotIdleHobbiesService.requestDecisionNow(bot);
+            }
+        }
+
+        if (!bots.isEmpty()) {
+            String summary = formatBotList(bots, isAll);
+            if (isAll || bots.size() > 1) {
+                ChatUtils.sendSystemMessage(source,
+                        summary + " idle hobbies enabled for " + enabledCount + "/" + bots.size() + ".");
+            } else if (bots.size() == 1) {
+                boolean on = BotHomeService.isIdleHobbiesEnabled(bots.getFirst());
+                ChatUtils.sendSystemMessage(source,
+                        summary + " idle hobbies are now " + (on ? "ON" : "OFF") + ".");
+            }
+        }
+        return successes;
+    }
+
+    static int executeIdleHobbiesToggleAndIdleTargets(CommandContext<ServerCommandSource> context,
+                                                      String targetArg) throws CommandSyntaxException {
+        ServerCommandSource source = context.getSource();
+        List<ServerPlayerEntity> bots = resolveTargetBots(context, targetArg);
+        boolean isAll = targetArg != null && "all".equalsIgnoreCase(targetArg.trim());
+
+        int successes = 0;
+        int enabledCount = 0;
+        int idled = 0;
+
+        for (ServerPlayerEntity bot : bots) {
+            if (bot == null) {
+                continue;
+            }
+            if (!BotHomeService.toggleIdleHobbiesEnabled(bot)) {
+                continue;
+            }
+            successes++;
+
+            boolean enabled = BotHomeService.isIdleHobbiesEnabled(bot);
+            if (!enabled) {
+                continue;
+            }
+
+            enabledCount++;
+
+            // Don't override command/system tasks.
+            try {
+                var active = TaskService.getActiveTaskInfo(bot.getUuid());
+                if (active.isPresent() && active.get().origin() != TaskService.Origin.AMBIENT) {
+                    continue;
+                }
+                if (active.isPresent() && active.get().origin() == TaskService.Origin.AMBIENT) {
+                    TaskService.forceAbort(bot.getUuid(), "§cInterrupted by /bot idle_hobbies toggle_and_idle.");
+                }
+            } catch (Throwable ignored) {
+            }
+
+            BotEventHandler.setIdleMode(bot, true);
+            BotIdleHobbiesService.requestDecisionNow(bot);
+            idled++;
+        }
+
+        if (!bots.isEmpty()) {
+            String summary = formatBotList(bots, isAll);
+            if (isAll || bots.size() > 1) {
+                ChatUtils.sendSystemMessage(source,
+                        summary + " idle hobbies enabled for " + enabledCount + "/" + bots.size() + "; idling now for " + idled + "/" + bots.size() + ".");
+            } else if (bots.size() == 1) {
+                boolean on = BotHomeService.isIdleHobbiesEnabled(bots.getFirst());
+                ChatUtils.sendSystemMessage(source,
+                        summary + " idle hobbies are now " + (on ? "ON (idling now)" : "OFF") + ".");
+            }
+        }
+
+        return successes;
+    }
+
+    static int executeIdleNowTargets(CommandContext<ServerCommandSource> context,
+                                    String targetArg) throws CommandSyntaxException {
+        ServerCommandSource source = context.getSource();
+        List<ServerPlayerEntity> bots = resolveTargetBots(context, targetArg);
+        boolean isAll = targetArg != null && "all".equalsIgnoreCase(targetArg.trim());
+
+        int successes = 0;
+        for (ServerPlayerEntity bot : bots) {
+            if (bot == null) {
+                continue;
+            }
+            rememberTarget(source, bot);
+
+            // If an ambient hobby is running, stop it (we're explicitly changing behavior).
+            // If a command/system task is running, do not override it.
+            try {
+                TaskService.getActiveTaskInfo(bot.getUuid()).ifPresent(info -> {
+                    if (info.origin() == TaskService.Origin.AMBIENT) {
+                        TaskService.forceAbort(bot.getUuid(), "§cInterrupted by /bot idle_now.");
+                    }
+                });
+                var active = TaskService.getActiveTaskInfo(bot.getUuid());
+                if (active.isPresent() && active.get().origin() != TaskService.Origin.AMBIENT) {
+                    if (bots.size() == 1) {
+                        ChatUtils.sendSystemMessage(source, bot.getName().getString() + " is busy.");
+                    } else {
+                        ChatUtils.sendSystemMessage(source, bot.getName().getString() + " is busy; skipping.");
+                    }
+                    continue;
+                }
+            } catch (Throwable ignored) {
+            }
+
+            if (bots.size() == 1) {
+                String result = BotEventHandler.setIdleMode(bot);
+                ChatUtils.sendSystemMessage(source, result);
+            } else {
+                BotEventHandler.setIdleMode(bot, true);
+            }
+
+            // If idle hobbies are enabled, try to start one immediately.
+            if (BotHomeService.isIdleHobbiesEnabled(bot)) {
+                BotIdleHobbiesService.requestDecisionNow(bot);
+            }
+
+            successes++;
+        }
+
+        if (!bots.isEmpty() && (isAll || bots.size() > 1)) {
+            String summary = formatBotList(bots, isAll);
+            ChatUtils.sendSystemMessage(source, summary + " told to idle now (" + successes + "/" + bots.size() + ").");
+        }
+        return successes;
+    }
+
+    static int executeBaseSet(CommandContext<ServerCommandSource> context, String label) throws CommandSyntaxException {
+        if (label == null || label.isBlank()) {
+            throw new SimpleCommandExceptionType(Text.literal("Provide a base label."))
+                    .create();
+        }
+        ServerCommandSource source = context.getSource();
+        ServerPlayerEntity commander = source.getPlayer();
+        if (commander == null) {
+            throw new SimpleCommandExceptionType(Text.literal("Only players can set a base location."))
+                    .create();
+        }
+        ServerWorld world = source.getWorld();
+        if (world.getRegistryKey() != World.OVERWORLD) {
+            ChatUtils.sendSystemMessage(source, "Bases can only be saved in the Overworld.");
+            return 0;
+        }
+        boolean ok = BotHomeService.addBase(source.getServer(), world, label, commander.getBlockPos().toImmutable());
+        if (ok) {
+            ChatUtils.sendSystemMessage(source, "Saved base '" + label + "' at " + commander.getBlockPos().toShortString() + ".");
+            return 1;
+        }
+        ChatUtils.sendSystemMessage(source, "Failed to save base.");
+        return 0;
+    }
+
+    static int executeBaseRemove(CommandContext<ServerCommandSource> context, String label) {
+        if (label == null || label.isBlank()) {
+            ChatUtils.sendSystemMessage(context.getSource(), "Provide a base label to remove.");
+            return 0;
+        }
+        ServerCommandSource source = context.getSource();
+        ServerWorld world = source.getWorld();
+        if (world.getRegistryKey() != World.OVERWORLD) {
+            ChatUtils.sendSystemMessage(source, "Bases are only managed in the Overworld.");
+            return 0;
+        }
+        boolean removed = BotHomeService.removeBase(source.getServer(), world, label);
+        ChatUtils.sendSystemMessage(source, removed ? "Removed base '" + label + "'." : "No base named '" + label + "' found.");
+        return removed ? 1 : 0;
+    }
+
+    static int executeBaseRename(CommandContext<ServerCommandSource> context, String oldLabel, String newLabel) {
+        if (oldLabel == null || oldLabel.isBlank() || newLabel == null || newLabel.isBlank()) {
+            ChatUtils.sendSystemMessage(context.getSource(), "Usage: /bot base rename <old_label> <new_label>");
+            return 0;
+        }
+        ServerCommandSource source = context.getSource();
+        ServerWorld world = source.getWorld();
+        if (world.getRegistryKey() != World.OVERWORLD) {
+            ChatUtils.sendSystemMessage(source, "Bases are only managed in the Overworld.");
+            return 0;
+        }
+
+        boolean ok = BotHomeService.renameBase(source.getServer(), world, oldLabel, newLabel);
+        if (ok) {
+            ChatUtils.sendSystemMessage(source, "Renamed base '" + oldLabel + "' -> '" + newLabel + "'.");
+            return 1;
+        }
+        ChatUtils.sendSystemMessage(source, "Rename failed (does the old base exist? is the new name already used?).");
+        return 0;
+    }
+
+    static int executeBaseList(CommandContext<ServerCommandSource> context) {
+        ServerCommandSource source = context.getSource();
+        ServerWorld world = source.getWorld();
+        if (world.getRegistryKey() != World.OVERWORLD) {
+            ChatUtils.sendSystemMessage(source, "Bases are only managed in the Overworld.");
+            return 0;
+        }
+
+        List<BotHomeService.BaseEntry> bases = BotHomeService.listBases(source.getServer(), world);
+        List<String> lines = new ArrayList<>();
+        for (BotHomeService.BaseEntry base : bases) {
+            if (base == null || base.pos() == null) {
+                continue;
+            }
+            lines.add(base.label() + " @ " + base.pos().toShortString());
+        }
+        sendPaged(source, "Saved bases:", lines);
+        return bases.size();
     }
 
     static int executeDirectionReset(CommandContext<ServerCommandSource> context, String targetArg) throws CommandSyntaxException {
@@ -2977,6 +3648,46 @@ public class modCommandRegistry {
             String summary = formatBotList(bots, isAll);
             String verb = (isAll || bots.size() > 1) ? "have" : "has";
             ChatUtils.sendSystemMessage(context.getSource(), summary + " " + verb + " stopped following.");
+        }
+        return successes;
+    }
+
+    static int executeFollowToggleTargets(CommandContext<ServerCommandSource> context,
+                                          String targetArg,
+                                          ServerPlayerEntity followTarget) throws CommandSyntaxException {
+        if (followTarget == null) {
+            throw new SimpleCommandExceptionType(Text.literal("Specify a player for the bots to follow.")).create();
+        }
+        List<ServerPlayerEntity> bots = BotTargetingService.resolve(context.getSource(), targetArg);
+        boolean isAll = targetArg != null && "all".equalsIgnoreCase(targetArg.trim());
+
+        int successes = 0;
+        int turnedOn = 0;
+        for (ServerPlayerEntity bot : bots) {
+            if (bot == null) {
+                continue;
+            }
+            interruptAmbientHobbyIfAny(bot, "§cInterrupted by /bot follow toggle.");
+            boolean isFollowingTarget = BotEventHandler.getCurrentMode(bot) == BotEventHandler.Mode.FOLLOW
+                    && followTarget.getUuid().equals(BotEventHandler.getFollowTargetUuid(bot));
+            if (isFollowingTarget) {
+                BotEventHandler.stopFollowing(bot);
+            } else {
+                BotEventHandler.setFollowMode(bot, followTarget);
+                turnedOn++;
+            }
+            successes++;
+        }
+
+        if (!bots.isEmpty()) {
+            String summary = formatBotList(bots, isAll);
+            if (isAll || bots.size() > 1) {
+                ChatUtils.sendSystemMessage(context.getSource(), summary + " now following " + followTarget.getName().getString()
+                        + " for " + turnedOn + "/" + bots.size() + " (others stopped)." );
+            } else {
+                boolean on = turnedOn > 0;
+                ChatUtils.sendSystemMessage(context.getSource(), summary + " follow is now " + (on ? "ON" : "OFF") + ".");
+            }
         }
         return successes;
     }
@@ -3620,7 +4331,7 @@ public class modCommandRegistry {
         ServerCommandSource source = context.getSource();
         ServerPlayerEntity player = source.getPlayerOrThrow();
         ServerWorld world = source.getWorld();
-        boolean isAdmin = source.hasPermissionLevel(2);
+        boolean isAdmin = AIPlayer.isOperator(source);
         
         boolean success = ProtectedZoneService.removeZone(world, label, player, isAdmin);
         if (!success) {
@@ -3652,4 +4363,19 @@ public class modCommandRegistry {
         
         return 1;
     }
+
+            private static void interruptAmbientHobbyIfAny(ServerPlayerEntity bot, String reason) {
+                if (bot == null) {
+                    return;
+                }
+                try {
+                    TaskService.getActiveTaskInfo(bot.getUuid()).ifPresent(info -> {
+                        if (info.origin() == TaskService.Origin.AMBIENT) {
+                            TaskService.forceAbort(bot.getUuid(), reason);
+                        }
+                    });
+                } catch (Throwable ignored) {
+                    // Best-effort; command execution should not fail if task system is unavailable.
+                }
+            }
 }

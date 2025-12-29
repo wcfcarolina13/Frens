@@ -10,6 +10,7 @@ import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Vec3d;
 import net.shasankp000.GameAI.BotActions;
+import net.shasankp000.GameAI.services.DropSweepService;
 import net.shasankp000.GameAI.services.MovementService;
 import net.shasankp000.GameAI.skills.SkillPreferences;
 import net.shasankp000.Entity.LookController;
@@ -84,6 +85,10 @@ public final class DropSweeper {
         Set<ItemEntity> excludedDrops = new HashSet<>();
 
         while (attempts < maxTargets && System.currentTimeMillis() <= deadline) {
+            if (DropSweepService.shouldAbort(player)) {
+                LOGGER.info("Drop sweep aborted after {} attempt(s).", attempts);
+                break;
+            }
             ItemEntity targetDrop = findClosestDrop(player, world, horizontalRadius, verticalRange, excludedDrops);
             if (targetDrop == null) {
                 LOGGER.debug("Drop sweep finished: no drops within radius {}.", horizontalRadius);

@@ -526,9 +526,13 @@ public final class BotActions {
                 return false;
             }
             if (!world.getBlockState(target).isAir() && world.getFluidState(target).isEmpty()) {
-                // Allow replacing snow layers/blocks to avoid placement failures
+                // Allow replacing certain "clutter" blocks to avoid placement failures.
+                // (E.g., grass/flowers/snow layers that occupy the cell but should not block building.)
                 net.minecraft.block.BlockState state = world.getBlockState(target);
-                if (!state.isOf(net.minecraft.block.Blocks.SNOW) && !state.isOf(net.minecraft.block.Blocks.SNOW_BLOCK)) {
+                boolean allowReplace = state.isOf(net.minecraft.block.Blocks.SNOW)
+                        || state.isOf(net.minecraft.block.Blocks.SNOW_BLOCK)
+                        || (state.isReplaceable() && state.getCollisionShape(world, target).isEmpty());
+                if (!allowReplace) {
                     return false;
                 }
                 world.breakBlock(target, false);

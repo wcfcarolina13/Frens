@@ -112,10 +112,10 @@ public class BotControlScreen extends Screen {
         autoSpawn.setTooltip(Tooltip.of(Text.of("Automatically spawn this bot at login using the saved location.")));
         this.addDrawableChild(autoSpawn);
 
-        CyclingButtonWidget<String> spawnMode = CyclingButtonWidget.<String>builder(value ->
-                        Text.of("play".equals(value) ? "Play" : "Training"))
+        CyclingButtonWidget<String> spawnMode = CyclingButtonWidget.<String>builder(
+                        value -> Text.of("play".equals(value) ? "Play" : "Training"),
+                        () -> settings.getSpawnMode())
                 .values("training", "play")
-                .initially(settings.getSpawnMode())
                 .build(0, 0, buttonWidth, 20, Text.of("Mode"), (button, value) -> {});
         spawnMode.setTooltip(Tooltip.of(Text.of("Training keeps the bot sandboxed. Play enables full AI behaviors.")));
         this.addDrawableChild(spawnMode);

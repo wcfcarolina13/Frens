@@ -66,3 +66,7 @@ ai_search_config.json
 .env.*
 # Ignore local gemini helper directory
 .gemini/
+
+# Python venv
+**/venv/
+**/__pycache__/

@@ -17,6 +17,7 @@ import net.minecraft.server.network.ServerPlayerEntity;
 import net.shasankp000.AIPlayer;
 import net.shasankp000.GameAI.BotEventHandler;
 import net.shasankp000.GameAI.services.BotCommandStateService;
+import net.shasankp000.GameAI.services.BotHomeService;
 import net.shasankp000.GameAI.services.BotInventoryStorageService;
 
 /**
@@ -56,7 +57,8 @@ public class BotPlayerInventoryScreenHandler extends ScreenHandler {
         this.playerInventory = playerInventory;
         this.botInventory = botInventory;
         this.botRef = botRef;
-        this.botStats = new ArrayPropertyDelegate(10);
+        // Keep this in sync with refreshStats() + getters below.
+        this.botStats = new ArrayPropertyDelegate(13);
         this.addProperties(this.botStats);
         refreshStats();
 
@@ -101,7 +103,7 @@ public class BotPlayerInventoryScreenHandler extends ScreenHandler {
     @Override
     public boolean canUse(PlayerEntity player) {
         if (botRef == null) return true;
-        if (player instanceof ServerPlayerEntity serverPlayer && serverPlayer.hasPermissionLevel(2)) {
+        if (player instanceof ServerPlayerEntity serverPlayer && AIPlayer.isOperator(serverPlayer)) {
             return true;
         }
         return player.getEntityWorld() == botRef.getEntityWorld() && player.squaredDistanceTo(botRef) <= 64.0;
@@ -220,6 +222,12 @@ public class BotPlayerInventoryScreenHandler extends ScreenHandler {
         botStats.set(8, mode == BotEventHandler.Mode.PATROL ? 1 : 0);
         double followDistance = state != null ? state.followStandoffRange : 0.0D;
         botStats.set(9, (int) Math.round(Math.max(0.0D, followDistance) * 10.0D));
+
+        botStats.set(10, BotHomeService.isAutoReturnAtSunset(botRef) ? 1 : 0);
+
+        // Additional per-bot automation toggles (used by Topics UI).
+        botStats.set(11, BotHomeService.isIdleHobbiesEnabled(botRef) ? 1 : 0);
+        botStats.set(12, BotHomeService.isAutoReturnGuardPatrolEligible(botRef) ? 1 : 0);
     }
 
     public float getBotHealth() {
@@ -256,6 +264,18 @@ public class BotPlayerInventoryScreenHandler extends ScreenHandler {
 
     public boolean isBotPatrolling() {
         return botStats.get(8) != 0;
+    }
+
+    public boolean isBotAutoReturnAtSunset() {
+        return botStats.get(10) != 0;
+    }
+
+    public boolean isBotIdleHobbiesEnabled() {
+        return botStats.get(11) != 0;
+    }
+
+    public boolean isBotAutoReturnGuardPatrolEligible() {
+        return botStats.get(12) != 0;
     }
 
     public double getBotFollowDistance() {

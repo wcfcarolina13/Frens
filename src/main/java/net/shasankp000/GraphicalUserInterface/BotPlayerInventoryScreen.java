@@ -5,6 +5,7 @@ import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.ingame.HandledScreen;
 import net.minecraft.client.gui.screen.ingame.InventoryScreen;
 import net.minecraft.client.gl.RenderPipelines;
+import net.minecraft.client.input.KeyInput;
 import net.minecraft.client.network.AbstractClientPlayerEntity;
 import net.minecraft.client.network.OtherClientPlayerEntity;
 import net.minecraft.entity.LivingEntity;
@@ -37,11 +38,34 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
     private float lastMouseX;
     private float lastMouseY;
     private int topicScrollIndex;
+    private boolean topicsExpanded;
+
+    private static final int TOPICS_OVERLAY_MAX_WIDTH = 240;
+    private static final int TOPICS_OVERLAY_MAX_HEIGHT = 220;
+    private static final int TOPICS_OVERLAY_MIN_WIDTH = 190;
+    private static final int TOPICS_OVERLAY_MIN_HEIGHT = 140;
+    private static final int TOPICS_OVERLAY_PADDING = 10;
+    private static final int TOPICS_OVERLAY_HEADER_PAD = 6;
+    private static final int TOPICS_OVERLAY_FOOTER_PAD = 6;
+
+    private record Rect(int x, int y, int w, int h) {
+        int right() { return x + w; }
+        int bottom() { return y + h; }
+        boolean contains(double px, double py) {
+            return px >= x && px < x + w && py >= y && py < y + h;
+        }
+    }
 
     private enum TopicAction {
         FOLLOW,
         GUARD,
         PATROL,
+        RETURN_HOME,
+        SLEEP,
+        AUTO_RETURN_SUNSET,
+        AUTO_RETURN_SUNSET_GUARD_PATROL,
+        IDLE_HOBBIES,
+        BASES,
         SKILL_FISH,
         SKILL_WOODCUT,
         SKILL_MINING,
@@ -68,6 +92,12 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             new TopicEntry("Follow", TopicAction.FOLLOW, true, 0),
             new TopicEntry("Guard", TopicAction.GUARD, true, 0),
             new TopicEntry("Patrol", TopicAction.PATROL, true, 0),
+            new TopicEntry("Return Home", TopicAction.RETURN_HOME, false, 0),
+            new TopicEntry("Sleep", TopicAction.SLEEP, false, 0),
+            new TopicEntry("Auto Home @ Sunset", TopicAction.AUTO_RETURN_SUNSET, true, 0),
+            new TopicEntry("Guard/Patrol eligible", TopicAction.AUTO_RETURN_SUNSET_GUARD_PATROL, true, 1),
+            new TopicEntry("Idle Hobbies", TopicAction.IDLE_HOBBIES, true, 0),
+            new TopicEntry("Bases…", TopicAction.BASES, false, 0),
             new TopicEntry("Fishing", TopicAction.SKILL_FISH, false, 0),
             new TopicEntry("Woodcut", TopicAction.SKILL_WOODCUT, false, 0),
             new TopicEntry("Mining", TopicAction.SKILL_MINING, false, 0),
@@ -140,7 +170,12 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         int panelHeight = STATS_AREA_HEIGHT - 4;
         context.fill(panelX, panelY, panelX + panelWidth, panelY + panelHeight, 0xC0101010);
 
-        context.drawText(this.textRenderer, "Topics", panelX + TOPIC_PADDING, panelY + 2, 0xFFE6D7A3, false);
+        boolean headerHover = isMouseOverTopicsHeader(mouseX, mouseY);
+        int headerColor = headerHover || topicsExpanded ? 0xFFFFE08A : 0xFFE6D7A3;
+        context.drawText(this.textRenderer, "Topics", panelX + TOPIC_PADDING, panelY + 2, headerColor, false);
+        String openLabel = topicsExpanded ? "Close" : "Open";
+        int openX = panelX + panelWidth - TOPIC_PADDING - this.textRenderer.getWidth(openLabel);
+        context.drawText(this.textRenderer, openLabel, openX, panelY + 2, headerColor, false);
         int rowX = panelX + TOPIC_PADDING;
         int rowY = panelY + 2 + this.textRenderer.fontHeight + 1;
         int rowW = panelWidth - TOPIC_PADDING * 2;
@@ -162,6 +197,202 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
                 drawTopicRow(context, rowX, currentY, rowW, entry, active, mouseX, mouseY);
             }
         }
+    }
+
+    private Rect computeTopicsOverlayRect() {
+        int w = MathHelper.clamp(getTopicPanelWidth() + 40, TOPICS_OVERLAY_MIN_WIDTH, TOPICS_OVERLAY_MAX_WIDTH);
+        int h = MathHelper.clamp(SECTION_HEIGHT + 8, TOPICS_OVERLAY_MIN_HEIGHT, TOPICS_OVERLAY_MAX_HEIGHT);
+
+        // Anchor near the existing Topics panel (bottom-right of the shared inventory).
+        int anchorRight = getTopicPanelX() + getTopicPanelWidth();
+        int x = anchorRight - w;
+        int y = getTopicPanelY() - h - 6;
+
+        // Clamp within screen.
+        x = MathHelper.clamp(x, 12, Math.max(12, this.width - w - 12));
+        y = MathHelper.clamp(y, 12, Math.max(12, this.height - h - 12));
+        return new Rect(x, y, w, h);
+    }
+
+    private boolean isMouseOverTopicsHeader(double mouseX, double mouseY) {
+        int panelX = getTopicPanelX();
+        int panelY = getTopicPanelY();
+        int panelW = getTopicPanelWidth();
+        int headerH = this.textRenderer.fontHeight + 4;
+        return mouseX >= panelX && mouseX < panelX + panelW
+                && mouseY >= panelY && mouseY < panelY + headerH;
+    }
+
+    private boolean isMouseOverTopicsOverlay(double mouseX, double mouseY) {
+        if (!topicsExpanded) return false;
+        return computeTopicsOverlayRect().contains(mouseX, mouseY);
+    }
+
+    private void drawTopicsOverlay(DrawContext context, int mouseX, int mouseY) {
+        Rect r = computeTopicsOverlayRect();
+        int border = 0xFF000000;
+        int fill = 0xEE101010;
+
+        // Panel background + border.
+        context.fill(r.x, r.y, r.right(), r.bottom(), fill);
+        context.fill(r.x, r.y, r.right(), r.y + 1, border);
+        context.fill(r.x, r.bottom() - 1, r.right(), r.bottom(), border);
+        context.fill(r.x, r.y, r.x + 1, r.bottom(), border);
+        context.fill(r.right() - 1, r.y, r.right(), r.bottom(), border);
+
+        // Header.
+        int headerH = this.textRenderer.fontHeight + TOPICS_OVERLAY_HEADER_PAD * 2;
+        context.fill(r.x + 1, r.y + 1, r.right() - 1, r.y + headerH, 0xFF161616);
+        context.drawText(this.textRenderer, "Topics", r.x + TOPICS_OVERLAY_PADDING, r.y + TOPICS_OVERLAY_HEADER_PAD + 1, 0xFFFFE08A, false);
+
+        // Close box (top-right).
+        String closeLabel = "X";
+        int closeSize = 12;
+        int closeX = r.right() - TOPICS_OVERLAY_PADDING - closeSize;
+        int closeY = r.y + (headerH - closeSize) / 2;
+        boolean closeHover = mouseX >= closeX && mouseX < closeX + closeSize && mouseY >= closeY && mouseY < closeY + closeSize;
+        context.fill(closeX, closeY, closeX + closeSize, closeY + closeSize, closeHover ? 0xFF2A2A2A : 0xFF1A1A1A);
+        int closeTextX = closeX + (closeSize - this.textRenderer.getWidth(closeLabel)) / 2;
+        context.drawText(this.textRenderer, closeLabel, closeTextX, closeY + 2, 0xFFEFEFEF, false);
+
+        // Footer hint.
+        String hint = "Scroll, click a topic; Esc closes";
+        int footerH = this.textRenderer.fontHeight + TOPICS_OVERLAY_FOOTER_PAD * 2;
+        int footerY = r.bottom() - footerH;
+        context.fill(r.x + 1, footerY, r.right() - 1, r.bottom() - 1, 0xFF161616);
+        context.drawText(this.textRenderer, hint, r.x + TOPICS_OVERLAY_PADDING, footerY + TOPICS_OVERLAY_FOOTER_PAD, 0xFFB0B0B0, false);
+
+        // List region.
+        int listX = r.x + TOPICS_OVERLAY_PADDING;
+        int listY = r.y + headerH + 2;
+        int listW = r.w - TOPICS_OVERLAY_PADDING * 2;
+        int listH = (footerY - 2) - listY;
+        int visibleRows = Math.max(1, listH / TOPIC_ROW_HEIGHT);
+        clampTopicScroll(visibleRows);
+
+        // Clip to list area.
+        context.enableScissor(listX, listY, listX + listW, listY + listH);
+        for (int i = 0; i < visibleRows; i++) {
+            int entryIndex = topicScrollIndex + i;
+            if (entryIndex >= TOPIC_ENTRIES.size()) break;
+            TopicEntry entry = TOPIC_ENTRIES.get(entryIndex);
+            int rowY = listY + i * TOPIC_ROW_HEIGHT;
+            if (entry.action == TopicAction.FOLLOW) {
+                drawFollowRow(context, listX, rowY, listW, mouseX, mouseY);
+            } else {
+                boolean active = isEntryActive(entry.action);
+                drawTopicRow(context, listX, rowY, listW, entry, active, mouseX, mouseY);
+            }
+        }
+        context.disableScissor();
+    }
+
+    private void toggleTopicsExpanded(boolean open) {
+        this.topicsExpanded = open;
+        if (!open) {
+            return;
+        }
+        // Ensure the scroll is valid for the (larger) overlay view.
+        Rect r = computeTopicsOverlayRect();
+        int headerH = this.textRenderer.fontHeight + TOPICS_OVERLAY_HEADER_PAD * 2;
+        int footerH = this.textRenderer.fontHeight + TOPICS_OVERLAY_FOOTER_PAD * 2;
+        int listY = r.y + headerH + 2;
+        int listH = (r.bottom() - footerH - 2) - listY;
+        int visibleRows = Math.max(1, listH / TOPIC_ROW_HEIGHT);
+        clampTopicScroll(visibleRows);
+    }
+
+    private boolean clickTopicsOverlay(double mouseX, double mouseY) {
+        Rect r = computeTopicsOverlayRect();
+        if (!r.contains(mouseX, mouseY)) {
+            toggleTopicsExpanded(false);
+            return true;
+        }
+
+        int headerH = this.textRenderer.fontHeight + TOPICS_OVERLAY_HEADER_PAD * 2;
+        int closeSize = 12;
+        int closeX = r.right() - TOPICS_OVERLAY_PADDING - closeSize;
+        int closeY = r.y + (headerH - closeSize) / 2;
+        if (mouseX >= closeX && mouseX < closeX + closeSize && mouseY >= closeY && mouseY < closeY + closeSize) {
+            toggleTopicsExpanded(false);
+            return true;
+        }
+
+        // Follow +/- controls.
+        int adjust = getFollowAdjustDirectionInOverlay(mouseX, mouseY);
+        if (adjust != 0) {
+            adjustFollowDistance(adjust);
+            return true;
+        }
+
+        TopicEntry entry = getTopicEntryAtOverlay(mouseX, mouseY);
+        if (entry != null) {
+            handleTopicEntry(entry);
+            return true;
+        }
+        return true;
+    }
+
+    private TopicEntry getTopicEntryAtOverlay(double mouseX, double mouseY) {
+        Rect r = computeTopicsOverlayRect();
+        int headerH = this.textRenderer.fontHeight + TOPICS_OVERLAY_HEADER_PAD * 2;
+        int footerH = this.textRenderer.fontHeight + TOPICS_OVERLAY_FOOTER_PAD * 2;
+
+        int listX = r.x + TOPICS_OVERLAY_PADDING;
+        int listY = r.y + headerH + 2;
+        int listW = r.w - TOPICS_OVERLAY_PADDING * 2;
+        int listH = (r.bottom() - footerH - 2) - listY;
+        int visibleRows = Math.max(1, listH / TOPIC_ROW_HEIGHT);
+        clampTopicScroll(visibleRows);
+
+        if (mouseX < listX || mouseX >= listX + listW || mouseY < listY || mouseY >= listY + listH) {
+            return null;
+        }
+        int rowIndex = (int) ((mouseY - listY) / TOPIC_ROW_HEIGHT);
+        if (rowIndex < 0 || rowIndex >= visibleRows) {
+            return null;
+        }
+        int entryIndex = topicScrollIndex + rowIndex;
+        if (entryIndex < 0 || entryIndex >= TOPIC_ENTRIES.size()) {
+            return null;
+        }
+        return TOPIC_ENTRIES.get(entryIndex);
+    }
+
+    private int getFollowAdjustDirectionInOverlay(double mouseX, double mouseY) {
+        Rect r = computeTopicsOverlayRect();
+        int headerH = this.textRenderer.fontHeight + TOPICS_OVERLAY_HEADER_PAD * 2;
+        int footerH = this.textRenderer.fontHeight + TOPICS_OVERLAY_FOOTER_PAD * 2;
+
+        int listX = r.x + TOPICS_OVERLAY_PADDING;
+        int listY = r.y + headerH + 2;
+        int listW = r.w - TOPICS_OVERLAY_PADDING * 2;
+        int listH = (r.bottom() - footerH - 2) - listY;
+        int visibleRows = Math.max(1, listH / TOPIC_ROW_HEIGHT);
+        clampTopicScroll(visibleRows);
+
+        int followIndex = 0;
+        int visibleStart = topicScrollIndex;
+        int visibleEnd = topicScrollIndex + visibleRows;
+        if (followIndex < visibleStart || followIndex >= visibleEnd) {
+            return 0;
+        }
+
+        int rowY = listY + (followIndex - visibleStart) * TOPIC_ROW_HEIGHT;
+        int controlSize = TOPIC_ROW_HEIGHT - 2;
+        int controlY = rowY + 1;
+        int plusX = listX + listW - controlSize;
+        int minusX = plusX - TOPIC_CONTROL_GAP - controlSize;
+
+        if (mouseY >= controlY && mouseY < controlY + controlSize) {
+            if (mouseX >= plusX && mouseX < plusX + controlSize) {
+                return 1;
+            }
+            if (mouseX >= minusX && mouseX < minusX + controlSize) {
+                return -1;
+            }
+        }
+        return 0;
     }
 
     private void drawFollowRow(DrawContext context, int rowX, int rowY, int rowW, int mouseX, int mouseY) {
@@ -241,6 +472,14 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
 
     @Override
     public boolean mouseClicked(net.minecraft.client.gui.Click click, boolean isInside) {
+        if (topicsExpanded) {
+            return clickTopicsOverlay(click.x(), click.y());
+        }
+
+        if (isMouseOverTopicsHeader(click.x(), click.y())) {
+            toggleTopicsExpanded(true);
+            return true;
+        }
         int adjust = getFollowAdjustDirection(click.x(), click.y());
         if (adjust != 0) {
             adjustFollowDistance(adjust);
@@ -256,6 +495,23 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
 
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double horizontalAmount, double verticalAmount) {
+        if (topicsExpanded && isMouseOverTopicsOverlay(mouseX, mouseY)) {
+            Rect r = computeTopicsOverlayRect();
+            int headerH = this.textRenderer.fontHeight + TOPICS_OVERLAY_HEADER_PAD * 2;
+            int footerH = this.textRenderer.fontHeight + TOPICS_OVERLAY_FOOTER_PAD * 2;
+            int listY = r.y + headerH + 2;
+            int listH = (r.bottom() - footerH - 2) - listY;
+            int visibleRows = Math.max(1, listH / TOPIC_ROW_HEIGHT);
+            int maxScroll = Math.max(0, TOPIC_ENTRIES.size() - visibleRows);
+            if (maxScroll == 0) {
+                return true;
+            }
+            int delta = verticalAmount > 0 ? -1 : (verticalAmount < 0 ? 1 : 0);
+            if (delta != 0) {
+                topicScrollIndex = MathHelper.clamp(topicScrollIndex + delta, 0, maxScroll);
+            }
+            return true;
+        }
         if (isMouseOverTopicPanel(mouseX, mouseY)) {
             int listHeight = getTopicListHeight();
             int visibleRows = Math.max(1, listHeight / TOPIC_ROW_HEIGHT);
@@ -270,6 +526,15 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             }
         }
         return super.mouseScrolled(mouseX, mouseY, horizontalAmount, verticalAmount);
+    }
+
+    @Override
+    public boolean keyPressed(KeyInput input) {
+        if (input != null && topicsExpanded && input.key() == 256 /* ESC */) {
+            toggleTopicsExpanded(false);
+            return true;
+        }
+        return super.keyPressed(input);
     }
 
     private TopicEntry getTopicEntryAt(double mouseX, double mouseY) {
@@ -331,6 +596,12 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case FOLLOW -> toggleFollow();
             case GUARD -> toggleGuard();
             case PATROL -> togglePatrol();
+            case RETURN_HOME -> runReturnHome();
+            case SLEEP -> runSleep();
+            case AUTO_RETURN_SUNSET -> toggleAutoReturnSunset();
+            case AUTO_RETURN_SUNSET_GUARD_PATROL -> toggleAutoReturnSunsetGuardPatrol();
+            case IDLE_HOBBIES -> toggleIdleHobbies();
+            case BASES -> openBasesManager();
             case SKILL_FISH -> runSkillCommand("fish", null);
             case SKILL_WOODCUT -> runSkillCommand("woodcut", null);
             case SKILL_MINING -> runSkillCommand("mining", null);
@@ -345,8 +616,23 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case FOLLOW -> isFollowActive();
             case GUARD -> isGuardActive();
             case PATROL -> isPatrolActive();
+            case AUTO_RETURN_SUNSET -> isAutoReturnAtSunsetActive();
+            case AUTO_RETURN_SUNSET_GUARD_PATROL -> isAutoReturnGuardPatrolEligibleActive();
+            case IDLE_HOBBIES -> isIdleHobbiesActive();
             default -> false;
         };
+    }
+
+    private boolean isAutoReturnAtSunsetActive() {
+        return this.handler != null && this.handler.isBotAutoReturnAtSunset();
+    }
+
+    private boolean isIdleHobbiesActive() {
+        return this.handler != null && this.handler.isBotIdleHobbiesEnabled();
+    }
+
+    private boolean isAutoReturnGuardPatrolEligibleActive() {
+        return this.handler != null && this.handler.isBotAutoReturnGuardPatrolEligible();
     }
 
     private void runSkillCommand(String skillName, String action) {
@@ -455,6 +741,43 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         sendChatCommand(command);
     }
 
+    private void runReturnHome() {
+        String botTarget = formatBotTarget();
+        String command = "bot return " + botTarget;
+        sendChatCommand(command);
+    }
+
+    private void runSleep() {
+        String botTarget = formatBotTarget();
+        String command = "bot sleep " + botTarget;
+        sendChatCommand(command);
+    }
+
+    private void toggleAutoReturnSunset() {
+        String botTarget = formatBotTarget();
+        String command = "bot auto_return_sunset toggle " + botTarget;
+        sendChatCommand(command);
+    }
+
+    private void toggleAutoReturnSunsetGuardPatrol() {
+        String botTarget = formatBotTarget();
+        String command = "bot auto_return_sunset_guard_patrol toggle " + botTarget;
+        sendChatCommand(command);
+    }
+
+    private void toggleIdleHobbies() {
+        String botTarget = formatBotTarget();
+        String command = "bot idle_hobbies toggle " + botTarget;
+        sendChatCommand(command);
+    }
+
+    private void openBasesManager() {
+        if (this.client == null) {
+            return;
+        }
+        this.client.setScreen(new BaseManagerScreen(this));
+    }
+
     private void sendChatCommand(String command) {
         if (this.client == null || this.client.getNetworkHandler() == null) {
             return;
@@ -470,7 +793,12 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         this.renderBackground(context, mouseX, mouseY, delta);
         super.render(context, mouseX, mouseY, delta);
         this.drawEntities(context, mouseX, mouseY);
-        this.drawMouseoverTooltip(context, mouseX, mouseY);
+        if (topicsExpanded) {
+            drawTopicsOverlay(context, mouseX, mouseY);
+        }
+        if (!topicsExpanded || !isMouseOverTopicsOverlay(mouseX, mouseY)) {
+            this.drawMouseoverTooltip(context, mouseX, mouseY);
+        }
     }
 
     private void drawEntities(DrawContext context, int mouseX, int mouseY) {

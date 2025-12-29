@@ -65,13 +65,13 @@ public final class StripMineSkill implements Skill {
         if (resumeRequested && pausePos.isPresent()) {
             BlockPos resumeTarget = pausePos.get();
             LOGGER.info("Stripmine resuming - navigating back to pause position {}", resumeTarget.toShortString());
-            ChatUtils.sendChatMessages(source.withSilent().withMaxLevel(4), 
+            ChatUtils.sendChatMessages(source.withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS), 
                     "Returning to mining position...");
             
             // Navigate back to pause position
             if (!moveTo(source, player, resumeTarget)) {
                 LOGGER.warn("Failed to return to pause position {}", resumeTarget.toShortString());
-                ChatUtils.sendChatMessages(source.withSilent().withMaxLevel(4), 
+                ChatUtils.sendChatMessages(source.withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS), 
                         "Couldn't return to exact position, continuing from here.");
             }
             WorkDirectionService.clearPausePosition(player.getUuid());
@@ -97,13 +97,13 @@ public final class StripMineSkill implements Skill {
                 return SkillExecutionResult.failure("stripmine paused due to cancellation.");
             }
             detection.adjacentWarnings().forEach(hazard ->
-                    ChatUtils.sendChatMessages(player.getCommandSource().withSilent().withMaxLevel(4), hazard.chatMessage()));
+                    ChatUtils.sendChatMessages(player.getCommandSource().withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS), hazard.chatMessage()));
             if (detection.blockingHazard().isPresent()) {
                 Hazard hazard = detection.blockingHazard().get();
                 // Store current position for resume
                 WorkDirectionService.setPausePosition(player.getUuid(), player.getBlockPos());
                 SkillResumeService.flagManualResume(player);
-                ChatUtils.sendChatMessages(player.getCommandSource().withSilent().withMaxLevel(4), hazard.chatMessage());
+                ChatUtils.sendChatMessages(player.getCommandSource().withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS), hazard.chatMessage());
                 return SkillExecutionResult.failure(hazard.failureMessage());
             }
 
@@ -143,7 +143,7 @@ public final class StripMineSkill implements Skill {
                 TorchPlacer.PlacementResult torchResult = TorchPlacer.placeTorch(player, tunnelDirection);
                 if (torchResult == TorchPlacer.PlacementResult.NO_TORCHES) {
                     SkillResumeService.flagManualResume(player);
-                    ChatUtils.sendChatMessages(player.getCommandSource().withSilent().withMaxLevel(4), 
+                    ChatUtils.sendChatMessages(player.getCommandSource().withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS), 
                             "Ran out of torches!");
                     return SkillExecutionResult.failure("Stripmine paused: out of torches. Provide torches and /bot resume.");
                 }

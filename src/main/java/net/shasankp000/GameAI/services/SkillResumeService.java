@@ -67,7 +67,7 @@ public final class SkillResumeService {
 
         TaskService.forceAbort(bot.getUuid(), "§cSkill paused: bot died.");
 
-        ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withMaxLevel(4),
+        ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS),
                 "I died. Should I continue with the last job? (yes/no)");
         ChatUtils.sendSystemMessage(pending.source(),
                 pending.alias() + " died while running '" + pending.skillName() + "'. Reply with 'yes' or 'no' in chat.");

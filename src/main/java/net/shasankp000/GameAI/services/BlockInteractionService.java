@@ -1,6 +1,7 @@
 package net.shasankp000.GameAI.services;
 
 import net.minecraft.block.DoorBlock;
+import net.minecraft.block.FenceGateBlock;
 import net.minecraft.block.BlockState;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
@@ -40,6 +41,15 @@ public final class BlockInteractionService {
             return false;
         }
 
+        // Some small/replaceable blocks (short grass, flowers, etc.) have tiny outline/collision shapes.
+        // A strict "raycast must hit the target block" check can fail even when there is no obstruction.
+        // For these targets, treat an unobstructed MISS raycast as sufficient line-of-sight.
+        BlockState targetState = world.getBlockState(blockPos);
+        boolean lenientReplaceableTarget = targetState != null
+            && !targetState.isAir()
+            && targetState.isReplaceable()
+            && targetState.getCollisionShape(world, blockPos).isEmpty();
+
         // Doors are 2-block tall; raycasts commonly hit the upper half. Normalize to base so
         // "doorPos" checks remain stable regardless of which half is intersected.
         BlockPos desiredDoorBase = null;
@@ -49,12 +59,8 @@ public final class BlockInteractionService {
 
         Vec3d from = player.getEyePos();
         List<Vec3d> targets = desiredDoorBase != null
-                ? doorTargetPoints(desiredDoorBase)
-                : List.of(
-                        Vec3d.ofCenter(blockPos),
-                        Vec3d.ofCenter(blockPos).add(0, 0.35, 0),
-                        Vec3d.ofCenter(blockPos).add(0, 0.7, 0)
-                );
+            ? doorTargetPoints(desiredDoorBase)
+            : defaultTargetPoints(blockPos);
 
         for (Vec3d to : targets) {
             for (RaycastContext.ShapeType shape : List.of(RaycastContext.ShapeType.OUTLINE, RaycastContext.ShapeType.COLLIDER)) {
@@ -65,6 +71,9 @@ public final class BlockInteractionService {
                         RaycastContext.FluidHandling.NONE,
                         player
                 ));
+                if (lenientReplaceableTarget && hit.getType() == HitResult.Type.MISS) {
+                    return true;
+                }
                 if (hit.getType() == HitResult.Type.BLOCK
                         && hit instanceof BlockHitResult bhr) {
                     BlockPos hitPos = bhr.getBlockPos();
@@ -81,6 +90,28 @@ public final class BlockInteractionService {
             }
         }
         return false;
+    }
+
+    private static List<Vec3d> defaultTargetPoints(BlockPos pos) {
+        // Probe multiple points across the block volume to increase hit stability for small outline shapes.
+        // (E.g., short grass/flowers where the center ray can miss the voxel shape.)
+        double cx = pos.getX() + 0.5;
+        double cy = pos.getY();
+        double cz = pos.getZ() + 0.5;
+        double off = 0.28;
+        return List.of(
+                new Vec3d(cx, cy + 0.15, cz),
+                new Vec3d(cx + off, cy + 0.15, cz),
+                new Vec3d(cx - off, cy + 0.15, cz),
+                new Vec3d(cx, cy + 0.15, cz + off),
+                new Vec3d(cx, cy + 0.15, cz - off),
+                new Vec3d(cx, cy + 0.50, cz),
+                new Vec3d(cx + off, cy + 0.50, cz),
+                new Vec3d(cx - off, cy + 0.50, cz),
+                new Vec3d(cx, cy + 0.50, cz + off),
+                new Vec3d(cx, cy + 0.50, cz - off),
+                new Vec3d(cx, cy + 0.85, cz)
+        );
     }
 
     private static List<Vec3d> doorTargetPoints(BlockPos doorBase) {
@@ -139,7 +170,8 @@ public final class BlockInteractionService {
                 if (hitPos.equals(targetPos)) {
                     continue;
                 }
-                if (world.getBlockState(hitPos).getBlock() instanceof DoorBlock) {
+                var hitBlock = world.getBlockState(hitPos).getBlock();
+                if (hitBlock instanceof DoorBlock || hitBlock instanceof FenceGateBlock) {
                     return hitPos.toImmutable();
                 }
             }
@@ -175,7 +207,8 @@ public final class BlockInteractionService {
                 continue;
             }
             BlockPos hitPos = bhr.getBlockPos();
-            if (world.getBlockState(hitPos).getBlock() instanceof DoorBlock) {
+            var hitBlock = world.getBlockState(hitPos).getBlock();
+            if (hitBlock instanceof DoorBlock || hitBlock instanceof FenceGateBlock) {
                 return hitPos.toImmutable();
             }
         }

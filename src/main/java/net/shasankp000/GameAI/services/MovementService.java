@@ -2,7 +2,10 @@ package net.shasankp000.GameAI.services;
 
 import net.minecraft.fluid.FluidState;
 import net.minecraft.block.BlockState;
+import net.minecraft.block.Blocks;
 import net.minecraft.block.DoorBlock;
+import net.minecraft.block.FenceGateBlock;
+import net.minecraft.block.TrapdoorBlock;
 import net.minecraft.util.ActionResult;
 import net.minecraft.util.Hand;
 import net.minecraft.util.hit.BlockHitResult;
@@ -18,12 +21,14 @@ import net.minecraft.registry.tag.BlockTags;
 import net.minecraft.registry.tag.FluidTags;
 import net.shasankp000.GameAI.BotActions;
 import net.shasankp000.GameAI.skills.SkillPreferences;
+import net.shasankp000.Entity.AutoFaceEntity;
 import net.shasankp000.Entity.LookController;
 import net.shasankp000.PathFinding.GoTo;
 import net.shasankp000.PathFinding.PathFinder;
 import net.shasankp000.PathFinding.Segment;
 import net.shasankp000.PlayerUtils.MiningTool;
 import net.minecraft.item.ItemStack;
+import net.minecraft.state.property.Properties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -43,6 +48,7 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.function.Supplier;
 
 public final class MovementService {
 
@@ -64,8 +70,47 @@ public final class MovementService {
     private static final Map<UUID, Map<BlockPos, Long>> DOOR_DEBUG_COOLDOWN = new ConcurrentHashMap<>();
     private static final Map<UUID, Map<BlockPos, Long>> DOOR_IRON_WARN_COOLDOWN = new ConcurrentHashMap<>();
     private static final Map<UUID, Map<BlockPos, Long>> DOOR_RECENTLY_CLOSED_UNTIL = new ConcurrentHashMap<>();
+    
+    // Track doors that the bot has recently failed to traverse (oscillation prevention).
+    private static final Map<UUID, Map<BlockPos, Long>> DOOR_ESCAPE_FAILED = new ConcurrentHashMap<>();
+    private static final long DOOR_ESCAPE_FAIL_DURATION_MS = 30_000L;
+
+    // Prevent recursive “nudge -> assist -> nudge -> assist ...” loops.
+    private static final ThreadLocal<Integer> NUDGE_DEPTH = ThreadLocal.withInitial(() -> 0);
+
+    // When disabled, we suppress the "door subgoal" and "door escape" assists.
+    // This is useful for construction tasks where nearby unrelated doors can become distractions.
+    // NOTE: We still allow the simpler "open door directly ahead" and "traverse doorway" assists.
+    private static final ThreadLocal<Boolean> DOOR_ESCAPE_DISABLED = ThreadLocal.withInitial(() -> false);
+
+    private static final long OBSTRUCTION_MINE_COOLDOWN_MS = 4500L;
+    private static final Map<UUID, Map<BlockPos, Long>> OBSTRUCTION_MINE_COOLDOWN = new ConcurrentHashMap<>();
 
     private MovementService() {
+    }
+
+    public static <T> T withoutDoorEscape(Supplier<T> body) {
+        boolean prev = Boolean.TRUE.equals(DOOR_ESCAPE_DISABLED.get());
+        DOOR_ESCAPE_DISABLED.set(true);
+        try {
+            return body.get();
+        } finally {
+            DOOR_ESCAPE_DISABLED.set(prev);
+        }
+    }
+
+    public static void withoutDoorEscape(Runnable body) {
+        boolean prev = Boolean.TRUE.equals(DOOR_ESCAPE_DISABLED.get());
+        DOOR_ESCAPE_DISABLED.set(true);
+        try {
+            body.run();
+        } finally {
+            DOOR_ESCAPE_DISABLED.set(prev);
+        }
+    }
+
+    private static boolean doorEscapeEnabled() {
+        return !Boolean.TRUE.equals(DOOR_ESCAPE_DISABLED.get());
     }
 
     private static boolean abortRequested(ServerPlayerEntity player) {
@@ -121,9 +166,9 @@ public final class MovementService {
     public record DoorSubgoalPlan(BlockPos doorBase, BlockPos approachPos, BlockPos stepThroughPos, double improveSq) {}
 
     /**
-     * Finds a nearby wooden door that would bring the bot closer to the goal if it steps through it.
+     * Finds a nearby openable (door/gate) that would bring the bot closer to the goal if it steps through it.
      * Intended for "enclosure escape" situations where the goal is around a corner and raycasts to the goal
-     * never directly intersect the door block.
+     * never directly intersect the blocking openable.
      */
     public static DoorSubgoalPlan findDoorSubgoalPlan(ServerPlayerEntity bot, BlockPos goal) {
         if (bot == null || goal == null) {
@@ -148,34 +193,51 @@ public final class MovementService {
                 for (int dz = -radius; dz <= radius; dz++) {
                     BlockPos scan = botPos.add(dx, dy, dz);
                     BlockState raw = world.getBlockState(scan);
-                    if (!(raw.getBlock() instanceof DoorBlock)) {
+                    if (!(raw.getBlock() instanceof DoorBlock) && !(raw.getBlock() instanceof FenceGateBlock)) {
                         continue;
                     }
-                    BlockPos doorBase = normalizeDoorBase(world, scan);
+                    BlockPos doorBase = normalizeOpenableBase(world, scan);
                     if (doorBase == null) {
                         continue;
                     }
                     BlockState state = world.getBlockState(doorBase);
-                    if (!(state.getBlock() instanceof DoorBlock)) {
+                    if (!(state.getBlock() instanceof DoorBlock) && !(state.getBlock() instanceof FenceGateBlock)) {
                         continue;
                     }
-                    if (state.isOf(net.minecraft.block.Blocks.IRON_DOOR)) {
+                    if (state.getBlock() instanceof DoorBlock && state.isOf(net.minecraft.block.Blocks.IRON_DOOR)) {
                         continue;
                     }
                     if (botPos.getSquaredDistance(doorBase) > 25.0D) { // keep it local (enclosure escape)
                         continue;
                     }
 
-                    Direction facing = state.contains(DoorBlock.FACING) ? state.get(DoorBlock.FACING) : bot.getHorizontalFacing();
-                    BlockPos front = doorBase.offset(facing);
-                    BlockPos back = doorBase.offset(facing.getOpposite());
-
-                    BlockPos approach = botPos.getSquaredDistance(front) <= botPos.getSquaredDistance(back) ? front : back;
-                    BlockPos step = approach.equals(front) ? back : front;
-
-                    if (!isSolidStandable(world, approach.down(), approach) || !isSolidStandable(world, step.down(), step)) {
-                        continue;
+                    Direction facing;
+                    if (state.getBlock() instanceof DoorBlock && state.contains(DoorBlock.FACING)) {
+                        facing = state.get(DoorBlock.FACING);
+                    } else if (state.getBlock() instanceof FenceGateBlock && state.contains(FenceGateBlock.FACING)) {
+                        facing = state.get(FenceGateBlock.FACING);
+                    } else {
+                        facing = bot.getHorizontalFacing();
                     }
+                        if (facing == null || !facing.getAxis().isHorizontal()) {
+                            facing = bot.getHorizontalFacing();
+                        }
+
+                        BlockPos sideASeed = doorBase.offset(facing);
+                        BlockPos sideBSeed = doorBase.offset(facing.getOpposite());
+
+                        BlockPos approachSeed = botPos.getSquaredDistance(sideASeed) <= botPos.getSquaredDistance(sideBSeed)
+                                ? sideASeed
+                                : sideBSeed;
+                        BlockPos stepSeed = approachSeed.equals(sideASeed) ? sideBSeed : sideASeed;
+
+                        boolean approachFrontSide = isOnDoorFrontSide(doorBase, facing, approachSeed);
+                        boolean stepFrontSide = isOnDoorFrontSide(doorBase, facing, stepSeed);
+                        BlockPos approach = findStandableSameDoorSide(world, doorBase, facing, approachFrontSide, approachSeed, 2);
+                        BlockPos step = findStandableSameDoorSide(world, doorBase, facing, stepFrontSide, stepSeed, 2);
+                        if (approach == null || step == null || approach.equals(step)) {
+                            continue;
+                        }
 
                     double improve = currentGoalDistSq - step.getSquaredDistance(goal);
                     if (improve < 1.0D) {
@@ -222,6 +284,12 @@ public final class MovementService {
 
         BlockPos botPos = bot.getBlockPos();
         double currentGoalDistSq = goal != null ? botPos.getSquaredDistance(goal) : 0.0D;
+        
+        // Prune expired failed-door entries for this bot.
+        UUID uuid = bot.getUuid();
+        long now = System.currentTimeMillis();
+        Map<BlockPos, Long> failedMap = DOOR_ESCAPE_FAILED.computeIfAbsent(uuid, k -> new ConcurrentHashMap<>());
+        failedMap.entrySet().removeIf(e -> now >= e.getValue());
 
         BlockPos bestDoor = null;
         BlockPos bestApproach = null;
@@ -235,21 +303,25 @@ public final class MovementService {
                 for (int dz = -radius; dz <= radius; dz++) {
                     BlockPos scan = botPos.add(dx, dy, dz);
                     BlockState raw = world.getBlockState(scan);
-                    if (!(raw.getBlock() instanceof DoorBlock)) {
+                    if (!(raw.getBlock() instanceof DoorBlock) && !(raw.getBlock() instanceof FenceGateBlock)) {
                         continue;
                     }
-                    BlockPos doorBase = normalizeDoorBase(world, scan);
+                    BlockPos doorBase = normalizeOpenableBase(world, scan);
                     if (doorBase == null) {
                         continue;
                     }
                     if (avoidDoorBase != null && avoidDoorBase.equals(doorBase)) {
                         continue;
                     }
-                    BlockState state = world.getBlockState(doorBase);
-                    if (!(state.getBlock() instanceof DoorBlock)) {
+                    // Skip doors that have recently failed (oscillation prevention).
+                    if (failedMap.containsKey(doorBase)) {
                         continue;
                     }
-                    if (state.isOf(net.minecraft.block.Blocks.IRON_DOOR)) {
+                    BlockState state = world.getBlockState(doorBase);
+                    if (!(state.getBlock() instanceof DoorBlock) && !(state.getBlock() instanceof FenceGateBlock)) {
+                        continue;
+                    }
+                    if (state.getBlock() instanceof DoorBlock && state.isOf(net.minecraft.block.Blocks.IRON_DOOR)) {
                         continue;
                     }
                     double distToDoorSq = botPos.getSquaredDistance(doorBase);
@@ -257,16 +329,33 @@ public final class MovementService {
                         continue;
                     }
 
-                    Direction facing = state.contains(DoorBlock.FACING) ? state.get(DoorBlock.FACING) : bot.getHorizontalFacing();
-                    BlockPos front = doorBase.offset(facing);
-                    BlockPos back = doorBase.offset(facing.getOpposite());
-
-                    BlockPos approach = botPos.getSquaredDistance(front) <= botPos.getSquaredDistance(back) ? front : back;
-                    BlockPos step = approach.equals(front) ? back : front;
-
-                    if (!isSolidStandable(world, approach.down(), approach) || !isSolidStandable(world, step.down(), step)) {
-                        continue;
+                    Direction facing;
+                    if (state.getBlock() instanceof DoorBlock && state.contains(DoorBlock.FACING)) {
+                        facing = state.get(DoorBlock.FACING);
+                    } else if (state.getBlock() instanceof FenceGateBlock && state.contains(FenceGateBlock.FACING)) {
+                        facing = state.get(FenceGateBlock.FACING);
+                    } else {
+                        facing = bot.getHorizontalFacing();
                     }
+                        if (facing == null || !facing.getAxis().isHorizontal()) {
+                            facing = bot.getHorizontalFacing();
+                        }
+
+                        BlockPos sideASeed = doorBase.offset(facing);
+                        BlockPos sideBSeed = doorBase.offset(facing.getOpposite());
+
+                        BlockPos approachSeed = botPos.getSquaredDistance(sideASeed) <= botPos.getSquaredDistance(sideBSeed)
+                                ? sideASeed
+                                : sideBSeed;
+                        BlockPos stepSeed = approachSeed.equals(sideASeed) ? sideBSeed : sideASeed;
+
+                        boolean approachFrontSide = isOnDoorFrontSide(doorBase, facing, approachSeed);
+                        boolean stepFrontSide = isOnDoorFrontSide(doorBase, facing, stepSeed);
+                        BlockPos approach = findStandableSameDoorSide(world, doorBase, facing, approachFrontSide, approachSeed, 2);
+                        BlockPos step = findStandableSameDoorSide(world, doorBase, facing, stepFrontSide, stepSeed, 2);
+                        if (approach == null || step == null) {
+                            continue;
+                        }
 
                     // Require unobstructed LoS to the door, but don't require survival reach (we'll path to it).
                     if (distToDoorSq > 4.0D && !BlockInteractionService.canInteract(bot, doorBase, 400.0D)) {
@@ -295,6 +384,33 @@ public final class MovementService {
             return null;
         }
         return new DoorSubgoalPlan(bestDoor, bestApproach, bestStep, bestImprove);
+    }
+
+    /**
+     * Mark a door as failed for door-escape purposes. The bot will avoid this door
+     * for {@link #DOOR_ESCAPE_FAIL_DURATION_MS} to prevent oscillation.
+     */
+    public static void markDoorEscapeFailed(ServerPlayerEntity bot, BlockPos doorBase) {
+        if (bot == null || doorBase == null) {
+            return;
+        }
+        UUID uuid = bot.getUuid();
+        long expiry = System.currentTimeMillis() + DOOR_ESCAPE_FAIL_DURATION_MS;
+        DOOR_ESCAPE_FAILED.computeIfAbsent(uuid, k -> new ConcurrentHashMap<>()).put(doorBase.toImmutable(), expiry);
+        LOGGER.debug("[markDoorEscapeFailed] uuid={} door={}", uuid, doorBase);
+    }
+    
+    /**
+     * Clear all failed-door entries for a bot (e.g., after successful goal completion).
+     */
+    public static void clearDoorEscapeFailures(ServerPlayerEntity bot) {
+        if (bot == null) {
+            return;
+        }
+        Map<BlockPos, Long> map = DOOR_ESCAPE_FAILED.remove(bot.getUuid());
+        if (map != null && !map.isEmpty()) {
+            LOGGER.debug("[clearDoorEscapeFailures] uuid={} cleared {} entries", bot.getUuid(), map.size());
+        }
     }
 
     private record WalkResult(boolean success, BlockPos arrivedAt, String detail) {
@@ -792,6 +908,14 @@ public final class MovementService {
                         sameBlockSteps = 0;
                         continue;
                     }
+                    // If we're executing a skill and keep colliding, proactively mine a safe obstruction block
+                    // (instead of pushing into it until IN_WALL rescue triggers).
+                    if (tryMineObstructionToward(player, segment.end(), "walkSegment")) {
+                        stagnantSteps = 0;
+                        lastDistanceSq = Double.MAX_VALUE;
+                        sameBlockSteps = 0;
+                        continue;
+                    }
                     // Local corner probe: try a nearby standable tile to break out of collision jitter.
                     if (tryLocalUnstick(player, segment.end(), "walkSegment")) {
                         stagnantSteps = 0;
@@ -809,6 +933,12 @@ public final class MovementService {
                         continue;
                     }
                     if (tryDoorEscapeToward(player, segment.end(), null, "walkSegment-hard")) {
+                        stagnantSteps = 0;
+                        lastDistanceSq = Double.MAX_VALUE;
+                        sameBlockSteps = 0;
+                        continue;
+                    }
+                    if (tryMineObstructionToward(player, segment.end(), "walkSegment-hard")) {
                         stagnantSteps = 0;
                         lastDistanceSq = Double.MAX_VALUE;
                         sameBlockSteps = 0;
@@ -837,6 +967,12 @@ public final class MovementService {
                     continue;
                 }
                 if (tryDoorEscapeToward(player, segment.end(), null, "walkSegment-stuck")) {
+                    stagnantSteps = 0;
+                    lastDistanceSq = Double.MAX_VALUE;
+                    sameBlockSteps = 0;
+                    continue;
+                }
+                if (tryMineObstructionToward(player, segment.end(), "walkSegment-stuck")) {
                     stagnantSteps = 0;
                     lastDistanceSq = Double.MAX_VALUE;
                     sameBlockSteps = 0;
@@ -888,60 +1024,223 @@ public final class MovementService {
         if (player == null || candidate == null || world == null) {
             return false;
         }
-        BlockPos doorPos = normalizeDoorBase(world, candidate);
-        if (doorPos == null) {
+        BlockPos openablePos = normalizeOpenableBase(world, candidate);
+        if (openablePos == null) {
             return false;
         }
-        BlockState state = world.getBlockState(doorPos);
-        if (!(state.getBlock() instanceof DoorBlock)) {
+        BlockState state = world.getBlockState(openablePos);
+        if (!isOpenableBlock(state)) {
             return false;
         }
-        if (state.isOf(net.minecraft.block.Blocks.IRON_DOOR)) {
-            maybeWarnIronDoor(player, doorPos);
-            return false;
-        }
-        if (state.contains(DoorBlock.OPEN) && Boolean.TRUE.equals(state.get(DoorBlock.OPEN))) {
-            return false; // already open
-        }
-        if (!doorAttemptAllowed(player.getUuid(), doorPos)) {
-            return false;
-        }
-        // Enforce survival-like interaction constraints; prevents opening through walls.
-        double selfDoorDistSq = player.getBlockPos().getSquaredDistance(doorPos);
-        if (selfDoorDistSq > 1.0D && !BlockInteractionService.canInteract(player, doorPos)) {
-            maybeLogDoor(player, doorPos, "door-open blocked: cannot interact (reach/LoS)");
+        if (state.getBlock() instanceof DoorBlock && state.isOf(net.minecraft.block.Blocks.IRON_DOOR)) {
+            maybeWarnIronDoor(player, openablePos);
             return false;
         }
 
-        Direction toward = approximateToward(player.getBlockPos(), doorPos);
+        Direction toward = approximateToward(player.getBlockPos(), openablePos);
         if (!toward.getAxis().isHorizontal()) {
             toward = player.getHorizontalFacing();
         }
         final Direction hitFacing = toward;
-        final Direction travelDir = toward;
+        final Direction travelDir = computeOpenableTravelDir(world, openablePos, player.getBlockPos(), hitFacing);
+
+        if (state.contains(Properties.OPEN) && Boolean.TRUE.equals(state.get(Properties.OPEN))) {
+            // Treat an already-open openable as a success so callers can commit to stepping through.
+            if (isAutoCloseOpenable(state) && doorAttemptAllowed(player.getUuid(), openablePos)) {
+                scheduleDoorClose(player, world.getRegistryKey(), openablePos.toImmutable(), travelDir);
+            }
+            return true;
+        }
+        if (!doorAttemptAllowed(player.getUuid(), openablePos)) {
+            return false;
+        }
+        // Enforce survival-like interaction constraints; prevents opening through walls.
+        // Use continuous distance so diagonal-adjacent positions don't get incorrectly treated as "far".
+        double selfOpenableDistSq = player.squaredDistanceTo(Vec3d.ofCenter(openablePos).add(0, 0.35, 0));
+        if (selfOpenableDistSq > 2.25D && !BlockInteractionService.canInteract(player, openablePos)) {
+            maybeLogDoor(player, openablePos, "door-open blocked: cannot interact (reach/LoS)");
+            return false;
+        }
 
         boolean opened = runOnServerThread(player, () -> {
-            Vec3d hitVec = Vec3d.ofCenter(doorPos).add(0, 0.35, 0);
-            BlockHitResult hit = new BlockHitResult(hitVec, hitFacing, doorPos, false);
+            Vec3d hitVec = Vec3d.ofCenter(openablePos).add(0, 0.35, 0);
+            BlockHitResult hit = new BlockHitResult(hitVec, hitFacing, openablePos, false);
             ActionResult result = player.interactionManager.interactBlock(player, world, player.getMainHandStack(), Hand.MAIN_HAND, hit);
             if (result.isAccepted()) {
                 player.swingHand(Hand.MAIN_HAND, true);
             }
         });
         if (!opened) {
-            maybeLogDoor(player, doorPos, "door-open failed: interactBlock dispatch failed");
+            maybeLogDoor(player, openablePos, "door-open failed: interactBlock dispatch failed");
             return false;
         }
-        // If the interaction did open the door, schedule a close once we've passed through.
-        if (world.getBlockState(doorPos).getBlock() instanceof DoorBlock
-                && world.getBlockState(doorPos).contains(DoorBlock.OPEN)
-                && Boolean.TRUE.equals(world.getBlockState(doorPos).get(DoorBlock.OPEN))) {
-            scheduleDoorClose(player, world.getRegistryKey(), doorPos.toImmutable(), travelDir);
-            maybeLogDoor(player, doorPos, "door-open success");
+        // If the interaction did open the door/gate, schedule a close once we've passed through.
+        BlockState after = world.getBlockState(openablePos);
+        if (after.contains(Properties.OPEN) && Boolean.TRUE.equals(after.get(Properties.OPEN))) {
+            if (isAutoCloseOpenable(after)) {
+                scheduleDoorClose(player, world.getRegistryKey(), openablePos.toImmutable(), travelDir);
+            }
+            maybeLogDoor(player, openablePos, "door-open success");
             return true;
         }
-        maybeLogDoor(player, doorPos, "door-open failed: door did not toggle open");
+        maybeLogDoor(player, openablePos, "door-open failed: door did not toggle open");
         return false;
+    }
+
+    /**
+     * Commit to crossing a specific blocking openable (door/gate) toward a goal.
+     *
+     * <p>Why: raycasting to a far-away goal can miss a nearby doorway if the path is around a corner,
+     * and general "door escape" selection can get pulled by competing heuristics. This helper is
+     * a deterministic "approach -> open -> step through" for a known openable.</p>
+     */
+    public static boolean tryTraverseOpenableToward(ServerPlayerEntity bot,
+                                                    BlockPos openablePos,
+                                                    BlockPos goal,
+                                                    String label) {
+        if (bot == null || openablePos == null) {
+            return false;
+        }
+        ServerWorld world = getWorld(bot);
+        if (world == null) {
+            return false;
+        }
+
+        BlockPos base = normalizeOpenableBase(world, openablePos);
+        if (base == null) {
+            return false;
+        }
+        BlockState state = world.getBlockState(base);
+        if (!isOpenableBlock(state)) {
+            return false;
+        }
+
+        // Determine the two sides of the doorway.
+        Direction facing = null;
+        if (state.getBlock() instanceof DoorBlock && state.contains(DoorBlock.FACING)) {
+            facing = state.get(DoorBlock.FACING);
+        } else if (state.getBlock() instanceof FenceGateBlock && state.contains(FenceGateBlock.FACING)) {
+            facing = state.get(FenceGateBlock.FACING);
+        }
+        if (facing == null || !facing.getAxis().isHorizontal()) {
+            facing = bot.getHorizontalFacing();
+        }
+
+        BlockPos sideASeed = base.offset(facing);
+        BlockPos sideBSeed = base.offset(facing.getOpposite());
+
+        // Pick approach as the side we're currently closest to.
+        BlockPos botPos = bot.getBlockPos();
+        BlockPos approachSeed = botPos.getSquaredDistance(sideASeed) <= botPos.getSquaredDistance(sideBSeed) ? sideASeed : sideBSeed;
+
+        // Pick step-through as the side that best progresses toward the goal (if provided), otherwise the opposite.
+        BlockPos stepSeed;
+        if (goal != null) {
+            stepSeed = goal.getSquaredDistance(sideASeed) <= goal.getSquaredDistance(sideBSeed) ? sideASeed : sideBSeed;
+            if (stepSeed.equals(approachSeed)) {
+                stepSeed = approachSeed.equals(sideASeed) ? sideBSeed : sideASeed;
+            }
+        } else {
+            stepSeed = approachSeed.equals(sideASeed) ? sideBSeed : sideASeed;
+        }
+
+        // Hovel learnings: the tile directly “in front” of a door isn't always standable (stairs/half-blocks/etc).
+        // Pick a nearby standable tile on the SAME side of the doorway instead of giving up.
+        boolean approachFrontSide = isOnDoorFrontSide(base, facing, approachSeed);
+        boolean stepFrontSide = isOnDoorFrontSide(base, facing, stepSeed);
+        BlockPos approach = findStandableSameDoorSide(world, base, facing, approachFrontSide, approachSeed, 2);
+        BlockPos step = findStandableSameDoorSide(world, base, facing, stepFrontSide, stepSeed, 2);
+        if (approach == null || step == null) {
+            return false;
+        }
+
+        maybeLogDoor(bot, base, "doorway-commit: label=" + label
+                + " approach=" + approach.toShortString()
+                + " step=" + step.toShortString()
+                + " goal=" + (goal != null ? goal.toShortString() : "null"));
+
+        boolean approached = botPos.getSquaredDistance(approach) <= 2.25D
+                || nudgeTowardUntilClose(bot, approach, 2.25D, 2000L, 0.18, label + "-door-approach");
+        if (!approached) {
+            return false;
+        }
+
+        tryOpenDoorAt(bot, base);
+        // Be slightly forgiving: stepping "enough" across the threshold is usually sufficient for replans.
+        return nudgeTowardUntilClose(bot, step, 4.0D, 3200L, 0.22, label + "-door-step");
+    }
+
+    private static Direction computeOpenableTravelDir(ServerWorld world,
+                                                     BlockPos openableBase,
+                                                     BlockPos botPos,
+                                                     Direction fallback) {
+        if (world == null || openableBase == null || botPos == null || fallback == null) {
+            return fallback;
+        }
+
+        try {
+            BlockState state = world.getBlockState(openableBase);
+            Direction facing = null;
+            if (state.getBlock() instanceof DoorBlock && state.contains(DoorBlock.FACING)) {
+                facing = state.get(DoorBlock.FACING);
+            } else if (state.getBlock() instanceof FenceGateBlock && state.contains(FenceGateBlock.FACING)) {
+                facing = state.get(FenceGateBlock.FACING);
+            }
+            if (facing == null || !facing.getAxis().isHorizontal()) {
+                return fallback;
+            }
+
+            BlockPos front = openableBase.offset(facing);
+            BlockPos back = openableBase.offset(facing.getOpposite());
+            BlockPos nearSide = botPos.getSquaredDistance(front) <= botPos.getSquaredDistance(back) ? front : back;
+            BlockPos farSide = nearSide.equals(front) ? back : front;
+            Direction travel = approximateToward(openableBase, farSide);
+            return travel.getAxis().isHorizontal() ? travel : fallback;
+        } catch (Throwable ignored) {
+            return fallback;
+        }
+    }
+
+    private static boolean isOpenableBlock(BlockState state) {
+        if (state == null) {
+            return false;
+        }
+        return state.getBlock() instanceof DoorBlock
+                || state.getBlock() instanceof FenceGateBlock
+                || state.getBlock() instanceof TrapdoorBlock;
+    }
+
+    private static boolean isAutoCloseOpenable(BlockState state) {
+        if (state == null) {
+            return false;
+        }
+        // Auto-closing trapdoors can be annoying and some are used as floor hatches.
+        // Stick to doors and fence gates for now.
+        return state.getBlock() instanceof DoorBlock
+                || state.getBlock() instanceof FenceGateBlock;
+    }
+
+    private static BlockPos normalizeOpenableBase(ServerWorld world, BlockPos pos) {
+        if (world == null || pos == null) {
+            return null;
+        }
+        BlockState state = world.getBlockState(pos);
+        if (state.getBlock() instanceof DoorBlock) {
+            return normalizeDoorBase(world, pos);
+        }
+        if (state.getBlock() instanceof FenceGateBlock || state.getBlock() instanceof TrapdoorBlock) {
+            return pos;
+        }
+        // For door raycasts and edge cases, probe one up/down.
+        BlockState up = world.getBlockState(pos.up());
+        if (up.getBlock() instanceof DoorBlock || up.getBlock() instanceof FenceGateBlock || up.getBlock() instanceof TrapdoorBlock) {
+            return normalizeOpenableBase(world, pos.up());
+        }
+        BlockState down = world.getBlockState(pos.down());
+        if (down.getBlock() instanceof DoorBlock || down.getBlock() instanceof FenceGateBlock || down.getBlock() instanceof TrapdoorBlock) {
+            return normalizeOpenableBase(world, pos.down());
+        }
+        return null;
     }
 
     private static void maybeWarnIronDoor(ServerPlayerEntity player, BlockPos doorPos) {
@@ -1060,14 +1359,14 @@ public final class MovementService {
                 return;
             }
             BlockState state = world.getBlockState(doorPos);
-            if (!(state.getBlock() instanceof DoorBlock) || !state.contains(DoorBlock.OPEN) || !Boolean.TRUE.equals(state.get(DoorBlock.OPEN))) {
+            if (!isAutoCloseOpenable(state) || !state.contains(Properties.OPEN) || !Boolean.TRUE.equals(state.get(Properties.OPEN))) {
                 return;
             }
 
             // Close once the bot has actually passed through (wolf-like behavior: open, go through, close behind).
             BlockPos botPos = bot.getBlockPos();
             // Never close while the bot is still in/too close to the doorway.
-            if (botPos.equals(doorPos) || botPos.getSquaredDistance(doorPos) <= 2.25D) {
+            if (botPos.equals(doorPos) || botPos.getSquaredDistance(doorPos) <= 4.0D) {
                 maybeLogDoor(bot, doorPos, "door-close wait: bot too close");
                 scheduleDoorCloseInternal(server, botUuid, worldKey, doorPos, travelDir, attempt + 1);
                 return;
@@ -1078,15 +1377,36 @@ public final class MovementService {
                 return;
             }
             int dot = (botPos.getX() - doorPos.getX()) * dx + (botPos.getZ() - doorPos.getZ()) * dz;
-            // Prefer closing only after crossing the door plane; but if our travelDir guess was wrong
-            // (or the bot sidestepped), close once we're clearly away from the doorway.
-            if (dot < 1 && attempt < 4) {
-                maybeLogDoor(bot, doorPos, "door-close wait: not past door yet");
-                scheduleDoorCloseInternal(server, botUuid, worldKey, doorPos, travelDir, attempt + 1);
-                return;
+            // Prefer closing only after crossing the door plane.
+            // IMPORTANT: don't close just because we backed away; that can create open/close oscillation.
+            if (dot < 1) {
+                // If we're far away (bot abandoned this doorway), close anyway after a few retries.
+                // Also close if we've been stuck near the door for too long (oscillation scenario) -
+                // being stuck near a door that stays open causes more problems than closing "early".
+                boolean farAway = attempt >= 12 && botPos.getSquaredDistance(doorPos) >= 36.0D;
+                boolean stuckNearDoor = attempt >= 8 && botPos.getSquaredDistance(doorPos) <= 16.0D; // <= 4 blocks
+                if (!farAway && !stuckNearDoor) {
+                    maybeLogDoor(bot, doorPos, "door-close wait: not past door yet (attempt=" + attempt + " dist=" + String.format("%.1f", Math.sqrt(botPos.getSquaredDistance(doorPos))) + ")");
+                    scheduleDoorCloseInternal(server, botUuid, worldKey, doorPos, travelDir, attempt + 1);
+                    return;
+                }
+                if (stuckNearDoor) {
+                    maybeLogDoor(bot, doorPos, "door-close: stuck near door, closing anyway after " + attempt + " attempts");
+                }
             }
 
             maybeLogDoor(bot, doorPos, "door-close attempt");
+            
+            // Only close the door if the bot is within survival reach distance (~4.5 blocks).
+            // This prevents "remote" door closing which breaks survival gamemode mechanics.
+            double distSqToDoor = bot.getEyePos().squaredDistanceTo(Vec3d.ofCenter(doorPos));
+            if (distSqToDoor > 20.25D) { // 4.5 * 4.5 = 20.25
+                maybeLogDoor(bot, doorPos, "door-close skip: beyond survival reach dist=" 
+                        + String.format("%.2f", Math.sqrt(distSqToDoor)));
+                scheduleDoorCloseInternal(server, botUuid, worldKey, doorPos, travelDir, attempt + 1);
+                return;
+            }
+            
             Direction toward = bot.getHorizontalFacing();
             Vec3d hitVec = Vec3d.ofCenter(doorPos).add(0, 0.35, 0);
             BlockHitResult hit = new BlockHitResult(hitVec, toward, doorPos, false);
@@ -1096,7 +1416,7 @@ public final class MovementService {
             }
 
             BlockState after = world.getBlockState(doorPos);
-            if (after.getBlock() instanceof DoorBlock && after.contains(DoorBlock.OPEN) && !Boolean.TRUE.equals(after.get(DoorBlock.OPEN))) {
+            if (isAutoCloseOpenable(after) && after.contains(Properties.OPEN) && !Boolean.TRUE.equals(after.get(Properties.OPEN))) {
                 markDoorRecentlyClosed(botUuid, doorPos, 8_000L);
                 // Also throttle re-open attempts after we close a door behind us; reduces follow “door loops”.
                 Map<BlockPos, Long> perBot = DOOR_CLOSE_COOLDOWN.computeIfAbsent(botUuid, __ -> new ConcurrentHashMap<>());
@@ -1372,6 +1692,12 @@ public final class MovementService {
                         sameBlockSteps = 0;
                         continue;
                     }
+                    if (tryMineObstructionToward(player, destination, "walkDirect")) {
+                        stagnantSteps = 0;
+                        lastDistanceSq = Double.MAX_VALUE;
+                        sameBlockSteps = 0;
+                        continue;
+                    }
                     if (tryLocalUnstick(player, destination, "walkDirect")) {
                         stagnantSteps = 0;
                         lastDistanceSq = Double.MAX_VALUE;
@@ -1387,6 +1713,12 @@ public final class MovementService {
                         continue;
                     }
                     if (tryDoorEscapeToward(player, destination, null, "walkDirect-hard")) {
+                        stagnantSteps = 0;
+                        lastDistanceSq = Double.MAX_VALUE;
+                        sameBlockSteps = 0;
+                        continue;
+                    }
+                    if (tryMineObstructionToward(player, destination, "walkDirect-hard")) {
                         stagnantSteps = 0;
                         lastDistanceSq = Double.MAX_VALUE;
                         sameBlockSteps = 0;
@@ -1413,6 +1745,12 @@ public final class MovementService {
                     continue;
                 }
                 if (tryDoorEscapeToward(player, destination, null, "walkDirect-stuck")) {
+                    stagnantSteps = 0;
+                    lastDistanceSq = Double.MAX_VALUE;
+                    sameBlockSteps = 0;
+                    continue;
+                }
+                if (tryMineObstructionToward(player, destination, "walkDirect-stuck")) {
                     stagnantSteps = 0;
                     lastDistanceSq = Double.MAX_VALUE;
                     sameBlockSteps = 0;
@@ -1447,51 +1785,159 @@ public final class MovementService {
         if (bot == null || target == null) {
             return false;
         }
+        int depth = NUDGE_DEPTH.get();
+        NUDGE_DEPTH.set(depth + 1);
+        boolean allowAssists = depth == 0;
         long deadline = System.currentTimeMillis() + timeoutMs;
-        double best = bot.getBlockPos().getSquaredDistance(target);
+        final Vec3d targetCenter = Vec3d.ofCenter(target);
+        double best = bot.squaredDistanceTo(targetCenter);
         double start = best;
         LOGGER.debug("nudgeToward start [{}]: from={} to={} dist={}", label, bot.getBlockPos().toShortString(), target.toShortString(), Math.sqrt(best));
         int noProgress = 0;
-        while (System.currentTimeMillis() < deadline) {
-            if (abortRequested(bot)) {
-                BotActions.stop(bot);
-                return false;
-            }
-            double distSq = bot.getBlockPos().getSquaredDistance(target);
-            if (distSq <= reachSq && (start - distSq > 0.25D || distSq <= reachSq * 0.6D)) {
-                BotActions.stop(bot);
-                LOGGER.debug("nudgeToward success [{}]: dist={}", label, Math.sqrt(distSq));
-                return true;
-            }
-            boolean sprint = distSq > 9.0D;
-            runOnServerThread(bot, () -> LookController.faceBlock(bot, target));
-            BotActions.sprint(bot, sprint);
-            double dy = target.getY() - bot.getY();
-            if (dy > 0.6D) {
-                BotActions.jump(bot);
-            } else if (distSq > CLOSE_ENOUGH_DISTANCE_SQ) {
-                BotActions.autoJumpIfNeeded(bot);
-            }
-            double tunedImpulse = distSq > 16.0D ? Math.max(impulse, 0.16) : impulse;
-            BotActions.applyMovementInput(bot, Vec3d.ofCenter(target), tunedImpulse);
-            sleep(90L);
-
-            double nowDist = bot.getBlockPos().getSquaredDistance(target);
-            if (nowDist + 0.05D >= best) {
-                noProgress++;
-                if (noProgress >= 7) {
-                    LOGGER.debug("nudgeToward stalled [{}]: bestDist={}", label, Math.sqrt(best));
+        try {
+            while (System.currentTimeMillis() < deadline) {
+                if (abortRequested(bot)) {
                     BotActions.stop(bot);
-                    break;
+                    return false;
                 }
-            } else {
-                best = nowDist;
-                noProgress = 0;
+                double distSq = bot.squaredDistanceTo(targetCenter);
+                if (distSq <= reachSq && (start - distSq > 0.25D || distSq <= reachSq * 0.6D)) {
+                    BotActions.stop(bot);
+                    LOGGER.debug("nudgeToward success [{}]: dist={}", label, Math.sqrt(distSq));
+                    return true;
+                }
+
+                boolean sprint = distSq > 9.0D;
+                runOnServerThread(bot, () -> LookController.faceBlock(bot, target));
+                BotActions.sprint(bot, sprint);
+                double dy = target.getY() - bot.getY();
+                if (dy > 0.6D) {
+                    BotActions.jump(bot);
+                } else if (distSq > CLOSE_ENOUGH_DISTANCE_SQ) {
+                    BotActions.autoJumpIfNeeded(bot);
+                }
+                double tunedImpulse = distSq > 16.0D ? Math.max(impulse, 0.16) : impulse;
+                BotActions.applyMovementInput(bot, targetCenter, tunedImpulse);
+                sleep(90L);
+
+                double nowDist = bot.squaredDistanceTo(targetCenter);
+                if (nowDist + 0.05D >= best) {
+                    noProgress++;
+
+                    // If we're stalled, try the same kinds of deterministic assists we use for follow/pathing.
+                    // This is the primary fix for "nudgeToward failed" loops near doors/corners.
+                    if (allowAssists && (noProgress == 4 || noProgress == 6)) {
+                        BotActions.stop(bot);
+
+                        if (tryOpenDoorToward(bot, target)) {
+                            best = Double.MAX_VALUE;
+                            noProgress = 0;
+                            continue;
+                        }
+                        if (tryTraverseDoorway(bot, target, label + "-nudge")) {
+                            best = Double.MAX_VALUE;
+                            noProgress = 0;
+                            continue;
+                        }
+                        if (tryDoorEscapeToward(bot, target, null, label + "-nudge")) {
+                            best = Double.MAX_VALUE;
+                            noProgress = 0;
+                            continue;
+                        }
+                        if (tryStepUpToward(bot, target, label + "-nudge")) {
+                            best = Double.MAX_VALUE;
+                            noProgress = 0;
+                            continue;
+                        }
+                        if (tryLocalUnstick(bot, target, label + "-nudge")) {
+                            best = Double.MAX_VALUE;
+                            noProgress = 0;
+                            continue;
+                        }
+                        if (trySidestepAround(bot, target)) {
+                            best = Double.MAX_VALUE;
+                            noProgress = 0;
+                            continue;
+                        }
+                        // Only as a late resort (and only during tasks) clear a safe obstruction.
+                        if (noProgress >= 6 && tryMineObstructionToward(bot, target, label + "-nudge")) {
+                            best = Double.MAX_VALUE;
+                            noProgress = 0;
+                            continue;
+                        }
+                    }
+
+                    if (noProgress >= 7) {
+                        LOGGER.debug("nudgeToward stalled [{}]: bestDist={}", label, Math.sqrt(best));
+                        BotActions.stop(bot);
+                        break;
+                    }
+                } else {
+                    best = nowDist;
+                    noProgress = 0;
+                }
+            }
+        } finally {
+            NUDGE_DEPTH.set(depth);
+        }
+
+        LOGGER.warn("nudgeToward failed [{}]: finalDist={}", label, Math.sqrt(bot.squaredDistanceTo(targetCenter)));
+        BotActions.stop(bot);
+        return bot.squaredDistanceTo(targetCenter) <= reachSq;
+    }
+
+    private static boolean isOnDoorFrontSide(BlockPos doorBase, Direction facing, BlockPos pos) {
+        if (doorBase == null || facing == null || pos == null) {
+            return true;
+        }
+        int dx = pos.getX() - doorBase.getX();
+        int dz = pos.getZ() - doorBase.getZ();
+        int dot = dx * facing.getOffsetX() + dz * facing.getOffsetZ();
+        // doorBase.offset(facing) will have dot == 1.
+        return dot >= 0;
+    }
+
+    private static BlockPos findStandableSameDoorSide(ServerWorld world,
+                                                     BlockPos doorBase,
+                                                     Direction facing,
+                                                     boolean wantFrontSide,
+                                                     BlockPos seed,
+                                                     int radius) {
+        if (world == null || doorBase == null || facing == null || seed == null) {
+            return null;
+        }
+        int r = Math.max(0, radius);
+        BlockPos best = null;
+        double bestScore = Double.POSITIVE_INFINITY;
+
+        for (int dy = -1; dy <= 1; dy++) {
+            for (int dx = -r; dx <= r; dx++) {
+                for (int dz = -r; dz <= r; dz++) {
+                    BlockPos cand = seed.add(dx, dy, dz);
+
+                    int relX = cand.getX() - doorBase.getX();
+                    int relZ = cand.getZ() - doorBase.getZ();
+                    int dot = relX * facing.getOffsetX() + relZ * facing.getOffsetZ();
+                    boolean front = dot >= 0;
+                    if (front != wantFrontSide) {
+                        continue;
+                    }
+
+                    if (!isSolidStandable(world, cand.down(), cand)) {
+                        continue;
+                    }
+
+                    // Prefer: close to the seed and not too far from the door plane.
+                    double score = cand.getSquaredDistance(seed) + 0.25D * cand.getSquaredDistance(doorBase);
+                    if (score < bestScore) {
+                        bestScore = score;
+                        best = cand.toImmutable();
+                    }
+                }
             }
         }
-        LOGGER.warn("nudgeToward failed [{}]: finalDist={}", label, Math.sqrt(bot.getBlockPos().getSquaredDistance(target)));
-        BotActions.stop(bot);
-        return bot.getBlockPos().getSquaredDistance(target) <= reachSq;
+
+        return best;
     }
 
     /**
@@ -1506,7 +1952,8 @@ public final class MovementService {
             return false;
         }
         long deadline = System.currentTimeMillis() + timeoutMs;
-        double best = bot.getBlockPos().getSquaredDistance(target);
+        final Vec3d targetCenter = Vec3d.ofCenter(target);
+        double best = bot.squaredDistanceTo(targetCenter);
         int stagnant = 0;
         BlockPos lastBlockPos = bot.getBlockPos();
         int sameBlockSteps = 0;
@@ -1516,7 +1963,7 @@ public final class MovementService {
                 BotActions.stop(bot);
                 return false;
             }
-            double distSq = bot.getBlockPos().getSquaredDistance(target);
+            double distSq = bot.squaredDistanceTo(targetCenter);
             if (distSq <= reachSq) {
                 BotActions.stop(bot);
                 LOGGER.debug("pursuit success [{}]: dist={}", label, Math.sqrt(distSq));
@@ -1541,7 +1988,7 @@ public final class MovementService {
             double impulse = sprint ? 0.19 : 0.15;
             BotActions.applyMovementInput(bot, Vec3d.ofCenter(target), impulse);
             sleep(80L);
-            double nowDist = bot.getBlockPos().getSquaredDistance(target);
+            double nowDist = bot.squaredDistanceTo(targetCenter);
             if (nowDist + 0.02D >= best) {
                 stagnant++;
                 if (stagnant == 4) {
@@ -1578,6 +2025,12 @@ public final class MovementService {
                         sameBlockSteps = 0;
                         continue;
                     }
+                    if (tryMineObstructionToward(bot, target, label)) {
+                        stagnant = 0;
+                        best = Double.MAX_VALUE;
+                        sameBlockSteps = 0;
+                        continue;
+                    }
                     if (tryLocalUnstick(bot, target, label)) {
                         stagnant = 0;
                         best = Double.MAX_VALUE;
@@ -1608,6 +2061,12 @@ public final class MovementService {
                     sameBlockSteps = 0;
                     continue;
                 }
+                if (tryMineObstructionToward(bot, target, label + "-stuck")) {
+                    stagnant = 0;
+                    best = Double.MAX_VALUE;
+                    sameBlockSteps = 0;
+                    continue;
+                }
                 if (tryLocalUnstick(bot, target, label + "-stuck")) {
                     stagnant = 0;
                     best = Double.MAX_VALUE;
@@ -1616,12 +2075,12 @@ public final class MovementService {
                 }
             }
         }
-        LOGGER.warn("pursuit failed [{}]: finalDist={}", label, Math.sqrt(bot.getBlockPos().getSquaredDistance(target)));
+        LOGGER.warn("pursuit failed [{}]: finalDist={}", label, Math.sqrt(bot.squaredDistanceTo(targetCenter)));
         BotActions.stop(bot);
         return false;
     }
 
-    private static boolean tryTraverseDoorway(ServerPlayerEntity bot, BlockPos destination, String label) {
+    public static boolean tryTraverseDoorway(ServerPlayerEntity bot, BlockPos destination, String label) {
         if (bot == null || destination == null) {
             return false;
         }
@@ -1633,20 +2092,20 @@ public final class MovementService {
         if (doorHit == null) {
             return false;
         }
-        BlockPos doorBase = normalizeDoorBase(world, doorHit);
+        BlockPos doorBase = normalizeOpenableBase(world, doorHit);
         if (doorBase == null) {
             return false;
         }
         BlockState doorState = world.getBlockState(doorBase);
-        if (!(doorState.getBlock() instanceof DoorBlock)) {
+        if (!isOpenableBlock(doorState)) {
             return false;
         }
         // Ensure it's open (or try to open it).
-        if (doorState.contains(DoorBlock.OPEN) && !Boolean.TRUE.equals(doorState.get(DoorBlock.OPEN))) {
+        if (doorState.contains(Properties.OPEN) && !Boolean.TRUE.equals(doorState.get(Properties.OPEN))) {
             tryOpenDoorAt(bot, doorBase);
             doorState = world.getBlockState(doorBase);
         }
-        if (!doorState.contains(DoorBlock.OPEN) || !Boolean.TRUE.equals(doorState.get(DoorBlock.OPEN))) {
+        if (!doorState.contains(Properties.OPEN) || !Boolean.TRUE.equals(doorState.get(Properties.OPEN))) {
             return false;
         }
         Direction toward = approximateToward(doorBase, destination);
@@ -1680,6 +2139,9 @@ public final class MovementService {
         if (bot == null || goal == null) {
             return false;
         }
+        if (!doorEscapeEnabled()) {
+            return false;
+        }
         DoorSubgoalPlan plan = findDoorSubgoalPlan(bot, goal);
         if (plan == null) {
             return false;
@@ -1696,7 +2158,7 @@ public final class MovementService {
             return false;
         }
         tryOpenDoorAt(bot, plan.doorBase());
-        return nudgeTowardUntilClose(bot, plan.stepThroughPos(), 2.25D, 2000L, 0.22, label + "-door-step");
+        return nudgeTowardUntilClose(bot, plan.stepThroughPos(), 4.0D, 2400L, 0.22, label + "-door-step");
     }
 
     /**
@@ -1704,6 +2166,9 @@ public final class MovementService {
      */
     private static boolean tryDoorEscapeToward(ServerPlayerEntity bot, BlockPos goal, BlockPos avoidDoorBase, String label) {
         if (bot == null) {
+            return false;
+        }
+        if (!doorEscapeEnabled()) {
             return false;
         }
         BlockPos avoid = avoidDoorBase;
@@ -1726,7 +2191,7 @@ public final class MovementService {
                 continue;
             }
             tryOpenDoorAt(bot, plan.doorBase());
-            if (nudgeTowardUntilClose(bot, plan.stepThroughPos(), 2.25D, 2600L, 0.22, label + "-door-escape-step")) {
+            if (nudgeTowardUntilClose(bot, plan.stepThroughPos(), 4.0D, 3200L, 0.22, label + "-door-escape-step")) {
                 return true;
             }
         }
@@ -1864,6 +2329,162 @@ public final class MovementService {
         }
 
         return false;
+    }
+
+    private static boolean tryMineObstructionToward(ServerPlayerEntity bot, BlockPos goal, String label) {
+        if (bot == null || goal == null) {
+            return false;
+        }
+        // Keep this conservative: only mine during skills/build tasks, not during guard/patrol/follow.
+        if (!AutoFaceEntity.isBotExecutingTask()) {
+            return false;
+        }
+        ServerWorld world = getWorld(bot);
+        if (world == null) {
+            return false;
+        }
+
+        // If we're not grounded (often true during step-up attempts), briefly settle so mining targets are stable.
+        if (!bot.isOnGround() && !bot.isClimbing() && !bot.isTouchingWater()) {
+            BotActions.stop(bot);
+            sleep(80L);
+        }
+
+        BlockPos start = bot.getBlockPos();
+
+        // Candidate offsets: cardinal primary/secondary and diagonal toward goal.
+        int sx = Integer.compare(goal.getX(), start.getX());
+        int sz = Integer.compare(goal.getZ(), start.getZ());
+
+        Set<BlockPos> candidates = new HashSet<>();
+
+        // If we're already clipping, also consider clearing the bot's own head/feet spaces.
+        // This prevents the "keep pushing until rescue" pattern.
+        if (bot.isInsideWall()) {
+            candidates.add(start);
+            candidates.add(start.up());
+        }
+        // Diagonal first when applicable.
+        if (sx != 0 || sz != 0) {
+            candidates.add(start.add(sx, 0, sz));
+        }
+
+        // Also probe primary/secondary cardinal directions.
+        int dx = goal.getX() - start.getX();
+        int dz = goal.getZ() - start.getZ();
+        Direction primary;
+        Direction secondary;
+        if (Math.abs(dx) >= Math.abs(dz)) {
+            primary = dx >= 0 ? Direction.EAST : Direction.WEST;
+            secondary = dz >= 0 ? Direction.SOUTH : Direction.NORTH;
+        } else {
+            primary = dz >= 0 ? Direction.SOUTH : Direction.NORTH;
+            secondary = dx >= 0 ? Direction.EAST : Direction.WEST;
+        }
+        candidates.add(start.offset(primary));
+        candidates.add(start.offset(secondary));
+
+        // Expand to head/ceiling obstruction candidates.
+        ArrayDeque<BlockPos> toTry = new ArrayDeque<>();
+        for (BlockPos front : candidates) {
+            if (front == null) {
+                continue;
+            }
+            toTry.add(front);
+            toTry.add(front.up());
+            toTry.add(front.up(2));
+        }
+
+        while (!toTry.isEmpty()) {
+            BlockPos pos = toTry.poll();
+            if (pos == null) {
+                continue;
+            }
+            // Keep it extremely local (prevents "mine a tunnel" behavior).
+            if (start.getSquaredDistance(pos) > 3.0D) {
+                continue;
+            }
+            if (!isWithinReach(bot, pos)) {
+                continue;
+            }
+            if (!obstructionMineAllowed(bot.getUuid(), pos)) {
+                continue;
+            }
+
+            BlockState state = world.getBlockState(pos);
+            if (state.isAir() || state.isReplaceable()) {
+                continue;
+            }
+            if (state.getBlock() instanceof DoorBlock) {
+                continue;
+            }
+            if (!state.getFluidState().isEmpty()) {
+                continue;
+            }
+            if (world.getBlockEntity(pos) != null) {
+                continue;
+            }
+            // Never grief obvious player storage/beds or unstick-protected blocks.
+            if (state.isOf(Blocks.CHEST) || state.isOf(Blocks.TRAPPED_CHEST) || state.isOf(Blocks.BARREL) || state.isOf(Blocks.ENDER_CHEST)) {
+                continue;
+            }
+            if (state.isIn(BlockTags.BEDS) || state.isIn(BlockTags.SHULKER_BOXES)) {
+                continue;
+            }
+            if (state.isIn(BlockTags.FENCES) || state.isIn(BlockTags.WALLS) || state.isIn(BlockTags.FENCE_GATES)) {
+                continue;
+            }
+            // Avoid ripping up common build materials during generic movement.
+            if (state.isIn(BlockTags.LOGS) || state.isIn(BlockTags.PLANKS) || state.isIn(BlockTags.WOOL)) {
+                continue;
+            }
+            // Only attempt when it actually blocks movement space (has collision).
+            if (state.getCollisionShape(world, pos).isEmpty()) {
+                continue;
+            }
+
+            // Pick a reasonable tool for this block type.
+            if (state.isIn(BlockTags.PICKAXE_MINEABLE)) {
+                BotActions.selectBestTool(bot, "pickaxe", "sword");
+            } else if (state.isIn(BlockTags.SHOVEL_MINEABLE)) {
+                BotActions.selectBestTool(bot, "shovel", "sword");
+            } else if (state.isIn(BlockTags.AXE_MINEABLE)) {
+                BotActions.selectBestTool(bot, "axe", "sword");
+            }
+
+            LOGGER.info("movement obstruction mine [{}]: bot={} pos={} state={}",
+                    label,
+                    bot.getName().getString(),
+                    pos.toShortString(),
+                    state.getBlock().getTranslationKey());
+
+            try {
+                MiningTool.mineBlock(bot, pos).get(6, TimeUnit.SECONDS);
+                // Small pause to let physics/collision settle.
+                sleep(120L);
+                return world.getBlockState(pos).isAir();
+            } catch (Exception ignored) {
+                // Cooldown is already marked; treat this as a failed attempt.
+                return false;
+            }
+        }
+
+        return false;
+    }
+
+    private static boolean obstructionMineAllowed(UUID botUuid, BlockPos pos) {
+        if (botUuid == null || pos == null) {
+            return false;
+        }
+        long now = System.currentTimeMillis();
+        Map<BlockPos, Long> perBot = OBSTRUCTION_MINE_COOLDOWN.computeIfAbsent(botUuid, __ -> new ConcurrentHashMap<>());
+        BlockPos key = pos.toImmutable();
+        Long last = perBot.get(key);
+        if (last != null && now - last < OBSTRUCTION_MINE_COOLDOWN_MS) {
+            return false;
+        }
+        perBot.put(key, now);
+        return true;
     }
 
     private static void snapTo(ServerPlayerEntity player, BlockPos target) {

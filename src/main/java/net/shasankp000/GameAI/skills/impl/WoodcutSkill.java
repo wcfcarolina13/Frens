@@ -196,7 +196,7 @@ public final class WoodcutSkill implements Skill {
             double horizRadius = Math.max(6.0,
                     Math.max(Math.abs(maxX - startPos.getX()), Math.abs(minX - startPos.getX())) + 3.0);
             double vertRange = Math.max(4.0, (maxY - minY) + 3.0);
-            DropSweeper.safeSweep(bot, source.withSilent().withMaxLevel(4), horizRadius, vertRange);
+            DropSweeper.safeSweep(bot, source.withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS), horizRadius, vertRange);
             swept = true;
         }
 

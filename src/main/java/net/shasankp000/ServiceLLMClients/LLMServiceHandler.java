@@ -198,7 +198,7 @@ public class LLMServiceHandler {
             LOGGER.error("Bot {} not online.", botName);
             return;
         }
-        ServerCommandSource botSource = bot.getCommandSource().withSilent().withMaxLevel(4);
+        ServerCommandSource botSource = bot.getCommandSource().withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS);
 
         server.execute(() -> {
             Thread.currentThread().setName("LLM-Chat-Worker");

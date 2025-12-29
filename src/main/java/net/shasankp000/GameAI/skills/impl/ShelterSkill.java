@@ -17,13 +17,16 @@ import net.shasankp000.ChatUtils.ChatUtils;
 import net.shasankp000.GameAI.BotActions;
 import net.shasankp000.GameAI.BotEventHandler;
 import net.shasankp000.GameAI.DropSweeper;
+import net.shasankp000.GameAI.services.BotStuckService;
 import net.shasankp000.GameAI.services.MovementService;
 import net.shasankp000.GameAI.services.BlockInteractionService;
+import net.shasankp000.GameAI.services.TaskService;
 import net.shasankp000.GameAI.services.WorkDirectionService;
 import net.shasankp000.GameAI.skills.Skill;
 import net.shasankp000.GameAI.skills.SkillContext;
 import net.shasankp000.GameAI.skills.SkillExecutionResult;
 import net.shasankp000.GameAI.skills.SkillManager;
+import net.shasankp000.GameAI.skills.SkillPreferences;
 import net.shasankp000.GameAI.skills.impl.CollectDirtSkill;
 import net.shasankp000.GameAI.skills.impl.StripMineSkill;
 import net.shasankp000.GameAI.skills.support.TreeDetector;
@@ -56,6 +59,7 @@ public final class ShelterSkill implements Skill {
 
     private static final Logger LOGGER = LoggerFactory.getLogger("skill-shelter");
     private static final double REACH_DISTANCE_SQ = 20.25D; // ~4.5 blocks (survival reach)
+    private static final int DEEP_UNDERGROUND_SURFACE_DELTA_Y = 14;
     private static final List<Item> BUILD_BLOCKS = List.of(
             Items.DIRT, Items.COARSE_DIRT, Items.ROOTED_DIRT,
             Items.COBBLESTONE, Items.COBBLED_DEEPSLATE,
@@ -117,6 +121,15 @@ public final class ShelterSkill implements Skill {
         int surfaceY = world.getTopY(net.minecraft.world.Heightmap.Type.MOTION_BLOCKING_NO_LEAVES, origin.getX(), origin.getZ());
         boolean skyVisible = world.isSkyVisible(origin.up());
         boolean underArtificialRoof = isLikelyUnderArtificialRoof(world, origin, 7);
+
+        // If we fell far below the surface (common when dropping into a deep hole mid-task),
+        // don't try to mine our way out here. Regroup and let follow-walk / teleport handle recovery.
+        if (!skyVisible && !underArtificialRoof && bot.getBlockY() < surfaceY - DEEP_UNDERGROUND_SURFACE_DELTA_Y) {
+            if (triggerEmergencyRegroupFromDeepUnderground(context, source, bot, world)) {
+                return SkillExecutionResult.failure("Regrouping: fell deep underground.");
+            }
+        }
+
         if (!skyVisible && !underArtificialRoof && bot.getBlockY() < surfaceY - 3) {
             // If we're simply under a roof/walls near the surface, relocate to a nearby sky-visible opening
             // instead of trying to mine upward (which can hit shoreline water and abort).
@@ -137,7 +150,188 @@ public final class ShelterSkill implements Skill {
             return SkillExecutionResult.failure("I can't build a surface shelter while underground; I couldn't reach the surface.");
         }
 
+        // If we're near a cave mouth / low overhang, the footprint can include tight headroom that causes
+        // repeated in-wall clipping and "mining out" loops. Prefer relocating a short distance to a more
+        // open patch of ground before starting the build.
+        if (!isOpenFootprint(world, origin, radius)) {
+            BlockPos relocated = findNearbyOpenFootprint(world, origin, radius, 12);
+            if (relocated != null) {
+                boolean moved = moveToBuildSite(source, bot, relocated);
+                if (moved) {
+                    origin = bot.getBlockPos();
+                }
+            }
+        }
+
         return new HovelPerimeterBuilder().build(context, source, bot, world, origin, radius, wallHeight, preferredDoorSide, resumeRequested);
+    }
+
+    private boolean isOpenFootprint(ServerWorld world, BlockPos center, int radius) {
+        if (world == null || center == null) {
+            return true;
+        }
+        if (radius <= 0) {
+            return true;
+        }
+
+        // "Open" means: sky visible and 2-block headroom across most of the intended footprint.
+        int total = 0;
+        int open = 0;
+        for (int dx = -radius; dx <= radius; dx++) {
+            for (int dz = -radius; dz <= radius; dz++) {
+                BlockPos pos = center.add(dx, 0, dz);
+                total++;
+                if (!world.isChunkLoaded(pos)) {
+                    continue;
+                }
+                if (!world.isSkyVisible(pos.up())) {
+                    continue;
+                }
+                BlockState feet = world.getBlockState(pos);
+                BlockState head = world.getBlockState(pos.up());
+                if (!feet.getCollisionShape(world, pos).isEmpty()) {
+                    continue;
+                }
+                if (!head.getCollisionShape(world, pos.up()).isEmpty()) {
+                    continue;
+                }
+                open++;
+            }
+        }
+
+        if (total <= 0) {
+            return true;
+        }
+        double ratio = (double) open / (double) total;
+        return ratio >= 0.75D;
+    }
+
+    private BlockPos findNearbyOpenFootprint(ServerWorld world, BlockPos origin, int buildRadius, int searchRadius) {
+        if (world == null || origin == null) {
+            return null;
+        }
+        if (searchRadius <= 0) {
+            return null;
+        }
+
+        BlockPos best = null;
+        double bestScore = -1.0D;
+        double bestDistSq = Double.MAX_VALUE;
+
+        for (int dx = -searchRadius; dx <= searchRadius; dx++) {
+            for (int dz = -searchRadius; dz <= searchRadius; dz++) {
+                int x = origin.getX() + dx;
+                int z = origin.getZ() + dz;
+                int y = world.getTopY(net.minecraft.world.Heightmap.Type.MOTION_BLOCKING_NO_LEAVES, x, z);
+                BlockPos candidate = new BlockPos(x, y, z);
+                if (!world.isChunkLoaded(candidate)) {
+                    continue;
+                }
+                if (!world.isSkyVisible(candidate.up())) {
+                    continue;
+                }
+                if (!isStandable(world, candidate)) {
+                    continue;
+                }
+                if (TreeDetector.isNearHumanBlocks(world, candidate, 2)) {
+                    continue;
+                }
+
+                // Score by footprint openness, with tie-breaker toward closer candidates.
+                boolean open = isOpenFootprint(world, candidate, buildRadius);
+                if (!open) {
+                    continue;
+                }
+                double distSq = origin.getSquaredDistance(candidate);
+                double score = 1.0D;
+                if (score > bestScore || (score == bestScore && distSq < bestDistSq)) {
+                    bestScore = score;
+                    bestDistSq = distSq;
+                    best = candidate.toImmutable();
+                }
+            }
+        }
+
+        return best;
+    }
+
+    private boolean triggerEmergencyRegroupFromDeepUnderground(SkillContext context,
+                                                              ServerCommandSource botSource,
+                                                              ServerPlayerEntity bot,
+                                                              ServerWorld world) {
+        if (botSource == null || bot == null || world == null) {
+            return false;
+        }
+
+        // Prefer the player who issued the command (if available).
+        ServerPlayerEntity commander = null;
+        if (context != null && context.requestSource() != null) {
+            try {
+                commander = context.requestSource().getPlayer();
+            } catch (Exception ignored) {
+            }
+        }
+        if (commander != null && commander.getUuid().equals(bot.getUuid())) {
+            commander = null;
+        }
+        if (commander != null && commander.isSpectator()) {
+            commander = null;
+        }
+        if (commander == null) {
+            net.minecraft.server.MinecraftServer srv = bot.getCommandSource().getServer();
+            if (srv != null) {
+                commander = srv.getPlayerManager().getPlayerList().stream()
+                        .filter(p -> p != null && !p.getUuid().equals(bot.getUuid()))
+                        .filter(p -> !p.isSpectator())
+                        .min(java.util.Comparator.comparingDouble(p -> p.squaredDistanceTo(bot)))
+                        .orElse(null);
+            }
+        }
+
+        BlockPos goal = null;
+        if (commander != null && commander.getEntityWorld() instanceof ServerWorld commanderWorld) {
+            goal = net.shasankp000.GameAI.services.SafePositionService.findForwardSafeSpot(commanderWorld, commander);
+            if (goal == null) {
+                goal = net.shasankp000.GameAI.services.SafePositionService.findSafeNear(commanderWorld, commander.getBlockPos(), 8);
+            }
+            if (goal == null) {
+                goal = commander.getBlockPos().toImmutable();
+            }
+        }
+        if (goal == null) {
+            Vec3d safe = BotStuckService.getLastSafePosition(bot.getUuid());
+            if (safe != null) {
+                goal = BlockPos.ofFloored(safe);
+                // Avoid teleporting/pathing into a 1-block hole.
+                BlockPos safer = net.shasankp000.GameAI.services.SafePositionService.findSafeNear(world, goal, 6);
+                if (safer != null) {
+                    goal = safer;
+                }
+            }
+        }
+        if (goal == null) {
+            return false;
+        }
+
+        TaskService.forceAbort(bot.getUuid(), "§cEmergency regroup: fell deep underground.");
+        ChatUtils.sendSystemMessage(botSource, "Shelter: fell deep underground; regrouping...");
+
+        boolean teleportAllowed = SkillPreferences.teleportDuringSkills(bot);
+        if (!teleportAllowed) {
+            // Safe regroup: do not allow come-recovery digging skills (ascent/stripmine).
+            BotEventHandler.setComeModeWalk(bot, commander, goal, 3.2D, false);
+            return true;
+        }
+
+        MovementService.MovementPlan plan = new MovementService.MovementPlan(
+                MovementService.Mode.DIRECT,
+                goal,
+                goal,
+                null,
+                null,
+                bot.getHorizontalFacing());
+        MovementService.execute(botSource, bot, plan, Boolean.TRUE, true);
+        return true;
     }
 
     private boolean tryStepOutOfWater(ServerCommandSource source, ServerPlayerEntity bot, ServerWorld world) {
@@ -373,8 +567,8 @@ public final class ShelterSkill implements Skill {
 
     private void sweepDrops(ServerCommandSource source, double radius, double vRange, int maxTargets, long durationMs) {
         try {
-            DropSweeper.sweep(source.withSilent().withMaxLevel(4), radius, vRange, maxTargets, durationMs);
-            DropSweeper.sweep(source.withSilent().withMaxLevel(4), radius + 2.0, vRange + 1.0, Math.max(maxTargets, 40), durationMs + 3000); // second, wider pass
+            DropSweeper.sweep(source.withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS), radius, vRange, maxTargets, durationMs);
+            DropSweeper.sweep(source.withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS), radius + 2.0, vRange + 1.0, Math.max(maxTargets, 40), durationMs + 3000); // second, wider pass
         } catch (Exception e) {
             LOGGER.warn("Shelter drop-sweep failed: {}", e.getMessage());
         }

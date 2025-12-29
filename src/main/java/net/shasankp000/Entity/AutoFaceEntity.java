@@ -224,8 +224,8 @@ public class AutoFaceEntity {
             lastHostileTick = server.getTicks();
         }
 
-        // Use HealingService for automatic eating
-        if (HealingService.autoEat(bot)) {
+        // Use HealingService for automatic eating (safe regen + hunger maintenance)
+        if (HealingService.autoEat(bot, hostileEntities)) {
             return;
         }
 
@@ -628,7 +628,7 @@ public class AutoFaceEntity {
             return;
         }
         lastDangerMessageMs = now;
-        ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withMaxLevel(4),
+        ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS),
                 "§cTerminating all current tasks due to threat detections");
     }
 

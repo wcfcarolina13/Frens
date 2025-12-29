@@ -83,6 +83,18 @@ public final class BotRescueService {
         }
     }
 
+    /**
+     * Exposes the short obstruction-damage window used internally to gate mining/escape.
+     * Intended for higher-level safety systems (e.g., shelter emergency regroup) that need a
+     * reliable "this happened recently" signal without relying on sticky getRecentDamageSource().
+     */
+    public static boolean tookRecentObstructDamageWindow(ServerPlayerEntity bot) {
+        if (bot == null) {
+            return false;
+        }
+        return tookRecentObstructDamage(bot);
+    }
+
     private static boolean tookRecentObstructDamage(ServerPlayerEntity bot) {
         MinecraftServer srv = bot.getCommandSource().getServer();
         if (srv == null) return false;
@@ -134,6 +146,14 @@ public final class BotRescueService {
         }
 
         boolean stuckInBlocks = (headBlocked || feetBlocked);
+
+        // getRecentDamageSource() can remain sticky for a short window even after we're no longer clipped.
+        // If head/feet are clear AND we're not currently inside a wall, do not escalate into mining.
+        if (takingSuffocationDamage && !stuckInBlocks && !bot.isInsideWall()) {
+            LAST_SUFFOCATION_ALERT_TICK.remove(bot.getUuid());
+            LAST_STUCK_LOG_MS.remove(bot.getUuid());
+            return false;
+        }
 
         // Exit if not suffocating AND not stuck in blocks
         if (!takingSuffocationDamage && !stuckInBlocks) {
@@ -314,16 +334,10 @@ public final class BotRescueService {
 
         // Check critical positions (head and feet most important)
         List<BlockPos> criticalPositions = List.of(feet, head);
-        List<BlockPos> adjacentPositions = List.of(
-                feet.north(), feet.south(), feet.east(), feet.west(),
-                head.north(), head.south(), head.east(), head.west()
-        );
 
-        boolean criticalBlocked = false;
         BlockPos blockedPos = null;
         BlockState blockedState = null;
 
-        // Check critical positions first
         for (BlockPos pos : criticalPositions) {
             BlockState state = world.getBlockState(pos);
             // Ignore Farmland and other partial blocks that don't suffocate
@@ -333,9 +347,7 @@ public final class BotRescueService {
                     && !state.isOf(Blocks.WATER)
                     && state.blocksMovement()
                     && !isRescueProtectedBlock(state)) {
-                // Double check collision shape to be sure
                 if (!state.getCollisionShape(world, pos).isEmpty()) {
-                    criticalBlocked = true;
                     blockedPos = pos;
                     blockedState = state;
                     break;
@@ -343,25 +355,20 @@ public final class BotRescueService {
             }
         }
 
-        // If no critical blocks, check adjacent
-        if (!criticalBlocked) {
-            for (BlockPos pos : adjacentPositions) {
-                BlockState state = world.getBlockState(pos);
-                if (!state.isAir()
-                        && !state.isOf(Blocks.BEDROCK)
-                        && !state.isOf(Blocks.FARMLAND)
-                        && state.blocksMovement()
-                        && !isRescueProtectedBlock(state)) {
-                    criticalBlocked = true;
-                    blockedPos = pos;
-                    blockedState = state;
-                    break;
-                }
+        boolean hasCriticalObstruction = blockedPos != null && blockedState != null;
+        boolean insideWall = bot.isInsideWall();
+
+        // If we took a transient IN_WALL tick but aren't actually blocked at head/feet, do NOT mine nearby blocks.
+        // Prefer a movement-only nudge so modes like GUARD/PATROL don't start griefing terrain.
+        if (!hasCriticalObstruction) {
+            if (insideWall && tookRecentObstructDamage(bot)) {
+                return attemptEscapeMovement(bot, world, feet, head);
             }
+            return false;
         }
 
-        // Gate escape: require obstructing blocks AND recent obstruct damage (<=2s)
-        if (!criticalBlocked || !tookRecentObstructDamage(bot)) {
+        // Gate escape: require recent obstruct damage (<=2s)
+        if (!tookRecentObstructDamage(bot)) {
             return false;
         }
 
@@ -379,7 +386,7 @@ public final class BotRescueService {
 
             String blockName = blockedState.getBlock().getName().getString();
             String toolName = bot.getMainHandStack().isEmpty() ? "bare hands" : bot.getMainHandStack().getName().getString();
-            String location = blockedPos.equals(head) ? "above" : blockedPos.equals(feet) ? "at feet" : "nearby";
+            String location = blockedPos.equals(head) ? "above" : "at feet";
 
             // Send urgent alert
             alertSuffocationWithDetails(bot, blockName, toolName, location);
@@ -476,7 +483,7 @@ public final class BotRescueService {
 
             // Alert player
             String message = String.format("Spawned inside %s! Mining out with %s...", blockName, toolName);
-            ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withMaxLevel(4), message);
+            ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS), message);
 
             LOGGER.info("Bot {} spawned inside {} {} - starting time-based mining with {}",
                     bot.getName().getString(), blockName, location, toolName);
@@ -594,7 +601,7 @@ public final class BotRescueService {
         if (last >= 0 && (now - last) < SUFFOCATION_ALERT_COOLDOWN_TICKS) {
             return;
         }
-        ChatUtils.sendChatMessages(source.withSilent().withMaxLevel(4), "I'm suffocating!");
+        ChatUtils.sendChatMessages(source.withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS), "I'm suffocating!");
         LAST_SUFFOCATION_ALERT_TICK.put(uuid, now);
     }
 
@@ -623,7 +630,7 @@ public final class BotRescueService {
 
                 // Apply movement velocity toward clear space
                 bot.setVelocity(direction.multiply(0.3));
-                bot.velocityModified = true;
+                bot.velocityDirty = true;
                 LAST_ESCAPE_NUDGE_MS.put(bot.getUuid(), nowMs);
 
                 LOGGER.info("Bot {} attempting escape movement toward {}", bot.getName().getString(), dir);
@@ -650,7 +657,7 @@ public final class BotRescueService {
             return;
         }
         String message = String.format("I'm stuck in %s %s! Mining with %s...", blockName, location, toolName);
-        ChatUtils.sendChatMessages(source.withSilent().withMaxLevel(4), message);
+        ChatUtils.sendChatMessages(source.withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS), message);
         LAST_SUFFOCATION_ALERT_TICK.put(uuid, now);
     }
 

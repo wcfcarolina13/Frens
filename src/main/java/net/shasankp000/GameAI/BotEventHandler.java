@@ -4,6 +4,8 @@ import net.shasankp000.EntityUtil;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
 import net.minecraft.block.DoorBlock;
+import net.minecraft.block.FenceGateBlock;
+import net.minecraft.state.property.Properties;
 import net.minecraft.component.DataComponentTypes;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.ItemEntity;
@@ -46,6 +48,7 @@ import net.shasankp000.GameAI.services.BotThreatService;
 import net.shasankp000.GameAI.services.BotStuckService;
 import net.shasankp000.GameAI.services.BotRLActionService;
 import net.shasankp000.GameAI.services.BotRLPersistenceThrottleService;
+import net.shasankp000.GameAI.services.BotHomeService;
 import net.shasankp000.Database.StateActionPair;
 import net.shasankp000.Entity.AutoFaceEntity;
 import net.shasankp000.Entity.LookController;
@@ -235,6 +238,40 @@ public class BotEventHandler {
     private static Mode getMode(ServerPlayerEntity bot) {
         BotCommandStateService.State state = stateFor(bot);
         return state != null ? state.mode : Mode.IDLE;
+    }
+
+    /**
+     * Force the bot into {@link Mode#IDLE}.
+     *
+     * <p>Intended for user-facing "resume idle" and post-action auto-resume.
+     * Does not abort tasks; callers should check {@link net.shasankp000.GameAI.services.TaskService#hasActiveTask} first.
+     */
+    public static boolean setIdleMode(ServerPlayerEntity bot, boolean silent) {
+        if (bot == null || bot.isRemoved()) {
+            return false;
+        }
+
+        // Clear any directed mode targets.
+        setFollowTarget(bot, null);
+        setBaseTarget(bot, null);
+        clearGuard(bot);
+
+        Mode prior = getMode(bot);
+        setMode(bot, Mode.IDLE);
+        setAssistAllies(bot, true);
+
+        if (!silent && prior != Mode.IDLE) {
+            sendBotMessage(bot, "Back to idling.");
+        }
+        return prior != Mode.IDLE;
+    }
+
+    public static String setIdleMode(ServerPlayerEntity bot) {
+        boolean ok = setIdleMode(bot, true);
+        if (bot == null) {
+            return "No bot selected.";
+        }
+        return ok ? (bot.getName().getString() + " is now IDLE.") : (bot.getName().getString() + " is already IDLE.");
     }
 
     private static void setFollowTarget(ServerPlayerEntity bot, UUID targetUuid) {
@@ -603,7 +640,7 @@ public class BotEventHandler {
             int timeofDay = GetTime.getTimeOfWorld(bot);
             String time = (timeofDay >= 12000 && timeofDay < 24000) ? "night" : "day";
 
-            World world = bot.getCommandSource().withSilent().withMaxLevel(4).getWorld();
+            World world = bot.getCommandSource().withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS).getWorld();
             RegistryKey<World> dimType = world.getRegistryKey();
             String dimension = dimType.getValue().toString();
 
@@ -743,7 +780,7 @@ public class BotEventHandler {
         }
 
         try {
-            ServerCommandSource botSource = bot.getCommandSource().withSilent().withMaxLevel(4);
+            ServerCommandSource botSource = bot.getCommandSource().withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS);
 
 
             if (qTable == null) {
@@ -931,7 +968,7 @@ public class BotEventHandler {
             rememberSpawn(destinationWorld, target, bot.getYaw(), bot.getPitch());
         }
 
-        ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withMaxLevel(4),
+        ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS),
                 bot.getName().getString() + " has regrouped and is ready to re-engage.");
 
         rescueFromBurial(bot);
@@ -1026,6 +1063,7 @@ public class BotEventHandler {
             state.comeBestGoalDistSq = Double.NaN;
             state.comeTicksSinceBest = 0;
             state.comeNextSkillTick = 0L;
+            state.comeAllowRecoverySkills = true;
         }
         setMode(bot, Mode.FOLLOW);
         clearGuard(bot);
@@ -1055,6 +1093,7 @@ public class BotEventHandler {
             state.comeBestGoalDistSq = Double.NaN;
             state.comeTicksSinceBest = 0;
             state.comeNextSkillTick = 0L;
+            state.comeAllowRecoverySkills = true;
         }
         setMode(bot, Mode.FOLLOW);
         clearGuard(bot);
@@ -1067,7 +1106,22 @@ public class BotEventHandler {
         return "Walking to " + target.getName().getString() + ".";
     }
 
-    public static String setComeModeWalk(ServerPlayerEntity bot, ServerPlayerEntity commander, BlockPos fixedGoal, double stopRange) {
+    public static String setComeModeWalk(ServerPlayerEntity bot,
+                                        ServerPlayerEntity commander,
+                                        BlockPos fixedGoal,
+                                        double stopRange) {
+        return setComeModeWalk(bot, commander, fixedGoal, stopRange, true);
+    }
+
+    /**
+     * Come mode (fixed-goal follow-walk). If allowRecoverySkills is false, the bot will not launch
+     * "come recovery" digging skills (collect_dirt ascent / stripmine) and will only walk/path.
+     */
+    public static String setComeModeWalk(ServerPlayerEntity bot,
+                                        ServerPlayerEntity commander,
+                                        BlockPos fixedGoal,
+                                        double stopRange,
+                                        boolean allowRecoverySkills) {
         if (bot == null || fixedGoal == null) {
             return "Unable to come — destination not found.";
         }
@@ -1082,6 +1136,7 @@ public class BotEventHandler {
             state.comeBestGoalDistSq = Double.NaN;
             state.comeTicksSinceBest = 0;
             state.comeNextSkillTick = 0L;
+            state.comeAllowRecoverySkills = allowRecoverySkills;
         }
         setMode(bot, Mode.FOLLOW);
         clearGuard(bot);
@@ -1118,6 +1173,7 @@ public class BotEventHandler {
             state.comeBestGoalDistSq = Double.NaN;
             state.comeTicksSinceBest = 0;
             state.comeNextSkillTick = 0L;
+            state.comeAllowRecoverySkills = true;
         }
         if (bot != null) {
             BotActions.stop(bot);
@@ -1152,6 +1208,7 @@ public class BotEventHandler {
             state.comeBestGoalDistSq = Double.NaN;
             state.comeTicksSinceBest = 0;
             state.comeNextSkillTick = 0L;
+            state.comeAllowRecoverySkills = true;
         }
         setMode(bot, Mode.FOLLOW);
         clearGuard(bot);
@@ -1181,6 +1238,8 @@ public class BotEventHandler {
 
     public static String setGuardMode(ServerPlayerEntity bot, double radius) {
         registerBot(bot);
+        // If a drop sweep is currently driving movement, cancel it so GUARD can take over immediately.
+        DropSweepService.requestCancel(bot, "mode-switch-guard");
         setGuardState(bot, positionOf(bot), Math.max(3.0D, radius));
         setMode(bot, Mode.GUARD);
         setFollowTarget(bot, null);
@@ -1192,6 +1251,8 @@ public class BotEventHandler {
 
     public static String setPatrolMode(ServerPlayerEntity bot, double radius) {
         registerBot(bot);
+        // If a drop sweep is currently driving movement, cancel it so PATROL can take over immediately.
+        DropSweepService.requestCancel(bot, "mode-switch-patrol");
         setGuardState(bot, positionOf(bot), Math.max(3.0D, radius));
         setMode(bot, Mode.PATROL);
         setFollowTarget(bot, null);
@@ -1216,25 +1277,62 @@ public class BotEventHandler {
         if (base == null) {
             return "No base location available.";
         }
+        // Preserve baseTarget so sunset automation can track "home" for auto-sleep.
         setBaseTarget(bot, base);
-        setMode(bot, Mode.RETURNING_BASE);
+
+        // Use the follow-walk system with a fixed goal. This gives us the more robust door/corner/waypoint
+        // planning that FOLLOW/COME already have, avoiding the simple "push into wall" steering.
         setFollowTarget(bot, null);
-        setGuardState(bot, null, getGuardRadius(bot));
+        BlockPos goal = BlockPos.ofFloored(base.x, base.y, base.z).toImmutable();
+        BotCommandStateService.State state = stateFor(bot);
+        if (state != null) {
+            state.followNoTeleport = false;
+            state.followStopRange = 0.0D;
+            state.followStandoffRange = 0.0D;
+            state.followFixedGoal = goal;
+            state.comeBestGoalDistSq = Double.NaN;
+            state.comeTicksSinceBest = 0;
+            state.comeNextSkillTick = 0L;
+            // For "head home", prefer safe walking/pathing over digging recovery skills.
+            state.comeAllowRecoverySkills = false;
+        }
+        setMode(bot, Mode.FOLLOW);
+        clearGuard(bot);
+
+        UUID id = bot.getUuid();
+        FollowStateService.clearPlanning(id);
+        FollowDebugService.clear(id);
+        requestFollowPathPlanToGoal(bot, goal, true, "return-base-start");
+
         sendBotMessage(bot, "Returning to base.");
         return "Bot is returning to base.";
     }
 
     public static String setReturnToBase(ServerPlayerEntity bot, ServerPlayerEntity commander) {
+        if (bot == null) {
+            return "No bot available.";
+        }
         ServerWorld world = bot.getCommandSource().getWorld();
-        Vec3d base;
-        if (commander != null) {
-            ServerWorld commanderWorld = commander.getCommandSource().getWorld();
-            BlockPos spawn = resolveSpawnPoint(commanderWorld);
-            base = Vec3d.ofCenter(spawn);
-        } else {
-            BlockPos spawn = resolveSpawnPoint(world);
+
+        // Policy: home/base return is not cross-dimension.
+        if (world.getRegistryKey() != net.minecraft.world.World.OVERWORLD) {
+            sendBotMessage(bot, "I can't return home from this dimension.");
+            return "Home return is not available in this dimension.";
+        }
+
+        Vec3d base = null;
+        java.util.Optional<BlockPos> home = BotHomeService.resolveHomeTarget(bot);
+        if (home.isPresent()) {
+            base = Vec3d.ofCenter(home.get());
+        }
+
+        // Fallback for older worlds / no saved home info.
+        if (base == null) {
+            ServerWorld spawnWorld = commander != null ? commander.getCommandSource().getWorld() : world;
+            BlockPos spawn = resolveSpawnPoint(spawnWorld);
             base = Vec3d.ofCenter(spawn);
         }
+
         return setReturnToBase(bot, base);
     }
 
@@ -1375,7 +1473,7 @@ public class BotEventHandler {
                 : null;
         if (target == null && fixedGoal == null) {
             setMode(bot, Mode.IDLE);
-        setAssistAllies(bot, true);            setFollowTarget(bot, null);
+            setFollowTarget(bot, null);
 	            if (bot != null) {
 	                UUID id = bot.getUuid();
 	                FollowStateService.clearAll(id);
@@ -1386,9 +1484,6 @@ public class BotEventHandler {
 	        }
 
         List<Entity> augmentedHostiles = new ArrayList<>(hostileEntities);
-        if (target != null && isAssistAllies(bot)) {
-            augmentedHostiles.addAll(BotThreatService.findHostilesAround(target, 8.0D));
-        }
 
         if (!augmentedHostiles.isEmpty() && engageHostiles(bot, server, augmentedHostiles)) {
             return true;
@@ -1396,11 +1491,12 @@ public class BotEventHandler {
 
         lowerShieldTracking(bot);
 
-	        Vec3d targetPos = fixedGoal != null ? Vec3d.ofCenter(fixedGoal) : positionOf(target);
-	        double distanceSq = bot.squaredDistanceTo(targetPos);
-	        double horizDistSq = horizontalDistanceSq(bot, targetPos);
+        Vec3d targetPos = fixedGoal != null ? Vec3d.ofCenter(fixedGoal) : positionOf(target);
+
+    double distanceSq = bot.squaredDistanceTo(targetPos);
+    double horizDistSq = horizontalDistanceSq(bot, targetPos);
 	        if (target != null) {
-	            handleFollowPersonalSpace(bot, target, horizDistSq, targetPos);
+            handleFollowPersonalSpace(bot, target, horizDistSq, targetPos);
 	        }
         boolean forceWalk = state != null && state.followNoTeleport;
         double stopRange = state != null ? state.followStopRange : 0.0D;
@@ -1434,7 +1530,9 @@ public class BotEventHandler {
             boolean verticalProblem = absDeltaY >= 6.0D && !canSee;
             int triggerTicks = verticalProblem ? 25 : 60;
 
-            if (state.comeTicksSinceBest >= triggerTicks && srv.getTicks() >= state.comeNextSkillTick) {
+            if (state.comeAllowRecoverySkills
+                    && state.comeTicksSinceBest >= triggerTicks
+                    && srv.getTicks() >= state.comeNextSkillTick) {
                 if (triggerComeRecoverySkill(bot, target, fixedGoal, targetPos, deltaY, horizDistSq, srv, state)) {
                     return true;
                 }
@@ -1463,9 +1561,40 @@ public class BotEventHandler {
                 stopRange);
         // stopRange is used for "come"-style one-shot moves: do not stop if we're vertically far away
         // (e.g., standing under the commander on a floor below).
-        if (stopRange > 0 && horizDistSq <= stopRange * stopRange && absDeltaY <= 2.0D) {
-            stopFollowing(bot);
-            return true;
+        if (fixedGoal != null && stopRange > 0.0D) {
+            double stopRangeSq = stopRange * stopRange;
+            if (horizDistSq <= stopRangeSq && absDeltaY <= 2.5D) {
+                stopFollowing(bot);
+                return true;
+            }
+        }
+
+        // Special case: return-to-base uses FOLLOW with a fixed goal, but keeps baseTarget populated.
+        // Use the older RETURNING_BASE arrival semantics (arrive -> STAY) while benefiting from
+        // FOLLOW's door/corner/waypoint planning.
+        if (fixedGoal != null && state != null && state.baseTarget != null) {
+            double dxHome = state.baseTarget.x - bot.getX();
+            double dzHome = state.baseTarget.z - bot.getZ();
+            double homeHorizDistSq = dxHome * dxHome + dzHome * dzHome;
+            if (homeHorizDistSq <= 3.0D * 3.0D) {
+                UUID id = bot.getUuid();
+                FollowStateService.clearAll(id);
+                FollowDebugService.clear(id);
+                setFollowTarget(bot, null);
+                state.followNoTeleport = false;
+                state.followStopRange = 0.0D;
+                state.followStandoffRange = 0.0D;
+                state.followFixedGoal = null;
+                state.comeBestGoalDistSq = Double.NaN;
+                state.comeTicksSinceBest = 0;
+                state.comeNextSkillTick = 0L;
+                state.comeAllowRecoverySkills = true;
+                BotActions.stop(bot);
+                setMode(bot, Mode.IDLE);
+                setBaseTarget(bot, null);
+                sendBotMessage(bot, "Arrived at base.");
+                return true;
+            }
         }
 
         UUID botId = bot.getUuid();
@@ -1487,7 +1616,11 @@ public class BotEventHandler {
 	                if (bot.getEntityWorld() instanceof ServerWorld world) {
 	                    BlockState peekState = world.getBlockState(peek);
 	                    BlockState peekUpState = world.getBlockState(peek.up());
-	                    if (peekState.getBlock() instanceof DoorBlock || peekUpState.getBlock() instanceof DoorBlock) {
+                        boolean peekIsOpenable = peekState.getBlock() instanceof DoorBlock
+                                || peekUpState.getBlock() instanceof DoorBlock
+                                || peekState.getBlock() instanceof FenceGateBlock
+                                || peekUpState.getBlock() instanceof FenceGateBlock;
+                        if (peekIsOpenable) {
 	                        FollowDoorPlan doorWpPlan = buildFollowDoorPlan(bot, world, peek);
 	                        if (doorWpPlan != null) {
 	                            waypoints.pollFirst();
@@ -1552,7 +1685,9 @@ public class BotEventHandler {
             desiredSpace = Math.max(desiredSpace, state.followStandoffRange);
         }
         double personalSpaceSq = desiredSpace * desiredSpace;
-        if (canSee && !directBlocked && horizDistSq <= personalSpaceSq) {
+        // Personal space only applies when following an actual entity. For fixed-goal follow,
+        // stopping early based on Euclidean distance can strand the bot behind doors/walls.
+        if (target != null && canSee && !directBlocked && horizDistSq <= personalSpaceSq) {
             FOLLOW_WAYPOINTS.remove(botId);
             FOLLOW_DOOR_PLAN.remove(botId);
             BotActions.stop(bot);
@@ -1600,7 +1735,8 @@ public class BotEventHandler {
 
         lowerShieldTracking(bot);
 
-        if (DropSweepService.isInProgress()) {
+        // If a sweep is in-flight for this bot, let it keep driving movement unless we've requested cancellation.
+        if (DropSweepService.isInProgressFor(bot) && !DropSweepService.isCancelRequestedFor(bot)) {
             return true;
         }
 
@@ -1635,7 +1771,8 @@ public class BotEventHandler {
 
         lowerShieldTracking(bot);
 
-        if (DropSweepService.isInProgress()) {
+        // If a sweep is in-flight for this bot, let it keep driving movement unless we've requested cancellation.
+        if (DropSweepService.isInProgressFor(bot) && !DropSweepService.isCancelRequestedFor(bot)) {
             return true;
         }
 
@@ -1688,14 +1825,34 @@ public class BotEventHandler {
         Vec3d base = state != null ? state.baseTarget : null;
         if (base == null) {
             setMode(bot, Mode.IDLE);
-        setAssistAllies(bot, true);            return false;
+            setAssistAllies(bot, true);
+            return false;
         }
 
-        double distance = positionOf(bot).distanceTo(base);
-        if (distance <= 3.0D) {
+        // Important: use horizontal distance, matching FollowMovementService.moveToward().
+        // Otherwise the bot can be close enough to stop moving, but never "arrive" here,
+        // leaving RETURNING_BASE stuck indefinitely.
+        double dx = base.x - bot.getX();
+        double dz = base.z - bot.getZ();
+        double horizDistSq = dx * dx + dz * dz;
+        if (horizDistSq <= 3.0D * 3.0D) {
             setMode(bot, Mode.STAY);
             sendBotMessage(bot, "Arrived at base. Holding position.");
             setBaseTarget(bot, null);
+
+            // If idle hobbies are enabled, automatically resume idling after a short pause.
+            MinecraftServer srv = bot.getCommandSource() != null ? bot.getCommandSource().getServer() : null;
+            if (srv != null) {
+                try {
+                    net.shasankp000.GameAI.services.BotIdleResumeService.scheduleResumeIfEnabled(
+                            srv,
+                            bot,
+                            400L,
+                            "return-to-base"
+                    );
+                } catch (Throwable ignored) {
+                }
+            }
             return true;
         }
 
@@ -1813,13 +1970,16 @@ public class BotEventHandler {
                                                  boolean allowTeleportPref,
                                                  boolean forceWalk,
                                                  MinecraftServer server) {
-        if (bot == null || target == null) {
+        if (bot == null) {
             return false;
         }
         BotCommandStateService.State st = stateFor(bot);
         boolean fixedGoalActive = st != null && st.followFixedGoal != null;
+        if (!fixedGoalActive && target == null) {
+            return false;
+        }
         boolean botSealed = isSealedSpace(bot);
-        boolean commanderSealed = isSealedSpace(target);
+        boolean commanderSealed = target != null && isSealedSpace(target);
         boolean teleportPreferenceEnabled = SkillPreferences.teleportDuringSkills(bot);
         // Only treat "very close" as resolved if we're not physically blocked; otherwise we still need
         // door/waypoint planning to reach the commander through the enclosure.
@@ -1864,7 +2024,7 @@ public class BotEventHandler {
         }
         int effectiveStagnant = Math.max(Math.max(stagnant, posStagnant), blockedTicks);
         if (directBlocked && posStagnant >= 5 && effectiveStagnant >= 10) {
-            BlockPos directionGoal = navGoalBlock != null ? navGoalBlock : target.getBlockPos();
+            BlockPos directionGoal = navGoalBlock != null ? navGoalBlock : (target != null ? target.getBlockPos() : null);
             Direction towardAction = directionGoal != null
                     ? approximateToward(bot.getBlockPos(), directionGoal)
                     : bot.getHorizontalFacing();
@@ -1878,7 +2038,7 @@ public class BotEventHandler {
         Vec3d commanderGoal = fixedGoalActive ? navGoalPos : positionOf(target);
         BlockPos commanderGoalBlock = fixedGoalActive ? navGoalBlock : target.getBlockPos();
         boolean commanderRouteBlocked = isDirectRouteBlocked(bot, commanderGoal, commanderGoalBlock);
-        if (canSee && commanderRouteBlocked && isOpenDoorBetween(bot, target)) {
+        if (target != null && canSee && commanderRouteBlocked && isOpenDoorBetween(bot, target)) {
             commanderRouteBlocked = false;
         }
         if (canSee && !commanderRouteBlocked) {
@@ -1914,7 +2074,7 @@ public class BotEventHandler {
                     + " dist=" + String.format(Locale.ROOT, "%.2f", Math.sqrt(targetDistSq))
                     + " stagnant=" + effectiveStagnant);
         }
-        if (allowTeleportPref && teleportDesired) {
+        if (target != null && allowTeleportPref && teleportDesired) {
             if (tryWolfTeleport(bot, target, server)) {
                 FOLLOW_DOOR_PLAN.remove(id);
                 FOLLOW_WAYPOINTS.remove(id);
@@ -1926,7 +2086,7 @@ public class BotEventHandler {
             }
         }
 
-        if (shouldPrioritizeCommanderOverDoors(bot, target, canSee, directBlocked, targetDistSq, botSealed, commanderSealed)) {
+        if (target != null && shouldPrioritizeCommanderOverDoors(bot, target, canSee, directBlocked, targetDistSq, botSealed, commanderSealed)) {
             FOLLOW_DOOR_PLAN.remove(id);
             FOLLOW_DOOR_LAST_BLOCK.remove(id);
             FOLLOW_DOOR_STUCK_TICKS.remove(id);
@@ -1945,7 +2105,10 @@ public class BotEventHandler {
             // If the commander moved away and we now have a clear direct route, stop "lingering" on the doorway
             // and resume normal follow immediately.
             if (canSee && targetDistSq <= 144.0D) { // ~12 blocks
-                boolean blockedToCommander = isDirectRouteBlocked(bot, commanderGoal, target.getBlockPos());
+                BlockPos commanderBlock = commanderGoalBlock != null
+                        ? commanderGoalBlock
+                        : (target != null ? target.getBlockPos() : null);
+                boolean blockedToCommander = isDirectRouteBlocked(bot, commanderGoal, commanderBlock);
                 if (!blockedToCommander) {
                     FOLLOW_DOOR_PLAN.remove(id);
                     FOLLOW_DOOR_LAST_BLOCK.remove(id);
@@ -1957,6 +2120,8 @@ public class BotEventHandler {
                 }
             }
             if (nowMs >= activeDoorPlan.expiresAtMs()) {
+                // Mark this door as failed to prevent oscillation.
+                MovementService.markDoorEscapeFailed(bot, activeDoorPlan.doorBase());
                 FOLLOW_DOOR_PLAN.remove(id);
                 FOLLOW_DOOR_LAST_BLOCK.remove(id);
                 FOLLOW_DOOR_STUCK_TICKS.remove(id);
@@ -1976,7 +2141,9 @@ public class BotEventHandler {
             for (Direction dir : Direction.Type.HORIZONTAL) {
                 BlockPos candidate = base.offset(dir);
                 if (world.getBlockState(candidate).getBlock() instanceof net.minecraft.block.DoorBlock
-                        || world.getBlockState(candidate.up()).getBlock() instanceof net.minecraft.block.DoorBlock) {
+                        || world.getBlockState(candidate.up()).getBlock() instanceof net.minecraft.block.DoorBlock
+                        || world.getBlockState(candidate).getBlock() instanceof FenceGateBlock
+                        || world.getBlockState(candidate.up()).getBlock() instanceof FenceGateBlock) {
                     BlockPos doorBase = normalizeDoorBase(world, candidate);
                     if (doorBase != null) {
                         if (targetDistSq >= 900.0D && (MovementService.isDoorRecentlyClosed(id, doorBase)
@@ -2052,7 +2219,9 @@ public class BotEventHandler {
                 if (fixedGoalActive && navGoalBlock != null) {
                     requestFollowPathPlanToGoal(bot, navGoalBlock, true, "direct-blocked-stuck");
                 } else {
-                    requestFollowPathPlan(bot, target, true, "direct-blocked-stuck");
+                    if (target != null) {
+                        requestFollowPathPlan(bot, target, true, "direct-blocked-stuck");
+                    }
                 }
             }
         }
@@ -2061,7 +2230,10 @@ public class BotEventHandler {
         // This handles the common "follow while behind a closed door" case even when
         // distanceSq jitters and the stagnant counter doesn't hit exactly.
         if (targetDistSq <= 400.0D) { // keep this local; long-range “door ray” tends to create distractions
-            Vec3d doorRayGoal = navGoalPos != null ? navGoalPos : target.getEyePos();
+            Vec3d doorRayGoal = navGoalPos != null ? navGoalPos : (target != null ? target.getEyePos() : null);
+            if (doorRayGoal == null) {
+                return false;
+            }
             BlockPos blockingDoor = BlockInteractionService.findDoorAlongLine(bot, doorRayGoal, 5.5D);
             if (blockingDoor != null) {
                 MovementService.tryOpenDoorAt(bot, blockingDoor);
@@ -2082,27 +2254,34 @@ public class BotEventHandler {
 
         // If the bot isn't making progress for a few ticks, try to open a door directly in the way.
         if (effectiveStagnant == 4) {
-            MovementService.tryOpenDoorToward(bot, navGoalBlock != null ? navGoalBlock : target.getBlockPos());
+            if (navGoalBlock != null) {
+                MovementService.tryOpenDoorToward(bot, navGoalBlock);
+            } else if (target != null) {
+                MovementService.tryOpenDoorToward(bot, target.getBlockPos());
+            }
         }
 
         // If we're still stuck and the target is likely "around the corner", treat a nearby door as a sub-goal.
         if (effectiveStagnant >= 6 && FOLLOW_DOOR_PLAN.get(id) == null && bot.getEntityWorld() instanceof ServerWorld world) {
             // If the commander is close and visible and we're not directly blocked, never detour through doors.
             // This prevents “door magnet” behavior when the bot is already in the right area.
-            if (canSee && !directBlocked && targetDistSq <= 64.0D) {
+            if (target != null && canSee && !directBlocked && targetDistSq <= 64.0D) {
                 FOLLOW_WAYPOINTS.remove(id);
                 return false;
             }
             // Only treat doors as a sub-goal when we have reason to think we need to change rooms (blocked or no LoS).
-            if (!directBlocked && canSee) {
+            if (target != null && !directBlocked && canSee) {
                 return false;
             }
             // If the commander is far away, avoid “nearest door” distractions; follow will rely on direct pursuit
             // and (if enabled) wolf-teleport catch-up rather than local door heuristics.
-            if (!directBlocked && !canSee && targetDistSq >= 900.0D) { // ~30 blocks
+            if (target != null && !directBlocked && !canSee && targetDistSq >= 900.0D) { // ~30 blocks
                 return false;
             }
-            BlockPos goalBlock = navGoalBlock != null ? navGoalBlock : target.getBlockPos();
+            BlockPos goalBlock = navGoalBlock != null ? navGoalBlock : (target != null ? target.getBlockPos() : null);
+            if (goalBlock == null) {
+                return false;
+            }
             BlockPos avoidDoor = currentAvoidDoor(id);
             long lastDoorMs = FOLLOW_LAST_DOOR_CROSS_MS.getOrDefault(id, -1L);
             if (lastDoorMs >= 0 && (System.currentTimeMillis() - lastDoorMs) < 5_000L) {
@@ -2148,7 +2327,9 @@ public class BotEventHandler {
         if (fixedGoalActive && navGoalBlock != null) {
             maybeRequestFollowPathPlanToGoal(bot, navGoalBlock, canSee, effectiveStagnant);
         } else {
-            maybeRequestFollowPathPlan(bot, target, canSee, effectiveStagnant);
+            if (target != null) {
+                maybeRequestFollowPathPlan(bot, target, canSee, effectiveStagnant);
+            }
         }
 
         Long replanAfterDoor = FOLLOW_REPLAN_AFTER_DOOR_MS.remove(id);
@@ -2158,7 +2339,9 @@ public class BotEventHandler {
                 if (fixedGoalActive && navGoalBlock != null) {
                     requestFollowPathPlanToGoal(bot, navGoalBlock, true, "post-door");
                 } else {
-                    requestFollowPathPlan(bot, target, true, "post-door");
+                    if (target != null) {
+                        requestFollowPathPlan(bot, target, true, "post-door");
+                    }
                 }
             }
         }
@@ -2368,6 +2551,18 @@ public class BotEventHandler {
         }
         BlockState doorState = world.getBlockState(doorBase);
 
+        // If we are near the door and it's closed, try opening it even before we perfectly reach the
+        // approach cell. This reduces "push into door" stalls when alignment is imperfect.
+        boolean doorOpen = doorState.contains(Properties.OPEN)
+            && Boolean.TRUE.equals(doorState.get(Properties.OPEN));
+        if (!plan.stepping() && !doorOpen) {
+            double doorDistSq = bot.squaredDistanceTo(Vec3d.ofCenter(doorBase));
+            if (doorDistSq <= 4.0D) { // ~2 blocks
+                MovementService.tryOpenDoorAt(bot, doorBase);
+                doorState = world.getBlockState(doorBase);
+            }
+        }
+
         // Keep the plan stable: approach/step are chosen when the plan is built.
         // (Dynamic re-picking can oscillate around hinge corners.)
         BlockPos approachPos = plan.approachPos();
@@ -2489,9 +2684,12 @@ public class BotEventHandler {
 
         if (distSq <= 2.25D) {
             if (!plan.stepping()) {
-                boolean isOpen = doorState.contains(net.minecraft.block.DoorBlock.OPEN)
-                        && Boolean.TRUE.equals(doorState.get(net.minecraft.block.DoorBlock.OPEN));
-                boolean opened = isOpen || MovementService.tryOpenDoorAt(bot, doorBase);
+            boolean isOpen = doorState.contains(Properties.OPEN)
+                && Boolean.TRUE.equals(doorState.get(Properties.OPEN));
+                // Always invoke the door helper here:
+                // - if the door is closed, this opens it
+                // - if the door is already open, this schedules an auto-close behind the bot
+                boolean opened = MovementService.tryOpenDoorAt(bot, doorBase) || isOpen;
                 if (!opened) {
                     // Don't commit to stepping through a door we couldn't open; instead, try to re-approach
                     // for a better interaction angle.
@@ -2507,7 +2705,6 @@ public class BotEventHandler {
                             }
                         }
                     }
-                    avoidDoorFor(botId, doorBase, 4_000L, "door-open-failed");
                     maybeLogFollowDecision(bot, "door-open failed: doorBase=" + doorBase.toShortString());
                     return true;
                 }
@@ -2523,7 +2720,8 @@ public class BotEventHandler {
 
             // Only consider the doorway crossed once we're no longer standing in the door block itself.
             BlockPos botBlock = bot.getBlockPos();
-            if (botBlock.equals(doorBase) || botBlock.equals(doorBase.up())) {
+            boolean twoHighDoor = doorState.getBlock() instanceof net.minecraft.block.DoorBlock;
+            if (botBlock.equals(doorBase) || (twoHighDoor && botBlock.equals(doorBase.up()))) {
                 // Still “in the door”; keep executing the plan (or recovery) instead of oscillating.
                 return true;
             }
@@ -2549,15 +2747,23 @@ public class BotEventHandler {
             return null;
         }
         BlockState state = world.getBlockState(doorBase);
-        if (!(state.getBlock() instanceof net.minecraft.block.DoorBlock)) {
+        boolean isDoor = state.getBlock() instanceof net.minecraft.block.DoorBlock;
+        boolean isGate = state.getBlock() instanceof FenceGateBlock;
+        if (!isDoor && !isGate) {
             return null;
         }
-        if (state.isOf(net.minecraft.block.Blocks.IRON_DOOR)) {
+        if (isDoor && state.isOf(net.minecraft.block.Blocks.IRON_DOOR)) {
             return null;
         }
         // Prefer true front/back tiles (more reliable than picking an arbitrary standable neighbor near the hinge).
-        if (state.contains(net.minecraft.block.DoorBlock.FACING)) {
-            Direction facing = state.get(net.minecraft.block.DoorBlock.FACING);
+        Direction facing = null;
+        if (isDoor && state.contains(net.minecraft.block.DoorBlock.FACING)) {
+            facing = state.get(net.minecraft.block.DoorBlock.FACING);
+        } else if (isGate && state.contains(FenceGateBlock.FACING)) {
+            facing = state.get(FenceGateBlock.FACING);
+        }
+
+        if (facing != null) {
             BlockPos front = doorBase.offset(facing);
             BlockPos back = doorBase.offset(facing.getOpposite());
             if (isStandable(world, front) && isStandable(world, back)) {
@@ -2694,7 +2900,7 @@ public class BotEventHandler {
         if (commander != null) {
             ChatUtils.sendSystemMessage(commander.getCommandSource(), announce);
         } else {
-            ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withMaxLevel(4), announce);
+            ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS), announce);
         }
 
         // Avoid spamming skill launches.
@@ -2714,7 +2920,7 @@ public class BotEventHandler {
                     if (commander != null) {
                         ChatUtils.sendSystemMessage(commander.getCommandSource(), result.message());
                     } else {
-                        ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withMaxLevel(4), result.message());
+                        ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS), result.message());
                     }
                 });
             } catch (Exception e) {
@@ -2723,7 +2929,7 @@ public class BotEventHandler {
                     if (commander != null) {
                         ChatUtils.sendSystemMessage(commander.getCommandSource(), msg);
                     } else {
-                        ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withMaxLevel(4), msg);
+                        ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS), msg);
                     }
                 });
             }
@@ -2851,7 +3057,7 @@ public class BotEventHandler {
             return false;
         }
         BlockState state = world.getBlockState(doorBase);
-        return state.contains(DoorBlock.OPEN) && Boolean.TRUE.equals(state.get(DoorBlock.OPEN));
+        return state.contains(Properties.OPEN) && Boolean.TRUE.equals(state.get(Properties.OPEN));
     }
 
     private static boolean isSealedSpace(ServerPlayerEntity entity) {
@@ -2889,10 +3095,10 @@ public class BotEventHandler {
                         continue;
                     }
                     BlockState state = world.getBlockState(doorBase);
-                    if (!(state.getBlock() instanceof DoorBlock)) {
+                    if (!(state.getBlock() instanceof DoorBlock) && !(state.getBlock() instanceof FenceGateBlock)) {
                         continue;
                     }
-                    if (state.contains(DoorBlock.OPEN) && Boolean.TRUE.equals(state.get(DoorBlock.OPEN))) {
+                    if (state.contains(Properties.OPEN) && Boolean.TRUE.equals(state.get(Properties.OPEN))) {
                         continue;
                     }
                     return true;
@@ -2914,12 +3120,15 @@ public class BotEventHandler {
             }
             return pos;
         }
+        if (state.getBlock() instanceof FenceGateBlock) {
+            return pos;
+        }
         BlockState down = world.getBlockState(pos.down());
-        if (down.getBlock() instanceof net.minecraft.block.DoorBlock) {
+        if (down.getBlock() instanceof net.minecraft.block.DoorBlock || down.getBlock() instanceof FenceGateBlock) {
             return normalizeDoorBase(world, pos.down());
         }
         BlockState up = world.getBlockState(pos.up());
-        if (up.getBlock() instanceof net.minecraft.block.DoorBlock) {
+        if (up.getBlock() instanceof net.minecraft.block.DoorBlock || up.getBlock() instanceof FenceGateBlock) {
             return normalizeDoorBase(world, pos.up());
         }
         return null;
@@ -3116,7 +3325,7 @@ public class BotEventHandler {
     }
 
     private static void sendBotMessage(ServerPlayerEntity bot, String message) {
-        ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withMaxLevel(4), message);
+        ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS), message);
     }
 
     private static Vec3d positionOf(Entity entity) {
@@ -3127,11 +3336,6 @@ public class BotEventHandler {
         return BotRescueService.rescueFromBurial(bot);
     }
 
-    
-    /**
-     * Proactively checks if bot is stuck in blocks and initiates time-based mining to escape.
-     * Uses MiningTool.mineBlock() for physical, tool-based breaking.
-     */
     /**
      * Proactively checks if bot is stuck in blocks and initiates time-based mining to escape.
      * Uses MiningTool.mineBlock() for physical, tool-based breaking.

@@ -19,10 +19,12 @@ import net.shasankp000.GameAI.DropSweeper;
 import net.shasankp000.GameAI.services.BlockInteractionService;
 import net.shasankp000.GameAI.services.MovementService;
 import net.shasankp000.GameAI.services.SneakLockService;
+import net.shasankp000.GameAI.services.TaskService;
 import net.shasankp000.GameAI.skills.SkillExecutionResult;
 import net.shasankp000.GameAI.skills.SkillManager;
 import net.shasankp000.GameAI.skills.SkillContext;
 import net.shasankp000.GameAI.skills.impl.CollectDirtSkill;
+import net.shasankp000.FunctionCaller.SharedStateUtils;
 import net.shasankp000.PlayerUtils.MiningTool;
 import net.shasankp000.Entity.AutoFaceEntity;
 import net.shasankp000.PathFinding.PathTracer;
@@ -42,7 +44,7 @@ public final class HovelPerimeterBuilder {
     private static final double REACH_DISTANCE_SQ = 20.25D; 
     private static final long PLACEMENT_DELAY_MS = 20L;
     private static final long REACH_STALL_PERIMETER_WALK_MS = 2000L;
-    private static final int PERIMETER_RING_OFFSET = 1;
+    private static final int PERIMETER_RING_OFFSET = 2;
 
     private static final List<Item> BUILD_BLOCKS = List.of(
             Items.DIRT, Items.COARSE_DIRT, Items.ROOTED_DIRT,
@@ -68,6 +70,9 @@ public final class HovelPerimeterBuilder {
     // Tracks scaffold bases (X/Z) used in this build to avoid redundant pillars.
     private final Set<BlockPos> usedScaffoldBasesXZ = new HashSet<>();
 
+    // Persistence wrapper around SkillContext.sharedState() so a resumed shelter build can reuse scaffold memory.
+    private final HovelBuildStateStore buildStateStore = new HovelBuildStateStore();
+
     // Tracks repeated attempts to reach the same destination. If we spend >6s trying, do a perimeter walk.
     private final Map<BlockPos, Long> reachAttemptSinceMs = new HashMap<>();
 
@@ -84,6 +89,19 @@ public final class HovelPerimeterBuilder {
     private static BlockPos canonicalXZ(BlockPos p) {
         if (p == null) return null;
         return new BlockPos(p.getX(), 0, p.getZ());
+    }
+
+    private Direction parseDirectionOr(Direction fallback, Object raw) {
+        if (raw == null) return fallback;
+        String s = raw.toString().trim();
+        if (s.isEmpty()) return fallback;
+        for (Direction d : Direction.values()) {
+            if (d == null) continue;
+            if (d.asString().equalsIgnoreCase(s) || d.name().equalsIgnoreCase(s)) {
+                return d;
+            }
+        }
+        return fallback;
     }
 
     private boolean shouldUsePerimeterRouting(BlockPos dest) {
@@ -104,17 +122,22 @@ public final class HovelPerimeterBuilder {
         BlockPos a = canonicalXZ(p);
         if (a != null) {
             usedScaffoldBasesXZ.add(a);
+            buildStateStore.persistUsedScaffoldBases(usedScaffoldBasesXZ);
         }
     }
 
-    private void resetBuildState() {
+    private void resetBuildState(boolean clearScaffoldMemory) {
         reachAttemptSinceMs.clear();
-        usedScaffoldBasesXZ.clear();
+        if (clearScaffoldMemory) {
+            usedScaffoldBasesXZ.clear();
+        }
         confirmedFoundationBeams.clear();
         pendingFoundationBeams.clear();
         stageMessagesSent.clear();
         stageMessageSource = null;
-        pendingRoofPillars.clear();
+        if (clearScaffoldMemory) {
+            pendingRoofPillars.clear();
+        }
     }
 
     private boolean isForbiddenScaffoldBase(BlockPos foot) {
@@ -123,7 +146,135 @@ public final class HovelPerimeterBuilder {
         return isDoorwayReservedCell(foot) || isDoorwayFrontClearanceCell(foot);
     }
 
-    private record RoofPillar(BlockPos base, int topY) {
+    private RoofPillar findKnownRoofPillarByXZ(BlockPos anyAtXZ, RoofPillar current) {
+        if (anyAtXZ == null) return null;
+        int x = anyAtXZ.getX();
+        int z = anyAtXZ.getZ();
+        if (current != null && current.base() != null) {
+            BlockPos b = current.base();
+            if (b.getX() == x && b.getZ() == z) {
+                return current;
+            }
+        }
+        for (RoofPillar p : pendingRoofPillars) {
+            if (p == null || p.base() == null) continue;
+            BlockPos b = p.base();
+            if (b.getX() == x && b.getZ() == z) {
+                return p;
+            }
+        }
+        return null;
+    }
+
+    private void removePendingRoofPillarXZ(BlockPos anyAtXZ) {
+        if (anyAtXZ == null || pendingRoofPillars.isEmpty()) return;
+        int x = anyAtXZ.getX();
+        int z = anyAtXZ.getZ();
+        pendingRoofPillars.removeIf(p -> p == null || p.base() == null || (p.base().getX() == x && p.base().getZ() == z));
+        buildStateStore.persistPendingRoofPillars(pendingRoofPillars);
+    }
+
+    /**
+     * Resolve a stable stand position for snapping to the "top" of a pillar.
+     *
+     * <p>Normally {@code perch} is the feet (air) block above a solid pillar block. For debugging,
+     * you may place a marker block in that air cell (as in your red-block screenshot). In that case,
+     * we still want to snap to the top face, which becomes {@code perch.up()}.</p>
+     */
+    private BlockPos resolveStandablePerch(ServerWorld world, BlockPos perch) {
+        if (world == null || perch == null) return null;
+        if (isStandable(world, perch)) return perch.toImmutable();
+
+        BlockState at = world.getBlockState(perch);
+        if (at != null && !at.isAir() && isStandable(world, perch.up())) {
+            return perch.up().toImmutable();
+        }
+        return null;
+    }
+
+    private BlockPos pickNearestStandable(ServerWorld world, ServerPlayerEntity bot, Collection<BlockPos> candidates) {
+        if (world == null || bot == null || candidates == null || candidates.isEmpty()) return null;
+        BlockPos botPos = bot.getBlockPos();
+        BlockPos best = null;
+        double bestSq = Double.MAX_VALUE;
+        for (BlockPos c : candidates) {
+            if (c == null) continue;
+            BlockPos stand = resolveStandablePerch(world, c);
+            if (stand == null) continue;
+            double d = distSqXZ(botPos, stand);
+            if (d < bestSq) {
+                bestSq = d;
+                best = stand.toImmutable();
+            } else if (d == bestSq && best != null) {
+                // Deterministic tie-break to avoid oscillation.
+                if (stand.getX() < best.getX()
+                        || (stand.getX() == best.getX() && stand.getZ() < best.getZ())
+                        || (stand.getX() == best.getX() && stand.getZ() == best.getZ() && stand.getY() < best.getY())) {
+                    best = stand.toImmutable();
+                }
+            }
+        }
+        return best;
+    }
+
+    private boolean elevatorDownKnownRoofPillar(ServerWorld world,
+                                                ServerPlayerEntity bot,
+                                                RoofPillar pillar,
+                                                long perBlockTimeoutMs) {
+        if (world == null || bot == null || pillar == null || pillar.base() == null) return false;
+        BlockPos base = pillar.base();
+        int bottomBlockY = base.getY();
+        int topStandY = pillar.topY();
+        // Allow one extra block at the very top so debug marker blocks (or incidental clutter)
+        // placed in the "stand" cell can be removed and the bot can settle onto the intended perch.
+        int topBlockY = topStandY;
+
+        // Safety: don't tear down anything that is inside the hovel footprint.
+        if (activeBuildCenter != null && activeRadius > 0) {
+            int dx = Math.abs(base.getX() - activeBuildCenter.getX());
+            int dz = Math.abs(base.getZ() - activeBuildCenter.getZ());
+            if (dx <= activeRadius && dz <= activeRadius) {
+                LOGGER.warn("Roof pillar teardown refused: pillar appears inside footprint base={} center={} radius={}",
+                        base.toShortString(), activeBuildCenter.toShortString(), activeRadius);
+                return false;
+            }
+        }
+
+        final long stepTimeout = Math.max(250L, perBlockTimeoutMs);
+        final int guard = Math.max(8, (topBlockY - bottomBlockY + 1) * 3);
+
+        final int px = base.getX();
+        final int pz = base.getZ();
+
+        final boolean[] didWork = new boolean[] { false };
+        withSneakLock(bot, () -> {
+            int g = guard;
+            while (g-- > 0 && !SkillManager.shouldAbortSkill(bot)) {
+                BlockPos underFeet = bot.getBlockPos().down();
+                if (underFeet.getX() != px || underFeet.getZ() != pz) {
+                    // If we drifted off the pillar, stop rather than risk mining something else.
+                    break;
+                }
+                int y = underFeet.getY();
+                if (y < bottomBlockY || y > topBlockY) {
+                    break;
+                }
+                if (world.getBlockState(underFeet).isAir()) {
+                    // If the block is already gone, just yield to gravity.
+                    waitForYDecrease(bot, bot.getBlockY(), stepTimeout);
+                    continue;
+                }
+                net.shasankp000.Entity.LookController.faceBlock(bot, underFeet);
+                mineSoft(bot, underFeet);
+                didWork[0] = true;
+                waitForYDecrease(bot, bot.getBlockY(), stepTimeout);
+            }
+        });
+
+        if (didWork[0]) {
+            removePendingRoofPillarXZ(base);
+        }
+        return didWork[0];
     }
 
     private static final class StandableCache {
@@ -182,6 +333,14 @@ public final class HovelPerimeterBuilder {
         }
     }
 
+    private SkillExecutionResult abortResult(ServerPlayerEntity bot) {
+        if (bot == null) {
+            return SkillExecutionResult.failure("Aborted.");
+        }
+        String reason = TaskService.getCancelReason(bot.getUuid()).orElse("Aborted.");
+        return SkillExecutionResult.failure(reason);
+    }
+
     public SkillExecutionResult build(SkillContext context,
                                       ServerCommandSource source,
                                       ServerPlayerEntity bot,
@@ -191,11 +350,16 @@ public final class HovelPerimeterBuilder {
                                       int wallHeight,
                                       Direction preferredDoorSide,
                                       boolean resumeRequested) {
-        
+        // Attach sharedState persistence hooks as early as possible so resume can reuse prior plan.
+        buildStateStore.attach(context, bot);
+
         HovelPlan plan = resolvePlan(world, bot, origin, radius, preferredDoorSide, context.sharedState(), resumeRequested);
         BlockPos requestedStand = plan.center();
         Direction doorSide = plan.doorSide();
         logStage("start", "plan resolved center=" + requestedStand + " radius=" + radius + " height=" + wallHeight + " door=" + doorSide);
+
+        // Persist the plan anchor immediately so a paused build resumes the same site even if the bot moves.
+        buildStateStore.persistPlanAnchor(requestedStand, doorSide);
 
         // IMPORTANT: keep build geometry anchored to the floor BLOCK layer, but keep movement anchored
         // to the standable (feet) layer. Conflating these is the #1 cause of:
@@ -206,11 +370,28 @@ public final class HovelPerimeterBuilder {
         BlockPos buildCenter = new BlockPos(requestedStand.getX(), floorBlockY, requestedStand.getZ());
         BlockPos standCenter = buildCenter.up();
 
+        // (persistence already attached above)
+
         // Publish active context for safety rules.
         this.activeBuildCenter = buildCenter;
         this.activeRadius = radius;
         this.activeDoorSide = doorSide;
-        resetBuildState();
+
+        // Persist/restore scaffold memory so a resumed build doesn't rebuild the same pillars.
+        // If the resume doesn't match this build signature, we start clean.
+        boolean restored = false;
+        if (resumeRequested) {
+            restored = buildStateStore.restoreBuildStateIfCompatible(LOGGER, buildCenter, radius, wallHeight, doorSide,
+                    usedScaffoldBasesXZ, pendingRoofPillars);
+        }
+        if (!restored) {
+            buildStateStore.clearPersistedBuildState();
+        }
+        // Always refresh the signature for the current build.
+        buildStateStore.persistBuildSignature(buildCenter, radius, wallHeight, doorSide);
+
+        // Clear transient state; only clear scaffold memory if we did not restore it.
+        resetBuildState(!restored);
         this.stageMessageSource = context != null && context.requestSource() != null
                 ? context.requestSource()
                 : source;
@@ -220,6 +401,9 @@ public final class HovelPerimeterBuilder {
             logStageWarn("init-move", "could not reach initial build stand at " + standCenter);
             return SkillExecutionResult.failure("I could not reach a safe spot to build a hovel.");
         }
+        if (SkillManager.shouldAbortSkill(bot)) {
+            return abortResult(bot);
+        }
 
         BuildCounters counters = new BuildCounters();
 
@@ -228,30 +412,56 @@ public final class HovelPerimeterBuilder {
         if (countBuildBlocks(bot) < needed) {
             ensureBuildStock(source, bot, needed, standCenter);
         }
+        if (SkillManager.shouldAbortSkill(bot)) {
+            return abortResult(bot);
+        }
 
         sendStageMessage("leveling", "Hovel: leveling build site...");
         logStage("leveling", "start center=" + buildCenter + " radius=" + radius);
         levelBuildSite(world, source, bot, buildCenter, radius, wallHeight, counters);
         logStage("leveling", "done pos=" + bot.getBlockPos() + " interrupted=" + Thread.currentThread().isInterrupted());
 
+        if (SkillManager.shouldAbortSkill(bot)) {
+            return abortResult(bot);
+        }
+
         // Corner pillars are the most commonly missed placements.
         // Build them immediately after leveling, from diagonal outside stances, so later phases
         // don't mis-predict reach from interior stations.
         buildCornerBeamsEarly(world, source, bot, buildCenter, radius, wallHeight, counters);
 
+        if (SkillManager.shouldAbortSkill(bot)) {
+            return abortResult(bot);
+        }
+
         // CRITICAL: do not proceed until the foundation beams are definitely constructed.
         // If a corner is missing due to a terrain hole, later phases will oscillate and wall-hump.
         if (!ensureFoundationBeamsComplete(world, source, bot, buildCenter, radius, wallHeight, counters)) {
+            if (SkillManager.shouldAbortSkill(bot)) {
+                return abortResult(bot);
+            }
             logStageWarn("foundation", "unable to complete corner beams after retries; continuing best-effort");
             sendStageMessage("foundation-warning", "Hovel: WARNING - could not fully complete foundation beams (corners). Continuing best-effort.");
+        }
+
+        if (SkillManager.shouldAbortSkill(bot)) {
+            return abortResult(bot);
         }
 
         // Leveling + early scaffolds can still leave 1x1 floor holes if we never stand near them again.
         // Patch interior floor and remove clutter (grass/flowers) before walls reduce mobility.
         patchInteriorFloorAndClutter(world, source, bot, buildCenter, radius, counters, null);
 
+        if (SkillManager.shouldAbortSkill(bot)) {
+            return abortResult(bot);
+        }
+
         // Ensure the future doorway is traversable before later phases attempt exterior angles.
         ensureDoorwayOpen(world, source, bot, buildCenter, radius, doorSide);
+
+        if (SkillManager.shouldAbortSkill(bot)) {
+            return abortResult(bot);
+        }
 
         List<BlockPos> walls = HovelBlueprint.generateWallBlueprint(buildCenter, radius, wallHeight, doorSide);
         List<BlockPos> roof = HovelBlueprint.generateRoofBlueprint(buildCenter, radius, wallHeight);
@@ -268,34 +478,46 @@ public final class HovelPerimeterBuilder {
         sendStageMessage("walls", "Hovel: building walls (layer-by-layer scaffolding)...");
         buildByStationsLayered(world, source, bot, buildCenter, radius, wallHeight, walls, counters, standableCache);
 
+        if (SkillManager.shouldAbortSkill(bot)) {
+            return abortResult(bot);
+        }
+
         // Exterior walk patch is especially good at fixing the "single window" hole.
         if (countMissing(world, walls) > 0) {
             sendStageMessage("wall-exterior", "Hovel: exterior wall patch...");
             exteriorWallPerimeterPatch(world, source, bot, buildCenter, radius, walls, counters);
         }
 
+        if (SkillManager.shouldAbortSkill(bot)) {
+            return abortResult(bot);
+        }
+
         // Revisit any missing foundation beam segments after wall placements stabilize the footprint.
         patchPendingFoundationBeams(world, source, bot, buildCenter, radius, wallHeight, counters);
+
+        if (SkillManager.shouldAbortSkill(bot)) {
+            return abortResult(bot);
+        }
 
         List<BlockPos> allTargets = new ArrayList<>(walls.size() + roof.size());
         allTargets.addAll(walls);
         allTargets.addAll(roof);
 
-        // If we still have missing roof/edge blocks, do a dedicated roof pass:
-        // build a pillar just outside the hovel, climb above the roof plane, step onto the roof,
-        // then walk the roof perimeter to place remaining blocks.
-        if (radius >= 2 && countMissing(world, allTargets) > 0) {
-            sendStageMessage("roof-perimeter", "Hovel: roof perimeter pass...");
-            roofPerimeterPass(world, source, bot, buildCenter, radius, wallHeight, doorSide, allTargets, roof, counters);
-        }
-
         // Final floor polish: remove clutter and fill any remaining holes inside the hovel.
         patchInteriorFloorAndClutter(world, source, bot, buildCenter, radius, counters, null);
+
+        if (SkillManager.shouldAbortSkill(bot)) {
+            return abortResult(bot);
+        }
 
         // Last angle sweep.
         if (countMissing(world, allTargets) > 0) {
             sendStageMessage("final-sweep-2", "Hovel: final sweep...");
             finalStationSweep(world, source, bot, buildCenter, radius, allTargets, counters, standableCache);
+        }
+
+        if (SkillManager.shouldAbortSkill(bot)) {
+            return abortResult(bot);
         }
 
         // If roof is still incomplete, fall back to scaffold-based roof patching (doesn't require stepping onto the roof).
@@ -304,22 +526,36 @@ public final class HovelPerimeterBuilder {
             patchRoofWithScaffolds(world, source, bot, buildCenter, radius, wallHeight, roof, counters);
         }
 
+        if (SkillManager.shouldAbortSkill(bot)) {
+            return abortResult(bot);
+        }
+
         // True final leveling: fill holes AND shave any remaining raised blocks in the interior.
         // (Do this BEFORE amenities so we don't fight clutter/uneven terrain while placing doors/torches.)
         sendStageMessage("interior-level", "Hovel: interior cleanup...");
-        if (isOutsideFootprint(bot.getBlockPos(), buildCenter, radius)) {
-            cleanupRoofAccessPillars(world, source, bot, buildCenter, radius);
-        }
+        cleanupRoofAccessPillars(world, source, bot, buildCenter, radius);
         finalInteriorLevelingPass(world, source, bot, buildCenter, radius, wallHeight, doorSide);
+
+        if (SkillManager.shouldAbortSkill(bot)) {
+            return abortResult(bot);
+        }
 
         // Final amenities pass: door + torches, with retries.
         // These are mandatory usability invariants whenever the bot has the items.
         sendStageMessage("amenities", "Hovel: placing door/torches...");
         finalizeDoorAndTorches(world, source, bot, buildCenter, radius, doorSide);
 
+        if (SkillManager.shouldAbortSkill(bot)) {
+            return abortResult(bot);
+        }
+
         // Re-enforce doorway clearance and re-level once more to guarantee the end state.
         ensureDoorwayOpen(world, source, bot, buildCenter, radius, doorSide);
         finalInteriorLevelingPass(world, source, bot, buildCenter, radius, wallHeight, doorSide);
+
+        if (SkillManager.shouldAbortSkill(bot)) {
+            return abortResult(bot);
+        }
 
         int missing = countMissing(world, walls) + countMissing(world, roof);
         LOGGER.info("Hovel build finished. Missing: {}, Placed: {}, Attempts: {}, ReachFail: {}, NoMat: {}",
@@ -407,7 +643,6 @@ public final class HovelPerimeterBuilder {
         int baseY = center.getY();
         int roofY = baseY + wallHeight;
         long startMs = System.currentTimeMillis();
-        long lastHeartbeatMs = startMs;
         boolean heartbeatSent = false;
         BlockPos lastTarget = null;
 
@@ -468,8 +703,11 @@ public final class HovelPerimeterBuilder {
                 }
                 logStageWarn("foundation", "slow progress " + detail);
                 heartbeatSent = true;
-                lastHeartbeatMs = now;
             }
+        }
+
+        if (SkillManager.shouldAbortSkill(bot)) {
+            return false;
         }
         if (stageMessageSource != null && lastTarget != null) {
             ChatUtils.sendSystemMessage(stageMessageSource,
@@ -588,43 +826,67 @@ public final class HovelPerimeterBuilder {
         if (pendingRoofPillars.isEmpty()) {
             return;
         }
-        List<RoofPillar> snapshot = new ArrayList<>(pendingRoofPillars);
-        pendingRoofPillars.clear();
-        ArrayList<RoofPillar> stillPending = new ArrayList<>();
-        for (RoofPillar pillar : snapshot) {
-            if (SkillManager.shouldAbortSkill(bot)) {
-                pendingRoofPillars.addAll(stillPending);
-                return;
+        sendStageMessage("roof-cleanup", "Hovel: clearing leftover roof scaffolds...");
+        LOGGER.info("Hovel: roof access pillar cleanup starting (pending={})", pendingRoofPillars.size());
+
+        // Deterministically choose the nearest standable pending pillar top and fully tear it down.
+        int guard = Math.max(2, pendingRoofPillars.size() * 2);
+        while (guard-- > 0 && !pendingRoofPillars.isEmpty() && !SkillManager.shouldAbortSkill(bot)) {
+            ArrayList<BlockPos> candidates = new ArrayList<>(pendingRoofPillars.size());
+            for (RoofPillar p : pendingRoofPillars) {
+                if (p == null || p.base() == null) continue;
+                candidates.add(p.base().withY(p.topY()));
             }
-            if (pillar == null || pillar.base() == null) {
-                continue;
+            BlockPos exitTop = pickNearestStandable(world, bot, candidates);
+            if (exitTop == null) {
+                break;
             }
-            BlockPos base = pillar.base();
-            boolean cleared = false;
-            BlockPos approach = findNearbyStandableFiltered(world, base, 4, (p) -> !isDoorwayReservedCell(p));
+            RoofPillar chosen = findKnownRoofPillarByXZ(exitTop, null);
+            if (chosen == null) {
+                break;
+            }
+
+            // Move near the base first to keep chunk/interaction stable.
+            BlockPos base = chosen.base();
+            BlockPos approach = findNearbyStandableFiltered(world, base, 5, (p) -> !isDoorwayReservedCell(p));
             if (approach != null) {
                 moveToRingPosFast(source, bot, approach);
             }
-            if (moveToRingPosFast(source, bot, base) || BlockInteractionService.canInteract(bot, base, REACH_DISTANCE_SQ)) {
-                // Clear the bottom couple of blocks so the perimeter path isn't obstructed.
-                for (int dy = 0; dy <= 1; dy++) {
-                    BlockPos p = base.withY(base.getY() + dy);
-                    if (world.getBlockState(p).isAir()) {
-                        continue;
-                    }
-                    if (BlockInteractionService.canInteract(bot, p, REACH_DISTANCE_SQ)
-                            && isPillarMaterial(world.getBlockState(p))) {
-                        mineSoft(bot, p);
-                        sleepQuiet(60L);
-                        cleared = true;
-                    }
-                }
+
+            // Snap to the chosen top (no oscillation). This is the "elevator" entry point.
+            BlockPos snap = resolveStandablePerch(world, exitTop);
+            if (snap == null) {
+                // If we can't stand on/above it, leave it pending.
+                break;
             }
-            if (!cleared) {
-                stillPending.add(pillar);
+            LOGGER.info("Hovel: roof pillar cleanup snapping to top={} base={} (pending={})",
+                    snap.toShortString(), base.toShortString(), pendingRoofPillars.size());
+            withSneakLock(bot, () -> {
+                BotActions.stop(bot);
+                BotActions.sneak(bot, true);
+                bot.teleport(world,
+                        snap.getX() + 0.5D,
+                        snap.getY(),
+                        snap.getZ() + 0.5D,
+                        EnumSet.noneOf(PositionFlag.class),
+                        bot.getYaw(),
+                        bot.getPitch(),
+                        true);
+                bot.setVelocity(Vec3d.ZERO);
+                sleepQuiet(80L);
+            });
+
+            boolean ok = elevatorDownKnownRoofPillar(world, bot, chosen, 900L);
+            LOGGER.info("Hovel: roof pillar cleanup result ok={} base={} remainingPending={}",
+                    ok, base.toShortString(), pendingRoofPillars.size());
+
+            // If we failed to do any work, avoid looping forever.
+            if (!ok) {
+                break;
             }
         }
-        pendingRoofPillars.addAll(stillPending);
+
+        buildStateStore.persistPendingRoofPillars(pendingRoofPillars);
     }
 
     private void clearPendingRoofPillarAt(ServerWorld world, ServerPlayerEntity bot, BlockPos ringPos) {
@@ -642,22 +904,31 @@ public final class HovelPerimeterBuilder {
             if (base.getX() != ringPos.getX() || base.getZ() != ringPos.getZ()) {
                 continue;
             }
-            BlockPos approach = findNearbyStandableFiltered(world, base, 3, (p) -> !isDoorwayReservedCell(p));
-            if (approach != null) {
-                moveToRingPosFast(bot.getCommandSource(), bot, approach);
-            }
+            // IMPORTANT: Do NOT path/move from here.
+            // This method is invoked by ensureRingStandable(), which is itself invoked during perimeter routing.
+            // Moving from here re-enters the routing stack and can recurse until StackOverflowError.
+            boolean clearedAny = false;
+            boolean allAir = true;
             for (int dy = 0; dy <= 1; dy++) {
                 BlockPos p = base.withY(base.getY() + dy);
+                if (!world.getBlockState(p).isAir()) {
+                    allAir = false;
+                }
                 if (!BlockInteractionService.canInteract(bot, p, REACH_DISTANCE_SQ)) {
                     continue;
                 }
                 if (isPillarMaterial(world.getBlockState(p))) {
                     mineSoft(bot, p);
                     sleepQuiet(60L);
+                    clearedAny = true;
                 }
             }
-            iter.remove();
+            // Only forget this pending pillar if it is actually cleared (or already gone).
+            if (allAir || clearedAny) {
+                iter.remove();
+            }
         }
+        buildStateStore.persistPendingRoofPillars(pendingRoofPillars);
     }
 
     private boolean isPillarMaterial(BlockState state) {
@@ -794,352 +1065,7 @@ public final class HovelPerimeterBuilder {
         return false;
     }
 
-    private boolean roofPerimeterPass(ServerWorld world,
-                                  ServerCommandSource source,
-                                  ServerPlayerEntity bot,
-                                  BlockPos center,
-                                  int radius,
-                                  int wallHeight,
-                                  Direction doorSide,
-                                  List<BlockPos> allTargets,
-                                  List<BlockPos> roofBlueprint,
-                                  BuildCounters counters) {
-        if (world == null || source == null || bot == null || center == null || allTargets == null || roofBlueprint == null) {
-            return false;
-        }
-        if (countMissing(world, roofBlueprint) == 0 && countMissing(world, allTargets) == 0) {
-            return false;
-        }
 
-        // Prefer the opposite side of the door to avoid fighting the doorway/entry terrain.
-        LinkedHashSet<Direction> sides = new LinkedHashSet<>();
-        if (doorSide != null) {
-            sides.add(doorSide.getOpposite());
-            sides.add(doorSide.rotateYClockwise());
-            sides.add(doorSide.rotateYCounterclockwise());
-            sides.add(doorSide);
-        }
-        sides.add(Direction.EAST);
-        sides.add(Direction.SOUTH);
-        sides.add(Direction.WEST);
-        sides.add(Direction.NORTH);
-
-        boolean steppedOnRoof = false;
-        for (Direction side : sides) {
-            if (countMissing(world, allTargets) == 0) {
-                return steppedOnRoof;
-            }
-            if (SkillManager.shouldAbortSkill(bot)) {
-                return steppedOnRoof;
-            }
-            if (roofPerimeterPassOnSide(world, source, bot, center, radius, wallHeight, side, allTargets, roofBlueprint, counters)) {
-                steppedOnRoof = true;
-                break;
-            }
-        }
-        return steppedOnRoof;
-    }
-
-    private boolean roofPerimeterPassOnSide(ServerWorld world,
-                                           ServerCommandSource source,
-                                           ServerPlayerEntity bot,
-                                           BlockPos center,
-                                           int radius,
-                                           int wallHeight,
-                                           Direction side,
-                                           List<BlockPos> allTargets,
-                                           List<BlockPos> roofBlueprint,
-                                           BuildCounters counters) {
-        if (world == null || source == null || bot == null || center == null || allTargets == null || roofBlueprint == null || side == null) {
-            return false;
-        }
-        int missingBefore = countMissing(world, allTargets);
-
-        int roofY = center.getY() + wallHeight;
-        int roofStandY = roofY + 1;
-        int towerTopY = roofStandY; // stand just above the roof plane; step sideways onto roof
-
-        int standY = center.getY() + 1;
-
-        BlockPos pillarSeed = center.offset(side, radius + 1).withY(standY);
-        // Prefer a base that is not directly obstructed above the roof plane.
-        // If the top "stand cell" is blocked, the bot may step onto the roof but be unable to return to the pillar,
-        // which later devolves into unsafe roof jumps.
-        BlockPos pillarBase = findNearbyStandableFiltered(world, pillarSeed, 6, (p) -> {
-            if (isForbiddenScaffoldBase(p) || isScaffoldBaseUsed(p)) return false;
-            // Must be outside the footprint on this side.
-            int dx = p.getX() - center.getX();
-            int dz = p.getZ() - center.getZ();
-            if (side == Direction.EAST && dx < radius + 1) return false;
-            if (side == Direction.WEST && dx > -(radius + 1)) return false;
-            if (side == Direction.SOUTH && dz < radius + 1) return false;
-            if (side == Direction.NORTH && dz > -(radius + 1)) return false;
-
-            // Ensure the pillar top cell + headspace are clear enough to stand.
-            BlockPos top = p.withY(towerTopY);
-            BlockPos head = top.up();
-            BlockState ts = world.getBlockState(top);
-            BlockState hs = world.getBlockState(head);
-            boolean topClear = ts.getCollisionShape(world, top).isEmpty() && (ts.isAir() || ts.isReplaceable() || ts.isIn(BlockTags.LEAVES));
-            boolean headClear = hs.getCollisionShape(world, head).isEmpty() && (hs.isAir() || hs.isReplaceable() || hs.isIn(BlockTags.LEAVES));
-            return topClear && headClear;
-        });
-        if (pillarBase == null) {
-            return false;
-        }
-        ensureRingStandable(world, bot, pillarBase);
-        if (!moveToRingPosFast(source, bot, pillarBase)) {
-            return false;
-        }
-
-        // Entry point on the roof: directly adjacent inward from the pillar.
-        BlockPos entryRoofBlock = center.offset(side, radius).withY(roofY);
-        BlockPos entryStand = entryRoofBlock.up();
-        BlockPos pillarTop = pillarBase.withY(towerTopY);
-
-        List<BlockPos> pillar = new ArrayList<>();
-        final boolean[] stepped = new boolean[] { false };
-        final boolean[] fellOffRoof = new boolean[] { false };
-        final boolean[] onPillarForTeardown = new boolean[] { false };
-        try {
-            withSneakLock(bot, () -> {
-                if (SkillManager.shouldAbortSkill(bot)) {
-                    return;
-                }
-
-                prepareScaffoldBase(world, bot);
-
-                int climb = Math.max(0, towerTopY - bot.getBlockY());
-                if (!pillarUp(bot, climb, pillar, true)) {
-                    return;
-                }
-
-                // Widen the top of the roof access pillar to reduce the "1x1 edge" transfer failures.
-                // This is a temporary platform (outside the footprint) and will be torn down with the pillar.
-                try {
-                    Direction cw = side.rotateYClockwise();
-                    Direction ccw = side.rotateYCounterclockwise();
-                    BlockPos topBlock = bot.getBlockPos().down(); // should be at roofY after climb
-                    for (Direction d : List.of(cw, ccw)) {
-                        BlockPos p = topBlock.offset(d);
-                        int dx = p.getX() - center.getX();
-                        int dz = p.getZ() - center.getZ();
-                        boolean outsideFootprint = Math.abs(dx) > radius || Math.abs(dz) > radius;
-                        if (!outsideFootprint) continue;
-                        if (isMissing(world, p)) {
-                            if (BotActions.placeBlockAt(bot, p, Direction.UP, PILLAR_BLOCKS)) {
-                                pillar.add(p.toImmutable());
-                                sleepQuiet(40L);
-                            }
-                        }
-                    }
-                } catch (Exception ignored) {
-                }
-
-                // Always try to place from this high vantage, even if we fail to step onto the roof.
-                placeUntilStalled(world, bot, allTargets, counters, 2);
-
-                // Ensure we have a solid roof block to step onto.
-                if (isMissing(world, entryRoofBlock)) {
-                    placeBlockDirectIfWithinReach(bot, entryRoofBlock, counters);
-                }
-                if (isMissing(world, entryRoofBlock)) {
-                    return;
-                }
-
-                // Step onto the roof (stand position is one above the roof block).
-                if (!nudgeToStand(world, bot, entryStand, 1600L)) {
-                    return;
-                }
-                stepped[0] = true;
-                // Safety: re-assert sneaking after the transition onto the roof.
-                BotActions.sneak(bot, true);
-
-                // Clear any incidental clutter that could block small roof movements
-                // (e.g., grass/flowers from an incomplete roof, or replaceables like snow layers).
-                prepareScaffoldBase(world, bot);
-
-                // Walk multiple roof rings (outer -> inner) and place missing blocks from multiple angles.
-                // Limiting to a few inner rings keeps it safe/time-bounded while improving coverage.
-                int ringMin = Math.max(0, radius - 6);
-                roofWalk:
-                for (int ring = radius; ring >= ringMin; ring -= 1) {
-                    if (SkillManager.shouldAbortSkill(bot)) {
-                        return;
-                    }
-                    if (countMissing(world, allTargets) == 0) {
-                        break;
-                    }
-
-                    List<BlockPos> perimeter = HovelBlueprint.buildRoofPerimeter(center, ring, roofY);
-                    // Rotate so we start near our entry (outer ring only).
-                    int startIdx = 0;
-                    if (ring == radius) {
-                        for (int i = 0; i < perimeter.size(); i++) {
-                            if (perimeter.get(i).equals(entryRoofBlock)) {
-                                startIdx = i;
-                                break;
-                            }
-                        }
-                    }
-
-                    for (int step = 0; step < perimeter.size(); step++) {
-                        if (SkillManager.shouldAbortSkill(bot)) {
-                            return;
-                        }
-                        if (step % 8 == 0 && countMissing(world, allTargets) == 0) {
-                            // IMPORTANT: don't return early from the roof pass runnable.
-                            // We still need to snap back to the access pillar for safe teardown/descent.
-                            break roofWalk;
-                        }
-
-                        // If we fell off the roof plane, abort the roof-walk quickly.
-                        // The later scaffold-based roof patch stage will finish the job without requiring roof traversal.
-                        if (stepped[0] && bot.getBlockY() < roofY) {
-                            fellOffRoof[0] = true;
-                            break roofWalk;
-                        }
-
-                        BlockPos roofBlock = perimeter.get((startIdx + step) % perimeter.size());
-                        BlockPos stand = roofBlock.up();
-
-                        // Before moving: ensure the roof block exists, otherwise we can't stand there.
-                        if (isMissing(world, roofBlock)) {
-                            placeBlockDirectIfWithinReach(bot, roofBlock, counters);
-                        }
-                        if (isMissing(world, roofBlock)) {
-                            // Can't safely step here; skip.
-                            continue;
-                        }
-
-                        // Try to move to this stand cell; if it fails, keep placing from where we are.
-                        if (stepped[0] && bot.getBlockY() < roofY) {
-                            fellOffRoof[0] = true;
-                            break roofWalk;
-                        }
-                        if (isStandable(world, stand)) {
-                            nudgeToStand(world, bot, stand, 1200L);
-                        }
-
-                        // Place everything we can reach from here (repeat until no more progress).
-                        placeUntilStalled(world, bot, allTargets, counters, 3);
-                    }
-                }
-
-                // Snap-teleport only if we're on the roof plane and not already on the pillar.
-                // This avoids disrupting the roof walk when the bot isn't actually on the roof.
-                BlockPos exitTop = pickRoofExitTop(world, bot, pillarTop);
-                if (exitTop != null
-                        && !isOnPillarTop(bot, exitTop)
-                        && stepped[0]
-                        && bot.getBlockY() >= roofY
-                        && isStandable(world, exitTop)) {
-                    BotActions.stop(bot);
-                    BotActions.sneak(bot, true);
-                    LOGGER.info("Roof pass: snapping back to roof access pillarTop={} (preferred={}, pending={})",
-                            exitTop, pillarTop, pendingRoofPillars.size());
-                    bot.teleport(world,
-                            exitTop.getX() + 0.5D,
-                            exitTop.getY(),
-                            exitTop.getZ() + 0.5D,
-                            EnumSet.noneOf(PositionFlag.class),
-                            bot.getYaw(),
-                            bot.getPitch(),
-                            true);
-                    bot.setVelocity(Vec3d.ZERO);
-                    sleepQuiet(80L);
-                }
-                onPillarForTeardown[0] = isOnPillarTop(bot, pillarTop);
-            });
-        } finally {
-            if (onPillarForTeardown[0]) {
-                teardownScaffolding(bot, pillar, Collections.emptySet(), allTargets, counters);
-            } else {
-                // Safety: if we couldn't get back onto the pillar, do NOT tear it down.
-                // Leaving a stray pillar is better than the bot attempting an unsafe roof leap.
-                LOGGER.info("Roof pass: skipping pillar teardown because bot did not return to pillarTop (side={}, base={})", side, pillarBase);
-                pendingRoofPillars.add(new RoofPillar(pillarBase.toImmutable(), towerTopY));
-            }
-        }
-
-        if (stepped[0]) {
-            int missingAfter = countMissing(world, allTargets);
-            LOGGER.info("Roof perimeter pass succeeded on side={} base={} missing {} -> {}",
-                    side, pillarBase, missingBefore, missingAfter);
-        } else {
-            int missingAfter = countMissing(world, allTargets);
-            LOGGER.info("Roof perimeter pass could not step onto roof on side={} base={} missing {} -> {}",
-                    side, pillarBase, missingBefore, missingAfter);
-        }
-
-        // Treat a fall as "we stepped onto the roof" so the caller doesn't keep attempting more roof sides.
-        // Subsequent scaffold roof patching will handle any remaining holes.
-        return stepped[0] || fellOffRoof[0];
-    }
-
-    /**
-     * Choose a roof-exit perch top deterministically.
-     *
-     * <p>Primary goal is to return to the pillar we just built (so we can safely tear it down).
-     * If that top isn't standable (rare: clutter/leaves/snow/blocks), fall back to another known
-     * still-present roof access pillar top so we don't oscillate or get stranded on the roof.</p>
-     */
-    private BlockPos pickRoofExitTop(ServerWorld world, ServerPlayerEntity bot, BlockPos preferredTop) {
-        if (world == null || bot == null) {
-            return preferredTop;
-        }
-        if (preferredTop != null && isStandable(world, preferredTop)) {
-            return preferredTop;
-        }
-
-        BlockPos botPos = bot.getBlockPos();
-        BlockPos best = null;
-        double bestSq = Double.MAX_VALUE;
-
-        // Only consider pillars we explicitly kept because we could not tear them down.
-        // These are safe candidates for "snap back to perch".
-        for (RoofPillar pillar : pendingRoofPillars) {
-            if (pillar == null || pillar.base() == null) continue;
-            BlockPos top = pillar.base().withY(pillar.topY());
-            if (!isStandable(world, top)) continue;
-            double d = distSqXZ(botPos, top);
-            if (d < bestSq) {
-                bestSq = d;
-                best = top.toImmutable();
-            }
-        }
-        return best != null ? best : preferredTop;
-    }
-
-    private boolean nudgeToStand(ServerWorld world, ServerPlayerEntity bot, BlockPos stand, long timeoutMs) {
-        if (world == null || bot == null || stand == null) {
-            return false;
-        }
-        if (!isStandable(world, stand)) {
-            return false;
-        }
-        Vec3d target = Vec3d.ofCenter(stand);
-        long deadline = System.currentTimeMillis() + Math.max(250L, timeoutMs);
-        while (System.currentTimeMillis() < deadline) {
-            if (SkillManager.shouldAbortSkill(bot)) {
-                return false;
-            }
-            // Horizontal-only convergence is far more reliable than full XYZ convergence
-            // (player Y can fluctuate while on edges/slabs/steps).
-            Vec3d pos = new Vec3d(bot.getX(), bot.getY(), bot.getZ());
-            double dx = pos.x - target.x;
-            double dz = pos.z - target.z;
-            if ((dx * dx + dz * dz) <= 0.16D) { // ~0.4 blocks
-                return true;
-            }
-            BotActions.moveToward(bot, target, 0.45);
-            sleepQuiet(60L);
-        }
-        Vec3d pos = new Vec3d(bot.getX(), bot.getY(), bot.getZ());
-        double dx = pos.x - target.x;
-        double dz = pos.z - target.z;
-        return (dx * dx + dz * dz) <= 0.25D;
-    }
 
     /**
      * Build by visiting a small, stable set of stations (center + corners + outer ring).
@@ -1384,6 +1310,9 @@ public final class HovelPerimeterBuilder {
 
         for (int i = 0; i < steps; i++) {
             if (SkillManager.shouldAbortSkill(bot)) return false;
+            if (handleHovelEmergency(bot, "pillar-up")) {
+                return false;
+            }
             // Kill horizontal drift before attempting a 1x1 tower step.
             BotActions.stop(bot);
             sleepQuiet(60L);
@@ -1418,6 +1347,9 @@ public final class HovelPerimeterBuilder {
             }
             if (placed != null) placed.add(target.toImmutable());
             waitForYIncrease(bot, target.getY(), 1000L);
+            if (handleHovelEmergency(bot, "pillar-up-post")) {
+                return false;
+            }
         }
         return true;
     }
@@ -1425,6 +1357,9 @@ public final class HovelPerimeterBuilder {
     private boolean waitForOnGround(ServerPlayerEntity bot, long timeoutMs) {
         long deadline = System.currentTimeMillis() + timeoutMs;
         while (System.currentTimeMillis() < deadline) {
+            if (SkillManager.shouldAbortSkill(bot)) {
+                return false;
+            }
             if (bot.isOnGround() || bot.isClimbing() || bot.isTouchingWater() || bot.isInLava()) {
                 return true;
             }
@@ -1436,6 +1371,9 @@ public final class HovelPerimeterBuilder {
     private boolean waitForAirborne(ServerPlayerEntity bot, long timeoutMs) {
         long deadline = System.currentTimeMillis() + timeoutMs;
         while (System.currentTimeMillis() < deadline) {
+            if (SkillManager.shouldAbortSkill(bot)) {
+                return false;
+            }
             if (!bot.isOnGround()) {
                 return true;
             }
@@ -1456,6 +1394,9 @@ public final class HovelPerimeterBuilder {
     private void waitForJumpPlaceWindow(ServerPlayerEntity bot, double startY, long timeoutMs) {
         long deadline = System.currentTimeMillis() + timeoutMs;
         while (System.currentTimeMillis() < deadline) {
+            if (SkillManager.shouldAbortSkill(bot)) {
+                return;
+            }
             double y = bot.getY();
             double vy = bot.getVelocity().y;
             if (y >= startY + 0.20D && vy <= 0.08D) {
@@ -1466,13 +1407,89 @@ public final class HovelPerimeterBuilder {
     }
 
     private void teardownScaffolding(ServerPlayerEntity bot, List<BlockPos> placed, Set<BlockPos> keepBlocks) {
+        teardownScaffoldingInternal(bot, placed, keepBlocks, null, null);
+    }
+
+    /**
+     * Teardown variant that opportunistically places missing targets after each descent step.
+     * This makes the bot far more thorough without extra movement/pathfinding.
+     */
+    private void teardownScaffolding(ServerPlayerEntity bot,
+                                    List<BlockPos> placed,
+                                    Set<BlockPos> keepBlocks,
+                                    List<BlockPos> checkTargets,
+                                    BuildCounters counters) {
+        teardownScaffoldingInternal(bot, placed, keepBlocks, checkTargets, counters);
+    }
+
+    /**
+     * Shared scaffold teardown implementation.
+     *
+     * <p>If {@code checkTargets} is provided, we opportunistically place missing targets during descent
+     * (excluding targets that share the scaffold column X/Z), then do a final fill pass once we're down.</p>
+     */
+    private void teardownScaffoldingInternal(ServerPlayerEntity bot,
+                                            List<BlockPos> placed,
+                                            Set<BlockPos> keepBlocks,
+                                            List<BlockPos> checkTargets,
+                                            BuildCounters counters) {
         if (bot == null || placed == null || placed.isEmpty()) return;
+
         ServerWorld world = (ServerWorld) bot.getEntityWorld();
+
+        // Derive pillar X/Z and vertical span. Used to stabilize teardown.
+        int px = placed.get(0).getX();
+        int pz = placed.get(0).getZ();
+        int minY = Integer.MAX_VALUE;
+        int maxY = Integer.MIN_VALUE;
+        for (BlockPos p : placed) {
+            if (p == null) continue;
+            px = p.getX();
+            pz = p.getZ();
+            minY = Math.min(minY, p.getY());
+            maxY = Math.max(maxY, p.getY());
+        }
+        final BlockPos expectedPerch = new BlockPos(px, maxY + 1, pz);
+
+        List<BlockPos> descentTargets = null;
+        if (checkTargets != null && !checkTargets.isEmpty()) {
+            Set<BlockPos> scaffoldXZ = new HashSet<>();
+            for (BlockPos p : placed) {
+                if (p == null) continue;
+                scaffoldXZ.add(canonicalXZ(p));
+            }
+            descentTargets = checkTargets.stream()
+                    .filter(Objects::nonNull)
+                    .filter(p -> {
+                        BlockPos xz = canonicalXZ(p);
+                        return xz == null || !scaffoldXZ.contains(xz);
+                    })
+                    .toList();
+        }
 
         // IMPORTANT: You cannot mine a tall pillar from the top by iterating the list;
         // blocks near the bottom are out of reach. Tear down by "mining the block under feet"
         // so every break is within reach and we descend naturally.
+        List<BlockPos> finalDescentTargets = descentTargets;
         withSneakLock(bot, () -> {
+            // Ensure we're centered on the pillar before descending.
+            // If the bot drifted even slightly, it can fail to find/break the block under feet and leave a full pillar.
+            BlockPos snap = resolveStandablePerch(world, expectedPerch);
+            if (snap != null && !isOnPillarTop(bot, snap)) {
+                BotActions.stop(bot);
+                BotActions.sneak(bot, true);
+                bot.teleport(world,
+                        snap.getX() + 0.5D,
+                        snap.getY(),
+                        snap.getZ() + 0.5D,
+                        EnumSet.noneOf(PositionFlag.class),
+                        bot.getYaw(),
+                        bot.getPitch(),
+                        true);
+                bot.setVelocity(Vec3d.ZERO);
+                sleepQuiet(80L);
+            }
+
             // Work on a copy to avoid surprising callers.
             ArrayList<BlockPos> stack = new ArrayList<>(placed);
             // Top-down by construction order (pillarUp adds bottom->top).
@@ -1493,6 +1510,11 @@ public final class HovelPerimeterBuilder {
                         net.shasankp000.Entity.LookController.faceBlock(bot, pos);
                         mineSoft(bot, pos);
                         waitForYDecrease(bot, bot.getBlockY(), 900L);
+                    }
+
+                    // Each time we descend, re-check everything reachable, but avoid filling the scaffold column yet.
+                    if (finalDescentTargets != null) {
+                        placeUntilStalled(world, bot, finalDescentTargets, counters, 1);
                     }
                     continue;
                 }
@@ -1515,86 +1537,41 @@ public final class HovelPerimeterBuilder {
                 net.shasankp000.Entity.LookController.faceBlock(bot, reachable);
                 mineSoft(bot, reachable);
                 sleepQuiet(60L);
+
+                if (finalDescentTargets != null) {
+                    placeUntilStalled(world, bot, finalDescentTargets, counters, 1);
+                }
             }
         });
-    }
 
-    /**
-     * Teardown variant that opportunistically places missing targets after each descent step.
-     * This makes the bot far more thorough without extra movement/pathfinding.
-     */
-    private void teardownScaffolding(ServerPlayerEntity bot,
-                                    List<BlockPos> placed,
-                                    Set<BlockPos> keepBlocks,
-                                    List<BlockPos> checkTargets,
-                                    BuildCounters counters) {
-        if (bot == null || placed == null || placed.isEmpty()) return;
-        if (checkTargets == null || checkTargets.isEmpty()) {
-            teardownScaffolding(bot, placed, keepBlocks);
-            return;
-        }
-
-        ServerWorld world = (ServerWorld) bot.getEntityWorld();
-        Set<BlockPos> scaffoldXZ = new HashSet<>();
-        for (BlockPos p : placed) {
-            if (p == null) continue;
-            scaffoldXZ.add(canonicalXZ(p));
-        }
-        List<BlockPos> descentTargets = checkTargets.stream()
-                .filter(p -> p != null)
-                .filter(p -> {
-                    BlockPos xz = canonicalXZ(p);
-                    return xz == null || !scaffoldXZ.contains(xz);
-                })
-                .toList();
-        withSneakLock(bot, () -> {
-            ArrayList<BlockPos> stack = new ArrayList<>(placed);
-            Collections.reverse(stack);
-
-            int guard = Math.max(16, stack.size() * 4);
-            while (guard-- > 0 && !stack.isEmpty() && !SkillManager.shouldAbortSkill(bot)) {
-                BlockPos underFeet = bot.getBlockPos().down();
-                int idx = stack.indexOf(underFeet);
-                if (idx >= 0) {
-                    BlockPos pos = stack.remove(idx);
-                    if (keepBlocks != null && keepBlocks.contains(pos)) {
-                        // Can't break this one.
-                    } else if (!world.getBlockState(pos).isAir()) {
-                        net.shasankp000.Entity.LookController.faceBlock(bot, pos);
-                        mineSoft(bot, pos);
-                        waitForYDecrease(bot, bot.getBlockY(), 900L);
-                    }
-
-                    // Each time we descend, re-check everything reachable, but avoid filling the scaffold column yet.
-                    placeUntilStalled(world, bot, descentTargets, counters, 1);
-                    continue;
-                }
-
-                BlockPos reachable = null;
-                for (BlockPos p : stack) {
+        // If teardown failed and this pillar is outside the hovel footprint, remember it for deterministic cleanup.
+        if (activeBuildCenter != null && activeRadius > 0 && minY != Integer.MAX_VALUE && maxY != Integer.MIN_VALUE) {
+            int dx = Math.abs(px - activeBuildCenter.getX());
+            int dz = Math.abs(pz - activeBuildCenter.getZ());
+            boolean outside = dx > activeRadius || dz > activeRadius;
+            if (outside) {
+                int remaining = 0;
+                for (BlockPos p : placed) {
                     if (p == null) continue;
                     if (keepBlocks != null && keepBlocks.contains(p)) continue;
-                    if (world.getBlockState(p).isAir()) continue;
-                    if (BlockInteractionService.canInteract(bot, p, REACH_DISTANCE_SQ)) {
-                        reachable = p;
-                        break;
+                    if (!world.getBlockState(p).isAir()) {
+                        remaining++;
                     }
                 }
-                if (reachable == null) {
-                    break;
+                if (remaining >= 3) {
+                    RoofPillar pending = new RoofPillar(new BlockPos(px, minY, pz), maxY + 1);
+                    pendingRoofPillars.add(pending);
+                    buildStateStore.persistPendingRoofPillars(pendingRoofPillars);
+                    LOGGER.info("Hovel: recorded pending roof pillar from teardown (base={}, topY={}, remainingBlocks={})",
+                            pending.base().toShortString(), pending.topY(), remaining);
                 }
-
-                stack.remove(reachable);
-                net.shasankp000.Entity.LookController.faceBlock(bot, reachable);
-                mineSoft(bot, reachable);
-                sleepQuiet(60L);
-
-                placeUntilStalled(world, bot, descentTargets, counters, 1);
             }
-        });
+        }
 
         // After we're down, allow filling any remaining targets (including the former scaffold column).
-        placeUntilStalled(world, bot, checkTargets, counters, 2);
+        if (checkTargets != null && !checkTargets.isEmpty()) {
+            placeUntilStalled(world, bot, checkTargets, counters, 2);
+        }
     }
 
     private boolean isMissing(ServerWorld world, BlockPos pos) {
@@ -1622,6 +1599,7 @@ public final class HovelPerimeterBuilder {
         return state.getCollisionShape(world, pos).isEmpty();
     }
 
+    @SuppressWarnings("unused")
     private boolean isSupportHole(ServerWorld world, BlockPos pos) {
         if (world == null || pos == null) {
             return false;
@@ -1656,10 +1634,12 @@ public final class HovelPerimeterBuilder {
             return;
         }
 
+        int ringRadius = perimeterRingRadius(radius);
+
         // 0) Corner-first: always put up towers near the four OUTSIDE corners.
         // This tends to cover the largest roof area early, while avoiding interior-corner "spam pillars".
         // Build from a diagonal outside stance (better aim on corner roof blocks).
-        int outside = radius + 2;
+        int outside = ringRadius;
         Set<BlockPos> cornerBaseSet = new LinkedHashSet<>();
         cornerBaseSet.add(center.add(outside, 0, outside));
         cornerBaseSet.add(center.add(-outside, 0, outside));
@@ -1682,22 +1662,24 @@ public final class HovelPerimeterBuilder {
                 return Math.abs(dx) >= radius + 1 && Math.abs(dz) >= radius + 1;
             });
             if (base == null) continue;
+            if (isScaffoldBaseUsed(base)) continue;
             ensureRingStandable(world, bot, base);
             if (!moveToRingPos(source, bot, base)) continue;
 
-            scaffoldPlaceAndTeardown(world, bot, roofBlueprint, roofY + 2, counters, Collections.emptySet(), false);
+            scaffoldPlaceRoofWalkAndTeardown(world, source, bot, center, radius, roofY,
+                    roofBlueprint, roofY + 2, counters, Collections.emptySet(), true);
         }
 
         // 1) Quick coverage from outside ring positions (cheap and usually accessible)
         List<BlockPos> ringBases = List.of(
-                center.add(radius + 1, 0, radius + 1),
-                center.add(-(radius + 1), 0, radius + 1),
-                center.add(-(radius + 1), 0, -(radius + 1)),
-                center.add(radius + 1, 0, -(radius + 1)),
-                center.add(radius + 1, 0, 0),
-                center.add(-(radius + 1), 0, 0),
-                center.add(0, 0, radius + 1),
-                center.add(0, 0, -(radius + 1))
+            center.add(ringRadius, 0, ringRadius),
+            center.add(-ringRadius, 0, ringRadius),
+            center.add(-ringRadius, 0, -ringRadius),
+            center.add(ringRadius, 0, -ringRadius),
+            center.add(ringRadius, 0, 0),
+            center.add(-ringRadius, 0, 0),
+            center.add(0, 0, ringRadius),
+            center.add(0, 0, -ringRadius)
         );
 
         for (BlockPos base0 : ringBases) {
@@ -1707,11 +1689,13 @@ public final class HovelPerimeterBuilder {
             BlockPos base = findNearbyStandableFiltered(world, base0.withY(standY), 4,
                     (p) -> !isForbiddenScaffoldBase(p));
             if (base == null) continue;
+                if (isScaffoldBaseUsed(base)) continue;
             ensureRingStandable(world, bot, base);
             if (!moveToRingPos(source, bot, base)) continue;
 
             // Stand ABOVE the roof plane. This reduces "corner hopping" and gives better angles.
-            scaffoldPlaceAndTeardown(world, bot, roofBlueprint, roofY + 2, counters, Collections.emptySet(), false);
+            scaffoldPlaceRoofWalkAndTeardown(world, source, bot, center, radius, roofY,
+                    roofBlueprint, roofY + 2, counters, Collections.emptySet(), true);
         }
 
         if (countMissing(world, roofBlueprint) == 0) {
@@ -1743,32 +1727,313 @@ public final class HovelPerimeterBuilder {
 
             BlockPos exteriorSeed;
             if (side == Direction.EAST || side == Direction.WEST) {
-                exteriorSeed = new BlockPos(center.getX() + (side == Direction.EAST ? (radius + 1) : -(radius + 1)),
+                exteriorSeed = new BlockPos(center.getX() + (side == Direction.EAST ? ringRadius : -ringRadius),
                         standY,
                         target.getZ());
             } else {
                 exteriorSeed = new BlockPos(target.getX(),
                         standY,
-                        center.getZ() + (side == Direction.SOUTH ? (radius + 1) : -(radius + 1)));
+                    center.getZ() + (side == Direction.SOUTH ? ringRadius : -ringRadius));
             }
 
                 BlockPos base = findNearbyStandableFiltered(world, exteriorSeed, 6,
                     (p) -> !isForbiddenScaffoldBase(p));
             if (base == null) {
                 // Fall back to any outside ring spot.
-                base = findNearbyStandableFiltered(world, center.offset(side, radius + 1).withY(standY), 6,
+                base = findNearbyStandableFiltered(world, center.offset(side, ringRadius).withY(standY), 6,
                     (p) -> !isForbiddenScaffoldBase(p));
             }
             if (base == null) {
                 return;
+            }
+            if (isScaffoldBaseUsed(base)) {
+                continue;
             }
 
             ensureRingStandable(world, bot, base);
             if (!moveToRingPos(source, bot, base)) {
                 continue;
             }
-            scaffoldPlaceAndTeardown(world, bot, roofBlueprint, roofY + 2, counters, keepIfRoof, false);
+            scaffoldPlaceRoofWalkAndTeardown(world, source, bot, center, radius, roofY,
+                    roofBlueprint, roofY + 2, counters, keepIfRoof, true);
         }
+    }
+
+    @SuppressWarnings("unused")
+    private int roofWalkMissingThreshold(int radius) {
+        // Allow roof-walking only when the roof is mostly complete. This reduces the odds of stepping into holes.
+        int r = Math.max(2, radius);
+        return Math.min(32, Math.max(10, (2 * r + 1) * 2));
+    }
+
+    private record RoofPatchStep(BlockPos stand, BlockPos target) {
+    }
+
+    private RoofPatchStep findNearestRoofPatchStep(ServerWorld world,
+                                                  ServerPlayerEntity bot,
+                                                  BlockPos center,
+                                                  int radius,
+                                                  int roofY,
+                                                  List<BlockPos> roofBlueprint) {
+        if (world == null || bot == null || center == null || radius <= 0 || roofBlueprint == null || roofBlueprint.isEmpty()) {
+            return null;
+        }
+
+        Vec3d here = new Vec3d(bot.getX(), bot.getY(), bot.getZ());
+        RoofPatchStep best = null;
+        double bestSq = Double.MAX_VALUE;
+
+        for (BlockPos target : roofBlueprint) {
+            if (target == null || target.getY() != roofY || !isMissing(world, target)) {
+                continue;
+            }
+
+            // Find a neighboring roof block that exists so we can stand on it (instead of trying to stand on the hole).
+            for (Direction d : Direction.Type.HORIZONTAL) {
+                BlockPos neighborRoof = target.offset(d);
+                if (neighborRoof == null) continue;
+
+                int dx = Math.abs(neighborRoof.getX() - center.getX());
+                int dz = Math.abs(neighborRoof.getZ() - center.getZ());
+                if (dx > radius || dz > radius) {
+                    continue;
+                }
+
+                if (isMissing(world, neighborRoof)) {
+                    continue;
+                }
+                BlockPos stand = neighborRoof.up();
+                if (!isStandable(world, stand)) {
+                    continue;
+                }
+
+                double distSq = here.squaredDistanceTo(Vec3d.ofCenter(stand));
+                if (distSq < bestSq) {
+                    bestSq = distSq;
+                    best = new RoofPatchStep(stand.toImmutable(), target.toImmutable());
+                }
+            }
+        }
+
+        return best;
+    }
+
+    private boolean moveOnRoofToStand(ServerWorld world,
+                                     ServerCommandSource source,
+                                     ServerPlayerEntity bot,
+                                     BlockPos stand,
+                                     long timeoutMs) {
+        if (world == null || bot == null || stand == null) {
+            return false;
+        }
+        if (!isStandable(world, stand)) {
+            return false;
+        }
+
+        double distSq = bot.squaredDistanceTo(stand.getX() + 0.5D, stand.getY() + 0.5D, stand.getZ() + 0.5D);
+
+        // Roof-walking is safety-critical: prefer local nudges for short hops.
+        // This reduces the chance of any higher-level planner deciding to detour off the roof.
+        if (distSq <= 9.0D) {
+            if (nudgeToStandWithJump(world, bot, stand, Math.min(timeoutMs, 1500L))) {
+                return true;
+            }
+        }
+
+        // For longer moves, try the movement service with local intent.
+        if (source != null && distSq <= 18.0D * 18.0D) {
+            try {
+                MovementService.MovementPlan plan = new MovementService.MovementPlan(
+                        MovementService.Mode.DIRECT,
+                        stand,
+                        stand,
+                        null,
+                        null,
+                        Direction.UP
+                );
+                // No snap/teleport while roof-walking.
+                MovementService.MovementResult result = MovementService.withoutDoorEscape(
+                    () -> MovementService.execute(source, bot, plan, false, true, true, false)
+                );
+                if (result.success()) {
+                    return true;
+                }
+            } catch (Throwable ignored) {
+            }
+        }
+
+        return nudgeToStandWithJump(world, bot, stand, timeoutMs);
+    }
+
+    private void tryRoofWalkPatch(ServerWorld world,
+                                 ServerCommandSource source,
+                                 ServerPlayerEntity bot,
+                                 BlockPos center,
+                                 int radius,
+                                 int roofY,
+                                 List<BlockPos> roofBlueprint,
+                                 BuildCounters counters,
+                                 long timeoutMs) {
+        if (world == null || bot == null || center == null || roofBlueprint == null || roofBlueprint.isEmpty()) {
+            return;
+        }
+
+        int missing0 = countMissing(world, roofBlueprint);
+        if (missing0 <= 0) {
+            return;
+        }
+        // NOTE: We intentionally do NOT hard-gate roof-walking by "missing count".
+        // In practice, the old threshold caused roof-walking to never trigger on uneven terrain.
+        // Safety is enforced instead by only stepping onto confirmed solid roof blocks.
+
+        long deadline = System.currentTimeMillis() + Math.max(1500L, timeoutMs);
+
+        // First, step onto the roof surface (stand on an existing roof block).
+        BlockPos entry = null;
+        BlockPos here = bot.getBlockPos();
+        for (int dx = -6; dx <= 6 && entry == null; dx++) {
+            for (int dz = -6; dz <= 6 && entry == null; dz++) {
+                BlockPos roof = new BlockPos(here.getX() + dx, roofY, here.getZ() + dz);
+                int ax = Math.abs(roof.getX() - center.getX());
+                int az = Math.abs(roof.getZ() - center.getZ());
+                if (ax > radius || az > radius) continue;
+                if (isMissing(world, roof)) continue;
+                BlockPos stand = roof.up();
+                if (isStandable(world, stand)) {
+                    entry = stand.toImmutable();
+                }
+            }
+        }
+
+        if (entry == null) {
+            return;
+        }
+
+        if (!moveOnRoofToStand(world, source, bot, entry, 3200L)) {
+            return;
+        }
+
+        // Deterministic roof traversal (serpentine) to ensure we actually cover the whole roof.
+        // This avoids greedy "best station" loops that can miss corners or terminate early.
+        List<BlockPos> route = HovelRoofWalkService.buildSerpentineRouteFromNearest(
+                center, radius, roofY, bot.getBlockPos());
+
+        int lastMissing = countMissing(world, roofBlueprint);
+        int noProgressSteps = 0;
+        int visited = 0;
+
+        // Prime: do one good placement pass from the entry.
+        placeUntilStalled(world, bot, roofBlueprint, counters, 4);
+        lastMissing = countMissing(world, roofBlueprint);
+        if (lastMissing <= 0) {
+            return;
+        }
+
+        for (BlockPos roofPos : route) {
+            if (roofPos == null) continue;
+            if (System.currentTimeMillis() >= deadline || SkillManager.shouldAbortSkill(bot)) {
+                return;
+            }
+
+            int missingNow = countMissing(world, roofBlueprint);
+            if (missingNow <= 0) {
+                return;
+            }
+
+            // Try to place the current roof cell (helps maintain traversal continuity).
+            if (isMissing(world, roofPos) && hasPlacementSupport(world, roofPos)) {
+                placeBlockDirectIfWithinReach(bot, roofPos, counters);
+            }
+
+            // Walk to the stand cell above the roof block if it's solid.
+            if (!isMissing(world, roofPos)) {
+                BlockPos stand = roofPos.up();
+                if (isStandable(world, stand)) {
+                    moveOnRoofToStand(world, source, bot, stand, 2200L);
+                }
+            }
+
+            // Opportunistically place from each new angle.
+            placeUntilStalled(world, bot, roofBlueprint, counters, 2);
+
+            int after = countMissing(world, roofBlueprint);
+            if (after < lastMissing) {
+                lastMissing = after;
+                noProgressSteps = 0;
+            } else {
+                noProgressSteps++;
+            }
+
+            if (++visited >= 400 || noProgressSteps >= 40) {
+                break;
+            }
+        }
+
+        // Targeted cleanup: walk next to specific missing cells and try to place them.
+        int guard = 0;
+        int last = countMissing(world, roofBlueprint);
+        while (System.currentTimeMillis() < deadline && !SkillManager.shouldAbortSkill(bot) && guard++ < 64) {
+            int missing = countMissing(world, roofBlueprint);
+            if (missing <= 0) {
+                return;
+            }
+
+            RoofPatchStep step = findNearestRoofPatchStep(world, bot, center, radius, roofY, roofBlueprint);
+            if (step == null) {
+                return;
+            }
+            if (!moveOnRoofToStand(world, source, bot, step.stand(), 4200L)) {
+                return;
+            }
+            placeUntilStalled(world, bot, roofBlueprint, counters, 6);
+
+            int now = countMissing(world, roofBlueprint);
+            if (now >= last) {
+                // No progress from targeted patching; bail to avoid thrashing.
+                return;
+            }
+            last = now;
+        }
+    }
+
+    private void scaffoldPlaceRoofWalkAndTeardown(ServerWorld world,
+                                                 ServerCommandSource source,
+                                                 ServerPlayerEntity bot,
+                                                 BlockPos center,
+                                                 int radius,
+                                                 int roofY,
+                                                 List<BlockPos> roofBlueprint,
+                                                 int standY,
+                                                 BuildCounters counters,
+                                                 Set<BlockPos> keepBlocks,
+                                                 boolean enforceNoRepeatBase) {
+        withSneakLock(bot, () -> {
+            int steps = standY - bot.getBlockY();
+            if (steps <= 0) {
+                placeUntilStalled(world, bot, roofBlueprint, counters, 2);
+                return;
+            }
+
+            List<BlockPos> pillar = new ArrayList<>();
+            if (!pillarUp(bot, steps, pillar, enforceNoRepeatBase)) {
+                teardownScaffolding(bot, pillar, keepBlocks);
+                return;
+            }
+
+            try {
+                placeUntilStalled(world, bot, roofBlueprint, counters, 3);
+
+                // Optional roof walking: patch a few final holes faster, but ALWAYS return to this pillar
+                // (teardown will snap back to the pillar top first).
+                if (source != null && !SkillManager.shouldAbortSkill(bot)) {
+                    int missing = countMissing(world, roofBlueprint);
+                    long budget = 12_000L + (long) Math.min(20_000L, missing * 550L);
+                    tryRoofWalkPatch(world, source, bot, center, radius, roofY, roofBlueprint, counters, budget);
+                }
+            } finally {
+                teardownScaffolding(bot, pillar, keepBlocks, roofBlueprint, counters);
+            }
+        });
     }
 
     private void scaffoldPlaceAndTeardown(ServerWorld world,
@@ -1807,23 +2072,84 @@ public final class HovelPerimeterBuilder {
         // IMPORTANT ordering:
         // - Place lower-Y blocks first (prevents "floating" slits where upper blocks fail due to missing supports)
         // - Within the same Y, place closer blocks first to reduce half-placed rings.
+        // Pre-score support so we place "edge" blocks first (helps fill larger holes by growing supports inward).
+        Map<BlockPos, Integer> supportScore = new HashMap<>();
+
         List<BlockPos> inRange = targets.stream()
-                .filter(p -> isMissing(world, p))
-                .filter(p -> !isDoorwayReservedCell(p))
-                .filter(p -> eye.squaredDistanceTo(Vec3d.ofCenter(p)) <= REACH_DISTANCE_SQ)
+            .filter(p -> isMissing(world, p))
+            .filter(p -> !isDoorwayReservedCell(p))
+            .filter(p -> eye.squaredDistanceTo(Vec3d.ofCenter(p)) <= REACH_DISTANCE_SQ)
+            .peek(p -> supportScore.put(p, placementSupportScore(world, p)))
             .sorted(Comparator
+                // IMPORTANT: lower-Y blocks first (prevents floating slits).
                 .comparingInt(BlockPos::getY)
+                // Within the same layer: place blocks with more/stronger supports first.
+                .thenComparingInt((BlockPos p) -> -supportScore.getOrDefault(p, 0))
+                // Finally: closer blocks first.
                 .thenComparingDouble(p -> eye.squaredDistanceTo(Vec3d.ofCenter(p))))
-                .toList();
+            .toList();
 
         int placed = 0;
         for (BlockPos p : inRange) {
             if (SkillManager.shouldAbortSkill(bot)) return placed;
+            if (bot.isInsideWall() && handleHovelEmergency(bot, "place-many")) {
+                return placed;
+            }
             if (placeBlockDirectIfWithinReach(bot, p, counters)) {
                 placed++;
             }
         }
         return placed;
+    }
+
+    private int placementSupportScore(ServerWorld world, BlockPos target) {
+        if (world == null || target == null) {
+            return 0;
+        }
+        int score = 0;
+        // Prefer a solid block below (best-case support).
+        if (isClickablePlacementSupport(world, target.down())) {
+            score += 4;
+        }
+        // Count horizontal solid neighbors.
+        for (Direction d : Direction.Type.HORIZONTAL) {
+            if (isClickablePlacementSupport(world, target.offset(d))) {
+                score += 2;
+            }
+        }
+        return score;
+    }
+
+    private boolean hasPlacementSupport(ServerWorld world, BlockPos target) {
+        if (world == null || target == null) {
+            return false;
+        }
+        if (isClickablePlacementSupport(world, target.down())) {
+            return true;
+        }
+        for (Direction d : Direction.Type.HORIZONTAL) {
+            if (isClickablePlacementSupport(world, target.offset(d))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean isClickablePlacementSupport(ServerWorld world, BlockPos pos) {
+        if (world == null || pos == null) {
+            return false;
+        }
+        BlockState state = world.getBlockState(pos);
+        if (state.isAir()) {
+            return false;
+        }
+        if (!state.getFluidState().isEmpty()) {
+            return false;
+        }
+        if (state.isReplaceable()) {
+            return false;
+        }
+        return !state.getCollisionShape(world, pos).isEmpty();
     }
 
     /**
@@ -1838,6 +2164,9 @@ public final class HovelPerimeterBuilder {
         int passes = Math.max(1, maxPasses);
         for (int i = 0; i < passes; i++) {
             if (SkillManager.shouldAbortSkill(bot)) {
+                return;
+            }
+            if (handleHovelEmergency(bot, "place-until-stalled")) {
                 return;
             }
             int placed = placeManyWithinReachCount(world, bot, targets, counters);
@@ -1918,49 +2247,23 @@ public final class HovelPerimeterBuilder {
     }
 
     private static double distSqXZ(BlockPos a, BlockPos b) {
-        if (a == null || b == null) return Double.MAX_VALUE;
-        long dx = (long) a.getX() - (long) b.getX();
-        long dz = (long) a.getZ() - (long) b.getZ();
-        return (double) (dx * dx + dz * dz);
+        return HovelGeometryService.distSqXZ(a, b);
     }
 
     private int perimeterRingRadius(int radius) {
-        if (radius <= 0) return 0;
-        return Math.max(2, radius + PERIMETER_RING_OFFSET);
+        return HovelPerimeterRoutingService.perimeterRingRadius(radius, PERIMETER_RING_OFFSET);
     }
 
     private boolean isInsideFootprint(BlockPos pos, BlockPos center, int radius) {
-        if (pos == null || center == null || radius <= 0) return false;
-        int dx = Math.abs(pos.getX() - center.getX());
-        int dz = Math.abs(pos.getZ() - center.getZ());
-        return dx < radius && dz < radius;
+        return HovelGeometryService.isInsideFootprint(pos, center, radius);
     }
 
     private boolean isOutsideFootprint(BlockPos pos, BlockPos center, int radius) {
-        if (pos == null || center == null || radius <= 0) return false;
-        int dx = Math.abs(pos.getX() - center.getX());
-        int dz = Math.abs(pos.getZ() - center.getZ());
-        return dx > radius || dz > radius;
+        return HovelGeometryService.isOutsideFootprint(pos, center, radius);
     }
 
     private Direction resolveDoorSideForExit(ServerPlayerEntity bot) {
-        if (activeDoorSide != null) return activeDoorSide;
-        if (bot == null) return Direction.NORTH;
-        if (activeBuildCenter == null || activeRadius <= 0) {
-            return bot.getHorizontalFacing();
-        }
-        BlockPos pos = bot.getBlockPos();
-        Direction best = bot.getHorizontalFacing();
-        double bestSq = Double.MAX_VALUE;
-        for (Direction dir : List.of(Direction.NORTH, Direction.SOUTH, Direction.EAST, Direction.WEST)) {
-            BlockPos outside = activeBuildCenter.offset(dir, activeRadius + 1).withY(pos.getY());
-            double d = distSqXZ(pos, outside);
-            if (d < bestSq) {
-                bestSq = d;
-                best = dir;
-            }
-        }
-        return best;
+        return HovelDoorAccessService.resolveDoorSideForExit(activeDoorSide, bot, activeBuildCenter, activeRadius);
     }
 
     private boolean ensureExteriorAccessForDestination(ServerWorld world,
@@ -2008,33 +2311,20 @@ public final class HovelPerimeterBuilder {
                                          BlockPos center,
                                          int radius,
                                          Direction doorSide) {
-        if (world == null || source == null || bot == null || center == null || doorSide == null) {
-            return false;
-        }
-        int standY = center.getY() + 1;
-        BlockPos outsideFront = center.offset(doorSide, radius + 1).withY(standY);
-        BlockPos insideFront = center.offset(doorSide, Math.max(1, radius - 1)).withY(standY);
-
-        BlockPos outside = findNearbyStandable(world, outsideFront, 6);
-        if (outside == null) {
-            return false;
-        }
-        if (bot.getBlockPos().getSquaredDistance(outside) > 1.0D) {
-            if (!moveToRingPosFast(source, bot, outside)) {
-                return false;
-            }
-        }
-        clearDoorwayNearby(world, bot, center, radius, doorSide);
-
-        BlockPos inside = findNearbyStandable(world, insideFront, 6);
-        if (inside == null) {
-            return false;
-        }
-        if (!directMove(source, bot, inside) && !pathMove(source, bot, inside)) {
-            return false;
-        }
-        clearDoorwayNearby(world, bot, center, radius, doorSide);
-        return true;
+        return HovelDoorAccessService.enterInteriorViaDoor(
+                world,
+                source,
+                bot,
+                center,
+                radius,
+                doorSide,
+                REACH_DISTANCE_SQ,
+                this::findNearbyStandable,
+                this::moveToRingPosFast,
+                this::directMove,
+                this::pathMove,
+                this::mineSoft
+        );
     }
 
     private boolean exitInteriorViaDoor(ServerWorld world,
@@ -2043,57 +2333,38 @@ public final class HovelPerimeterBuilder {
                                         BlockPos center,
                                         int radius,
                                         Direction doorSide) {
-        if (world == null || source == null || bot == null || center == null || doorSide == null) {
-            return false;
-        }
-
-        int standY = center.getY() + 1;
-        BlockPos insideFront = center.offset(doorSide, Math.max(1, radius - 1)).withY(standY);
-        BlockPos outsideFront = center.offset(doorSide, radius + 1).withY(standY);
-
-        BlockPos insideStand = findNearbyStandable(world, insideFront, 5);
-        if (insideStand == null) {
-            return false;
-        }
-        if (bot.getBlockPos().getSquaredDistance(insideStand) > 1.0D) {
-            if (!moveToBuildSiteAllowPathing(source, bot, insideStand)) {
-                return false;
-            }
-        }
-        clearDoorwayNearby(world, bot, center, radius, doorSide);
-
-        BlockPos outsideStand = findNearbyStandable(world, outsideFront, 6);
-        if (outsideStand == null) {
-            return false;
-        }
-        ensureRingStandable(world, bot, outsideStand);
-        if (!directMove(source, bot, outsideStand) && !pathMove(source, bot, outsideStand)) {
-            return false;
-        }
-        clearDoorwayNearby(world, bot, center, radius, doorSide);
-        return true;
+        return HovelDoorAccessService.exitInteriorViaDoor(
+                world,
+                source,
+                bot,
+                center,
+                radius,
+                doorSide,
+                REACH_DISTANCE_SQ,
+                this::findNearbyStandable,
+                this::moveToBuildSiteAllowPathing,
+                this::directMove,
+                this::pathMove,
+                this::ensureRingStandable,
+                this::mineSoft
+        );
     }
 
+    @SuppressWarnings("unused")
     private void clearDoorwayNearby(ServerWorld world,
                                     ServerPlayerEntity bot,
                                     BlockPos center,
                                     int radius,
                                     Direction doorSide) {
-        if (world == null || bot == null || center == null || doorSide == null) return;
-        int standY = center.getY() + 1;
-        BlockPos doorBase = center.offset(doorSide, radius).withY(standY);
-        BlockPos doorUpper = doorBase.up();
-        BlockPos insideFront = doorBase.offset(doorSide.getOpposite());
-        BlockPos outsideFront = doorBase.offset(doorSide);
-
-        for (BlockPos p : List.of(doorBase, doorUpper, insideFront, insideFront.up(), outsideFront, outsideFront.up())) {
-            if (p == null) continue;
-            if (bot.getEyePos().squaredDistanceTo(Vec3d.ofCenter(p)) > REACH_DISTANCE_SQ) continue;
-            BlockState s = world.getBlockState(p);
-            if (s.isAir()) continue;
-            if (s.getBlock() instanceof net.minecraft.block.DoorBlock) continue;
-            mineSoft(bot, p);
-        }
+        HovelDoorAccessService.clearDoorwayNearby(
+                world,
+                bot,
+                center,
+                radius,
+                doorSide,
+                REACH_DISTANCE_SQ,
+                this::mineSoft
+        );
     }
 
     /**
@@ -2116,125 +2387,30 @@ public final class HovelPerimeterBuilder {
             return false;
         }
 
-        int standY = activeBuildCenter.getY() + 1;
-        int ringRadius = perimeterRingRadius(activeRadius);
-        List<BlockPos> loop = HovelBlueprint.buildGroundPerimeter(activeBuildCenter, ringRadius, standY);
-        if (loop.isEmpty()) {
-            return false;
-        }
-
-        BlockPos here = bot.getBlockPos();
-
-        int startIdx = 0;
-        int goalIdx = 0;
-        double bestStart = Double.MAX_VALUE;
-        double bestGoal = Double.MAX_VALUE;
-        for (int i = 0; i < loop.size(); i++) {
-            BlockPos p = loop.get(i);
-            double ds = distSqXZ(here, p);
-            if (ds < bestStart) {
-                bestStart = ds;
-                startIdx = i;
-            }
-            double dg = distSqXZ(destination, p);
-            if (dg < bestGoal) {
-                bestGoal = dg;
-                goalIdx = i;
-            }
-        }
-
-        // If we're already basically at the goal ring index, don't waste time looping.
-        if (startIdx == goalIdx) {
-            return false;
-        }
-
-        int size = loop.size();
-        int cw = (goalIdx - startIdx + size) % size;
-        int ccw = (startIdx - goalIdx + size) % size;
-        int dir = cw <= ccw ? 1 : -1;
-        int remaining = Math.min(cw, ccw);
-
-        // First: step to the nearest loop cell if we're not close (helps "snap" onto the red path).
-        BlockPos entrySeed = loop.get(startIdx);
-        BlockPos entry = findNearbyStandable(world, entrySeed, 4);
-        if (entry != null && distSqXZ(here, entry) > 1.0D) {
-            ensureRingStandable(world, bot, entry);
-            if (!moveToRingWaypoint(source, bot, entry, false)) {
-                return false;
-            }
-        }
-
-        // Walk along the loop in a handful of hops instead of dozens of single-tile steps.
-        int hops = 0;
-        int idx = startIdx;
-        int maxHops = Math.min(24, Math.max(8, remaining + 4));
-        int stride = 4;
-        while (hops < maxHops && remaining > 0 && !SkillManager.shouldAbortSkill(bot)) {
-            int stepWanted = Math.min(stride, remaining);
-
-            // Pick a standable waypoint for this hop.
-            // Try shorter steps first, then scan a bit farther ahead to route around small terrain irregularities.
-            int chosenStep = -1;
-            int candIdx = idx;
-            BlockPos chosenStand = null;
-
-            for (int stepTry = stepWanted; stepTry >= 1; stepTry--) {
-                int ci = (idx + dir * stepTry) % size;
-                if (ci < 0) ci += size;
-                BlockPos seed = loop.get(ci);
-                BlockPos stand = findNearbyStandable(world, seed, 4);
-                if (stand != null) {
-                    chosenStep = stepTry;
-                    candIdx = ci;
-                    chosenStand = stand;
-                    break;
-                }
-            }
-            if (chosenStand == null) {
-                int scan = Math.min(6, remaining);
-                for (int stepTry = 1; stepTry <= scan; stepTry++) {
-                    int ci = (idx + dir * stepTry) % size;
-                    if (ci < 0) ci += size;
-                    BlockPos seed = loop.get(ci);
-                    BlockPos stand = findNearbyStandable(world, seed, 4);
-                    if (stand != null) {
-                        chosenStep = stepTry;
-                        candIdx = ci;
-                        chosenStand = stand;
-                        break;
-                    }
-                }
-            }
-            if (chosenStand == null) {
-                // No viable waypoint ahead; caller can fall back to pathing or another strategy.
-                return false;
-            }
-
-            ensureRingStandable(world, bot, chosenStand);
-            boolean ok = moveToRingWaypoint(source, bot, chosenStand, false);
-            if (!ok) {
-                // Don't commit to the index advance; reduce stride and try a smaller/nearer hop.
-                stride = Math.max(1, stride - 1);
-                hops++;
-                continue;
-            }
-
-            // Commit progress.
-            idx = candIdx;
-            remaining -= chosenStep;
-            hops++;
-
-            // If we made it to the ring point nearest the destination, stop looping.
-            if (idx == goalIdx) {
-                break;
-            }
-        }
-
-        return idx == goalIdx;
+        return HovelPerimeterRoutingService.moveToViaPerimeterLoop(
+                world,
+                source,
+                bot,
+                destination,
+                activeBuildCenter,
+                activeRadius,
+                PERIMETER_RING_OFFSET,
+                this::findNearbyStandable,
+                this::ensureRingStandable,
+                this::moveToRingWaypoint
+        );
     }
 
     private boolean directMove(ServerCommandSource source, ServerPlayerEntity bot, BlockPos dest) {
         if (source == null || bot == null || dest == null) return false;
+        if (HovelEmergencyRegroupService.triggerDeepUndergroundRegroupIfNeeded(
+                LOGGER, source, bot, "direct-move", activeBuildCenter, activeRadius, stageMessageSource)) {
+            return false;
+        }
+        if (HovelEmergencyRegroupService.triggerInWallRegroupIfNeeded(
+                LOGGER, source, bot, "direct-move", activeBuildCenter, activeRadius, stageMessageSource)) {
+            return false;
+        }
         MovementService.MovementPlan direct = new MovementService.MovementPlan(
                 MovementService.Mode.DIRECT,
                 dest,
@@ -2243,14 +2419,26 @@ public final class HovelPerimeterBuilder {
                 null,
                 Direction.UP
         );
-        MovementService.MovementResult res = MovementService.execute(source, bot, direct, false, true, false, false);
+        MovementService.MovementResult res = MovementService.withoutDoorEscape(
+            () -> MovementService.execute(source, bot, direct, false, true, false, false)
+        );
         return res.success();
     }
 
     private boolean pathMove(ServerCommandSource source, ServerPlayerEntity bot, BlockPos dest) {
         if (source == null || bot == null || dest == null) return false;
+        if (HovelEmergencyRegroupService.triggerDeepUndergroundRegroupIfNeeded(
+                LOGGER, source, bot, "path-move", activeBuildCenter, activeRadius, stageMessageSource)) {
+            return false;
+        }
+        if (HovelEmergencyRegroupService.triggerInWallRegroupIfNeeded(
+                LOGGER, source, bot, "path-move", activeBuildCenter, activeRadius, stageMessageSource)) {
+            return false;
+        }
         var planOpt = MovementService.planLootApproach(bot, dest, MovementService.MovementOptions.skillLoot());
-        return planOpt.isPresent() && MovementService.execute(source, bot, planOpt.get(), false, true, false, false).success();
+        return planOpt.isPresent() && MovementService.withoutDoorEscape(
+            () -> MovementService.execute(source, bot, planOpt.get(), false, true, false, false)
+        ).success();
     }
 
     private boolean moveToRingWaypoint(ServerCommandSource source,
@@ -2258,6 +2446,14 @@ public final class HovelPerimeterBuilder {
                                        BlockPos ringPos,
                                        boolean allowDirectFallback) {
         if (source == null || bot == null || ringPos == null) return false;
+        if (HovelEmergencyRegroupService.triggerDeepUndergroundRegroupIfNeeded(
+                LOGGER, source, bot, "ring-waypoint", activeBuildCenter, activeRadius, stageMessageSource)) {
+            return false;
+        }
+        if (HovelEmergencyRegroupService.triggerInWallRegroupIfNeeded(
+                LOGGER, source, bot, "ring-waypoint", activeBuildCenter, activeRadius, stageMessageSource)) {
+            return false;
+        }
         if (bot.getBlockPos().getSquaredDistance(ringPos) <= 1.0D) return true;
         if (pathMove(source, bot, ringPos)) {
             return true;
@@ -2265,12 +2461,36 @@ public final class HovelPerimeterBuilder {
         if (allowDirectFallback && directMove(source, bot, ringPos)) {
             return true;
         }
+
+        // Perimeter safety fallback: if the path/dir move failed, clear a small column and head/shoulder blocks
+        // at the intended ring stand (common corner-hump / suffocation case), then retry once.
         ServerWorld world = (ServerWorld) bot.getEntityWorld();
+        if (world != null && activeBuildCenter != null && activeRadius > 0
+                && isOutsideFootprint(ringPos, activeBuildCenter, activeRadius)) {
+            boolean mined = HovelPerimeterSafetyService.tryClearStandColumn(world, bot, ringPos, REACH_DISTANCE_SQ, this::mineSoft);
+            if (mined) {
+                sleepQuiet(60L);
+                if (pathMove(source, bot, ringPos)) {
+                    return true;
+                }
+                if (allowDirectFallback && directMove(source, bot, ringPos)) {
+                    return true;
+                }
+            }
+        }
         return world != null && nudgeToStandWithJump(world, bot, ringPos, 2200L);
     }
 
     private boolean moveToRingPos(ServerCommandSource source, ServerPlayerEntity bot, BlockPos ringPos) {
         if (source == null || bot == null || ringPos == null) return false;
+        if (HovelEmergencyRegroupService.triggerDeepUndergroundRegroupIfNeeded(
+                LOGGER, source, bot, "ring-pos", activeBuildCenter, activeRadius, stageMessageSource)) {
+            return false;
+        }
+        if (HovelEmergencyRegroupService.triggerInWallRegroupIfNeeded(
+                LOGGER, source, bot, "ring-pos", activeBuildCenter, activeRadius, stageMessageSource)) {
+            return false;
+        }
         if (bot.getBlockPos().getSquaredDistance(ringPos) <= 1.0D) return true;
 
         ServerWorld world = (ServerWorld) bot.getEntityWorld();
@@ -2284,6 +2504,8 @@ public final class HovelPerimeterBuilder {
         }
         return moveToRingWaypoint(source, bot, ringPos, true);
     }
+
+    // (Deep-underground emergency regroup logic extracted to HovelEmergencyRegroupService.)
 
     /**
      * Exterior ring movement uses the path planner and doorway exits.
@@ -2336,6 +2558,7 @@ public final class HovelPerimeterBuilder {
         if (!world.getBlockState(ringPos).getCollisionShape(world, ringPos).isEmpty()) mineSoft(bot, ringPos);
         if (!world.getBlockState(ringPos.up()).getCollisionShape(world, ringPos.up()).isEmpty()) mineSoft(bot, ringPos.up());
         if (!world.getBlockState(ringPos.up(2)).getCollisionShape(world, ringPos.up(2)).isEmpty()) mineSoft(bot, ringPos.up(2));
+        if (!world.getBlockState(ringPos.up(3)).getCollisionShape(world, ringPos.up(3)).isEmpty()) mineSoft(bot, ringPos.up(3));
     }
 
     private boolean nudgeToStandWithJump(ServerWorld world, ServerPlayerEntity bot, BlockPos stand, long timeoutMs) {
@@ -2399,7 +2622,8 @@ public final class HovelPerimeterBuilder {
         int floorY = center.getY();
         int standY = floorY + 1;
         int inner = Math.max(0, radius - 1);
-        int outer = radius + 1;
+        int outerBuffer = radius + 1;
+        int outerTravelRing = perimeterRingRadius(radius);
 
         // Leveling must MOVE around; otherwise almost everything is out of reach.
         // Use a small 3x3 grid of interior stations.
@@ -2433,8 +2657,11 @@ public final class HovelPerimeterBuilder {
                     int dz = z - center.getZ();
 
                     boolean inFootprint = Math.abs(dx) <= radius && Math.abs(dz) <= radius;
-                    boolean inOuterRing = !inFootprint && (Math.abs(dx) == outer || Math.abs(dz) == outer);
-                    // Only touch the hovel footprint + one-block buffer ring.
+                    boolean inOuterRing = !inFootprint && (
+                            (Math.abs(dx) == outerBuffer || Math.abs(dz) == outerBuffer)
+                                    || (Math.abs(dx) == outerTravelRing || Math.abs(dz) == outerTravelRing)
+                    );
+                    // Only touch the hovel footprint + exterior buffer/travel rings.
                     if (!inFootprint && !inOuterRing) {
                         continue;
                     }
@@ -2461,7 +2688,7 @@ public final class HovelPerimeterBuilder {
                             }
                         }
                     } else if (inOuterRing) {
-                        for (int y = floorY + 2; y >= floorY + 1; y--) {
+                        for (int y = floorY + 3; y >= floorY + 1; y--) {
                             BlockPos p = new BlockPos(x, y, z);
                             if (!world.getBlockState(p).getCollisionShape(world, p).isEmpty()) {
                                 mineSoft(bot, p);
@@ -2501,7 +2728,8 @@ public final class HovelPerimeterBuilder {
                     }
 
                     // Clear minimal headspace and proactively remove replaceable clutter (grass/flowers).
-                    int headTop = inOuterRing ? floorY + 2 : floorY + 3;
+                    // NOTE: the perimeter travel ring is where we see most corner-hump / in-wall damage, so clear extra headroom.
+                    int headTop = floorY + 3;
                     for (int y = floorY + 1; y <= headTop; y++) {
                         BlockPos p = new BlockPos(x, y, z);
                         BlockState s = world.getBlockState(p);
@@ -2514,6 +2742,7 @@ public final class HovelPerimeterBuilder {
         }
     }
 
+    @SuppressWarnings("unused")
     private boolean isCornerOfRing(BlockPos pos, BlockPos center, int radius) {
         if (pos == null || center == null) return false;
         int dx = pos.getX() - center.getX();
@@ -2526,20 +2755,10 @@ public final class HovelPerimeterBuilder {
      * This helps us patch holes even if the chosen Y represents the player's standing cell.
      */
     private int detectFloorBlockY(ServerWorld world, BlockPos center) {
-        if (world == null || center == null) return 0;
-        int start = center.getY();
-        for (int y = start; y >= start - 6; y--) {
-            BlockPos p = new BlockPos(center.getX(), y, center.getZ());
-            if (!world.isChunkLoaded(p.getX() >> 4, p.getZ() >> 4)) continue;
-            BlockState s = world.getBlockState(p);
-            if (!world.getFluidState(p).isEmpty()) continue;
-            if (!s.getCollisionShape(world, p).isEmpty()) {
-                return y;
-            }
-        }
-        return start - 1;
+        return HovelTerrainService.detectFloorBlockY(world, center);
     }
 
+    @SuppressWarnings("unused")
     private void clearIfObstructed(ServerWorld world, ServerPlayerEntity bot, BlockPos pos) {
         if (world == null || bot == null || pos == null) return;
         BlockState s = world.getBlockState(pos);
@@ -2737,8 +2956,40 @@ public final class HovelPerimeterBuilder {
     }
 
     private void mineSoft(ServerPlayerEntity bot, BlockPos pos) {
+        if (bot == null || pos == null) return;
+        // If we start mining our way out of a deep pit during a surface-hovel build, we waited too long.
+        // Trigger emergency pause early (cooldown-gated) to avoid long "mining out" spirals.
+        if (HovelEmergencyRegroupService.triggerDeepUndergroundRegroupIfNeeded(
+                LOGGER, bot.getCommandSource(), bot, "mining", activeBuildCenter, activeRadius, stageMessageSource)) {
+            return;
+        }
+        if (HovelEmergencyRegroupService.triggerInWallRegroupIfNeeded(
+                LOGGER, bot.getCommandSource(), bot, "mining", activeBuildCenter, activeRadius, stageMessageSource)) {
+            return;
+        }
+
         if (!BlockInteractionService.canInteract(bot, pos, REACH_DISTANCE_SQ)) return;
         try { MiningTool.mineBlock(bot, pos).get(3, TimeUnit.SECONDS); } catch (Exception ignored) {}
+    }
+
+    /**
+     * Hovel-only safety handler.
+     *
+     * @return true if an emergency action was taken (snap or pause) and the caller should stop its current
+     * action and let the outer build loop retry from a new stance.
+     */
+    private boolean handleHovelEmergency(ServerPlayerEntity bot, String where) {
+        if (bot == null) {
+            return false;
+        }
+        ServerCommandSource src = bot.getCommandSource();
+        // Deep-underground pause has priority over in-wall snapping.
+        if (HovelEmergencyRegroupService.triggerDeepUndergroundRegroupIfNeeded(
+                LOGGER, src, bot, where, activeBuildCenter, activeRadius, stageMessageSource)) {
+            return true;
+        }
+        return HovelEmergencyRegroupService.triggerInWallRegroupIfNeeded(
+                LOGGER, src, bot, where, activeBuildCenter, activeRadius, stageMessageSource);
     }
 
     private Item selectBuildItem(ServerPlayerEntity bot) {
@@ -2774,6 +3025,14 @@ public final class HovelPerimeterBuilder {
      */
     private boolean moveToBuildSiteAllowPathing(ServerCommandSource source, ServerPlayerEntity bot, BlockPos dest) {
         if (source == null || bot == null || dest == null) return false;
+        if (HovelEmergencyRegroupService.triggerDeepUndergroundRegroupIfNeeded(
+                LOGGER, source, bot, "buildsite-allow-pathing", activeBuildCenter, activeRadius, stageMessageSource)) {
+            return false;
+        }
+        if (HovelEmergencyRegroupService.triggerInWallRegroupIfNeeded(
+                LOGGER, source, bot, "buildsite-allow-pathing", activeBuildCenter, activeRadius, stageMessageSource)) {
+            return false;
+        }
         ServerWorld world = (ServerWorld) bot.getEntityWorld();
         if (world != null && activeBuildCenter != null && activeRadius > 0) {
             if (!ensureInteriorAccessForDestination(world, source, bot, dest, activeBuildCenter, activeRadius, activeDoorSide)) {
@@ -2796,7 +3055,9 @@ public final class HovelPerimeterBuilder {
                     null,
                     Direction.UP
             );
-            MovementService.MovementResult directRes = MovementService.execute(source, bot, direct, false, true, false, false);
+            MovementService.MovementResult directRes = MovementService.withoutDoorEscape(
+                    () -> MovementService.execute(source, bot, direct, false, true, false, false)
+            );
             if (directRes.success()) {
                 return true;
             }
@@ -2817,7 +3078,9 @@ public final class HovelPerimeterBuilder {
                             null,
                             Direction.UP
                     );
-                    MovementService.MovementResult res = MovementService.execute(source, bot, directAlt, false, true, false, false);
+                    MovementService.MovementResult res = MovementService.withoutDoorEscape(
+                            () -> MovementService.execute(source, bot, directAlt, false, true, false, false)
+                    );
                     if (res.success()) {
                         return true;
                     }
@@ -2848,7 +3111,9 @@ public final class HovelPerimeterBuilder {
         }
 
         var planOpt = MovementService.planLootApproach(bot, dest, MovementService.MovementOptions.skillLoot());
-        return planOpt.isPresent() && MovementService.execute(source, bot, planOpt.get(), false, true, false, false).success();
+        return planOpt.isPresent() && MovementService.withoutDoorEscape(
+            () -> MovementService.execute(source, bot, planOpt.get(), false, true, false, false)
+        ).success();
     }
 
     private boolean shouldPerimeterRecover(BlockPos dest) {
@@ -2879,88 +3144,17 @@ public final class HovelPerimeterBuilder {
                 center.offset(resolveDoorSideForExit(bot), radius + 1), center, radius)) {
             return false;
         }
-        int standY = center.getY() + 1;
-        int ringRadius = perimeterRingRadius(radius);
-        List<BlockPos> loop = HovelBlueprint.buildGroundPerimeter(center, ringRadius, standY);
-        if (loop.isEmpty()) return false;
-
-        BlockPos here = bot.getBlockPos();
-        int startIdx = 0;
-        double best = Double.MAX_VALUE;
-        for (int i = 0; i < loop.size(); i++) {
-            BlockPos p = loop.get(i);
-            double d = here.getSquaredDistance(p);
-            if (d < best) {
-                best = d;
-                startIdx = i;
-            }
-        }
-
-        // Turning the corner is the goal. Find the next corner ahead on the loop.
-        ArrayList<Integer> corners = new ArrayList<>(4);
-        for (int i = 0; i < loop.size(); i++) {
-            BlockPos p = loop.get(i);
-            int dx = p.getX() - center.getX();
-            int dz = p.getZ() - center.getZ();
-            if (Math.abs(dx) == ringRadius && Math.abs(dz) == ringRadius) {
-                corners.add(i);
-            }
-        }
-
-        // Fallback: if corners weren't detected (shouldn't happen), do a short arc and hope.
-        if (corners.isEmpty()) {
-            int maxSteps = Math.min(loop.size(), 14);
-            int progressed = 0;
-            for (int i = 0; i < maxSteps && !SkillManager.shouldAbortSkill(bot); i++) {
-                BlockPos seed = loop.get((startIdx + i) % loop.size());
-                BlockPos stand = findNearbyStandable(world, seed.withY(standY), 3);
-                if (stand == null) continue;
-                ensureRingStandable(world, bot, stand);
-                if (moveToRingWaypoint(source, bot, stand, false)) {
-                    progressed++;
-                    if (progressed >= 4) return true;
-                }
-            }
-            return false;
-        }
-
-        int targetCornerIdx = corners.get(0);
-        int bestDelta = Integer.MAX_VALUE;
-        for (int ci : corners) {
-            int delta = ci >= startIdx ? (ci - startIdx) : (loop.size() - startIdx + ci);
-            if (delta == 0) continue;
-            if (delta < bestDelta) {
-                bestDelta = delta;
-                targetCornerIdx = ci;
-            }
-        }
-
-        // 1) Try to reach the corner.
-        BlockPos corner = loop.get(targetCornerIdx);
-        BlockPos cornerStand = findNearbyStandable(world, corner.withY(standY), 4);
-        if (cornerStand == null) {
-            return false;
-        }
-        ensureRingStandable(world, bot, cornerStand);
-        if (!moveToRingWaypoint(source, bot, cornerStand, false)) {
-            return false;
-        }
-
-        // 2) Take a couple more steps past the corner so we really "turn" and don't just jitter at it.
-        int progressed = 0;
-        for (int i = 1; i <= 4 && !SkillManager.shouldAbortSkill(bot); i++) {
-            BlockPos seed = loop.get((targetCornerIdx + i) % loop.size());
-            BlockPos stand = findNearbyStandable(world, seed.withY(standY), 3);
-            if (stand == null) continue;
-            ensureRingStandable(world, bot, stand);
-            if (moveToRingWaypoint(source, bot, stand, false)) {
-                progressed++;
-                if (progressed >= 2) {
-                    break;
-                }
-            }
-        }
-        return true;
+        return HovelPerimeterRoutingService.perimeterRecoveryWalk(
+                world,
+                source,
+                bot,
+                center,
+                radius,
+                PERIMETER_RING_OFFSET,
+                this::findNearbyStandable,
+                this::ensureRingStandable,
+                this::moveToRingWaypoint
+        );
     }
 
     private boolean moveToBuildSiteWithPerimeterFallback(ServerWorld world,
@@ -2970,6 +3164,14 @@ public final class HovelPerimeterBuilder {
                                                         BlockPos buildCenter,
                                                         int radius) {
         if (source == null || bot == null || dest == null) return false;
+        if (HovelEmergencyRegroupService.triggerDeepUndergroundRegroupIfNeeded(
+                LOGGER, source, bot, "buildsite-perimeter-fallback", activeBuildCenter, activeRadius, stageMessageSource)) {
+            return false;
+        }
+        if (HovelEmergencyRegroupService.triggerInWallRegroupIfNeeded(
+                LOGGER, source, bot, "buildsite-perimeter-fallback", activeBuildCenter, activeRadius, stageMessageSource)) {
+            return false;
+        }
         if (world != null && buildCenter != null && radius > 0) {
             if (!ensureInteriorAccessForDestination(world, source, bot, dest, buildCenter, radius, activeDoorSide)) {
                 markReachAttemptResult(dest, false);
@@ -3036,7 +3238,9 @@ public final class HovelPerimeterBuilder {
                     Direction.UP
             );
             // Disable pursuit for build moves; it commonly devolves into wall-humping when stations are unreachable.
-            MovementService.MovementResult directRes = MovementService.execute(source, bot, direct, false, true, false, false);
+            MovementService.MovementResult directRes = MovementService.withoutDoorEscape(
+                    () -> MovementService.execute(source, bot, direct, false, true, false, false)
+            );
             if (directRes.success()) {
                 return true;
             }
@@ -3061,7 +3265,9 @@ public final class HovelPerimeterBuilder {
                             null,
                             Direction.UP
                     );
-                    MovementService.MovementResult res = MovementService.execute(source, bot, directAlt, false, true, false, false);
+                    MovementService.MovementResult res = MovementService.withoutDoorEscape(
+                            () -> MovementService.execute(source, bot, directAlt, false, true, false, false)
+                    );
                     if (res.success()) {
                         return true;
                     }
@@ -3585,14 +3791,18 @@ public final class HovelPerimeterBuilder {
 
     private void waitForYIncrease(ServerPlayerEntity bot, int fromY, long timeoutMs) {
         long deadline = System.currentTimeMillis() + timeoutMs;
-        while (System.currentTimeMillis() < deadline && bot.getBlockY() <= fromY) {
+        while (System.currentTimeMillis() < deadline
+                && bot.getBlockY() <= fromY
+                && !SkillManager.shouldAbortSkill(bot)) {
             sleepQuiet(50L);
         }
     }
 
     private void waitForYDecrease(ServerPlayerEntity bot, int fromY, long timeoutMs) {
         long deadline = System.currentTimeMillis() + timeoutMs;
-        while (System.currentTimeMillis() < deadline && bot.getBlockY() >= fromY) {
+        while (System.currentTimeMillis() < deadline
+                && bot.getBlockY() >= fromY
+                && !SkillManager.shouldAbortSkill(bot)) {
             sleepQuiet(50L);
         }
     }
@@ -3641,6 +3851,23 @@ public final class HovelPerimeterBuilder {
     }
 
     private HovelPlan resolvePlan(ServerWorld world, ServerPlayerEntity bot, BlockPos origin, int radius, Direction preferredDoorSide, Map<String, Object> sharedState, boolean resumeRequested) {
-        return new HovelPlan(origin, preferredDoorSide != null ? preferredDoorSide : bot.getHorizontalFacing());
+        Direction fallbackDoor = preferredDoorSide != null ? preferredDoorSide : (bot != null ? bot.getHorizontalFacing() : Direction.NORTH);
+        BlockPos fallbackCenter = origin;
+
+            if (resumeRequested && sharedState != null && buildStateStore.isAttached()) {
+                Object cx = SharedStateUtils.getValue(sharedState, buildStateStore.key("plan.center.x"));
+                Object cy = SharedStateUtils.getValue(sharedState, buildStateStore.key("plan.center.y"));
+                Object cz = SharedStateUtils.getValue(sharedState, buildStateStore.key("plan.center.z"));
+                Object ds = SharedStateUtils.getValue(sharedState, buildStateStore.key("plan.doorSide"));
+            if (cx instanceof Number && cy instanceof Number && cz instanceof Number) {
+                BlockPos stored = new BlockPos(((Number) cx).intValue(), ((Number) cy).intValue(), ((Number) cz).intValue());
+                Direction storedDoor = parseDirectionOr(fallbackDoor, ds);
+                LOGGER.info("Hovel: resume requested; using stored plan center={} doorSide={} (fallbackDoor={})",
+                        stored.toShortString(), storedDoor, fallbackDoor);
+                return new HovelPlan(stored, storedDoor);
+            }
+        }
+
+        return new HovelPlan(fallbackCenter, fallbackDoor);
     }
 }

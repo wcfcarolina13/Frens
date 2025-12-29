@@ -7,6 +7,7 @@ import net.minecraft.item.Items;
 import net.minecraft.registry.tag.BlockTags;
 import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.network.ServerPlayerEntity;
+import net.minecraft.registry.RegistryKey;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.ActionResult;
 import net.minecraft.util.Hand;
@@ -14,6 +15,7 @@ import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.util.hit.BlockHitResult;
+import net.minecraft.world.World;
 import net.shasankp000.ChatUtils.ChatUtils;
 import net.shasankp000.Entity.LookController;
 import org.slf4j.Logger;
@@ -40,6 +42,12 @@ public final class SleepService {
             Items.ORANGE_BED, Items.PINK_BED, Items.PURPLE_BED, Items.RED_BED, Items.YELLOW_BED
     );
 
+    private enum BedUseResult {
+        SUCCESS,
+        FAIL_NOT_SLEEP_TIME,
+        FAIL_OTHER
+    }
+
     private SleepService() {}
 
     public static boolean sleep(ServerCommandSource source, ServerPlayerEntity bot) {
@@ -49,7 +57,7 @@ public final class SleepService {
         if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
             return false;
         }
-        if (!world.getDimension().bedWorks()) {
+        if (!dimensionAllowsBeds(world)) {
             ChatUtils.sendSystemMessage(source, "Beds don't work in this dimension.");
             return false;
         }
@@ -57,10 +65,25 @@ public final class SleepService {
             return true;
         }
 
+        boolean canSleepNow = canSleepNow(world);
+
         // 1) Try existing nearby bed.
-        Optional<BlockPos> bed = findNearestBed(world, bot.getBlockPos(), 16);
-        if (bed.isPresent() && tryUseBed(source, bot, bed.get())) {
-            return true;
+        Optional<BlockPos> bed = findNearestBed(world, bot.getBlockPos(), 24);
+        if (bed.isPresent()) {
+            BedUseResult res = tryUseBed(source, bot, bed.get());
+            if (res == BedUseResult.SUCCESS) {
+                return true;
+            }
+            // If a nearby bed exists but we simply can't sleep yet (daytime), don't start crafting/placing.
+            if (res == BedUseResult.FAIL_NOT_SLEEP_TIME) {
+                return false;
+            }
+        }
+
+        // If we can't sleep right now, avoid crafting/placing beds.
+        if (!canSleepNow) {
+            ChatUtils.sendSystemMessage(source, "I couldn't sleep right now (not night/thunder).");
+            return false;
         }
 
         // 2) Ensure we have a bed item (craft if possible).
@@ -84,12 +107,12 @@ public final class SleepService {
             ChatUtils.sendSystemMessage(source, "I couldn't find a safe place to set a bed down.");
             return false;
         }
-        return tryUseBed(source, bot, placed);
+        return tryUseBed(source, bot, placed) == BedUseResult.SUCCESS;
     }
 
-    private static boolean tryUseBed(ServerCommandSource source, ServerPlayerEntity bot, BlockPos bedPos) {
+    private static BedUseResult tryUseBed(ServerCommandSource source, ServerPlayerEntity bot, BlockPos bedPos) {
         if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
-            return false;
+            return BedUseResult.FAIL_OTHER;
         }
 
         List<BlockPos> stands = findStandableAdjacent(world, bedPos);
@@ -108,17 +131,26 @@ public final class SleepService {
             ActionResult result = interactBed(bot, world, bedPos);
             LOGGER.info("Bed interact result={} botSleeping={}", result, bot.isSleeping());
             if (bot.isSleeping()) {
+                BotHomeService.recordLastSleep(bot, bedPos.toImmutable());
                 ChatUtils.sendSystemMessage(source, bot.getName().getString() + " is sleeping.");
-                return true;
+                return BedUseResult.SUCCESS;
             }
         }
 
-        if (!world.isDay()) {
+        if (canSleepNow(world)) {
             ChatUtils.sendSystemMessage(source, "I couldn't get into the bed (blocked or unsafe).");
-        } else {
-            ChatUtils.sendSystemMessage(source, "I couldn't sleep right now (not night/thunder).");
+            return BedUseResult.FAIL_OTHER;
         }
-        return false;
+        ChatUtils.sendSystemMessage(source, "I couldn't sleep right now (not night/thunder).");
+        return BedUseResult.FAIL_NOT_SLEEP_TIME;
+    }
+
+    private static boolean canSleepNow(ServerWorld world) {
+        if (world == null) {
+            return false;
+        }
+        // Vanilla allows sleeping at night, and also during thunderstorms.
+        return !world.isDay() || world.isThundering();
     }
 
     private static ActionResult interactBed(ServerPlayerEntity bot, ServerWorld world, BlockPos bedPos) {
@@ -188,6 +220,14 @@ public final class SleepService {
             }
         }
         return Optional.ofNullable(best);
+    }
+
+    private static boolean dimensionAllowsBeds(ServerWorld world) {
+        if (world == null) {
+            return false;
+        }
+        RegistryKey<World> key = world.getRegistryKey();
+        return key != World.NETHER && key != World.END;
     }
 
     private static List<BlockPos> findStandableAdjacent(ServerWorld world, BlockPos bedPos) {

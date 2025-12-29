@@ -2,6 +2,7 @@ package net.shasankp000.GameAI.services;
 
 import net.minecraft.component.DataComponentTypes;
 import net.minecraft.component.type.FoodComponent;
+import net.minecraft.entity.Entity;
 import net.minecraft.entity.player.HungerManager;
 import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.item.ItemStack;
@@ -27,8 +28,18 @@ public final class HealingService {
     private static final int HUNGER_WARNING = 10;      // "I'm hungry"
     private static final int HUNGER_CRITICAL = 5;      // "I'm starving"
     private static final int HUNGER_EMERGENCY = 2;     // "I'll die if I don't eat!"
+
+    /**
+     * Natural regeneration requires a sufficiently high hunger bar. In vanilla this is effectively
+     * "9+ shanks" ($\ge 18$ food level). We aim to reach that threshold when the bot is safe.
+     */
+    private static final int REGEN_READY_FOOD_LEVEL = 18;
+
+    // Safety window for eating (avoid interrupting combat reactions).
+    private static final double HOSTILE_ALERT_DISTANCE_SQ = 36.0D; // 6 blocks
     
-    // Health threshold for eating to regen health
+    // Health threshold for eating to regen health (legacy; kept for backwards-compat behaviour)
+    @SuppressWarnings("unused")
     private static final float HEALTH_EAT_THRESHOLD = 15.0F; // 75% of 20
     
     // Track when we last complained about hunger to avoid spam
@@ -53,33 +64,55 @@ public final class HealingService {
      * Eats when hungry or health is low.
      */
     public static boolean autoEat(ServerPlayerEntity bot) {
+        return autoEat(bot, null);
+    }
+
+    /**
+     * Variant that accepts hostile context (when already computed by the caller).
+     *
+     * <p>Behavior requested: when the bot is safe, not under attack, hungry, and not at full health,
+     * it should eat its cheapest safe food until its hunger bar is high enough to naturally regenerate.</p>
+     */
+    public static boolean autoEat(ServerPlayerEntity bot, List<Entity> hostileEntities) {
         if (bot == null || bot.isDead() || bot.isUsingItem()) {
             return false;
         }
-        
+
         HungerManager hunger = bot.getHungerManager();
         int foodLevel = hunger.getFoodLevel();
+        float saturation = hunger.getSaturationLevel();
         float health = bot.getHealth();
         float maxHealth = bot.getMaxHealth();
-        
-        boolean needsFood = foodLevel < HUNGER_COMFORTABLE;
-        boolean needsHealthRegen = (health / maxHealth) <= 0.75F && foodLevel < 20;
-        
-        if (!needsFood && !needsHealthRegen) {
+
+        boolean hungry = foodLevel < 20;
+        boolean missingHealth = health + 0.001F < maxHealth;
+
+        // Keep legacy behaviour: don't casually dip into food while at full hunger.
+        boolean needsComfortFood = foodLevel < HUNGER_COMFORTABLE;
+
+        // New behaviour: if we're hurt and our hunger/saturation isn't high enough to naturally regen hearts, top up.
+        // In practice, hearts won't regen reliably unless the hunger bar is high (>=18) and there's some satiation.
+        boolean needsRegenFuel = hungry && missingHealth && (foodLevel < REGEN_READY_FOOD_LEVEL || saturation <= 0.0F);
+
+        if (!needsComfortFood && !needsRegenFuel) {
             return false;
         }
-        
-        // Check warnings
+
+        // If we're in danger or actively being attacked, only eat when it's truly urgent.
+        boolean emergency = foodLevel <= HUNGER_CRITICAL;
+        if (!emergency && !isSafeToEat(bot, hostileEntities)) {
+            return false;
+        }
+
+        // Check warnings (only tied to hunger levels).
         checkHungerWarnings(bot, foodLevel);
-        
-        // Try to eat
+
         PlayerInventory inv = bot.getInventory();
         OptionalInt foodSlot = findCheapestSafeFood(inv);
-        
         if (foodSlot.isEmpty()) {
             return false;
         }
-        
+
         return consumeFood(bot, foodSlot.getAsInt());
     }
     
@@ -208,6 +241,32 @@ public final class HealingService {
         }
         
         return bestSlot >= 0 ? OptionalInt.of(bestSlot) : OptionalInt.empty();
+    }
+
+    private static boolean isSafeToEat(ServerPlayerEntity bot, List<Entity> hostiles) {
+        if (bot == null) {
+            return false;
+        }
+
+        // "Not under attack": if something is actively set as our attacker, play it safe.
+        if (bot.getAttacker() != null) {
+            return false;
+        }
+
+        if (hostiles == null || hostiles.isEmpty()) {
+            return true;
+        }
+
+        for (Entity hostile : hostiles) {
+            if (hostile == null || hostile.isRemoved() || !hostile.isAlive()) {
+                continue;
+            }
+            if (hostile.squaredDistanceTo(bot) <= HOSTILE_ALERT_DISTANCE_SQ && bot.canSee(hostile)) {
+                return false;
+            }
+        }
+
+        return true;
     }
     
     /**

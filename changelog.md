@@ -78,6 +78,9 @@ Historical record and reasoning. `TODO.md` is the source of truth for what’s n
 - Shelter: `hovel2` no longer crafts ladders during tower builds (prevents wandering to far-away crafting tables).
 - Shelter: improved scaffolding cleanup by using a safe teardown that never breaks roof/wall cells, plus strict vertical pillaring for `hovel2` tower/aux pillars to avoid messy exterior offsets.
 - Shelter: added a final roof-center cap attempt after all teardown/patching, to handle cases where the cap block was previously removed during cleanup.
+- Shelter: add persistent IN_WALL / clipping emergency regroup during hovel building (abort + come-to-commander) to avoid repeated suffocation loops.
+- Shelter: hovel builder now checks abort requests between major phases so `/bot stop` halts promptly (and avoids emitting misleading timeout/completion stage messages after abort).
+- Movement: obstruction mining during movement stalls now also considers the bot's own head/feet cells while clipping, and no longer requires being fully grounded to trigger.
 - Shelter: `CraftingHelper` now tells chat when it’s heading to a nearby crafting table (coords) so “ran off” trips are understandable.
 - Shelter: `hovel2` now runs a final drop sweep around the build site.
 - Shelter: shelter material gathering now prefers a descent-based dig at a safe distance first (then falls back to a small surface gather), and avoids mining near the active build footprint to prevent corner holes/terrain distortion.

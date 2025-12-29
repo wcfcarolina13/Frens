@@ -23,7 +23,9 @@ import net.shasankp000.Entity.LookController;
 import net.shasankp000.GameAI.BotActions;
 import net.shasankp000.GameAI.DropSweeper;
 import net.shasankp000.GameAI.services.ChestStoreService;
+import net.shasankp000.GameAI.services.BlockInteractionService;
 import net.shasankp000.GameAI.services.CraftingHelper;
+import net.shasankp000.GameAI.services.FollowPathService;
 import net.shasankp000.GameAI.services.MovementService;
 import net.shasankp000.GameAI.services.MovementService.Mode;
 import net.shasankp000.GameAI.services.MovementService.MovementPlan;
@@ -44,6 +46,8 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 public final class FishingSkill implements Skill {
 
@@ -57,6 +61,12 @@ public final class FishingSkill implements Skill {
     private static final double BOBBER_SEARCH_RADIUS = 24.0D;
     private static final long CAST_WAIT_MS = 6_000L;
     private static final long SWEEP_INTERVAL_MS = 3 * 60 * 1000L; // 3 minutes
+
+    // Reactive sweep: if loot is piling up (usually because we're standing a touch too far from shore),
+    // pause and do a quick local pickup run.
+    private static final int DROP_SWEEP_TRIGGER_COUNT = 3; // "more than 2"
+    private static final double DROP_SWEEP_TRIGGER_RADIUS = 6.5D;
+    private static final long DROP_SWEEP_TRIGGER_COOLDOWN_MS = 12_000L;
     
     private static final Set<Item> FISH_ITEMS = Set.of(
             Items.COD,
@@ -68,6 +78,11 @@ public final class FishingSkill implements Skill {
     private static final int CHEST_SCAN_RADIUS = 16;
     private static final record StandCandidate(BlockPos pos, boolean adjacent) {}
     private static final record StandOption(BlockPos stand, BlockPos castTarget, double score) {}
+
+    // Failed target blacklist: prevent oscillation by remembering unreachable targets.
+    private static final long BLACKLIST_DURATION_MS = 45_000L; // Forget after 45 seconds
+    private static final int MAX_BLACKLIST_SIZE = 50;
+    private static final Map<UUID, Map<BlockPos, Long>> FAILED_TARGET_BLACKLIST = new ConcurrentHashMap<>();
 
     private static final Field CAUGHT_FISH_FIELD = findCaughtFishField();
 
@@ -160,6 +175,7 @@ public final class FishingSkill implements Skill {
         int attempts = 0;
         int baseline = countFish(bot);
         long lastSweepTime = System.currentTimeMillis();
+        long lastReactiveSweepTime = 0L;
 
         String modeDesc = (targetFish == Integer.MAX_VALUE ? "until sunset" : targetFish + " catches") + (checkSunset && targetFish != Integer.MAX_VALUE ? " (or sunset)" : "");
         LOGGER.info("Starting fishing session for {} (mode: {})", bot.getName().getString(), modeDesc);
@@ -167,6 +183,15 @@ public final class FishingSkill implements Skill {
         while (caught < targetFish && attempts < maxAttempts) {
             if (SkillManager.shouldAbortSkill(bot)) {
                 return SkillExecutionResult.failure("Fishing paused by another task.");
+            }
+
+            // Anchor: if we drift from our chosen stand (e.g., after loot shimmy or nudges), return.
+            // This prevents "follow-the-commander"-looking creep during long sessions.
+            if (bot.getBlockPos().getSquaredDistance(stand) > 2.25D) {
+                if (!navigateToSpot(source, bot, stand)) {
+                    return SkillExecutionResult.failure("Can't maintain position at the fishing spot.");
+                }
+                adjustPositionToWaterEdge(bot, spot.water());
             }
 
             // Periodic Sweep
@@ -178,6 +203,24 @@ public final class FishingSkill implements Skill {
                     return SkillExecutionResult.failure("Lost fishing rod during sweep.");
                 }
                 adjustPositionToWaterEdge(bot, spot.water());
+            }
+
+            // Reactive Sweep: if multiple drops are accumulating nearby, stop casting and go pick them up now.
+            // This is intentionally more aggressive than the periodic sweep.
+            long nowMs = System.currentTimeMillis();
+            if (nowMs - lastReactiveSweepTime > DROP_SWEEP_TRIGGER_COOLDOWN_MS) {
+                int nearbyDrops = countNearbyDropsForFishing(world, stand, spot.water(), DROP_SWEEP_TRIGGER_RADIUS);
+                if (nearbyDrops >= DROP_SWEEP_TRIGGER_COUNT) {
+                    LOGGER.info("Detected {} nearby drops during fishing; performing quick sweep.", nearbyDrops);
+                    retractBobberIfPresent(bot);
+                    performReactiveSweep(source, bot, stand);
+                    lastReactiveSweepTime = System.currentTimeMillis();
+                    if (!BotActions.ensureHotbarItem(bot, Items.FISHING_ROD)) {
+                        return SkillExecutionResult.failure("Lost fishing rod during reactive sweep.");
+                    }
+                    adjustPositionToWaterEdge(bot, spot.water());
+                    continue;
+                }
             }
 
             if (checkSunset) {
@@ -289,6 +332,31 @@ public final class FishingSkill implements Skill {
             waitForBobberRemoval(bot);
             
             sleep(600L); // Wait for item arrival
+
+            // If drops landed just out of pickup range, shimmy toward them to collect.
+            shimmyTowardNearbyDrops(source, bot, stand, spot.water());
+
+            // If loot is still building up after a catch, proactively sweep it before casting again.
+            long afterCatchMs = System.currentTimeMillis();
+            if (afterCatchMs - lastReactiveSweepTime > DROP_SWEEP_TRIGGER_COOLDOWN_MS) {
+                int nearbyDrops = countNearbyDropsForFishing(world, stand, spot.water(), DROP_SWEEP_TRIGGER_RADIUS);
+                if (nearbyDrops >= DROP_SWEEP_TRIGGER_COUNT) {
+                    LOGGER.info("Loot pile-up after catch ({} drops); performing quick sweep.", nearbyDrops);
+                    performReactiveSweep(source, bot, stand);
+                    lastReactiveSweepTime = System.currentTimeMillis();
+                    if (!BotActions.ensureHotbarItem(bot, Items.FISHING_ROD)) {
+                        return SkillExecutionResult.failure("Lost fishing rod during reactive sweep.");
+                    }
+                    adjustPositionToWaterEdge(bot, spot.water());
+                }
+            }
+
+            // Always return to the stand after a shimmy to avoid slowly wandering.
+            if (bot.getBlockPos().getSquaredDistance(stand) > 2.25D) {
+                navigateToSpot(source, bot, stand);
+                BotActions.stop(bot);
+                adjustPositionToWaterEdge(bot, spot.water());
+            }
             
             int now = countFish(bot);
             int delta = now - baseline;
@@ -316,11 +384,44 @@ public final class FishingSkill implements Skill {
     }
 
     private boolean navigateToSpot(ServerCommandSource source, ServerPlayerEntity bot, BlockPos target) {
-        // Use pathfinding first, disable pursuit fallback to avoid walking off cliffs
+        // Use pathfinding first, disable pursuit fallback to avoid walking off cliffs.
+        // IMPORTANT: MovementService uses a fairly generous arrival radius; for fishing we need to
+        // truly reach the chosen stand (doors/walls can otherwise produce false "arrived" results).
         MovementPlan plan = new MovementPlan(Mode.DIRECT, target, target, null, null, null);
         MovementResult result = MovementService.execute(source, bot, plan, Boolean.FALSE, false, false, false);
         if (result.success()) {
-            return true;
+            // IMPORTANT: distance alone is not enough here.
+            // If the target is on the other side of a closed door, the bot can be "close" but unreachable.
+            double distSq = bot.getBlockPos().getSquaredDistance(target);
+            if (distSq <= APPROACH_REACH_SQ) {
+                BlockPos blockingDoor = BlockInteractionService.findBlockingDoor(bot, target, 12.0D);
+                if (blockingDoor == null) {
+                    return true;
+                }
+
+                // Try the minimal "open + step" behavior, then re-check.
+                MovementService.tryOpenDoorAt(bot, blockingDoor);
+                // Commit to crossing THIS doorway toward our fishing target.
+                MovementService.tryTraverseOpenableToward(bot, blockingDoor, target, "fish-stand-door-near");
+                MovementService.nudgeTowardUntilClose(bot, target, APPROACH_REACH_SQ, 2200L, 0.18, "fish-stand-door-near");
+                if (bot.getBlockPos().getSquaredDistance(target) <= APPROACH_REACH_SQ
+                        && BlockInteractionService.findBlockingDoor(bot, target, 12.0D) == null) {
+                    return true;
+                }
+                // Fall through to door-escape assist below.
+            } else {
+                // Common failure case: destination is "close" but separated by a closed door.
+                BlockPos blockingDoor = BlockInteractionService.findBlockingDoor(bot, target, 64.0D);
+                if (blockingDoor != null) {
+                    MovementService.tryOpenDoorAt(bot, blockingDoor);
+                    MovementService.tryTraverseOpenableToward(bot, blockingDoor, target, "fish-stand-door");
+                    MovementService.nudgeTowardUntilClose(bot, target, APPROACH_REACH_SQ, 2000L, 0.16, "fish-stand-door");
+                    if (bot.getBlockPos().getSquaredDistance(target) <= APPROACH_REACH_SQ
+                            && BlockInteractionService.findBlockingDoor(bot, target, 12.0D) == null) {
+                        return true;
+                    }
+                }
+            }
         }
 
         String failureDetail = result.detail();
@@ -330,10 +431,49 @@ public final class FishingSkill implements Skill {
         if (MovementService.clearLeafObstruction(bot, dir)) {
             // Retry if we cleared something
             result = MovementService.execute(source, bot, plan, Boolean.FALSE, false, false, false);
-            if (result.success()) {
+            if (result.success() && bot.getBlockPos().getSquaredDistance(target) <= APPROACH_REACH_SQ) {
                 return true;
             }
             failureDetail = result.detail();
+        }
+
+        // If the target is blocked by a nearby door/gate on the direct line, prioritize a doorway traverse
+        // before broader "door escape" heuristics (prevents getting pulled back inside).
+        BlockPos directBlockingDoor = BlockInteractionService.findBlockingDoor(bot, target, 64.0D);
+        if (directBlockingDoor != null) {
+            MovementService.tryOpenDoorAt(bot, directBlockingDoor);
+            MovementService.tryTraverseOpenableToward(bot, directBlockingDoor, target, "fish-doorway");
+            result = MovementService.execute(source, bot, plan, Boolean.FALSE, true, false, false);
+            if (result.success() && bot.getBlockPos().getSquaredDistance(target) <= APPROACH_REACH_SQ) {
+                return true;
+            }
+            failureDetail = result.detail();
+        }
+
+        // Door escape assist: if we appear to be in an enclosure, try a short "approach -> open -> step through".
+        // This is intentionally local and only used as a recovery step when normal navigation fails.
+        try {
+            // If a door is directly blocking the line, we already handled it above.
+            MovementService.DoorSubgoalPlan doorPlan = directBlockingDoor == null
+                    ? MovementService.findDoorEscapePlan(bot, target, null)
+                    : null;
+            if (doorPlan != null) {
+                boolean approached = MovementService.nudgeTowardUntilClose(bot, doorPlan.approachPos(), 2.25D, 2200L, 0.18, "fish-door-approach");
+                if (approached) {
+                    MovementService.tryOpenDoorAt(bot, doorPlan.doorBase());
+                    // Be slightly more forgiving here: we just need to cross the doorway enough
+                    // for the follow-up pathfinding to replan successfully.
+                    MovementService.nudgeTowardUntilClose(bot, doorPlan.stepThroughPos(), 4.0D, 2600L, 0.22, "fish-door-step");
+                    // After stepping through, retry the main move.
+                    result = MovementService.execute(source, bot, plan, Boolean.FALSE, true, false, false);
+                    if (result.success() && bot.getBlockPos().getSquaredDistance(target) <= APPROACH_REACH_SQ) {
+                        return true;
+                    }
+                    failureDetail = result.detail();
+                }
+            }
+        } catch (Throwable t) {
+            // Never fail the skill due to a door helper throwing.
         }
 
         // Fallback: Safe nudge (only if very close)
@@ -345,6 +485,10 @@ public final class FishingSkill implements Skill {
             }
             failureDetail = "safe nudge failed near " + target.toShortString();
         }
+        
+        // Blacklist this target to prevent oscillation.
+        blacklistTarget(bot.getUuid(), target);
+        
         LOGGER.warn("Navigation to fishing spot {} failed: {}", target.toShortString(), failureDetail);
         return false;
     }
@@ -368,7 +512,13 @@ public final class FishingSkill implements Skill {
             
             // Safety check: is ground ahead?
             Vec3d currentPos = new Vec3d(bot.getX(), bot.getY(), bot.getZ());
-            Vec3d nextStep = currentPos.add(bot.getRotationVec(1.0f).multiply(0.6));
+            Vec3d toward = Vec3d.ofCenter(target).subtract(currentPos).multiply(1.0, 0.0, 1.0);
+            double lenSq = toward.lengthSquared();
+            if (lenSq < 1.0E-6D) {
+                return true;
+            }
+            toward = toward.multiply(1.0D / Math.sqrt(lenSq));
+            Vec3d nextStep = currentPos.add(toward.multiply(0.6));
             BlockPos nextBlock = BlockPos.ofFloored(nextStep);
             if (bot.getEntityWorld().getBlockState(nextBlock.down()).getCollisionShape(bot.getEntityWorld(), nextBlock.down()).isEmpty()) {
                 // Edge detected!
@@ -396,41 +546,184 @@ public final class FishingSkill implements Skill {
     }
 
     private void adjustPositionToWaterEdge(ServerPlayerEntity bot, BlockPos water) {
-        if (bot == null || water == null) return;
-        
+        if (bot == null || water == null) {
+            return;
+        }
+        if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
+            return;
+        }
+
         // Face the water
         LookController.faceBlock(bot, water);
-        
-        // Safety check: only move if we are safely on ground
-        if (!bot.isOnGround()) return;
 
-        double distSq = bot.getBlockPos().getSquaredDistance(water);
-        // If we are already very close (e.g. adjacent), don't risk falling in.
-        // But if we are casting on land, we might be 2-3 blocks away.
-        if (distSq < 2.5) return; 
+        // Safety: only adjust when grounded.
+        if (!bot.isOnGround()) {
+            return;
+        }
+
+        Vec3d waterCenter = Vec3d.ofCenter(water);
+        Vec3d botXZ = new Vec3d(bot.getX(), 0.0D, bot.getZ());
+        Vec3d waterXZ = new Vec3d(waterCenter.x, 0.0D, waterCenter.z);
+        double horizDistSq = botXZ.squaredDistanceTo(waterXZ);
+
+        // Already close enough (roughly "adjacent to" the water block).
+        if (horizDistSq <= 1.35D * 1.35D) {
+            return;
+        }
 
         BotActions.sneak(bot, true);
         try {
-            // Take small steps forward
-            for (int i = 0; i < 5; i++) {
-                Vec3d currentPos = new Vec3d(bot.getX(), bot.getY(), bot.getZ());
-                Vec3d nextStep = currentPos.add(bot.getRotationVec(1.0f).multiply(0.6));
-                BlockPos nextBlock = BlockPos.ofFloored(nextStep);
-                // Check if ground exists below next position
-                if (bot.getEntityWorld().getBlockState(nextBlock.down()).getCollisionShape(bot.getEntityWorld(), nextBlock.down()).isEmpty()) {
-                    // Edge detected! Stop.
+            // Take a few conservative micro-steps toward the shore.
+            for (int i = 0; i < 8; i++) {
+                if (!bot.isOnGround()) {
                     break;
                 }
-                
-                BotActions.applyMovementInput(bot, nextStep, 0.15);
-                sleep(150L);
+
+                Vec3d currentPos = new Vec3d(bot.getX(), bot.getY(), bot.getZ());
+                Vec3d toward = waterCenter.subtract(currentPos).multiply(1.0, 0.0, 1.0);
+                double lenSq = toward.lengthSquared();
+                if (lenSq < 1.0E-6D) {
+                    break;
+                }
+                toward = toward.multiply(1.0D / Math.sqrt(lenSq));
+
+                // Preview the next foothold.
+                Vec3d nextStep = currentPos.add(toward.multiply(0.55));
+                BlockPos nextBlock = BlockPos.ofFloored(nextStep);
+
+                // Don't step into water (we want shoreline fishing, not wading).
+                if (world.getFluidState(nextBlock).isIn(FluidTags.WATER)) {
+                    break;
+                }
+
+                // Don't step off a ledge.
+                if (world.getBlockState(nextBlock.down()).getCollisionShape(world, nextBlock.down()).isEmpty()) {
+                    break;
+                }
+
+                // If the destination is not a plausible stand position, don't risk it.
+                if (!isStandable(world, nextBlock)) {
+                    break;
+                }
+
+                BotActions.applyMovementInput(bot, waterCenter, 0.12);
+                sleep(140L);
                 BotActions.stop(bot);
-                
-                if (bot.getBlockPos().getSquaredDistance(water) < 3.0) break;
+
+                // Re-check closeness.
+                botXZ = new Vec3d(bot.getX(), 0.0D, bot.getZ());
+                horizDistSq = botXZ.squaredDistanceTo(waterXZ);
+                if (horizDistSq <= 1.35D * 1.35D) {
+                    break;
+                }
             }
         } finally {
             BotActions.sneak(bot, false);
         }
+    }
+
+    private void shimmyTowardNearbyDrops(ServerCommandSource source,
+                                        ServerPlayerEntity bot,
+                                        BlockPos stand,
+                                        BlockPos waterAnchor) {
+        if (source == null || bot == null || stand == null || waterAnchor == null) {
+            return;
+        }
+        if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
+            return;
+        }
+
+        // Only do small, local adjustments; don't wander off from the spot.
+        double maxScan = 5.5D;
+        List<ItemEntity> items = world.getEntitiesByClass(
+                ItemEntity.class,
+                bot.getBoundingBox().expand(maxScan, 2.0D, maxScan),
+                e -> e != null && e.isAlive() && e.getStack() != null && !e.getStack().isEmpty()
+        );
+        if (items.isEmpty()) {
+            return;
+        }
+
+        // Filter to drops that are plausibly from this fishing session: nearby the stand and not "behind" it.
+        // This prevents the bot from slowly creeping toward the commander (who is often behind the bot).
+        Vec3d standCenter = Vec3d.ofCenter(stand);
+        Vec3d waterCenter = Vec3d.ofCenter(waterAnchor);
+        Vec3d forward = waterCenter.subtract(standCenter).multiply(1.0, 0.0, 1.0);
+        double forwardLenSq = forward.lengthSquared();
+        if (forwardLenSq > 1.0E-6) {
+            forward = forward.multiply(1.0 / Math.sqrt(forwardLenSq));
+        }
+        final Vec3d fwd = forward;
+        items.removeIf(e -> {
+            if (e == null) {
+                return true;
+            }
+            if (e.getBlockPos().getSquaredDistance(stand) > 4.0D * 4.0D) {
+                return true;
+            }
+            if (fwd.lengthSquared() < 1.0E-6) {
+                return false;
+            }
+            double dx = e.getX() - standCenter.x;
+            double dz = e.getZ() - standCenter.z;
+            double dot = dx * fwd.x + dz * fwd.z;
+            // Allow slight sideways jitter, but reject clearly "behind" the stand.
+            return dot < -0.15D;
+        });
+        if (items.isEmpty()) {
+            return;
+        }
+
+        items.sort(Comparator.comparingDouble(e -> e.squaredDistanceTo(bot)));
+        ItemEntity closest = items.getFirst();
+        if (closest == null || !closest.isAlive()) {
+            return;
+        }
+
+        double distSq = closest.squaredDistanceTo(bot);
+        // If already basically in pickup range, don't move.
+        if (distSq <= 2.0D * 2.0D) {
+            return;
+        }
+
+        BlockPos best = findStandableNear(world, closest.getBlockPos(), 2);
+        if (best == null) {
+            // Fallback: edge nudge again.
+            adjustPositionToWaterEdge(bot, waterAnchor);
+            return;
+        }
+
+        // Don't chase drops too far away from the fishing stand.
+        if (best.getSquaredDistance(stand) > 5.0D * 5.0D) {
+            return;
+        }
+
+        navigateToSpot(source, bot, best);
+        BotActions.stop(bot);
+        adjustPositionToWaterEdge(bot, waterAnchor);
+    }
+
+    private static BlockPos findStandableNear(ServerWorld world, BlockPos around, int radius) {
+        if (world == null || around == null) {
+            return null;
+        }
+        BlockPos best = null;
+        double bestDist = Double.POSITIVE_INFINITY;
+        int r = Math.max(0, radius);
+        for (BlockPos pos : BlockPos.iterate(around.add(-r, -1, -r), around.add(r, 1, r))) {
+            if (!world.isChunkLoaded(pos)) {
+                continue;
+            }
+            if (!isStandable(world, pos)) {
+                continue;
+            }
+            double d = pos.getSquaredDistance(around);
+            if (d < bestDist) {
+                bestDist = d;
+                best = pos.toImmutable();
+            }
+        }
+        return best;
     }
 
     private static Optional<BlockPos> handleFullInventory(ServerPlayerEntity bot, ServerCommandSource source, BlockPos safeStand) {
@@ -565,6 +858,15 @@ public final class FishingSkill implements Skill {
             return null;
         }
         BlockPos origin = bot.getBlockPos();
+        
+        // Pre-capture a reachability snapshot centered on the bot for A* validation.
+        FollowPathService.FollowSnapshot reachabilitySnapshot = FollowPathService.capture(world, origin, origin, true);
+        
+        // Clean up expired blacklist entries.
+        UUID botUuid = bot.getUuid();
+        cleanupBlacklist(botUuid);
+        Map<BlockPos, Long> blacklist = FAILED_TARGET_BLACKLIST.getOrDefault(botUuid, Map.of());
+        
         FishingSpot best = null;
         double bestScore = Double.MAX_VALUE;
         for (BlockPos water : BlockPos.iterate(origin.add(-radius, -2, -radius), origin.add(radius, 2, radius))) {
@@ -583,16 +885,46 @@ public final class FishingSkill implements Skill {
                 continue;
             }
 
-            StandOption primary = options.get(0);
+            // Filter options: skip blacklisted stands and verify reachability.
+            List<StandOption> reachableOptions = new ArrayList<>();
+            for (StandOption opt : options) {
+                BlockPos stand = opt.stand();
+                // Skip blacklisted positions.
+                if (blacklist.containsKey(stand)) {
+                    LOGGER.debug("Skipping blacklisted fishing stand {}", stand.toShortString());
+                    continue;
+                }
+                // Check reachability via A* if we have a snapshot and stand is in bounds.
+                if (reachabilitySnapshot != null && reachabilitySnapshot.inBounds(stand)) {
+                    boolean alreadyThere = origin.getSquaredDistance(stand) <= 2.25D;
+                    if (!alreadyThere && !FollowPathService.isReachable(reachabilitySnapshot, stand)) {
+                        LOGGER.debug("Fishing spot {} unreachable via A* from {}", stand.toShortString(), origin.toShortString());
+                        continue;
+                    }
+                }
+                reachableOptions.add(opt);
+            }
+            if (reachableOptions.isEmpty()) {
+                continue;
+            }
+
+            StandOption primary = reachableOptions.get(0);
             if (primary.score() < bestScore) {
                 bestScore = primary.score();
                 best = new FishingSpot(
                         water.toImmutable(),
                         primary.stand(),
                         primary.castTarget(),
-                        options.stream().map(StandOption::stand).toList()
+                        reachableOptions.stream().map(StandOption::stand).toList()
                 );
             }
+        }
+        
+        if (best != null) {
+            LOGGER.info("Selected fishing spot: stand={} water={} (score={:.2f})", 
+                    best.stand().toShortString(), best.water().toShortString(), bestScore);
+        } else {
+            LOGGER.info("No reachable fishing spot found within radius {} from {}", radius, origin.toShortString());
         }
         return best;
     }
@@ -617,10 +949,14 @@ public final class FishingSkill implements Skill {
             // Prefer open/deep water and a reasonable cast distance.
             double quality = castDistancePenalty - openness * 0.35 - depth * 0.55;
 
+            // Strong preference for shoreline adjacency: loot pickup suffers when we stand a few blocks back.
+            // This is deliberately large enough to override small water-quality differences.
+            double shorePenalty = isAdjacentToWater(stand, water) ? 0.0D : 0.85D;
+
             // Weak travel penalty: don't let bot/commander position dominate the choice.
             double travelPenalty = botPos.getSquaredDistance(stand) * 0.01;
 
-            options.add(new StandOption(stand.toImmutable(), castTarget.toImmutable(), quality + travelPenalty));
+            options.add(new StandOption(stand.toImmutable(), castTarget.toImmutable(), quality + shorePenalty + travelPenalty));
         }
 
         options.sort(Comparator.comparingDouble(StandOption::score));
@@ -873,7 +1209,92 @@ public final class FishingSkill implements Skill {
         int dx = Math.abs(candidate.getX() - water.getX());
         int dz = Math.abs(candidate.getZ() - water.getZ());
         int dy = Math.abs(candidate.getY() - water.getY());
-        return dx <= 1 && dz <= 1 && dy <= 1;
+
+        // Fishing loot pickup is noticeably worse from diagonal adjacency (distance ~1.41 blocks).
+        // Prefer cardinal adjacency (N/E/S/W), or the block directly above water (e.g. docks).
+        boolean directAbove = dx == 0 && dz == 0 && dy == 1;
+        boolean cardinalAdjacent = (dx + dz) == 1 && dy <= 1;
+        return directAbove || cardinalAdjacent;
+    }
+
+    private static int countNearbyDropsForFishing(ServerWorld world,
+                                                 BlockPos stand,
+                                                 BlockPos waterAnchor,
+                                                 double radius) {
+        if (world == null || stand == null) {
+            return 0;
+        }
+        double r = Math.max(0.0D, radius);
+        Vec3d standCenter = Vec3d.ofCenter(stand);
+
+        // Bias toward loot that is "in front" of the stand (toward water) to avoid chasing the commander behind.
+        Vec3d waterCenter = waterAnchor != null ? Vec3d.ofCenter(waterAnchor) : standCenter;
+        Vec3d forward = waterCenter.subtract(standCenter).multiply(1.0, 0.0, 1.0);
+        double forwardLenSq = forward.lengthSquared();
+        if (forwardLenSq > 1.0E-6D) {
+            forward = forward.multiply(1.0 / Math.sqrt(forwardLenSq));
+        }
+        final Vec3d fwd = forward;
+
+        double radiusSq = r * r;
+        var box = new net.minecraft.util.math.Box(
+                standCenter.x - r, standCenter.y - 2.0D, standCenter.z - r,
+                standCenter.x + r, standCenter.y + 4.0D, standCenter.z + r
+        );
+        List<ItemEntity> items = world.getEntitiesByClass(
+                ItemEntity.class,
+                box,
+                e -> e != null && e.isAlive() && e.getStack() != null && !e.getStack().isEmpty()
+        );
+        if (items.isEmpty()) {
+            return 0;
+        }
+        int count = 0;
+        for (ItemEntity e : items) {
+            if (e == null || !e.isAlive()) {
+                continue;
+            }
+            double dx = e.getX() - standCenter.x;
+            double dz = e.getZ() - standCenter.z;
+            double distSq = dx * dx + dz * dz;
+            if (distSq > radiusSq) {
+                continue;
+            }
+            if (fwd.lengthSquared() > 1.0E-6D) {
+                double dot = dx * fwd.x + dz * fwd.z;
+                if (dot < -0.35D) {
+                    continue;
+                }
+            }
+            count++;
+        }
+        return count;
+    }
+
+    private static void retractBobberIfPresent(ServerPlayerEntity bot) {
+        if (bot == null) {
+            return;
+        }
+        FishingBobberEntity bobber = findActiveBobber(bot);
+        if (bobber == null) {
+            return;
+        }
+        try {
+            BotActions.useSelectedItem(bot);
+            sleep(250L);
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private void performReactiveSweep(ServerCommandSource source, ServerPlayerEntity bot, BlockPos returnPos) {
+        if (source == null || bot == null || returnPos == null) {
+            return;
+        }
+        LOGGER.info("Reactive sweep: collecting nearby fishing drops...");
+        // Smaller than the periodic sweep: quick and local.
+        DropSweeper.sweep(source, 7.5, 4.5, 8, 5000L);
+        navigateToSpot(source, bot, returnPos);
+        BotActions.stop(bot);
     }
 
     private static boolean isStandable(ServerWorld world, BlockPos pos) {
@@ -1146,5 +1567,74 @@ bot.getName().getString());
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
+    }
+
+    // -------- Failed Target Blacklist Helpers --------
+
+    /**
+     * Marks a position as unreachable for this bot, preventing oscillation.
+     */
+    private static void blacklistTarget(UUID botUuid, BlockPos pos) {
+        if (botUuid == null || pos == null) {
+            return;
+        }
+        Map<BlockPos, Long> perBot = FAILED_TARGET_BLACKLIST.computeIfAbsent(botUuid, __ -> new ConcurrentHashMap<>());
+        perBot.put(pos.toImmutable(), System.currentTimeMillis() + BLACKLIST_DURATION_MS);
+        LOGGER.info("Blacklisted fishing target {} for {} ms", pos.toShortString(), BLACKLIST_DURATION_MS);
+        
+        // Evict oldest entries if too large.
+        if (perBot.size() > MAX_BLACKLIST_SIZE) {
+            long oldest = Long.MAX_VALUE;
+            BlockPos oldestKey = null;
+            for (var entry : perBot.entrySet()) {
+                if (entry.getValue() < oldest) {
+                    oldest = entry.getValue();
+                    oldestKey = entry.getKey();
+                }
+            }
+            if (oldestKey != null) {
+                perBot.remove(oldestKey);
+            }
+        }
+    }
+
+    /**
+     * Removes expired blacklist entries.
+     */
+    private static void cleanupBlacklist(UUID botUuid) {
+        if (botUuid == null) {
+            return;
+        }
+        Map<BlockPos, Long> perBot = FAILED_TARGET_BLACKLIST.get(botUuid);
+        if (perBot == null || perBot.isEmpty()) {
+            return;
+        }
+        long now = System.currentTimeMillis();
+        perBot.entrySet().removeIf(e -> now >= e.getValue());
+        if (perBot.isEmpty()) {
+            FAILED_TARGET_BLACKLIST.remove(botUuid);
+        }
+    }
+
+    /**
+     * Checks if a position is currently blacklisted.
+     */
+    private static boolean isBlacklisted(UUID botUuid, BlockPos pos) {
+        if (botUuid == null || pos == null) {
+            return false;
+        }
+        Map<BlockPos, Long> perBot = FAILED_TARGET_BLACKLIST.get(botUuid);
+        if (perBot == null) {
+            return false;
+        }
+        Long until = perBot.get(pos.toImmutable());
+        if (until == null) {
+            return false;
+        }
+        if (System.currentTimeMillis() >= until) {
+            perBot.remove(pos.toImmutable());
+            return false;
+        }
+        return true;
     }
 }

@@ -66,6 +66,23 @@ final class BotUtilityCommands {
                                 .executes(context -> modCommandRegistry.executeFollowStopTargets(context,
                                         StringArgumentType.getString(context, "target"))))
                 )
+                .then(CommandManager.literal("toggle")
+                        .executes(context -> modCommandRegistry.executeFollowToggleTargets(
+                                context,
+                                null,
+                                context.getSource().getPlayer()))
+                        .then(CommandManager.argument("bots", StringArgumentType.string())
+                                .executes(context -> modCommandRegistry.executeFollowToggleTargets(
+                                        context,
+                                        StringArgumentType.getString(context, "bots"),
+                                        context.getSource().getPlayer()))
+                                .then(CommandManager.argument("player", EntityArgumentType.player())
+                                        .executes(context -> modCommandRegistry.executeFollowToggleTargets(
+                                                context,
+                                                StringArgumentType.getString(context, "bots"),
+                                                EntityArgumentType.getPlayer(context, "player"))))
+                        )
+                )
                 .executes(context -> modCommandRegistry.executeFollowTargets(context, null, context.getSource().getPlayer()))
                 .then(CommandManager.argument("bots", StringArgumentType.string())
                         .executes(context -> modCommandRegistry.executeFollowTargets(context,

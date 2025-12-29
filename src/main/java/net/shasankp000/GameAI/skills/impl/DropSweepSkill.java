@@ -98,7 +98,7 @@ public SkillExecutionResult execute(SkillContext context) {
 
                 try {
                     DropSweeper.sweep(
-                            source.withSilent().withMaxLevel(4),
+                            source.withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS),
                             effectiveRadius,
                             effectiveVertical,
                             Math.max(1, maxTargets),

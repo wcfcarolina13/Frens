@@ -38,6 +38,7 @@ public final class SkillManager {
         register(new WoodcutSkill());
         register(new ShelterSkill());
         register(new FishingSkill());
+        register(new net.shasankp000.GameAI.skills.impl.HangoutSkill());
         register(new net.shasankp000.GameAI.skills.impl.FarmSkill());
         register(new net.shasankp000.GameAI.skills.impl.WoolSkill());
     }
@@ -62,11 +63,20 @@ public final class SkillManager {
             return SkillExecutionResult.failure("Another skill is already running.");
         }
         TaskService.TaskTicket ticket = ticketOpt.get();
+
+        // Tag task metadata early so tick-driven automation can make safe decisions.
+        try {
+            TaskService.Origin origin = inferOrigin(context);
+            ticket.setOrigin(origin);
+            ticket.setOpenEnded(inferOpenEnded(name, context));
+        } catch (Exception ignored) {
+        }
         TaskService.attachExecutingThread(ticket, Thread.currentThread());
 
         UUID resumeFollowUuid = null;
         net.minecraft.util.math.BlockPos resumeFixedGoal = null;
         double resumeStopRange = 0.0D;
+        boolean resumeAllowRecoverySkills = true;
         if (botPlayer != null && BotEventHandler.getCurrentMode(botPlayer) == BotEventHandler.Mode.FOLLOW) {
             UUID currentFollow = BotEventHandler.getFollowTargetUuid(botPlayer);
             resumeFollowUuid = currentFollow;
@@ -74,6 +84,7 @@ public final class SkillManager {
             if (st != null) {
                 resumeFixedGoal = st.followFixedGoal;
                 resumeStopRange = st.followStopRange;
+                resumeAllowRecoverySkills = st.comeAllowRecoverySkills;
             }
             BotEventHandler.stopFollowing(botPlayer);
         }
@@ -112,7 +123,7 @@ public final class SkillManager {
                         && !"shelter".equalsIgnoreCase(name)
                         && !"wool".equalsIgnoreCase(name)) {
                     DropSweeper.sweep(
-                            context.botSource().withSilent().withMaxLevel(4),
+                            context.botSource().withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS),
                             DROP_SWEEP_RADIUS,
                             DROP_SWEEP_VERTICAL,
                             DROP_SWEEP_MAX_TARGETS,
@@ -131,7 +142,7 @@ public final class SkillManager {
                             ? context.botSource().getServer().getPlayerManager().getPlayer(resumeFollowUuid)
                             : null;
                     double stopRange = resumeStopRange > 0.0D ? resumeStopRange : 3.2D;
-                    BotEventHandler.setComeModeWalk(botPlayer, target, resumeFixedGoal, stopRange);
+                    BotEventHandler.setComeModeWalk(botPlayer, target, resumeFixedGoal, stopRange, resumeAllowRecoverySkills);
                 } else if (resumeFollowUuid != null) {
                     ServerPlayerEntity target = context.botSource().getServer().getPlayerManager().getPlayer(resumeFollowUuid);
                     if (target != null) {
@@ -159,5 +170,70 @@ public final class SkillManager {
             return false;
         }
         return player.getInventory().getEmptySlot() == -1;
+    }
+
+    private static TaskService.Origin inferOrigin(SkillContext context) {
+        if (context == null || context.parameters() == null) {
+            return TaskService.Origin.COMMAND;
+        }
+        Object raw = context.parameters().get("_origin");
+        if (raw instanceof String s) {
+            if ("ambient".equalsIgnoreCase(s)) {
+                return TaskService.Origin.AMBIENT;
+            }
+            if ("system".equalsIgnoreCase(s)) {
+                return TaskService.Origin.SYSTEM;
+            }
+        }
+        return TaskService.Origin.COMMAND;
+    }
+
+    /**
+     * Best-effort classification for "open-ended" skills.
+     * <p>
+     * Open-ended tasks are eligible for sunset automation interruption.
+     */
+    private static boolean inferOpenEnded(String skillName, SkillContext context) {
+        if (skillName == null || context == null) {
+            return false;
+        }
+        Map<String, Object> params = context.parameters();
+        if (params == null) {
+            return false;
+        }
+
+        // Explicit override.
+        Object explicit = params.get("open_ended");
+        if (explicit instanceof Boolean b) {
+            return b;
+        }
+        if (explicit instanceof String s) {
+            if ("true".equalsIgnoreCase(s) || "1".equals(s) || "yes".equalsIgnoreCase(s)) {
+                return true;
+            }
+        }
+
+        // Common option token pattern.
+        Object opts = params.get("options");
+        if (opts instanceof Iterable<?> iterable) {
+            for (Object o : iterable) {
+                if (o instanceof String str) {
+                    if ("until_sunset".equalsIgnoreCase(str)
+                            || "sunset".equalsIgnoreCase(str)
+                            || "open_ended".equalsIgnoreCase(str)
+                            || "open-ended".equalsIgnoreCase(str)) {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        // Fishing is open-ended when no explicit count was provided.
+        if ("fish".equalsIgnoreCase(skillName) || "fishing".equalsIgnoreCase(skillName)) {
+            return !params.containsKey("count");
+        }
+
+        // Ambient-origin tasks are treated as open-ended by default.
+        return inferOrigin(context) == TaskService.Origin.AMBIENT;
     }
 }

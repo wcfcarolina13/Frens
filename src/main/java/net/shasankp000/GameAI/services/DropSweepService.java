@@ -18,6 +18,7 @@ import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
@@ -39,6 +40,9 @@ public final class DropSweepService {
     private static final long DROP_SWEEP_COOLDOWN_MS = 4000L;
     private static volatile long lastDropSweepMs = 0L;
     private static final AtomicBoolean dropSweepInProgress = new AtomicBoolean(false);
+    private static final AtomicBoolean dropSweepCancelRequested = new AtomicBoolean(false);
+    private static volatile UUID dropSweepOwner = null;
+    private static volatile String dropSweepCancelReason = null;
     private static final long DROP_RETRY_COOLDOWN_MS = 15_000L;
     private static final ConcurrentHashMap<BlockPos, Long> dropRetryTimestamps = new ConcurrentHashMap<>();
     private static final double RL_MANUAL_NUDGE_DISTANCE_SQ = 4.0D;
@@ -49,10 +53,58 @@ public final class DropSweepService {
         return dropSweepInProgress.get();
     }
 
+    public static boolean isInProgressFor(ServerPlayerEntity bot) {
+        if (bot == null) {
+            return false;
+        }
+        if (!dropSweepInProgress.get()) {
+            return false;
+        }
+        UUID owner = dropSweepOwner;
+        return owner == null || owner.equals(bot.getUuid());
+    }
+
+    public static boolean isCancelRequestedFor(ServerPlayerEntity bot) {
+        if (bot == null) {
+            return false;
+        }
+        if (!dropSweepCancelRequested.get()) {
+            return false;
+        }
+        UUID owner = dropSweepOwner;
+        return owner == null || owner.equals(bot.getUuid());
+    }
+
+    /**
+     * Best-effort cancellation: the sweep loop polls {@link #shouldAbort(ServerPlayerEntity)}.
+     * This does not forcibly interrupt movement planning, but it prevents new targets from being pursued.
+     */
+    public static void requestCancel(ServerPlayerEntity bot, String reason) {
+        if (bot == null) {
+            return;
+        }
+        if (!dropSweepInProgress.get()) {
+            return;
+        }
+        UUID owner = dropSweepOwner;
+        if (owner != null && !owner.equals(bot.getUuid())) {
+            return;
+        }
+        dropSweepCancelReason = reason;
+        dropSweepCancelRequested.set(true);
+    }
+
+    public static boolean shouldAbort(ServerPlayerEntity bot) {
+        return isCancelRequestedFor(bot);
+    }
+
     public static void reset() {
         dropRetryTimestamps.clear();
         lastDropSweepMs = 0L;
         dropSweepInProgress.set(false);
+        dropSweepCancelRequested.set(false);
+        dropSweepOwner = null;
+        dropSweepCancelReason = null;
     }
 
     public static void collectNearbyDrops(ServerPlayerEntity bot,
@@ -117,6 +169,10 @@ public final class DropSweepService {
                 return;
             }
 
+            dropSweepOwner = bot.getUuid();
+            dropSweepCancelRequested.set(false);
+            dropSweepCancelReason = null;
+
             BlockPos dropPos = closest.getBlockPos().toImmutable();
             long startedAt = System.currentTimeMillis();
             dropRetryTimestamps.put(dropPos, startedAt);
@@ -126,7 +182,7 @@ public final class DropSweepService {
 
             CompletableFuture<Void> sweepTask = CompletableFuture.runAsync(() -> {
                         try {
-                            ServerCommandSource source = bot.getCommandSource().withSilent().withMaxLevel(4);
+                            ServerCommandSource source = bot.getCommandSource().withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS);
                             DropSweeper.sweep(source, radius, verticalRange, maxTargets, durationMs);
                         } catch (Exception sweepError) {
                             LOGGER.warn("Training drop sweep failed near {}: {}", dropPos, sweepError.getMessage());
@@ -135,7 +191,12 @@ public final class DropSweepService {
                     .orTimeout(durationMs + 750L, TimeUnit.MILLISECONDS);
 
             lastDropSweepMs = startedAt;
-            sweepTask.whenComplete((ignored, throwable) -> srv.execute(() -> dropSweepInProgress.set(false)));
+            sweepTask.whenComplete((ignored, throwable) -> srv.execute(() -> {
+                dropSweepInProgress.set(false);
+                dropSweepCancelRequested.set(false);
+                dropSweepOwner = null;
+                dropSweepCancelReason = null;
+            }));
             return;
         }
 
@@ -152,6 +213,9 @@ public final class DropSweepService {
         final ServerWorld trackedWorld = world;
 
         dropSweepInProgress.set(true);
+        dropSweepOwner = bot.getUuid();
+        dropSweepCancelRequested.set(false);
+        dropSweepCancelReason = null;
         boolean needOverride = isExternalOverrideActive != null
                 && setExternalOverrideActive != null
                 && !isExternalOverrideActive.getAsBoolean();
@@ -162,7 +226,7 @@ public final class DropSweepService {
 
         CompletableFuture<Void> sweepFuture = CompletableFuture.runAsync(() -> {
             try {
-                ServerCommandSource source = bot.getCommandSource().withSilent().withMaxLevel(4);
+                ServerCommandSource source = bot.getCommandSource().withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS);
                 DropSweeper.sweep(source, radius, verticalRange, 4, 4000L);
             } catch (Exception sweepError) {
                 LOGGER.warn("Drop sweep failed: {}", sweepError.getMessage(), sweepError);
@@ -185,6 +249,9 @@ public final class DropSweepService {
                 }
             }
             dropSweepInProgress.set(false);
+            dropSweepCancelRequested.set(false);
+            dropSweepOwner = null;
+            dropSweepCancelReason = null;
             if (activatedOverride) {
                 setExternalOverrideActive.accept(false);
             }

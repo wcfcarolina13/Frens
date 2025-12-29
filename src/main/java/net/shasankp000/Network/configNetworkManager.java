@@ -69,7 +69,7 @@ public class configNetworkManager {
             context.server().execute(() -> {
                 ConfigJsonUtil.applyConfigJson(newConfigData);
                 AIPlayer.CONFIG.save();
-                ServerCommandSource serverCommandSource = server.getCommandSource().withSilent().withMaxLevel(4);
+                ServerCommandSource serverCommandSource = server.getCommandSource().withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS);
                 ChatUtils.sendSystemMessage(serverCommandSource, "Config saved to server successfully!");
                 net.shasankp000.GameAI.services.BotControlApplier.applyPersistentSettings(server);
             });
@@ -108,7 +108,7 @@ public class configNetworkManager {
                         return;
                 }
                 AIPlayer.CONFIG.save();
-                ServerCommandSource serverCommandSource = server.getCommandSource().withSilent().withMaxLevel(4);
+                ServerCommandSource serverCommandSource = server.getCommandSource().withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS);
                 ChatUtils.sendSystemMessage(serverCommandSource, "API Key for " + provider + " saved successfully!");
             });
         });
@@ -125,7 +125,7 @@ public class configNetworkManager {
                 AIPlayer.CONFIG.setCustomApiKey(newApiKey);
                 AIPlayer.CONFIG.setCustomApiUrl(newApiUrl);
                 AIPlayer.CONFIG.save();
-                ServerCommandSource serverCommandSource = server.getCommandSource().withSilent().withMaxLevel(4);
+                ServerCommandSource serverCommandSource = server.getCommandSource().withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS);
                 ChatUtils.sendSystemMessage(serverCommandSource, "Custom provider settings saved successfully!");
             });
         });

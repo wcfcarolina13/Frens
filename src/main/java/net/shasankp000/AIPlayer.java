@@ -12,6 +12,9 @@ import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.entity.damage.DamageTypes;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.PlayerConfigEntry;
+import net.minecraft.command.permission.LeveledPermissionPredicate;
+import net.minecraft.command.permission.PermissionPredicate;
 import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.shasankp000.ChatUtils.BERTModel.BertModelManager;
@@ -25,6 +28,10 @@ import net.shasankp000.GameAI.BotEventHandler;
 import net.shasankp000.GameAI.services.SkillResumeService;
 import net.shasankp000.FunctionCaller.FunctionCallerV2;
 import net.shasankp000.GameAI.services.BotPersistenceService;
+import net.shasankp000.GameAI.services.BotAutoReturnSunsetService;
+import net.shasankp000.GameAI.services.BotAmbientSocialChatService;
+import net.shasankp000.GameAI.services.BotCampfireAvoidanceService;
+import net.shasankp000.GameAI.services.BotIdleHobbiesService;
 import net.shasankp000.GameAI.llm.LLMOrchestrator;
 
 import net.shasankp000.Database.QTableStorage;
@@ -62,6 +69,24 @@ public class AIPlayer implements ModInitializer {
 
     public static final Logger LOGGER = LoggerFactory.getLogger("ai-player");
     public static final String MOD_ID = "ai-player";
+    public static final PermissionPredicate OPERATOR_PERMISSIONS = LeveledPermissionPredicate.OWNERS;
+    public static boolean isOperator(ServerPlayerEntity player) {
+        if (player == null || serverInstance == null) {
+            return false;
+        }
+        return serverInstance.getPlayerManager().isOperator(new PlayerConfigEntry(player.getGameProfile()));
+    }
+
+    public static boolean isOperator(ServerCommandSource source) {
+        if (source == null) {
+            return false;
+        }
+        ServerPlayerEntity player = source.getPlayer();
+        if (player != null) {
+            return isOperator(player);
+        }
+        return true;
+    }
     public static ScreenHandlerType<net.shasankp000.ui.BotPlayerInventoryScreenHandler> BOT_PLAYER_INV_HANDLER;
     public static final ManualConfig CONFIG = ManualConfig.load();
     public static MinecraftServer serverInstance = null; // default for now
@@ -102,6 +127,20 @@ public class AIPlayer implements ModInitializer {
             // Only react once (MAIN_HAND). OFF_HAND callback will return PASS to avoid double-fire.
             if (hand != net.minecraft.util.Hand.MAIN_HAND) return net.minecraft.util.ActionResult.PASS;
             if (!(entity instanceof net.minecraft.server.network.ServerPlayerEntity bot)) return net.minecraft.util.ActionResult.PASS;
+
+            // Only handle interactions for registered bot players.
+            if (!BotEventHandler.isRegisteredBot(bot)) return net.minecraft.util.ActionResult.PASS;
+
+            // Sneak-right-click: "touch" flavor line (opt-in via /bot idle_hobbies on).
+            if (player instanceof net.minecraft.server.network.ServerPlayerEntity serverPlayer && serverPlayer.isSneaking()) {
+                boolean spoke = net.shasankp000.GameAI.services.BotTouchChatService.trySendTouchLine(serverPlayer, bot);
+                return spoke ? net.minecraft.util.ActionResult.SUCCESS : net.minecraft.util.ActionResult.PASS;
+            }
+
+            // Normal right-click: allow shared inventory, but also emit a touch line (cooldown-gated).
+            if (player instanceof net.minecraft.server.network.ServerPlayerEntity serverPlayer) {
+                net.shasankp000.GameAI.services.BotTouchChatService.trySendTouchLine(serverPlayer, bot);
+            }
 
             // Always allow the shared inventory view, regardless of held item.
 
@@ -146,6 +185,15 @@ public class AIPlayer implements ModInitializer {
         PayloadTypeRegistry.playS2C().register(OpenConfigPayload.ID, OpenConfigPayload.CODEC);
         PayloadTypeRegistry.playC2S().register(SaveAPIKeyPayload.ID, SaveAPIKeyPayload.CODEC);
         PayloadTypeRegistry.playC2S().register(SaveCustomProviderPayload.ID, SaveCustomProviderPayload.CODEC);
+
+        // Bases manager UI payloads
+        PayloadTypeRegistry.playC2S().register(net.shasankp000.Network.RequestBasesPayload.ID, net.shasankp000.Network.RequestBasesPayload.CODEC);
+        PayloadTypeRegistry.playS2C().register(net.shasankp000.Network.BasesListPayload.ID, net.shasankp000.Network.BasesListPayload.CODEC);
+        PayloadTypeRegistry.playC2S().register(net.shasankp000.Network.BaseSetPayload.ID, net.shasankp000.Network.BaseSetPayload.CODEC);
+        PayloadTypeRegistry.playC2S().register(net.shasankp000.Network.BaseRemovePayload.ID, net.shasankp000.Network.BaseRemovePayload.CODEC);
+        PayloadTypeRegistry.playC2S().register(net.shasankp000.Network.BaseRenamePayload.ID, net.shasankp000.Network.BaseRenamePayload.CODEC);
+
+        net.shasankp000.Network.BaseNetworkManager.registerReceiversOnce();
 
         modCommandRegistry.register();
         configCommand.register();
@@ -198,6 +246,9 @@ public class AIPlayer implements ModInitializer {
             AutoFaceEntity.onServerStopped(server);
             // Integrated-server world reloads keep mod static state alive. Ensure task locks don't leak across reloads.
             net.shasankp000.GameAI.services.TaskService.resetAll("§cServer stopped; clearing task state.");
+            // Integrated-server world reloads also keep scheduler state alive; clear idle-hobby backoff so
+            // "idle hobbies = on" resumes automatically when re-entering the world.
+            net.shasankp000.GameAI.services.BotIdleHobbiesService.resetSession();
             try {
                 if (modelManager.isModelLoaded() || loadedBERTModelIntoMemory) {
                     modelManager.unloadModel();
@@ -232,6 +283,12 @@ public class AIPlayer implements ModInitializer {
         // Register damage event to handle suffocation immediately
         ServerLivingEntityEvents.ALLOW_DAMAGE.register((entity, source, amount) -> {
             if (entity instanceof ServerPlayerEntity serverPlayer && BotEventHandler.isRegisteredBot(serverPlayer)) {
+                // If a real player hits a bot, treat it like a "touch" interaction for flavor text.
+                if (source != null && source.getAttacker() instanceof ServerPlayerEntity attacker
+                        && attacker != serverPlayer && !attacker.isRemoved()) {
+                    net.shasankp000.GameAI.services.BotTouchChatService.trySendTouchLine(attacker, serverPlayer);
+                }
+
                 // If bot is taking IN_WALL damage, try to escape immediately
                 // BUT: skip aggressive escape if bot is in ascent mode (digging upward)
                 if (source.isOf(DamageTypes.IN_WALL) || source.isOf(DamageTypes.FLY_INTO_WALL) || source.isOf(DamageTypes.CRAMMING)) {
@@ -301,6 +358,10 @@ public class AIPlayer implements ModInitializer {
         ServerTickEvents.END_SERVER_TICK.register(BotEventHandler::tickBurialRescue);
         ServerTickEvents.END_SERVER_TICK.register(BotEventHandler::tickHunger);
         ServerTickEvents.END_SERVER_TICK.register(AIPlayer::processSpawnEscapeChecks);
+        ServerTickEvents.END_SERVER_TICK.register(BotCampfireAvoidanceService::onServerTick);
+        ServerTickEvents.END_SERVER_TICK.register(BotAutoReturnSunsetService::onServerTick);
+        ServerTickEvents.END_SERVER_TICK.register(BotIdleHobbiesService::onServerTick);
+        ServerTickEvents.END_SERVER_TICK.register(BotAmbientSocialChatService::onServerTick);
 
         ServerMessageEvents.CHAT_MESSAGE.register((message, sender, params) -> {
             String raw = message.getContent().getString();
@@ -318,7 +379,7 @@ public class AIPlayer implements ModInitializer {
                     if (target.prompt().isEmpty()) {
                         continue;
                     }
-                    ServerCommandSource botSource = bot.getCommandSource().withSilent().withMaxLevel(4);
+                    ServerCommandSource botSource = bot.getCommandSource().withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS);
                     ChatUtils.sendChatMessages(botSource, "Processing your message, please wait.");
                     handled |= LLMOrchestrator.handleChat(
                             bot,

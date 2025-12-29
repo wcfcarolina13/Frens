@@ -41,7 +41,7 @@ public final class LLMStatusReporter {
             }
         }
 
-        ChatUtils.sendChatMessages(botSource.withSilent().withMaxLevel(4), status.toString().trim());
+        ChatUtils.sendChatMessages(botSource.withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS), status.toString().trim());
     }
 
     private static String personaLead(ServerCommandSource source, ServerPlayerEntity bot) {

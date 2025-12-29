@@ -129,11 +129,11 @@ public final class DirtShovelSkill implements Skill {
                         gatherHazardBlocks(detectedPos, approachPlan),
                         gatherStepTargets(approachPlan));
                 detection.adjacentWarnings().forEach(adjacent ->
-                        ChatUtils.sendChatMessages(source.withSilent().withMaxLevel(4), adjacent.chatMessage()));
+                        ChatUtils.sendChatMessages(source.withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS), adjacent.chatMessage()));
                 if (detection.blockingHazard().isPresent()) {
                     Hazard hazard = detection.blockingHazard().get();
                     SkillResumeService.flagManualResume(player);
-                    ChatUtils.sendChatMessages(source.withSilent().withMaxLevel(4), hazard.chatMessage());
+                    ChatUtils.sendChatMessages(source.withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS), hazard.chatMessage());
                     return failure(context, hazard.failureMessage());
                 }
 

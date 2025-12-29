@@ -80,9 +80,13 @@ public class CollectDirtSkill implements Skill {
     private static final int MAX_STALLED_FAILURES = 5;
     private static final long INVENTORY_MESSAGE_COOLDOWN_MS = 5000; // 5 seconds between messages
     private static final long ESCAPE_COOLDOWN_MS = 15_000L;
+    private static final long FALLING_BLOCK_SETTLE_MAX_MS = 5_000L;
+    private static final long FALLING_BLOCK_SETTLE_POLL_MS = 200L;
+    private static final long FALLING_BLOCK_MESSAGE_COOLDOWN_MS = 1_500L;
     
     private static final Map<UUID, Long> LAST_INVENTORY_FULL_MESSAGE = new HashMap<>();
     private static final Map<UUID, Long> LAST_ESCAPE_ATTEMPT = new HashMap<>();
+    private static final Map<UUID, Long> LAST_FALLING_BLOCK_MESSAGE = new HashMap<>();
     private static final List<Item> LAVA_SAFETY_BLOCKS = List.of(
             Items.COBBLESTONE,
             Items.COBBLED_DEEPSLATE,
@@ -524,7 +528,7 @@ public class CollectDirtSkill implements Skill {
                 runDropCleanup(source, cleanupPlayer, cleanupBaseRadius, squareMode, squareCenter);
             } else if (cleanupPlayer != null && inventoryFull) {
                 LOGGER.info("{} skipping drop cleanup because inventory is full.", skillName);
-                ChatUtils.sendChatMessages(source.withSilent().withMaxLevel(4),
+                ChatUtils.sendChatMessages(source.withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS),
                         "I'm out of inventory space, so I'll leave the remaining drops where they fell.");
             }
         }
@@ -660,7 +664,7 @@ public class CollectDirtSkill implements Skill {
                 double sweepRadius = Math.max(4.0D, squareRadius + 1.0D);
                 try {
                     DropSweeper.sweep(
-                            source.withSilent().withMaxLevel(4),
+                            source.withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS),
                             sweepRadius,
                             Math.max(6.0D, sweepRadius),
                             6,
@@ -903,7 +907,7 @@ public class CollectDirtSkill implements Skill {
         }
         LAST_ESCAPE_ATTEMPT.put(player.getUuid(), System.currentTimeMillis());
 
-        ChatUtils.sendChatMessages(source.withSilent().withMaxLevel(4),
+        ChatUtils.sendChatMessages(source.withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS),
                 "I'm stuck down here — attempting a ladder or stair escape...");
 
         boolean ladderAttempted = ensureLadders(source, player, 6);
@@ -1221,7 +1225,7 @@ public class CollectDirtSkill implements Skill {
         if (resumeRequested && pausePos.isPresent()) {
             BlockPos resumeTarget = pausePos.get();
             LOGGER.info("Descent resuming - navigating back to pause position {}", resumeTarget.toShortString());
-            ChatUtils.sendChatMessages(source.withSilent().withMaxLevel(4), 
+            ChatUtils.sendChatMessages(source.withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS), 
                     "Returning to descent position...");
             
             Direction digDirection = determineStraightStairDirection(context, player);
@@ -1231,14 +1235,16 @@ public class CollectDirtSkill implements Skill {
             
             if (!movement.success() || !player.getBlockPos().equals(resumeTarget)) {
                 LOGGER.warn("Failed to return to pause position {}, continuing from current location", resumeTarget.toShortString());
-                ChatUtils.sendChatMessages(source.withSilent().withMaxLevel(4), 
+                ChatUtils.sendChatMessages(source.withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS), 
                         "Couldn't return to exact position, continuing from here.");
             }
             WorkDirectionService.clearPausePosition(player.getUuid());
         }
         
-        Direction digDirection = determineStraightStairDirection(context, player);
+                Direction digDirection = determineStraightStairDirection(context, player);
         runOnServerThread(player, () -> LookController.faceBlock(player, player.getBlockPos().offset(digDirection)));
+
+                final int startY = player.getBlockY();
 
         int carvedSteps = 0;
         while (player.getBlockY() > targetDepthY) {
@@ -1265,12 +1271,12 @@ public class CollectDirtSkill implements Skill {
                     .toList();
             DetectionResult detection = MiningHazardDetector.detect(player, workVolume, List.of(stairFoot), true);
             detection.adjacentWarnings().forEach(warning ->
-                    ChatUtils.sendChatMessages(player.getCommandSource().withSilent().withMaxLevel(4), warning.chatMessage()));
+                    ChatUtils.sendChatMessages(player.getCommandSource().withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS), warning.chatMessage()));
             if (detection.blockingHazard().isPresent()) {
                 Hazard hazard = detection.blockingHazard().get();
                 WorkDirectionService.setPausePosition(player.getUuid(), player.getBlockPos());
                 SkillResumeService.flagManualResume(player);
-                ChatUtils.sendChatMessages(player.getCommandSource().withSilent().withMaxLevel(4), hazard.chatMessage());
+                ChatUtils.sendChatMessages(player.getCommandSource().withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS), hazard.chatMessage());
                 return SkillExecutionResult.failure(hazard.failureMessage());
             }
 
@@ -1288,16 +1294,22 @@ public class CollectDirtSkill implements Skill {
                     if (!mineStraightStairBlock(player, block)) {
                     WorkDirectionService.setPausePosition(player.getUuid(), player.getBlockPos());
                     SkillResumeService.flagManualResume(player);
-                    ChatUtils.sendChatMessages(player.getCommandSource().withSilent().withMaxLevel(4),
+                    ChatUtils.sendChatMessages(player.getCommandSource().withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS),
                             "I couldn't clear a block in the stairwell at " + block.getX() + ", " + block.getY() + ", " + block.getZ() + ". I'll pause here.");
                     return SkillExecutionResult.failure("Descent paused: unable to clear stairwell at " + block + ".");
                     }
                 }
 
+            // Falling blocks (sand/gravel/etc.) can refill the stairwell after we mine. Pause briefly until
+            // they settle, then re-clear any refilled falling blocks before moving.
+            if (!stabilizeFallingBlocks(player, source, workVolume, stairFoot)) {
+                return SkillExecutionResult.failure("Descent paused: falling blocks won't settle. Use /bot resume.");
+            }
+
             BlockPos support = stairFoot.down();
             if (!hasSolidSupport(player, support)) {
                 SkillResumeService.flagManualResume(player);
-                ChatUtils.sendChatMessages(player.getCommandSource().withSilent().withMaxLevel(4), "There's a drop ahead.");
+                ChatUtils.sendChatMessages(player.getCommandSource().withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS), "There's a drop ahead.");
                 return SkillExecutionResult.failure("Descent paused: unsafe drop detected.");
             }
 
@@ -1310,7 +1322,7 @@ public class CollectDirtSkill implements Skill {
             if (!moveResult.success()) {
                 WorkDirectionService.setPausePosition(player.getUuid(), player.getBlockPos());
                 SkillResumeService.flagManualResume(player);
-                ChatUtils.sendChatMessages(player.getCommandSource().withSilent().withMaxLevel(4),
+                ChatUtils.sendChatMessages(player.getCommandSource().withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS),
                         "I'm stuck trying to step down to " + stairFoot.getX() + ", " + stairFoot.getY() + ", " + stairFoot.getZ()
                                 + " (" + moveResult.detail() + "). I'll pause here.");
                 return SkillExecutionResult.failure("Descent aborted: failed to advance (" + moveResult.detail() + ").");
@@ -1321,7 +1333,7 @@ public class CollectDirtSkill implements Skill {
                 if (!nudged && !player.getBlockPos().equals(stairFoot)) {
                     WorkDirectionService.setPausePosition(player.getUuid(), player.getBlockPos());
                     SkillResumeService.flagManualResume(player);
-                    ChatUtils.sendChatMessages(player.getCommandSource().withSilent().withMaxLevel(4),
+                    ChatUtils.sendChatMessages(player.getCommandSource().withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS),
                             "I couldn't reach the next stair at " + stairFoot.getX() + ", " + stairFoot.getY() + ", " + stairFoot.getZ() + ". I'll pause here.");
                     return SkillExecutionResult.failure("Descent aborted: movement stalled before reaching " + stairFoot + ".");
                 }
@@ -1333,17 +1345,128 @@ public class CollectDirtSkill implements Skill {
                 TorchPlacer.PlacementResult torchResult = TorchPlacer.placeTorch(player, digDirection);
                 if (torchResult == TorchPlacer.PlacementResult.NO_TORCHES) {
                     SkillResumeService.flagManualResume(player);
-                    ChatUtils.sendChatMessages(player.getCommandSource().withSilent().withMaxLevel(4), 
+                    ChatUtils.sendChatMessages(player.getCommandSource().withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS), 
                             "Ran out of torches!");
                     return SkillExecutionResult.failure("Descent paused: out of torches. Provide torches and /bot resume.");
                 }
             }
         }
 
-        return SkillExecutionResult.success("Descended " + carvedSteps + " steps to Y=" + player.getBlockY() + ".");
+        int endY = player.getBlockY();
+        int descendedBlocks = Math.max(0, startY - endY);
+        return SkillExecutionResult.success("Descended " + descendedBlocks + " blocks (" + carvedSteps + " steps) to Y=" + endY + ".");
         } finally {
             TaskService.setAscentMode(player.getUuid(), false);
         }
+    }
+
+    private boolean stabilizeFallingBlocks(ServerPlayerEntity player,
+                                          ServerCommandSource source,
+                                          List<BlockPos> workVolume,
+                                          BlockPos stairFoot) {
+        if (player == null || workVolume == null || workVolume.isEmpty()) {
+            return true;
+        }
+        if (!(player.getEntityWorld() instanceof ServerWorld world)) {
+            return true;
+        }
+
+        BlockPos focus = stairFoot != null ? stairFoot : player.getBlockPos();
+
+        if (!waitForNearbyFallingBlocksToSettle(player, world, focus, FALLING_BLOCK_SETTLE_MAX_MS)) {
+            WorkDirectionService.setPausePosition(player.getUuid(), player.getBlockPos());
+            SkillResumeService.flagManualResume(player);
+            if (source != null) {
+                ChatUtils.sendChatMessages(source.withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS),
+                        "Falling blocks are still settling here; I'll pause so I don't get buried. Use /bot resume.");
+            }
+            return false;
+        }
+
+        // Re-check the work volume for sand/gravel refills and clear them.
+        for (BlockPos pos : workVolume) {
+            if (pos == null) {
+                continue;
+            }
+            BlockState state = world.getBlockState(pos);
+            if (state.isAir() || isTorchBlock(state) || isPassableForStairs(world, pos)) {
+                continue;
+            }
+            if (isFallingBlock(state)) {
+                if (!mineStraightStairBlock(player, pos)) {
+                    WorkDirectionService.setPausePosition(player.getUuid(), player.getBlockPos());
+                    SkillResumeService.flagManualResume(player);
+                    if (source != null) {
+                        ChatUtils.sendChatMessages(source.withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS),
+                                "Sand/gravel refilled the stairwell and I couldn't clear it safely. I'll pause here.");
+                    }
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    private boolean waitForNearbyFallingBlocksToSettle(ServerPlayerEntity player,
+                                                      ServerWorld world,
+                                                      BlockPos focus,
+                                                      long maxWaitMs) {
+        if (player == null || world == null || focus == null || maxWaitMs <= 0) {
+            return true;
+        }
+
+        long deadline = System.currentTimeMillis() + maxWaitMs;
+        while (System.currentTimeMillis() < deadline) {
+            final boolean[] hasFalling = new boolean[] { false };
+            runOnServerThread(player, () -> {
+                Box box = new Box(
+                    focus.getX(), focus.getY(), focus.getZ(),
+                    focus.getX() + 1, focus.getY() + 1, focus.getZ() + 1
+                ).expand(3.5D, 10.0D, 3.5D);
+                hasFalling[0] = !world.getEntitiesByClass(
+                        net.minecraft.entity.FallingBlockEntity.class,
+                        box,
+                        entity -> entity != null && entity.isAlive()
+                ).isEmpty();
+            });
+
+            if (!hasFalling[0]) {
+                return true;
+            }
+
+            runOnServerThread(player, () -> BotActions.stop(player));
+            maybeSendFallingBlockWaitMessage(player);
+            try {
+                Thread.sleep(FALLING_BLOCK_SETTLE_POLL_MS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return false;
+            }
+        }
+        return false;
+    }
+
+    private void maybeSendFallingBlockWaitMessage(ServerPlayerEntity player) {
+        if (player == null) {
+            return;
+        }
+        UUID id = player.getUuid();
+        long now = System.currentTimeMillis();
+        Long last = LAST_FALLING_BLOCK_MESSAGE.get(id);
+        if (last != null && (now - last) < FALLING_BLOCK_MESSAGE_COOLDOWN_MS) {
+            return;
+        }
+        LAST_FALLING_BLOCK_MESSAGE.put(id, now);
+        ChatUtils.sendChatMessages(player.getCommandSource().withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS),
+                "Waiting for sand/gravel to settle...");
+    }
+
+    private boolean isFallingBlock(BlockState state) {
+        if (state == null) {
+            return false;
+        }
+        Block b = state.getBlock();
+        return b instanceof net.minecraft.block.FallingBlock;
     }
     
     // ==================== ASCENT METHOD (Walk-and-jump upward) ====================
@@ -1413,7 +1536,7 @@ public class CollectDirtSkill implements Skill {
                 if (torchResult == TorchPlacer.PlacementResult.NO_TORCHES) {
                     SkillResumeService.flagManualResume(player);
                     WorkDirectionService.setPausePosition(player.getUuid(), player.getBlockPos());
-                    ChatUtils.sendChatMessages(player.getCommandSource().withSilent().withMaxLevel(4), 
+                    ChatUtils.sendChatMessages(player.getCommandSource().withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS), 
                             "Ran out of torches!");
                     return SkillExecutionResult.failure("Ascent paused: out of torches.");
                 }
@@ -1512,12 +1635,12 @@ public class CollectDirtSkill implements Skill {
         }
         DetectionResult ascentDetection = MiningHazardDetector.detect(player, headroomVolume, java.util.List.of(stepBlock));
         ascentDetection.adjacentWarnings().forEach(w ->
-                ChatUtils.sendChatMessages(player.getCommandSource().withSilent().withMaxLevel(4), w.chatMessage()));
+                ChatUtils.sendChatMessages(player.getCommandSource().withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS), w.chatMessage()));
         if (ascentDetection.blockingHazard().isPresent()) {
             Hazard hazard = ascentDetection.blockingHazard().get();
             WorkDirectionService.setPausePosition(player.getUuid(), player.getBlockPos());
             SkillResumeService.flagManualResume(player);
-            ChatUtils.sendChatMessages(player.getCommandSource().withSilent().withMaxLevel(4), hazard.chatMessage());
+            ChatUtils.sendChatMessages(player.getCommandSource().withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS), hazard.chatMessage());
             return SkillExecutionResult.failure(hazard.failureMessage());
         }
         // Clear headroom: break the step block itself AND 8 blocks above it
@@ -1857,7 +1980,7 @@ public class CollectDirtSkill implements Skill {
                 BotEventHandler.collectNearbyDrops(player, radius);
                 try {
                     DropSweeper.sweep(
-                            source.withSilent().withMaxLevel(4),
+                            source.withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS),
                             radius,
                             vertical,
                             20,
@@ -1924,7 +2047,7 @@ public class CollectDirtSkill implements Skill {
         }
         SkillResumeService.flagManualResume(player);
         String alias = player.getName().getString();
-        ChatUtils.sendChatMessages(source.withSilent().withMaxLevel(4),
+        ChatUtils.sendChatMessages(source.withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS),
                 "Water flooded the dig site — pausing. Use /bot resume " + alias + " when it's clear.");
         BotActions.moveBackward(player);
         if (player.isOnGround()) {
@@ -1949,7 +2072,7 @@ public class CollectDirtSkill implements Skill {
                 ? "Lava ahead! Plugged it and backing away."
                 : "Lava ahead! Retreating to stay safe.";
         message += " Use /bot resume " + player.getName().getString() + " when it's safe.";
-        ChatUtils.sendChatMessages(source.withSilent().withMaxLevel(4), message);
+        ChatUtils.sendChatMessages(source.withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS), message);
         return true;
     }
 
@@ -1972,7 +2095,7 @@ public class CollectDirtSkill implements Skill {
         if (shouldPause) {
             if (shouldSendMessage) {
                 SkillResumeService.flagManualResume(player);
-                ChatUtils.sendChatMessages(source.withSilent().withMaxLevel(4),
+                ChatUtils.sendChatMessages(source.withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS),
                         "Inventory full — pausing mining. Clear space and run /bot resume " + player.getName().getString() + ".");
                 BotActions.stop(player);
                 LAST_INVENTORY_FULL_MESSAGE.put(player.getUuid(), now);
@@ -1981,7 +2104,7 @@ public class CollectDirtSkill implements Skill {
         } else {
             // Continuing despite full inventory - send message if cooldown allows
             if (shouldSendMessage) {
-                ChatUtils.sendChatMessages(source.withSilent().withMaxLevel(4),
+                ChatUtils.sendChatMessages(source.withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS),
                         "Inventory's full! Continuing…");
                 LAST_INVENTORY_FULL_MESSAGE.put(player.getUuid(), now);
             }
@@ -1997,7 +2120,7 @@ public class CollectDirtSkill implements Skill {
             return false;
         }
         SkillResumeService.flagManualResume(player);
-        ChatUtils.sendChatMessages(source.withSilent().withMaxLevel(4),
+        ChatUtils.sendChatMessages(source.withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS),
                 "Inventory full — pausing mining. Clear space and run /bot resume " + player.getName().getString() + ".");
         BotActions.stop(player);
         return true;

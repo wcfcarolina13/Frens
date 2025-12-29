@@ -14,7 +14,7 @@ import net.shasankp000.PlayerUtils.blockDetectionUnit;
 public class ChartPathToBlock {
 
     public static String chart(ServerPlayerEntity bot, BlockPos targetBlockPos, String blockType) {
-        ServerCommandSource botSource = bot.getCommandSource().withSilent().withMaxLevel(4);
+        ServerCommandSource botSource = bot.getCommandSource().withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS);
         String botName = bot.getName().getString();
 
 

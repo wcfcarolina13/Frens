@@ -1694,7 +1694,7 @@ public class FunctionCallerV2 {
         if (queued == null) {
             return;
         }
-        ChatUtils.sendChatMessages(source.withSilent().withMaxLevel(4),
+        ChatUtils.sendChatMessages(source.withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS),
                 "Queued request: \"" + queued.message() + "\"");
         LLMServiceHandler.runQueuedCommand(source, queued.commanderId(), queued.message());
     }
@@ -1719,7 +1719,7 @@ public class FunctionCallerV2 {
         if (currentBotSource() == null || reply == null || reply.isBlank()) {
             return;
         }
-        ChatUtils.sendChatMessages(currentBotSource().withSilent().withMaxLevel(4), reply.trim());
+        ChatUtils.sendChatMessages(currentBotSource().withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS), reply.trim());
     }
 
     private static boolean requiresConfirmation(JsonObject payload) {
@@ -1812,7 +1812,7 @@ public class FunctionCallerV2 {
             ChatContextManager.clearPendingConfirmation(commanderId, state.botName);
             return true;
         }
-        ServerCommandSource botSource = bot.getCommandSource().withSilent().withMaxLevel(4);
+        ServerCommandSource botSource = bot.getCommandSource().withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS);
         Boolean decision = parseDecision(responsePortion);
         if (decision == null) {
             ChatUtils.sendChatMessages(botSource, "Give me a quick yes or no so I know whether to proceed.");

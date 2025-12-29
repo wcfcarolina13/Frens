@@ -28,6 +28,12 @@ public final class BotCommandStateService {
         public double comeBestGoalDistSq = Double.NaN;
         public int comeTicksSinceBest = 0;
         public long comeNextSkillTick = 0L;
+        /**
+         * When true, the bot may launch short "recovery" skills (e.g., collect_dirt ascent / stripmine)
+         * while trying to reach a fixed /come goal. When false ("safe regroup"), it will only path/walk
+         * and will NOT start digging itself out, avoiding the common "ascend then get lost" failure.
+         */
+        public boolean comeAllowRecoverySkills = true;
         public Vec3d baseTarget;
         public boolean assistAllies;
         public boolean shieldRaised;

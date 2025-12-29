@@ -1,6 +1,7 @@
 package net.shasankp000.GameAI.services;
 
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.ServerTask;
 import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.shasankp000.ChatUtils.ChatUtils;
@@ -33,6 +34,29 @@ public final class TaskService {
         COMPLETED
     }
 
+    /**
+     * Where a task was initiated from.
+     * <p>
+     * This is intentionally coarse-grained; it is used for automation policies (e.g., sunset gating)
+     * and light UX (touch responses), not for permission checks.
+     */
+    public enum Origin {
+        COMMAND,
+        AMBIENT,
+        SYSTEM
+    }
+
+    /**
+     * Snapshot of the currently active task (if any) for a bot.
+     */
+    public record ActiveTaskInfo(String name,
+                                 Origin origin,
+                                 boolean openEnded,
+                                 State state,
+                                 boolean cancelRequested,
+                                 Instant createdAt) {
+    }
+
     public static final class TaskTicket {
         private final String name;
         private final ServerCommandSource source;
@@ -42,6 +66,8 @@ public final class TaskService {
         private final AtomicBoolean cancelRequested;
         private final AtomicReference<String> cancelReason;
         private final AtomicReference<Thread> executingThread;
+        private final AtomicReference<Origin> origin;
+        private final AtomicBoolean openEnded;
 
         TaskTicket(String name, ServerCommandSource source, UUID botUuid) {
             this.name = name;
@@ -52,6 +78,8 @@ public final class TaskService {
             this.cancelRequested = new AtomicBoolean(false);
             this.cancelReason = new AtomicReference<>("");
             this.executingThread = new AtomicReference<>(null);
+            this.origin = new AtomicReference<>(Origin.COMMAND);
+            this.openEnded = new AtomicBoolean(false);
         }
 
         public String name() {
@@ -68,6 +96,25 @@ public final class TaskService {
 
         public Instant createdAt() {
             return createdAt;
+        }
+
+        public Origin origin() {
+            Origin o = origin.get();
+            return o != null ? o : Origin.COMMAND;
+        }
+
+        public void setOrigin(Origin origin) {
+            if (origin != null) {
+                this.origin.set(origin);
+            }
+        }
+
+        public boolean isOpenEnded() {
+            return openEnded.get();
+        }
+
+        public void setOpenEnded(boolean openEnded) {
+            this.openEnded.set(openEnded);
         }
 
         public void attachExecutingThread(Thread thread) {
@@ -116,6 +163,8 @@ public final class TaskService {
             cancelReason.set("");
             state.set(State.IDLE);
             executingThread.set(null);
+            origin.set(Origin.COMMAND);
+            openEnded.set(false);
         }
 
         public boolean matches(UUID candidate) {
@@ -159,6 +208,56 @@ public final class TaskService {
         }
         LOGGER.info("Task '{}' started for bot {}", skillName, botUuid);
         return Optional.of(ticket);
+    }
+
+    /**
+     * Starts an ambient (idle hobby) skill task for a bot.
+     * <p>
+     * Ambient tasks are considered open-ended by default so automation (e.g. sunset return) can
+     * safely interrupt them without stepping on commander-issued work.
+     */
+    public static Optional<TaskTicket> beginAmbientSkill(String skillName,
+                                                         ServerCommandSource source,
+                                                         UUID botUuid) {
+        Optional<TaskTicket> ticketOpt = beginSkill(skillName, source, botUuid);
+        ticketOpt.ifPresent(t -> {
+            t.setOrigin(Origin.AMBIENT);
+            t.setOpenEnded(true);
+        });
+        return ticketOpt;
+    }
+
+    public static Optional<String> getActiveTaskName(UUID botUuid) {
+        TaskTicket ticket = ACTIVE.get(key(botUuid));
+        return ticket != null ? Optional.ofNullable(ticket.name()) : Optional.empty();
+    }
+
+    public static Optional<ActiveTaskInfo> getActiveTaskInfo(UUID botUuid) {
+        TaskTicket ticket = ACTIVE.get(key(botUuid));
+        if (ticket == null) {
+            return Optional.empty();
+        }
+        return Optional.of(new ActiveTaskInfo(
+                ticket.name(),
+                ticket.origin(),
+                ticket.isOpenEnded(),
+                ticket.state(),
+                ticket.isCancelRequested(),
+                ticket.createdAt()
+        ));
+    }
+
+    public static boolean hasActiveTask(UUID botUuid) {
+        return ACTIVE.containsKey(key(botUuid));
+    }
+
+    /**
+     * Mark a task as open-ended (eligible to be interrupted by automation like sunset return).
+     */
+    public static void markOpenEnded(TaskTicket ticket, boolean openEnded) {
+        if (ticket != null) {
+            ticket.setOpenEnded(openEnded);
+        }
     }
 
     /**
@@ -217,26 +316,47 @@ public final class TaskService {
         ACTIVE.remove(key(ticket.botUuid()), ticket);
         LOGGER.info("Task '{}' finished with state {}", ticket.name(), finalState);
         
-        // After task completion, check if bot is stuck in blocks and needs rescue
-        // This is important for mining tasks that may leave bot positioned inside blocks
+        // After task completion, check if bot is stuck in blocks and needs rescue.
+        // IMPORTANT: keep this conservative to avoid fighting legitimate movement around doors/bed wakeups.
         ServerCommandSource source = ticket.source();
         if (source != null) {
             MinecraftServer server = source.getServer();
             if (server != null) {
                 ServerPlayerEntity bot = server.getPlayerManager().getPlayer(ticket.botUuid());
                 if (bot != null && !bot.isRemoved()) {
-                    LOGGER.info("Scheduling post-task safety check for bot {} after task '{}'", 
-                               bot.getName().getString(), ticket.name());
-                    // Schedule check for next tick to ensure task cleanup is complete
-                    server.execute(() -> {
-                        if (!bot.isRemoved()) {
-                            LOGGER.info("Running post-task safety check for bot {} at position {}", 
-                                       bot.getName().getString(), bot.getBlockPos().toShortString());
-                            BotEventHandler.checkAndEscapeSuffocation(bot);
-                        } else {
-                            LOGGER.warn("Bot was removed before post-task safety check could run");
+                    boolean isSleep = false;
+                    try {
+                        String name = ticket.name();
+                        isSleep = name != null && ("skill:sleep".equalsIgnoreCase(name) || "sleep".equalsIgnoreCase(name));
+                    } catch (Throwable ignored) {
+                    }
+
+                    // For sleep, skip the post-task safety check entirely; bed wakeups can briefly produce
+                    // awkward collision states and we don't want to inject velocity nudges that fight doorway traversal.
+                    if (!isSleep) {
+                        boolean shouldSafetyCheck = bot.isInsideWall() || BotRescueService.tookRecentObstructDamageWindow(bot);
+                        if (shouldSafetyCheck) {
+                            LOGGER.info("Scheduling post-task safety check for bot {} after task '{}'", 
+                                       bot.getName().getString(), ticket.name());
+                            // Run a few ticks later to let vanilla position updates settle.
+                            long due = server.getTicks() + 5L;
+                            server.send(new ServerTask((int) due, () -> {
+                                if (!bot.isRemoved()) {
+                                    LOGGER.info("Running post-task safety check for bot {} at position {}", 
+                                               bot.getName().getString(), bot.getBlockPos().toShortString());
+                                    BotEventHandler.checkAndEscapeSuffocation(bot);
+                                } else {
+                                    LOGGER.warn("Bot was removed before post-task safety check could run");
+                                }
+                            }));
                         }
-                    });
+                    }
+
+                    // Quality-of-life: after a completed/aborted sleep command, return to IDLE after a timeout
+                    // (but only if idle hobbies are enabled, and only if bot is still holding position).
+                    if (isSleep) {
+                        BotIdleResumeService.scheduleResumeIfEnabled(server, bot, 200L, "sleep");
+                    }
                 } else {
                     LOGGER.warn("Could not schedule post-task safety check - bot not found or removed");
                 }
@@ -282,7 +402,7 @@ public final class TaskService {
         if (server == null) {
             return;
         }
-        server.execute(() -> ChatUtils.sendChatMessages(source.withSilent().withMaxLevel(4), message));
+        server.execute(() -> ChatUtils.sendChatMessages(source.withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS), message));
     }
 
     public static void onBotRespawn(ServerPlayerEntity bot) {
