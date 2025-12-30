@@ -5,17 +5,24 @@ import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.sound.SoundCategory;
 import net.minecraft.sound.SoundEvent;
+import net.minecraft.text.Text;
+import net.minecraft.util.Formatting;
 import net.shasankp000.AIPlayer;
 import net.shasankp000.FilingSystem.ManualConfig;
 import net.shasankp000.GameAI.BotEventHandler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.HashMap;
+import java.util.Map;
+
 /**
  * Handles playing dialogue sounds for bot chat messages.
  * 
  * <p>This class provides the connection between chat messages and audio playback,
  * looking up the appropriate sound for each message and playing it at the bot's location.
+ * 
+ * <p>Also supports subtitle display via action bar for accessibility and immersion.
  */
 public final class BotDialoguePlayer {
 
@@ -24,6 +31,42 @@ public final class BotDialoguePlayer {
     // Audio settings - volume affects the audible range (lower = quieter and shorter range)
     private static final float VOLUME = 0.8f;
     private static final float PITCH = 1.0f;
+    
+    // Subtitle range - players within this range see subtitles
+    private static final double SUBTITLE_RANGE = 16.0;
+
+    // Map sound events to subtitle text for ambient chatter
+    private static final Map<SoundEvent, String> SUBTITLE_MAP = new HashMap<>();
+    
+    static {
+        initializeSubtitles();
+    }
+    
+    private static void initializeSubtitles() {
+        // Idle chatter
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_IDLE_ALL_QUIET, "All quiet around here...");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_IDLE_STILL_STANDING, "Still standing. Still ready.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_IDLE_TAKING_IT_EASY, "Just taking it easy.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_IDLE_HERE_IF_NEEDED, "I'm here if you need me.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_IDLE_ENJOYING_CALM, "Enjoying the calm.");
+        
+        // Context chatter
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_CONTEXT_BREATHER_SOMETIMES, "Nice to take a breather sometimes.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_CONTEXT_CAMPFIRE_WONDERS, "A little campfire time does wonders.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_CONTEXT_LISTENING, "If you need me, I'm listening.");
+        
+        // Status - injured
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_STATUS_NEED_BREATHER, "I could use a breather.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_STATUS_NOT_BEST, "Not feeling my best right now.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_STATUS_TOO_MANY_HITS, "I've taken too many hits today.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_WARNING_BANGED_UP, "I'm a bit banged up.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_WARNING_NOT_FULL_STRENGTH, "I'm not at full strength.");
+        
+        // Status - hungry
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_STATUS_HUNGRY, "I'm getting hungry...");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_STATUS_FIND_FOOD, "We should find food soon.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_STATUS_SNACK_TIME, "Snack time, maybe?");
+    }
 
     private BotDialoguePlayer() {
     }
@@ -137,7 +180,8 @@ public final class BotDialoguePlayer {
 
     /**
      * Convenience method to play a specific sound event for a bot.
-     * Useful for programmatic sound playback outside of chat.
+     * Useful for programmatic sound playback outside of chat (e.g., ambient chatter).
+     * Shows subtitle to nearby players if available.
      * 
      * @param bot The bot entity
      * @param sound The sound event to play
@@ -155,7 +199,49 @@ public final class BotDialoguePlayer {
             return false;
         }
 
-        return playSound(bot, sound);
+        boolean played = playSound(bot, sound);
+        
+        // Show subtitle to nearby players for ambient chatter
+        if (played) {
+            showSubtitle(bot, sound);
+        }
+        
+        return played;
+    }
+    
+    /**
+     * Show a subtitle to nearby players via action bar.
+     * Only shows subtitles for sounds that have mapped text (like ambient chatter).
+     * 
+     * @param bot The bot speaking
+     * @param sound The sound being played
+     */
+    private static void showSubtitle(ServerPlayerEntity bot, SoundEvent sound) {
+        String subtitleText = SUBTITLE_MAP.get(sound);
+        if (subtitleText == null) {
+            return; // No subtitle for this sound
+        }
+        
+        if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
+            return;
+        }
+        
+        String botName = bot.getName().getString();
+        Text subtitle = Text.literal("[" + botName + "] ")
+                .formatted(Formatting.GRAY, Formatting.ITALIC)
+                .append(Text.literal(subtitleText).formatted(Formatting.WHITE, Formatting.ITALIC));
+        
+        // Send to all players within range
+        for (ServerPlayerEntity player : world.getPlayers()) {
+            if (player == bot) continue; // Don't send to the bot itself
+            
+            double distance = player.squaredDistanceTo(bot);
+            if (distance <= SUBTITLE_RANGE * SUBTITLE_RANGE) {
+                player.sendMessage(subtitle, true); // true = action bar
+            }
+        }
+        
+        LOGGER.debug("[Subtitle] Showed '{}' from {} to nearby players", subtitleText, botName);
     }
 
     /**
