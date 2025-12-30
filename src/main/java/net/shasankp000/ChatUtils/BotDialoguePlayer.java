@@ -55,6 +55,17 @@ public final class BotDialoguePlayer {
         SUBTITLE_MAP.put(BotDialogueSounds.LINE_CONTEXT_CAMPFIRE_WONDERS, "A little campfire time does wonders.");
         SUBTITLE_MAP.put(BotDialogueSounds.LINE_CONTEXT_LISTENING, "If you need me, I'm listening.");
         
+        // Fishing context chatter
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_CONTEXT_FISH_EARLIER, "I was fishing a bit ago. Not a bad haul.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_CONTEXT_SMELLS_FISH, "Still smells like fish. Could be worse.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_CONTEXT_FISH_COOPERATING, "The fish were cooperating earlier.");
+        
+        // Hangout context chatter
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_CONTEXT_WARMING_EARLIER, "I was just warming up by the fire earlier.");
+        
+        // Combat context
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_COMBAT_STANDING_DOWN, "Standing down unless attacked.");
+        
         // Status - injured
         SUBTITLE_MAP.put(BotDialogueSounds.LINE_STATUS_NEED_BREATHER, "I could use a breather.");
         SUBTITLE_MAP.put(BotDialogueSounds.LINE_STATUS_NOT_BEST, "Not feeling my best right now.");

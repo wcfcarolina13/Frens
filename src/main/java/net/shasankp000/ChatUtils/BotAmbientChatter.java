@@ -8,6 +8,7 @@ import net.minecraft.world.World;
 import net.shasankp000.AIPlayer;
 import net.shasankp000.FilingSystem.ManualConfig;
 import net.shasankp000.GameAI.BotEventHandler;
+import net.shasankp000.GameAI.services.BotIdleHobbiesService;
 import net.shasankp000.GameAI.services.TaskService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -71,6 +72,20 @@ public final class BotAmbientChatter {
             BotDialogueSounds.LINE_CONTEXT_BREATHER_SOMETIMES,
             BotDialogueSounds.LINE_CONTEXT_CAMPFIRE_WONDERS,
             BotDialogueSounds.LINE_CONTEXT_LISTENING,
+    };
+
+    // Fishing-related context sounds (used when bot recently fished)
+    private static final SoundEvent[] FISHING_CONTEXT_CHATTER = {
+            BotDialogueSounds.LINE_CONTEXT_FISH_EARLIER,
+            BotDialogueSounds.LINE_CONTEXT_SMELLS_FISH,
+            BotDialogueSounds.LINE_CONTEXT_FISH_COOPERATING,
+    };
+
+    // Campfire/hangout-related context sounds (used when bot recently hung out)
+    private static final SoundEvent[] HANGOUT_CONTEXT_CHATTER = {
+            BotDialogueSounds.LINE_CONTEXT_WARMING_EARLIER,
+            BotDialogueSounds.LINE_CONTEXT_BREATHER_SOMETIMES,
+            BotDialogueSounds.LINE_CONTEXT_CAMPFIRE_WONDERS,
     };
 
     // Health-related sounds when bot is injured (INJURED mood)
@@ -200,17 +215,20 @@ public final class BotAmbientChatter {
         return MIN_DELAY_TICKS + RNG.nextLong(MAX_DELAY_TICKS - MIN_DELAY_TICKS);
     }
 
+    // How long a hobby context is considered "recent" (10 minutes)
+    private static final long HOBBY_CONTEXT_WINDOW_MS = 10 * 60 * 1000L;
+
     /**
-     * Pick a mood-aware chatter sound based on the bot's emotional state.
+     * Pick a mood-aware and context-aware chatter sound based on the bot's state.
      * 
      * <p>Uses {@link BotMoodManager} to determine the bot's current mood
-     * and selects appropriate sounds:
+     * and considers recent activities for context:
      * <ul>
      *   <li>STRESSED - Alert/tense sounds (100% chance)</li>
      *   <li>INJURED - Pain/fatigue sounds (100% chance)</li>
      *   <li>HUNGRY - Food-related sounds (100% chance)</li>
-     *   <li>CONTENT - Relaxed sounds (100% chance)</li>
-     *   <li>NEUTRAL - 70% idle, 30% context chatter</li>
+     *   <li>CONTENT - Relaxed sounds, with hobby context (40% hobby, 60% content)</li>
+     *   <li>NEUTRAL - Hobby context (30%), idle (50%), general context (20%)</li>
      * </ul>
      * 
      * @param bot The bot to pick a sound for
@@ -219,24 +237,64 @@ public final class BotAmbientChatter {
     private static SoundEvent pickChatterSound(ServerPlayerEntity bot) {
         // Get the bot's current emotional state from the mood manager
         EmotionalState mood = BotMoodManager.getMood(bot);
+        UUID botId = bot.getUuid();
         
         LOGGER.debug("Bot {} mood: {}", bot.getName().getString(), mood.getId());
-        
+
+        // Check for recent hobby context
+        String lastHobby = BotIdleHobbiesService.getLastHobbyName(botId);
+        long lastHobbyEndMs = BotIdleHobbiesService.getLastHobbyEndMs(botId);
+        boolean hasRecentHobby = lastHobby != null && !lastHobby.isBlank() 
+                && lastHobbyEndMs > 0 
+                && (System.currentTimeMillis() - lastHobbyEndMs) < HOBBY_CONTEXT_WINDOW_MS;
+
         // Select sound based on mood
         return switch (mood) {
             case STRESSED -> STRESSED_CHATTER[RNG.nextInt(STRESSED_CHATTER.length)];
             case INJURED -> INJURED_CHATTER[RNG.nextInt(INJURED_CHATTER.length)];
             case HUNGRY -> HUNGRY_CHATTER[RNG.nextInt(HUNGRY_CHATTER.length)];
-            case CONTENT -> CONTENT_CHATTER[RNG.nextInt(CONTENT_CHATTER.length)];
+            case CONTENT -> {
+                // Content mood: 40% hobby context (if available), 60% content sounds
+                if (hasRecentHobby && RNG.nextFloat() < 0.4f) {
+                    yield pickHobbyContextSound(lastHobby);
+                } else {
+                    yield CONTENT_CHATTER[RNG.nextInt(CONTENT_CHATTER.length)];
+                }
+            }
             case NEUTRAL -> {
-                // 70% idle chatter, 30% context chatter
-                if (RNG.nextFloat() < 0.7f) {
+                float roll = RNG.nextFloat();
+                // Neutral mood: 30% hobby context (if available), 50% idle, 20% general context
+                if (hasRecentHobby && roll < 0.3f) {
+                    yield pickHobbyContextSound(lastHobby);
+                } else if (roll < 0.8f) {
                     yield IDLE_CHATTER[RNG.nextInt(IDLE_CHATTER.length)];
                 } else {
                     yield CONTEXT_CHATTER[RNG.nextInt(CONTEXT_CHATTER.length)];
                 }
             }
         };
+    }
+
+    /**
+     * Pick a context sound based on the bot's recent hobby.
+     * 
+     * @param hobby The hobby name (e.g., "fish", "hangout")
+     * @return A hobby-appropriate SoundEvent
+     */
+    private static SoundEvent pickHobbyContextSound(String hobby) {
+        if (hobby == null) {
+            return CONTEXT_CHATTER[RNG.nextInt(CONTEXT_CHATTER.length)];
+        }
+        
+        String lowerHobby = hobby.toLowerCase();
+        if (lowerHobby.contains("fish")) {
+            return FISHING_CONTEXT_CHATTER[RNG.nextInt(FISHING_CONTEXT_CHATTER.length)];
+        } else if (lowerHobby.contains("hangout") || lowerHobby.contains("campfire")) {
+            return HANGOUT_CONTEXT_CHATTER[RNG.nextInt(HANGOUT_CONTEXT_CHATTER.length)];
+        }
+        
+        // Fallback to general context
+        return CONTEXT_CHATTER[RNG.nextInt(CONTEXT_CHATTER.length)];
     }
 
     /**
