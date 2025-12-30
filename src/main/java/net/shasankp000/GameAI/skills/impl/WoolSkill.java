@@ -101,6 +101,7 @@ public class WoolSkill implements Skill {
         ChatUtils.sendSystemMessage(source, "Looking for sheep within " + radius + " blocks (line-of-sight only).");
 
         int sheared = 0;
+        Set<UUID> failedSheepIds = new HashSet<>(); // Track sheep we couldn't reach to avoid oscillating
 
         while (System.currentTimeMillis() - startedAt < MAX_JOB_MILLIS) {
             if (SkillManager.shouldAbortSkill(bot)) {
@@ -119,47 +120,63 @@ public class WoolSkill implements Skill {
             }
 
             List<SheepEntity> candidates = visibleSheep(bot, world, radius);
+            // Filter out sheep we already failed to reach (avoid oscillation)
+            candidates.removeIf(s -> failedSheepIds.contains(s.getUuid()));
+            
             if (candidates.isEmpty()) {
+                // Clear failed set when exploring - give them another chance after moving
+                failedSheepIds.clear();
                 if (!exploreForSheep(bot, world, source, radius)) {
                     break;
                 }
                 continue;
             }
 
-            boolean progressed = false;
-            for (SheepEntity target : candidates) {
-                if (SkillManager.shouldAbortSkill(bot)) {
-                    BotActions.stop(bot);
-                    return SkillExecutionResult.failure("Wool job stopped.");
-                }
-                LAST_SEEN_SHEEP.put(bot.getUuid(), target.getBlockPos());
-                if (!moveNextTo(bot, source, target.getBlockPos())) {
-                    continue;
-                }
-                if (!target.isShearable() || target.isBaby()) {
-                    continue;
-                }
-                BotActions.interactEntity(bot, target, Hand.MAIN_HAND);
-                sheared++;
-                progressed = true;
-                // Give the drops a tick to spawn, then sweep aggressively.
-                sleep(220);
-                dropSweepWool(bot, world, source, target.getBlockPos(), POST_SHEAR_SWEEP_BUDGET_MS);
-                if (SkillManager.shouldAbortSkill(bot)) {
-                    BotActions.stop(bot);
-                    return SkillExecutionResult.failure("Wool job stopped.");
-                }
-
-                int collected = countWoolItems(bot.getInventory()) - woolAtStart;
-                if (collected >= minWoolToCollect) {
-                    ChatUtils.sendSystemMessage(source, "Collected at least " + minWoolToCollect + " wool; heading back.");
-                    dropSweepWool(bot, world, source, bot.getBlockPos(), 7000L);
-                    moveTo(bot, source, startPos, false);
-                    return SkillExecutionResult.success("Collected " + collected + " wool and sheared " + sheared + " sheep.");
+            // IMPORTANT: Pick ONE sheep and commit to it, don't iterate through all
+            SheepEntity target = candidates.get(0); // Already sorted by distance
+            LAST_SEEN_SHEEP.put(bot.getUuid(), target.getBlockPos());
+            
+            if (!moveNextTo(bot, source, target.getBlockPos())) {
+                // Mark this sheep as failed and try a different one next iteration
+                failedSheepIds.add(target.getUuid());
+                LOGGER.debug("Failed to reach sheep {}, marking as unreachable", target.getUuid());
+                continue;
+            }
+            
+            // Re-check if sheep is still shearable after we moved to it
+            if (!target.isAlive() || !target.isShearable() || target.isBaby()) {
+                continue;
+            }
+            
+            // CRITICAL: Ensure shears are equipped before each shearing attempt
+            if (!ensureShearsEquipped(bot)) {
+                LOGGER.warn("Lost shears, attempting to re-equip or craft");
+                if (!ensureShears(bot, source)) {
+                    return SkillExecutionResult.failure("Lost shears and cannot replace.");
                 }
             }
-            if (!progressed) {
-                exploreForSheep(bot, world, source, radius);
+            
+            BotActions.interactEntity(bot, target, Hand.MAIN_HAND);
+            sheared++;
+            bot.swingHand(Hand.MAIN_HAND, true);
+            
+            // Give the drops a tick to spawn, then immediately collect THIS sheep's drops
+            sleep(250);
+            
+            // Collect drops BEFORE moving to next sheep - use shorter budget, focused area
+            collectImmediateDrops(bot, world, target.getBlockPos());
+            
+            if (SkillManager.shouldAbortSkill(bot)) {
+                BotActions.stop(bot);
+                return SkillExecutionResult.failure("Wool job stopped.");
+            }
+
+            int collected = countWoolItems(bot.getInventory()) - woolAtStart;
+            if (collected >= minWoolToCollect) {
+                ChatUtils.sendSystemMessage(source, "Collected at least " + minWoolToCollect + " wool; heading back.");
+                dropSweepWool(bot, world, source, bot.getBlockPos(), 7000L);
+                moveTo(bot, source, startPos, false);
+                return SkillExecutionResult.success("Collected " + collected + " wool and sheared " + sheared + " sheep.");
             }
         }
 
@@ -228,6 +245,76 @@ public class WoolSkill implements Skill {
         }
         BotActions.selectHotbarSlot(bot, slot);
         return true;
+    }
+
+    /**
+     * Quick check if shears are currently in hand. If not, try to re-select them.
+     * Returns true if shears are now equipped, false otherwise.
+     */
+    private boolean ensureShearsEquipped(ServerPlayerEntity bot) {
+        ItemStack hand = bot.getMainHandStack();
+        if (hand.isOf(Items.SHEARS)) {
+            return true;
+        }
+        // Shears not in hand - find and re-select
+        int slot = findShearsSlot(bot);
+        if (slot == -1) {
+            return false;
+        }
+        if (slot >= 9) {
+            // Need to move to hotbar first
+            int empty = findEmptyHotbar(bot);
+            if (empty == -1) {
+                empty = bot.getInventory().getSelectedSlot();
+            }
+            ItemStack from = bot.getInventory().getStack(slot);
+            ItemStack to = bot.getInventory().getStack(empty);
+            bot.getInventory().setStack(slot, to);
+            bot.getInventory().setStack(empty, from);
+            slot = empty;
+        }
+        BotActions.selectHotbarSlot(bot, slot);
+        return bot.getMainHandStack().isOf(Items.SHEARS);
+    }
+
+    /**
+     * Immediately collect wool drops in a small radius around the sheared sheep.
+     * This is a quick, focused collection before moving to the next target.
+     */
+    private void collectImmediateDrops(ServerPlayerEntity bot, ServerWorld world, BlockPos sheepPos) {
+        // Small radius, quick collection - don't wander far
+        Box box = Box.from(Vec3d.of(sheepPos)).expand(5, 3, 5);
+        List<ItemEntity> drops = world.getEntitiesByClass(ItemEntity.class, box,
+                e -> e.getStack().getItem().getTranslationKey().contains("wool"));
+        
+        if (drops.isEmpty()) {
+            return;
+        }
+        
+        drops.sort((a, b) -> Double.compare(bot.squaredDistanceTo(a), bot.squaredDistanceTo(b)));
+        
+        long deadline = System.currentTimeMillis() + 3000L; // Max 3 seconds for immediate pickup
+        for (ItemEntity drop : drops) {
+            if (System.currentTimeMillis() >= deadline) {
+                break;
+            }
+            if (SkillManager.shouldAbortSkill(bot)) {
+                return;
+            }
+            BlockPos dropPos = drop.getBlockPos();
+            // Only pick up drops that are reasonably close and at similar Y level
+            if (Math.abs(dropPos.getY() - bot.getBlockY()) > 2) {
+                continue;
+            }
+            double distSq = bot.squaredDistanceTo(drop);
+            if (distSq > 49.0) { // Don't chase drops more than 7 blocks away
+                continue;
+            }
+            
+            // Quick nudge toward drop
+            MovementService.nudgeTowardUntilClose(bot, dropPos, 1.5, 1200L, 0.2, "wool-pickup");
+            sleep(80);
+        }
     }
 
     private List<SheepEntity> visibleSheep(ServerPlayerEntity bot, ServerWorld world, int radius) {

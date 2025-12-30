@@ -7,6 +7,7 @@ import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
+import static net.shasankp000.GameAI.services.BotCampfireAvoidanceService.isNearExposedCampfire;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -174,9 +175,12 @@ public final class FollowPathService {
                     boolean solidBelow = !belowState.getCollisionShape(world, below).isEmpty();
                     boolean footPassable = isPassableForPlan(world, foot, footState);
                     boolean headPassable = isPassableForPlan(world, head, headState);
+                    
+                    // Campfire avoidance: mark cells near exposed campfires as non-standable
+                    boolean nearCampfire = isNearExposedCampfire(world, foot, 2);
 
                     int idx = ((y - minY) * sizeX + (x - minX)) * sizeZ + (z - minZ);
-                    standable[idx] = solidBelow && footPassable && headPassable;
+                    standable[idx] = solidBelow && footPassable && headPassable && !nearCampfire;
                     if (footState.getBlock() instanceof DoorBlock) {
                         doorType[idx] = footState.isOf(Blocks.IRON_DOOR) ? (byte) 2 : (byte) 1;
                     }

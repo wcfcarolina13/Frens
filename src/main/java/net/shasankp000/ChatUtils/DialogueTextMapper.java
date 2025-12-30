@@ -227,6 +227,8 @@ public final class DialogueTextMapper {
 
         // ============ CONFIRM ============
         EXACT_MAP.put("On it.", BotDialogueSounds.LINE_CONFIRM_ON_IT);
+        // Pattern for "On it — <summary>." messages
+        PATTERN_MAP.put(Pattern.compile("On it [-—] .+\\."), BotDialogueSounds.LINE_CONFIRM_ON_IT);
         EXACT_MAP.put("Understood. I'll hold off for now.", BotDialogueSounds.LINE_CONFIRM_HOLD_OFF);
         EXACT_MAP.put("Give me a quick yes or no so I know whether to proceed.", BotDialogueSounds.LINE_CONFIRM_ASK_YESNO);
 
@@ -261,12 +263,17 @@ public final class DialogueTextMapper {
         EXACT_MAP.put("I'll die if I don't eat!", BotDialogueSounds.LINE_HUNGER_DYING);
         EXACT_MAP.put("I'm starving!", BotDialogueSounds.LINE_HUNGER_STARVING);
         EXACT_MAP.put("I'm getting hungry.", BotDialogueSounds.LINE_HUNGER_WARNING);
+        EXACT_MAP.put("I'm hungry!", BotDialogueSounds.LINE_HUNGER_WARNING); // Actual code uses this variant
 
         // ============ EATING ============
         EXACT_MAP.put("I don't have any safe food to eat!", BotDialogueSounds.LINE_EATING_NO_FOOD);
         EXACT_MAP.put("I ate some food, but I'm still hungry.", BotDialogueSounds.LINE_EATING_STILL_HUNGRY);
         EXACT_MAP.put("I ate some food so far.", BotDialogueSounds.LINE_EATING_PROGRESS);
         EXACT_MAP.put("I ate some food. I feel better now!", BotDialogueSounds.LINE_EATING_DONE);
+        // Pattern matches for dynamic food counts: "I ate 2 food item(s), but I'm still hungry."
+        PATTERN_MAP.put(Pattern.compile("I ate \\d+ food item\\(s\\), but I'm still hungry\\."), BotDialogueSounds.LINE_EATING_STILL_HUNGRY);
+        PATTERN_MAP.put(Pattern.compile("I ate \\d+ food item\\(s\\) so far\\."), BotDialogueSounds.LINE_EATING_PROGRESS);
+        PATTERN_MAP.put(Pattern.compile("I ate \\d+ food item\\(s\\)\\. I feel better now!"), BotDialogueSounds.LINE_EATING_DONE);
 
         // ============ DEATH ============
         EXACT_MAP.put("I died. Should I continue with the last job?", BotDialogueSounds.LINE_DEATH_RESUME_ASK);
@@ -280,7 +287,9 @@ public final class DialogueTextMapper {
 
         // ============ INVENTORY ============
         EXACT_MAP.put("I'm out of inventory space.", BotDialogueSounds.LINE_INVENTORY_FULL);
+        EXACT_MAP.put("I'm out of inventory space, so I'll leave the remaining drops where they fell.", BotDialogueSounds.LINE_INVENTORY_FULL);
         EXACT_MAP.put("I don't have that.", BotDialogueSounds.LINE_INVENTORY_DONT_HAVE);
+        EXACT_MAP.put("I don't have that", BotDialogueSounds.LINE_INVENTORY_DONT_HAVE); // Without period
         EXACT_MAP.put("Here, take this.", BotDialogueSounds.LINE_INVENTORY_GIVE_ITEM);
 
         // ============ FISH ============

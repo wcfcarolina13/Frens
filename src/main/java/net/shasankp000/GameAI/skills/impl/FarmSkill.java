@@ -205,14 +205,20 @@ public class FarmSkill implements Skill {
                 center.add(1, 0, 1)
         };
 
+        // First pass: ensure solid foundation 2 blocks deep under each water spot
         for (BlockPos pos : waterSpots) {
             ensureStandingOffFarmland(bot, world, source, pos);
-            BlockPos base = pos.down();
-            BlockState baseState = world.getBlockState(base);
-            if (!baseState.isSolidBlock(world, base)) {
-                fillWithDirt(bot, world, base);
+            for (int dy = 1; dy <= 2; dy++) {
+                BlockPos base = pos.down(dy);
+                BlockState baseState = world.getBlockState(base);
+                if (!baseState.isSolidBlock(world, base)) {
+                    fillWithDirt(bot, world, base);
+                }
             }
+        }
 
+        // Second pass: clear the hole spaces
+        for (BlockPos pos : waterSpots) {
             BlockState state = world.getBlockState(pos);
             if (!state.isAir() && !state.isOf(Blocks.WATER)) {
                 mineBlock(bot, pos, world);
@@ -260,10 +266,15 @@ public class FarmSkill implements Skill {
                     }
                     fillWithDirt(bot, world, pos);
                 }
-                BlockPos below = pos.down();
-                BlockState belowState = world.getBlockState(below);
-                if (!belowState.isSolidBlock(world, below)) {
-                    fillWithDirt(bot, world, below);
+                // Seal 3 blocks deep to handle uneven terrain and prevent leaks
+                for (int dy = 1; dy <= 3; dy++) {
+                    BlockPos below = pos.down(dy);
+                    BlockState belowState = world.getBlockState(below);
+                    if (!belowState.isSolidBlock(world, below)) {
+                        fillWithDirt(bot, world, below);
+                    } else {
+                        break; // hit solid ground, stop
+                    }
                 }
             }
         }
@@ -320,28 +331,58 @@ public class FarmSkill implements Skill {
 
     private static void secureIrrigationContainment(ServerPlayerEntity bot, ServerWorld world, ServerCommandSource source, BlockPos center) {
         BlockPos[] hole = {center, center.add(1, 0, 0), center.add(0, 0, 1), center.add(1, 0, 1)};
-        // Seal below and around edges to prevent leaks on uneven terrain
+        Set<BlockPos> holeSet = Set.of(hole);
+
+        // First pass: seal multiple layers below the hole to prevent downward leaks
         for (BlockPos pos : hole) {
-            BlockPos below = pos.down();
-            if (world.getBlockState(below).isAir() || world.getBlockState(below).isOf(Blocks.WATER)) {
-                fillWithDirt(bot, world, below);
-            }
-            for (Direction dir : Direction.Type.HORIZONTAL) {
-                BlockPos edge = pos.offset(dir);
-                BlockState edgeState = world.getBlockState(edge);
-                if (!edgeState.isSolidBlock(world, edge) || edgeState.isOf(Blocks.WATER)) {
-                    fillWithDirt(bot, world, edge);
+            for (int dy = 1; dy <= 3; dy++) {
+                BlockPos below = pos.down(dy);
+                BlockState belowState = world.getBlockState(below);
+                if (belowState.isAir() || belowState.isOf(Blocks.WATER)) {
+                    fillWithDirt(bot, world, below);
+                } else if (belowState.isSolidBlock(world, below)) {
+                    break; // hit solid, stop filling
                 }
             }
         }
-        // Clear any flowing water exiting the basin
-        for (int dx = -2; dx <= 2; dx++) {
-            for (int dz = -2; dz <= 2; dz++) {
+
+        // Second pass: seal horizontal edges, going deep enough to contain water
+        for (BlockPos pos : hole) {
+            for (Direction dir : Direction.Type.HORIZONTAL) {
+                BlockPos edge = pos.offset(dir);
+                if (holeSet.contains(edge)) continue; // inside the hole
+
+                // Seal the edge and 2 blocks below it
+                for (int dy = 0; dy <= 2; dy++) {
+                    BlockPos checkPos = edge.down(dy);
+                    BlockState edgeState = world.getBlockState(checkPos);
+                    if (!edgeState.isSolidBlock(world, checkPos) || edgeState.isOf(Blocks.WATER)) {
+                        fillWithDirt(bot, world, checkPos);
+                    } else {
+                        break; // hit solid, stop
+                    }
+                }
+            }
+        }
+
+        // Third pass: clear any flowing water exiting the basin
+        for (int dx = -3; dx <= 3; dx++) {
+            for (int dz = -3; dz <= 3; dz++) {
                 BlockPos check = center.add(dx, 0, dz);
+                if (holeSet.contains(check)) continue;
                 BlockState state = world.getBlockState(check);
                 if (state.isOf(Blocks.WATER) && !state.getFluidState().isStill()) {
+                    LOGGER.info("Removing stray flowing water at {}", check);
                     pickupWater(bot, world, check);
                     fillWithDirt(bot, world, check);
+                }
+                // Also check one level below for water seepage
+                BlockPos checkBelow = check.down();
+                BlockState stateBelow = world.getBlockState(checkBelow);
+                if (stateBelow.isOf(Blocks.WATER)) {
+                    LOGGER.info("Removing seepage water at {}", checkBelow);
+                    pickupWater(bot, world, checkBelow);
+                    fillWithDirt(bot, world, checkBelow);
                 }
             }
         }
@@ -1624,7 +1665,7 @@ public class FarmSkill implements Skill {
     }
 
     private static void levelGround(ServerPlayerEntity bot, ServerWorld world, ServerCommandSource source, BlockPos center, SkillContext ctx) {
-        int radius = 3;
+        int radius = HYDRATION_RADIUS + 1; // 5 blocks: covers the full 10x10 farm area plus buffer
         List<Integer> heights = new ArrayList<>();
         for (int dx = -radius; dx <= radius; dx++) {
             for (int dz = -radius; dz <= radius; dz++) {

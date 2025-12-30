@@ -74,6 +74,8 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         SKILL_FISH,
         SKILL_WOODCUT,
         SKILL_WOOL,
+        SKILL_SHELTER,
+        SKILL_FARM,
         SKILL_MINING,
         SKILL_STRIPMINE,
         SKILL_ASCENT,
@@ -110,6 +112,8 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             new TopicEntry("Fishing", TopicAction.SKILL_FISH, false, 0),
             new TopicEntry("Woodcut", TopicAction.SKILL_WOODCUT, false, 0),
             new TopicEntry("Wool", TopicAction.SKILL_WOOL, false, 0),
+            new TopicEntry("Shelter…", TopicAction.SKILL_SHELTER, false, 0),
+            new TopicEntry("Farming", TopicAction.SKILL_FARM, false, 0),
             new TopicEntry("Mining", TopicAction.SKILL_MINING, false, 0),
             new TopicEntry("Stripmine", TopicAction.SKILL_STRIPMINE, false, 1),
             new TopicEntry("Ascent", TopicAction.SKILL_ASCENT, false, 1),
@@ -618,6 +622,8 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case SKILL_FISH -> runSkillCommand("fish", null);
             case SKILL_WOODCUT -> runSkillCommand("woodcut", null);
             case SKILL_WOOL -> runSkillCommand("wool", null);
+            case SKILL_SHELTER -> openShelterSubmenu();
+            case SKILL_FARM -> runSkillCommand("farm", null);
             case SKILL_MINING -> runSkillCommand("mining", null);
             case SKILL_STRIPMINE -> runSkillCommand("stripmine", null);
             case SKILL_ASCENT -> runSkillCommand("mining", "ascent");
@@ -826,6 +832,14 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             return;
         }
         this.client.setScreen(new BaseManagerScreen(this));
+    }
+
+    private void openShelterSubmenu() {
+        // For now, run the default hovel shelter command
+        // TODO: Could be expanded to show a submenu with hovel/hovel2/burrow options
+        String botTarget = formatBotTarget();
+        String command = "bot skill shelter hovel " + botTarget;
+        sendChatCommand(command);
     }
 
     private void sendChatCommand(String command) {
