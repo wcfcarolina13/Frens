@@ -237,6 +237,7 @@ public class modCommandRegistry {
 	                        .then(BotMovementCommands.buildCome())
 	                        .then(BotMovementCommands.buildRegroup())
                             .then(BotMovementCommands.buildGoToLook())
+                            .then(BotMovementCommands.buildShelterLook())
 	                        .then(BotMovementCommands.buildGuard())
 	                        .then(BotMovementCommands.buildPatrol())
 	                        .then(BotMovementCommands.buildStay("stay"))
@@ -2422,6 +2423,97 @@ public class modCommandRegistry {
             ChatUtils.sendSystemMessage(source, summary + " " + verb + " heading to where you're looking.");
         }
         return successes;
+    }
+
+    /**
+     * Executes the shelter skill at the position the player is looking at.
+     * For hovel: centers the build at the look target.
+     * For burrow: digs in the direction the player is looking.
+     */
+    static int executeShelterLook(CommandContext<ServerCommandSource> context, String shelterType, String targetArg) throws CommandSyntaxException {
+        ServerCommandSource source = context.getSource();
+        ServerPlayerEntity commander = source.getPlayer();
+        if (commander == null) {
+            throw new SimpleCommandExceptionType(Text.literal("Only players can direct bots to build a shelter at a look target.")).create();
+        }
+        if (!(commander.getEntityWorld() instanceof ServerWorld commanderWorld)) {
+            return 0;
+        }
+
+        // Raycast from player's view to find target position
+        final double maxDistance = 64.0D;
+        HitResult hit = commander.raycast(maxDistance, 1.0F, false);
+        if (!(hit instanceof BlockHitResult bhr) || hit.getType() == HitResult.Type.MISS) {
+            ChatUtils.sendSystemMessage(source, "Look at where you want the " + shelterType + " to be built.");
+            return 0;
+        }
+
+        BlockPos targetPos = bhr.getBlockPos().offset(bhr.getSide()).toImmutable();
+        BlockPos goal = SafePositionService.findSafeNear(commanderWorld, targetPos, 8);
+        if (goal == null) {
+            goal = SafePositionService.findSafeNear(commanderWorld, bhr.getBlockPos().toImmutable(), 8);
+        }
+        if (goal == null) {
+            ChatUtils.sendSystemMessage(source, "Can't find a safe spot near there.");
+            return 0;
+        }
+
+        // Resolve target bot(s)
+        List<ServerPlayerEntity> bots;
+        if (targetArg == null) {
+            // Default: find bots following the commander
+            bots = new ArrayList<>();
+            for (ServerPlayerEntity candidate : BotEventHandler.getRegisteredBots(source.getServer())) {
+                if (candidate == null || candidate.isRemoved()) continue;
+                if (candidate.getEntityWorld() != commanderWorld) continue;
+                if (BotEventHandler.getCurrentMode(candidate) != BotEventHandler.Mode.FOLLOW) continue;
+                if (!commander.getUuid().equals(BotEventHandler.getFollowTargetUuid(candidate))) continue;
+                bots.add(candidate);
+            }
+        } else {
+            bots = resolveTargetBots(context, targetArg);
+        }
+
+        if (bots.isEmpty()) {
+            ChatUtils.sendSystemMessage(source, "No bots are following you.");
+            return 0;
+        }
+
+        // For now, just use the first bot (shelter is typically a single-bot task)
+        ServerPlayerEntity bot = bots.get(0);
+        MinecraftServer server = source.getServer();
+
+        // Abort any current task
+        TaskService.forceAbort(bot.getUuid(), "§cInterrupted by /bot shelter_look.");
+        BotIdleHobbiesService.snoozeFor(bot, 3_600L);
+
+        // Move the bot to the target location first, then run shelter skill
+        final BlockPos finalGoal = goal;
+        final String finalShelterType = shelterType;
+        ChatUtils.sendSystemMessage(source, bot.getGameProfile().name() + " is heading to build a " + shelterType + " where you're looking.");
+
+        // Use async movement to the position, then run the shelter skill
+        BotEventHandler.setComeModeWalk(bot, commander, finalGoal, 3.2D, true);
+
+        // Schedule the shelter skill to run after the bot arrives
+        // We'll do a simple approach: run the skill after a short delay / when bot is close
+        server.execute(() -> {
+            // Queue up the skill execution once movement is roughly complete
+            // Use TaskService to run shelter after a brief movement phase
+            java.util.concurrent.Executors.newSingleThreadScheduledExecutor().schedule(() -> {
+                server.execute(() -> {
+                    // Run the shelter skill
+                    String skillArgs = finalShelterType;
+                    try {
+                        executeSkillTargets(context, "shelter", skillArgs + " " + bot.getGameProfile().name());
+                    } catch (CommandSyntaxException e) {
+                        LOGGER.warn("Failed to execute shelter skill: {}", e.getMessage());
+                    }
+                });
+            }, 2, java.util.concurrent.TimeUnit.SECONDS);
+        });
+
+        return 1;
     }
 
     private static int executeCome(CommandContext<ServerCommandSource> context,

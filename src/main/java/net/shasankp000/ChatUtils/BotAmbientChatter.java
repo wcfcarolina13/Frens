@@ -1,6 +1,5 @@
 package net.shasankp000.ChatUtils;
 
-import net.minecraft.entity.player.HungerManager;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
@@ -13,8 +12,6 @@ import net.shasankp000.GameAI.services.TaskService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.UUID;
@@ -26,12 +23,14 @@ import java.util.concurrent.ConcurrentHashMap;
  * <p>This creates an immersive atmosphere where bots occasionally vocalize
  * idle thoughts, similar to how Minecraft villagers hum to themselves.
  * 
- * <p>Features context-aware sound selection based on:
+ * <p>Uses the {@link BotMoodManager} emotional state system to select
+ * appropriate dialogue based on the bot's current mood:
  * <ul>
- *   <li>Bot's current health level (injured sounds if hurt)</li>
- *   <li>Bot's hunger level (hungry comments if low)</li>
- *   <li>Time of day (relaxed vs alert based on time)</li>
- *   <li>Current mode (follow, guard, patrol, etc.)</li>
+ *   <li>STRESSED - Alert/tense sounds after combat</li>
+ *   <li>INJURED - Pain/fatigue sounds when hurt</li>
+ *   <li>HUNGRY - Food-related comments when low on food</li>
+ *   <li>CONTENT - Relaxed/happy sounds when all is well</li>
+ *   <li>NEUTRAL - General idle chatter</li>
  * </ul>
  * 
  * <p>Chatter is infrequent (every 2-5 minutes when idle) and only occurs when:
@@ -58,7 +57,7 @@ public final class BotAmbientChatter {
     // Per-bot next chatter tick
     private static final Map<UUID, Long> NEXT_CHATTER_TICK = new ConcurrentHashMap<>();
 
-    // Idle chatter sounds - things the bot might say when standing around
+    // Idle chatter sounds - things the bot might say when standing around (NEUTRAL mood)
     private static final SoundEvent[] IDLE_CHATTER = {
             BotDialogueSounds.LINE_IDLE_ALL_QUIET,
             BotDialogueSounds.LINE_IDLE_STILL_STANDING,
@@ -67,14 +66,14 @@ public final class BotAmbientChatter {
             BotDialogueSounds.LINE_IDLE_ENJOYING_CALM,
     };
 
-    // Context-aware chatter - things the bot might muse about
+    // Context-aware chatter - things the bot might muse about (NEUTRAL mood variant)
     private static final SoundEvent[] CONTEXT_CHATTER = {
             BotDialogueSounds.LINE_CONTEXT_BREATHER_SOMETIMES,
             BotDialogueSounds.LINE_CONTEXT_CAMPFIRE_WONDERS,
             BotDialogueSounds.LINE_CONTEXT_LISTENING,
     };
 
-    // Health-related sounds when bot is injured
+    // Health-related sounds when bot is injured (INJURED mood)
     private static final SoundEvent[] INJURED_CHATTER = {
             BotDialogueSounds.LINE_STATUS_NEED_BREATHER,
             BotDialogueSounds.LINE_STATUS_NOT_BEST,
@@ -83,16 +82,28 @@ public final class BotAmbientChatter {
             BotDialogueSounds.LINE_WARNING_NOT_FULL_STRENGTH,
     };
 
-    // Hunger-related sounds when bot is hungry
+    // Hunger-related sounds when bot is hungry (HUNGRY mood)
     private static final SoundEvent[] HUNGRY_CHATTER = {
             BotDialogueSounds.LINE_STATUS_HUNGRY,
             BotDialogueSounds.LINE_STATUS_FIND_FOOD,
             BotDialogueSounds.LINE_STATUS_SNACK_TIME,
     };
 
-    // Thresholds for context-aware selection
-    private static final float INJURED_HEALTH_THRESHOLD = 0.6f; // Below 60% health
-    private static final int HUNGRY_FOOD_THRESHOLD = 12; // Below 12 food points (out of 20)
+    // Alert/tense sounds after recent combat (STRESSED mood)
+    private static final SoundEvent[] STRESSED_CHATTER = {
+            BotDialogueSounds.LINE_COMBAT_STANDING_DOWN,
+            BotDialogueSounds.LINE_STATUS_NEED_BREATHER,
+            BotDialogueSounds.LINE_STATUS_TOO_MANY_HITS,
+            BotDialogueSounds.LINE_WARNING_BANGED_UP,
+    };
+
+    // Relaxed/happy sounds when all is well (CONTENT mood)
+    private static final SoundEvent[] CONTENT_CHATTER = {
+            BotDialogueSounds.LINE_IDLE_ENJOYING_CALM,
+            BotDialogueSounds.LINE_IDLE_TAKING_IT_EASY,
+            BotDialogueSounds.LINE_CONTEXT_BREATHER_SOMETIMES,
+            BotDialogueSounds.LINE_IDLE_ALL_QUIET,
+    };
 
     private BotAmbientChatter() {
     }
@@ -190,46 +201,42 @@ public final class BotAmbientChatter {
     }
 
     /**
-     * Pick a context-aware chatter sound based on the bot's current state.
+     * Pick a mood-aware chatter sound based on the bot's emotional state.
      * 
-     * <p>Priority:
-     * <ol>
-     *   <li>If injured (below 60% health), high chance of injured sounds</li>
-     *   <li>If hungry (below 12 food points), high chance of hungry sounds</li>
-     *   <li>Otherwise, mix of idle and context chatter</li>
-     * </ol>
+     * <p>Uses {@link BotMoodManager} to determine the bot's current mood
+     * and selects appropriate sounds:
+     * <ul>
+     *   <li>STRESSED - Alert/tense sounds (100% chance)</li>
+     *   <li>INJURED - Pain/fatigue sounds (100% chance)</li>
+     *   <li>HUNGRY - Food-related sounds (100% chance)</li>
+     *   <li>CONTENT - Relaxed sounds (100% chance)</li>
+     *   <li>NEUTRAL - 70% idle, 30% context chatter</li>
+     * </ul>
      * 
      * @param bot The bot to pick a sound for
      * @return The selected SoundEvent
      */
     private static SoundEvent pickChatterSound(ServerPlayerEntity bot) {
-        // Build a weighted list of possible sounds based on context
-        List<SoundEvent> candidates = new ArrayList<>();
+        // Get the bot's current emotional state from the mood manager
+        EmotionalState mood = BotMoodManager.getMood(bot);
         
-        // Check health status
-        float healthPercent = bot.getHealth() / bot.getMaxHealth();
-        boolean isInjured = healthPercent < INJURED_HEALTH_THRESHOLD;
+        LOGGER.debug("Bot {} mood: {}", bot.getName().getString(), mood.getId());
         
-        // Check hunger status
-        HungerManager hunger = bot.getHungerManager();
-        boolean isHungry = hunger.getFoodLevel() < HUNGRY_FOOD_THRESHOLD;
-        
-        // If injured, high chance of injured sounds
-        if (isInjured && RNG.nextFloat() < 0.6f) {
-            return INJURED_CHATTER[RNG.nextInt(INJURED_CHATTER.length)];
-        }
-        
-        // If hungry, high chance of hungry sounds
-        if (isHungry && RNG.nextFloat() < 0.5f) {
-            return HUNGRY_CHATTER[RNG.nextInt(HUNGRY_CHATTER.length)];
-        }
-        
-        // Default: 70% idle chatter, 30% context chatter
-        if (RNG.nextFloat() < 0.7f) {
-            return IDLE_CHATTER[RNG.nextInt(IDLE_CHATTER.length)];
-        } else {
-            return CONTEXT_CHATTER[RNG.nextInt(CONTEXT_CHATTER.length)];
-        }
+        // Select sound based on mood
+        return switch (mood) {
+            case STRESSED -> STRESSED_CHATTER[RNG.nextInt(STRESSED_CHATTER.length)];
+            case INJURED -> INJURED_CHATTER[RNG.nextInt(INJURED_CHATTER.length)];
+            case HUNGRY -> HUNGRY_CHATTER[RNG.nextInt(HUNGRY_CHATTER.length)];
+            case CONTENT -> CONTENT_CHATTER[RNG.nextInt(CONTENT_CHATTER.length)];
+            case NEUTRAL -> {
+                // 70% idle chatter, 30% context chatter
+                if (RNG.nextFloat() < 0.7f) {
+                    yield IDLE_CHATTER[RNG.nextInt(IDLE_CHATTER.length)];
+                } else {
+                    yield CONTEXT_CHATTER[RNG.nextInt(CONTEXT_CHATTER.length)];
+                }
+            }
+        };
     }
 
     /**

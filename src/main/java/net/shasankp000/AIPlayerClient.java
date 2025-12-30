@@ -25,6 +25,20 @@ public class AIPlayerClient implements ClientModInitializer {
     private static KeyBinding KEY_FOLLOW_TOGGLE_LOOK;
     private static KeyBinding KEY_GO_TO_LOOK;
 
+    // Pending shelter type from the Topics menu (null = no pending shelter, use go_to_look as normal)
+    private static String pendingShelterType = null;
+    private static String pendingShelterBotTarget = null;
+
+    public static void setPendingShelter(String type, String botTarget) {
+        pendingShelterType = type;
+        pendingShelterBotTarget = botTarget;
+    }
+
+    public static void clearPendingShelter() {
+        pendingShelterType = null;
+        pendingShelterBotTarget = null;
+    }
+
     @Override
     public void onInitializeClient() {
         HandledScreens.register(AIPlayer.BOT_PLAYER_INV_HANDLER, BotPlayerInventoryScreen::new);
@@ -59,7 +73,7 @@ public class AIPlayerClient implements ClientModInitializer {
                 handleFollowToggleLookedAt(client);
             }
             if (KEY_GO_TO_LOOK.wasPressed()) {
-                sendChatCommand(client, "bot go_to_look");
+                handleGoToLook(client);
             }
         });
 
@@ -76,6 +90,24 @@ public class AIPlayerClient implements ClientModInitializer {
             String json = payload.basesJson();
             context.client().execute(() -> BaseManagerScreen.applyBasesJson(json));
         });
+    }
+
+    private static void handleGoToLook(MinecraftClient client) {
+        if (client == null || client.player == null) {
+            return;
+        }
+        // Check if there's a pending shelter command from the Topics menu
+        if (pendingShelterType != null) {
+            String cmd = "bot shelter_look " + pendingShelterType;
+            if (pendingShelterBotTarget != null && !pendingShelterBotTarget.isEmpty()) {
+                cmd += " " + pendingShelterBotTarget;
+            }
+            sendChatCommand(client, cmd);
+            clearPendingShelter();
+        } else {
+            // Normal go_to_look behavior
+            sendChatCommand(client, "bot go_to_look");
+        }
     }
 
     private static void handleFollowToggleLookedAt(MinecraftClient client) {

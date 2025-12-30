@@ -19,6 +19,7 @@ import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.shasankp000.ChatUtils.BERTModel.BertModelManager;
 import net.shasankp000.ChatUtils.BotAmbientChatter;
+import net.shasankp000.ChatUtils.BotMoodManager;
 import net.shasankp000.ChatUtils.ChatUtils;
 import net.shasankp000.ChatUtils.NLPProcessor;
 import net.shasankp000.Commands.configCommand;
@@ -255,6 +256,8 @@ public class AIPlayer implements ModInitializer {
             net.shasankp000.GameAI.services.BotIdleHobbiesService.resetSession();
             // Clear ambient chatter scheduler state too.
             BotAmbientChatter.resetSession();
+            // Clear mood manager state.
+            BotMoodManager.resetSession();
             try {
                 if (modelManager.isModelLoaded() || loadedBERTModelIntoMemory) {
                     modelManager.unloadModel();
@@ -289,6 +292,9 @@ public class AIPlayer implements ModInitializer {
         // Register damage event to handle suffocation immediately
         ServerLivingEntityEvents.ALLOW_DAMAGE.register((entity, source, amount) -> {
             if (entity instanceof ServerPlayerEntity serverPlayer && BotEventHandler.isRegisteredBot(serverPlayer)) {
+                // Notify mood manager of damage (triggers STRESSED state)
+                BotMoodManager.noteDamage(serverPlayer);
+
                 // If a real player hits a bot, treat it like a "touch" interaction for flavor text.
                 if (source != null && source.getAttacker() instanceof ServerPlayerEntity attacker
                         && attacker != serverPlayer && !attacker.isRemoved()) {
@@ -368,6 +374,7 @@ public class AIPlayer implements ModInitializer {
         ServerTickEvents.END_SERVER_TICK.register(BotAutoReturnSunsetService::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(BotIdleHobbiesService::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(BotAmbientSocialChatService::onServerTick);
+        ServerTickEvents.END_SERVER_TICK.register(BotMoodManager::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(BotAmbientChatter::onServerTick);
 
         ServerMessageEvents.CHAT_MESSAGE.register((message, sender, params) -> {

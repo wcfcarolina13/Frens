@@ -3,7 +3,9 @@ package net.shasankp000.GameAI.services;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
+import net.shasankp000.ChatUtils.BotMoodManager;
 import net.shasankp000.ChatUtils.ChatUtils;
+import net.shasankp000.ChatUtils.EmotionalState;
 import net.shasankp000.GameAI.BotEventHandler;
 
 import java.util.List;
@@ -15,6 +17,8 @@ import java.util.concurrent.ConcurrentHashMap;
  * "Touch" interaction flavor text for bots.
  *
  * <p>Intended to be triggered by an explicit interaction (e.g., right-click / punch) to avoid chat spam.
+ * 
+ * <p>Uses {@link BotMoodManager} to add mood-aware responses.
  */
 public final class BotTouchChatService {
 
@@ -124,6 +128,9 @@ public final class BotTouchChatService {
             );
         };
 
+        // Get mood-based greetings for distressed states
+        String moodLine = getMoodLine(bot, name);
+
         String simple = choose(
             "Hmm?",
             "Yeah?",
@@ -133,13 +140,57 @@ public final class BotTouchChatService {
 
         String context = buildContextLine(toucher, bot);
         double r = Math.random();
-        if (context != null && !context.isBlank() && r < 0.28) {
+        
+        // High priority: if mood is distressed, use mood line 40% of the time
+        if (moodLine != null && r < 0.40) {
+            return moodLine;
+        }
+        
+        // Otherwise: 25% context, 30% mode, rest simple
+        if (context != null && !context.isBlank() && r < 0.55) {
             return context;
         }
-        if (r < 0.52) {
+        if (r < 0.70) {
             return modeLine;
         }
         return simple;
+    }
+
+    /**
+     * Get a mood-specific response line based on the bot's emotional state.
+     * 
+     * @return A mood-appropriate line, or null for NEUTRAL/CONTENT states
+     */
+    private static String getMoodLine(ServerPlayerEntity bot, String name) {
+        EmotionalState mood = BotMoodManager.getMood(bot);
+        
+        return switch (mood) {
+            case STRESSED -> choose(
+                    "Still a bit on edge after that fight, " + name + ".",
+                    "Give me a second—still catching my breath.",
+                    "That was close. I'm alright though.",
+                    "Heart's still pounding from that scuffle."
+            );
+            case INJURED -> choose(
+                    "I'm a bit banged up, " + name + ".",
+                    "Could use a moment to recover.",
+                    "Not at my best right now.",
+                    "I've had better days, health-wise."
+            );
+            case HUNGRY -> choose(
+                    "My stomach's been grumbling.",
+                    "Could really use a snack, " + name + ".",
+                    "Getting hungry over here.",
+                    "Food would be nice about now."
+            );
+            case CONTENT -> choose(
+                    "Doing great, " + name + "!",
+                    "Life's good right now.",
+                    "No complaints here.",
+                    "Feeling pretty good, actually."
+            );
+            case NEUTRAL -> null; // Use default responses
+        };
     }
 
         private static String buildContextLine(ServerPlayerEntity toucher, ServerPlayerEntity bot) {

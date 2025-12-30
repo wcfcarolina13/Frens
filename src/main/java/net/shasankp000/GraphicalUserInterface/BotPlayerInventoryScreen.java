@@ -74,7 +74,8 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         SKILL_FISH,
         SKILL_WOODCUT,
         SKILL_WOOL,
-        SKILL_SHELTER,
+        SKILL_HOVEL,
+        SKILL_BURROW,
         SKILL_FARM,
         SKILL_MINING,
         SKILL_STRIPMINE,
@@ -112,7 +113,8 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             new TopicEntry("Fishing", TopicAction.SKILL_FISH, false, 0),
             new TopicEntry("Woodcut", TopicAction.SKILL_WOODCUT, false, 0),
             new TopicEntry("Wool", TopicAction.SKILL_WOOL, false, 0),
-            new TopicEntry("Shelter…", TopicAction.SKILL_SHELTER, false, 0),
+            new TopicEntry("Hovel", TopicAction.SKILL_HOVEL, false, 0),
+            new TopicEntry("Burrow", TopicAction.SKILL_BURROW, false, 0),
             new TopicEntry("Farming", TopicAction.SKILL_FARM, false, 0),
             new TopicEntry("Mining", TopicAction.SKILL_MINING, false, 0),
             new TopicEntry("Stripmine", TopicAction.SKILL_STRIPMINE, false, 1),
@@ -622,7 +624,8 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case SKILL_FISH -> runSkillCommand("fish", null);
             case SKILL_WOODCUT -> runSkillCommand("woodcut", null);
             case SKILL_WOOL -> runSkillCommand("wool", null);
-            case SKILL_SHELTER -> openShelterSubmenu();
+            case SKILL_HOVEL -> runShelterWithLook("hovel");
+            case SKILL_BURROW -> runShelterWithLook("burrow");
             case SKILL_FARM -> runSkillCommand("farm", null);
             case SKILL_MINING -> runSkillCommand("mining", null);
             case SKILL_STRIPMINE -> runSkillCommand("stripmine", null);
@@ -834,12 +837,28 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         this.client.setScreen(new BaseManagerScreen(this));
     }
 
-    private void openShelterSubmenu() {
-        // For now, run the default hovel shelter command
-        // TODO: Could be expanded to show a submenu with hovel/hovel2/burrow options
+    /**
+     * Closes the screen and sends a shelter command with @look flag.
+     * The server will use the player's current look direction to determine placement.
+     * For hovel: centered where player looks
+     * For burrow: digs in the direction player looks
+     */
+    private void runShelterWithLook(String shelterType) {
+        if (this.client == null) {
+            return;
+        }
         String botTarget = formatBotTarget();
-        String command = "bot skill shelter hovel " + botTarget;
-        sendChatCommand(command);
+        // Set the pending shelter type - will be used when player presses go_to_look keybind
+        net.shasankp000.AIPlayerClient.setPendingShelter(shelterType, botTarget);
+        // Close the screen first so player can see where they're looking
+        this.close();
+        // Show instruction message
+        if (this.client.player != null) {
+            this.client.player.sendMessage(
+                net.minecraft.text.Text.literal("Look where you want the " + shelterType + " and press your 'Go To Look' keybind (or /bot shelter_look " + shelterType + ")"),
+                true
+            );
+        }
     }
 
     private void sendChatCommand(String command) {

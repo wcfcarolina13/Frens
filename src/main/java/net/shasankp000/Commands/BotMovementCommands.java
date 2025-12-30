@@ -80,4 +80,22 @@ final class BotMovementCommands {
                 .then(CommandManager.argument("bot", EntityArgumentType.player())
                         .executes(context -> modCommandRegistry.executeReturnToBase(context, EntityArgumentType.getPlayer(context, "bot"), context.getSource().getPlayer())));
     }
+
+    /**
+     * Build shelter at the position where the player is looking.
+     * Usage: /bot shelter_look <hovel|burrow> [bot]
+     */
+    static ArgumentBuilder<ServerCommandSource, ?> buildShelterLook() {
+        return CommandManager.literal("shelter_look")
+                .then(CommandManager.literal("hovel")
+                        .executes(context -> modCommandRegistry.executeShelterLook(context, "hovel", null))
+                        .then(CommandManager.argument("bot", StringArgumentType.string())
+                                .executes(context -> modCommandRegistry.executeShelterLook(context, "hovel",
+                                        StringArgumentType.getString(context, "bot")))))
+                .then(CommandManager.literal("burrow")
+                        .executes(context -> modCommandRegistry.executeShelterLook(context, "burrow", null))
+                        .then(CommandManager.argument("bot", StringArgumentType.string())
+                                .executes(context -> modCommandRegistry.executeShelterLook(context, "burrow",
+                                        StringArgumentType.getString(context, "bot")))));
+    }
 }
