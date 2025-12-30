@@ -124,6 +124,106 @@ public final class BotDialogueSounds {
     public static final SoundEvent LINE_CONTEXT_CAMPFIRE_WONDERS = register("bot.line.context_campfire_wonders");
     public static final SoundEvent LINE_CONTEXT_LISTENING = register("bot.line.context_listening");
 
+    // === NEW CATEGORY SOUND EVENTS ===
+    public static final SoundEvent BOT_COMBAT = register("bot.combat");
+    public static final SoundEvent BOT_CONFIRM = register("bot.confirm");
+    public static final SoundEvent BOT_CRAFT = register("bot.craft");
+    public static final SoundEvent BOT_DEATH = register("bot.death");
+    public static final SoundEvent BOT_DISCOVER = register("bot.discover");
+    public static final SoundEvent BOT_EATING = register("bot.eating");
+    public static final SoundEvent BOT_FARM = register("bot.farm");
+    public static final SoundEvent BOT_FISH = register("bot.fish");
+    public static final SoundEvent BOT_HAZARD = register("bot.hazard");
+    public static final SoundEvent BOT_HUNGER = register("bot.hunger");
+    public static final SoundEvent BOT_INVENTORY = register("bot.inventory");
+    public static final SoundEvent BOT_MOVE = register("bot.move");
+    public static final SoundEvent BOT_SHELTER = register("bot.shelter");
+    public static final SoundEvent BOT_SLEEP = register("bot.sleep");
+    public static final SoundEvent BOT_SMELT = register("bot.smelt");
+
+    // Line-specific sound events (combat)
+    public static final SoundEvent LINE_COMBAT_ENGAGING = register("bot.line.combat_engaging");
+    public static final SoundEvent LINE_COMBAT_STANDING_DOWN = register("bot.line.combat_standing_down");
+    public static final SoundEvent LINE_COMBAT_DEFEND_BOTS = register("bot.line.combat_defend_bots");
+    public static final SoundEvent LINE_COMBAT_FOCUS_SELF = register("bot.line.combat_focus_self");
+    public static final SoundEvent LINE_COMBAT_AGGRESSIVE = register("bot.line.combat_aggressive");
+    public static final SoundEvent LINE_COMBAT_EVASIVE = register("bot.line.combat_evasive");
+
+    // Line-specific sound events (confirm)
+    public static final SoundEvent LINE_CONFIRM_ON_IT = register("bot.line.confirm_on_it");
+    public static final SoundEvent LINE_CONFIRM_HOLD_OFF = register("bot.line.confirm_hold_off");
+    public static final SoundEvent LINE_CONFIRM_ASK_YESNO = register("bot.line.confirm_ask_yesno");
+
+    // Line-specific sound events (craft)
+    public static final SoundEvent LINE_CRAFT_NEED_TABLE = register("bot.line.craft_need_table");
+    public static final SoundEvent LINE_CRAFT_UNKNOWN = register("bot.line.craft_unknown");
+    public static final SoundEvent LINE_CRAFT_CANT_PLACE = register("bot.line.craft_cant_place");
+
+    // Line-specific sound events (death)
+    public static final SoundEvent LINE_DEATH_RESUME_ASK = register("bot.line.death_resume_ask");
+
+    // Line-specific sound events (discover)
+    public static final SoundEvent LINE_DISCOVER_DIAMONDS = register("bot.line.discover_diamonds");
+    public static final SoundEvent LINE_DISCOVER_ANCIENT_DEBRIS = register("bot.line.discover_ancient_debris");
+    public static final SoundEvent LINE_DISCOVER_EMERALDS = register("bot.line.discover_emeralds");
+    public static final SoundEvent LINE_DISCOVER_GOLD = register("bot.line.discover_gold");
+    public static final SoundEvent LINE_DISCOVER_IRON = register("bot.line.discover_iron");
+    public static final SoundEvent LINE_DISCOVER_COAL = register("bot.line.discover_coal");
+    public static final SoundEvent LINE_DISCOVER_REDSTONE = register("bot.line.discover_redstone");
+    public static final SoundEvent LINE_DISCOVER_LAPIS = register("bot.line.discover_lapis");
+    public static final SoundEvent LINE_DISCOVER_QUARTZ = register("bot.line.discover_quartz");
+    public static final SoundEvent LINE_DISCOVER_CHEST = register("bot.line.discover_chest");
+    public static final SoundEvent LINE_DISCOVER_GEODE = register("bot.line.discover_geode");
+    public static final SoundEvent LINE_DISCOVER_STRUCTURE = register("bot.line.discover_structure");
+
+    // Line-specific sound events (eating)
+    public static final SoundEvent LINE_EATING_NO_FOOD = register("bot.line.eating_no_food");
+    public static final SoundEvent LINE_EATING_STILL_HUNGRY = register("bot.line.eating_still_hungry");
+    public static final SoundEvent LINE_EATING_PROGRESS = register("bot.line.eating_progress");
+    public static final SoundEvent LINE_EATING_DONE = register("bot.line.eating_done");
+
+    // Line-specific sound events (farm)
+    public static final SoundEvent LINE_FARM_NEED_SEEDS = register("bot.line.farm_need_seeds");
+    public static final SoundEvent LINE_FARM_NEED_HOE = register("bot.line.farm_need_hoe");
+
+    // Line-specific sound events (fish)
+    public static final SoundEvent LINE_FISH_NO_WATER = register("bot.line.fish_no_water");
+
+    // Line-specific sound events (hazard)
+    public static final SoundEvent LINE_HAZARD_LAVA = register("bot.line.hazard_lava");
+    public static final SoundEvent LINE_HAZARD_WATER = register("bot.line.hazard_water");
+    public static final SoundEvent LINE_HAZARD_NO_TORCHES = register("bot.line.hazard_no_torches");
+
+    // Line-specific sound events (hunger)
+    public static final SoundEvent LINE_HUNGER_DYING = register("bot.line.hunger_dying");
+    public static final SoundEvent LINE_HUNGER_STARVING = register("bot.line.hunger_starving");
+    public static final SoundEvent LINE_HUNGER_WARNING = register("bot.line.hunger_warning");
+
+    // Line-specific sound events (inventory)
+    public static final SoundEvent LINE_INVENTORY_FULL = register("bot.line.inventory_full");
+    public static final SoundEvent LINE_INVENTORY_DONT_HAVE = register("bot.line.inventory_dont_have");
+    public static final SoundEvent LINE_INVENTORY_GIVE_ITEM = register("bot.line.inventory_give_item");
+
+    // Line-specific sound events (move)
+    public static final SoundEvent LINE_MOVE_CANT_REACH = register("bot.line.move_cant_reach");
+    public static final SoundEvent LINE_MOVE_BLOCKED = register("bot.line.move_blocked");
+    public static final SoundEvent LINE_MOVE_WALKING_TO_YOU = register("bot.line.move_walking_to_you");
+    public static final SoundEvent LINE_MOVE_TARGET_LOST = register("bot.line.move_target_lost");
+    public static final SoundEvent LINE_MOVE_BACK_TO_IDLE = register("bot.line.move_back_to_idle");
+
+    // Line-specific sound events (shelter)
+    public static final SoundEvent LINE_SHELTER_CANT_BUILD = register("bot.line.shelter_cant_build");
+
+    // Line-specific sound events (sleep)
+    public static final SoundEvent LINE_SLEEP_CANT_NOW = register("bot.line.sleep_cant_now");
+    public static final SoundEvent LINE_SLEEP_NO_BED = register("bot.line.sleep_no_bed");
+    public static final SoundEvent LINE_SLEEP_NO_SPOT = register("bot.line.sleep_no_spot");
+    public static final SoundEvent LINE_SLEEP_BED_BLOCKED = register("bot.line.sleep_bed_blocked");
+
+    // Line-specific sound events (smelt)
+    public static final SoundEvent LINE_SMELT_NEED_FURNACE = register("bot.line.smelt_need_furnace");
+    public static final SoundEvent LINE_SMELT_NOTHING = register("bot.line.smelt_nothing");
+
     private BotDialogueSounds() {
     }
 

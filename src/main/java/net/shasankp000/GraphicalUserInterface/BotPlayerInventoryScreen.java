@@ -73,6 +73,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         BASES,
         SKILL_FISH,
         SKILL_WOODCUT,
+        SKILL_WOOL,
         SKILL_MINING,
         SKILL_STRIPMINE,
         SKILL_ASCENT,
@@ -108,6 +109,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             new TopicEntry("Bases…", TopicAction.BASES, false, 0),
             new TopicEntry("Fishing", TopicAction.SKILL_FISH, false, 0),
             new TopicEntry("Woodcut", TopicAction.SKILL_WOODCUT, false, 0),
+            new TopicEntry("Wool", TopicAction.SKILL_WOOL, false, 0),
             new TopicEntry("Mining", TopicAction.SKILL_MINING, false, 0),
             new TopicEntry("Stripmine", TopicAction.SKILL_STRIPMINE, false, 1),
             new TopicEntry("Ascent", TopicAction.SKILL_ASCENT, false, 1),
@@ -615,6 +617,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case BASES -> openBasesManager();
             case SKILL_FISH -> runSkillCommand("fish", null);
             case SKILL_WOODCUT -> runSkillCommand("woodcut", null);
+            case SKILL_WOOL -> runSkillCommand("wool", null);
             case SKILL_MINING -> runSkillCommand("mining", null);
             case SKILL_STRIPMINE -> runSkillCommand("stripmine", null);
             case SKILL_ASCENT -> runSkillCommand("mining", "ascent");

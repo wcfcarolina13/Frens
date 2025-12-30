@@ -37,7 +37,9 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 /**
  * Simplified farming skill that follows a clear flow:
@@ -1257,32 +1259,106 @@ public class FarmSkill implements Skill {
         }
 
         LookController.faceBlock(bot, waterPos);
-        sleep(120);
+        sleep(150);
 
-        // Try interactBlock first with explicit hit inside the water block (top face)
-        Vec3d hitVec = Vec3d.ofCenter(waterPos).add(0, 0.4, 0);
-        BlockHitResult hit = new BlockHitResult(hitVec, Direction.UP, waterPos, true);
-        ActionResult result = bot.interactionManager.interactBlock(bot, world, bot.getMainHandStack(), Hand.MAIN_HAND, hit);
-        LOGGER.info("scoopWater interactBlock result={} handItem={}", result, bot.getMainHandStack().getItem());
-        if (result.isAccepted() && bot.getMainHandStack().isOf(Items.WATER_BUCKET)) {
-            bot.swingHand(Hand.MAIN_HAND, true);
-            LOGGER.info("scoopWater success via interactBlock at {}", waterPos);
-            return true;
+        // Execute scooping on the server thread for proper synchronization
+        return scoopWaterOnServerThread(bot, world, waterPos, bucketSlot);
+    }
+
+    /**
+     * Performs the actual water scooping on the server thread for proper synchronization.
+     * Uses multiple strategies: interactBlock, interactItem, and fallback step-into approach.
+     */
+    private static boolean scoopWaterOnServerThread(ServerPlayerEntity bot, ServerWorld world, BlockPos waterPos, int bucketSlot) {
+        var server = bot.getCommandSource().getServer();
+        if (server == null) {
+            LOGGER.warn("scoopWaterOnServerThread: no server available");
+            return false;
         }
 
-        // Try interactItem as a fallback (server-side bucket use)
-        result = bot.interactionManager.interactItem(bot, world, bot.getMainHandStack(), Hand.MAIN_HAND);
-        LOGGER.info("scoopWater interactItem result={} handItem={}", result, bot.getMainHandStack().getItem());
-        if (result.isAccepted() && bot.getMainHandStack().isOf(Items.WATER_BUCKET)) {
-            bot.swingHand(Hand.MAIN_HAND, true);
-            LOGGER.info("scoopWater success via interactItem at {}", waterPos);
-            return true;
+        CompletableFuture<Boolean> future = new CompletableFuture<>();
+        server.execute(() -> {
+            try {
+                // Ensure bucket is selected on server thread
+                selectHotbarSlot(bot, bucketSlot);
+                if (!bot.getMainHandStack().isOf(Items.BUCKET)) {
+                    LOGGER.warn("scoopWaterOnServerThread: expected BUCKET but have {}", bot.getMainHandStack().getItem());
+                    future.complete(false);
+                    return;
+                }
+
+                // Verify the water block is actually water before attempting
+                BlockState waterState = world.getBlockState(waterPos);
+                if (!waterState.isOf(Blocks.WATER)) {
+                    LOGGER.warn("scoopWater: target {} is not water (is {})", waterPos, waterState.getBlock());
+                    future.complete(false);
+                    return;
+                }
+
+                // Strategy 1: interactItem - bucket's use() is triggered by player looking at water
+                // This relies on the raycast from the bot's eye position
+                ActionResult result = bot.interactionManager.interactItem(bot, world, bot.getMainHandStack(), Hand.MAIN_HAND);
+                LOGGER.info("scoopWater interactItem result={} handItem={}", result, bot.getMainHandStack().getItem());
+                if (result.isAccepted() && bot.getMainHandStack().isOf(Items.WATER_BUCKET)) {
+                    bot.swingHand(Hand.MAIN_HAND, true);
+                    LOGGER.info("scoopWater success via interactItem at {}", waterPos);
+                    future.complete(true);
+                    return;
+                }
+
+                // Strategy 2: interactBlock with explicit hit targeting the water block (top face)
+                Vec3d hitVec = Vec3d.ofCenter(waterPos).add(0, 0.4, 0);
+                BlockHitResult hit = new BlockHitResult(hitVec, Direction.UP, waterPos, true);
+                result = bot.interactionManager.interactBlock(bot, world, bot.getMainHandStack(), Hand.MAIN_HAND, hit);
+                LOGGER.info("scoopWater interactBlock result={} handItem={}", result, bot.getMainHandStack().getItem());
+                if (result.isAccepted() && bot.getMainHandStack().isOf(Items.WATER_BUCKET)) {
+                    bot.swingHand(Hand.MAIN_HAND, true);
+                    LOGGER.info("scoopWater success via interactBlock at {}", waterPos);
+                    future.complete(true);
+                    return;
+                }
+
+                // Strategy 3: Try targeting different faces of the water block
+                for (Direction face : new Direction[]{Direction.DOWN, Direction.NORTH, Direction.SOUTH, Direction.EAST, Direction.WEST}) {
+                    Vec3d faceHit = Vec3d.ofCenter(waterPos).add(
+                        face.getOffsetX() * 0.4,
+                        face.getOffsetY() * 0.4,
+                        face.getOffsetZ() * 0.4
+                    );
+                    BlockHitResult faceBlockHit = new BlockHitResult(faceHit, face, waterPos, true);
+                    result = bot.interactionManager.interactBlock(bot, world, bot.getMainHandStack(), Hand.MAIN_HAND, faceBlockHit);
+                    if (result.isAccepted() && bot.getMainHandStack().isOf(Items.WATER_BUCKET)) {
+                        bot.swingHand(Hand.MAIN_HAND, true);
+                        LOGGER.info("scoopWater success via interactBlock (face={}) at {}", face, waterPos);
+                        future.complete(true);
+                        return;
+                    }
+                }
+
+                LOGGER.warn("scoopWater primary strategies failed at {} (lastResult: {}, hand: {})", waterPos, result, bot.getMainHandStack().getItem());
+                future.complete(false);
+            } catch (Exception e) {
+                LOGGER.error("scoopWaterOnServerThread exception: {}", e.getMessage());
+                future.complete(false);
+            }
+        });
+
+        try {
+            boolean result = future.get(5, TimeUnit.SECONDS);
+            if (result) {
+                return true;
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            LOGGER.warn("scoopWater interrupted");
+            return false;
+        } catch (ExecutionException | TimeoutException e) {
+            LOGGER.warn("scoopWater server thread execution failed: {}", e.getMessage());
+            return false;
         }
 
-        LOGGER.warn("scoopWater failed at {} (lastResult: {}, hand: {})", waterPos, result, bot.getMainHandStack().getItem());
         // Fallback: step into the water block and try again
         Vec3d enterPos = Vec3d.ofCenter(waterPos).add(0, 0.2, 0);
-        // Walk to nearest stand then step into the water center
         BlockPos stand = findStandingNearWater(world, waterPos);
         if (stand != null) {
             moveTo(bot.getCommandSource(), bot, stand);
@@ -1291,29 +1367,64 @@ public class FarmSkill implements Skill {
         waitUntilClose(bot, waterPos, 1.5, 10);
         LookController.faceBlock(bot, waterPos);
         sleep(120);
-        // Re-select bucket before fallback
-        selectHotbarSlot(bot, bucketSlot);
-        ActionResult inside = bot.interactionManager.interactItem(bot, world, bot.getMainHandStack(), Hand.MAIN_HAND);
-        LOGGER.info("scoopWater fallback inside block result={} hand={}", inside, bot.getMainHandStack().getItem());
-        if (inside.isAccepted() && bot.getMainHandStack().isOf(Items.WATER_BUCKET)) {
-            bot.swingHand(Hand.MAIN_HAND, true);
-            // move out to nearest stand
-            BlockPos exit = findStandingNearWater(world, waterPos);
-            if (exit != null) {
-                moveTo(bot.getCommandSource(), bot, exit);
+
+        // Re-execute on server thread from inside water
+        CompletableFuture<Boolean> fallbackFuture = new CompletableFuture<>();
+        server.execute(() -> {
+            try {
+                selectHotbarSlot(bot, bucketSlot);
+                if (!bot.getMainHandStack().isOf(Items.BUCKET)) {
+                    fallbackFuture.complete(false);
+                    return;
+                }
+
+                // From inside water, try interactItem first
+                ActionResult inside = bot.interactionManager.interactItem(bot, world, bot.getMainHandStack(), Hand.MAIN_HAND);
+                LOGGER.info("scoopWater fallback interactItem result={} hand={}", inside, bot.getMainHandStack().getItem());
+                if (inside.isAccepted() && bot.getMainHandStack().isOf(Items.WATER_BUCKET)) {
+                    bot.swingHand(Hand.MAIN_HAND, true);
+                    fallbackFuture.complete(true);
+                    return;
+                }
+
+                // Try interactBlock with different faces
+                for (Direction face : Direction.values()) {
+                    Vec3d faceHit = Vec3d.ofCenter(waterPos).add(
+                        face.getOffsetX() * 0.3,
+                        face.getOffsetY() * 0.3,
+                        face.getOffsetZ() * 0.3
+                    );
+                    BlockHitResult insideHit = new BlockHitResult(faceHit, face, waterPos, true);
+                    inside = bot.interactionManager.interactBlock(bot, world, bot.getMainHandStack(), Hand.MAIN_HAND, insideHit);
+                    LOGGER.info("scoopWater fallback interactBlock (face={}) result={} hand={}", face, inside, bot.getMainHandStack().getItem());
+                    if (inside.isAccepted() && bot.getMainHandStack().isOf(Items.WATER_BUCKET)) {
+                        bot.swingHand(Hand.MAIN_HAND, true);
+                        fallbackFuture.complete(true);
+                        return;
+                    }
+                }
+
+                fallbackFuture.complete(false);
+            } catch (Exception e) {
+                LOGGER.error("scoopWater fallback exception: {}", e.getMessage());
+                fallbackFuture.complete(false);
             }
-            return true;
-        }
-        BlockHitResult insideHit = new BlockHitResult(Vec3d.ofCenter(waterPos), Direction.UP, waterPos, true);
-        inside = bot.interactionManager.interactBlock(bot, world, bot.getMainHandStack(), Hand.MAIN_HAND, insideHit);
-        LOGGER.info("scoopWater fallback interactBlock inside result={} hand={}", inside, bot.getMainHandStack().getItem());
-        if (inside.isAccepted() && bot.getMainHandStack().isOf(Items.WATER_BUCKET)) {
-            bot.swingHand(Hand.MAIN_HAND, true);
-            BlockPos exit = findStandingNearWater(world, waterPos);
-            if (exit != null) {
-                moveTo(bot.getCommandSource(), bot, exit);
+        });
+
+        try {
+            boolean fallbackResult = fallbackFuture.get(5, TimeUnit.SECONDS);
+            if (fallbackResult) {
+                // Move out of water
+                BlockPos exit = findStandingNearWater(world, waterPos);
+                if (exit != null) {
+                    moveTo(bot.getCommandSource(), bot, exit);
+                }
+                return true;
             }
-            return true;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } catch (ExecutionException | TimeoutException e) {
+            LOGGER.warn("scoopWater fallback execution failed: {}", e.getMessage());
         }
 
         return false;

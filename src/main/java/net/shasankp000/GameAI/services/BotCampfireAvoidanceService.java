@@ -203,4 +203,75 @@ public final class BotCampfireAvoidanceService {
         }
         return false;
     }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // PUBLIC API for Pathfinding Integration
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Returns true if the given position is dangerously close to an EXPOSED campfire.
+     * An exposed campfire is one that doesn't have solid blocks on all 4 horizontal sides.
+     * This is intended for pathfinding to give campfires a wide berth.
+     *
+     * @param world  the server world
+     * @param pos    the position to check (typically a potential path node)
+     * @param radius how many blocks away to search for campfires (recommend 2-3)
+     * @return true if there's an exposed campfire within radius
+     */
+    public static boolean isNearExposedCampfire(ServerWorld world, BlockPos pos, int radius) {
+        if (world == null || pos == null) {
+            return false;
+        }
+        int r = Math.max(1, radius);
+        for (BlockPos p : BlockPos.iterate(pos.add(-r, -1, -r), pos.add(r, 1, r))) {
+            if (!world.isChunkLoaded(p)) {
+                continue;
+            }
+            if (isCampfire(world.getBlockState(p)) && isCampfireExposed(world, p)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Returns true if the campfire at the given position is exposed, meaning it doesn't
+     * have solid blocks on all 4 horizontal sides (N/S/E/W). Campfires surrounded by walls
+     * are considered safe to walk near.
+     */
+    public static boolean isCampfireExposed(ServerWorld world, BlockPos campfirePos) {
+        if (world == null || campfirePos == null) {
+            return true; // default to exposed if we can't check
+        }
+        
+        BlockPos[] horizontalNeighbors = {
+            campfirePos.north(),
+            campfirePos.south(),
+            campfirePos.east(),
+            campfirePos.west()
+        };
+        
+        int solidCount = 0;
+        for (BlockPos neighbor : horizontalNeighbors) {
+            if (!world.isChunkLoaded(neighbor)) {
+                continue;
+            }
+            BlockState state = world.getBlockState(neighbor);
+            // Check if it's a solid full block (not air, not partial)
+            if (state != null && state.isOpaque() && !state.isAir()) {
+                solidCount++;
+            }
+        }
+        
+        // Campfire is exposed if any side is open
+        return solidCount < 4;
+    }
+
+    /**
+     * Check if a specific block is a campfire (regular or soul).
+     * Made public for external pathfinding checks.
+     */
+    public static boolean isCampfireBlock(BlockState state) {
+        return isCampfire(state);
+    }
 }

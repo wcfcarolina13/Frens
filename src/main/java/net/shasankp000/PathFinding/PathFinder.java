@@ -8,6 +8,7 @@ import net.minecraft.registry.tag.BlockTags;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3i;
+import net.shasankp000.GameAI.services.BotCampfireAvoidanceService;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -514,13 +515,16 @@ public class PathFinder {
     private static List<BlockPos> getNeighbors(BlockPos pos, ServerWorld world) {
         List<BlockPos> neighbors = new ArrayList<>();
 
+        // Candidate positions (all directions)
+        List<BlockPos> candidates = new ArrayList<>();
+        
         // Standard moves on same level
-        neighbors.add(pos.add(1, 0, 0));  // East
-        neighbors.add(pos.add(-1, 0, 0)); // West
-        neighbors.add(pos.add(0, 0, 1));  // South
-        neighbors.add(pos.add(0, 0, -1)); // North
-        neighbors.add(pos.add(0, -1, 0)); // Down
-        neighbors.add(pos.add(0, 1, 0));  // Up - careful: raw vertical climb
+        candidates.add(pos.add(1, 0, 0));  // East
+        candidates.add(pos.add(-1, 0, 0)); // West
+        candidates.add(pos.add(0, 0, 1));  // South
+        candidates.add(pos.add(0, 0, -1)); // North
+        candidates.add(pos.add(0, -1, 0)); // Down
+        candidates.add(pos.add(0, 1, 0));  // Up - careful: raw vertical climb
 
         // Smart step-up moves: only add if there's a block in front
         for (BlockPos flatNeighbor : List.of(
@@ -534,8 +538,18 @@ public class PathFinder {
             BlockPos headSpace = topOfBlock.up();
 
             if (isSolidBlock(world, blockInFront) && isPassable(world, topOfBlock) && isPassable(world, headSpace)) {
-                neighbors.add(topOfBlock); // stepping onto it
+                candidates.add(topOfBlock); // stepping onto it
             }
+        }
+
+        // Filter out positions near exposed campfires (give them a wide berth)
+        for (BlockPos candidate : candidates) {
+            // Skip positions that are too close to exposed campfires
+            if (BotCampfireAvoidanceService.isNearExposedCampfire(world, candidate, 2)) {
+                LOGGER.debug("PathFinder: skipping {} - too close to exposed campfire", candidate);
+                continue;
+            }
+            neighbors.add(candidate);
         }
 
         return neighbors;

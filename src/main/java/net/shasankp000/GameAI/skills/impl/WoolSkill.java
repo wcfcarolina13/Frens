@@ -442,18 +442,42 @@ public class WoolSkill implements Skill {
             BotActions.stop(bot);
             return false;
         }
-        double distSq = bot.getBlockPos().getSquaredDistance(target);
+        
+        // Early Y-level sanity check: don't pursue sheep that wandered into caves
         int dy = Math.abs(target.getY() - bot.getBlockY());
+        if (dy > 12) {
+            LOGGER.debug("Target {} too far vertically (dy={}), skipping", target.toShortString(), dy);
+            return false;
+        }
+        
+        double distSq = bot.getBlockPos().getSquaredDistance(target);
+        final double ARRIVAL_THRESHOLD_SQ = 9.0D;
+        
+        // Short-range nudge for nearby targets
         if (distSq <= 196.0D && dy <= 2) {
             boolean close = MovementService.nudgeTowardUntilClose(
                     bot,
                     target,
-                    9.0D,
+                    ARRIVAL_THRESHOLD_SQ,
                     fastReplan ? 1800L : 2800L,
                     0.16,
                     "wool-short-move");
-            return close || bot.getBlockPos().getSquaredDistance(target) <= 9.0D;
+            if (close || bot.getBlockPos().getSquaredDistance(target) <= ARRIVAL_THRESHOLD_SQ) {
+                return true;
+            }
+            // If short nudge failed, check for a blocking door
+            BlockPos blockingDoor = BlockInteractionService.findBlockingDoor(bot, target, 12.0D);
+            if (blockingDoor != null) {
+                MovementService.tryOpenDoorAt(bot, blockingDoor);
+                MovementService.tryTraverseOpenableToward(bot, blockingDoor, target, "wool-door-nearby");
+                MovementService.nudgeTowardUntilClose(bot, target, ARRIVAL_THRESHOLD_SQ, 2000L, 0.18, "wool-door-cross");
+                if (bot.getBlockPos().getSquaredDistance(target) <= ARRIVAL_THRESHOLD_SQ) {
+                    return true;
+                }
+            }
         }
+        
+        // Standard pathfinding for longer distances
         MovementService.MovementPlan plan = new MovementService.MovementPlan(
                 MovementService.Mode.DIRECT,
                 target,
@@ -463,7 +487,57 @@ public class WoolSkill implements Skill {
                 bot.getHorizontalFacing()
         );
         MovementService.MovementResult res = MovementService.execute(source, bot, plan, false, fastReplan, true, false);
-        return res.success() || bot.getBlockPos().getSquaredDistance(target) <= 9.0;
+        if (res.success() || bot.getBlockPos().getSquaredDistance(target) <= ARRIVAL_THRESHOLD_SQ) {
+            return true;
+        }
+        
+        // Check for blocking door on the direct line
+        BlockPos directBlockingDoor = BlockInteractionService.findBlockingDoor(bot, target, 64.0D);
+        if (directBlockingDoor != null) {
+            MovementService.tryOpenDoorAt(bot, directBlockingDoor);
+            MovementService.tryTraverseOpenableToward(bot, directBlockingDoor, target, "wool-doorway");
+            res = MovementService.execute(source, bot, plan, false, true, false, false);
+            if (res.success() || bot.getBlockPos().getSquaredDistance(target) <= ARRIVAL_THRESHOLD_SQ) {
+                return true;
+            }
+        }
+        
+        // Door escape assist: if we appear to be in an enclosure, try "approach -> open -> step through"
+        try {
+            MovementService.DoorSubgoalPlan doorPlan = directBlockingDoor == null
+                    ? MovementService.findDoorEscapePlan(bot, target, null)
+                    : null;
+            if (doorPlan != null) {
+                LOGGER.info("wool door-escape: doorBase={} approach={} step={}",
+                        doorPlan.doorBase().toShortString(),
+                        doorPlan.approachPos().toShortString(),
+                        doorPlan.stepThroughPos().toShortString());
+                boolean approached = MovementService.nudgeTowardUntilClose(
+                        bot, doorPlan.approachPos(), 2.25D, 2200L, 0.18, "wool-door-approach");
+                if (approached) {
+                    MovementService.tryOpenDoorAt(bot, doorPlan.doorBase());
+                    MovementService.nudgeTowardUntilClose(
+                            bot, doorPlan.stepThroughPos(), 4.0D, 2600L, 0.22, "wool-door-step");
+                    // Retry the main move after stepping through
+                    res = MovementService.execute(source, bot, plan, false, true, false, false);
+                    if (res.success() || bot.getBlockPos().getSquaredDistance(target) <= ARRIVAL_THRESHOLD_SQ) {
+                        return true;
+                    }
+                }
+            }
+        } catch (Throwable t) {
+            LOGGER.debug("Door escape helper threw: {}", t.getMessage());
+        }
+        
+        // Final fallback: safe nudge for very close targets
+        if (bot.getBlockPos().getSquaredDistance(target) <= 16.0) {
+            boolean nudged = MovementService.nudgeTowardUntilClose(bot, target, ARRIVAL_THRESHOLD_SQ, 1500L, 0.2, "wool-final-nudge");
+            if (nudged || bot.getBlockPos().getSquaredDistance(target) <= ARRIVAL_THRESHOLD_SQ) {
+                return true;
+            }
+        }
+        
+        return false;
     }
 
     private boolean ensureWoolCapacityOrDeposit(ServerPlayerEntity bot, ServerWorld world, ServerCommandSource source) {

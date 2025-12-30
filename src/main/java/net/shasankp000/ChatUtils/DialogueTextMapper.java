@@ -225,6 +225,89 @@ public final class DialogueTextMapper {
         // General context
         EXACT_MAP.put("If you need me, I'm listening.", BotDialogueSounds.LINE_CONTEXT_LISTENING);
 
+        // ============ CONFIRM ============
+        EXACT_MAP.put("On it.", BotDialogueSounds.LINE_CONFIRM_ON_IT);
+        EXACT_MAP.put("Understood. I'll hold off for now.", BotDialogueSounds.LINE_CONFIRM_HOLD_OFF);
+        EXACT_MAP.put("Give me a quick yes or no so I know whether to proceed.", BotDialogueSounds.LINE_CONFIRM_ASK_YESNO);
+
+        // ============ DISCOVER ============
+        EXACT_MAP.put("I found diamonds!", BotDialogueSounds.LINE_DISCOVER_DIAMONDS);
+        EXACT_MAP.put("I found ancient debris!", BotDialogueSounds.LINE_DISCOVER_ANCIENT_DEBRIS);
+        EXACT_MAP.put("I found emeralds!", BotDialogueSounds.LINE_DISCOVER_EMERALDS);
+        EXACT_MAP.put("I found gold!", BotDialogueSounds.LINE_DISCOVER_GOLD);
+        EXACT_MAP.put("I found iron!", BotDialogueSounds.LINE_DISCOVER_IRON);
+        EXACT_MAP.put("I found coal!", BotDialogueSounds.LINE_DISCOVER_COAL);
+        EXACT_MAP.put("I found redstone!", BotDialogueSounds.LINE_DISCOVER_REDSTONE);
+        EXACT_MAP.put("I found lapis!", BotDialogueSounds.LINE_DISCOVER_LAPIS);
+        EXACT_MAP.put("I found quartz!", BotDialogueSounds.LINE_DISCOVER_QUARTZ);
+        EXACT_MAP.put("I found a chest!", BotDialogueSounds.LINE_DISCOVER_CHEST);
+        EXACT_MAP.put("I found an amethyst geode!", BotDialogueSounds.LINE_DISCOVER_GEODE);
+        EXACT_MAP.put("I found a structure.", BotDialogueSounds.LINE_DISCOVER_STRUCTURE);
+
+        // ============ HAZARD ============
+        EXACT_MAP.put("Careful, there's lava ahead.", BotDialogueSounds.LINE_HAZARD_LAVA);
+        EXACT_MAP.put("Water detected ahead.", BotDialogueSounds.LINE_HAZARD_WATER);
+        EXACT_MAP.put("Ran out of torches!", BotDialogueSounds.LINE_HAZARD_NO_TORCHES);
+
+        // ============ COMBAT ============
+        EXACT_MAP.put("Engaging threats against allies.", BotDialogueSounds.LINE_COMBAT_ENGAGING);
+        EXACT_MAP.put("Standing down unless attacked.", BotDialogueSounds.LINE_COMBAT_STANDING_DOWN);
+        EXACT_MAP.put("I'll defend nearby bots when they are attacked.", BotDialogueSounds.LINE_COMBAT_DEFEND_BOTS);
+        EXACT_MAP.put("I'll focus on my own fights.", BotDialogueSounds.LINE_COMBAT_FOCUS_SELF);
+        EXACT_MAP.put("Combat stance set to aggressive.", BotDialogueSounds.LINE_COMBAT_AGGRESSIVE);
+        EXACT_MAP.put("Combat stance set to evasive.", BotDialogueSounds.LINE_COMBAT_EVASIVE);
+
+        // ============ HUNGER ============
+        EXACT_MAP.put("I'll die if I don't eat!", BotDialogueSounds.LINE_HUNGER_DYING);
+        EXACT_MAP.put("I'm starving!", BotDialogueSounds.LINE_HUNGER_STARVING);
+        EXACT_MAP.put("I'm getting hungry.", BotDialogueSounds.LINE_HUNGER_WARNING);
+
+        // ============ EATING ============
+        EXACT_MAP.put("I don't have any safe food to eat!", BotDialogueSounds.LINE_EATING_NO_FOOD);
+        EXACT_MAP.put("I ate some food, but I'm still hungry.", BotDialogueSounds.LINE_EATING_STILL_HUNGRY);
+        EXACT_MAP.put("I ate some food so far.", BotDialogueSounds.LINE_EATING_PROGRESS);
+        EXACT_MAP.put("I ate some food. I feel better now!", BotDialogueSounds.LINE_EATING_DONE);
+
+        // ============ DEATH ============
+        EXACT_MAP.put("I died. Should I continue with the last job?", BotDialogueSounds.LINE_DEATH_RESUME_ASK);
+
+        // ============ MOVE ============
+        EXACT_MAP.put("I couldn't reach that spot.", BotDialogueSounds.LINE_MOVE_CANT_REACH);
+        EXACT_MAP.put("I couldn't clear a block.", BotDialogueSounds.LINE_MOVE_BLOCKED);
+        EXACT_MAP.put("Walking to you.", BotDialogueSounds.LINE_MOVE_WALKING_TO_YOU);
+        EXACT_MAP.put("Follow target lost. Returning to idle.", BotDialogueSounds.LINE_MOVE_TARGET_LOST);
+        EXACT_MAP.put("Back to idling.", BotDialogueSounds.LINE_MOVE_BACK_TO_IDLE);
+
+        // ============ INVENTORY ============
+        EXACT_MAP.put("I'm out of inventory space.", BotDialogueSounds.LINE_INVENTORY_FULL);
+        EXACT_MAP.put("I don't have that.", BotDialogueSounds.LINE_INVENTORY_DONT_HAVE);
+        EXACT_MAP.put("Here, take this.", BotDialogueSounds.LINE_INVENTORY_GIVE_ITEM);
+
+        // ============ FISH ============
+        EXACT_MAP.put("I can't find any water nearby.", BotDialogueSounds.LINE_FISH_NO_WATER);
+
+        // ============ SLEEP ============
+        EXACT_MAP.put("I couldn't sleep right now.", BotDialogueSounds.LINE_SLEEP_CANT_NOW);
+        EXACT_MAP.put("I couldn't craft a bed.", BotDialogueSounds.LINE_SLEEP_NO_BED);
+        EXACT_MAP.put("I couldn't find a safe spot.", BotDialogueSounds.LINE_SLEEP_NO_SPOT);
+        EXACT_MAP.put("I couldn't get into the bed.", BotDialogueSounds.LINE_SLEEP_BED_BLOCKED);
+
+        // ============ CRAFT ============
+        EXACT_MAP.put("I need a crafting table placed nearby.", BotDialogueSounds.LINE_CRAFT_NEED_TABLE);
+        EXACT_MAP.put("I don't know how to craft that yet.", BotDialogueSounds.LINE_CRAFT_UNKNOWN);
+        EXACT_MAP.put("I couldn't place a crafting table here.", BotDialogueSounds.LINE_CRAFT_CANT_PLACE);
+
+        // ============ SMELT ============
+        EXACT_MAP.put("I need a furnace placed nearby.", BotDialogueSounds.LINE_SMELT_NEED_FURNACE);
+        EXACT_MAP.put("I have nothing cookable.", BotDialogueSounds.LINE_SMELT_NOTHING);
+
+        // ============ FARM ============
+        EXACT_MAP.put("I need seeds before I can farm.", BotDialogueSounds.LINE_FARM_NEED_SEEDS);
+        EXACT_MAP.put("I need a hoe to till the soil.", BotDialogueSounds.LINE_FARM_NEED_HOE);
+
+        // ============ SHELTER ============
+        EXACT_MAP.put("I can't build a shelter here.", BotDialogueSounds.LINE_SHELTER_CANT_BUILD);
+
         // ============ WARNINGS ============
         EXACT_MAP.put("I'm suffocating!", BotDialogueSounds.LINE_WARNING_SUFFOCATING);
         EXACT_MAP.put("There's a drop ahead.", BotDialogueSounds.LINE_WARNING_DROP_AHEAD);
