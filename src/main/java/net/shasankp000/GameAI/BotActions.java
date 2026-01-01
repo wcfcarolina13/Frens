@@ -919,6 +919,7 @@ public final class BotActions {
      * Checks if a position has clearance for the bot (2 blocks tall).
      * Prevents bot from moving into walls that would cause suffocation.
      */
+    @SuppressWarnings("deprecation")
     private static boolean hasMovementClearance(ServerWorld world, BlockPos pos) {
         BlockState feet = world.getBlockState(pos);
         BlockState head = world.getBlockState(pos.up());

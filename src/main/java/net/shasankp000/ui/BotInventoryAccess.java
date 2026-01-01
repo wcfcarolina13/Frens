@@ -1,6 +1,5 @@
 package net.shasankp000.ui;
 
-import net.minecraft.command.permission.LeveledPermissionPredicate;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.text.Text;
 import net.shasankp000.AIPlayer;

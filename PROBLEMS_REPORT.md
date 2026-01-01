@@ -1,8 +1,9 @@
-PROBLEMS REPORT — AI-Player-checkpoint
+# PROBLEMS REPORT — AI-Player-checkpoint
 Date: 2025-12-31
 Snapshot commit: 952478a
 
-- Quick summary
+# Quick summary
+
 - IDE / language-server reported: ~382 problems (collected from project diagnostics).
 - Gradle reported: 11 configuration/warning items (see build/reports/problems/problems-report.html).
 

@@ -11,7 +11,6 @@ import net.shasankp000.AIPlayer;
 import net.shasankp000.Entity.createFakePlayer;
 import net.shasankp000.FilingSystem.ManualConfig;
 import net.shasankp000.GameAI.BotEventHandler;
-import net.shasankp000.GameAI.services.BotWorldStateService.BotState;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -22,7 +21,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.HashSet;
-import java.util.Map;
+// import java.util.Map; // previously unused; uncomment if needed
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;

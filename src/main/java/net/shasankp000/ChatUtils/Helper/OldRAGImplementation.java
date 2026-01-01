@@ -349,6 +349,7 @@ public class OldRAGImplementation {
     }
 
 
+    @SuppressWarnings("unused")
     private static String recall(String dateTime, String playerMessage) throws SQLException {
 
         ollamaAPI.setRequestTimeoutSeconds(600);

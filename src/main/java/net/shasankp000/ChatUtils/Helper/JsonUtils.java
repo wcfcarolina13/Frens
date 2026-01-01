@@ -62,6 +62,7 @@ public class JsonUtils {
         return sb;
     }
 
+    @SuppressWarnings("deprecation")
     private static boolean isValidJson(String jsonString) {
         try {
             JsonReader reader = new JsonReader(new StringReader(jsonString));

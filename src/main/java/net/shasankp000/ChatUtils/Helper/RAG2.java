@@ -7,7 +7,6 @@ import net.minecraft.server.command.ServerCommandSource;
 import net.shasankp000.ChatUtils.ChatUtils;
 import net.shasankp000.ChatUtils.NLPProcessor;
 import net.shasankp000.Database.SQLiteDB;
-import net.shasankp000.OllamaClient.ollamaClient;
 import net.shasankp000.Overlay.ThinkingStateManager;
 import net.shasankp000.FilingSystem.LLMClientFactory;
 import net.shasankp000.ServiceLLMClients.LLMClient;
