@@ -12,10 +12,10 @@ import net.minecraft.client.gui.widget.ButtonWidget;
 import net.minecraft.client.gui.widget.TextFieldWidget;
 import net.minecraft.text.Text;
 import net.minecraft.util.math.MathHelper;
-import net.shasankp000.Network.BaseRemovePayload;
-import net.shasankp000.Network.BaseRenamePayload;
-import net.shasankp000.Network.BaseSetPayload;
-import net.shasankp000.Network.RequestBasesPayload;
+import net.shasankp000.network.BaseRemovePayload;
+import net.shasankp000.network.BaseRenamePayload;
+import net.shasankp000.network.BaseSetPayload;
+import net.shasankp000.network.RequestBasesPayload;
 
 import java.lang.reflect.Type;
 import java.util.List;

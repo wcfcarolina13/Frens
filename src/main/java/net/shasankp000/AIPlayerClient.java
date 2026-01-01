@@ -15,9 +15,9 @@ import net.minecraft.util.hit.HitResult;
 import net.shasankp000.GraphicalUserInterface.BaseManagerScreen;
 import net.shasankp000.GraphicalUserInterface.BotPlayerInventoryScreen;
 import net.shasankp000.GraphicalUserInterface.ConfigManager;
-import net.shasankp000.Network.BasesListPayload;
-import net.shasankp000.Network.ConfigJsonUtil;
-import net.shasankp000.Network.OpenConfigPayload;
+import net.shasankp000.network.BasesListPayload;
+import net.shasankp000.network.ConfigJsonUtil;
+import net.shasankp000.network.OpenConfigPayload;
 import org.lwjgl.glfw.GLFW;
 
 public class AIPlayerClient implements ClientModInitializer {

@@ -13,8 +13,8 @@ import net.shasankp000.AIPlayer;
 import net.shasankp000.AIPlayerClient;
 import net.shasankp000.GraphicalUserInterface.Widgets.DropdownMenuWidget;
 import net.shasankp000.GraphicalUserInterface.BotControlScreen;
-import net.shasankp000.Network.configNetworkManager;
-import net.shasankp000.Network.ConfigJsonUtil;
+import net.shasankp000.network.configNetworkManager;
+import net.shasankp000.network.ConfigJsonUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

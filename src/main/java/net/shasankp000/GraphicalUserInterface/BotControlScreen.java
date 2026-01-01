@@ -10,8 +10,8 @@ import net.minecraft.client.toast.SystemToast;
 import net.minecraft.text.Text;
 import net.shasankp000.AIPlayer;
 import net.shasankp000.FilingSystem.ManualConfig;
-import net.shasankp000.Network.ConfigJsonUtil;
-import net.shasankp000.Network.configNetworkManager;
+import net.shasankp000.network.ConfigJsonUtil;
+import net.shasankp000.network.configNetworkManager;
 import net.minecraft.text.OrderedText;
 import net.minecraft.util.math.MathHelper;
 

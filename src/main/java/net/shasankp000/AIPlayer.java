@@ -38,11 +38,11 @@ import net.shasankp000.GameAI.llm.LLMOrchestrator;
 
 import net.shasankp000.Database.QTableStorage;
 import net.shasankp000.Entity.AutoFaceEntity;
-import net.shasankp000.Network.OpenConfigPayload;
-import net.shasankp000.Network.SaveAPIKeyPayload;
-import net.shasankp000.Network.SaveConfigPayload;
-import net.shasankp000.Network.SaveCustomProviderPayload;
-import net.shasankp000.Network.configNetworkManager;
+import net.shasankp000.network.OpenConfigPayload;
+import net.shasankp000.network.SaveAPIKeyPayload;
+import net.shasankp000.network.SaveConfigPayload;
+import net.shasankp000.network.SaveCustomProviderPayload;
+import net.shasankp000.network.configNetworkManager;
 import net.shasankp000.WebSearch.AISearchConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -192,13 +192,13 @@ public class AIPlayer implements ModInitializer {
         PayloadTypeRegistry.playC2S().register(SaveCustomProviderPayload.ID, SaveCustomProviderPayload.CODEC);
 
         // Bases manager UI payloads
-        PayloadTypeRegistry.playC2S().register(net.shasankp000.Network.RequestBasesPayload.ID, net.shasankp000.Network.RequestBasesPayload.CODEC);
-        PayloadTypeRegistry.playS2C().register(net.shasankp000.Network.BasesListPayload.ID, net.shasankp000.Network.BasesListPayload.CODEC);
-        PayloadTypeRegistry.playC2S().register(net.shasankp000.Network.BaseSetPayload.ID, net.shasankp000.Network.BaseSetPayload.CODEC);
-        PayloadTypeRegistry.playC2S().register(net.shasankp000.Network.BaseRemovePayload.ID, net.shasankp000.Network.BaseRemovePayload.CODEC);
-        PayloadTypeRegistry.playC2S().register(net.shasankp000.Network.BaseRenamePayload.ID, net.shasankp000.Network.BaseRenamePayload.CODEC);
+        PayloadTypeRegistry.playC2S().register(net.shasankp000.network.RequestBasesPayload.ID, net.shasankp000.network.RequestBasesPayload.CODEC);
+        PayloadTypeRegistry.playS2C().register(net.shasankp000.network.BasesListPayload.ID, net.shasankp000.network.BasesListPayload.CODEC);
+        PayloadTypeRegistry.playC2S().register(net.shasankp000.network.BaseSetPayload.ID, net.shasankp000.network.BaseSetPayload.CODEC);
+        PayloadTypeRegistry.playC2S().register(net.shasankp000.network.BaseRemovePayload.ID, net.shasankp000.network.BaseRemovePayload.CODEC);
+        PayloadTypeRegistry.playC2S().register(net.shasankp000.network.BaseRenamePayload.ID, net.shasankp000.network.BaseRenamePayload.CODEC);
 
-        net.shasankp000.Network.BaseNetworkManager.registerReceiversOnce();
+        net.shasankp000.network.BaseNetworkManager.registerReceiversOnce();
 
         modCommandRegistry.register();
         configCommand.register();

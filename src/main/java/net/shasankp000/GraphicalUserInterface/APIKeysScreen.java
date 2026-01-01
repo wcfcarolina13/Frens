@@ -7,7 +7,7 @@ import net.minecraft.client.gui.widget.TextFieldWidget;
 import net.minecraft.client.toast.SystemToast;
 import net.minecraft.text.Text;
 import net.shasankp000.AIPlayer;
-import net.shasankp000.Network.configNetworkManager;
+import net.shasankp000.network.configNetworkManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

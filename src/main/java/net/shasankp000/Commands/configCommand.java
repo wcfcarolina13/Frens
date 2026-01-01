@@ -3,7 +3,7 @@ package net.shasankp000.Commands;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.minecraft.server.command.CommandManager;
 import net.minecraft.server.network.ServerPlayerEntity;
-import net.shasankp000.Network.configNetworkManager;
+import net.shasankp000.network.configNetworkManager;
 import net.fabricmc.loader.api.FabricLoader;
 import net.fabricmc.api.EnvType;
 

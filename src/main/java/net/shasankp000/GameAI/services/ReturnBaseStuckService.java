@@ -212,12 +212,7 @@ public final class ReturnBaseStuckService {
         int stagnant = STAGNANT_TICKS.getOrDefault(botId, 0);
 
         // Transient debug: show detailed per-tick state when verbose debug is enabled
-        DebugToggleService.debug(LOGGER, "ReturnBaseStuck DEBUG: bot={} distToBase={} bestDist={} improvedBaseDistance={} anchor={} escapedFromAnchor={} stagnant={} prevBlock={} prevPos={}",
-            bot.getName().getString(), distToBase, bestDist, improvedBaseDistance,
-            anchorPos == null ? "null" : anchorPos.toShortString(), escapedFromAnchor,
-            stagnant,
-            prevBlock == null ? "null" : prevBlock.toShortString(),
-            prevPos == null ? "null" : String.format("%.2f,%.2f,%.2f", prevPos.x, prevPos.y, prevPos.z));
+        // (moved below after anchor/progress variables are computed)
 
         // Track anchor position - where the bot first became stuck
         BlockPos anchorPos = STUCK_ANCHOR_POS.get(botId);
@@ -241,6 +236,14 @@ public final class ReturnBaseStuckService {
         if (improvedBaseDistance) {
             BEST_BASE_DIST.put(botId, distToBase);
         }
+
+        // Transient debug: show detailed per-tick state when verbose debug is enabled
+        DebugToggleService.debug(LOGGER, "ReturnBaseStuck DEBUG: bot={} distToBase={} bestDist={} improvedBaseDistance={} anchor={} escapedFromAnchor={} stagnant={} prevBlock={} prevPos={}",
+            bot.getName().getString(), distToBase, bestDist, improvedBaseDistance,
+            anchorPos == null ? "null" : anchorPos.toShortString(), escapedFromAnchor,
+            stagnant,
+            prevBlock == null ? "null" : prevBlock.toShortString(),
+            prevPos == null ? "null" : String.format("%.2f,%.2f,%.2f", prevPos.x, prevPos.y, prevPos.z));
 
         boolean madeMeaningfulProgress = prevPos == null || improvedBaseDistance || escapedFromAnchor;
 
