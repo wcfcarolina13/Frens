@@ -188,7 +188,7 @@ public final class FallingBlockStabilizer {
         ServerCommandSource sink = source != null
                 ? source
                 : player.getCommandSource();
-        ChatUtils.sendChatMessages(sink.withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS), message);
+        ChatUtils.sendChatMessages(sink.withSilent(), message);
     }
 
     private static void runOnServerThread(ServerPlayerEntity player, Runnable action) {

@@ -628,8 +628,8 @@ public class AutoFaceEntity {
             return;
         }
         lastDangerMessageMs = now;
-        ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS),
-                "§cTerminating all current tasks due to threat detections");
+        ChatUtils.sendChatMessages(bot.getCommandSource().withSilent(),
+            "§cTerminating all current tasks due to threat detections");
     }
 
 

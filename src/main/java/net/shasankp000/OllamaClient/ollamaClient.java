@@ -52,7 +52,7 @@ public class ollamaClient {
             LOGGER.error("Bot {} not online.", botName);
             return;
         }
-        ServerCommandSource botSource = bot.getCommandSource().withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS);
+        ServerCommandSource botSource = bot.getCommandSource().withSilent();
 
         server.execute(() -> {
             try {
@@ -71,7 +71,7 @@ public class ollamaClient {
         MinecraftServer server = context.getSource().getServer();
         ServerCommandSource playerSource = context.getSource();
         ServerCommandSource botSource = Objects.requireNonNull(server.getPlayerManager().getPlayer(botName))
-                .getCommandSource().withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS);
+            .getCommandSource().withSilent();
 
         String formatter = ChatUtils.getRandomColorCode();
 

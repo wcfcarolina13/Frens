@@ -257,7 +257,7 @@ public final class BotAutoReturnSunsetService {
             return;
         }
 
-        ServerCommandSource source = bot.getCommandSource().withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS);
+        ServerCommandSource source = bot.getCommandSource().withSilent();
         var ticketOpt = TaskService.beginSkill("sleep", source, botUuid);
         if (ticketOpt.isEmpty()) {
             return;

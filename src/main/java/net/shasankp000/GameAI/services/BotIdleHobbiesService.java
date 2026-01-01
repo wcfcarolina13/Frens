@@ -344,7 +344,7 @@ public final class BotIdleHobbiesService {
             return;
         }
 
-        ServerCommandSource botSource = bot.getCommandSource().withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS);
+        ServerCommandSource botSource = bot.getCommandSource().withSilent();
 
         Map<String, Object> params = new HashMap<>();
         params.put("_origin", "ambient");

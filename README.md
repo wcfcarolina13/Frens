@@ -35,6 +35,7 @@
 ### 💬 Planned LLM Integration
 LLM-based conversational features are planned but not included in this release. Core bot functionality does not require an LLM provider.
 
+
 ### ⚙️ Building with AI/LLM support (optional)
 
 By default this project avoids bundling heavy AI runtimes. If you want to enable AI/LLM runtime packaging (which includes native runtimes and AI libraries), set the Gradle project property `aiEnabled` to `true` when building.
@@ -43,17 +44,23 @@ Build examples:
 
 - Build normally (no AI runtime bundled):
 
-	./gradlew build
+```bash
+./gradlew build
+```
 
 - Build with AI/LLM runtime packaging enabled:
 
-	./gradlew build -PaiEnabled=true
+```bash
+./gradlew build -PaiEnabled=true
+```
 
 Enabling AI packaging will include large native libraries (e.g., PyTorch natives) and may significantly increase build times and the resulting JAR size. Use it only if you intend to run LLM providers locally or bundle them for deployment.
 
 To enable the flag permanently for your environment, add to `gradle.properties`:
 
-	aiEnabled=true
+```text
+aiEnabled=true
+```
 
 If you do not bundle the AI runtime, you'll still need to provide a compatible LLM provider at runtime (install native engines or configure a remote provider). Refer to provider-specific docs for setup when enabling AI packaging.
 
@@ -77,7 +84,7 @@ If you do not bundle the AI runtime, you'll still need to provide a compatible L
 
 ## Quick Start
 
-```
+```bash
 /bot spawn Jake training    # Spawn a bot named Jake
 /bot follow Jake            # Make Jake follow you
 /bot skill woodcut 10 Jake  # Cut 10 trees
@@ -92,17 +99,19 @@ Alternatively, a work-in-progress topics dialogue menu and a shared inventory vi
 ## Command Reference
 
 ### Bot Management
+
 | Command | Description |
 |---------|-------------|
 | `/bot spawn <alias> training` | Spawn a new bot |
-| `/bot stop [alias|all]` | Stop current task and movement |
-| `/bot resume [alias|all]` | Resume a paused skill |
-| `/bot follow [alias|all]` | Follow the commander |
-| `/bot heal [alias|all]` | Force immediate eating |
-| `/bot inventory [alias|all]` | Show inventory summary |
+| `/bot stop [alias&#124;all]` | Stop current task and movement |
+| `/bot resume [alias&#124;all]` | Resume a paused skill |
+| `/bot follow [alias&#124;all]` | Follow the commander |
+| `/bot heal [alias&#124;all]` | Force immediate eating |
+| `/bot inventory [alias&#124;all]` | Show inventory summary |
 
 ### Skills
-```
+
+```bash
 /bot skill <skill_name> [arguments] [alias|all]
 ```
 
@@ -116,16 +125,18 @@ Alternatively, a work-in-progress topics dialogue menu and a shared inventory vi
 - `/bot skill collect_dirt 30 square Jake` - Gather 30 dirt
 
 ### Storage
+
 | Command | Description |
 |---------|-------------|
-| `/bot store deposit <amount|all> <item>` | Deposit to nearby chest |
-| `/bot store withdraw <amount|all> <item>` | Withdraw from nearby chest |
+| `/bot store deposit <amount&#124;all> <item>` | Deposit to nearby chest |
+| `/bot store withdraw <amount&#124;all> <item>` | Withdraw from nearby chest |
 
 ### Configuration
+
 | Command | Description |
 |---------|-------------|
-| `/bot config teleportDuringSkills on|off` | Toggle teleport shortcuts |
-| `/bot config inventoryFullPause on|off` | Pause when inventory full |
+| `/bot config teleportDuringSkills on&#124;off` | Toggle teleport shortcuts |
+| `/bot config inventoryFullPause on&#124;off` | Pause when inventory full |
 | `/configMan` | Open GUI for persistent settings |
 
 ---

@@ -182,7 +182,7 @@ public final class DropSweepService {
 
             CompletableFuture<Void> sweepTask = CompletableFuture.runAsync(() -> {
                         try {
-                            ServerCommandSource source = bot.getCommandSource().withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS);
+                            ServerCommandSource source = bot.getCommandSource().withSilent();
                             DropSweeper.sweep(source, radius, verticalRange, maxTargets, durationMs);
                         } catch (Exception sweepError) {
                             LOGGER.warn("Training drop sweep failed near {}: {}", dropPos, sweepError.getMessage());
@@ -226,7 +226,7 @@ public final class DropSweepService {
 
         CompletableFuture<Void> sweepFuture = CompletableFuture.runAsync(() -> {
             try {
-                ServerCommandSource source = bot.getCommandSource().withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS);
+                ServerCommandSource source = bot.getCommandSource().withSilent();
                 DropSweeper.sweep(source, radius, verticalRange, 4, 4000L);
             } catch (Exception sweepError) {
                 LOGGER.warn("Drop sweep failed: {}", sweepError.getMessage(), sweepError);
