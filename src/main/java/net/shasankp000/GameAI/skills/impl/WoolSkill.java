@@ -102,11 +102,20 @@ public class WoolSkill implements Skill {
 
         int sheared = 0;
         Set<UUID> failedSheepIds = new HashSet<>(); // Track sheep we couldn't reach to avoid oscillating
+        long lastFailedClearTime = System.currentTimeMillis();
+        final long FAILED_CLEAR_INTERVAL_MS = 30_000L; // Reset failed list every 30 seconds to allow wool regrowth
 
         while (System.currentTimeMillis() - startedAt < MAX_JOB_MILLIS) {
             if (SkillManager.shouldAbortSkill(bot)) {
                 BotActions.stop(bot);
                 return SkillExecutionResult.failure("Wool job stopped.");
+            }
+            
+            // Periodically clear the failed set to allow sheep with regrown wool to be re-tried
+            if (System.currentTimeMillis() - lastFailedClearTime >= FAILED_CLEAR_INTERVAL_MS) {
+                failedSheepIds.clear();
+                lastFailedClearTime = System.currentTimeMillis();
+                LOGGER.debug("Cleared failed sheep list for periodic re-scan");
             }
             int now = (int) (world.getTimeOfDay() % 24000L);
             if (now >= SUNSET_TIME_OF_DAY) {
@@ -121,7 +130,11 @@ public class WoolSkill implements Skill {
 
             List<SheepEntity> candidates = visibleSheep(bot, world, radius);
             // Filter out sheep we already failed to reach (avoid oscillation)
+            int beforeFilter = candidates.size();
             candidates.removeIf(s -> failedSheepIds.contains(s.getUuid()));
+            if (beforeFilter > 0 && candidates.isEmpty()) {
+                LOGGER.debug("All {} visible sheep are in failed set; will explore", beforeFilter);
+            }
             
             if (candidates.isEmpty()) {
                 // Clear failed set when exploring - give them another chance after moving
@@ -133,6 +146,7 @@ public class WoolSkill implements Skill {
             }
 
             // IMPORTANT: Pick ONE sheep and commit to it, don't iterate through all
+            LOGGER.debug("Found {} shearable sheep candidates (radius={})", candidates.size(), radius);
             SheepEntity target = candidates.get(0); // Already sorted by distance
             LAST_SEEN_SHEEP.put(bot.getUuid(), target.getBlockPos());
             
@@ -325,7 +339,7 @@ public class WoolSkill implements Skill {
                 s -> !s.isBaby() && s.isShearable() && (bot.canSee(s) || bot.squaredDistanceTo(s) <= 64.0)
         );
         if (visible.isEmpty()) {
-            return List.of();
+            return new ArrayList<>(); // Return mutable empty list so callers can safely use removeIf
         }
         visible.sort((a, b) -> Double.compare(bot.squaredDistanceTo(a), bot.squaredDistanceTo(b)));
         return visible;

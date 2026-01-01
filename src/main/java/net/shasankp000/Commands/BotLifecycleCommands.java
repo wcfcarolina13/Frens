@@ -38,6 +38,14 @@ final class BotLifecycleCommands {
                                 StringArgumentType.getString(context, "target"))));
     }
 
+    static ArgumentBuilder<ServerCommandSource, ?> buildResumeShort() {
+        return CommandManager.literal("r")
+                .executes(context -> modCommandRegistry.executeResumeTargets(context, (String) null))
+                .then(CommandManager.argument("target", StringArgumentType.string())
+                        .executes(context -> modCommandRegistry.executeResumeTargets(context,
+                                StringArgumentType.getString(context, "target"))));
+    }
+
     static ArgumentBuilder<ServerCommandSource, ?> buildHeal() {
         return CommandManager.literal("heal")
                 .executes(context -> modCommandRegistry.executeHealTargets(context, (String) null))

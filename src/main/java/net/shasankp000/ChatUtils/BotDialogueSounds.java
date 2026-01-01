@@ -140,6 +140,12 @@ public final class BotDialogueSounds {
     public static final SoundEvent BOT_SHELTER = register("bot.shelter");
     public static final SoundEvent BOT_SLEEP = register("bot.sleep");
     public static final SoundEvent BOT_SMELT = register("bot.smelt");
+    // New categories from chatterbox handoff
+    public static final SoundEvent BOT_AMBIENT = register("bot.ambient");
+    public static final SoundEvent BOT_DARK = register("bot.dark");
+    public static final SoundEvent BOT_WILDLIFE = register("bot.wildlife");
+    public static final SoundEvent BOT_LOST = register("bot.lost");
+    public static final SoundEvent BOT_FOUND = register("bot.found");
 
     // Line-specific sound events (combat)
     public static final SoundEvent LINE_COMBAT_ENGAGING = register("bot.line.combat_engaging");
@@ -223,6 +229,48 @@ public final class BotDialogueSounds {
     // Line-specific sound events (smelt)
     public static final SoundEvent LINE_SMELT_NEED_FURNACE = register("bot.line.smelt_need_furnace");
     public static final SoundEvent LINE_SMELT_NOTHING = register("bot.line.smelt_nothing");
+
+    // Line-specific sound events (ambient / cave)
+    public static final SoundEvent LINE_AMBIENT_HEARD_SOMETHING = register("bot.line.ambient_heard_something");
+    public static final SoundEvent LINE_AMBIENT_DID_YOU_HEAR = register("bot.line.ambient_did_you_hear");
+    public static final SoundEvent LINE_AMBIENT_SOMETHING_MOVED = register("bot.line.ambient_something_moved");
+    public static final SoundEvent LINE_AMBIENT_NOT_ALONE = register("bot.line.ambient_not_alone");
+    public static final SoundEvent LINE_AMBIENT_SMELLS_TERRIBLE = register("bot.line.ambient_smells_terrible");
+    public static final SoundEvent LINE_AMBIENT_DONT_LIKE_THIS = register("bot.line.ambient_dont_like_this");
+    public static final SoundEvent LINE_AMBIENT_CREEPY = register("bot.line.ambient_creepy");
+    public static final SoundEvent LINE_AMBIENT_CAVE_DEEP = register("bot.line.ambient_cave_deep");
+
+    // Line-specific sound events (darkness)
+    public static final SoundEvent LINE_DARK_CANT_SEE = register("bot.line.dark_cant_see");
+    public static final SoundEvent LINE_DARK_WHERE_ARE_YOU = register("bot.line.dark_where_are_you");
+    public static final SoundEvent LINE_DARK_NEED_LIGHT = register("bot.line.dark_need_light");
+    public static final SoundEvent LINE_DARK_TOO_DARK = register("bot.line.dark_too_dark");
+    public static final SoundEvent LINE_DARK_TORCH_PLEASE = register("bot.line.dark_torch_please");
+
+    // Line-specific sound events (wildlife)
+    public static final SoundEvent LINE_WILDLIFE_HEARD_BIRD = register("bot.line.wildlife_heard_bird");
+    public static final SoundEvent LINE_WILDLIFE_SAW_COW = register("bot.line.wildlife_saw_cow");
+    public static final SoundEvent LINE_WILDLIFE_PIG_NEARBY = register("bot.line.wildlife_pig_nearby");
+    public static final SoundEvent LINE_WILDLIFE_HEARD_WOLF = register("bot.line.wildlife_heard_wolf");
+    public static final SoundEvent LINE_WILDLIFE_SHEEP_AROUND = register("bot.line.wildlife_sheep_around");
+    public static final SoundEvent LINE_WILDLIFE_CHICKEN = register("bot.line.wildlife_chicken");
+    public static final SoundEvent LINE_WILDLIFE_NICE_DAY = register("bot.line.wildlife_nice_day");
+
+    // Line-specific sound events (lost / shouts)
+    public static final SoundEvent LINE_LOST_OVER_HERE = register("bot.line.lost_over_here");
+    public static final SoundEvent LINE_LOST_CAN_ANYONE_HEAR = register("bot.line.lost_can_anyone_hear");
+    public static final SoundEvent LINE_LOST_HELLO = register("bot.line.lost_hello");
+    public static final SoundEvent LINE_LOST_HELP = register("bot.line.lost_help");
+    public static final SoundEvent LINE_LOST_STUCK_HERE = register("bot.line.lost_stuck_here");
+    public static final SoundEvent LINE_LOST_WHERE_IS_EVERYONE = register("bot.line.lost_where_is_everyone");
+
+    // Line-specific sound events (found / rescued)
+    public static final SoundEvent LINE_FOUND_FINALLY = register("bot.line.found_finally");
+    public static final SoundEvent LINE_FOUND_THANK_GOODNESS = register("bot.line.found_thank_goodness");
+    public static final SoundEvent LINE_FOUND_THOUGHT_ID_BE_STUCK = register("bot.line.found_thought_id_be_stuck");
+    public static final SoundEvent LINE_FOUND_SO_GLAD = register("bot.line.found_so_glad");
+    public static final SoundEvent LINE_FOUND_BEEN_CALLING = register("bot.line.found_been_calling");
+    public static final SoundEvent LINE_FOUND_LETS_GET_OUT = register("bot.line.found_lets_get_out");
 
     private BotDialogueSounds() {
     }

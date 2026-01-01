@@ -422,8 +422,10 @@ public final class TaskService {
         }
         // Best-effort: interrupt the executing thread so long-running loops/sleeps unwind promptly.
         ticket.interruptExecutingThread();
-        // Don't remove ticket from ACTIVE here - let skill detect cancelRequest and finish naturally
-        // Ticket will be removed when task completes in finishTask()
+        // Force-remove the ticket from ACTIVE immediately so new skills can start.
+        // The background thread should check isCancelRequested() and exit gracefully,
+        // but we don't want to block new skill starts if pathfinding gets stuck.
+        ACTIVE.remove(key(ticket.botUuid()), ticket);
     }
 
     /**

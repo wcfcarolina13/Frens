@@ -337,9 +337,42 @@ public class BotEventHandler {
         setBaseTarget(bot, null);
     }
 
-    private static Vec3d getBaseTarget(ServerPlayerEntity bot) {
+    public static Vec3d getBaseTarget(ServerPlayerEntity bot) {
         BotCommandStateService.State state = stateFor(bot);
         return state != null ? state.baseTarget : null;
+    }
+
+    /**
+     * Check if the bot is currently in "return to base" mode.
+     * Return-to-base uses Mode.FOLLOW internally (for door/waypoint planning)
+     * but has state.baseTarget and state.followFixedGoal set.
+     * 
+     * @return true if the bot is actively returning to its base
+     */
+    public static boolean isReturningToBase(ServerPlayerEntity bot) {
+        if (bot == null) return false;
+        BotCommandStateService.State state = stateFor(bot);
+        if (state == null) return false;
+        // Return-to-base uses FOLLOW mode with baseTarget + followFixedGoal set
+        return state.mode == Mode.FOLLOW 
+                && state.baseTarget != null 
+                && state.followFixedGoal != null;
+    }
+
+    /**
+     * Check if the bot is actively following a player (not returning to base).
+     * This excludes return-to-base mode which also uses Mode.FOLLOW internally.
+     * 
+     * @return true if the bot is following a player entity
+     */
+    public static boolean isFollowingPlayer(ServerPlayerEntity bot) {
+        if (bot == null) return false;
+        BotCommandStateService.State state = stateFor(bot);
+        if (state == null) return false;
+        // Following a player: FOLLOW mode with followTargetUuid set (not baseTarget)
+        return state.mode == Mode.FOLLOW 
+                && state.followTargetUuid != null 
+                && state.baseTarget == null;
     }
 
     private static void setAssistAllies(ServerPlayerEntity bot, boolean enable) {
@@ -1030,6 +1063,8 @@ public class BotEventHandler {
                 return true;
             }
             case RETURNING_BASE -> {
+                // Note: This case is currently not used. Return-to-base uses FOLLOW mode with
+                // state.baseTarget set. Stuck detection is handled in handleFollow.
                 if (!augmentedHostiles.isEmpty() && engageHostiles(bot, server, augmentedHostiles)) {
                     return true;
                 }
@@ -1277,6 +1312,22 @@ public class BotEventHandler {
         if (base == null) {
             return "No base location available.";
         }
+        
+        // Guard: if already returning to the same (or very close) base, don't reset state
+        // This prevents repeated calls from resetting stuck detection counters
+        if (isReturningToBase(bot)) {
+            BotCommandStateService.State existingState = stateFor(bot);
+            if (existingState != null && existingState.baseTarget != null) {
+                double dx = base.x - existingState.baseTarget.x;
+                double dz = base.z - existingState.baseTarget.z;
+                double distSq = dx * dx + dz * dz;
+                if (distSq < 9.0D) { // Within 3 blocks of same target
+                    LOGGER.debug("setReturnToBase: already returning to nearby base, skipping reset");
+                    return "Bot is already returning to base.";
+                }
+            }
+        }
+        
         // Preserve baseTarget so sunset automation can track "home" for auto-sleep.
         setBaseTarget(bot, base);
 
@@ -1302,6 +1353,7 @@ public class BotEventHandler {
         UUID id = bot.getUuid();
         FollowStateService.clearPlanning(id);
         FollowDebugService.clear(id);
+        // Note: ReturnBaseStuckService counter is NOT cleared here - it should keep counting
         requestFollowPathPlanToGoal(bot, goal, true, "return-base-start");
 
         sendBotMessage(bot, "Returning to base.");
@@ -1592,8 +1644,17 @@ public class BotEventHandler {
                 BotActions.stop(bot);
                 setMode(bot, Mode.IDLE);
                 setBaseTarget(bot, null);
+                net.shasankp000.GameAI.services.ReturnBaseStuckService.clear(bot.getUuid());
                 sendBotMessage(bot, "Arrived at base.");
                 return true;
+            }
+            
+            // Bot is returning to base but hasn't arrived yet - check for stuck condition
+            // This enables progressive escape attempts (backup, pillar, flare) when stuck
+            LOGGER.debug("Return-base stuck check: calling tickAndCheckStuck for {} at {}", 
+                    bot.getName().getString(), bot.getBlockPos().toShortString());
+            if (net.shasankp000.GameAI.services.ReturnBaseStuckService.tickAndCheckStuck(bot, state.baseTarget)) {
+                triggerStuckFlare(bot);
             }
         }
 
@@ -1822,10 +1883,13 @@ public class BotEventHandler {
     }
 
     private static boolean handleReturnToBase(ServerPlayerEntity bot, BotCommandStateService.State state) {
+        // Note: This method is currently unused. Return-to-base uses FOLLOW mode via setReturnToBase().
+        // Keeping this for potential future use or if we want to switch back to dedicated mode.
         Vec3d base = state != null ? state.baseTarget : null;
         if (base == null) {
             setMode(bot, Mode.IDLE);
             setAssistAllies(bot, true);
+            net.shasankp000.GameAI.services.ReturnBaseStuckService.clear(bot.getUuid());
             return false;
         }
 
@@ -1839,6 +1903,7 @@ public class BotEventHandler {
             setMode(bot, Mode.STAY);
             sendBotMessage(bot, "Arrived at base. Holding position.");
             setBaseTarget(bot, null);
+            net.shasankp000.GameAI.services.ReturnBaseStuckService.clear(bot.getUuid());
 
             // If idle hobbies are enabled, automatically resume idling after a short pause.
             MinecraftServer srv = bot.getCommandSource() != null ? bot.getCommandSource().getServer() : null;
@@ -1856,8 +1921,112 @@ public class BotEventHandler {
             return true;
         }
 
+        // Check if bot is stuck and should trigger a flare
+        if (net.shasankp000.GameAI.services.ReturnBaseStuckService.tickAndCheckStuck(bot, base)) {
+            triggerStuckFlare(bot);
+        }
+
+        // Door handling: like vanilla villagers, try to open/traverse doors when blocked
+        if (bot.getEntityWorld() instanceof ServerWorld world) {
+            BlockPos baseBlock = BlockPos.ofFloored(base.x, base.y, base.z);
+            
+            // Check for doors directly in front of the bot
+            BlockPos botPos = bot.getBlockPos();
+            for (Direction dir : Direction.Type.HORIZONTAL) {
+                BlockPos candidate = botPos.offset(dir);
+                BlockState candidateState = world.getBlockState(candidate);
+                BlockState candidateUpState = world.getBlockState(candidate.up());
+                boolean isDoor = candidateState.getBlock() instanceof DoorBlock
+                        || candidateUpState.getBlock() instanceof DoorBlock
+                        || candidateState.getBlock() instanceof FenceGateBlock
+                        || candidateUpState.getBlock() instanceof FenceGateBlock;
+                if (isDoor) {
+                    // Try to open and step through
+                    if (MovementService.tryOpenDoorAt(bot, candidate)) {
+                        // Commit to stepping through
+                        if (MovementService.tryTraverseOpenableToward(bot, candidate, baseBlock, "return-base-door")) {
+                            return true;
+                        }
+                    }
+                }
+            }
+            
+            // If we seem stuck (not making progress), look for nearby doors as escape routes
+            UUID botId = bot.getUuid();
+            BlockPos curBlock = bot.getBlockPos();
+            BlockPos prevBlock = FOLLOW_LAST_BLOCK_POS.get(botId);
+            int posStagnant = FOLLOW_POS_STAGNANT_TICKS.getOrDefault(botId, 0);
+            if (prevBlock != null && prevBlock.equals(curBlock)) {
+                posStagnant++;
+            } else {
+                posStagnant = 0;
+                FOLLOW_LAST_BLOCK_POS.put(botId, curBlock.toImmutable());
+            }
+            FOLLOW_POS_STAGNANT_TICKS.put(botId, posStagnant);
+            
+            // If stagnant for 10+ ticks, try door escape planning
+            if (posStagnant >= 10) {
+                MovementService.DoorSubgoalPlan doorPlan = MovementService.findDoorEscapePlan(bot, baseBlock, null);
+                if (doorPlan != null) {
+                    // Open the door
+                    MovementService.tryOpenDoorAt(bot, doorPlan.doorBase());
+                    // Try to traverse through
+                    if (MovementService.tryTraverseOpenableToward(bot, doorPlan.doorBase(), baseBlock, "return-base-escape")) {
+                        // Reset stagnation since we're moving through the door
+                        FOLLOW_POS_STAGNANT_TICKS.put(botId, 0);
+                        return true;
+                    }
+                }
+            }
+            
+            // Also check for doors along the direct line to base
+            BlockPos blockingDoor = BlockInteractionService.findDoorAlongLine(bot, base, 6.0D);
+            if (blockingDoor != null) {
+                MovementService.tryOpenDoorAt(bot, blockingDoor);
+            }
+        }
+
         moveToward(bot, base, 2.0D, false);
         return true;
+    }
+
+    /**
+     * Triggers the flare skill when bot is stuck during return-to-base.
+     * Runs asynchronously to avoid blocking the tick thread.
+     */
+    private static void triggerStuckFlare(ServerPlayerEntity bot) {
+        if (bot == null) {
+            return;
+        }
+        UUID botId = bot.getUuid();
+        
+        // Send message to commander that bot is stuck
+        sendBotMessage(bot, "§eI'm stuck and too far from base. Sending a flare signal!");
+        
+        // Mark the flare as sent (for cooldown)
+        net.shasankp000.GameAI.services.ReturnBaseStuckService.markFlareSent(botId);
+        
+        // Execute flare skill in a separate thread
+        MinecraftServer server = bot.getCommandSource() != null ? bot.getCommandSource().getServer() : null;
+        if (server == null) {
+            return;
+        }
+        
+        Thread flareThread = new Thread(() -> {
+            try {
+                ServerCommandSource source = bot.getCommandSource().withSilent();
+                SkillContext context = new SkillContext(source, null, null);
+                SkillExecutionResult result = SkillManager.runSkill("flare", context);
+                if (!result.success()) {
+                    // Log but don't spam - flare failed silently
+                    LOGGER.info("Flare skill failed for {}: {}", bot.getName().getString(), result.message());
+                }
+            } catch (Exception e) {
+                LOGGER.warn("Error running flare skill for {}: {}", bot.getName().getString(), e.getMessage());
+            }
+        }, "flare-stuck-" + bot.getName().getString());
+        flareThread.setDaemon(true);
+        flareThread.start();
     }
 
     private static boolean engageHostiles(ServerPlayerEntity bot, MinecraftServer server, List<Entity> hostileEntities) {
@@ -1975,6 +2144,7 @@ public class BotEventHandler {
         }
         BotCommandStateService.State st = stateFor(bot);
         boolean fixedGoalActive = st != null && st.followFixedGoal != null;
+        boolean returningToBase = fixedGoalActive && st != null && st.baseTarget != null;
         if (!fixedGoalActive && target == null) {
             return false;
         }
@@ -2041,7 +2211,11 @@ public class BotEventHandler {
         if (target != null && canSee && commanderRouteBlocked && isOpenDoorBetween(bot, target)) {
             commanderRouteBlocked = false;
         }
-        if (canSee && !commanderRouteBlocked) {
+        // For fixed-goal follow, the original canSee flag represents LoS to the FINAL goal, which can be
+        // blocked by distant terrain even when the current navigation goal (waypoint) is locally clear.
+        // Use the direct-route check to the current nav goal as the "route clear" signal instead.
+        boolean clearRoute = fixedGoalActive ? !commanderRouteBlocked : (canSee && !commanderRouteBlocked);
+        if (clearRoute) {
             if (!botSealed && !commanderSealed) {
                 FOLLOW_DOOR_PLAN.remove(id);
                 FOLLOW_DOOR_LAST_BLOCK.remove(id);
@@ -2064,26 +2238,11 @@ public class BotEventHandler {
             }
         }
 
-        boolean teleportDesired = shouldWolfTeleport(targetDistSq, absDeltaY, canSee, effectiveStagnant, server);
-        if (teleportDesired && !allowTeleportPref) {
-            String reason = teleportPreferenceEnabled
-                    ? "force-walk"
-                    : "teleport-pref-disabled";
-            maybeLogFollowDecision(bot, "teleport-suppressed: reason=" + reason
-                    + " forceWalk=" + forceWalk
-                    + " dist=" + String.format(Locale.ROOT, "%.2f", Math.sqrt(targetDistSq))
-                    + " stagnant=" + effectiveStagnant);
-        }
-        if (target != null && allowTeleportPref && teleportDesired) {
-            if (tryWolfTeleport(bot, target, server)) {
-                FOLLOW_DOOR_PLAN.remove(id);
-                FOLLOW_WAYPOINTS.remove(id);
-                FOLLOW_LAST_DISTANCE_SQ.remove(id);
-                FOLLOW_STAGNANT_TICKS.remove(id);
-                maybeLogFollowDecision(bot, "teleport: long-range regain dist="
-                        + String.format(Locale.ROOT, "%.2f", Math.sqrt(targetDistSq)));
-                return true;
-            }
+        // Reuse return-to-base stuck escape logic for normal follow (non-fixed goal).
+        // This enables quick nudge / backup / mining / pillar / panic-flee escapes when the bot
+        // is stuck while following a player (useful when teleportation is disabled).
+        if (!fixedGoalActive && target != null) {
+            net.shasankp000.GameAI.services.ReturnBaseStuckService.tickAndCheckStuck(bot, positionOf(target));
         }
 
         if (target != null && shouldPrioritizeCommanderOverDoors(bot, target, canSee, directBlocked, targetDistSq, botSealed, commanderSealed)) {
@@ -2138,7 +2297,19 @@ public class BotEventHandler {
         // Guarded to avoid “door distraction” when the commander is far away and we don't actually need to interact with doors.
         if ((directBlocked || effectiveStagnant >= 3 || targetDistSq <= 400.0D) && bot.getEntityWorld() instanceof ServerWorld world) {
             BlockPos base = bot.getBlockPos();
+            Direction returnToBaseDoorDir = null;
+            if (returningToBase && navGoalBlock != null) {
+                returnToBaseDoorDir = approximateToward(base, navGoalBlock);
+            }
             for (Direction dir : Direction.Type.HORIZONTAL) {
+                if (returningToBase
+                        && !botSealed
+                        && !directBlocked
+                        && effectiveStagnant < 10
+                        && returnToBaseDoorDir != null
+                        && dir != returnToBaseDoorDir) {
+                    continue;
+                }
                 BlockPos candidate = base.offset(dir);
                 if (world.getBlockState(candidate).getBlock() instanceof net.minecraft.block.DoorBlock
                         || world.getBlockState(candidate.up()).getBlock() instanceof net.minecraft.block.DoorBlock
@@ -2146,6 +2317,27 @@ public class BotEventHandler {
                         || world.getBlockState(candidate.up()).getBlock() instanceof FenceGateBlock) {
                     BlockPos doorBase = normalizeDoorBase(world, candidate);
                     if (doorBase != null) {
+                        // Skip doors that are NOT between bot and goal (avoids side-tracking on unrelated doors).
+                        // A door is "between" if stepping through it gets us closer to the goal.
+                        BlockPos goalBlock = navGoalBlock != null ? navGoalBlock : (target != null ? target.getBlockPos() : null);
+                        if (goalBlock != null) {
+                            double currentDistSq = base.getSquaredDistance(goalBlock);
+                            FollowDoorPlan probePlan = buildFollowDoorPlan(bot, world, candidate);
+                            BlockPos afterPos = probePlan != null ? probePlan.stepThroughPos() : candidate;
+                            double afterDoorDistSq = afterPos.getSquaredDistance(goalBlock);
+                            // If the door isn't closer to the goal than our current position, skip it
+                            // unless we're directly blocked (stuck against something).
+                            if (afterDoorDistSq >= currentDistSq && !directBlocked && effectiveStagnant < 6) {
+                                continue;
+                            }
+                            if (returningToBase
+                                    && !botSealed
+                                    && !directBlocked
+                                    && effectiveStagnant < 10
+                                    && !isStepMeaningfullyTowardGoal(base, afterPos, goalBlock)) {
+                                continue;
+                            }
+                        }
                         if (targetDistSq >= 900.0D && (MovementService.isDoorRecentlyClosed(id, doorBase)
                                 || isNearRecentlyCrossedDoor(id, doorBase, 12_000L, 36.0D))) {
                             avoidDoorFor(id, doorBase, 8_000L, "avoid-adjacent-longrange");
@@ -2174,11 +2366,14 @@ public class BotEventHandler {
 
         // If the direct route is blocked and we're not making progress, proactively treat a nearby door as an escape
         // objective instead of continuing to push into a fence/glass corner.
-        int escapeThreshold = (targetDistSq >= 900.0D && !canSee) ? 8 : 2;
+        // For fixed-goal (return-to-base), be more conservative to avoid oscillating on nearby doors.
+        int escapeThreshold = fixedGoalActive ? 10 : ((targetDistSq >= 900.0D && !canSee) ? 8 : 4);
         if (directBlocked && effectiveStagnant >= escapeThreshold && FOLLOW_DOOR_PLAN.get(id) == null && bot.getEntityWorld() instanceof ServerWorld world) {
             long now = System.currentTimeMillis();
             long lastPlanMs = FOLLOW_LAST_ESCAPE_DOOR_PLAN_MS.getOrDefault(id, -1L);
-            if (now - lastPlanMs >= 900L) {
+            // Use longer cooldown for fixed-goal to prevent rapid door oscillation.
+            long planCooldown = fixedGoalActive ? 2000L : 900L;
+            if (now - lastPlanMs >= planCooldown) {
                 FOLLOW_LAST_ESCAPE_DOOR_PLAN_MS.put(id, now);
                 BlockPos avoidDoor = currentAvoidDoor(id);
                 long lastDoorMs = FOLLOW_LAST_DOOR_CROSS_MS.getOrDefault(id, -1L);
@@ -2187,7 +2382,14 @@ public class BotEventHandler {
                 }
                 MovementService.DoorSubgoalPlan escape = MovementService.findDoorEscapePlan(bot, navGoalBlock, avoidDoor);
                 if (escape != null) {
-                    if (targetDistSq >= 900.0D && MovementService.isDoorRecentlyClosed(id, escape.doorBase())) {
+                    if (returningToBase && !botSealed && navGoalBlock != null
+                            && !isStepMeaningfullyTowardGoal(bot.getBlockPos(), escape.stepThroughPos(), navGoalBlock)) {
+                        avoidDoorFor(id, escape.doorBase(), 8_000L, "return-base-escape-not-toward-goal");
+                        maybeLogFollowDecision(bot, "skip-door: return-base escape not toward goal doorBase="
+                                + escape.doorBase().toShortString());
+                        escape = null;
+                    }
+                    if (escape != null && targetDistSq >= 900.0D && MovementService.isDoorRecentlyClosed(id, escape.doorBase())) {
                         avoidDoorFor(id, escape.doorBase(), 8_000L, "recently-closed-escape");
                         maybeLogFollowDecision(bot, "skip-door: recently closed escape doorBase=" + escape.doorBase().toShortString()
                                 + " dist=" + String.format(Locale.ROOT, "%.2f", Math.sqrt(targetDistSq)));
@@ -2200,11 +2402,13 @@ public class BotEventHandler {
                         escape = MovementService.findDoorEscapePlan(bot, navGoalBlock, escape.doorBase());
                     }
                     if (escape != null && (targetDistSq < 900.0D || !MovementService.isDoorRecentlyClosed(id, escape.doorBase()))) {
+                        // Use longer timeout for fixed goal (return-to-base) since bot must reach destination
+                        long doorTimeout = fixedGoalActive ? 10_000L : 5_000L;
                         FollowDoorPlan plan = new FollowDoorPlan(
                                 escape.doorBase().toImmutable(),
                                 escape.approachPos().toImmutable(),
                                 escape.stepThroughPos().toImmutable(),
-                                System.currentTimeMillis() + 5_000L,
+                                System.currentTimeMillis() + doorTimeout,
                                 false
                         );
                         FOLLOW_DOOR_PLAN.put(id, plan);
@@ -2263,6 +2467,9 @@ public class BotEventHandler {
 
         // If we're still stuck and the target is likely "around the corner", treat a nearby door as a sub-goal.
         if (effectiveStagnant >= 6 && FOLLOW_DOOR_PLAN.get(id) == null && bot.getEntityWorld() instanceof ServerWorld world) {
+            if (returningToBase && !botSealed && !directBlocked) {
+                return false;
+            }
             // If the commander is close and visible and we're not directly blocked, never detour through doors.
             // This prevents “door magnet” behavior when the bot is already in the right area.
             if (target != null && canSee && !directBlocked && targetDistSq <= 64.0D) {
@@ -2306,11 +2513,13 @@ public class BotEventHandler {
 	                    if (lastDoorMs >= 0 && lastDoor != null && lastDoor.equals(plan.doorBase()) && (System.currentTimeMillis() - lastDoorMs) < 4_500L) {
 	                        // Avoid immediate oscillation back through the same door we just crossed.
 	                    } else {
+                        // Use longer timeout for fixed goal (return-to-base) since bot must reach destination
+                        long doorTimeout = fixedGoalActive ? 10_000L : 4_000L;
                         FollowDoorPlan followPlan = new FollowDoorPlan(
                                 plan.doorBase(),
                                 plan.approachPos(),
                                 plan.stepThroughPos(),
-                                System.currentTimeMillis() + 4_000L,
+                                System.currentTimeMillis() + doorTimeout,
                                 false
                         );
                         FOLLOW_DOOR_PLAN.put(id, followPlan);
@@ -2673,7 +2882,7 @@ public class BotEventHandler {
                         + " doorBase=" + doorBase.toShortString()
                         + " goal=" + goal.toShortString()
                         + " stepping=" + plan.stepping());
-                avoidDoorFor(botId, doorBase, 4_000L, "door-plan-abort");
+                avoidDoorFor(botId, doorBase, 2_000L, "door-plan-abort");
                 FOLLOW_DOOR_PLAN.remove(botId);
                 FOLLOW_DOOR_LAST_BLOCK.remove(botId);
                 FOLLOW_DOOR_STUCK_TICKS.remove(botId);
@@ -3132,6 +3341,34 @@ public class BotEventHandler {
             return normalizeDoorBase(world, pos.up());
         }
         return null;
+    }
+
+    /**
+     * Heuristic: returns true if moving from {@code from} to {@code step} is generally toward {@code goal}.
+     * Used to suppress "door magnet" behavior by skipping doors whose step-through tile is sideways/backward
+     * relative to the current goal.
+     */
+    private static boolean isStepMeaningfullyTowardGoal(BlockPos from, BlockPos step, BlockPos goal) {
+        if (from == null || step == null || goal == null) {
+            return true;
+        }
+        double ax = (goal.getX() + 0.5D) - (from.getX() + 0.5D);
+        double az = (goal.getZ() + 0.5D) - (from.getZ() + 0.5D);
+        double bx = (step.getX() + 0.5D) - (from.getX() + 0.5D);
+        double bz = (step.getZ() + 0.5D) - (from.getZ() + 0.5D);
+        double aLenSq = ax * ax + az * az;
+        double bLenSq = bx * bx + bz * bz;
+        if (aLenSq < 1.0e-6 || bLenSq < 1.0e-6) {
+            return true;
+        }
+        double dot = (ax * bx + az * bz) / (Math.sqrt(aLenSq) * Math.sqrt(bLenSq));
+        if (dot < 0.05D) {
+            return false;
+        }
+        double currentDistSq = from.getSquaredDistance(goal);
+        double stepDistSq = step.getSquaredDistance(goal);
+        // Allow minor "side-step" increases, but reject steps that clearly move away.
+        return stepDistSq <= currentDistSq + 1.0D;
     }
 
     private static boolean shouldWolfTeleport(double distanceSq,

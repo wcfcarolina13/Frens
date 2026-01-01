@@ -1,6 +1,8 @@
 package net.shasankp000.GameAI.services;
 
 import net.minecraft.block.BlockState;
+import net.minecraft.block.BedBlock;
+import net.minecraft.block.enums.BedPart;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
@@ -16,6 +18,7 @@ import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.world.World;
+import net.minecraft.util.shape.VoxelShape;
 import net.shasankp000.ChatUtils.ChatUtils;
 import net.shasankp000.Entity.LookController;
 import org.slf4j.Logger;
@@ -25,8 +28,10 @@ import net.minecraft.server.MinecraftServer;
 import net.shasankp000.GameAI.BotActions;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -67,17 +72,23 @@ public final class SleepService {
 
         boolean canSleepNow = canSleepNow(world);
 
-        // 1) Try existing nearby bed.
-        Optional<BlockPos> bed = findNearestBed(world, bot.getBlockPos(), 24);
-        if (bed.isPresent()) {
-            BedUseResult res = tryUseBed(source, bot, bed.get());
+        // 1) Try existing nearby beds (all candidates, not just the closest bed block).
+        List<BlockPos> nearbyBeds = findNearbyBedFeet(world, bot.getBlockPos(), 24);
+        LOGGER.info("sleep: nearbyBeds={}", nearbyBeds.size());
+        for (BlockPos bedFoot : nearbyBeds) {
+            BedUseResult res = tryUseBed(source, bot, bedFoot, true);
             if (res == BedUseResult.SUCCESS) {
                 return true;
             }
-            // If a nearby bed exists but we simply can't sleep yet (daytime), don't start crafting/placing.
+            // If a bed exists but we simply can't sleep yet (daytime), don't start crafting/placing.
             if (res == BedUseResult.FAIL_NOT_SLEEP_TIME) {
+                ChatUtils.sendSystemMessage(source, "I couldn't sleep right now (not night/thunder).");
                 return false;
             }
+        }
+
+        if (!nearbyBeds.isEmpty() && canSleepNow) {
+            ChatUtils.sendSystemMessage(source, "I couldn't get into the bed (blocked or unsafe).");
         }
 
         // If we can't sleep right now, avoid crafting/placing beds.
@@ -107,41 +118,67 @@ public final class SleepService {
             ChatUtils.sendSystemMessage(source, "I couldn't find a safe place to set a bed down.");
             return false;
         }
-        return tryUseBed(source, bot, placed) == BedUseResult.SUCCESS;
+        return tryUseBed(source, bot, placed, false) == BedUseResult.SUCCESS;
     }
 
-    private static BedUseResult tryUseBed(ServerCommandSource source, ServerPlayerEntity bot, BlockPos bedPos) {
+    private static BedUseResult tryUseBed(ServerCommandSource source, ServerPlayerEntity bot, BlockPos bedFootPos, boolean quietFailures) {
         if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
             return BedUseResult.FAIL_OTHER;
         }
 
-        List<BlockPos> stands = findStandableAdjacent(world, bedPos);
+        Optional<BedGeometry> geomOpt = bedGeometry(world, bedFootPos);
+        if (geomOpt.isEmpty()) {
+            return BedUseResult.FAIL_OTHER;
+        }
+        BedGeometry bed = geomOpt.get();
+
+        List<BlockPos> stands = findStandPositionsForBed(world, bed);
+        LOGGER.info("tryUseBed bedFoot={} standCandidates={}", bed.foot.toShortString(), stands.size());
         for (BlockPos stand : stands) {
+            // Door assist BEFORE walking: the stand tile can be behind a doorway.
+            // Doing this pre-move reduces "door oscillation" and avoids false crafting fallbacks.
+            MovementService.tryOpenDoorToward(bot, stand);
+            MovementService.tryOpenDoorToward(bot, bed.foot);
             if (!moveToStand(source, bot, stand)) {
                 continue;
             }
-            if (!MovementService.tryOpenDoorToward(bot, bedPos)) {
+            if (!MovementService.tryOpenDoorToward(bot, bed.foot)) {
                 // ok, might not need door.
             }
-            runOnServerThread(bot, () -> LookController.faceBlock(bot, bedPos));
+            runOnServerThread(bot, () -> LookController.faceBlock(bot, bed.foot));
             if (bot.getBlockPos().getSquaredDistance(stand) > STAND_REACH_SQ) {
                 continue;
             }
 
-            ActionResult result = interactBed(bot, world, bedPos);
-            LOGGER.info("Bed interact result={} botSleeping={}", result, bot.isSleeping());
+            // Try both halves: selection may have found head/foot, and vanilla accepts either.
+            ActionResult resultFoot = interactBed(bot, world, bed.foot);
+            LOGGER.info("Bed interact foot result={} botSleeping={}", resultFoot, bot.isSleeping());
+            if (!bot.isSleeping()) {
+                ActionResult resultHead = interactBed(bot, world, bed.head);
+                LOGGER.info("Bed interact head result={} botSleeping={}", resultHead, bot.isSleeping());
+            }
             if (bot.isSleeping()) {
-                BotHomeService.recordLastSleep(bot, bedPos.toImmutable());
+                // Verify the server updated the player's sleeping position to be on/near the bed.
+                boolean onBed = waitForPlayerAtBed(bot, bed, 900);
+                if (!onBed) {
+                    LOGGER.warn("Bot appears sleeping but not located at bed {} (pos={}); skipping last-sleep record.", bed.foot.toShortString(), bot.getBlockPos());
+                    ChatUtils.sendSystemMessage(source, "I appear to be sleeping but not actually on the bed; aborting record to avoid mis-reservation.");
+                    // Do not record last-sleep if the player isn't physically at the bed; treat as failure so caller can retry.
+                    return BedUseResult.FAIL_OTHER;
+                }
+
+                BotHomeService.recordLastSleep(bot, bed.foot.toImmutable());
                 ChatUtils.sendSystemMessage(source, bot.getName().getString() + " is sleeping.");
                 return BedUseResult.SUCCESS;
             }
         }
 
         if (canSleepNow(world)) {
-            ChatUtils.sendSystemMessage(source, "I couldn't get into the bed (blocked or unsafe).");
+            if (!quietFailures) {
+                ChatUtils.sendSystemMessage(source, "I couldn't get into the bed (blocked or unsafe).");
+            }
             return BedUseResult.FAIL_OTHER;
         }
-        ChatUtils.sendSystemMessage(source, "I couldn't sleep right now (not night/thunder).");
         return BedUseResult.FAIL_NOT_SLEEP_TIME;
     }
 
@@ -157,9 +194,23 @@ public final class SleepService {
         CompletableFuture<ActionResult> future = new CompletableFuture<>();
         runOnServerThread(bot, () -> {
             selectEmptyOrSafeHand(bot);
-            Vec3d hitVec = Vec3d.ofCenter(bedPos);
-            BlockHitResult hit = new BlockHitResult(hitVec, Direction.UP, bedPos, false);
-            future.complete(bot.interactionManager.interactBlock(bot, world, bot.getMainHandStack(), Hand.MAIN_HAND, hit));
+            // Try several hit vectors to be robust across bed orientations and server-side handling.
+            // Prefer side-face hits first (clicking the inner face of the bed), then fall back to top-click.
+            ActionResult last = ActionResult.FAIL;
+            Vec3d center = Vec3d.ofCenter(bedPos);
+            for (Direction dir : Direction.Type.HORIZONTAL) {
+                Vec3d faceHit = center.add(dir.getOffsetX() * 0.45, 0.45, dir.getOffsetZ() * 0.45);
+                BlockHitResult faceBlockHit = new BlockHitResult(faceHit, dir.getOpposite(), bedPos, false);
+                ActionResult r = bot.interactionManager.interactBlock(bot, world, bot.getMainHandStack(), Hand.MAIN_HAND, faceBlockHit);
+                if (r.isAccepted()) {
+                    future.complete(r);
+                    return;
+                }
+                last = r;
+            }
+            // Fallback: top-center click
+            BlockHitResult upHit = new BlockHitResult(center, Direction.UP, bedPos, false);
+            future.complete(bot.interactionManager.interactBlock(bot, world, bot.getMainHandStack(), Hand.MAIN_HAND, upHit));
         });
         try {
             return future.get(750, TimeUnit.MILLISECONDS);
@@ -169,6 +220,33 @@ public final class SleepService {
         } catch (ExecutionException | TimeoutException e) {
             return ActionResult.FAIL;
         }
+    }
+
+    /**
+     * After server reports the player is sleeping, the player's block position should be at or near the bed.
+     * This helper waits briefly for the server to update the player's position and verifies it's close enough
+     * to the bed geometry. Returns true if the player is observed on/near the bed within the timeout.
+     */
+    private static boolean waitForPlayerAtBed(ServerPlayerEntity bot, BedGeometry bed, int timeoutMs) {
+        if (bot == null || bed == null) return false;
+        long deadline = System.currentTimeMillis() + timeoutMs;
+        while (System.currentTimeMillis() < deadline) {
+            BlockPos cur = bot.getBlockPos();
+            // Accept foot/head positions or adjacent lying positions (allow small horizontal tolerance)
+            if (cur.equals(bed.foot) || cur.equals(bed.head)) return true;
+            double dx = cur.getX() - (bed.foot.getX() + 0.5);
+            double dz = cur.getZ() - (bed.foot.getZ() + 0.5);
+            double horiz = Math.sqrt(dx * dx + dz * dz);
+            int dy = Math.abs(cur.getY() - bed.foot.getY());
+            if (horiz <= 1.25 && dy <= 1) return true;
+            try {
+                Thread.sleep(60);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+        }
+        return false;
     }
 
     private static void selectEmptyOrSafeHand(ServerPlayerEntity bot) {
@@ -199,13 +277,81 @@ public final class SleepService {
         return res.success() || bot.getBlockPos().getSquaredDistance(stand) <= STAND_REACH_SQ;
     }
 
+    private record BedGeometry(BlockPos foot, BlockPos head, Direction facing) {}
+
+    private static BlockPos canonicalizeBedFoot(BlockPos pos, BlockState state) {
+        if (pos == null || state == null) {
+            return pos;
+        }
+        if (state.contains(BedBlock.FACING) && state.contains(BedBlock.PART)) {
+            Direction facing = state.get(BedBlock.FACING);
+            BedPart part = state.get(BedBlock.PART);
+            return part == BedPart.FOOT ? pos : pos.offset(facing.getOpposite());
+        }
+        return pos;
+    }
+
+    private static Optional<BedGeometry> bedGeometry(ServerWorld world, BlockPos bedFootPos) {
+        if (world == null || bedFootPos == null) {
+            return Optional.empty();
+        }
+        if (!world.isChunkLoaded(bedFootPos)) {
+            return Optional.empty();
+        }
+        BlockState state = world.getBlockState(bedFootPos);
+        if (!state.isIn(BlockTags.BEDS)) {
+            return Optional.empty();
+        }
+        if (!state.contains(BedBlock.FACING) || !state.contains(BedBlock.PART)) {
+            return Optional.empty();
+        }
+        Direction facing = state.get(BedBlock.FACING);
+        BedPart part = state.get(BedBlock.PART);
+        BlockPos foot = part == BedPart.FOOT ? bedFootPos : bedFootPos.offset(facing.getOpposite());
+        BlockPos head = foot.offset(facing);
+        if (!world.isChunkLoaded(head)) {
+            return Optional.empty();
+        }
+        if (!world.getBlockState(foot).isIn(BlockTags.BEDS) || !world.getBlockState(head).isIn(BlockTags.BEDS)) {
+            return Optional.empty();
+        }
+        return Optional.of(new BedGeometry(foot.toImmutable(), head.toImmutable(), facing));
+    }
+
+    private static List<BlockPos> findNearbyBedFeet(ServerWorld world, BlockPos origin, int radius) {
+        List<BlockPos> beds = new ArrayList<>();
+        if (world == null || origin == null) {
+            return beds;
+        }
+        Set<BlockPos> seenFeet = new HashSet<>();
+        int vertical = Math.max(12, radius / 2);
+        for (BlockPos pos : BlockPos.iterate(origin.add(-radius, -vertical, -radius), origin.add(radius, vertical, radius))) {
+            if (!world.isChunkLoaded(pos)) {
+                continue;
+            }
+            BlockState state = world.getBlockState(pos);
+            if (!state.isIn(BlockTags.BEDS)) {
+                continue;
+            }
+            BlockPos foot = canonicalizeBedFoot(pos, state);
+            if (foot != null && seenFeet.add(foot)) {
+                beds.add(foot.toImmutable());
+            }
+        }
+        beds.sort((a, b) -> Double.compare(origin.getSquaredDistance(a.up()), origin.getSquaredDistance(b.up())));
+        return beds;
+    }
+
     private static Optional<BlockPos> findNearestBed(ServerWorld world, BlockPos origin, int radius) {
         if (world == null || origin == null) {
             return Optional.empty();
         }
         BlockPos best = null;
         double bestSq = Double.MAX_VALUE;
-        for (BlockPos pos : BlockPos.iterate(origin.add(-radius, -3, -radius), origin.add(radius, 3, radius))) {
+        // Beds are frequently on different floors (basements / second stories).
+        // Scan a larger vertical range to avoid incorrectly falling back to crafting.
+        int vertical = Math.max(12, radius / 2);
+        for (BlockPos pos : BlockPos.iterate(origin.add(-radius, -vertical, -radius), origin.add(radius, vertical, radius))) {
             if (!world.isChunkLoaded(pos)) {
                 continue;
             }
@@ -230,16 +376,32 @@ public final class SleepService {
         return key != World.NETHER && key != World.END;
     }
 
-    private static List<BlockPos> findStandableAdjacent(ServerWorld world, BlockPos bedPos) {
-        List<BlockPos> stands = new ArrayList<>();
-        for (Direction dir : Direction.Type.HORIZONTAL) {
-            BlockPos stand = bedPos.offset(dir);
-            if (isStandable(world, stand)) {
-                stands.add(stand.toImmutable());
+    private static List<BlockPos> findStandPositionsForBed(ServerWorld world, BedGeometry bed) {
+        // These are *feet positions* (air blocks). Ground is at feet.down().
+        Set<BlockPos> stands = new HashSet<>();
+        List<BlockPos> halves = List.of(bed.foot, bed.head);
+
+        // Adjacent around both halves.
+        for (BlockPos half : halves) {
+            for (Direction dir : Direction.Type.HORIZONTAL) {
+                BlockPos feet = half.offset(dir).up();
+                if (isStandable(world, feet)) {
+                    stands.add(feet.toImmutable());
+                }
             }
         }
-        stands.sort((a, b) -> Double.compare(a.getSquaredDistance(bedPos), b.getSquaredDistance(bedPos)));
-        return stands;
+
+        // Extra angles: standing on top of the bed halves.
+        for (BlockPos half : halves) {
+            BlockPos feet = half.up();
+            if (isStandable(world, feet)) {
+                stands.add(feet.toImmutable());
+            }
+        }
+
+        List<BlockPos> result = new ArrayList<>(stands);
+        result.sort((a, b) -> Double.compare(a.getSquaredDistance(bed.foot), b.getSquaredDistance(bed.foot)));
+        return result;
     }
 
     private static boolean isStandable(ServerWorld world, BlockPos foot) {
@@ -247,12 +409,25 @@ public final class SleepService {
             return false;
         }
         BlockPos below = foot.down();
-        if (!world.getBlockState(below).isSolidBlock(world, below)) {
+        BlockState belowState = world.getBlockState(below);
+        // Don't require a full cube: slabs/stairs/etc are standable.
+        if (belowState.getCollisionShape(world, below).isEmpty()) {
             return false;
         }
-        if (!world.getBlockState(foot).getCollisionShape(world, foot).isEmpty()) {
-            return false;
+
+        // Stand tile: allow true-empty space, and also allow very-low-profile blocks
+        // like carpets/pressure plates (which can otherwise make a bed look "blocked").
+        VoxelShape footShape = world.getBlockState(foot).getCollisionShape(world, foot);
+        if (!footShape.isEmpty()) {
+            double maxY = footShape.getMax(Direction.Axis.Y);
+            if (maxY > 0.25D) {
+                return false;
+            }
         }
+
+        // Only require the 2-block-tall player volume to be clear: feet block + head block.
+        // Do NOT require a third block above the head to be empty; that incorrectly rejects
+        // normal 2-high interiors where the ceiling is at foot.up().up().
         return world.getBlockState(foot.up()).getCollisionShape(world, foot.up()).isEmpty();
     }
 

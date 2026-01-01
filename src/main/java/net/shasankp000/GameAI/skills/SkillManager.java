@@ -12,6 +12,7 @@ import net.shasankp000.GameAI.skills.impl.FishingSkill;
 import net.shasankp000.GameAI.skills.impl.MiningSkill;
 import net.shasankp000.GameAI.skills.impl.ShelterSkill;
 import net.shasankp000.GameAI.skills.impl.StripMineSkill;
+import net.shasankp000.GameAI.skills.impl.WoodcutCleanupSkill;
 import net.shasankp000.GameAI.skills.impl.WoodcutSkill;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -29,6 +30,11 @@ public final class SkillManager {
     private static final int DROP_SWEEP_MAX_TARGETS = 6;
     private static final long DROP_SWEEP_MAX_DURATION_MS = 10_000L;
 
+    // Ephemeral woodcut state (kept across woodcut/woodcut_cleanup runs, cleared when any other skill starts).
+    private static final String WOODCUT_SCAFFOLD_MEMORY_POSITIONS_KEY = "woodcut.scaffoldMemory.positions";
+    private static final String WOODCUT_SCAFFOLD_MEMORY_DIMENSION_KEY = "woodcut.scaffoldMemory.dimension";
+    private static final String WOODCUT_SCAFFOLD_MEMORY_UPDATED_AT_KEY = "woodcut.scaffoldMemory.updatedAt";
+
     static {
         register(new DirtShovelSkill());
         register(new CollectDirtSkill());
@@ -36,11 +42,13 @@ public final class SkillManager {
         register(new DropSweepSkill());
         register(new StripMineSkill());
         register(new WoodcutSkill());
+        register(new WoodcutCleanupSkill());
         register(new ShelterSkill());
         register(new FishingSkill());
         register(new net.shasankp000.GameAI.skills.impl.HangoutSkill());
         register(new net.shasankp000.GameAI.skills.impl.FarmSkill());
         register(new net.shasankp000.GameAI.skills.impl.WoolSkill());
+        register(new net.shasankp000.GameAI.skills.impl.FlareSkill());
     }
 
     private SkillManager() {
@@ -63,6 +71,19 @@ public final class SkillManager {
             return SkillExecutionResult.failure("Another skill is already running.");
         }
         TaskService.TaskTicket ticket = ticketOpt.get();
+
+        // Clear woodcut scaffold memory when switching away from woodcut flows.
+        try {
+            if (context != null && context.sharedState() != null
+                    && name != null
+                    && !"woodcut".equalsIgnoreCase(name)
+                    && !"woodcut_cleanup".equalsIgnoreCase(name)) {
+                context.sharedState().remove(WOODCUT_SCAFFOLD_MEMORY_POSITIONS_KEY);
+                context.sharedState().remove(WOODCUT_SCAFFOLD_MEMORY_DIMENSION_KEY);
+                context.sharedState().remove(WOODCUT_SCAFFOLD_MEMORY_UPDATED_AT_KEY);
+            }
+        } catch (Exception ignored) {
+        }
 
         // Tag task metadata early so tick-driven automation can make safe decisions.
         try {

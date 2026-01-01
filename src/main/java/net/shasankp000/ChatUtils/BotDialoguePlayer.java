@@ -77,6 +77,47 @@ public final class BotDialoguePlayer {
         SUBTITLE_MAP.put(BotDialogueSounds.LINE_STATUS_HUNGRY, "I'm getting hungry...");
         SUBTITLE_MAP.put(BotDialogueSounds.LINE_STATUS_FIND_FOOD, "We should find food soon.");
         SUBTITLE_MAP.put(BotDialogueSounds.LINE_STATUS_SNACK_TIME, "Snack time, maybe?");
+
+        // ============ NEW CHATTERBOX SUBTITLES ============
+        // Ambient / cave
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_AMBIENT_HEARD_SOMETHING, "I heard something.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_AMBIENT_DID_YOU_HEAR, "Did you hear that?");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_AMBIENT_SOMETHING_MOVED, "Something moved.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_AMBIENT_NOT_ALONE, "Not alone...");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_AMBIENT_SMELLS_TERRIBLE, "Smells terrible.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_AMBIENT_DONT_LIKE_THIS, "I don't like this.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_AMBIENT_CREEPY, "This is creepy.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_AMBIENT_CAVE_DEEP, "Deep in the cave.");
+
+        // Darkness
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_DARK_CANT_SEE, "I can't see a thing.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_DARK_WHERE_ARE_YOU, "Where are you?");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_DARK_NEED_LIGHT, "I need light.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_DARK_TOO_DARK, "It's too dark.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_DARK_TORCH_PLEASE, "Torch please.");
+
+        // Wildlife
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_WILDLIFE_HEARD_BIRD, "I heard a bird.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_WILDLIFE_SAW_COW, "Saw a cow.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_WILDLIFE_PIG_NEARBY, "Pig nearby.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_WILDLIFE_SHEEP_AROUND, "Sheep around.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_WILDLIFE_CHICKEN, "Chicken nearby.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_WILDLIFE_NICE_DAY, "Nice day.");
+
+        // Lost / found
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_LOST_OVER_HERE, "Over here!");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_LOST_CAN_ANYONE_HEAR, "Can anyone hear me?");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_LOST_HELLO, "Hello?");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_LOST_HELP, "Help!");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_LOST_STUCK_HERE, "I'm stuck here.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_LOST_WHERE_IS_EVERYONE, "Where is everyone?");
+
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_FOUND_FINALLY, "Finally! Someone found me.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_FOUND_THANK_GOODNESS, "Thank goodness.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_FOUND_THOUGHT_ID_BE_STUCK, "Thought I'd be stuck.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_FOUND_SO_GLAD, "So glad.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_FOUND_BEEN_CALLING, "I've been calling.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_FOUND_LETS_GET_OUT, "Let's get out.");
     }
 
     private BotDialoguePlayer() {

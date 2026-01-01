@@ -58,7 +58,7 @@ public class BotPlayerInventoryScreenHandler extends ScreenHandler {
         this.botInventory = botInventory;
         this.botRef = botRef;
         // Keep this in sync with refreshStats() + getters below.
-        this.botStats = new ArrayPropertyDelegate(13);
+        this.botStats = new ArrayPropertyDelegate(14);
         this.addProperties(this.botStats);
         refreshStats();
 
@@ -217,7 +217,10 @@ public class BotPlayerInventoryScreenHandler extends ScreenHandler {
         botStats.set(5, botRef.totalExperience);
         BotCommandStateService.State state = BotCommandStateService.stateFor(botRef);
         BotEventHandler.Mode mode = state != null ? state.mode : BotEventHandler.Mode.IDLE;
-        botStats.set(6, mode == BotEventHandler.Mode.FOLLOW ? 1 : 0);
+        // Distinguish between "following a player" vs "returning to base" (both use FOLLOW mode internally)
+        boolean isReturningToBase = BotEventHandler.isReturningToBase(botRef);
+        boolean isFollowingPlayer = BotEventHandler.isFollowingPlayer(botRef);
+        botStats.set(6, isFollowingPlayer ? 1 : 0);
         botStats.set(7, mode == BotEventHandler.Mode.GUARD ? 1 : 0);
         botStats.set(8, mode == BotEventHandler.Mode.PATROL ? 1 : 0);
         double followDistance = state != null ? state.followStandoffRange : 0.0D;
@@ -228,6 +231,8 @@ public class BotPlayerInventoryScreenHandler extends ScreenHandler {
         // Additional per-bot automation toggles (used by Topics UI).
         botStats.set(11, BotHomeService.isIdleHobbiesEnabled(botRef) ? 1 : 0);
         botStats.set(12, BotHomeService.isAutoReturnGuardPatrolEligible(botRef) ? 1 : 0);
+        // Index 13: returning to base (separate from following)
+        botStats.set(13, isReturningToBase ? 1 : 0);
     }
 
     public float getBotHealth() {
@@ -276,6 +281,10 @@ public class BotPlayerInventoryScreenHandler extends ScreenHandler {
 
     public boolean isBotAutoReturnGuardPatrolEligible() {
         return botStats.get(12) != 0;
+    }
+
+    public boolean isBotReturningToBase() {
+        return botStats.get(13) != 0;
     }
 
     public double getBotFollowDistance() {

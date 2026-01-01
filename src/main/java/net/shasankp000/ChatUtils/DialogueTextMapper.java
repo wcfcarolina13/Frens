@@ -361,6 +361,49 @@ public final class DialogueTextMapper {
         EXACT_MAP.put("Patrolling the area.", BotDialogueSounds.LINE_MODE_PATROL_AREA);
         EXACT_MAP.put("Just checking the perimeter.", BotDialogueSounds.LINE_MODE_PATROL_PERIMETER);
 
+        // ============ NEW CHATTERBOX LINES: AMBIENT / DARK / WILDLIFE / LOST / FOUND ============
+        // Ambient / cave
+        EXACT_MAP.put("I heard something.", BotDialogueSounds.LINE_AMBIENT_HEARD_SOMETHING);
+        EXACT_MAP.put("Did you hear that?", BotDialogueSounds.LINE_AMBIENT_DID_YOU_HEAR);
+        EXACT_MAP.put("Something moved.", BotDialogueSounds.LINE_AMBIENT_SOMETHING_MOVED);
+        EXACT_MAP.put("I'm not alone.", BotDialogueSounds.LINE_AMBIENT_NOT_ALONE);
+        EXACT_MAP.put("Smells terrible.", BotDialogueSounds.LINE_AMBIENT_SMELLS_TERRIBLE);
+        EXACT_MAP.put("I don't like this.", BotDialogueSounds.LINE_AMBIENT_DONT_LIKE_THIS);
+        EXACT_MAP.put("This is creepy.", BotDialogueSounds.LINE_AMBIENT_CREEPY);
+        EXACT_MAP.put("It's deep in the cave.", BotDialogueSounds.LINE_AMBIENT_CAVE_DEEP);
+
+        // Darkness-related
+        EXACT_MAP.put("I can't see a thing.", BotDialogueSounds.LINE_DARK_CANT_SEE);
+        EXACT_MAP.put("Where are you?", BotDialogueSounds.LINE_DARK_WHERE_ARE_YOU);
+        EXACT_MAP.put("I need light.", BotDialogueSounds.LINE_DARK_NEED_LIGHT);
+        EXACT_MAP.put("It's too dark.", BotDialogueSounds.LINE_DARK_TOO_DARK);
+        EXACT_MAP.put("Torch please.", BotDialogueSounds.LINE_DARK_TORCH_PLEASE);
+        EXACT_MAP.put("Torch, please.", BotDialogueSounds.LINE_DARK_TORCH_PLEASE);
+
+        // Wildlife / surface
+        EXACT_MAP.put("I heard a bird.", BotDialogueSounds.LINE_WILDLIFE_HEARD_BIRD);
+        EXACT_MAP.put("Saw a cow.", BotDialogueSounds.LINE_WILDLIFE_SAW_COW);
+        EXACT_MAP.put("Pig nearby.", BotDialogueSounds.LINE_WILDLIFE_PIG_NEARBY);
+        EXACT_MAP.put("Sheep around.", BotDialogueSounds.LINE_WILDLIFE_SHEEP_AROUND);
+        EXACT_MAP.put("Chicken nearby.", BotDialogueSounds.LINE_WILDLIFE_CHICKEN);
+        EXACT_MAP.put("Nice day.", BotDialogueSounds.LINE_WILDLIFE_NICE_DAY);
+
+        // Lost / shouts
+        EXACT_MAP.put("Over here!", BotDialogueSounds.LINE_LOST_OVER_HERE);
+        EXACT_MAP.put("Can anyone hear me?", BotDialogueSounds.LINE_LOST_CAN_ANYONE_HEAR);
+        EXACT_MAP.put("Hello?", BotDialogueSounds.LINE_LOST_HELLO);
+        EXACT_MAP.put("Help!", BotDialogueSounds.LINE_LOST_HELP);
+        EXACT_MAP.put("I'm stuck here.", BotDialogueSounds.LINE_LOST_STUCK_HERE);
+        EXACT_MAP.put("Where is everyone?", BotDialogueSounds.LINE_LOST_WHERE_IS_EVERYONE);
+
+        // Found / rescued responses
+        EXACT_MAP.put("Finally! Someone found me.", BotDialogueSounds.LINE_FOUND_FINALLY);
+        EXACT_MAP.put("Thank goodness.", BotDialogueSounds.LINE_FOUND_THANK_GOODNESS);
+        EXACT_MAP.put("I thought I'd be stuck.", BotDialogueSounds.LINE_FOUND_THOUGHT_ID_BE_STUCK);
+        EXACT_MAP.put("So glad.", BotDialogueSounds.LINE_FOUND_SO_GLAD);
+        EXACT_MAP.put("I've been calling.", BotDialogueSounds.LINE_FOUND_BEEN_CALLING);
+        EXACT_MAP.put("Let's get out of here.", BotDialogueSounds.LINE_FOUND_LETS_GET_OUT);
+
         LOGGER.info("Initialized {} exact mappings and {} pattern mappings", EXACT_MAP.size(), PATTERN_MAP.size());
     }
 

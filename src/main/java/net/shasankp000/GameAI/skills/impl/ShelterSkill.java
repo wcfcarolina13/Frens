@@ -86,7 +86,7 @@ public final class ShelterSkill implements Skill {
         String type = getOption(context, "hovel");
         if ("burrow".equalsIgnoreCase(type)) {
             LOGGER.info("Burrow sequence start: descend 5 -> strip 5 -> descend 3 -> hollow");
-            SkillExecutionResult burrowResult = new BurrowBuilder().build(source, bot, world, origin);
+            SkillExecutionResult burrowResult = new BurrowBuilder().build(context, source, bot, world, origin);
             if (!burrowResult.success()) {
                 return burrowResult;
             }

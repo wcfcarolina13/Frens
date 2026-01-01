@@ -60,7 +60,7 @@ public final class WoodcutSkill implements Skill {
     private static final int DEFAULT_TREE_COUNT_STANDALONE = 4;
     private static final int DEFAULT_SEARCH_RADIUS = 12;
     private static final int DEFAULT_VERTICAL_RANGE = 6;
-    private static final int MAX_FAILURES = 3;
+    private static final int MAX_CONSECUTIVE_FAILURES = 6;
     private static final int SUNSET_TIME_OF_DAY = 12000;
     private static final double REACH_DISTANCE_SQ = 20.25D; // ~4.5 blocks (survival reach)
     private static final long PILLAR_STEP_DELAY_MS = 160L;
@@ -78,6 +78,12 @@ public final class WoodcutSkill implements Skill {
             Items.COBBLED_DEEPSLATE,
             Items.NETHERRACK
     );
+
+    // Ephemeral memory (persists across woodcut/woodcut_cleanup until another skill starts).
+    private static final String WOODCUT_SCAFFOLD_MEMORY_POSITIONS_KEY = "woodcut.scaffoldMemory.positions";
+    private static final String WOODCUT_SCAFFOLD_MEMORY_DIMENSION_KEY = "woodcut.scaffoldMemory.dimension";
+    private static final String WOODCUT_SCAFFOLD_MEMORY_UPDATED_AT_KEY = "woodcut.scaffoldMemory.updatedAt";
+    private static final int WOODCUT_SCAFFOLD_MEMORY_MAX = 2048;
     private static final List<Item> SAPLING_ITEMS = List.of(
             Items.OAK_SAPLING,
             Items.SPRUCE_SAPLING,
@@ -101,9 +107,19 @@ public final class WoodcutSkill implements Skill {
         ServerPlayerEntity bot = Objects.requireNonNull(source.getPlayer(), "player");
         SkillResumeService.consumeResumeIntent(bot.getUuid());
 
+        Map<String, Object> sharedState = context.sharedState();
+
         boolean internal = getBooleanParameter(context.parameters(), "internal", false);
-        int defaultTrees = internal ? DEFAULT_TREE_COUNT_INTERNAL : DEFAULT_TREE_COUNT_STANDALONE;
-        int targetTrees = Math.max(1, getIntParameter(context.parameters(), "count", defaultTrees));
+        boolean explicitCount = context.parameters() != null && context.parameters().containsKey("count");
+        // Default standalone invocation with no explicit count => open-ended until sunset.
+        boolean openEnded = isOpenEnded(context.parameters()) || (!explicitCount && !internal);
+        int targetTrees;
+        if (openEnded) {
+            targetTrees = Integer.MAX_VALUE;
+        } else {
+            int defaultTrees = internal ? DEFAULT_TREE_COUNT_INTERNAL : DEFAULT_TREE_COUNT_STANDALONE;
+            targetTrees = Math.max(1, getIntParameter(context.parameters(), "count", defaultTrees));
+        }
         int searchRadius = Math.max(6, getIntParameter(context.parameters(), "searchRadius", DEFAULT_SEARCH_RADIUS));
         int verticalRange = Math.max(4, getIntParameter(context.parameters(), "verticalRange", DEFAULT_VERTICAL_RANGE));
         int startTimeOfDay = bot.getEntityWorld() != null ? (int) (bot.getEntityWorld().getTimeOfDay() % 24000L) : 0;
@@ -117,8 +133,10 @@ public final class WoodcutSkill implements Skill {
 
         Set<BlockPos> visitedBases = new HashSet<>();
         int felled = 0;
-        int failures = 0;
-        boolean swept = false;
+        int consecutiveFailures = 0;
+        int totalFailures = 0;
+        int sinceCleanup = 0;
+        boolean abortRequested = false;
         BlockPos startPos = bot.getBlockPos();
         int minX = startPos.getX();
         int maxX = startPos.getX();
@@ -127,89 +145,247 @@ public final class WoodcutSkill implements Skill {
         int minZ = startPos.getZ();
         int maxZ = startPos.getZ();
 
-        while (felled < targetTrees && failures < MAX_FAILURES) {
-            if (SkillManager.shouldAbortSkill(bot)) {
-                return SkillExecutionResult.failure("woodcut paused due to nearby threat.");
-            }
-            if (!internal) {
-                int timeOfDay = (int) (bot.getEntityWorld().getTimeOfDay() % 24000L);
-                if (timeOfDay >= SUNSET_TIME_OF_DAY) {
-                    ChatUtils.sendSystemMessage(source, "It's getting late; I'm stopping woodcut for the day.");
+        SkillExecutionResult finalResult;
+        try {
+            while (felled < targetTrees && consecutiveFailures < MAX_CONSECUTIVE_FAILURES) {
+                if (SkillManager.shouldAbortSkill(bot)) {
+                    abortRequested = true;
                     break;
                 }
-            }
-            if (!ensureWoodSpaceOrDeposit(source, bot)) {
-                return SkillExecutionResult.failure("Inventory full; couldn't deposit wood into any chest.");
-            }
-            logDetectionSummary(bot, searchRadius, verticalRange, visitedBases);
-            Optional<TreeDetector.TreeTarget> targetOpt = TreeDetector.findNearestTree(bot, searchRadius, verticalRange, visitedBases);
-            if (targetOpt.isEmpty()) {
-                logDetectionDiagnostics(bot, searchRadius, verticalRange, visitedBases);
-                Optional<BlockPos> floaters = TreeDetector.findFloatingLog(bot, searchRadius, verticalRange, visitedBases);
-                if (floaters.isPresent()) {
-                    LOGGER.warn("Woodcut: cleaning floating log at {}", floaters.get().toShortString());
-                    TreeDetector.TreeTarget synthetic = new TreeDetector.TreeTarget(floaters.get(), floaters.get(), 1);
-                    targetOpt = Optional.of(synthetic);
-                }
-                Optional<BlockPos> stray = TreeDetector.findNearestLooseLog(bot, searchRadius, verticalRange, visitedBases);
-                if (stray.isEmpty()) {
-                    Optional<BlockPos> anyLog = TreeDetector.findNearestAnyLog(bot, searchRadius, verticalRange, visitedBases);
-                    if (anyLog.isEmpty()) {
-                        LOGGER.warn("Woodcut: found no detectable trees/logs within {}x{}", searchRadius, verticalRange);
+                if (!internal) {
+                    int timeOfDay = (int) (bot.getEntityWorld().getTimeOfDay() % 24000L);
+                    if (timeOfDay >= SUNSET_TIME_OF_DAY) {
+                        ChatUtils.sendSystemMessage(source, "It's getting late; I'm stopping woodcut for the day.");
                         break;
                     }
-                    LOGGER.warn("Woodcut: falling back to permissive log at {}", anyLog.get().toShortString());
-                    TreeDetector.TreeTarget synthetic = new TreeDetector.TreeTarget(anyLog.get(), anyLog.get(), 1);
-                    targetOpt = Optional.of(synthetic);
-                } else {
-                    LOGGER.warn("Woodcut: using stray log cleanup at {}", stray.get().toShortString());
-                    TreeDetector.TreeTarget synthetic = new TreeDetector.TreeTarget(stray.get(), stray.get(), 1);
-                    targetOpt = Optional.of(synthetic);
+                }
+
+                if (!ensureWoodSpaceOrDeposit(source, bot)) {
+                    totalFailures++;
+                    consecutiveFailures++;
+                    ChatUtils.sendSystemMessage(source, "Inventory is full and I couldn't deposit wood; stopping woodcut.");
+                    break;
+                }
+
+                logDetectionSummary(bot, searchRadius, verticalRange, visitedBases);
+                Optional<TreeDetector.TreeTarget> targetOpt = TreeDetector.findNearestTree(bot, searchRadius, verticalRange, visitedBases);
+                if (targetOpt.isEmpty()) {
+                    logDetectionDiagnostics(bot, searchRadius, verticalRange, visitedBases);
+                    Optional<BlockPos> floaters = TreeDetector.findFloatingLog(bot, searchRadius, verticalRange, visitedBases);
+                    if (floaters.isPresent()) {
+                        LOGGER.warn("Woodcut: cleaning floating log at {}", floaters.get().toShortString());
+                        TreeDetector.TreeTarget synthetic = new TreeDetector.TreeTarget(floaters.get(), floaters.get(), 1);
+                        targetOpt = Optional.of(synthetic);
+                    }
+                    Optional<BlockPos> stray = TreeDetector.findNearestLooseLog(bot, searchRadius, verticalRange, visitedBases);
+                    if (stray.isEmpty()) {
+                        Optional<BlockPos> anyLog = TreeDetector.findNearestAnyLog(bot, searchRadius, verticalRange, visitedBases);
+                        if (anyLog.isEmpty()) {
+                            LOGGER.warn("Woodcut: found no detectable trees/logs within {}x{}", searchRadius, verticalRange);
+                            break;
+                        }
+                        LOGGER.warn("Woodcut: falling back to permissive log at {}", anyLog.get().toShortString());
+                        TreeDetector.TreeTarget synthetic = new TreeDetector.TreeTarget(anyLog.get(), anyLog.get(), 1);
+                        targetOpt = Optional.of(synthetic);
+                    } else {
+                        LOGGER.warn("Woodcut: using stray log cleanup at {}", stray.get().toShortString());
+                        TreeDetector.TreeTarget synthetic = new TreeDetector.TreeTarget(stray.get(), stray.get(), 1);
+                        targetOpt = Optional.of(synthetic);
+                    }
+                }
+
+                TreeDetector.TreeTarget target = targetOpt.get();
+                visitedBases.add(target.base());
+
+                // Track footprint to size post-run drop sweep.
+                BlockPos posNow = bot.getBlockPos();
+                minX = Math.min(minX, posNow.getX());
+                maxX = Math.max(maxX, posNow.getX());
+                minY = Math.min(minY, posNow.getY());
+                maxY = Math.max(maxY, posNow.getY());
+                minZ = Math.min(minZ, posNow.getZ());
+                maxZ = Math.max(maxZ, posNow.getZ());
+
+                if (!approachBase(source, bot, target.base(), sharedState)) {
+                    totalFailures++;
+                    consecutiveFailures++;
+                    continue;
+                }
+                if (!fellTree(source, bot, target, sharedState)) {
+                    totalFailures++;
+                    consecutiveFailures++;
+                    continue;
+                }
+
+                felled++;
+                consecutiveFailures = 0;
+                sinceCleanup++;
+                ChatUtils.sendSystemMessage(source, "Tree cut (" + felled + "/" + targetTrees + ")");
+
+                if (openEnded && sinceCleanup >= 5) {
+                    runWoodcutCleanup(context, source, bot, startPos, minX, maxX, minY, maxY, minZ, maxZ,
+                            Math.max(searchRadius + 6, 16), Math.max(verticalRange + 8, 12),
+                            false);
+                    sinceCleanup = 0;
                 }
             }
-            TreeDetector.TreeTarget target = targetOpt.get();
-            visitedBases.add(target.base());
 
-            // Track footprint to size post-run drop sweep.
-            BlockPos posNow = bot.getBlockPos();
-            minX = Math.min(minX, posNow.getX());
-            maxX = Math.max(maxX, posNow.getX());
-            minY = Math.min(minY, posNow.getY());
-            maxY = Math.max(maxY, posNow.getY());
-            minZ = Math.min(minZ, posNow.getZ());
-            maxZ = Math.max(maxZ, posNow.getZ());
-
-            if (!approachBase(source, bot, target.base())) {
-                failures++;
-                continue;
+            if (abortRequested) {
+                finalResult = SkillExecutionResult.failure("woodcut paused due to nearby threat.");
+            } else if (felled == 0) {
+                finalResult = SkillExecutionResult.failure("No valid trees nearby. Try moving closer or adjust radius.");
+            } else if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+                finalResult = SkillExecutionResult.failure("Stopped after cutting " + felled + " tree(s); repeated failures reaching remaining targets (path/LOS/inventory).");
+            } else if (felled < targetTrees) {
+                finalResult = SkillExecutionResult.success("Stopped after cutting " + felled + " tree(s).");
+            } else {
+                finalResult = SkillExecutionResult.success("Cut " + felled + " tree(s).");
             }
-            if (!fellTree(source, bot, target)) {
-                failures++;
-                continue;
+        } finally {
+            // Best-effort: if we did any work, attempt cleanup (when not aborted) and always perform a
+            // wide drop sweep at the end so items don't get left on the ground even after termination.
+            if ((felled > 0 || !visitedBases.isEmpty() || totalFailures > 0)) {
+                try {
+                    ensureWoodSpaceOrDeposit(source, bot);
+                } catch (Exception ignored) {
+                }
+
+                double horizRadius = Math.max(6.0,
+                        Math.max(Math.abs(maxX - startPos.getX()), Math.abs(minX - startPos.getX())) + 3.0);
+                double vertRange = Math.max(4.0, (maxY - minY) + 3.0);
+
+                if (!abortRequested) {
+                    // Cleanup pass first (break floating logs/scaffolds).
+                    runWoodcutCleanup(context, source, bot, startPos, minX, maxX, minY, maxY, minZ, maxZ,
+                            (int) Math.ceil(horizRadius), (int) Math.ceil(vertRange),
+                            false);
+                } else {
+                    LOGGER.info("Woodcut: abort requested; skipping cleanup pass and performing final sweep.");
+                }
+
+                // Always attempt a wide drop sweep at the end (even if the run was terminated). Still
+                // avoid sweeping when the inventory is full.
+                if (!isInventoryFull(bot)) {
+                    try {
+                        DropSweeper.safeSweep(bot, source.withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS), horizRadius, vertRange);
+                    } catch (Exception e) {
+                        LOGGER.warn("Drop sweep after woodcut failed: {}", e.getMessage());
+                    }
+                }
             }
-            felled++;
-            ChatUtils.sendSystemMessage(source, "Tree cut (" + felled + "/" + targetTrees + ")");
         }
 
-        if (felled > 0 && !swept) {
-            ensureWoodSpaceOrDeposit(source, bot);
-            double horizRadius = Math.max(6.0,
-                    Math.max(Math.abs(maxX - startPos.getX()), Math.abs(minX - startPos.getX())) + 3.0);
-            double vertRange = Math.max(4.0, (maxY - minY) + 3.0);
-            DropSweeper.safeSweep(bot, source.withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS), horizRadius, vertRange);
-            swept = true;
-        }
+        return finalResult;
+    }
 
-        if (felled == 0) {
-            return SkillExecutionResult.failure("No valid trees nearby. Try moving closer or adjust radius.");
+    private void recordScaffoldPlacement(Map<String, Object> sharedState, ServerWorld world, BlockPos pos) {
+        if (sharedState == null || world == null || pos == null) {
+            return;
         }
-        if (failures >= MAX_FAILURES) {
-            return SkillExecutionResult.failure("Stopped after cutting " + felled + " tree(s); repeated failures reaching remaining targets (path/LOS/inventory).");
+        String dimension = world.getRegistryKey().getValue().toString();
+        try {
+            Object rawDim = sharedState.get(WOODCUT_SCAFFOLD_MEMORY_DIMENSION_KEY);
+            if (rawDim instanceof String s && !s.equals(dimension)) {
+                sharedState.remove(WOODCUT_SCAFFOLD_MEMORY_POSITIONS_KEY);
+            }
+            sharedState.put(WOODCUT_SCAFFOLD_MEMORY_DIMENSION_KEY, dimension);
+            sharedState.put(WOODCUT_SCAFFOLD_MEMORY_UPDATED_AT_KEY, System.currentTimeMillis());
+
+            Object raw = sharedState.get(WOODCUT_SCAFFOLD_MEMORY_POSITIONS_KEY);
+            @SuppressWarnings("unchecked")
+            Set<Long> set = raw instanceof Set<?> existing ? (Set<Long>) existing : null;
+            if (set == null) {
+                set = new HashSet<>();
+                sharedState.put(WOODCUT_SCAFFOLD_MEMORY_POSITIONS_KEY, set);
+            }
+            set.add(pos.asLong());
+            if (set.size() > WOODCUT_SCAFFOLD_MEMORY_MAX) {
+                int toRemove = set.size() - WOODCUT_SCAFFOLD_MEMORY_MAX;
+                var it = set.iterator();
+                while (toRemove > 0 && it.hasNext()) {
+                    it.next();
+                    it.remove();
+                    toRemove--;
+                }
+            }
+        } catch (Exception ignored) {
         }
-        if (felled < targetTrees) {
-            return SkillExecutionResult.success("Stopped after cutting " + felled + " tree(s).");
+    }
+
+    private void runWoodcutCleanup(SkillContext context,
+                                  ServerCommandSource source,
+                                  ServerPlayerEntity bot,
+                                  BlockPos startPos,
+                                  int minX,
+                                  int maxX,
+                                  int minY,
+                                  int maxY,
+                                  int minZ,
+                                  int maxZ,
+                                  int radius,
+                                  int verticalRange,
+                                  boolean sweepDrops) {
+        if (bot == null || source == null) {
+            return;
         }
-        return SkillExecutionResult.success("Cut " + felled + " tree(s).");
+        if (SkillManager.shouldAbortSkill(bot)) {
+            return;
+        }
+        try {
+            Map<String, Object> params = new HashMap<>();
+            params.put("radius", Math.max(8, radius));
+            params.put("verticalRange", Math.max(6, verticalRange));
+            params.put("maxLogs", 64);
+            params.put("maxScaffold", 48);
+            params.put("durationMs", 35_000L);
+            params.put("sweep", sweepDrops);
+            params.put("scaffold", true);
+
+            // Provide a tighter region for the cleanup scan.
+            params.put("minX", minX);
+            params.put("maxX", maxX);
+            params.put("minY", minY);
+            params.put("maxY", maxY);
+            params.put("minZ", minZ);
+            params.put("maxZ", maxZ);
+
+            // Keep internal child call from changing behavior like sunset gating.
+            params.put("internal", true);
+
+            WoodcutCleanupSkill cleanup = new WoodcutCleanupSkill();
+            SkillContext cleanupCtx = new SkillContext(source, context.sharedState(), params, context.requestSource());
+            var res = cleanup.execute(cleanupCtx);
+            LOGGER.info("Woodcut cleanup pass result: success={} message='{}'", res.success(), res.message());
+        } catch (Exception e) {
+            LOGGER.warn("Woodcut cleanup pass failed: {}", e.getMessage());
+        }
+    }
+
+    private boolean isOpenEnded(Map<String, Object> params) {
+        if (params == null) {
+            return false;
+        }
+        if (getBooleanParameter(params, "open_ended", false)) {
+            return true;
+        }
+        Object opts = params.get("options");
+        if (opts instanceof Iterable<?> iterable) {
+            for (Object o : iterable) {
+                if (o instanceof String str) {
+                    if ("until_sunset".equalsIgnoreCase(str)
+                            || "sunset".equalsIgnoreCase(str)
+                            || "open_ended".equalsIgnoreCase(str)
+                            || "open-ended".equalsIgnoreCase(str)) {
+                        return true;
+                    }
+                }
+            }
+        }
+        Object origin = params.get("_origin");
+        if (origin instanceof String s && "ambient".equalsIgnoreCase(s)) {
+            return true;
+        }
+        return false;
     }
 
     private boolean getBooleanParameter(Map<String, Object> parameters, String key, boolean fallback) {
@@ -226,7 +402,10 @@ public final class WoodcutSkill implements Skill {
         return fallback;
     }
 
-    private boolean fellTree(ServerCommandSource source, ServerPlayerEntity bot, TreeDetector.TreeTarget target) {
+    private boolean fellTree(ServerCommandSource source,
+                             ServerPlayerEntity bot,
+                             TreeDetector.TreeTarget target,
+                             Map<String, Object> sharedState) {
         if (!(source.getWorld() instanceof ServerWorld world)) {
             return false;
         }
@@ -239,7 +418,7 @@ public final class WoodcutSkill implements Skill {
             // Fell straight trunk first.
             List<BlockPos> trunk = TreeDetector.collectTrunk(world, target.base());
             for (BlockPos log : trunk) {
-                if (!mineWithRetries(bot, source, log, placedPillar, true)) {
+                if (!mineWithRetries(bot, source, log, placedPillar, true, sharedState)) {
                     LOGGER.warn("Failed to break trunk segment {} for base {}", log.toShortString(), target.base().toShortString());
                     return false;
                 }
@@ -266,7 +445,7 @@ public final class WoodcutSkill implements Skill {
                 if (next == null) {
                     break;
                 }
-                if (mineWithRetries(bot, source, next, placedPillar, true)) {
+                if (mineWithRetries(bot, source, next, placedPillar, true, sharedState)) {
                     remaining.remove(next);
                     remaining.addAll(TreeDetector.collectConnectedLogs(world, target.base(), 3, 8));
                     remaining.removeAll(broken);
@@ -298,7 +477,10 @@ public final class WoodcutSkill implements Skill {
         }
     }
 
-    private boolean approachBase(ServerCommandSource source, ServerPlayerEntity bot, BlockPos base) {
+    private boolean approachBase(ServerCommandSource source,
+                                 ServerPlayerEntity bot,
+                                 BlockPos base,
+                                 Map<String, Object> sharedState) {
         if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
             return false;
         }
@@ -334,7 +516,7 @@ public final class WoodcutSkill implements Skill {
         }
         // Last resort: try to pillar from here to reach the trunk directly.
         List<BlockPos> tempPillar = new ArrayList<>();
-        if (prepareReach(bot, source, base, tempPillar)) {
+        if (prepareReach(bot, source, base, tempPillar, sharedState)) {
             descendAndCleanup(bot, tempPillar);
             return true;
         }
@@ -422,7 +604,8 @@ public final class WoodcutSkill implements Skill {
     private boolean prepareReach(ServerPlayerEntity bot,
                                  ServerCommandSource source,
                                  BlockPos target,
-                                 List<BlockPos> placedPillar) {
+                                 List<BlockPos> placedPillar,
+                                 Map<String, Object> sharedState) {
         boolean onPillar = placedPillar != null && !placedPillar.isEmpty();
         if (isWithinReach(bot, target)) {
             LOGGER.debug("Woodcut reach: {} already within reach", target.toShortString());
@@ -448,12 +631,12 @@ public final class WoodcutSkill implements Skill {
             return false;
         }
         LOGGER.info("Woodcut reach: pillaring {} blocks to reach {}", needed, target.toShortString());
-        if (pillarUp(bot, needed, placedPillar, source)) {
+        if (pillarUp(bot, needed, placedPillar, source, sharedState)) {
             return true;
         }
         // Emergency: try a single underfoot placement to break climb-stall
         LOGGER.warn("Pillar placement failed; attempting emergency underfoot scaffold");
-        return emergencyStep(bot, placedPillar);
+        return emergencyStep(bot, placedPillar, sharedState);
     }
 
     private boolean tryReposition(ServerPlayerEntity bot, ServerCommandSource source, BlockPos target) {
@@ -497,7 +680,11 @@ public final class WoodcutSkill implements Skill {
         return false;
     }
 
-    private boolean pillarUp(ServerPlayerEntity bot, int steps, List<BlockPos> placedPillar, ServerCommandSource source) {
+    private boolean pillarUp(ServerPlayerEntity bot,
+                             int steps,
+                             List<BlockPos> placedPillar,
+                             ServerCommandSource source,
+                             Map<String, Object> sharedState) {
         if (steps <= 0) {
             return true;
         }
@@ -524,7 +711,7 @@ public final class WoodcutSkill implements Skill {
             if (!world.getBlockState(candidate).isAir()) {
                 candidate = candidate.up();
             }
-            boolean placed = tryPlaceScaffold(bot, candidate);
+            boolean placed = tryPlaceScaffold(bot, candidate, sharedState);
             if (!placed) {
                 LOGGER.warn("Failed to place scaffold block at {}", candidate.toShortString());
                 bot.setSneaking(wasSneaking);
@@ -677,10 +864,13 @@ public final class WoodcutSkill implements Skill {
             mining.get(3_000, TimeUnit.MILLISECONDS);
         } catch (Exception e) {
             mining.cancel(true);
+            if (e instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+            }
         }
     }
 
-    private boolean tryPlaceScaffold(ServerPlayerEntity bot, BlockPos target) {
+    private boolean tryPlaceScaffold(ServerPlayerEntity bot, BlockPos target, Map<String, Object> sharedState) {
         ServerWorld world = (ServerWorld) bot.getEntityWorld();
         if (countPillarBlocks(bot) == 0) {
             LOGGER.warn("No valid scaffold blocks available to place at {}", target.toShortString());
@@ -691,8 +881,9 @@ public final class WoodcutSkill implements Skill {
             // try to clear replaceable block
             breakSoftBlock(world, bot, placePos);
         }
-        ensureSupportBlock(bot, placePos);
+        ensureSupportBlock(bot, placePos, sharedState);
         if (BotActions.placeBlockAt(bot, placePos, Direction.UP, PILLAR_BLOCKS)) {
+            recordScaffoldPlacement(sharedState, world, placePos);
             return true;
         }
         // Try nearby offsets to recover from collision/leaf interference
@@ -701,8 +892,9 @@ public final class WoodcutSkill implements Skill {
             if (!isPlaceableTarget(world, alt)) {
                 breakSoftBlock(world, bot, alt);
             }
-            ensureSupportBlock(bot, alt);
+            ensureSupportBlock(bot, alt, sharedState);
             if (BotActions.placeBlockAt(bot, alt, Direction.UP, PILLAR_BLOCKS)) {
+                recordScaffoldPlacement(sharedState, world, alt);
                 LOGGER.debug("Woodcut pillar: placed via offset {} at {}", dir, alt.toShortString());
                 return true;
             }
@@ -710,7 +902,7 @@ public final class WoodcutSkill implements Skill {
         return false;
     }
 
-    private void ensureSupportBlock(ServerPlayerEntity bot, BlockPos target) {
+    private void ensureSupportBlock(ServerPlayerEntity bot, BlockPos target, Map<String, Object> sharedState) {
         if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
             return;
         }
@@ -723,6 +915,7 @@ public final class WoodcutSkill implements Skill {
             breakSoftBlock(world, bot, below);
         }
         if (BotActions.placeBlockAt(bot, below, Direction.UP, PILLAR_BLOCKS)) {
+            recordScaffoldPlacement(sharedState, world, below);
             LOGGER.debug("Woodcut pillar: placed support at {}", below.toShortString());
         }
     }
@@ -742,13 +935,13 @@ public final class WoodcutSkill implements Skill {
         }
     }
 
-    private boolean emergencyStep(ServerPlayerEntity bot, List<BlockPos> placedPillar) {
+    private boolean emergencyStep(ServerPlayerEntity bot, List<BlockPos> placedPillar, Map<String, Object> sharedState) {
         ServerWorld world = (ServerWorld) bot.getEntityWorld();
         BlockPos foot = bot.getBlockPos();
         BlockPos below = foot.down();
         breakSoftBlock(world, bot, foot);
         breakSoftBlock(world, bot, below);
-        if (tryPlaceScaffold(bot, below)) {
+        if (tryPlaceScaffold(bot, below, sharedState)) {
             placedPillar.add(below.toImmutable());
             LOGGER.info("Emergency scaffold placed at {}", below.toShortString());
             return true;
@@ -792,6 +985,9 @@ public final class WoodcutSkill implements Skill {
         } catch (Exception e) {
             LOGGER.error("Failed to mine {}: {}", pos.toShortString(), e.getMessage());
             miningFuture.cancel(true);
+            if (e instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+            }
             return false;
         }
     }
@@ -1041,7 +1237,8 @@ public final class WoodcutSkill implements Skill {
     private void forcePillarToward(ServerPlayerEntity bot,
                                    ServerCommandSource source,
                                    BlockPos target,
-                                   List<BlockPos> placedPillar) {
+                                   List<BlockPos> placedPillar,
+                                   Map<String, Object> sharedState) {
         if (!(bot.getEntityWorld() instanceof ServerWorld)) {
             return;
         }
@@ -1054,7 +1251,7 @@ public final class WoodcutSkill implements Skill {
             return;
         }
         moveUnderTarget(source, bot, target);
-        pillarUp(bot, needed, placedPillar, source);
+        pillarUp(bot, needed, placedPillar, source, sharedState);
     }
 
     private BlockPos findColumnStand(ServerWorld world, BlockPos target) {
@@ -1084,13 +1281,14 @@ public final class WoodcutSkill implements Skill {
                                     ServerCommandSource source,
                                     BlockPos target,
                                     List<BlockPos> placedPillar,
-                                    boolean preferAxe) {
+                                    boolean preferAxe,
+                                    Map<String, Object> sharedState) {
         for (int attempt = 0; attempt < MAX_RETRY_MINING; attempt++) {
             LOGGER.info("Woodcut mining attempt {} for {}", attempt + 1, target.toShortString());
             if (horizontalDistance(bot.getBlockPos(), target) > 2.5) {
                 moveUnderTarget(source, bot, target);
             }
-            if (!prepareReach(bot, source, target, placedPillar)) {
+            if (!prepareReach(bot, source, target, placedPillar, sharedState)) {
                 LOGGER.warn("Prepare reach failed for {} on attempt {}", target.toShortString(), attempt + 1);
                 continue;
             }
@@ -1107,10 +1305,10 @@ public final class WoodcutSkill implements Skill {
                 return true;
             }
             // Force a pillar attempt toward the target before retrying.
-            forcePillarToward(bot, source, target, placedPillar);
+            forcePillarToward(bot, source, target, placedPillar, sharedState);
             // If still blocked after mining attempt, try a small lift to break LOS/pursuit stalls (only once).
             if (attempt == 0) {
-                emergencyStep(bot, placedPillar);
+                emergencyStep(bot, placedPillar, sharedState);
             }
         }
         LOGGER.warn("Failed to mine {} after {} attempts", target.toShortString(), MAX_RETRY_MINING);
@@ -1270,6 +1468,10 @@ public final class WoodcutSkill implements Skill {
             }
         }
         return empty;
+    }
+
+    private boolean isInventoryFull(ServerPlayerEntity bot) {
+        return bot != null && bot.getInventory().getEmptySlot() == -1;
     }
 
     private int countWood(ServerPlayerEntity bot) {

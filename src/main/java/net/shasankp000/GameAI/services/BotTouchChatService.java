@@ -93,11 +93,24 @@ public final class BotTouchChatService {
         }
 
         BotEventHandler.Mode mode = BotEventHandler.getCurrentMode(bot);
+        
+        // Check if bot is actually returning to base (uses FOLLOW mode with baseTarget set)
+        boolean isReturningToBase = mode == BotEventHandler.Mode.FOLLOW 
+                && BotEventHandler.getBaseTarget(bot) != null;
 
         // No active skill: mix in occasional contextual chatter.
-        String modeLine = switch (mode) {
-            case FOLLOW -> choose(
-                    "I’m right behind you, " + name + ".",
+        String modeLine;
+        if (isReturningToBase) {
+            // Bot is using FOLLOW mode for return-to-base, use return-to-base lines
+            modeLine = choose(
+                    "Heading home before it gets too dark.",
+                    "On my way back to base.",
+                    "Returning to base."
+            );
+        } else {
+            modeLine = switch (mode) {
+                case FOLLOW -> choose(
+                        "I'm right behind you, " + name + ".",
                     "Lead the way.",
                     "Keeping up." 
             );
@@ -126,7 +139,8 @@ public final class BotTouchChatService {
                     "Nothing urgent—I'm here if you need me.",
                     "Enjoying the calm."
             );
-        };
+            };
+        }
 
         // Get mood-based greetings for distressed states
         String moodLine = getMoodLine(bot, name);

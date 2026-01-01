@@ -15,6 +15,7 @@ import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 import net.shasankp000.ChatUtils.ChatUtils;
+import net.shasankp000.ChatUtils.BotDialoguePlayer;
 import net.shasankp000.GameAI.BotActions;
 import net.shasankp000.PlayerUtils.MiningTool;
 import org.slf4j.Logger;
@@ -46,6 +47,14 @@ public final class BotRescueService {
     private static final Map<UUID, Long> LAST_SUFFOCATION_ALERT_TICK = new ConcurrentHashMap<>();
     private static final long SUFFOCATION_ALERT_COOLDOWN_TICKS = 20L; // 1 second for urgent warnings
     private static long lastBurialScanTick = -1L;
+
+    // Lost shout / found detection tracking
+    private static final Map<UUID, Long> STUCK_START_MS = new ConcurrentHashMap<>();
+    private static final Map<UUID, Long> LAST_LOST_SHOUT_MS = new ConcurrentHashMap<>();
+    private static final long FIRST_LOST_SHOUT_DELAY_MS = 5_000L; // 5s before first shout
+    private static final long LOST_SHOUT_REPEAT_MS = 12_000L; // repeat every 12s
+    private static final String[] LOST_SHOUTS = new String[]{"Help!", "Can anyone hear me?", "Over here!"};
+    private static final String[] FOUND_LINES = new String[]{"Finally! Someone found me.", "Thank goodness.", "I've been calling."};
 
     private BotRescueService() {}
 
@@ -80,6 +89,8 @@ public final class BotRescueService {
         MinecraftServer srv = bot.getCommandSource().getServer();
         if (srv != null) {
             LAST_OBSTRUCT_DAMAGE_TICK.put(bot.getUuid(), (long) srv.getTicks());
+            // Transient debug: record that we observed obstruct-like damage for this bot
+            DebugToggleService.debug(LOGGER, "noteObstructDamage: bot={} tick={}", bot.getName().getString(), srv.getTicks());
         }
     }
 
@@ -137,9 +148,15 @@ public final class BotRescueService {
                 && !isClimbableNonBlocking(feetState)
                 && !isRescueProtectedBlock(feetState);
 
+        // Debug: show initial rescue decision state
+        DebugToggleService.debug(LOGGER, "rescueFromBurial: bot={} suffocating={} headBlocked={} feetBlocked={} head={} feet={}",
+                bot.getName().getString(), takingSuffocationDamage, headBlocked, feetBlocked,
+                headState.getBlock().getName().getString(), feetState.getBlock().getName().getString());
+
         // Being "in" a door block is common during doorway traversal and should not trigger burial rescue
         // unless we're actually taking suffocation damage. Otherwise, this fights follow's door traversal.
         if (!takingSuffocationDamage && (headIsDoor || feetIsDoor) && headBlocked && feetBlocked) {
+            DebugToggleService.debug(LOGGER, "rescueFromBurial: bot={} door overlap and not suffocating - skipping mining", bot.getName().getString());
             LAST_SUFFOCATION_ALERT_TICK.remove(bot.getUuid());
             LAST_STUCK_LOG_MS.remove(bot.getUuid());
             return false;
@@ -150,6 +167,7 @@ public final class BotRescueService {
         // getRecentDamageSource() can remain sticky for a short window even after we're no longer clipped.
         // If head/feet are clear AND we're not currently inside a wall, do not escalate into mining.
         if (takingSuffocationDamage && !stuckInBlocks && !bot.isInsideWall()) {
+            DebugToggleService.debug(LOGGER, "rescueFromBurial: bot={} was taking transient suffocation damage but not stuck - skipping mining", bot.getName().getString());
             LAST_SUFFOCATION_ALERT_TICK.remove(bot.getUuid());
             LAST_STUCK_LOG_MS.remove(bot.getUuid());
             return false;
@@ -157,6 +175,7 @@ public final class BotRescueService {
 
         // Exit if not suffocating AND not stuck in blocks
         if (!takingSuffocationDamage && !stuckInBlocks) {
+            DebugToggleService.debug(LOGGER, "rescueFromBurial: bot={} not suffocating and not stuck - nothing to do", bot.getName().getString());
             LAST_SUFFOCATION_ALERT_TICK.remove(bot.getUuid());
             LAST_STUCK_LOG_MS.remove(bot.getUuid());
             return false;
@@ -218,9 +237,12 @@ public final class BotRescueService {
 
                 if (lastAttempt < 0 || (now - lastAttempt) >= MINING_ESCAPE_COOLDOWN_TICKS) {
                     LAST_MINING_ESCAPE_ATTEMPT.put(uuid, now);
+                    DebugToggleService.debug(LOGGER, "rescueFromBurial: bot={} performing headspace mining (block={} tool={})", bot.getName().getString(), blockName, toolName);
                     LOGGER.info("Bot {} clearing headspace by mining {}", bot.getName().getString(), blockName);
                     MiningTool.mineBlock(bot, head);
                     return true;
+                } else {
+                    DebugToggleService.debug(LOGGER, "rescueFromBurial: bot={} headspace mining suppressed by cooldown (lastAttempt={} now={})", bot.getName().getString(), lastAttempt, now);
                 }
             }
             return false;
@@ -483,7 +505,13 @@ public final class BotRescueService {
 
             // Alert player
             String message = String.format("Spawned inside %s! Mining out with %s...", blockName, toolName);
-            ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS), message);
+            ServerCommandSource src = bot.getCommandSource().withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS);
+            ChatUtils.sendChatMessages(src, message);
+            // Best-effort: play matching voiced dialogue for spawn-inside alert
+            try {
+                BotDialoguePlayer.tryPlayDialogue(src, message);
+            } catch (Exception ignored) {
+            }
 
             LOGGER.info("Bot {} spawned inside {} {} - starting time-based mining with {}",
                     bot.getName().getString(), blockName, location, toolName);
@@ -601,7 +629,14 @@ public final class BotRescueService {
         if (last >= 0 && (now - last) < SUFFOCATION_ALERT_COOLDOWN_TICKS) {
             return;
         }
-        ChatUtils.sendChatMessages(source.withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS), "I'm suffocating!");
+        String msg = "I'm suffocating!";
+        ChatUtils.sendChatMessages(source.withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS), msg);
+        // Play the voiced dialogue for this message if voiced dialogue is enabled
+        try {
+            BotDialoguePlayer.tryPlayDialogue(source.withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS), msg);
+        } catch (Exception ignored) {
+            // Best-effort: do not let dialogue playback failures affect rescue logic
+        }
         LAST_SUFFOCATION_ALERT_TICK.put(uuid, now);
     }
 
@@ -658,6 +693,11 @@ public final class BotRescueService {
         }
         String message = String.format("I'm stuck in %s %s! Mining with %s...", blockName, location, toolName);
         ChatUtils.sendChatMessages(source.withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS), message);
+        // Best-effort: play matching voiced dialogue for the suffocation alert
+        try {
+            BotDialoguePlayer.tryPlayDialogue(source.withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS), message);
+        } catch (Exception ignored) {
+        }
         LAST_SUFFOCATION_ALERT_TICK.put(uuid, now);
     }
 
@@ -672,8 +712,52 @@ public final class BotRescueService {
         lastBurialScanTick = now;
         for (UUID uuid : BotRegistry.ids()) {
             ServerPlayerEntity candidate = server.getPlayerManager().getPlayer(uuid);
-            if (candidate != null && candidate.isAlive()) {
-                rescueFromBurial(candidate);
+            if (candidate == null || !candidate.isAlive()) continue;
+
+            // Compute stuck state before rescue attempt
+            ServerWorld world = candidate.getEntityWorld() instanceof ServerWorld sw ? sw : null;
+            boolean beforeStuck = world != null && isBotCurrentlyStuck(candidate, world);
+
+            // Perform normal rescue handling (may start mining / nudges)
+            rescueFromBurial(candidate);
+
+            // Recompute after rescue attempt
+            boolean afterStuck = world != null && isBotCurrentlyStuck(candidate, world);
+
+            ServerCommandSource src = candidate.getCommandSource().withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS);
+
+            if (!beforeStuck && afterStuck) {
+                // Newly stuck - mark start
+                STUCK_START_MS.putIfAbsent(uuid, System.currentTimeMillis());
+            } else if (afterStuck) {
+                // Still stuck - maybe shout
+                long nowMs = System.currentTimeMillis();
+                long startMs = STUCK_START_MS.getOrDefault(uuid, nowMs);
+                long lastShout = LAST_LOST_SHOUT_MS.getOrDefault(uuid, -1L);
+
+                if (lastShout < 0) {
+                    if (nowMs - startMs >= FIRST_LOST_SHOUT_DELAY_MS) {
+                        // First shout
+                        String shout = LOST_SHOUTS[java.util.concurrent.ThreadLocalRandom.current().nextInt(LOST_SHOUTS.length)];
+                        ChatUtils.sendChatMessages(src, shout);
+                        try { BotDialoguePlayer.tryPlayDialogue(src, shout); } catch (Exception ignored) {}
+                        LAST_LOST_SHOUT_MS.put(uuid, nowMs);
+                    }
+                } else if (nowMs - lastShout >= LOST_SHOUT_REPEAT_MS) {
+                    String shout = LOST_SHOUTS[java.util.concurrent.ThreadLocalRandom.current().nextInt(LOST_SHOUTS.length)];
+                    ChatUtils.sendChatMessages(src, shout);
+                    try { BotDialoguePlayer.tryPlayDialogue(src, shout); } catch (Exception ignored) {}
+                    LAST_LOST_SHOUT_MS.put(uuid, nowMs);
+                }
+            } else {
+                // Not stuck now - if previously marked stuck, consider this a 'found' event
+                if (STUCK_START_MS.containsKey(uuid)) {
+                    STUCK_START_MS.remove(uuid);
+                    LAST_LOST_SHOUT_MS.remove(uuid);
+                    String found = FOUND_LINES[java.util.concurrent.ThreadLocalRandom.current().nextInt(FOUND_LINES.length)];
+                    ChatUtils.sendChatMessages(src, found);
+                    try { BotDialoguePlayer.tryPlayDialogue(src, found); } catch (Exception ignored) {}
+                }
 
                 // Also check if bot is crawling and can stand up
                 if (candidate.isCrawling() || candidate.isSwimming()) {
@@ -682,5 +766,44 @@ public final class BotRescueService {
                 }
             }
         }
+    }
+
+    /**
+     * Determine whether the bot is currently stuck/suffocating based on head/feet block states
+     * and recent suffocation damage.
+     */
+    private static boolean isBotCurrentlyStuck(ServerPlayerEntity bot, ServerWorld world) {
+        if (bot == null || world == null) return false;
+
+        BlockPos feet = bot.getBlockPos();
+        BlockPos head = feet.up();
+
+        BlockState headState = world.getBlockState(head);
+        BlockState feetState = world.getBlockState(feet);
+
+        boolean headBlocked = !headState.isAir()
+                && !headState.isOf(Blocks.WATER)
+                && !headState.isOf(Blocks.WHEAT)
+                && !headState.getCollisionShape(world, head).isEmpty()
+                && !isClimbableNonBlocking(headState)
+                && !isRescueProtectedBlock(headState);
+
+        boolean feetBlocked = !feetState.isAir()
+                && !feetState.isOf(Blocks.WATER)
+                && !feetState.isOf(Blocks.FARMLAND)
+                && !feetState.isOf(Blocks.WHEAT)
+                && !feetState.getCollisionShape(world, feet).isEmpty()
+                && !isClimbableNonBlocking(feetState)
+                && !isRescueProtectedBlock(feetState);
+
+        boolean stuckInBlocks = headBlocked || feetBlocked;
+
+        // Recent suffocation damage is a strong signal
+        if (tookRecentSuffocation(bot)) return true;
+
+        if (stuckInBlocks) return true;
+
+        // Falling back to in-wall check
+        return bot.isInsideWall();
     }
 }

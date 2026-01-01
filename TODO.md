@@ -22,6 +22,7 @@ Pending work only. Completed items and rationale live in `changelog.md`.
 
 ### Post-Refactor Follow-Up (From Testing Notes)
 - [ ] **Guard verification**: Run in-game tests for `/bot guard` (basic start/stop, radius handling, and interaction with other tasks).
+- [x] **Woodcut pillar escape/recover verification**: Confirm the bot can pillar to reach targets and reliably tear down temporary supports without leaving stray columns.
 - [x] **Come verification**: Confirm `/bot come` reaches in one run (no “direct walk blocked” stall) and does not grief player-placed doors.
 - [x] **Combat verification**: Confirm close-range combat switches from bow/crossbow to a melee weapon when available.
 

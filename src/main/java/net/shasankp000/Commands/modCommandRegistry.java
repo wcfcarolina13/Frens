@@ -1,10 +1,10 @@
 package net.shasankp000.Commands;
 
+import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.DoubleArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.arguments.BoolArgumentType;
-import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import com.mojang.brigadier.exceptions.SimpleCommandExceptionType;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
@@ -169,7 +169,35 @@ public class modCommandRegistry {
                                                     }
                                                 })
                                         )
-                                )
+                                        )
+
+                                        // In-game debug toggle: /bot debug <on|off>, /bot debug status, /bot debug clear
+                                        .then(literal("debug")
+                                            .then(CommandManager.argument("mode", StringArgumentType.string())
+                                                .executes(context -> {
+                                                    boolean enabled = parseToggle(StringArgumentType.getString(context, "mode"));
+                                                    DebugToggleService.setRuntimeVerbose(enabled);
+                                                    ChatUtils.sendSystemMessage(context.getSource(), "Debug set to " + (enabled ? "on" : "off"));
+                                                    return 1;
+                                                })
+                                            )
+                                            .then(literal("status")
+                                                .executes(context -> {
+                                                    Boolean override = DebugToggleService.getRuntimeOverride();
+                                                    boolean effective = DebugToggleService.verbose();
+                                                    String msg = "Debug: runtimeOverride=" + (override == null ? "none" : override.toString()) + " effective=" + effective;
+                                                    ChatUtils.sendSystemMessage(context.getSource(), msg);
+                                                    return 1;
+                                                })
+                                            )
+                                            .then(literal("clear")
+                                                .executes(context -> {
+                                                    DebugToggleService.clearRuntimeOverride();
+                                                    ChatUtils.sendSystemMessage(context.getSource(), "Debug runtime override cleared (env/properties now effective)");
+                                                    return 1;
+                                                })
+                                            )
+                                        )
 	                        )
 	                        .then(literal("rl")
 	                                .then(CommandManager.argument("mode", StringArgumentType.string())
@@ -215,11 +243,13 @@ public class modCommandRegistry {
 	                        .then(BotInventoryCommands.build())
 	                        .then(BotSkillCommands.buildSkill())
 	                        .then(BotSkillCommands.buildFish())
+	                        .then(BotSkillCommands.buildFlare())
 	                        .then(BotSkillCommands.buildShelter())
 	                        .then(BotLifecycleCommands.buildList())
 	                        .then(BotLifecycleCommands.buildDespawn())
 	                        .then(BotLifecycleCommands.buildStop())
 	                        .then(BotLifecycleCommands.buildResume())
+                            .then(BotLifecycleCommands.buildResumeShort())
 	                        .then(BotLifecycleCommands.buildHeal())
 	                        .then(BotLifecycleCommands.buildSleep())
 	                        .then(BotUtilityCommands.buildDirection())
@@ -2487,9 +2517,15 @@ public class modCommandRegistry {
         TaskService.forceAbort(bot.getUuid(), "§cInterrupted by /bot shelter_look.");
         BotIdleHobbiesService.snoozeFor(bot, 3_600L);
 
+        // Compute the direction from commander to target for burrow direction
+        // This gives the direction the player is looking/pointing
+        Direction lookDirection = computeHorizontalDirection(commander.getBlockPos(), goal);
+        WorkDirectionService.setDirection(bot.getUuid(), lookDirection);
+
         // Move the bot to the target location first, then run shelter skill
         final BlockPos finalGoal = goal;
         final String finalShelterType = shelterType;
+        final Direction finalDirection = lookDirection;
         ChatUtils.sendSystemMessage(source, bot.getGameProfile().name() + " is heading to build a " + shelterType + " where you're looking.");
 
         // Use async movement to the position, then run the shelter skill
@@ -3015,6 +3051,7 @@ public class modCommandRegistry {
         String normalized = raw.trim().toLowerCase(Locale.ROOT);
         return switch (normalized) {
             case "woodcutting", "chopwood", "chop_wood", "chop-wood" -> "woodcut";
+            case "woodcutcleanup", "woodcut-cleanup", "woodcut_cleanup", "cleanupwoodcut", "cleanup-woodcut", "tidywoodcut", "tidy-woodcut" -> "woodcut_cleanup";
             default -> normalized;
         };
     }
@@ -4188,10 +4225,15 @@ public class modCommandRegistry {
         // Record skill execution for resume capability
         SkillResumeService.recordExecution(bot, skillName, rawArgs, source);
         
-        // Capture command issuer's facing direction for directional skills (stripmine, etc.)
-        if (source.getPlayer() != null) {
-            Direction issuerFacing = source.getPlayer().getHorizontalFacing();
-            params.put("direction", issuerFacing);
+        // Capture command issuer's look direction (raycast) for directional skills.
+        // IMPORTANT: Skip on resume so we don't overwrite stored/locked work directions.
+        boolean isResuming = SkillResumeService.hasResumeIntent(botUuid);
+        if (!isResuming && source.getPlayer() != null) {
+            ServerPlayerEntity commander = source.getPlayer();
+            Direction lookDir = captureLookDirection(commander, 24.0D);
+            params.put("direction", lookDir);
+            params.put("issuerFacing", lookDir.asString());
+            params.put("issuerYaw", commander.getYaw());
         }
 
         skillExecutor.submit(() -> {
@@ -4510,4 +4552,55 @@ public class modCommandRegistry {
                     // Best-effort; command execution should not fail if task system is unavailable.
                 }
             }
+
+    /**
+     * Computes the primary horizontal direction from one position toward another.
+     * Prefers the axis with the largest difference.
+     */
+    private static Direction computeHorizontalDirection(BlockPos from, BlockPos to) {
+        if (from == null || to == null) {
+            return Direction.NORTH;
+        }
+        int dx = to.getX() - from.getX();
+        int dz = to.getZ() - from.getZ();
+        if (Math.abs(dx) >= Math.abs(dz)) {
+            return dx >= 0 ? Direction.EAST : Direction.WEST;
+        }
+        return dz >= 0 ? Direction.SOUTH : Direction.NORTH;
+    }
+
+    /**
+     * Returns a cardinal horizontal direction based on where the commander is looking.
+     * Uses a raycast hit when possible; falls back to look vector / horizontal facing.
+     */
+    private static Direction captureLookDirection(ServerPlayerEntity commander, double maxDistance) {
+        if (commander == null) {
+            return Direction.NORTH;
+        }
+        try {
+            net.minecraft.util.hit.HitResult hit = commander.raycast(maxDistance, 1.0F, false);
+            if (hit instanceof net.minecraft.util.hit.BlockHitResult bhr
+                    && hit.getType() == net.minecraft.util.hit.HitResult.Type.BLOCK) {
+                BlockPos from = commander.getBlockPos();
+                BlockPos to = bhr.getBlockPos();
+                if (to != null && !to.equals(from)) {
+                    return computeHorizontalDirection(from, to);
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+
+        Vec3d look = commander.getRotationVec(1.0F);
+        if (look != null) {
+            double ax = Math.abs(look.x);
+            double az = Math.abs(look.z);
+            if (ax >= az && ax > 1.0E-4) {
+                return look.x >= 0 ? Direction.EAST : Direction.WEST;
+            }
+            if (az > 1.0E-4) {
+                return look.z >= 0 ? Direction.SOUTH : Direction.NORTH;
+            }
+        }
+        return commander.getHorizontalFacing();
+    }
 }

@@ -17,6 +17,7 @@ import net.shasankp000.GameAI.skills.Skill;
 import net.shasankp000.GameAI.skills.SkillContext;
 import net.shasankp000.GameAI.skills.SkillExecutionResult;
 import net.shasankp000.GameAI.skills.SkillManager;
+import net.shasankp000.GameAI.skills.support.FallingBlockStabilizer;
 import net.shasankp000.GameAI.skills.support.MiningHazardDetector;
 import net.shasankp000.GameAI.skills.support.MiningHazardDetector.Hazard;
 import net.shasankp000.GameAI.skills.support.MiningHazardDetector.DetectionResult;
@@ -80,7 +81,7 @@ public final class StripMineSkill implements Skill {
         int length = Math.max(1, getIntParameter(context, "count", DEFAULT_LENGTH));
         int completed = 0;
 
-        Direction tunnelDirection = determineTunnelDirection(context, player);
+        Direction tunnelDirection = determineTunnelDirection(context, player, resumeRequested);
         Direction finalDirection = tunnelDirection;
         runOnServerThread(player, () -> LookController.faceBlock(player, player.getBlockPos().offset(finalDirection)));
 
@@ -123,8 +124,28 @@ public final class StripMineSkill implements Skill {
                     continue;
                 }
                 if (!mineBlock(player, block)) {
-                    return SkillExecutionResult.failure("Stripmine aborted: unable to clear corridor.");
+                    WorkDirectionService.setPausePosition(player.getUuid(), player.getBlockPos());
+                    SkillResumeService.flagManualResume(player);
+                    String blockName = player.getEntityWorld().getBlockState(block).getBlock().getName().getString();
+                    return SkillExecutionResult.failure("Stripmine paused: unable to clear " + blockName + " at " + block.toShortString() + ". Use /bot resume.");
                 }
+            }
+
+            // Falling blocks (sand/gravel/etc.) can refill the corridor after mining.
+            // Mirror descent safety: wait for settling, then re-clear falling refills before stepping forward.
+            if (!FallingBlockStabilizer.stabilizeAndReclear(
+                    player,
+                    source,
+                    footTarget,
+                    workVolume,
+                    this::isPassableForTunnel,
+                    StripMineSkill::isTorchBlock,
+                    pos -> mineBlock(player, pos),
+                    true
+            )) {
+                WorkDirectionService.setPausePosition(player.getUuid(), player.getBlockPos());
+                SkillResumeService.flagManualResume(player);
+                return SkillExecutionResult.failure("Stripmine paused: falling blocks won't settle. Use /bot resume.");
             }
 
             if (SkillManager.shouldAbortSkill(player)) {
@@ -206,50 +227,77 @@ public final class StripMineSkill implements Skill {
             return true; // Skip torches, treat as already cleared
         }
         
-        if (SkillManager.shouldAbortSkill(player)) {
+        if (!(player.getEntityWorld() instanceof net.minecraft.server.world.ServerWorld world)) {
             return false;
         }
-        if (!isWithinReach(player, blockPos)) {
-            Vec3d target = Vec3d.ofCenter(blockPos);
-            double distance = Math.sqrt(player.squaredDistanceTo(target.x, target.y, target.z));
-            LOGGER.warn("Block {} is out of reach for {} (distance {}).", blockPos, player.getName().getString(),
-                    String.format("%.2f", distance));
-            return false;
+
+        // If already passable, treat as cleared.
+        if (isPassableForTunnel(world, blockPos)) {
+            return true;
         }
-        LookController.faceBlock(player, blockPos);
-        CompletableFuture<String> future = MiningTool.mineBlock(player, blockPos);
-        long deadline = System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(6);
-        while (System.currentTimeMillis() < deadline) {
+
+        // Mirror the stair miner: retry transient failures/timeouts instead of hard-aborting.
+        for (int attempt = 1; attempt <= 3; attempt++) {
             if (SkillManager.shouldAbortSkill(player)) {
-                future.cancel(true);
                 return false;
             }
-            long remaining = deadline - System.currentTimeMillis();
-            long waitWindow = Math.min(remaining, 200L);
+
+            if (!isWithinReach(player, blockPos)) {
+                // Nudge closer (common if we got slightly misaligned in a tight tunnel).
+                runOnServerThread(player, () -> {
+                    LookController.faceBlock(player, blockPos);
+                    BotActions.moveForwardStep(player, 0.65);
+                    if (blockPos.getY() > player.getBlockY()) {
+                        BotActions.jump(player);
+                    }
+                });
+                try {
+                    Thread.sleep(140L);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return false;
+                }
+                if (!isWithinReach(player, blockPos)) {
+                    Vec3d target = Vec3d.ofCenter(blockPos);
+                    double distance = Math.sqrt(player.squaredDistanceTo(target.x, target.y, target.z));
+                    LOGGER.warn("Block {} is out of reach for {} (distance {}).", blockPos, player.getName().getString(),
+                            String.format("%.2f", distance));
+                    return false;
+                }
+            }
+
+            LookController.faceBlock(player, blockPos);
+            CompletableFuture<String> future = MiningTool.mineBlock(player, blockPos);
             try {
-                String result = future.get(waitWindow, TimeUnit.MILLISECONDS);
-                if (result == null || !result.toLowerCase().contains("complete")) {
-                    LOGGER.warn("Mining {} returned unexpected result: {}", blockPos, result);
-                    return false;
-                }
-                if (!player.getEntityWorld().getBlockState(blockPos).isAir()) {
-                    LOGGER.warn("{} still present after mining attempt", blockPos);
-                    return false;
-                }
-                return true;
+                // MiningTool has its own failsafe; wait long enough for slow tools.
+                future.get(13, TimeUnit.SECONDS);
             } catch (TimeoutException timeout) {
-                // keep waiting while polling for cancellation
+                LOGGER.warn("Stripmine mining attempt {}/3 timed out waiting at {} (state={})",
+                        attempt,
+                        blockPos.toShortString(),
+                        world.getBlockState(blockPos).getBlock().getName().getString());
             } catch (InterruptedException interrupted) {
                 Thread.currentThread().interrupt();
-                future.cancel(true);
                 return false;
             } catch (Exception e) {
-                LOGGER.warn("Mining {} failed", blockPos, e);
+                LOGGER.warn("Stripmine mining attempt {}/3 failed at {}: {}", attempt, blockPos.toShortString(), e.getMessage());
+            }
+
+            if (isPassableForTunnel(world, blockPos)) {
+                return true;
+            }
+
+            try {
+                Thread.sleep(160L);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
                 return false;
             }
         }
-        future.cancel(true);
-        LOGGER.warn("Mining {} timed out", blockPos);
+
+        LOGGER.warn("Stripmine couldn't clear {} after multiple attempts (state={})",
+                blockPos.toShortString(),
+                world.getBlockState(blockPos).getBlock().getName().getString());
         return false;
     }
 
@@ -259,6 +307,29 @@ public final class StripMineSkill implements Skill {
         }
         Vec3d target = Vec3d.ofCenter(blockPos);
         return player.squaredDistanceTo(target.x, target.y, target.z) <= 25.0D;
+    }
+
+    private boolean isPassableForTunnel(net.minecraft.server.world.ServerWorld world, BlockPos pos) {
+        if (world == null || pos == null) {
+            return false;
+        }
+        if (!world.getFluidState(pos).isEmpty()) {
+            return false;
+        }
+        return world.getBlockState(pos).getCollisionShape(world, pos).isEmpty();
+    }
+
+    private static boolean isTorchBlock(BlockState state) {
+        if (state == null) {
+            return false;
+        }
+        Block block = state.getBlock();
+        return block == Blocks.TORCH
+                || block == Blocks.WALL_TORCH
+                || block == Blocks.SOUL_TORCH
+                || block == Blocks.SOUL_WALL_TORCH
+                || block == Blocks.REDSTONE_TORCH
+                || block == Blocks.REDSTONE_WALL_TORCH;
     }
 
     private int getIntParameter(SkillContext context, String key, int defaultValue) {
@@ -275,32 +346,37 @@ public final class StripMineSkill implements Skill {
         return defaultValue;
     }
 
-    private Direction determineTunnelDirection(SkillContext context, ServerPlayerEntity player) {
-        // Try to get stored work direction first
-        Optional<Direction> stored = WorkDirectionService.getDirection(player.getUuid());
-        if (stored.isPresent()) {
-            LOGGER.info("Using stored work direction {} for bot {}", stored.get().asString(), player.getName().getString());
-            return stored.get();
-        }
-        
-        // If no stored direction, capture from command issuer (the player who issued the command)
-        // The context should contain the issuer's facing direction when the command was started
-        Direction commandIssuerFacing = null;
+    private Direction determineTunnelDirection(SkillContext context, ServerPlayerEntity player, boolean resumeRequested) {
+        boolean lockDirection = getBooleanParameter(context, "lockDirection", false);
+
+        Direction explicit = null;
         Object directionParam = context.parameters().get("direction");
         if (directionParam == null) {
-            // Fallback to issuerFacing parameter if provided by caller
             directionParam = context.parameters().get("issuerFacing");
         }
         if (directionParam instanceof Direction dir) {
-            commandIssuerFacing = dir;
+            explicit = dir;
         } else if (directionParam instanceof String dirStr) {
-            commandIssuerFacing = parseDirection(dirStr);
+            explicit = parseDirection(dirStr);
         }
-        
-        // Button-directed override within 3 block radius
-        Direction buttonDir = scanForButtonDirection(player);
-        // Fallback to bot's current facing if no direction parameter provided
-        Direction workDirection = buttonDir != null ? buttonDir : (commandIssuerFacing != null ? commandIssuerFacing : player.getHorizontalFacing());
+
+        Optional<Direction> stored = WorkDirectionService.getDirection(player.getUuid());
+        Direction workDirection;
+
+        if (resumeRequested) {
+            workDirection = stored.orElse(explicit);
+        } else if (lockDirection && stored.isPresent()) {
+            workDirection = stored.get();
+        } else if (explicit != null) {
+            workDirection = explicit;
+        } else {
+            Direction buttonDir = scanForButtonDirection(player);
+            workDirection = buttonDir != null ? buttonDir : player.getHorizontalFacing();
+        }
+        if (workDirection == null) {
+            workDirection = player.getHorizontalFacing();
+        }
+
         // Re-orient bot immediately to face workDirection before starting (map horizontal direction to yaw)
         Object issuerYawObj = context.parameters().get("issuerYaw");
         Float issuerYaw = null;
@@ -314,11 +390,22 @@ public final class StripMineSkill implements Skill {
         };
         player.setYaw(yaw);
         player.setHeadYaw(yaw);
-        
-        // Store this direction for future jobs
+
         WorkDirectionService.setDirection(player.getUuid(), workDirection);
-        LOGGER.info("Captured initial work direction {} for bot {}", workDirection.asString(), player.getName().getString());
+        LOGGER.info("Using work direction {} for bot {} (lockDirection={}, resumeRequested={})",
+                workDirection.asString(), player.getName().getString(), lockDirection, resumeRequested);
         return workDirection;
+    }
+
+    private boolean getBooleanParameter(SkillContext context, String key, boolean defaultValue) {
+        Object value = context.parameters().get(key);
+        if (value instanceof Boolean bool) {
+            return bool;
+        }
+        if (value instanceof String str) {
+            return Boolean.parseBoolean(str);
+        }
+        return defaultValue;
     }
 
     private Direction scanForButtonDirection(ServerPlayerEntity player) {

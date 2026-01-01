@@ -73,6 +73,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         BASES,
         SKILL_FISH,
         SKILL_WOODCUT,
+        SKILL_WOODCUT_CLEANUP,
         SKILL_WOOL,
         SKILL_HOVEL,
         SKILL_BURROW,
@@ -101,7 +102,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             new TopicEntry("Follow", TopicAction.FOLLOW, true, 0),
             new TopicEntry("Guard", TopicAction.GUARD, true, 0),
             new TopicEntry("Patrol", TopicAction.PATROL, true, 0),
-            new TopicEntry("Return Home", TopicAction.RETURN_HOME, false, 0),
+            new TopicEntry("Return Home", TopicAction.RETURN_HOME, true, 0),
             new TopicEntry("Sleep", TopicAction.SLEEP, false, 0),
             new TopicEntry("Auto Home @ Sunset", TopicAction.AUTO_RETURN_SUNSET, true, 0),
             new TopicEntry("Guard/Patrol eligible", TopicAction.AUTO_RETURN_SUNSET_GUARD_PATROL, true, 1),
@@ -112,6 +113,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             new TopicEntry("Bases…", TopicAction.BASES, false, 0),
             new TopicEntry("Fishing", TopicAction.SKILL_FISH, false, 0),
             new TopicEntry("Woodcut", TopicAction.SKILL_WOODCUT, false, 0),
+                new TopicEntry("Woodcut Cleanup", TopicAction.SKILL_WOODCUT_CLEANUP, false, 1),
             new TopicEntry("Wool", TopicAction.SKILL_WOOL, false, 0),
             new TopicEntry("Hovel", TopicAction.SKILL_HOVEL, false, 0),
             new TopicEntry("Burrow", TopicAction.SKILL_BURROW, false, 0),
@@ -623,6 +625,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case BASES -> openBasesManager();
             case SKILL_FISH -> runSkillCommand("fish", null);
             case SKILL_WOODCUT -> runSkillCommand("woodcut", null);
+            case SKILL_WOODCUT_CLEANUP -> runSkillCommand("woodcut_cleanup", null);
             case SKILL_WOOL -> runSkillCommand("wool", null);
             case SKILL_HOVEL -> runShelterWithLook("hovel");
             case SKILL_BURROW -> runShelterWithLook("burrow");
@@ -639,6 +642,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case FOLLOW -> isFollowActive();
             case GUARD -> isGuardActive();
             case PATROL -> isPatrolActive();
+            case RETURN_HOME -> isReturningToBase();
             case AUTO_RETURN_SUNSET -> isAutoReturnAtSunsetActive();
             case AUTO_RETURN_SUNSET_GUARD_PATROL -> isAutoReturnGuardPatrolEligibleActive();
             case IDLE_HOBBIES -> isIdleHobbiesActive();
@@ -740,9 +744,18 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
     }
 
     private void toggleFollow() {
+        // Don't toggle off if bot is returning to base (uses FOLLOW mode internally)
+        if (isReturningToBase()) {
+            // Bot is returning home, starting follow would interrupt that
+            // For now, just start following the player anyway (interrupts return-to-base)
+        }
         String botTarget = formatBotTarget();
         String command = isFollowActive() ? "bot follow stop " + botTarget : "bot follow " + botTarget;
         sendChatCommand(command);
+    }
+
+    private boolean isReturningToBase() {
+        return this.handler != null && this.handler.isBotReturningToBase();
     }
 
     private void adjustFollowDistance(int direction) {
@@ -769,7 +782,8 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
 
     private void runReturnHome() {
         String botTarget = formatBotTarget();
-        String command = "bot return " + botTarget;
+        // Toggle: if already returning, stop; otherwise start return-to-base
+        String command = isReturningToBase() ? "bot stop " + botTarget : "bot return " + botTarget;
         sendChatCommand(command);
     }
 
@@ -852,12 +866,23 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         net.shasankp000.AIPlayerClient.setPendingShelter(shelterType, botTarget);
         // Close the screen first so player can see where they're looking
         this.close();
-        // Show instruction message
+        // Show instruction message for 2.5 seconds (action bar messages fade quickly, so we repeat)
         if (this.client.player != null) {
-            this.client.player.sendMessage(
-                net.minecraft.text.Text.literal("Look where you want the " + shelterType + " and press your 'Go To Look' keybind (or /bot shelter_look " + shelterType + ")"),
-                true
-            );
+            String message = "Look where you want the " + shelterType + " and press your 'Go To Look' keybind";
+            net.minecraft.text.Text msgText = net.minecraft.text.Text.literal(message);
+            // Send immediately
+            this.client.player.sendMessage(msgText, true);
+            // Schedule repeats at 0.5s, 1.0s, 1.5s, 2.0s to keep message visible for ~2.5s
+            java.util.concurrent.ScheduledExecutorService scheduler = java.util.concurrent.Executors.newSingleThreadScheduledExecutor();
+            final net.minecraft.client.MinecraftClient clientRef = this.client;
+            for (int delayMs : new int[]{500, 1000, 1500, 2000}) {
+                scheduler.schedule(() -> {
+                    if (clientRef.player != null) {
+                        clientRef.execute(() -> clientRef.player.sendMessage(msgText, true));
+                    }
+                }, delayMs, java.util.concurrent.TimeUnit.MILLISECONDS);
+            }
+            scheduler.shutdown();
         }
     }
 

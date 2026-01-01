@@ -5,6 +5,8 @@ import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.sound.SoundEvent;
 import net.minecraft.world.World;
+import net.minecraft.world.LightType;
+import net.minecraft.util.math.BlockPos;
 import net.shasankp000.AIPlayer;
 import net.shasankp000.FilingSystem.ManualConfig;
 import net.shasankp000.GameAI.BotEventHandler;
@@ -67,6 +69,18 @@ public final class BotAmbientChatter {
             BotDialogueSounds.LINE_IDLE_ENJOYING_CALM,
     };
 
+        // Ambient / cave chatter (used when underground or in cave-like conditions)
+        private static final SoundEvent[] AMBIENT_CAVE_CHATTER = {
+            BotDialogueSounds.LINE_AMBIENT_HEARD_SOMETHING,
+            BotDialogueSounds.LINE_AMBIENT_DID_YOU_HEAR,
+            BotDialogueSounds.LINE_AMBIENT_SOMETHING_MOVED,
+            BotDialogueSounds.LINE_AMBIENT_NOT_ALONE,
+            BotDialogueSounds.LINE_AMBIENT_SMELLS_TERRIBLE,
+            BotDialogueSounds.LINE_AMBIENT_DONT_LIKE_THIS,
+            BotDialogueSounds.LINE_AMBIENT_CREEPY,
+            BotDialogueSounds.LINE_AMBIENT_CAVE_DEEP,
+        };
+
     // Context-aware chatter - things the bot might muse about (NEUTRAL mood variant)
     private static final SoundEvent[] CONTEXT_CHATTER = {
             BotDialogueSounds.LINE_CONTEXT_BREATHER_SOMETIMES,
@@ -111,6 +125,25 @@ public final class BotAmbientChatter {
             BotDialogueSounds.LINE_STATUS_TOO_MANY_HITS,
             BotDialogueSounds.LINE_WARNING_BANGED_UP,
     };
+
+        // Darkness-related chatter (used when light is low)
+        private static final SoundEvent[] DARK_CHATTER = {
+            BotDialogueSounds.LINE_DARK_CANT_SEE,
+            BotDialogueSounds.LINE_DARK_WHERE_ARE_YOU,
+            BotDialogueSounds.LINE_DARK_NEED_LIGHT,
+            BotDialogueSounds.LINE_DARK_TOO_DARK,
+            BotDialogueSounds.LINE_DARK_TORCH_PLEASE,
+        };
+
+        // Wildlife chatter (used on surface/daytime)
+        private static final SoundEvent[] WILDLIFE_CHATTER = {
+            BotDialogueSounds.LINE_WILDLIFE_HEARD_BIRD,
+            BotDialogueSounds.LINE_WILDLIFE_SAW_COW,
+            BotDialogueSounds.LINE_WILDLIFE_PIG_NEARBY,
+            BotDialogueSounds.LINE_WILDLIFE_SHEEP_AROUND,
+            BotDialogueSounds.LINE_WILDLIFE_CHICKEN,
+            BotDialogueSounds.LINE_WILDLIFE_NICE_DAY,
+        };
 
     // Relaxed/happy sounds when all is well (CONTENT mood)
     private static final SoundEvent[] CONTENT_CHATTER = {
@@ -235,6 +268,10 @@ public final class BotAmbientChatter {
      * @return The selected SoundEvent
      */
     private static SoundEvent pickChatterSound(ServerPlayerEntity bot) {
+        // Environment-aware chatter first (cave/dark/wildlife)
+        SoundEvent env = pickEnvironmentSound(bot);
+        if (env != null) return env;
+
         // Get the bot's current emotional state from the mood manager
         EmotionalState mood = BotMoodManager.getMood(bot);
         UUID botId = bot.getUuid();
@@ -273,6 +310,41 @@ public final class BotAmbientChatter {
                 }
             }
         };
+    }
+
+    /**
+     * Pick an environment-specific chatter sound (cave ambient, darkness, wildlife).
+     * Returns null if no environment-specific sound should be played.
+     */
+    private static SoundEvent pickEnvironmentSound(ServerPlayerEntity bot) {
+        if (bot == null || bot.getEntityWorld() == null) return null;
+        if (!(bot.getEntityWorld() instanceof ServerWorld world)) return null;
+
+        BlockPos pos = bot.getBlockPos();
+        int y = pos.getY();
+
+        // Prefer cave/ambient chatter when underground
+        if (y < 60 && RNG.nextFloat() < 0.40f) {
+            return AMBIENT_CAVE_CHATTER[RNG.nextInt(AMBIENT_CAVE_CHATTER.length)];
+        }
+
+        // Dark-room chatter when light is low
+        try {
+            int blockLight = world.getLightLevel(LightType.BLOCK, pos);
+            if (blockLight <= 4 && RNG.nextFloat() < 0.35f) {
+                return DARK_CHATTER[RNG.nextInt(DARK_CHATTER.length)];
+            }
+        } catch (Exception ignored) {
+            // If light lookup isn't available for some reason, skip dark checks
+        }
+
+        // Wildlife chatter during daytime on surface
+        long tod = Math.floorMod(world.getTimeOfDay(), 24_000L);
+        if (tod < 12_000 && RNG.nextFloat() < 0.20f) {
+            return WILDLIFE_CHATTER[RNG.nextInt(WILDLIFE_CHATTER.length)];
+        }
+
+        return null;
     }
 
     /**

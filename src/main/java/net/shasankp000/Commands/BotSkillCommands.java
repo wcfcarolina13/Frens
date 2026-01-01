@@ -30,6 +30,11 @@ final class BotSkillCommands {
                                 StringArgumentType.getString(context, "arguments"))));
     }
 
+    static ArgumentBuilder<ServerCommandSource, ?> buildFlare() {
+        return CommandManager.literal("flare")
+                .executes(context -> modCommandRegistry.executeSkillTargets(context, "flare", null));
+    }
+
     static ArgumentBuilder<ServerCommandSource, ?> buildShelter() {
         return CommandManager.literal("shelter")
                 .then(CommandManager.literal("hovel")

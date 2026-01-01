@@ -172,6 +172,12 @@ public final class BotIdleHobbiesService {
                 continue;
             }
 
+            // Extra safety: if follow/base intent is set but mode is momentarily IDLE, don't start a hobby.
+            // This prevents hobbies from stealing control while a follow is active.
+            if (BotEventHandler.getFollowTargetUuid(bot) != null || BotEventHandler.getBaseTarget(bot) != null) {
+                continue;
+            }
+
             // Never compete with a task.
             if (TaskService.hasActiveTask(bot.getUuid())) {
                 continue;

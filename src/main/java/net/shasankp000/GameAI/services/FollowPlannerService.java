@@ -53,7 +53,21 @@ public final class FollowPlannerService {
         UUID targetId = target.getUuid();
         long now = System.currentTimeMillis();
         long last = FOLLOW_LAST_PATH_PLAN_MS.getOrDefault(botId, -1L);
-        long minInterval = force ? Math.min(650L, FollowPathService.PLAN_COOLDOWN_MS) : FollowPathService.PLAN_COOLDOWN_MS;
+        boolean stagnantDriven = reason != null && reason.startsWith("stagnant-");
+        long minInterval = FollowPathService.PLAN_COOLDOWN_MS;
+        if (force) {
+            minInterval = Math.min(650L, minInterval);
+        }
+        // When we're stuck, spamming replans is expensive and usually unhelpful.
+        // Let micro-unstuck nudges move the bot a few blocks, then replan.
+        if (stagnantDriven) {
+            minInterval = Math.max(minInterval, 2_500L);
+        }
+        // If we recently failed to find any path, back off even harder.
+        long lastNoPath = FOLLOW_LAST_PATH_FAIL_LOG_MS.getOrDefault(botId, -1L);
+        if (lastNoPath >= 0 && (now - lastNoPath) < 7_000L) {
+            minInterval = Math.max(minInterval, 7_000L);
+        }
         if (last >= 0 && (now - last) < minInterval) {
             FollowDebugService.maybeLogPlanSkip(logger, botId, "skip: cooldown (" + (now - last) + "ms, reason=" + reason + ")");
             return;
@@ -226,7 +240,18 @@ public final class FollowPlannerService {
         UUID botId = bot.getUuid();
         long now = System.currentTimeMillis();
         long last = FOLLOW_LAST_PATH_PLAN_MS.getOrDefault(botId, -1L);
-        long minInterval = force ? Math.min(650L, FollowPathService.PLAN_COOLDOWN_MS) : FollowPathService.PLAN_COOLDOWN_MS;
+        boolean stagnantDriven = reason != null && reason.startsWith("stagnant-");
+        long minInterval = FollowPathService.PLAN_COOLDOWN_MS;
+        if (force) {
+            minInterval = Math.min(650L, minInterval);
+        }
+        if (stagnantDriven) {
+            minInterval = Math.max(minInterval, 2_500L);
+        }
+        long lastNoPath = FOLLOW_LAST_PATH_FAIL_LOG_MS.getOrDefault(botId, -1L);
+        if (lastNoPath >= 0 && (now - lastNoPath) < 7_000L) {
+            minInterval = Math.max(minInterval, 7_000L);
+        }
         if (last >= 0 && (now - last) < minInterval) {
             FollowDebugService.maybeLogPlanSkip(logger, botId, "skip: cooldown (" + (now - last) + "ms, reason=" + reason + ")");
             return;

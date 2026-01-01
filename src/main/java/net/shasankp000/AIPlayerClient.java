@@ -24,6 +24,7 @@ public class AIPlayerClient implements ClientModInitializer {
 
     private static KeyBinding KEY_FOLLOW_TOGGLE_LOOK;
     private static KeyBinding KEY_GO_TO_LOOK;
+    private static KeyBinding KEY_RESUME;
 
     // Pending shelter type from the Topics menu (null = no pending shelter, use go_to_look as normal)
     private static String pendingShelterType = null;
@@ -61,6 +62,12 @@ public class AIPlayerClient implements ClientModInitializer {
             KeyBinding.Category.MISC
         ));
 
+        KEY_RESUME = KeyBindingHelper.registerKeyBinding(new KeyBinding(
+            "key.ai-player.resume",
+            GLFW.GLFW_KEY_UNKNOWN,
+            KeyBinding.Category.MISC
+        ));
+
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             if (client == null || client.player == null || client.getNetworkHandler() == null) {
                 return;
@@ -74,6 +81,9 @@ public class AIPlayerClient implements ClientModInitializer {
             }
             if (KEY_GO_TO_LOOK.wasPressed()) {
                 handleGoToLook(client);
+            }
+            if (KEY_RESUME.wasPressed()) {
+                handleResumeKey(client);
             }
         });
 
@@ -96,6 +106,43 @@ public class AIPlayerClient implements ClientModInitializer {
         if (client == null || client.player == null) {
             return;
         }
+        // First, try resume for a looked-at bot (so users can bind a single "look" key to resume+look).
+        final double maxDistance = 16.0;
+        net.minecraft.util.math.Vec3d eyePos = client.player.getEyePos();
+        net.minecraft.util.math.Vec3d lookVec = client.player.getRotationVec(1.0F);
+        net.minecraft.util.math.Vec3d rayEnd = eyePos.add(lookVec.multiply(maxDistance));
+
+        net.minecraft.util.math.Box searchBox = client.player.getBoundingBox().expand(maxDistance);
+        PlayerEntity foundBot = null;
+        double closestDist = maxDistance;
+
+        for (net.minecraft.entity.Entity entity : client.world.getEntities()) {
+            if (!(entity instanceof PlayerEntity target) || target == client.player) {
+                continue;
+            }
+            if (target.squaredDistanceTo(client.player) > maxDistance * maxDistance) {
+                continue;
+            }
+            net.minecraft.util.math.Box entityBox = target.getBoundingBox().expand(0.3);
+            java.util.Optional<net.minecraft.util.math.Vec3d> intersect = entityBox.raycast(eyePos, rayEnd);
+            if (intersect.isPresent()) {
+                double dist = eyePos.squaredDistanceTo(intersect.get());
+                if (dist < closestDist * closestDist) {
+                    closestDist = Math.sqrt(dist);
+                    foundBot = target;
+                }
+            }
+        }
+
+        if (foundBot != null) {
+            String name = foundBot.getName().getString();
+            if (name != null && !name.isBlank()) {
+                // Attempt resume-first and return (fallback to normal look behaviour is not reliably
+                // detectable client-side without server acknowledgement).
+                sendChatCommand(client, "bot r " + name);
+                return;
+            }
+        }
         // Check if there's a pending shelter command from the Topics menu
         if (pendingShelterType != null) {
             String cmd = "bot shelter_look " + pendingShelterType;
@@ -111,24 +158,52 @@ public class AIPlayerClient implements ClientModInitializer {
     }
 
     private static void handleFollowToggleLookedAt(MinecraftClient client) {
-        if (client == null || client.player == null) {
+        if (client == null || client.player == null || client.world == null) {
             return;
         }
-        HitResult hit = client.crosshairTarget;
-        if (!(hit instanceof EntityHitResult ehr)) {
-            client.player.sendMessage(Text.literal("Look at a bot to toggle follow."), true);
+        // Use extended raycast (16 blocks) to find a bot the player is looking at
+        final double maxDistance = 16.0;
+        net.minecraft.util.math.Vec3d eyePos = client.player.getEyePos();
+        net.minecraft.util.math.Vec3d lookVec = client.player.getRotationVec(1.0F);
+        net.minecraft.util.math.Vec3d rayEnd = eyePos.add(lookVec.multiply(maxDistance));
+
+        // Find entities along the ray
+        net.minecraft.util.math.Box searchBox = client.player.getBoundingBox().expand(maxDistance);
+        PlayerEntity foundBot = null;
+        double closestDist = maxDistance;
+
+        for (net.minecraft.entity.Entity entity : client.world.getEntities()) {
+            if (!(entity instanceof PlayerEntity target) || target == client.player) {
+                continue;
+            }
+            if (target.squaredDistanceTo(client.player) > maxDistance * maxDistance) {
+                continue;
+            }
+            // Check if ray intersects entity bounding box
+            net.minecraft.util.math.Box entityBox = target.getBoundingBox().expand(0.3);
+            java.util.Optional<net.minecraft.util.math.Vec3d> intersect = entityBox.raycast(eyePos, rayEnd);
+            if (intersect.isPresent()) {
+                double dist = eyePos.squaredDistanceTo(intersect.get());
+                if (dist < closestDist * closestDist) {
+                    closestDist = Math.sqrt(dist);
+                    foundBot = target;
+                }
+            }
+        }
+
+        if (foundBot == null) {
+            client.player.sendMessage(Text.literal("Look at a bot to toggle follow (within 16 blocks)."), true);
             return;
         }
-        if (!(ehr.getEntity() instanceof PlayerEntity target) || target == client.player) {
-            client.player.sendMessage(Text.literal("Look at a bot to toggle follow."), true);
-            return;
-        }
-        String name = target.getName().getString();
+
+        String name = foundBot.getName().getString();
         if (name == null || name.isBlank()) {
             client.player.sendMessage(Text.literal("Couldn't identify that bot."), true);
             return;
         }
-        sendChatCommand(client, "bot follow toggle " + name);
+        // Try resume-first for the looked-at bot; fall back to follow-toggle only if the user runs the
+        // look key again (client-side fallback detection would require server acknowledgement).
+        sendChatCommand(client, "bot r " + name);
     }
 
     private static void sendChatCommand(MinecraftClient client, String command) {
@@ -137,5 +212,49 @@ public class AIPlayerClient implements ClientModInitializer {
         }
         String raw = command.startsWith("/") ? command.substring(1) : command;
         client.getNetworkHandler().sendChatCommand(raw);
+    }
+
+    private static void handleResumeKey(MinecraftClient client) {
+        if (client == null || client.player == null) {
+            return;
+        }
+        // Try to resume the bot the player is looking at (within 16 blocks), otherwise send a general resume.
+        final double maxDistance = 16.0;
+        net.minecraft.util.math.Vec3d eyePos = client.player.getEyePos();
+        net.minecraft.util.math.Vec3d lookVec = client.player.getRotationVec(1.0F);
+        net.minecraft.util.math.Vec3d rayEnd = eyePos.add(lookVec.multiply(maxDistance));
+
+        net.minecraft.util.math.Box searchBox = client.player.getBoundingBox().expand(maxDistance);
+        PlayerEntity foundBot = null;
+        double closestDist = maxDistance;
+
+        for (net.minecraft.entity.Entity entity : client.world.getEntities()) {
+            if (!(entity instanceof PlayerEntity target) || target == client.player) {
+                continue;
+            }
+            if (target.squaredDistanceTo(client.player) > maxDistance * maxDistance) {
+                continue;
+            }
+            net.minecraft.util.math.Box entityBox = target.getBoundingBox().expand(0.3);
+            java.util.Optional<net.minecraft.util.math.Vec3d> intersect = entityBox.raycast(eyePos, rayEnd);
+            if (intersect.isPresent()) {
+                double dist = eyePos.squaredDistanceTo(intersect.get());
+                if (dist < closestDist * closestDist) {
+                    closestDist = Math.sqrt(dist);
+                    foundBot = target;
+                }
+            }
+        }
+
+        if (foundBot != null) {
+            String name = foundBot.getName().getString();
+            if (name != null && !name.isBlank()) {
+                sendChatCommand(client, "bot r " + name);
+                return;
+            }
+        }
+
+        // No looked-at bot, send a generic resume command.
+        sendChatCommand(client, "bot r");
     }
 }

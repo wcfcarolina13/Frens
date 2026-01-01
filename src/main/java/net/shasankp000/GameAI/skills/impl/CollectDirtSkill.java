@@ -42,6 +42,7 @@ import net.shasankp000.ChatUtils.ChatUtils;
 import net.shasankp000.GameAI.skills.support.MiningHazardDetector;
 import net.shasankp000.GameAI.skills.support.MiningHazardDetector.DetectionResult;
 import net.shasankp000.GameAI.skills.support.MiningHazardDetector.Hazard;
+import net.shasankp000.GameAI.skills.support.FallingBlockStabilizer;
 import net.shasankp000.GameAI.skills.support.TorchPlacer;
 import net.shasankp000.PlayerUtils.MiningTool;
 import org.slf4j.Logger;
@@ -1228,7 +1229,7 @@ public class CollectDirtSkill implements Skill {
             ChatUtils.sendChatMessages(source.withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS), 
                     "Returning to descent position...");
             
-            Direction digDirection = determineStraightStairDirection(context, player);
+                Direction digDirection = determineStraightStairDirection(context, player, resumeRequested);
             MovementService.MovementPlan plan = new MovementService.MovementPlan(
                     MovementService.Mode.DIRECT, resumeTarget, resumeTarget, null, null, digDirection);
             MovementService.MovementResult movement = MovementService.execute(source, player, plan);
@@ -1241,7 +1242,7 @@ public class CollectDirtSkill implements Skill {
             WorkDirectionService.clearPausePosition(player.getUuid());
         }
         
-                Direction digDirection = determineStraightStairDirection(context, player);
+                Direction digDirection = determineStraightStairDirection(context, player, resumeRequested);
         runOnServerThread(player, () -> LookController.faceBlock(player, player.getBlockPos().offset(digDirection)));
 
                 final int startY = player.getBlockY();
@@ -1367,44 +1368,23 @@ public class CollectDirtSkill implements Skill {
         if (player == null || workVolume == null || workVolume.isEmpty()) {
             return true;
         }
-        if (!(player.getEntityWorld() instanceof ServerWorld world)) {
-            return true;
-        }
 
         BlockPos focus = stairFoot != null ? stairFoot : player.getBlockPos();
-
-        if (!waitForNearbyFallingBlocksToSettle(player, world, focus, FALLING_BLOCK_SETTLE_MAX_MS)) {
+        boolean ok = FallingBlockStabilizer.stabilizeAndReclear(
+                player,
+                source,
+                focus,
+                workVolume,
+                this::isPassableForStairs,
+                this::isTorchBlock,
+                pos -> mineStraightStairBlock(player, pos),
+                true
+        );
+        if (!ok) {
             WorkDirectionService.setPausePosition(player.getUuid(), player.getBlockPos());
             SkillResumeService.flagManualResume(player);
-            if (source != null) {
-                ChatUtils.sendChatMessages(source.withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS),
-                        "Falling blocks are still settling here; I'll pause so I don't get buried. Use /bot resume.");
-            }
-            return false;
         }
-
-        // Re-check the work volume for sand/gravel refills and clear them.
-        for (BlockPos pos : workVolume) {
-            if (pos == null) {
-                continue;
-            }
-            BlockState state = world.getBlockState(pos);
-            if (state.isAir() || isTorchBlock(state) || isPassableForStairs(world, pos)) {
-                continue;
-            }
-            if (isFallingBlock(state)) {
-                if (!mineStraightStairBlock(player, pos)) {
-                    WorkDirectionService.setPausePosition(player.getUuid(), player.getBlockPos());
-                    SkillResumeService.flagManualResume(player);
-                    if (source != null) {
-                        ChatUtils.sendChatMessages(source.withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS),
-                                "Sand/gravel refilled the stairwell and I couldn't clear it safely. I'll pause here.");
-                    }
-                    return false;
-                }
-            }
-        }
-        return true;
+        return ok;
     }
 
     private boolean waitForNearbyFallingBlocksToSettle(ServerPlayerEntity player,
@@ -1487,7 +1467,7 @@ public class CollectDirtSkill implements Skill {
         TaskService.setAscentMode(player.getUuid(), true);
         
         try {
-            Direction direction = determineStraightStairDirection(context, player);
+            Direction direction = determineStraightStairDirection(context, player, resumeRequested);
             runOnServerThread(player, () -> LookController.faceBlock(player, player.getBlockPos().offset(direction)));
             
             BotActions.selectBestTool(player, preferredTool, "sword");
@@ -1662,6 +1642,23 @@ public class CollectDirtSkill implements Skill {
                     LOGGER.warn("Could not clear headroom block at {}, continuing anyway", clearPos.toShortString());
                 }
             }
+        }
+
+        // Falling blocks (sand/gravel/etc.) can refill the cleared headroom after mining.
+        // Mirror descent safety: wait for settling, then re-clear any falling refills before jumping.
+        if (!FallingBlockStabilizer.stabilizeAndReclear(
+                player,
+                source,
+                stepBlock,
+                headroomVolume,
+                this::isPassableForStairs,
+                this::isTorchBlock,
+                pos -> mineStraightStairBlock(player, pos),
+                true
+        )) {
+            WorkDirectionService.setPausePosition(player.getUuid(), player.getBlockPos());
+            SkillResumeService.flagManualResume(player);
+            return SkillExecutionResult.failure("Ascent paused: falling blocks won't settle. Use /bot resume.");
         }
         
         // 4. Now jump onto the step block
@@ -1849,20 +1846,30 @@ public class CollectDirtSkill implements Skill {
         return !player.getEntityWorld().getBlockState(support).getCollisionShape(player.getEntityWorld(), support).isEmpty();
     }
 
-    private Direction determineStraightStairDirection(SkillContext context, ServerPlayerEntity player) {
-        Direction issuerFacing = scanForButtonDirection(player);
-        if (issuerFacing == null) issuerFacing = player.getHorizontalFacing(); // default fallback
-        // Attempt to capture the issuing player's facing from context if provided
-        Object issuerDirObj = context.parameters().get("issuerFacing");
-        if (issuerDirObj instanceof String s) {
-            Direction parsed = parseDirection(s);
-            if (parsed != null) {
-                issuerFacing = parsed;
-            }
+    private Direction determineStraightStairDirection(SkillContext context, ServerPlayerEntity player, boolean resumeRequested) {
+        Direction explicit = null;
+        // Prefer direction captured from the command issuer (raycast/look), if provided.
+        Object explicitObj = context.parameters().get("direction");
+        if (explicitObj == null) {
+            explicitObj = context.parameters().get("issuerFacing");
         }
-        Direction current = issuerFacing;
+        if (explicitObj instanceof Direction dir) {
+            explicit = dir;
+        } else if (explicitObj instanceof String s) {
+            explicit = parseDirection(s);
+        }
+
+        Direction base = explicit;
+        if (base == null) {
+            base = scanForButtonDirection(player);
+        }
+        if (base == null) {
+            base = player.getHorizontalFacing();
+        }
+
+        Direction current = base;
         Map<String, Object> shared = context.sharedState();
-        boolean lock = getBooleanParameter(context, "lockDirection", false);
+        boolean lock = getBooleanParameter(context, "lockDirection", false) || resumeRequested;
         if (shared != null) {
             String key = "collectDirt.depth.direction." + player.getUuid();
             if (!lock) {
