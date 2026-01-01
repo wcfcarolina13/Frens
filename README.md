@@ -35,6 +35,28 @@
 ### 💬 Planned LLM Integration
 LLM-based conversational features are planned but not included in this release. Core bot functionality does not require an LLM provider.
 
+### ⚙️ Building with AI/LLM support (optional)
+
+By default this project avoids bundling heavy AI runtimes. If you want to enable AI/LLM runtime packaging (which includes native runtimes and AI libraries), set the Gradle project property `aiEnabled` to `true` when building.
+
+Build examples:
+
+- Build normally (no AI runtime bundled):
+
+	./gradlew build
+
+- Build with AI/LLM runtime packaging enabled:
+
+	./gradlew build -PaiEnabled=true
+
+Enabling AI packaging will include large native libraries (e.g., PyTorch natives) and may significantly increase build times and the resulting JAR size. Use it only if you intend to run LLM providers locally or bundle them for deployment.
+
+To enable the flag permanently for your environment, add to `gradle.properties`:
+
+	aiEnabled=true
+
+If you do not bundle the AI runtime, you'll still need to provide a compatible LLM provider at runtime (install native engines or configure a remote provider). Refer to provider-specific docs for setup when enabling AI packaging.
+
 ### 📦 Persistence
 - **Inventory** - saved/loaded automatically between sessions
 - **Position** - bots respawn where they left off
