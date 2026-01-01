@@ -105,6 +105,12 @@ shadowJar {
 			include(dependency("com.github.amithkoujalgi:ollama4j:1.0.77"))
 		}
 	}
+	// Exclude compile-time shim packages that mirror runtime packages (do NOT ship these)
+	// These stubs exist only to allow compilation against differing mappings and
+	// must not be included in the mod JAR as they would conflict with game classes.
+	exclude 'net/minecraft/**'
+	exclude 'ai/djl/**'
+	exclude 'io/github/amithkoujalgi/**'
 	relocate 'com.fasterxml.jackson', 'net.shasankp000.relocated.com.fasterxml.jackson'
 	relocate 'io.wispforest:owo-sentinel', 'net.shasankp000.relocated.io.wispforest:owo-sentinel'
 	relocate 'com.github.amithkoujalgi', 'net.shasankp000.relocated:com.github.amithkoujalgi'
@@ -131,6 +137,10 @@ jar {
 	from("LICENSE") {
 		rename { "${it}_${project.base.archivesName.get()}"}
 	}
+	// Prevent shipping compile-time stubs that shadow runtime packages
+	exclude 'net/minecraft/**'
+	exclude 'ai/djl/**'
+	exclude 'io/github/amithkoujalgi/**'
 }
 
 publishing {
