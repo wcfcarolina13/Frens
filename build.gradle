@@ -4,6 +4,9 @@ plugins {
 	id 'com.github.johnrengelman.shadow' version '7.1.2'
 }
 
+// Feature flag: enable AI runtime packaging. Default = false (build without bundling heavy AI runtimes).
+def aiEnabled = project.hasProperty('aiEnabled') ? project.property('aiEnabled').toString().toLowerCase() == 'true' : false
+
 version = project.mod_version
 group = project.maven_group
 
@@ -41,7 +44,8 @@ dependencies {
 	modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_version}"
 
 	// Core application dependencies
-	implementation 'com.github.amithkoujalgi:ollama4j:1.0.77'
+	// AI libraries: compile-time only by default so code compiles but runtime/native packaging can be toggled
+	compileOnly 'com.github.amithkoujalgi:ollama4j:1.0.77'
 	implementation 'com.github.FasterXML:jackson-core:jackson-core-2.17.2'
 	implementation 'com.github.FasterXML:jackson-databind:jackson-databind-2.17.2'
 	implementation 'com.github.FasterXML:jackson-datatype-jsr310:jackson-datatype-jsr310-2.8.4'
@@ -52,21 +56,22 @@ dependencies {
 	implementation 'org.apache.commons:commons-compress:1.28.0'
 	implementation 'org.jsoup:jsoup:1.21.1'
 
-	// DJL dependencies
-	implementation "ai.djl:api:0.33.0"
-	implementation "ai.djl.huggingface:tokenizers:0.33.0"
-	implementation "ai.djl.pytorch:pytorch-engine:0.33.0"
-	runtimeOnly "ai.djl.pytorch:pytorch-native-cpu:2.5.1:linux-x86_64"
-	runtimeOnly "ai.djl.pytorch:pytorch-native-cpu:2.5.1:win-x86_64"
-	runtimeOnly "ai.djl.pytorch:pytorch-native-cpu:2.5.1:osx-aarch64"
-	implementation "ai.djl.pytorch:pytorch-model-zoo:0.33.0"
+	// DJL dependencies (compile-time only; native runtimes are added to packaging when aiEnabled=true)
+	compileOnly "ai.djl:api:0.33.0"
+	compileOnly "ai.djl.huggingface:tokenizers:0.33.0"
+	compileOnly "ai.djl.pytorch:pytorch-engine:0.33.0"
+	if (aiEnabled) {
+		runtimeOnly "ai.djl.pytorch:pytorch-native-cpu:2.5.1:linux-x86_64"
+		runtimeOnly "ai.djl.pytorch:pytorch-native-cpu:2.5.1:win-x86_64"
+		runtimeOnly "ai.djl.pytorch:pytorch-native-cpu:2.5.1:osx-aarch64"
+	}
+	compileOnly "ai.djl.pytorch:pytorch-model-zoo:0.33.0"
 
 	// OpenNLP ONLY - No Stanford CoreNLP!
 	implementation 'org.apache.opennlp:opennlp-tools:2.5.5'
 
 
-	// Include statements for runtime
-	include "com.github.amithkoujalgi:ollama4j:1.0.77"
+	// Include statements for runtime packaging. AI runtime pieces are included only when aiEnabled=true.
 	include "com.github.FasterXML:jackson-databind:jackson-databind-2.17.2"
 	include "com.github.FasterXML:jackson-core:jackson-core-2.17.2"
 	include "com.github.FasterXML:jackson-datatype-jsr310:jackson-datatype-jsr310-2.8.4"
@@ -75,13 +80,16 @@ dependencies {
 	include 'org.apache.commons:commons-math3:3.6.1'
 	include "org.apache.commons:commons-compress:1.28.0"
 	include 'org.jsoup:jsoup:1.21.1'
-	include "ai.djl:api:0.33.0"
-	include "ai.djl.huggingface:tokenizers:0.33.0"
-	include "ai.djl.pytorch:pytorch-engine:0.33.0"
-	include "ai.djl.pytorch:pytorch-native-cpu:2.5.1:linux-x86_64"
-	include "ai.djl.pytorch:pytorch-native-cpu:2.5.1:win-x86_64"
-	include "ai.djl.pytorch:pytorch-native-cpu:2.5.1:osx-aarch64"
-	include "ai.djl.pytorch:pytorch-model-zoo:0.33.0"
+	if (aiEnabled) {
+		include "com.github.amithkoujalgi:ollama4j:1.0.77"
+		include "ai.djl:api:0.33.0"
+		include "ai.djl.huggingface:tokenizers:0.33.0"
+		include "ai.djl.pytorch:pytorch-engine:0.33.0"
+		include "ai.djl.pytorch:pytorch-native-cpu:2.5.1:linux-x86_64"
+		include "ai.djl.pytorch:pytorch-native-cpu:2.5.1:win-x86_64"
+		include "ai.djl.pytorch:pytorch-native-cpu:2.5.1:osx-aarch64"
+		include "ai.djl.pytorch:pytorch-model-zoo:0.33.0"
+	}
 	include 'org.apache.opennlp:opennlp-tools:2.5.5'
 
 	dependencies {
@@ -93,7 +101,9 @@ shadowJar {
 	dependencies {
 		include(dependency('com.fasterxml.jackson.core:jackson-databind'))
 		include(dependency("io.wispforest:owo-sentinel:0.12.6+1.20.3"))
-		include(dependency("com.github.amithkoujalgi:ollama4j:1.0.77"))
+		if (aiEnabled) {
+			include(dependency("com.github.amithkoujalgi:ollama4j:1.0.77"))
+		}
 	}
 	relocate 'com.fasterxml.jackson', 'net.shasankp000.relocated.com.fasterxml.jackson'
 	relocate 'io.wispforest:owo-sentinel', 'net.shasankp000.relocated.io.wispforest:owo-sentinel'
