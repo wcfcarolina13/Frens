@@ -192,13 +192,20 @@ public class AIPlayer implements ModInitializer {
         PayloadTypeRegistry.playC2S().register(SaveCustomProviderPayload.ID, SaveCustomProviderPayload.CODEC);
 
         // Bases manager UI payloads
-        PayloadTypeRegistry.playC2S().register(net.shasankp000.network.RequestBasesPayload.ID, net.shasankp000.network.RequestBasesPayload.CODEC);
-        PayloadTypeRegistry.playS2C().register(net.shasankp000.network.BasesListPayload.ID, net.shasankp000.network.BasesListPayload.CODEC);
-        PayloadTypeRegistry.playC2S().register(net.shasankp000.network.BaseSetPayload.ID, net.shasankp000.network.BaseSetPayload.CODEC);
-        PayloadTypeRegistry.playC2S().register(net.shasankp000.network.BaseRemovePayload.ID, net.shasankp000.network.BaseRemovePayload.CODEC);
-        PayloadTypeRegistry.playC2S().register(net.shasankp000.network.BaseRenamePayload.ID, net.shasankp000.network.BaseRenamePayload.CODEC);
+        PayloadTypeRegistry.playC2S().register(net.shasankp000.Network.RequestBasesPayload.ID, net.shasankp000.Network.RequestBasesPayload.CODEC);
+        PayloadTypeRegistry.playS2C().register(net.shasankp000.Network.BasesListPayload.ID, net.shasankp000.Network.BasesListPayload.CODEC);
+        PayloadTypeRegistry.playC2S().register(net.shasankp000.Network.BaseSetPayload.ID, net.shasankp000.Network.BaseSetPayload.CODEC);
+        PayloadTypeRegistry.playC2S().register(net.shasankp000.Network.BaseRemovePayload.ID, net.shasankp000.Network.BaseRemovePayload.CODEC);
+        PayloadTypeRegistry.playC2S().register(net.shasankp000.Network.BaseRenamePayload.ID, net.shasankp000.Network.BaseRenamePayload.CODEC);
+        PayloadTypeRegistry.playC2S().register(net.shasankp000.Network.RequestCraftingHistoryPayload.ID, net.shasankp000.Network.RequestCraftingHistoryPayload.CODEC);
+        PayloadTypeRegistry.playS2C().register(net.shasankp000.Network.CraftingHistoryPayload.ID, net.shasankp000.Network.CraftingHistoryPayload.CODEC);
+        PayloadTypeRegistry.playC2S().register(net.shasankp000.Network.RequestCookablesPayload.ID, net.shasankp000.Network.RequestCookablesPayload.CODEC);
+        PayloadTypeRegistry.playS2C().register(net.shasankp000.Network.CookablesPayload.ID, net.shasankp000.Network.CookablesPayload.CODEC);
+        PayloadTypeRegistry.playS2C().register(net.shasankp000.Network.ResumeDecisionPayload.ID, net.shasankp000.Network.ResumeDecisionPayload.CODEC);
 
-        net.shasankp000.network.BaseNetworkManager.registerReceiversOnce();
+        net.shasankp000.Network.BaseNetworkManager.registerReceiversOnce();
+        net.shasankp000.Network.CraftingHistoryNetworkManager.registerReceiversOnce();
+        net.shasankp000.Network.CookablesNetworkManager.registerReceiversOnce();
 
         modCommandRegistry.register();
         configCommand.register();

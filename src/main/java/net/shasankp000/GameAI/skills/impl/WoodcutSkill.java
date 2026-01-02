@@ -24,6 +24,7 @@ import net.shasankp000.GameAI.services.CraftingHelper;
 import net.shasankp000.GameAI.services.ChestStoreService;
 import net.shasankp000.GameAI.services.BlockInteractionService;
 import net.shasankp000.GameAI.services.MovementService;
+import net.shasankp000.GameAI.services.ReturnBaseStuckService;
 import net.shasankp000.GameAI.services.SkillResumeService;
 import net.shasankp000.GameAI.skills.Skill;
 import net.shasankp000.GameAI.skills.SkillContext;
@@ -95,6 +96,25 @@ public final class WoodcutSkill implements Skill {
             Items.CHERRY_SAPLING,
             Items.BAMBOO
     );
+    private static final List<Item> SEED_ITEMS = List.of(
+            Items.WHEAT_SEEDS,
+            Items.BEETROOT_SEEDS,
+            Items.MELON_SEEDS,
+            Items.PUMPKIN_SEEDS,
+            Items.TORCHFLOWER_SEEDS,
+            Items.PITCHER_POD
+    );
+    private static final List<Item> RAW_FOOD_ITEMS = List.of(
+            Items.BEEF,
+            Items.PORKCHOP,
+            Items.CHICKEN,
+            Items.MUTTON,
+            Items.RABBIT,
+            Items.COD,
+            Items.SALMON,
+            Items.TROPICAL_FISH,
+            Items.PUFFERFISH
+    );
 
     @Override
     public String name() {
@@ -163,7 +183,7 @@ public final class WoodcutSkill implements Skill {
                 if (!ensureWoodSpaceOrDeposit(source, bot)) {
                     totalFailures++;
                     consecutiveFailures++;
-                    ChatUtils.sendSystemMessage(source, "Inventory is full and I couldn't deposit wood; stopping woodcut.");
+                    ChatUtils.sendSystemMessage(source, "Inventory is full and I couldn't store items; stopping woodcut.");
                     break;
                 }
 
@@ -502,6 +522,7 @@ public final class WoodcutSkill implements Skill {
             if (res.success() || isTrunkWithinReach(world, base, bot)) {
                 return true;
             }
+            ReturnBaseStuckService.tickAndCheckStuck(bot, Vec3d.ofCenter(base), ReturnBaseStuckService.StuckProfile.WOODCUT);
             MovementService.clearRecentWalkAttempt(bot.getUuid());
         }
         // Fallback to planner if simple stand failed.
@@ -512,6 +533,7 @@ public final class WoodcutSkill implements Skill {
             if (result.success() || isTrunkWithinReach(world, base, bot)) {
                 return true;
             }
+            ReturnBaseStuckService.tickAndCheckStuck(bot, Vec3d.ofCenter(base), ReturnBaseStuckService.StuckProfile.WOODCUT);
             LOGGER.warn("Failed to approach tree base {}: {}", base.toShortString(), result.detail());
         }
         // Last resort: try to pillar from here to reach the trunk directly.
@@ -520,6 +542,7 @@ public final class WoodcutSkill implements Skill {
             descendAndCleanup(bot, tempPillar);
             return true;
         }
+        ReturnBaseStuckService.tickAndCheckStuck(bot, Vec3d.ofCenter(base), ReturnBaseStuckService.StuckProfile.WOODCUT);
         LOGGER.warn("No path to tree base {}", base.toShortString());
         return false;
     }
@@ -548,17 +571,21 @@ public final class WoodcutSkill implements Skill {
         if (!needsDeposit) {
             return true;
         }
-        if (woodCount <= 0) {
-            LOGGER.warn("Inventory full but no wood detected for deposit; pausing woodcut.");
-            return false;
-        }
-
         List<BlockPos> candidates = findNearbyChests(bot, 18, 6);
         for (BlockPos chestPos : candidates) {
             int moved = ChestStoreService.depositMatchingWalkOnly(source, bot, chestPos, this::isWoodStack);
             LOGGER.info("Woodcut deposit attempt: chest={} moved={}", chestPos.toShortString(), moved);
             if (moved > 0) {
                 ChatUtils.sendSystemMessage(source, "Deposited wood into a nearby chest.");
+                return true;
+            }
+        }
+
+        for (BlockPos chestPos : candidates) {
+            int moved = ChestStoreService.depositMatchingWalkOnly(source, bot, chestPos, this::isWoodcutOffloadCandidate);
+            LOGGER.info("Woodcut deposit attempt (fallback): chest={} moved={}", chestPos.toShortString(), moved);
+            if (moved > 0) {
+                ChatUtils.sendSystemMessage(source, "Stored extra items in a nearby chest.");
                 return true;
             }
         }
@@ -571,10 +598,16 @@ public final class WoodcutSkill implements Skill {
                 ChatUtils.sendSystemMessage(source, "Deposited wood into the new chest.");
                 return true;
             }
+            int movedFallback = ChestStoreService.depositMatchingWalkOnly(source, bot, placed, this::isWoodcutOffloadCandidate);
+            LOGGER.info("Woodcut deposit attempt (placed chest fallback): chest={} moved={}", placed.toShortString(), movedFallback);
+            if (movedFallback > 0) {
+                ChatUtils.sendSystemMessage(source, "Stored extra items in the new chest.");
+                return true;
+            }
         }
 
-        LOGGER.warn("Inventory full and couldn't deposit wood (no reachable/usable chest, or chests are full).");
-        ChatUtils.sendSystemMessage(source, "Inventory is full and I couldn't deposit wood (no reachable chest or chests are full).");
+        LOGGER.warn("Inventory full and couldn't store items (no reachable/usable chest, or chests are full).");
+        ChatUtils.sendSystemMessage(source, "Inventory is full and I couldn't store items (no reachable chest or chests are full).");
         return false;
     }
 
@@ -1108,6 +1141,9 @@ public final class WoodcutSkill implements Skill {
         LOGGER.warn("Still short on scaffold after local gather. Triggering dirt collection.");
         Map<String, Object> params = new HashMap<>();
         params.put("count", Math.max(toGather, 12));
+        params.put("searchRadius", 6);
+        params.put("options", java.util.List.of("square"));
+        params.put("allowChestStore", true);
         try {
             CollectDirtSkill collect = new CollectDirtSkill();
             SkillContext ctx = new SkillContext(source, new HashMap<>(), params);
@@ -1501,6 +1537,37 @@ public final class WoodcutSkill implements Skill {
             return state.isIn(BlockTags.LOGS) || state.isIn(BlockTags.PLANKS);
         }
         return false;
+    }
+
+    private boolean isWoodcutOffloadCandidate(ItemStack stack) {
+        if (stack.isEmpty()) {
+            return false;
+        }
+        if (ChestStoreService.isOffloadProtected(stack)) {
+            return false;
+        }
+        if (stack.isOf(Items.CHEST) || stack.isOf(Items.CRAFTING_TABLE)) {
+            return false;
+        }
+        if (PILLAR_BLOCKS.contains(stack.getItem())) {
+            return false;
+        }
+        if (isWoodStack(stack)) {
+            return true;
+        }
+        if (SAPLING_ITEMS.contains(stack.getItem())) {
+            return true;
+        }
+        if (SEED_ITEMS.contains(stack.getItem())) {
+            return true;
+        }
+        if (RAW_FOOD_ITEMS.contains(stack.getItem())) {
+            return true;
+        }
+        if (stack.isOf(Items.LEAF_LITTER)) {
+            return true;
+        }
+        return stack.isOf(Items.APPLE);
     }
 
     private void cleanupNearbyScaffold(ServerPlayerEntity bot, BlockPos base) {

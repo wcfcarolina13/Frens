@@ -27,6 +27,7 @@ import net.shasankp000.GameAI.skills.SkillExecutionResult;
 import net.shasankp000.GameAI.skills.SkillPreferences;
 import net.shasankp000.Entity.LookController;
 import net.shasankp000.GameAI.BotActions;
+import net.shasankp000.GameAI.services.ChestStoreService;
 import net.shasankp000.GameAI.services.MovementService;
 import net.shasankp000.GameAI.services.TaskService;
 import net.shasankp000.GameAI.skills.SkillManager;
@@ -175,6 +176,7 @@ public class CollectDirtSkill implements Skill {
         int targetCount = getIntParameter(context, "count", DEFAULT_COUNT);
         int horizontalRadius = getIntParameter(context, "searchRadius", 6);
         int verticalRange = getIntParameter(context, "verticalRange", 4);
+        boolean allowChestStore = getBooleanParameter(context, "allowChestStore", false);
 
         DirtShovelSkill shovelSkill = new DirtShovelSkill();
         ServerCommandSource source = context.botSource();
@@ -214,7 +216,7 @@ public class CollectDirtSkill implements Skill {
         }
         
         boolean untilMode = optionTokens.contains("until") && !optionTokens.contains("exact");
-        boolean squareMode = optionTokens.contains("square");
+        boolean squareMode = true;
         boolean spiralRequested = optionTokens.contains("spiral") || getBooleanParameter(context, "spiralMode", false);
         if (spiralRequested) {
             return SkillExecutionResult.failure("The 'spiral' staircase mode is temporarily disabled. Use 'ascent' or 'descent' commands.");
@@ -233,7 +235,7 @@ public class CollectDirtSkill implements Skill {
                 LOGGER.info("Ascent mode: climbing from Y={} to Y={}", 
                            playerForAbortCheck.getBlockY(), targetY);
             }
-            return runAscent(context, source, playerForAbortCheck, targetY, resumeRequested);
+            return runAscent(context, source, playerForAbortCheck, targetY, resumeRequested, allowChestStore);
         }
 
         // Handle descent mode
@@ -248,7 +250,7 @@ public class CollectDirtSkill implements Skill {
                 LOGGER.info("Descent mode: descending from Y={} to Y={}", 
                            playerForAbortCheck.getBlockY(), targetY);
             }
-            return runDescent(context, source, playerForAbortCheck, targetY, resumeRequested);
+            return runDescent(context, source, playerForAbortCheck, targetY, resumeRequested, allowChestStore);
         }
 
         int collected = 0;
@@ -278,7 +280,7 @@ public class CollectDirtSkill implements Skill {
         }
 
         if (playerForAbortCheck != null) {
-            if (handleInventoryFull(playerForAbortCheck, source)) {
+            if (handleInventoryFull(playerForAbortCheck, source, allowChestStore)) {
                 return SkillExecutionResult.failure("Mining paused: inventory full.");
             }
             if (handleWaterHazard(playerForAbortCheck, source)) {
@@ -306,7 +308,7 @@ public class CollectDirtSkill implements Skill {
 
             ServerPlayerEntity loopPlayer = source.getPlayer();
             if (loopPlayer != null) {
-                if (handleInventoryFull(loopPlayer, source)) {
+                if (handleInventoryFull(loopPlayer, source, allowChestStore)) {
                     outcome = SkillExecutionResult.failure("Mining paused: inventory full.");
                     break;
                 }
@@ -933,7 +935,7 @@ public class CollectDirtSkill implements Skill {
         if (referencePos != null) {
             targetY = Math.max(targetY, referencePos.getY());
         }
-        SkillExecutionResult ascent = runAscent(new SkillContext(source, new HashMap<>(), new HashMap<>()), source, player, targetY, false);
+        SkillExecutionResult ascent = runAscent(new SkillContext(source, new HashMap<>(), new HashMap<>()), source, player, targetY, false, false);
         return ascent.success() || player.getBlockY() >= targetY;
     }
 
@@ -1206,7 +1208,8 @@ public class CollectDirtSkill implements Skill {
                                            ServerCommandSource source,
                                            ServerPlayerEntity player,
                                            int targetDepthY,
-                                           boolean resumeRequested) {
+                                           boolean resumeRequested,
+                                           boolean allowChestStore) {
         if (player == null) {
             return SkillExecutionResult.failure("No bot available for descent.");
         }
@@ -1219,33 +1222,33 @@ public class CollectDirtSkill implements Skill {
         TaskService.setAscentMode(player.getUuid(), true);
 
         try {
-        boolean strictWalk = getBooleanParameter(context, "strictWalk", false);
-        
-        // Check if resuming from a paused position
-        Optional<BlockPos> pausePos = WorkDirectionService.getPausePosition(player.getUuid());
-        if (resumeRequested && pausePos.isPresent()) {
-            BlockPos resumeTarget = pausePos.get();
-            LOGGER.info("Descent resuming - navigating back to pause position {}", resumeTarget.toShortString());
-            ChatUtils.sendChatMessages(source.withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS), 
-                    "Returning to descent position...");
-            
-                Direction digDirection = determineStraightStairDirection(context, player, resumeRequested);
-            MovementService.MovementPlan plan = new MovementService.MovementPlan(
-                    MovementService.Mode.DIRECT, resumeTarget, resumeTarget, null, null, digDirection);
-            MovementService.MovementResult movement = MovementService.execute(source, player, plan);
-            
-            if (!movement.success() || !player.getBlockPos().equals(resumeTarget)) {
-                LOGGER.warn("Failed to return to pause position {}, continuing from current location", resumeTarget.toShortString());
-                ChatUtils.sendChatMessages(source.withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS), 
-                        "Couldn't return to exact position, continuing from here.");
-            }
-            WorkDirectionService.clearPausePosition(player.getUuid());
-        }
-        
-                Direction digDirection = determineStraightStairDirection(context, player, resumeRequested);
-        runOnServerThread(player, () -> LookController.faceBlock(player, player.getBlockPos().offset(digDirection)));
+            boolean strictWalk = getBooleanParameter(context, "strictWalk", false);
 
-                final int startY = player.getBlockY();
+            // Check if resuming from a paused position
+            Optional<BlockPos> pausePos = WorkDirectionService.getPausePosition(player.getUuid());
+            if (resumeRequested && pausePos.isPresent()) {
+                BlockPos resumeTarget = pausePos.get();
+                LOGGER.info("Descent resuming - navigating back to pause position {}", resumeTarget.toShortString());
+                ChatUtils.sendChatMessages(source.withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS),
+                        "Returning to descent position...");
+
+                Direction digDirection = determineStraightStairDirection(context, player, resumeRequested);
+                MovementService.MovementPlan plan = new MovementService.MovementPlan(
+                        MovementService.Mode.DIRECT, resumeTarget, resumeTarget, null, null, digDirection);
+                MovementService.MovementResult movement = MovementService.execute(source, player, plan);
+
+                if (!movement.success() || !player.getBlockPos().equals(resumeTarget)) {
+                    LOGGER.warn("Failed to return to pause position {}, continuing from current location", resumeTarget.toShortString());
+                    ChatUtils.sendChatMessages(source.withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS),
+                            "Couldn't return to exact position, continuing from here.");
+                }
+                WorkDirectionService.clearPausePosition(player.getUuid());
+            }
+
+            Direction digDirection = determineStraightStairDirection(context, player, resumeRequested);
+            runOnServerThread(player, () -> LookController.faceBlock(player, player.getBlockPos().offset(digDirection)));
+
+            final int startY = player.getBlockY();
 
         int carvedSteps = 0;
         while (player.getBlockY() > targetDepthY) {
@@ -1253,7 +1256,7 @@ public class CollectDirtSkill implements Skill {
                 return SkillExecutionResult.failure(skillName + " paused due to nearby threat.");
             }
             
-            if (handleInventoryFull(player, source)) {
+            if (handleInventoryFull(player, source, allowChestStore)) {
                 return SkillExecutionResult.failure("Mining paused: inventory full.");
             }
             if (handleWaterHazard(player, source)) {
@@ -1455,7 +1458,8 @@ public class CollectDirtSkill implements Skill {
                                           ServerCommandSource source,
                                           ServerPlayerEntity player,
                                           int targetY,
-                                          boolean resumeRequested) {
+                                          boolean resumeRequested,
+                                          boolean allowChestStore) {
         if (player == null) {
             return SkillExecutionResult.failure("No bot available for ascent.");
         }
@@ -1487,19 +1491,19 @@ public class CollectDirtSkill implements Skill {
                 if (SkillManager.shouldAbortSkill(player)) {
                     WorkDirectionService.setPausePosition(player.getUuid(), player.getBlockPos());
                     return SkillExecutionResult.failure(skillName + " paused due to nearby threat.");
-            }
-            if (handleInventoryFull(player, source)) {
-                WorkDirectionService.setPausePosition(player.getUuid(), player.getBlockPos());
-                return SkillExecutionResult.failure("Mining paused: inventory full.");
-            }
-            if (handleWaterHazard(player, source)) {
-                WorkDirectionService.setPausePosition(player.getUuid(), player.getBlockPos());
-                return SkillExecutionResult.failure("Mining paused: water flooded the area.");
-            }
-            if (handleLavaHazard(player, source)) {
-                WorkDirectionService.setPausePosition(player.getUuid(), player.getBlockPos());
-                return SkillExecutionResult.failure("Mining paused: lava detected.");
-            }
+                }
+                if (handleInventoryFull(player, source, allowChestStore)) {
+                    WorkDirectionService.setPausePosition(player.getUuid(), player.getBlockPos());
+                    return SkillExecutionResult.failure("Mining paused: inventory full.");
+                }
+                if (handleWaterHazard(player, source)) {
+                    WorkDirectionService.setPausePosition(player.getUuid(), player.getBlockPos());
+                    return SkillExecutionResult.failure("Mining paused: water flooded the area.");
+                }
+                if (handleLavaHazard(player, source)) {
+                    WorkDirectionService.setPausePosition(player.getUuid(), player.getBlockPos());
+                    return SkillExecutionResult.failure("Mining paused: lava detected.");
+                }
             
             // Execute one upward step
             SkillExecutionResult stepResult = executeUpwardStep(player, direction, source);
@@ -2083,9 +2087,16 @@ public class CollectDirtSkill implements Skill {
         return true;
     }
 
-    private boolean handleInventoryFull(ServerPlayerEntity player, ServerCommandSource source) {
+    private boolean handleInventoryFull(ServerPlayerEntity player, ServerCommandSource source, boolean allowChestStore) {
         if (player == null || source == null) {
             return false;
+        }
+        if (allowChestStore && isInventoryFull(player)) {
+            boolean stored = attemptChestStore(player, source);
+            if (stored && !isInventoryFull(player)) {
+                LAST_INVENTORY_FULL_MESSAGE.remove(player.getUuid());
+                return false;
+            }
         }
         boolean shouldPause = SkillPreferences.pauseOnFullInventory(player);
         if (!isInventoryFull(player)) {
@@ -2131,6 +2142,59 @@ public class CollectDirtSkill implements Skill {
                 "Inventory full — pausing mining. Clear space and run /bot resume " + player.getName().getString() + ".");
         BotActions.stop(player);
         return true;
+    }
+
+    private boolean attemptChestStore(ServerPlayerEntity player, ServerCommandSource source) {
+        if (player == null || source == null) {
+            return false;
+        }
+        if (!(player.getEntityWorld() instanceof ServerWorld world)) {
+            return false;
+        }
+        List<BlockPos> chests = findNearbyChests(world, player.getBlockPos(), 12, 6);
+        for (BlockPos chestPos : chests) {
+            int moved = ChestStoreService.depositMatchingWalkOnly(source, player, chestPos, this::isChestOffloadCandidate);
+            if (moved > 0) {
+                return true;
+            }
+        }
+        BlockPos placed = ChestStoreService.placeChestNearBot(source, player, false);
+        if (placed != null) {
+            int moved = ChestStoreService.depositMatchingWalkOnly(source, player, placed, this::isChestOffloadCandidate);
+            return moved > 0;
+        }
+        return false;
+    }
+
+    private boolean isChestOffloadCandidate(ItemStack stack) {
+        if (stack == null || stack.isEmpty()) {
+            return false;
+        }
+        if (ChestStoreService.isOffloadProtected(stack)) {
+            return false;
+        }
+        if (stack.isOf(Items.CHEST) || stack.isOf(Items.CRAFTING_TABLE)) {
+            return false;
+        }
+        return stack.getMaxCount() > 1;
+    }
+
+    private List<BlockPos> findNearbyChests(ServerWorld world, BlockPos origin, int radius, int vertical) {
+        if (world == null || origin == null) {
+            return List.of();
+        }
+        List<BlockPos> found = new ArrayList<>();
+        for (BlockPos pos : BlockPos.iterate(origin.add(-radius, -vertical, -radius), origin.add(radius, vertical, radius))) {
+            if (!world.isChunkLoaded(pos)) {
+                continue;
+            }
+            BlockState state = world.getBlockState(pos);
+            if (state.isOf(Blocks.CHEST) || state.isOf(Blocks.TRAPPED_CHEST)) {
+                found.add(pos.toImmutable());
+            }
+        }
+        found.sort(Comparator.comparingDouble(p -> p.getSquaredDistance(origin)));
+        return found;
     }
 
     private void retreatFromHazard(ServerPlayerEntity player, Direction dangerDirection) {

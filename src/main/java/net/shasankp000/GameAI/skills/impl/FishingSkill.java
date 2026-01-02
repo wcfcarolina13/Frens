@@ -1469,6 +1469,9 @@ bot.getName().getString());
         if (stack == null || stack.isEmpty()) {
             return false;
         }
+        if (ChestStoreService.isOffloadProtected(stack)) {
+            return false;
+        }
         Item item = stack.getItem();
         if (item == Items.FISHING_ROD) {
             return false;

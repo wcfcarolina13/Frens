@@ -70,3 +70,11 @@ ai_search_config.json
 # Python venv
 **/venv/
 **/__pycache__/
+
+# Local handoff/notes docs
+HANDOFF_INSTRUCTIONS.md
+AUDIO_CHANGES_HANDOFF.md
+CHATTERBOX_AUDIO_HANDOFF.md
+PROGRESS.md
+PROGRESS_UPDATE.md
+PROBLEMS_REPORT.md

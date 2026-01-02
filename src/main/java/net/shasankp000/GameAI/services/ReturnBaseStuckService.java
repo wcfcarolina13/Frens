@@ -42,6 +42,27 @@ public final class ReturnBaseStuckService {
 
     private static final Logger LOGGER = LoggerFactory.getLogger("return-base-stuck");
 
+    public enum StuckProfile {
+        DEFAULT(1.0, false),
+        WOODCUT(1.0 / 3.0, true);
+
+        private final double tickScale;
+        private final boolean pillarFirst;
+
+        StuckProfile(double tickScale, boolean pillarFirst) {
+            this.tickScale = tickScale;
+            this.pillarFirst = pillarFirst;
+        }
+
+        double tickScale() {
+            return tickScale;
+        }
+
+        boolean pillarFirst() {
+            return pillarFirst;
+        }
+    }
+
     /**
      * Number of ticks to wait before considering the bot stuck.
      * 20 ticks = 1 second; 600 ticks = 30 seconds.
@@ -83,6 +104,9 @@ public final class ReturnBaseStuckService {
     
     /** At this threshold, try pillar escape */
     private static final int PILLAR_ATTEMPT_TICKS = 120;
+
+    /** Woodcut: require at least ~4s of no progress before pillar escape. */
+    private static final int WOODCUT_PILLAR_MIN_TICKS = 80;
     
     /** How long the panic flee lasts in milliseconds (3 seconds) */
     private static final long PANIC_FLEE_DURATION_MS = 3000L;
@@ -128,6 +152,7 @@ public final class ReturnBaseStuckService {
     private static final Map<UUID, Long> LAST_QUICK_NUDGE_MS = new ConcurrentHashMap<>();
     private static final Map<UUID, Long> LAST_MINE_ESCAPE_MS = new ConcurrentHashMap<>();
     private static final Map<UUID, Long> LAST_MINE_SURFACE_MS = new ConcurrentHashMap<>();
+    private static final Map<UUID, Long> LAST_STAGNANT_TICK_MS = new ConcurrentHashMap<>();
     private static final Map<UUID, Boolean> BACKUP_ATTEMPTED = new ConcurrentHashMap<>();
     private static final Map<UUID, Boolean> PILLAR_ATTEMPTED = new ConcurrentHashMap<>();
     private static final Map<UUID, Boolean> ESCAPE_IN_PROGRESS = new ConcurrentHashMap<>();
@@ -167,6 +192,14 @@ public final class ReturnBaseStuckService {
      * @return true if stuck and flare should be triggered
      */
     public static boolean tickAndCheckStuck(ServerPlayerEntity bot, Vec3d baseTarget) {
+        return tickAndCheckStuck(bot, baseTarget, StuckProfile.DEFAULT);
+    }
+
+    public static boolean tickAndCheckStuck(ServerPlayerEntity bot, Vec3d baseTarget, StuckProfile profile) {
+        return tickAndCheckStuckInternal(bot, baseTarget, profile != null ? profile : StuckProfile.DEFAULT);
+    }
+
+    private static boolean tickAndCheckStuckInternal(ServerPlayerEntity bot, Vec3d baseTarget, StuckProfile profile) {
         if (bot == null || baseTarget == null) {
             LOGGER.debug("ReturnBaseStuck: null bot or baseTarget");
             return false;
@@ -176,6 +209,22 @@ public final class ReturnBaseStuckService {
         BlockPos curBlock = bot.getBlockPos();
         Vec3d curPos = new Vec3d(bot.getX(), bot.getY(), bot.getZ());
         int currentStagnant = STAGNANT_TICKS.getOrDefault(botId, 0);
+        long nowMs = System.currentTimeMillis();
+        long lastTickMs = LAST_STAGNANT_TICK_MS.getOrDefault(botId, nowMs);
+        int tickIncrement = Math.max(1, (int) Math.round((nowMs - lastTickMs) / 50.0));
+        LAST_STAGNANT_TICK_MS.put(botId, nowMs);
+        int quickNudgeTicks = scaleTicks(QUICK_NUDGE_AFTER_TICKS, profile);
+        int backupTicks = scaleTicks(BACKUP_ATTEMPT_TICKS, profile);
+        int mineEscapeTicks = scaleTicks(MINE_ESCAPE_TICKS, profile);
+        int panicTicks = scaleTicks(PANIC_FLEE_TICKS, profile);
+        int pillarTicks = scaleTicks(PILLAR_ATTEMPT_TICKS, profile);
+        int mineSurfaceTicks = scaleTicks(MINE_TO_SURFACE_TICKS, profile);
+        int stuckTicks = scaleTicks(STUCK_THRESHOLD_TICKS, profile);
+        if (profile.pillarFirst()) {
+            int earliest = Math.min(backupTicks, Math.min(mineEscapeTicks, Math.min(panicTicks, pillarTicks)));
+            pillarTicks = Math.min(pillarTicks, earliest);
+            pillarTicks = Math.max(pillarTicks, WOODCUT_PILLAR_MIN_TICKS);
+        }
 
         // Track distance-to-base as the primary notion of "real progress" during return-to-base.
         // This avoids the common failure mode where the bot oscillates between nearby tiles (or jitters)
@@ -210,13 +259,9 @@ public final class ReturnBaseStuckService {
         Vec3d prevPos = LAST_POS.get(botId);
         BlockPos prevBlock = LAST_BLOCK_POS.get(botId);
         int stagnant = STAGNANT_TICKS.getOrDefault(botId, 0);
-
-        // Transient debug: show detailed per-tick state when verbose debug is enabled
-        // (moved below after anchor/progress variables are computed)
-
         // Track anchor position - where the bot first became stuck
         BlockPos anchorPos = STUCK_ANCHOR_POS.get(botId);
-        if (anchorPos == null && stagnant >= QUICK_NUDGE_AFTER_TICKS) {
+        if (anchorPos == null && stagnant >= quickNudgeTicks) {
             // Set anchor when we first start nudging
             STUCK_ANCHOR_POS.put(botId, curBlock.toImmutable());
             anchorPos = curBlock;
@@ -248,7 +293,7 @@ public final class ReturnBaseStuckService {
         boolean madeMeaningfulProgress = prevPos == null || improvedBaseDistance || escapedFromAnchor;
 
         if (!madeMeaningfulProgress) {
-            stagnant++;
+            stagnant += tickIncrement;
         } else {
             // Meaningful progress, reset stagnation counter
             if (prevPos != null && stagnant > 10 && prevBlock != null) {
@@ -280,8 +325,8 @@ public final class ReturnBaseStuckService {
         STAGNANT_TICKS.put(botId, stagnant);
         
         // Periodic logging at threshold milestones
-        if (stagnant == BACKUP_ATTEMPT_TICKS || stagnant == PANIC_FLEE_TICKS 
-                || stagnant == PILLAR_ATTEMPT_TICKS || stagnant == STUCK_THRESHOLD_TICKS) {
+        if (stagnant == backupTicks || stagnant == panicTicks
+                || stagnant == pillarTicks || stagnant == stuckTicks) {
             LOGGER.info("ReturnBaseStuck: bot={} reached {} ticks stagnant at pos={} backupAttempted={} panicAttempted={} pillarAttempted={}", 
                     bot.getName().getString(), stagnant, curBlock.toShortString(),
                     BACKUP_ATTEMPTED.getOrDefault(botId, false),
@@ -291,8 +336,7 @@ public final class ReturnBaseStuckService {
 
         // First line of defense: quick nudge into adjacent open space.
         // This resolves most "stuck under a cliff" / "just turn and step out" cases quickly.
-        if (stagnant >= QUICK_NUDGE_AFTER_TICKS) {
-            long nowMs = System.currentTimeMillis();
+        if (stagnant >= quickNudgeTicks) {
             long lastNudge = LAST_QUICK_NUDGE_MS.getOrDefault(botId, -1L);
             if (lastNudge < 0 || (nowMs - lastNudge) >= QUICK_NUDGE_COOLDOWN_MS) {
                 boolean nudged = tryQuickNudge(bot, baseTarget, stagnant);
@@ -302,9 +346,23 @@ public final class ReturnBaseStuckService {
                 }
             }
         }
+
+        // Woodcut profile: prioritize pillar escape earlier than other strategies.
+        if (profile.pillarFirst() && stagnant >= pillarTicks && !PILLAR_ATTEMPTED.getOrDefault(botId, false)) {
+            PILLAR_ATTEMPTED.put(botId, true);
+            LOGGER.info("Bot {} stuck for {} ticks, attempting pillar escape", 
+                bot.getName().getString(), stagnant);
+            DebugToggleService.debug(LOGGER, "ReturnBaseStuck: scheduling pillar-escape for bot={} stagnant={}", bot.getName().getString(), stagnant);
+            if (isOverheadBlocked(bot)) {
+                runEscapeAsync(botId, () -> tryMineToSurfaceEscape(bot, baseTarget));
+            } else {
+                runEscapeAsync(botId, () -> tryPillarEscape(bot));
+            }
+            return false;
+        }
         
         // At BACKUP_ATTEMPT_TICKS threshold, try backing up and sidestepping
-        if (stagnant >= BACKUP_ATTEMPT_TICKS && !BACKUP_ATTEMPTED.getOrDefault(botId, false)) {
+        if (stagnant >= backupTicks && !BACKUP_ATTEMPTED.getOrDefault(botId, false)) {
             BACKUP_ATTEMPTED.put(botId, true);
             LOGGER.info("Bot {} stuck for {} ticks, attempting backup/sidestep escape", 
                 bot.getName().getString(), stagnant);
@@ -315,8 +373,7 @@ public final class ReturnBaseStuckService {
 
         // More aggressive progress: periodically mine immediate obstructions (headroom/staircase or tunnel).
         // This is intentionally earlier than pillaring and does not require a full path to exist.
-        if (stagnant >= MINE_ESCAPE_TICKS) {
-            long nowMs = System.currentTimeMillis();
+        if (stagnant >= mineEscapeTicks) {
             long lastMine = LAST_MINE_ESCAPE_MS.getOrDefault(botId, -1L);
             if (lastMine < 0 || (nowMs - lastMine) >= MINE_ESCAPE_COOLDOWN_MS) {
                 LAST_MINE_ESCAPE_MS.put(botId, nowMs);
@@ -333,8 +390,7 @@ public final class ReturnBaseStuckService {
         // At PANIC_FLEE_TICKS threshold, trigger "panic flee" like a scared mob
         // This uses Minecraft's natural mob pathfinding behavior - flee in a random direction
         // which often successfully navigates around complex obstacles
-        if (stagnant >= PANIC_FLEE_TICKS && !PANIC_FLEE_ATTEMPTED.getOrDefault(botId, false)) {
-            long nowMs = System.currentTimeMillis();
+        if (stagnant >= panicTicks && !PANIC_FLEE_ATTEMPTED.getOrDefault(botId, false)) {
             long lastPanic = LAST_PANIC_FLEE_MS.getOrDefault(botId, -1L);
             if (lastPanic < 0 || (nowMs - lastPanic) >= PANIC_FLEE_RETRY_COOLDOWN_MS) {
                 LAST_PANIC_FLEE_MS.put(botId, nowMs);
@@ -350,19 +406,22 @@ public final class ReturnBaseStuckService {
         }
         
         // At PILLAR_ATTEMPT_TICKS threshold, try pillar escape
-        if (stagnant >= PILLAR_ATTEMPT_TICKS && !PILLAR_ATTEMPTED.getOrDefault(botId, false)) {
+        if (!profile.pillarFirst() && stagnant >= pillarTicks && !PILLAR_ATTEMPTED.getOrDefault(botId, false)) {
             PILLAR_ATTEMPTED.put(botId, true);
             LOGGER.info("Bot {} stuck for {} ticks, attempting pillar escape", 
                 bot.getName().getString(), stagnant);
             DebugToggleService.debug(LOGGER, "ReturnBaseStuck: scheduling pillar-escape for bot={} stagnant={}", bot.getName().getString(), stagnant);
-            runEscapeAsync(botId, () -> tryPillarEscape(bot));
+            if (isOverheadBlocked(bot)) {
+                runEscapeAsync(botId, () -> tryMineToSurfaceEscape(bot, baseTarget));
+            } else {
+                runEscapeAsync(botId, () -> tryPillarEscape(bot));
+            }
             return false; // Don't trigger flare yet
         }
 
         // Last-resort but still autonomous: mine a staircase upward until we reach surface/sky.
         // This is intended for "buried under terrain" / "trapped in a pocket" situations.
-        if (stagnant >= MINE_TO_SURFACE_TICKS) {
-            long nowMs = System.currentTimeMillis();
+        if (stagnant >= mineSurfaceTicks) {
             long last = LAST_MINE_SURFACE_MS.getOrDefault(botId, -1L);
             if (last < 0 || (nowMs - last) >= MINE_TO_SURFACE_COOLDOWN_MS) {
                 LAST_MINE_SURFACE_MS.put(botId, nowMs);
@@ -377,7 +436,7 @@ public final class ReturnBaseStuckService {
         }
 
         // Not stuck long enough for flare yet
-        if (stagnant < STUCK_THRESHOLD_TICKS) {
+        if (stagnant < stuckTicks) {
             return false;
         }
 
@@ -420,6 +479,14 @@ public final class ReturnBaseStuckService {
         return true;
     }
 
+    private static int scaleTicks(int baseTicks, StuckProfile profile) {
+        if (profile == null) {
+            return baseTicks;
+        }
+        double scaled = baseTicks * profile.tickScale();
+        return Math.max(1, (int) Math.round(scaled));
+    }
+
     /**
      * Mark that a flare was triggered, updating cooldown.
      */
@@ -443,6 +510,7 @@ public final class ReturnBaseStuckService {
             LAST_QUICK_NUDGE_MS.remove(botId);
             LAST_MINE_ESCAPE_MS.remove(botId);
             LAST_MINE_SURFACE_MS.remove(botId);
+            LAST_STAGNANT_TICK_MS.remove(botId);
             BACKUP_ATTEMPTED.remove(botId);
             PILLAR_ATTEMPTED.remove(botId);
             ESCAPE_IN_PROGRESS.remove(botId);
@@ -1745,7 +1813,20 @@ public final class ReturnBaseStuckService {
         }
         return -1;
     }
-    
+
+    private static boolean isOverheadBlocked(ServerPlayerEntity bot) {
+        if (bot == null || !(bot.getEntityWorld() instanceof ServerWorld world)) {
+            return false;
+        }
+        BlockPos head = bot.getBlockPos().up();
+        BlockPos above = head.up();
+        BlockState headState = world.getBlockState(head);
+        BlockState aboveState = world.getBlockState(above);
+        boolean headClear = headState.isAir() || headState.isReplaceable();
+        boolean aboveClear = aboveState.isAir() || aboveState.isReplaceable();
+        return !(headClear && aboveClear);
+    }
+
     private static boolean isPassable(ServerWorld world, BlockPos pos) {
         BlockState at = world.getBlockState(pos);
         BlockState above = world.getBlockState(pos.up());

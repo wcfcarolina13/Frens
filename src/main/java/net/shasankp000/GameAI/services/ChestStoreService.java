@@ -70,7 +70,6 @@ public final class ChestStoreService {
             Items.CLAY,
             Items.BRICKS,
             Items.GLASS,
-            Items.TORCH,
             Items.LADDER,
             Items.SCAFFOLDING,
             Items.STICK,
@@ -80,7 +79,6 @@ public final class ChestStoreService {
             // Common mob drops
             Items.ROTTEN_FLESH,
             Items.BONE,
-            Items.ARROW,
             Items.STRING,
             Items.GUNPOWDER,
             Items.SPIDER_EYE,
@@ -88,6 +86,37 @@ public final class ChestStoreService {
             Items.LEATHER,
             Items.FEATHER,
             Items.ENDER_PEARL
+    );
+
+    private static final Set<Item> COOKED_FOOD_ITEMS = Set.of(
+            Items.COOKED_BEEF,
+            Items.COOKED_PORKCHOP,
+            Items.COOKED_MUTTON,
+            Items.COOKED_CHICKEN,
+            Items.COOKED_RABBIT,
+            Items.COOKED_COD,
+            Items.COOKED_SALMON,
+            Items.BAKED_POTATO,
+            Items.DRIED_KELP,
+            Items.BREAD,
+            Items.PUMPKIN_PIE,
+            Items.RABBIT_STEW,
+            Items.MUSHROOM_STEW,
+            Items.BEETROOT_SOUP,
+            Items.SUSPICIOUS_STEW
+    );
+
+    private static final Set<Item> OFFLOAD_PROTECTED_ITEMS = Set.of(
+            Items.TORCH,
+            Items.SOUL_TORCH,
+            Items.REDSTONE_TORCH,
+            Items.LEAD,
+            Items.COMPASS,
+            Items.RECOVERY_COMPASS,
+            Items.CLOCK,
+            Items.ARROW,
+            Items.SPECTRAL_ARROW,
+            Items.TIPPED_ARROW
     );
 
     private ChestStoreService() {}
@@ -186,6 +215,9 @@ public final class ChestStoreService {
         if (stack == null || stack.isEmpty()) {
             return false;
         }
+        if (isOffloadProtected(stack)) {
+            return false;
+        }
         if (stack.isIn(net.minecraft.registry.tag.ItemTags.LOGS_THAT_BURN)
                 || stack.isIn(net.minecraft.registry.tag.ItemTags.PLANKS)) {
             return true;
@@ -205,6 +237,20 @@ public final class ChestStoreService {
                     || name.contains("leaves");
         }
         return false;
+    }
+
+    public static boolean isOffloadProtected(ItemStack stack) {
+        if (stack == null || stack.isEmpty()) {
+            return true;
+        }
+        if (stack.isDamageable()) {
+            return true;
+        }
+        Item item = stack.getItem();
+        if (OFFLOAD_PROTECTED_ITEMS.contains(item)) {
+            return true;
+        }
+        return COOKED_FOOD_ITEMS.contains(item);
     }
 
     private static BlockPos resolveRememberedChest(ServerCommandSource source, UUID botId) {
@@ -444,6 +490,12 @@ public final class ChestStoreService {
             return 0;
         }
 
+        debugChest("Deposit walk-only: chest=" + chestPos.toShortString()
+                + " botPos=" + bot.getBlockPos().toShortString()
+                + " thread=" + Thread.currentThread().getName()
+                + " serverThread=" + server.isOnThread()
+                + " sourceWorld=" + worldKeyName(source.getWorld())
+                + " botWorld=" + worldKeyName(bot.getEntityWorld()));
         return performStoreTransferWithBot(source, bot, chestPos, Integer.MAX_VALUE, matcher, true, WALK_ONLY);
     }
 
@@ -462,13 +514,22 @@ public final class ChestStoreService {
             return 0;
         }
 
+        debugChest("Store transfer start: deposit=" + deposit
+                + " chest=" + chestPos.toShortString()
+                + " botPos=" + bot.getBlockPos().toShortString()
+                + " thread=" + Thread.currentThread().getName()
+                + " serverThread=" + server.isOnThread()
+                + " sourceWorld=" + worldKeyName(source.getWorld())
+                + " botWorld=" + worldKeyName(bot.getEntityWorld()));
         Boolean chestOk = callOnServer(server, () -> source.getWorld().getBlockEntity(chestPos) instanceof ChestBlockEntity, 800, Boolean.FALSE);
         if (!Boolean.TRUE.equals(chestOk)) {
+            debugChest("Store transfer abort: chest missing at " + chestPos.toShortString());
             return 0;
         }
 
         if (deposit) {
             int have = callOnServer(server, () -> countMatching(bot.getInventory(), filter), 800, 0);
+            debugChest("Store transfer matching count=" + have);
             if (have <= 0) {
                 return 0;
             }
@@ -478,6 +539,7 @@ public final class ChestStoreService {
                 () -> findStandCandidatesNearChest(source.getWorld(), bot, chestPos),
                 1200,
                 java.util.List.of());
+        debugChest("Store transfer stand candidates=" + stands.size() + " stands=" + formatPositions(stands, 4));
         if (stands.isEmpty()) {
             return 0;
         }
@@ -508,12 +570,17 @@ public final class ChestStoreService {
                     flags.allowSnap()
             );
             double distSq = bot.getBlockPos().getSquaredDistance(stand);
+            debugChest("Store transfer move: stand=" + stand.toShortString()
+                    + " success=" + move.success()
+                    + " distSq=" + String.format(Locale.ROOT, "%.2f", distSq)
+                    + " detail=" + move.detail());
             if (move.success() || distSq <= BlockInteractionService.SURVIVAL_REACH_SQ) {
                 reached = true;
                 break;
             }
         }
         if (!reached) {
+            debugChest("Store transfer abort: failed to reach stand near chest " + chestPos.toShortString());
             return 0;
         }
 
@@ -527,6 +594,7 @@ public final class ChestStoreService {
         }
         if (!BlockInteractionService.canInteract(bot, chestPos)) {
             LOGGER.info("Store interact blocked: botPos={} chestPos={}", bot.getBlockPos().toShortString(), chestPos.toShortString());
+            debugChest("Store transfer abort: cannot interact with chest " + chestPos.toShortString());
             return 0;
         }
 
@@ -540,7 +608,9 @@ public final class ChestStoreService {
             }
             return moveItems(chest, bot.getInventory(), filter, amount);
         }, 2500, 0);
-        return moved != null ? moved : 0;
+        int movedCount = moved != null ? moved : 0;
+        debugChest("Store transfer done: moved=" + movedCount + " chest=" + chestPos.toShortString());
+        return movedCount;
     }
 
     private static int parseAmount(String raw, int fallback) {
@@ -742,5 +812,38 @@ public final class ChestStoreService {
             }
         }
         return stack;
+    }
+
+    private static String worldKeyName(World world) {
+        if (world == null) {
+            return "null";
+        }
+        RegistryKey<World> key = world.getRegistryKey();
+        return key != null ? key.getValue().toString() : "unknown";
+    }
+
+    private static String formatPositions(List<BlockPos> positions, int limit) {
+        if (positions == null || positions.isEmpty()) {
+            return "[]";
+        }
+        int cap = Math.max(1, limit);
+        StringBuilder sb = new StringBuilder();
+        sb.append('[');
+        int count = Math.min(positions.size(), cap);
+        for (int i = 0; i < count; i++) {
+            if (i > 0) {
+                sb.append(", ");
+            }
+            sb.append(positions.get(i).toShortString());
+        }
+        if (positions.size() > cap) {
+            sb.append(", +").append(positions.size() - cap).append(" more");
+        }
+        sb.append(']');
+        return sb.toString();
+    }
+
+    private static void debugChest(String message) {
+        DebugToggleService.debug(LOGGER, "[ChestDebug] {}", message);
     }
 }

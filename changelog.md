@@ -12,9 +12,28 @@ Historical record and reasoning. `TODO.md` is the source of truth for what’s n
 - Follow rework: bots now chase with WASD-style input, timeboxed path steps (no tick stalls), sensible teleport catch-up, and chill when adjacent; hill walking and vertical catch-up improved.
 
 ## Unreleased
+- Woodcut: reuse return-to-base stuck escape checks while approaching tree bases to recover from overhang stalls.
+- ReturnBaseStuckService: woodcut profile now triggers escape checks ~3x sooner and tries pillar escape first.
+- ReturnBaseStuckService: stuck timing now scales with real elapsed time, and pillar attempts switch to mine-to-surface when overhead blocks are detected (woodcut pillars wait ~4s of no progress).
+- Chest offload: auto-deposits now protect cooked foods, torches, leads, compass/clock items, and arrows across chest offload flows.
+- Crafting: record per-world crafting history for the commander when bots craft items.
+- ReturnBaseStuckService: move debug logging to after variable initialization so builds succeed post-revert.
 - Woodcut: tighter unreachable-log cap (4 skips), wider drop sweep sized to the job footprint, and confirmed sapling replant stays on; aborts still trigger a sweep.
 - Woodcut (standalone): defaults to a small target count and stops at sunset with a clear chat message (internal woodcut calls are unaffected).
 - Chest use: woodcut deposits via `ChestStoreService` (stand-candidate + door-aware); if nearby chests are full/unusable it will place a new chest near the bot and announce coordinates.
+- Chest use: added ChestStoreService debug logging for deposit/movement flow (thread, world, stand candidates, and interact failures) to diagnose crafting offload failures.
+- ChestStoreService: fix build by using `getEntityWorld()` for bot world logging.
+- Crafting: force offload retry after failed insert so chest deposit runs even when the initial room check is optimistic.
+- Chest debug logging now routes through DebugToggleService so it can be toggled with the global debug flag.
+- Smelting: when the furnace already has input, auto-cook or matching cook requests now top it up from inventory and refill matching fuel (direct inventory scan, item-only match); auto fuel selection now prefers leaf litter/leaves/saplings and ranks logs/planks/sticks/charcoal/coal blocks above coal.
+- Woodcut: inventory-full handling now attempts fallback chest deposits for non-tool woodcut drops and uses placed chests for both primary and fallback offloads.
+- Woodcut cleanup: drop sweep radius now reflects the full area traversed during cleanup, and scaffold placements are recorded for later cleanup passes.
+- Woodcut: collect-dirt fallback now uses a square 6-block radius to keep dig sites tidy.
+- Woodcut subskills: collect-dirt can attempt ChestStoreService offloads when inventory fills during woodcut.
+- Collect dirt: square quarry mode is now the default (radius remains configurable), and the Topics menu includes a Collect Dirt shortcut.
+- Drop sweep: if inventory is full, the sweep now attempts ChestStoreService deposits (and chest placement) before aborting.
+- Topics UI: added Stop/Resume/Drop Sweep entries with disabled states when not applicable.
+- Client: stop keybind now defaults to `\\` and stops the looked-at bot.
 - Commands: `/bot skill woodcutting ...` now aliases to `woodcut` (reduces “unknown skill” typos).
 - Store: `/bot store deposit|withdraw` now supports no-arg defaults; when not looking at a chest it will prefer the last chest it placed, otherwise use a nearby chest (or place one for deposits). Default deposit now “matches what’s already in the chest” (e.g., chest has oak logs ⇒ deposit oak logs); if the chest is empty it falls back to construction materials + common mob drops. Default deposit also includes construction/clutter items so it can be used as a general stash when you’re trying to make space. Use item filter `all`/`*` to match everything.
 - Crafting: crafting-table placement is now more robust (avoids fluids and blocked tiles, and retries nearby placements) so “logs → planks → place table → chest” works more reliably for storage automation.

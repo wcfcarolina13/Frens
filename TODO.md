@@ -3,6 +3,7 @@
 Pending work only. Completed items and rationale live in `changelog.md`.
 
 ## P0 — Critical
+- [x] **ReturnBaseStuckService build fix**: Reorder debug logging to use initialized variables (post-revert).
 - [ ] **Persist bot stats on respawn**: Health/XP/hunger restored with the same alias, logged on save/load, happens before spawn completes.
 - [x] **Upward stairs (ascent) simplification**: Walk-and-jump staircase that keeps controller-facing direction, mines only 3 blocks above each tread, climbs exactly one block per step, aborts with a clear message if Y does not increase.
 - [x] **Escape when spawned in walls**: Suffocation escape checks all four corners from head to feet, uses tool-based mining only, and throttles alerts to avoid spam.
@@ -12,6 +13,8 @@ Pending work only. Completed items and rationale live in `changelog.md`.
 
 ## P1 — High
 - [ ] **Protected zones persistence**: JSON-backed zones (position, radius, creator, timestamp, dimension) saved on create/update and loaded on server start.
+- [x] **Woodcut chest workflow**: Ensure woodcut uses ChestStoreService to deposit/place chests before prompting resume; avoid duplicate resume prompts when storage succeeds.
+- [x] **Crafting history UI**: Add popout window for crafting topics; gate list by per-world crafting history.
 - [ ] **Bot config UI refactor**: Single-bot view with alias dropdown, grouped/scrollable settings, and save/cancel affecting only the selected bot.
 - [ ] **Bot identity separation**: Per-alias inventory/hunger/sleep/XP isolation across sessions (Jake vs Bob) with validation.
 - [ ] **Job resume prompts on death/leave**: Pause current job; on rejoin/respawn, ask whether to continue and resume when confirmed.
@@ -47,6 +50,8 @@ Pending work only. Completed items and rationale live in `changelog.md`.
 ### Commands / UX
 - [x] **Open command admin mode**: Make “open” distance-independent for admins.
 - [ ] **Command pruning review**: Evaluate whether `look_player` and `direction reset` are still needed; deprecate/remove if redundant.
+- [x] **Topics menu updates**: Add drop-sweep, stop, and resume topics; disable stop/resume when not applicable.
+- [x] **Stop keybind default**: Bind stop action to `\\` by default and require looking at the bot.
 - [ ] **New command: `/bot follow-distance`**: Configure follow standoff distance so the bot idles or trails a few extra blocks away, but will pursue/path-plan when it loses line-of-sight (e.g., you turn a corner or drop into a hole).
 - [ ] **Elder Scrolls-style dialogue menu** Conversation topics, commands, quests
 - [ ] **Elder Scrolls-style Journal** Conversation topics, quests, important information with simple filter search

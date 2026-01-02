@@ -59,6 +59,8 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
     }
 
     private enum TopicAction {
+        STOP,
+        RESUME,
         FOLLOW,
         GUARD,
         PATROL,
@@ -70,7 +72,10 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         VOICED_DIALOGUE,
         TELEPORT_SKILLS,
         TELEPORT_DROP_SWEEP,
+        DROP_SWEEP,
         BASES,
+        CRAFTING,
+        COOKING,
         SKILL_FISH,
         SKILL_WOODCUT,
         SKILL_WOODCUT_CLEANUP,
@@ -78,6 +83,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         SKILL_HOVEL,
         SKILL_BURROW,
         SKILL_FARM,
+        SKILL_COLLECT_DIRT,
         SKILL_MINING,
         SKILL_STRIPMINE,
         SKILL_ASCENT,
@@ -99,6 +105,8 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
     }
 
     private static final List<TopicEntry> TOPIC_ENTRIES = List.of(
+            new TopicEntry("Stop", TopicAction.STOP, false, 0),
+            new TopicEntry("Resume", TopicAction.RESUME, false, 0),
             new TopicEntry("Follow", TopicAction.FOLLOW, true, 0),
             new TopicEntry("Guard", TopicAction.GUARD, true, 0),
             new TopicEntry("Patrol", TopicAction.PATROL, true, 0),
@@ -110,7 +118,10 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             new TopicEntry("Voiced Dialogue", TopicAction.VOICED_DIALOGUE, true, 0),
             new TopicEntry("TP during Skills", TopicAction.TELEPORT_SKILLS, true, 0),
             new TopicEntry("TP during Sweeps", TopicAction.TELEPORT_DROP_SWEEP, true, 0),
+            new TopicEntry("Drop Sweep", TopicAction.DROP_SWEEP, false, 0),
             new TopicEntry("Bases…", TopicAction.BASES, false, 0),
+            new TopicEntry("Crafting…", TopicAction.CRAFTING, false, 0),
+            new TopicEntry("Cooking…", TopicAction.COOKING, false, 0),
             new TopicEntry("Fishing", TopicAction.SKILL_FISH, false, 0),
             new TopicEntry("Woodcut", TopicAction.SKILL_WOODCUT, false, 0),
                 new TopicEntry("Woodcut Cleanup", TopicAction.SKILL_WOODCUT_CLEANUP, false, 1),
@@ -118,6 +129,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             new TopicEntry("Hovel", TopicAction.SKILL_HOVEL, false, 0),
             new TopicEntry("Burrow", TopicAction.SKILL_BURROW, false, 0),
             new TopicEntry("Farming", TopicAction.SKILL_FARM, false, 0),
+            new TopicEntry("Collect Dirt", TopicAction.SKILL_COLLECT_DIRT, false, 1),
             new TopicEntry("Mining", TopicAction.SKILL_MINING, false, 0),
             new TopicEntry("Stripmine", TopicAction.SKILL_STRIPMINE, false, 1),
             new TopicEntry("Ascent", TopicAction.SKILL_ASCENT, false, 1),
@@ -345,8 +357,11 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
 
         TopicEntry entry = getTopicEntryAtOverlay(mouseX, mouseY);
         if (entry != null) {
-            handleTopicEntry(entry);
-            return true;
+            if (isEntryEnabled(entry.action)) {
+                handleTopicEntry(entry);
+                return true;
+            }
+            return false;
         }
         return true;
     }
@@ -446,21 +461,29 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
 
     private void drawTopicRow(DrawContext context, int rowX, int rowY, int rowW, TopicEntry entry,
                               boolean active, int mouseX, int mouseY) {
+        boolean enabled = isEntryEnabled(entry.action);
         boolean hover = mouseX >= rowX && mouseX < rowX + rowW
                 && mouseY >= rowY && mouseY < rowY + TOPIC_ROW_HEIGHT;
         int baseRow = active ? 0xFF3A2C14 : 0xFF1A1A1A;
         int rowColor = hover ? (active ? 0xFF4A3720 : 0xFF2A2A2A) : baseRow;
+        if (!enabled) {
+            rowColor = 0xFF151515;
+        }
         context.fill(rowX, rowY, rowX + rowW, rowY + TOPIC_ROW_HEIGHT, rowColor);
 
         int textY = rowY + 1;
         int labelX = rowX + 4 + entry.indent * 8;
         String label = entry.indent > 0 ? "- " + entry.label : entry.label;
-        context.drawText(this.textRenderer, label, labelX, textY, 0xFFEFEFEF, false);
+        int labelColor = enabled ? 0xFFEFEFEF : 0xFF6F6F6F;
+        context.drawText(this.textRenderer, label, labelX, textY, labelColor, false);
 
-        String status = entry.toggle ? (active ? "ON" : "OFF") : "RUN";
+        String status = entry.toggle ? (active ? "ON" : "OFF") : (enabled ? "RUN" : "N/A");
         int statusX = rowX + rowW - 4 - this.textRenderer.getWidth(status);
         int statusColor = entry.toggle ? (active ? 0xFFE6D7A3 : 0xFFB0B0B0)
                 : (hover ? 0xFFE6D7A3 : 0xFFB0B0B0);
+        if (!enabled) {
+            statusColor = 0xFF6F6F6F;
+        }
         context.drawText(this.textRenderer, status, statusX, textY, statusColor, false);
     }
 
@@ -505,8 +528,11 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         }
         TopicEntry entry = getTopicEntryAt(click.x(), click.y());
         if (entry != null) {
-            handleTopicEntry(entry);
-            return true;
+            if (isEntryEnabled(entry.action)) {
+                handleTopicEntry(entry);
+                return true;
+            }
+            return false;
         }
         return super.mouseClicked(click, isInside);
     }
@@ -611,6 +637,8 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
 
     private void handleTopicEntry(TopicEntry entry) {
         switch (entry.action) {
+            case STOP -> runStop();
+            case RESUME -> runResume();
             case FOLLOW -> toggleFollow();
             case GUARD -> toggleGuard();
             case PATROL -> togglePatrol();
@@ -622,7 +650,10 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case VOICED_DIALOGUE -> toggleVoicedDialogue();
             case TELEPORT_SKILLS -> toggleTeleportSkills();
             case TELEPORT_DROP_SWEEP -> toggleTeleportDropSweep();
+            case DROP_SWEEP -> runSkillCommand("drop_sweep", null);
             case BASES -> openBasesManager();
+            case CRAFTING -> openCraftingHistory();
+            case COOKING -> openCookingMenu();
             case SKILL_FISH -> runSkillCommand("fish", null);
             case SKILL_WOODCUT -> runSkillCommand("woodcut", null);
             case SKILL_WOODCUT_CLEANUP -> runSkillCommand("woodcut_cleanup", null);
@@ -630,6 +661,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case SKILL_HOVEL -> runShelterWithLook("hovel");
             case SKILL_BURROW -> runShelterWithLook("burrow");
             case SKILL_FARM -> runSkillCommand("farm", null);
+            case SKILL_COLLECT_DIRT -> runSkillCommand("collect_dirt", null);
             case SKILL_MINING -> runSkillCommand("mining", null);
             case SKILL_STRIPMINE -> runSkillCommand("stripmine", null);
             case SKILL_ASCENT -> runSkillCommand("mining", "ascent");
@@ -650,6 +682,14 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case TELEPORT_SKILLS -> isTeleportSkillsActive();
             case TELEPORT_DROP_SWEEP -> isTeleportDropSweepActive();
             default -> false;
+        };
+    }
+
+    private boolean isEntryEnabled(TopicAction action) {
+        return switch (action) {
+            case STOP -> this.handler != null && this.handler.isBotTaskActive() && !this.handler.isBotTaskPaused();
+            case RESUME -> this.handler != null && this.handler.isBotTaskPaused();
+            default -> true;
         };
     }
 
@@ -780,6 +820,18 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         sendChatCommand(command);
     }
 
+    private void runStop() {
+        String botTarget = formatBotTarget();
+        String command = "bot stop " + botTarget;
+        sendChatCommand(command);
+    }
+
+    private void runResume() {
+        String botTarget = formatBotTarget();
+        String command = "bot resume " + botTarget;
+        sendChatCommand(command);
+    }
+
     private void runReturnHome() {
         String botTarget = formatBotTarget();
         // Toggle: if already returning, stop; otherwise start return-to-base
@@ -849,6 +901,20 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             return;
         }
         this.client.setScreen(new BaseManagerScreen(this));
+    }
+
+    private void openCraftingHistory() {
+        if (this.client == null) {
+            return;
+        }
+        this.client.setScreen(new CraftingHistoryScreen(this));
+    }
+
+    private void openCookingMenu() {
+        if (this.client == null) {
+            return;
+        }
+        this.client.setScreen(new CookablesScreen(this, formatBotTarget()));
     }
 
     /**

@@ -1,14 +1,17 @@
 package net.shasankp000.GameAI.services;
 
+import net.minecraft.block.BlockState;
+import net.minecraft.block.ChestBlock;
 import net.minecraft.block.DoorBlock;
 import net.minecraft.block.FenceGateBlock;
-import net.minecraft.block.BlockState;
+import net.minecraft.block.enums.ChestType;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.hit.HitResult;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
+import net.minecraft.util.math.Direction;
 import net.minecraft.world.RaycastContext;
 
 import java.util.List;
@@ -80,6 +83,9 @@ public final class BlockInteractionService {
                     if (hitPos.equals(blockPos)) {
                         return true;
                     }
+                    if (isMatchingDoubleChestHalf(world, targetState, blockPos, hitPos)) {
+                        return true;
+                    }
                     if (desiredDoorBase != null && world.getBlockState(hitPos).getBlock() instanceof DoorBlock) {
                         BlockPos hitBase = normalizeDoorBase(world, hitPos);
                         if (hitBase != null && hitBase.equals(desiredDoorBase)) {
@@ -90,6 +96,38 @@ public final class BlockInteractionService {
             }
         }
         return false;
+    }
+
+    private static boolean isMatchingDoubleChestHalf(ServerWorld world,
+                                                     BlockState targetState,
+                                                     BlockPos targetPos,
+                                                     BlockPos hitPos) {
+        if (!(targetState.getBlock() instanceof ChestBlock)) {
+            return false;
+        }
+        if (!targetPos.isWithinDistance(hitPos, 1.1D)) {
+            return false;
+        }
+        BlockState hitState = world.getBlockState(hitPos);
+        if (hitState.getBlock() != targetState.getBlock()) {
+            return false;
+        }
+        ChestType targetType = targetState.get(ChestBlock.CHEST_TYPE);
+        ChestType hitType = hitState.get(ChestBlock.CHEST_TYPE);
+        if (targetType == ChestType.SINGLE || hitType == ChestType.SINGLE) {
+            return false;
+        }
+        if (targetType == hitType) {
+            return false;
+        }
+        Direction facing = targetState.get(ChestBlock.FACING);
+        if (facing != hitState.get(ChestBlock.FACING)) {
+            return false;
+        }
+        BlockPos expectedOther = targetType == ChestType.LEFT
+                ? targetPos.offset(facing.rotateYClockwise())
+                : targetPos.offset(facing.rotateYCounterclockwise());
+        return expectedOther.equals(hitPos);
     }
 
     private static List<Vec3d> defaultTargetPoints(BlockPos pos) {

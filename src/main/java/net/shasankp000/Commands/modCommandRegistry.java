@@ -400,25 +400,25 @@ public class modCommandRegistry {
                                 )
                         )
                         .then(literal("cook")
-                                .executes(context -> executeCook(context, getActiveBotOrThrow(context), null, false))
+                                .executes(context -> executeCook(context, getActiveBotOrThrow(context), null, null))
                                 .then(CommandManager.argument("item", StringArgumentType.string())
-                                        .executes(context -> executeCook(context, getActiveBotOrThrow(context), StringArgumentType.getString(context, "item"), false))
-                                        .then(CommandManager.argument("fuel", BoolArgumentType.bool())
+                                        .executes(context -> executeCook(context, getActiveBotOrThrow(context), StringArgumentType.getString(context, "item"), null))
+                                        .then(CommandManager.argument("fuel", StringArgumentType.string())
                                                 .executes(context -> executeCook(context, getActiveBotOrThrow(context),
                                                         StringArgumentType.getString(context, "item"),
-                                                        BoolArgumentType.getBool(context, "fuel")))
+                                                        StringArgumentType.getString(context, "fuel")))
                                                 .then(CommandManager.argument("bot", EntityArgumentType.player())
                                                         .executes(context -> executeCook(context, EntityArgumentType.getPlayer(context, "bot"),
                                                                 StringArgumentType.getString(context, "item"),
-                                                                BoolArgumentType.getBool(context, "fuel"))))))
-                                .then(CommandManager.argument("fuel", BoolArgumentType.bool())
+                                                                StringArgumentType.getString(context, "fuel"))))))
+                                .then(CommandManager.argument("fuel", StringArgumentType.string())
                                         .executes(context -> executeCook(context, getActiveBotOrThrow(context), null,
-                                                BoolArgumentType.getBool(context, "fuel")))
+                                                StringArgumentType.getString(context, "fuel")))
                                         .then(CommandManager.argument("bot", EntityArgumentType.player())
                                                 .executes(context -> executeCook(context, EntityArgumentType.getPlayer(context, "bot"), null,
-                                                        BoolArgumentType.getBool(context, "fuel")))))
+                                                        StringArgumentType.getString(context, "fuel")))))
                                 .then(CommandManager.argument("bot", EntityArgumentType.player())
-                                        .executes(context -> executeCook(context, EntityArgumentType.getPlayer(context, "bot"), null, false)))
+                                        .executes(context -> executeCook(context, EntityArgumentType.getPlayer(context, "bot"), null, null)))
                         )
 	                        .then(literal("store")
 	                                .then(literal("deposit")
@@ -1685,11 +1685,11 @@ public class modCommandRegistry {
         return placed > 0 ? 1 : 0;
     }
 
-    private static int executeCook(CommandContext<ServerCommandSource> context, ServerPlayerEntity bot, String itemFilter, boolean useFuel) {
+    private static int executeCook(CommandContext<ServerCommandSource> context, ServerPlayerEntity bot, String itemFilter, String fuelSpec) {
         if (bot == null) {
             return 0;
         }
-        boolean started = SmeltingService.startBatchCook(bot, context.getSource(), itemFilter, useFuel);
+        boolean started = SmeltingService.startBatchCook(bot, context.getSource(), itemFilter, fuelSpec);
         return started ? 1 : 0;
     }
 
@@ -2978,7 +2978,7 @@ public class modCommandRegistry {
         net.shasankp000.GameAI.BotActions.sneak(bot, false);
         net.shasankp000.GameAI.BotActions.stop(bot);
         ChatUtils.sendSystemMessage(context.getSource(), "Stopping " + alias + "...");
-        SkillResumeService.clear(bot.getUuid());
+        SkillResumeService.clearAndNotify(bot.getUuid());
         return 1;
     }
 

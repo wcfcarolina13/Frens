@@ -1,9 +1,11 @@
 package net.shasankp000.GameAI.services;
 
+import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.shasankp000.ChatUtils.ChatUtils;
+import net.shasankp000.Network.ResumeDecisionPayload;
 
 import java.util.Locale;
 import java.util.Map;
@@ -71,6 +73,7 @@ public final class SkillResumeService {
                 "I died. Should I continue with the last job? (yes/no)");
         ChatUtils.sendSystemMessage(pending.source(),
                 pending.alias() + " died while running '" + pending.skillName() + "'. Reply with 'yes' or 'no' in chat.");
+        notifyDecision(pending, true);
     }
 
     public static void handleChat(ServerPlayerEntity sender, String message) {
@@ -90,6 +93,7 @@ public final class SkillResumeService {
             resume(pending, false, sender.getCommandSource());
         } else {
             ChatUtils.sendSystemMessage(pending.source(), "Okay, " + pending.alias() + " will stand down.");
+            notifyDecision(pending, false);
         }
         clear(pending.botUuid());
     }
@@ -134,6 +138,10 @@ public final class SkillResumeService {
             return;
         }
         AWAITING_DECISION.put(uuid, Boolean.TRUE);
+        PendingSkill pending = LAST_SKILL_BY_BOT.get(uuid);
+        if (pending != null) {
+            notifyDecision(pending, true);
+        }
     }
 
     public static boolean manualResume(ServerCommandSource requester, UUID botUuid) {
@@ -152,6 +160,17 @@ public final class SkillResumeService {
         return true;
     }
 
+    public static void clearAndNotify(UUID botUuid) {
+        if (botUuid == null) {
+            return;
+        }
+        PendingSkill pending = LAST_SKILL_BY_BOT.get(botUuid);
+        if (pending != null) {
+            notifyDecision(pending, false);
+        }
+        clear(botUuid);
+    }
+
     public static boolean consumeResumeIntent(UUID botUuid) {
         if (botUuid == null) {
             return false;
@@ -165,6 +184,7 @@ public final class SkillResumeService {
         if (server == null) {
             return;
         }
+        notifyDecision(pending, false);
         RESUME_INTENT.add(pending.botUuid());
         StringBuilder command = new StringBuilder("bot skill ")
                 .append(pending.skillName());
@@ -198,6 +218,20 @@ public final class SkillResumeService {
             return player.getUuid();
         }
         return CONSOLE_KEY;
+    }
+
+    private static void notifyDecision(PendingSkill pending, boolean active) {
+        if (pending == null) {
+            return;
+        }
+        ServerCommandSource source = pending.source();
+        if (!(source.getEntity() instanceof ServerPlayerEntity player)) {
+            return;
+        }
+        if (!ServerPlayNetworking.canSend(player, ResumeDecisionPayload.ID)) {
+            return;
+        }
+        ServerPlayNetworking.send(player, new ResumeDecisionPayload(active, pending.alias()));
     }
 
     private record PendingSkill(UUID botUuid, String alias, String skillName, String rawArgs, ServerCommandSource source) {

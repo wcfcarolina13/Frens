@@ -19,6 +19,7 @@ import net.shasankp000.GameAI.BotEventHandler;
 import net.shasankp000.GameAI.services.BotCommandStateService;
 import net.shasankp000.GameAI.services.BotHomeService;
 import net.shasankp000.GameAI.services.BotInventoryStorageService;
+import net.shasankp000.GameAI.services.TaskService;
 
 /**
  * Screen handler that mirrors the vanilla player inventory for both bot and viewer.
@@ -58,7 +59,7 @@ public class BotPlayerInventoryScreenHandler extends ScreenHandler {
         this.botInventory = botInventory;
         this.botRef = botRef;
         // Keep this in sync with refreshStats() + getters below.
-        this.botStats = new ArrayPropertyDelegate(14);
+        this.botStats = new ArrayPropertyDelegate(16);
         this.addProperties(this.botStats);
         refreshStats();
 
@@ -74,6 +75,10 @@ public class BotPlayerInventoryScreenHandler extends ScreenHandler {
         addArmorAndOffhand(playerInventory, offsetPlayer);
         addMainGrid(playerInventory, 9, offsetPlayer);
         addHotbar(playerInventory, 0, offsetPlayer);
+    }
+
+    public ServerPlayerEntity getBotRef() {
+        return botRef;
     }
 
     private void addArmorAndOffhand(Inventory inventory, int xOffset) {
@@ -233,6 +238,9 @@ public class BotPlayerInventoryScreenHandler extends ScreenHandler {
         botStats.set(12, BotHomeService.isAutoReturnGuardPatrolEligible(botRef) ? 1 : 0);
         // Index 13: returning to base (separate from following)
         botStats.set(13, isReturningToBase ? 1 : 0);
+        // Index 14: active task, Index 15: paused task (resume available)
+        botStats.set(14, TaskService.hasActiveTask(botRef.getUuid()) ? 1 : 0);
+        botStats.set(15, TaskService.isAbortRequested(botRef.getUuid()) ? 1 : 0);
     }
 
     public float getBotHealth() {
@@ -285,6 +293,14 @@ public class BotPlayerInventoryScreenHandler extends ScreenHandler {
 
     public boolean isBotReturningToBase() {
         return botStats.get(13) != 0;
+    }
+
+    public boolean isBotTaskActive() {
+        return botStats.get(14) != 0;
+    }
+
+    public boolean isBotTaskPaused() {
+        return botStats.get(15) != 0;
     }
 
     public double getBotFollowDistance() {

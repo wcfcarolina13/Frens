@@ -138,6 +138,13 @@ public final class WoodcutCleanupSkill implements Skill {
             scanMax = origin.add(radius, verticalRange, radius);
         }
 
+        int sweepMinX = Math.min(origin.getX(), Math.min(scanMin.getX(), scanMax.getX()));
+        int sweepMaxX = Math.max(origin.getX(), Math.max(scanMin.getX(), scanMax.getX()));
+        int sweepMinY = Math.min(origin.getY(), Math.min(scanMin.getY(), scanMax.getY()));
+        int sweepMaxY = Math.max(origin.getY(), Math.max(scanMin.getY(), scanMax.getY()));
+        int sweepMinZ = Math.min(origin.getZ(), Math.min(scanMin.getZ(), scanMax.getZ()));
+        int sweepMaxZ = Math.max(origin.getZ(), Math.max(scanMin.getZ(), scanMax.getZ()));
+
         long deadline = System.currentTimeMillis() + durationMs;
         int logsMined = 0;
         int scaffoldMined = 0;
@@ -163,13 +170,20 @@ public final class WoodcutCleanupSkill implements Skill {
                 if (SkillManager.shouldAbortSkill(bot)) {
                     return SkillExecutionResult.failure("woodcut_cleanup paused due to nearby threat.");
                 }
+                BlockPos botPos = bot.getBlockPos();
+                sweepMinX = Math.min(sweepMinX, botPos.getX());
+                sweepMaxX = Math.max(sweepMaxX, botPos.getX());
+                sweepMinY = Math.min(sweepMinY, botPos.getY());
+                sweepMaxY = Math.max(sweepMaxY, botPos.getY());
+                sweepMinZ = Math.min(sweepMinZ, botPos.getZ());
+                sweepMaxZ = Math.max(sweepMaxZ, botPos.getZ());
                 if (!world.getBlockState(next).isIn(BlockTags.LOGS)) {
                     continue;
                 }
                 if (TreeDetector.isNearHumanBlocks(world, next, 4) || TreeDetector.isProtected(world, next)) {
                     continue;
                 }
-                boolean ok = mineWithRetries(bot, source, next, placedPillar, true);
+                boolean ok = mineWithRetries(bot, source, next, placedPillar, scaffoldMemory, true);
                 if (ok) {
                     logsMined++;
                 } else {
@@ -205,6 +219,13 @@ public final class WoodcutCleanupSkill implements Skill {
                         if (SkillManager.shouldAbortSkill(bot)) {
                             return SkillExecutionResult.failure("woodcut_cleanup paused due to nearby threat.");
                         }
+                        BlockPos botPos = bot.getBlockPos();
+                        sweepMinX = Math.min(sweepMinX, botPos.getX());
+                        sweepMaxX = Math.max(sweepMaxX, botPos.getX());
+                        sweepMinY = Math.min(sweepMinY, botPos.getY());
+                        sweepMaxY = Math.max(sweepMaxY, botPos.getY());
+                        sweepMinZ = Math.min(sweepMinZ, botPos.getZ());
+                        sweepMaxZ = Math.max(sweepMaxZ, botPos.getZ());
                         BlockState state = world.getBlockState(pos);
                         if (state.isAir() || !PILLAR_BLOCKS.contains(state.getBlock().asItem())) {
                             scaffoldMemory.remove(pos.asLong());
@@ -213,7 +234,7 @@ public final class WoodcutCleanupSkill implements Skill {
                         if (TreeDetector.isNearHumanBlocks(world, pos, 3) || TreeDetector.isProtected(world, pos)) {
                             continue;
                         }
-                        boolean ok = mineWithRetries(bot, source, pos, placedPillar, false);
+                        boolean ok = mineWithRetries(bot, source, pos, placedPillar, scaffoldMemory, false);
                         if (ok || world.getBlockState(pos).isAir()) {
                             scaffoldMined++;
                             scaffoldMemory.remove(pos.asLong());
@@ -236,10 +257,17 @@ public final class WoodcutCleanupSkill implements Skill {
                         if (SkillManager.shouldAbortSkill(bot)) {
                             return SkillExecutionResult.failure("woodcut_cleanup paused due to nearby threat.");
                         }
+                        BlockPos botPos = bot.getBlockPos();
+                        sweepMinX = Math.min(sweepMinX, botPos.getX());
+                        sweepMaxX = Math.max(sweepMaxX, botPos.getX());
+                        sweepMinY = Math.min(sweepMinY, botPos.getY());
+                        sweepMaxY = Math.max(sweepMaxY, botPos.getY());
+                        sweepMinZ = Math.min(sweepMinZ, botPos.getZ());
+                        sweepMaxZ = Math.max(sweepMaxZ, botPos.getZ());
                         if (TreeDetector.isNearHumanBlocks(world, pos, 3) || TreeDetector.isProtected(world, pos)) {
                             continue;
                         }
-                        boolean ok = mineWithRetries(bot, source, pos, placedPillar, false);
+                        boolean ok = mineWithRetries(bot, source, pos, placedPillar, scaffoldMemory, false);
                         if (ok) {
                             scaffoldMined++;
                         }
@@ -262,6 +290,13 @@ public final class WoodcutCleanupSkill implements Skill {
             for (BlockPos pos : BlockPos.iterate(fMin, fMax)) {
                 if (System.currentTimeMillis() >= deadline) break;
                 if (SkillManager.shouldAbortSkill(bot)) break;
+                BlockPos botPos = bot.getBlockPos();
+                sweepMinX = Math.min(sweepMinX, botPos.getX());
+                sweepMaxX = Math.max(sweepMaxX, botPos.getX());
+                sweepMinY = Math.min(sweepMinY, botPos.getY());
+                sweepMaxY = Math.max(sweepMaxY, botPos.getY());
+                sweepMinZ = Math.min(sweepMinZ, botPos.getZ());
+                sweepMaxZ = Math.max(sweepMaxZ, botPos.getZ());
                 BlockState state = world.getBlockState(pos);
                 if (state.isAir()) continue;
 
@@ -276,7 +311,7 @@ public final class WoodcutCleanupSkill implements Skill {
                     if (TreeDetector.isNearHumanBlocks(world, pos, 3) || TreeDetector.isProtected(world, pos)) {
                         continue;
                     }
-                    boolean ok = mineWithRetries(bot, source, pos, placedPillar, true);
+                    boolean ok = mineWithRetries(bot, source, pos, placedPillar, scaffoldMemory, true);
                     if (ok) {
                         logsMined++;
                         fallbackRemoved++;
@@ -295,7 +330,7 @@ public final class WoodcutCleanupSkill implements Skill {
                                 continue;
                             }
                         }
-                        boolean ok = mineWithRetries(bot, source, pos, placedPillar, false);
+                        boolean ok = mineWithRetries(bot, source, pos, placedPillar, scaffoldMemory, false);
                         if (ok) {
                             scaffoldMined++;
                             fallbackRemoved++;
@@ -312,13 +347,16 @@ public final class WoodcutCleanupSkill implements Skill {
         }
 
         if (sweepDrops && !SkillManager.shouldAbortSkill(bot) && !isInventoryFull(bot)) {
+            double sweepRadius = Math.max(6.0D,
+                    Math.max(Math.abs(sweepMaxX - origin.getX()), Math.abs(sweepMinX - origin.getX())) + 3.0D);
+            double sweepVertical = Math.max(6.0D, (sweepMaxY - sweepMinY) + 3.0D);
             try {
                 // Use a modest sweep radius; caller can always run drop_sweep for a heavier pass.
                 net.shasankp000.GameAI.DropSweeper.sweep(
                         source.withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS),
-                        Math.max(6.0D, radius),
-                        Math.max(6.0D, verticalRange),
-                        Math.max(12, (int) Math.ceil(radius * 2.0)),
+                        sweepRadius,
+                        sweepVertical,
+                        Math.max(12, (int) Math.ceil(sweepRadius * 2.0)),
                         12_000L
                 );
             } catch (Exception e) {
@@ -380,6 +418,14 @@ public final class WoodcutCleanupSkill implements Skill {
             it.remove();
             overflow--;
         }
+    }
+
+    private void recordScaffoldPlacement(Set<Long> memory, BlockPos pos) {
+        if (memory == null || pos == null) {
+            return;
+        }
+        memory.add(pos.asLong());
+        trimScaffoldMemoryInPlace(memory);
     }
 
     private boolean isWithinRegion(BlockPos pos, BlockPos min, BlockPos max) {
@@ -579,13 +625,14 @@ public final class WoodcutCleanupSkill implements Skill {
                                     ServerCommandSource source,
                                     BlockPos target,
                                     List<BlockPos> placedPillar,
+                                    Set<Long> scaffoldMemory,
                                     boolean preferAxe) {
         for (int attempt = 0; attempt < MAX_RETRY_MINING; attempt++) {
             if (SkillManager.shouldAbortSkill(bot)) {
                 return false;
             }
 
-            if (!prepareReach(bot, source, target, placedPillar)) {
+            if (!prepareReach(bot, source, target, placedPillar, scaffoldMemory)) {
                 continue;
             }
 
@@ -601,7 +648,8 @@ public final class WoodcutCleanupSkill implements Skill {
     private boolean prepareReach(ServerPlayerEntity bot,
                                  ServerCommandSource source,
                                  BlockPos target,
-                                 List<BlockPos> placedPillar) {
+                                 List<BlockPos> placedPillar,
+                                 Set<Long> scaffoldMemory) {
         if (isWithinReach(bot, target)) {
             return true;
         }
@@ -616,10 +664,10 @@ public final class WoodcutCleanupSkill implements Skill {
         if (needed <= 0) {
             return false;
         }
-        return pillarUp(bot, needed, placedPillar);
+        return pillarUp(bot, needed, placedPillar, scaffoldMemory);
     }
 
-    private boolean pillarUp(ServerPlayerEntity bot, int steps, List<BlockPos> placedPillar) {
+    private boolean pillarUp(ServerPlayerEntity bot, int steps, List<BlockPos> placedPillar, Set<Long> scaffoldMemory) {
         if (steps <= 0) {
             return true;
         }
@@ -647,7 +695,7 @@ public final class WoodcutCleanupSkill implements Skill {
                 if (!world.getBlockState(candidate).isAir()) {
                     candidate = candidate.up();
                 }
-                if (!tryPlaceScaffold(bot, candidate)) {
+                if (!tryPlaceScaffold(bot, candidate, scaffoldMemory)) {
                     return false;
                 }
                 placedPillar.add(candidate.toImmutable());
@@ -659,7 +707,7 @@ public final class WoodcutCleanupSkill implements Skill {
         }
     }
 
-    private boolean tryPlaceScaffold(ServerPlayerEntity bot, BlockPos target) {
+    private boolean tryPlaceScaffold(ServerPlayerEntity bot, BlockPos target, Set<Long> scaffoldMemory) {
         if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
             return false;
         }
@@ -667,8 +715,9 @@ public final class WoodcutCleanupSkill implements Skill {
         if (!isPlaceableTarget(world, placePos)) {
             breakSoftBlock(world, bot, placePos);
         }
-        ensureSupportBlock(bot, placePos);
+        ensureSupportBlock(bot, placePos, scaffoldMemory);
         if (BotActions.placeBlockAt(bot, placePos, Direction.UP, PILLAR_BLOCKS)) {
+            recordScaffoldPlacement(scaffoldMemory, placePos);
             return true;
         }
         for (Direction dir : Direction.Type.HORIZONTAL) {
@@ -676,15 +725,16 @@ public final class WoodcutCleanupSkill implements Skill {
             if (!isPlaceableTarget(world, alt)) {
                 breakSoftBlock(world, bot, alt);
             }
-            ensureSupportBlock(bot, alt);
+            ensureSupportBlock(bot, alt, scaffoldMemory);
             if (BotActions.placeBlockAt(bot, alt, Direction.UP, PILLAR_BLOCKS)) {
+                recordScaffoldPlacement(scaffoldMemory, alt);
                 return true;
             }
         }
         return false;
     }
 
-    private void ensureSupportBlock(ServerPlayerEntity bot, BlockPos target) {
+    private void ensureSupportBlock(ServerPlayerEntity bot, BlockPos target, Set<Long> scaffoldMemory) {
         if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
             return;
         }
@@ -696,7 +746,9 @@ public final class WoodcutCleanupSkill implements Skill {
         if (!isPlaceableTarget(world, below)) {
             breakSoftBlock(world, bot, below);
         }
-        BotActions.placeBlockAt(bot, below, Direction.UP, PILLAR_BLOCKS);
+        if (BotActions.placeBlockAt(bot, below, Direction.UP, PILLAR_BLOCKS)) {
+            recordScaffoldPlacement(scaffoldMemory, below);
+        }
     }
 
     private boolean isPlaceableTarget(ServerWorld world, BlockPos pos) {

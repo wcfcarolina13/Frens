@@ -1129,10 +1129,6 @@
       {
         "name": "ai-player:dialogue/touch_hmm__01",
         "weight": 1
-      },
-      {
-        "name": "ai-player:dialogue/touch_hmm__02",
-        "weight": 1
       }
     ]
   },

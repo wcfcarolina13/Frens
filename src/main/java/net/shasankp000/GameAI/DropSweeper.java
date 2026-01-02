@@ -1,6 +1,11 @@
 package net.shasankp000.GameAI;
 
 import net.minecraft.entity.ItemEntity;
+import net.minecraft.entity.player.PlayerInventory;
+import net.minecraft.block.BlockState;
+import net.minecraft.block.Blocks;
+import net.minecraft.item.ItemStack;
+import net.minecraft.item.Items;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.network.ServerPlayerEntity;
@@ -11,6 +16,7 @@ import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Vec3d;
 import net.shasankp000.GameAI.BotActions;
 import net.shasankp000.GameAI.services.DropSweepService;
+import net.shasankp000.GameAI.services.ChestStoreService;
 import net.shasankp000.GameAI.services.MovementService;
 import net.shasankp000.GameAI.skills.SkillPreferences;
 import net.shasankp000.Entity.LookController;
@@ -85,6 +91,14 @@ public final class DropSweeper {
         Set<ItemEntity> excludedDrops = new HashSet<>();
 
         while (attempts < maxTargets && System.currentTimeMillis() <= deadline) {
+            if (isInventoryFull(player)) {
+                boolean stored = attemptChestStore(source, player);
+                if (stored && !isInventoryFull(player)) {
+                    continue;
+                }
+                LOGGER.info("Drop sweep ending: inventory full and no chest storage available.");
+                break;
+            }
             if (DropSweepService.shouldAbort(player)) {
                 LOGGER.info("Drop sweep aborted after {} attempt(s).", attempts);
                 break;
@@ -183,6 +197,77 @@ public final class DropSweeper {
 
     private static Vec3d currentPosition(ServerPlayerEntity player) {
         return new Vec3d(player.getX(), player.getY(), player.getZ());
+    }
+
+    private static boolean isInventoryFull(ServerPlayerEntity player) {
+        if (player == null) {
+            return false;
+        }
+        PlayerInventory inventory = player.getInventory();
+        int emptyCount = 0;
+        for (int i = 0; i < 36; i++) {
+            ItemStack stack = inventory.getStack(i);
+            if (stack.isEmpty()) {
+                emptyCount++;
+                if (emptyCount >= 3) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    private static boolean attemptChestStore(ServerCommandSource source, ServerPlayerEntity player) {
+        if (source == null || player == null) {
+            return false;
+        }
+        if (!(player.getEntityWorld() instanceof ServerWorld world)) {
+            return false;
+        }
+        BlockPos origin = player.getBlockPos();
+        for (BlockPos chestPos : findNearbyChests(world, origin, 12, 6)) {
+            int moved = ChestStoreService.depositMatchingWalkOnly(source, player, chestPos, DropSweeper::isChestOffloadCandidate);
+            if (moved > 0) {
+                return true;
+            }
+        }
+        BlockPos placed = ChestStoreService.placeChestNearBot(source, player, false);
+        if (placed != null) {
+            int moved = ChestStoreService.depositMatchingWalkOnly(source, player, placed, DropSweeper::isChestOffloadCandidate);
+            return moved > 0;
+        }
+        return false;
+    }
+
+    private static boolean isChestOffloadCandidate(ItemStack stack) {
+        if (stack == null || stack.isEmpty()) {
+            return false;
+        }
+        if (ChestStoreService.isOffloadProtected(stack)) {
+            return false;
+        }
+        if (stack.isOf(Items.CHEST) || stack.isOf(Items.CRAFTING_TABLE)) {
+            return false;
+        }
+        return stack.getMaxCount() > 1;
+    }
+
+    private static java.util.List<BlockPos> findNearbyChests(ServerWorld world, BlockPos origin, int radius, int vertical) {
+        if (world == null || origin == null) {
+            return java.util.List.of();
+        }
+        java.util.List<BlockPos> found = new java.util.ArrayList<>();
+        for (BlockPos pos : BlockPos.iterate(origin.add(-radius, -vertical, -radius), origin.add(radius, vertical, radius))) {
+            if (!world.isChunkLoaded(pos)) {
+                continue;
+            }
+            BlockState state = world.getBlockState(pos);
+            if (state.isOf(Blocks.CHEST) || state.isOf(Blocks.TRAPPED_CHEST)) {
+                found.add(pos.toImmutable());
+            }
+        }
+        found.sort(java.util.Comparator.comparingDouble(p -> p.getSquaredDistance(origin)));
+        return found;
     }
 
     public static boolean attemptManualNudge(ServerPlayerEntity player, ItemEntity targetDrop, BlockPos dropPos) {
