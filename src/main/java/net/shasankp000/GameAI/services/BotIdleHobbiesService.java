@@ -290,7 +290,14 @@ public final class BotIdleHobbiesService {
         boolean hasCampfireNearby = hasNearbyBlock(world, bot.getBlockPos(), campfireRadius, net.minecraft.block.Blocks.CAMPFIRE)
             || hasNearbyBlock(world, bot.getBlockPos(), campfireRadius, net.minecraft.block.Blocks.SOUL_CAMPFIRE);
 
+        boolean huntUnlocked = HuntHistoryService.hasAnyFoodKill(world);
+        boolean healthy = bot.getHealth() >= 18.0F && bot.getHungerManager().getFoodLevel() >= 16;
+        boolean canHunt = huntUnlocked && healthy && !world.isThundering();
+
         // Weighted-ish selection: prefer fishing if possible.
+        if (canHunt && RNG.nextDouble() < 0.30D) {
+            return "hunt";
+        }
         if (hasWaterNearby && RNG.nextDouble() < 0.70D) {
             return "fish";
         }
@@ -353,6 +360,11 @@ public final class BotIdleHobbiesService {
         // Fishing already interprets missing count as "until sunset"; keep it open-ended.
         if ("fish".equalsIgnoreCase(skillName)) {
             params.put("options", java.util.List.of("until_sunset"));
+        }
+
+        if ("hunt".equalsIgnoreCase(skillName)) {
+            params.put("options", java.util.List.of("until_sunset", "auto"));
+            params.put("open_ended", true);
         }
 
         // Ambient hangouts should be short so they don't starve other hobbies (like fishing) after failures.

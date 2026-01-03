@@ -11,6 +11,7 @@ import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 import net.shasankp000.GameAI.BotActions;
 import net.shasankp000.ChatUtils.ChatUtils;
+import net.shasankp000.GameAI.services.LavaHazardService;
 import net.shasankp000.GameAI.services.SkillResumeService;
 import net.shasankp000.GameAI.services.WorkDirectionService;
 import net.shasankp000.GameAI.skills.Skill;
@@ -101,6 +102,9 @@ public final class StripMineSkill implements Skill {
                     ChatUtils.sendChatMessages(player.getCommandSource().withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS), hazard.chatMessage()));
             if (detection.blockingHazard().isPresent()) {
                 Hazard hazard = detection.blockingHazard().get();
+                if (isLavaHazard(hazard)) {
+                    LavaHazardService.respondToLava(player, source, hazard.location());
+                }
                 // Store current position for resume
                 WorkDirectionService.setPausePosition(player.getUuid(), player.getBlockPos());
                 SkillResumeService.flagManualResume(player);
@@ -330,6 +334,13 @@ public final class StripMineSkill implements Skill {
                 || block == Blocks.SOUL_WALL_TORCH
                 || block == Blocks.REDSTONE_TORCH
                 || block == Blocks.REDSTONE_WALL_TORCH;
+    }
+
+    private static boolean isLavaHazard(Hazard hazard) {
+        if (hazard == null || hazard.chatMessage() == null) {
+            return false;
+        }
+        return hazard.chatMessage().toLowerCase().contains("lava");
     }
 
     private int getIntParameter(SkillContext context, String key, int defaultValue) {

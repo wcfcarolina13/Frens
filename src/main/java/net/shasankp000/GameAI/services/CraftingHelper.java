@@ -1107,11 +1107,11 @@ public final class CraftingHelper {
         debugChest("Post-offload emptySlot=" + bot.getInventory().getEmptySlot());
     }
 
-    static boolean offloadCheapItemsToNearbyChest(ServerPlayerEntity bot,
-                                                  ServerCommandSource source,
-                                                  int reservePlanks,
-                                                  int reserveLogs,
-                                                  Map<Item, Integer> reserveItems) {
+    public static boolean offloadCheapItemsToNearbyChest(ServerPlayerEntity bot,
+                                                       ServerCommandSource source,
+                                                       int reservePlanks,
+                                                       int reserveLogs,
+                                                       Map<Item, Integer> reserveItems) {
         return offloadCheapItemsToNearbyChestInternal(bot, source, reservePlanks, reserveLogs, reserveItems);
     }
 

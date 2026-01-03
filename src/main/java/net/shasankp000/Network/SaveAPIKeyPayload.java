@@ -12,8 +12,12 @@ public record SaveAPIKeyPayload(String provider, String apiKey) implements Custo
 
     public static final PacketCodec<PacketByteBuf, String> STRING_CODEC = new StringCodec(32767);
 
-        // CODEC left as null stub to satisfy compile; implement proper codec when restoring networking logic.
-        public static final PacketCodec<PacketByteBuf, SaveAPIKeyPayload> CODEC = null;
+    public static final PacketCodec<PacketByteBuf, SaveAPIKeyPayload> CODEC =
+            PacketCodec.tuple(
+                    STRING_CODEC, SaveAPIKeyPayload::provider,
+                    STRING_CODEC, SaveAPIKeyPayload::apiKey,
+                    SaveAPIKeyPayload::new
+            );
 
     @Override
     public Id<? extends CustomPayload> getId() {

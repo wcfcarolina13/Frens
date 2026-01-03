@@ -444,16 +444,18 @@ public class NLPProcessor {
         String LIDSNetLabel = null;
         String decision = null;
 
-        try {
-            Classifications intent = AIPlayer.modelManager.predict(userPrompt);
-            if (intent != null) {
-                bertLabel = intent.best().getClassName();
-                bertClassificationConfidence = intent.best().getProbability();
+        if (AIPlayer.modelManager != null && AIPlayer.isDjlAvailable()) {
+            try {
+                Classifications intent = AIPlayer.modelManager.predict(userPrompt);
+                if (intent != null) {
+                    bertLabel = intent.best().getClassName();
+                    bertClassificationConfidence = intent.best().getProbability();
 
-                LOGGER.info("BERT predicted: {} with confidence: {}", bertLabel, bertClassificationConfidence);
+                    LOGGER.info("BERT predicted: {} with confidence: {}", bertLabel, bertClassificationConfidence);
+                }
+            } catch (Exception e) {
+                LOGGER.error("Error predicting intent using BERT: {}", e.getMessage());
             }
-        } catch (Exception e) {
-            LOGGER.error("Error predicting intent using BERT: {}", e.getMessage());
         }
 
         try {
@@ -472,59 +474,61 @@ public class NLPProcessor {
             LOGGER.error("Error predicting intent using CART: {}", e.getMessage());
         }
 
-        try {
+        if (AIPlayer.isDjlAvailable()) {
+            try {
 
-            // --- 1. Load Feature Map JSON ---
-            ObjectMapper mapper = new ObjectMapper();
-            Path actualLidsNetModelDir = LidsNetModelDir.resolve("LIDSNet_torchscript/");
-            JsonNode root = mapper.readTree(new File(actualLidsNetModelDir.resolve("lidsnet_feature_map.json").toString()));
+                // --- 1. Load Feature Map JSON ---
+                ObjectMapper mapper = new ObjectMapper();
+                Path actualLidsNetModelDir = LidsNetModelDir.resolve("LIDSNet_torchscript/");
+                JsonNode root = mapper.readTree(new File(actualLidsNetModelDir.resolve("lidsnet_feature_map.json").toString()));
 
-            // Class label index map
-            TreeMap<Integer, String> classIdxMap = new TreeMap<>();
-            root.get("idx2label").fields().forEachRemaining(entry ->
-                    classIdxMap.put(Integer.parseInt(entry.getKey()), entry.getValue().asText())
-            );
-            List<String> classNames = new ArrayList<>(classIdxMap.values());
+                // Class label index map
+                TreeMap<Integer, String> classIdxMap = new TreeMap<>();
+                root.get("idx2label").fields().forEachRemaining(entry ->
+                        classIdxMap.put(Integer.parseInt(entry.getKey()), entry.getValue().asText())
+                );
+                List<String> classNames = new ArrayList<>(classIdxMap.values());
 
-            // Feature names
-            List<String> featureNames = new ArrayList<>();
-            root.get("features").forEach(f -> featureNames.add(f.asText()));
+                // Feature names
+                List<String> featureNames = new ArrayList<>();
+                root.get("features").forEach(f -> featureNames.add(f.asText()));
 
-            // --- 2. Initialize NLP processor ---
-            OpenNLPProcessor openNLP = new OpenNLPProcessor(openNlpModelsDir.toString());
+                // --- 2. Initialize NLP processor ---
+                OpenNLPProcessor openNLP = new OpenNLPProcessor(openNlpModelsDir.toString());
 
-            // --- 3. Analyze user input ---
-            List<OpenNLPProcessor.TokenInfo> tokens = openNLP.analyze(userPrompt);
+                // --- 3. Analyze user input ---
+                List<OpenNLPProcessor.TokenInfo> tokens = openNLP.analyze(userPrompt);
 
-            // --- 4. Build symbolic feature set ---
-            Set<String> presentFeatures = new HashSet<>();
-            for (OpenNLPProcessor.TokenInfo token : tokens) {
-                presentFeatures.add("POS=" + token.posTag);
-                presentFeatures.add("lemma=" + token.lemma);
+                // --- 4. Build symbolic feature set ---
+                Set<String> presentFeatures = new HashSet<>();
+                for (OpenNLPProcessor.TokenInfo token : tokens) {
+                    presentFeatures.add("POS=" + token.posTag);
+                    presentFeatures.add("lemma=" + token.lemma);
+                }
+
+                // --- 5. Construct input vector ---
+                float[] inputVector = new float[featureNames.size()];
+                for (int i = 0; i < featureNames.size(); i++) {
+                    inputVector[i] = presentFeatures.contains(featureNames.get(i)) ? 1.0f : 0.0f;
+                }
+
+                // --- 6. Classify ---
+                LIDSNetModelManager lidsNet = LIDSNetModelManager.getInstance(actualLidsNetModelDir);
+                lidsNet.loadModel(classNames);
+                LIDSNetModelManager.PredictionResult pred = lidsNet.predictWithConfidence(inputVector, classNames);
+
+                // --- 7. Output
+                System.out.printf("[LIDSNet Classifier] Sentence: \"%s\"\nPredicted intent: %s (Confidence: %.2f%%)\n",
+                        userPrompt, pred.getClassName(), pred.getConfidencePercentage());
+
+                LIDSNetLabel = pred.getClassName();
+                LIDSNetClassificationConfidence = pred.getConfidencePercentage();
+
+
             }
-
-            // --- 5. Construct input vector ---
-            float[] inputVector = new float[featureNames.size()];
-            for (int i = 0; i < featureNames.size(); i++) {
-                inputVector[i] = presentFeatures.contains(featureNames.get(i)) ? 1.0f : 0.0f;
+            catch (Exception e) {
+                LOGGER.error("Error while running inference: {}", e.getMessage());
             }
-
-            // --- 6. Classify ---
-            LIDSNetModelManager lidsNet = LIDSNetModelManager.getInstance(actualLidsNetModelDir);
-            lidsNet.loadModel(classNames);
-            LIDSNetModelManager.PredictionResult pred = lidsNet.predictWithConfidence(inputVector, classNames);
-
-            // --- 7. Output
-            System.out.printf("[LIDSNet Classifier] Sentence: \"%s\"\nPredicted intent: %s (Confidence: %.2f%%)\n",
-                    userPrompt, pred.getClassName(), pred.getConfidencePercentage());
-
-            LIDSNetLabel = pred.getClassName();
-            LIDSNetClassificationConfidence = pred.getConfidencePercentage();
-
-
-        }
-        catch (Exception e) {
-            LOGGER.error("Error while running inference: {}", e.getMessage());
         }
 
 

@@ -1,9 +1,10 @@
-package net.shasankp000.Network;
+package net.shasankp000.network;
 
 import net.minecraft.network.PacketByteBuf;
 import net.minecraft.network.codec.PacketCodec;
 import net.minecraft.network.packet.CustomPayload;
 import net.minecraft.util.Identifier;
+import net.shasankp000.network.StringCodec;
 
 /** Server -> Client: crafting history list (JSON array of identifiers). */
 public record CraftingHistoryPayload(String historyJson) implements CustomPayload {

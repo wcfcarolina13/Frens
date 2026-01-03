@@ -59,7 +59,7 @@ public class BotPlayerInventoryScreenHandler extends ScreenHandler {
         this.botInventory = botInventory;
         this.botRef = botRef;
         // Keep this in sync with refreshStats() + getters below.
-        this.botStats = new ArrayPropertyDelegate(16);
+        this.botStats = new ArrayPropertyDelegate(17);
         this.addProperties(this.botStats);
         refreshStats();
 
@@ -241,6 +241,7 @@ public class BotPlayerInventoryScreenHandler extends ScreenHandler {
         // Index 14: active task, Index 15: paused task (resume available)
         botStats.set(14, TaskService.hasActiveTask(botRef.getUuid()) ? 1 : 0);
         botStats.set(15, TaskService.isAbortRequested(botRef.getUuid()) ? 1 : 0);
+        botStats.set(16, BotHomeService.isAutoHuntStarvingEnabled(botRef) ? 1 : 0);
     }
 
     public float getBotHealth() {
@@ -301,6 +302,10 @@ public class BotPlayerInventoryScreenHandler extends ScreenHandler {
 
     public boolean isBotTaskPaused() {
         return botStats.get(15) != 0;
+    }
+
+    public boolean isBotAutoHuntStarvingEnabled() {
+        return botStats.get(16) != 0;
     }
 
     public double getBotFollowDistance() {

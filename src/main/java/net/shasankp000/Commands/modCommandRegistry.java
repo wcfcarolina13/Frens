@@ -262,6 +262,7 @@ public class modCommandRegistry {
                             .then(BotHomeCommands.buildAutoReturnSunsetGuardPatrolEligible())
                             .then(BotHomeCommands.buildAutoReturnSunsetPreferLastBed())
                             .then(BotHomeCommands.buildIdleHobbies())
+                            .then(BotHomeCommands.buildAutoHuntStarving())
                             .then(BotHomeCommands.buildIdleNow())
                             .then(BotHomeCommands.buildBase())
 	                        .then(BotMovementCommands.buildCome())
@@ -3562,6 +3563,70 @@ public class modCommandRegistry {
         return successes;
     }
 
+    static int executeAutoHuntStarvingSetTargets(CommandContext<ServerCommandSource> context,
+                                                 String targetArg,
+                                                 boolean enabled) throws CommandSyntaxException {
+        ServerCommandSource source = context.getSource();
+        List<ServerPlayerEntity> bots = resolveTargetBots(context, targetArg);
+        boolean isAll = targetArg != null && "all".equalsIgnoreCase(targetArg.trim());
+
+        int successes = 0;
+        for (ServerPlayerEntity bot : bots) {
+            if (bot == null) {
+                continue;
+            }
+            if (BotHomeService.setAutoHuntStarvingEnabled(bot, enabled)) {
+                successes++;
+                if (enabled) {
+                    net.shasankp000.GameAI.services.BotAutoHuntService.requestDecisionNow(bot);
+                }
+            }
+        }
+
+        if (!bots.isEmpty()) {
+            String summary = formatBotList(bots, isAll);
+            ChatUtils.sendSystemMessage(source,
+                    summary + " auto-hunt (starving) " + (enabled ? "enabled" : "disabled") + ".");
+        }
+        return successes;
+    }
+
+    static int executeAutoHuntStarvingToggleTargets(CommandContext<ServerCommandSource> context,
+                                                    String targetArg) throws CommandSyntaxException {
+        ServerCommandSource source = context.getSource();
+        List<ServerPlayerEntity> bots = resolveTargetBots(context, targetArg);
+        boolean isAll = targetArg != null && "all".equalsIgnoreCase(targetArg.trim());
+
+        int successes = 0;
+        int enabledCount = 0;
+        for (ServerPlayerEntity bot : bots) {
+            if (bot == null) {
+                continue;
+            }
+            if (!BotHomeService.toggleAutoHuntStarvingEnabled(bot)) {
+                continue;
+            }
+            successes++;
+            if (BotHomeService.isAutoHuntStarvingEnabled(bot)) {
+                enabledCount++;
+                net.shasankp000.GameAI.services.BotAutoHuntService.requestDecisionNow(bot);
+            }
+        }
+
+        if (!bots.isEmpty()) {
+            String summary = formatBotList(bots, isAll);
+            if (isAll || bots.size() > 1) {
+                ChatUtils.sendSystemMessage(source,
+                        summary + " auto-hunt (starving) enabled for " + enabledCount + "/" + bots.size() + ".");
+            } else if (bots.size() == 1) {
+                boolean on = BotHomeService.isAutoHuntStarvingEnabled(bots.getFirst());
+                ChatUtils.sendSystemMessage(source,
+                        summary + " auto-hunt (starving) is now " + (on ? "ON" : "OFF") + ".");
+            }
+        }
+        return successes;
+    }
+
     static int executeIdleNowTargets(CommandContext<ServerCommandSource> context,
                                     String targetArg) throws CommandSyntaxException {
         ServerCommandSource source = context.getSource();
@@ -4221,6 +4286,10 @@ public class modCommandRegistry {
 
         ServerCommandSource source = context.getSource();
         UUID botUuid = bot.getUuid();
+
+        if (TaskService.interruptAmbientTask(botUuid, "§cInterrupted by a command.")) {
+            LOGGER.info("Interrupted ambient task before starting '{}' for bot {}", skillName, bot.getGameProfile().name());
+        }
         
         // Record skill execution for resume capability
         SkillResumeService.recordExecution(bot, skillName, rawArgs, source);
@@ -4236,16 +4305,52 @@ public class modCommandRegistry {
             params.put("issuerYaw", commander.getYaw());
         }
 
-        skillExecutor.submit(() -> {
-            try {
-                SkillContext skillContext = new SkillContext(bot.getCommandSource(), FunctionCallerV2.getSharedState(), params, source);
-                SkillExecutionResult result = SkillManager.runSkill(skillName, skillContext);
-                source.getServer().execute(() -> ChatUtils.sendSystemMessage(source, result.message()));
-            } catch (Exception e) {
-                LOGGER.error("An unexpected error occurred in /bot skill " + skillName, e);
-                source.getServer().execute(() -> ChatUtils.sendSystemMessage(source, "An unexpected error occurred trying to execute that command."));
-            }
-        });
+        ServerCommandSource botSource = bot.getCommandSource();
+        Map<String, Object> sharedState = safeSharedState();
+        net.shasankp000.GameAI.services.DebugFileLogger.log("Command.runSkill prepared name="
+                + skillName + " bot=" + bot.getGameProfile().name()
+                + " thread=" + Thread.currentThread().getName());
+
+        LOGGER.info("Queueing skill '{}' for bot {} with args '{}'", skillName, bot.getGameProfile().name(), rawArgs);
+        try {
+            skillExecutor.submit(() -> {
+                LOGGER.info("Running skill '{}' for bot {}", skillName, bot.getGameProfile().name());
+                net.shasankp000.GameAI.services.DebugFileLogger.log("Command.runSkill start name="
+                        + skillName + " bot=" + bot.getGameProfile().name()
+                        + " thread=" + Thread.currentThread().getName());
+                try {
+                    net.shasankp000.GameAI.services.DebugFileLogger.log("Command.runSkill preContext name="
+                            + skillName + " bot=" + bot.getGameProfile().name());
+                    SkillContext skillContext = new SkillContext(botSource, sharedState, params, source);
+                    net.shasankp000.GameAI.services.DebugFileLogger.log("Command.runSkill postContext name="
+                            + skillName + " bot=" + bot.getGameProfile().name());
+                    net.shasankp000.GameAI.services.DebugFileLogger.log("Command.runSkill preRunSkill name="
+                            + skillName + " bot=" + bot.getGameProfile().name());
+                    SkillExecutionResult result = SkillManager.runSkill(skillName, skillContext);
+                    LOGGER.info("Skill '{}' finished for bot {}: success={} msg='{}'",
+                            skillName,
+                            bot.getGameProfile().name(),
+                            result != null && result.success(),
+                            result != null ? result.message() : "null");
+                    net.shasankp000.GameAI.services.DebugFileLogger.log("Command.runSkill end name="
+                            + skillName + " bot=" + bot.getGameProfile().name()
+                            + " success=" + (result != null && result.success())
+                            + " msg=" + (result != null ? result.message() : "null"));
+                    source.getServer().execute(() -> ChatUtils.sendSystemMessage(source, result.message()));
+                } catch (Exception e) {
+                    LOGGER.error("An unexpected error occurred in /bot skill " + skillName, e);
+                    net.shasankp000.GameAI.services.DebugFileLogger.log("Command.runSkill error name="
+                            + skillName + " bot=" + bot.getGameProfile().name()
+                            + " err=" + e.getClass().getSimpleName());
+                    source.getServer().execute(() -> ChatUtils.sendSystemMessage(source, "An unexpected error occurred trying to execute that command."));
+                }
+            });
+        } catch (RuntimeException e) {
+            LOGGER.error("Failed to queue skill '{}' for bot {} (fallback to direct run)", skillName, bot.getGameProfile().name(), e);
+            SkillContext skillContext = new SkillContext(bot.getCommandSource(), FunctionCallerV2.getSharedState(), params, source);
+            SkillExecutionResult result = SkillManager.runSkill(skillName, skillContext);
+            source.getServer().execute(() -> ChatUtils.sendSystemMessage(source, result.message()));
+        }
 
         return 1;
     }
@@ -4602,5 +4707,15 @@ public class modCommandRegistry {
             }
         }
         return commander.getHorizontalFacing();
+    }
+
+    private static Map<String, Object> safeSharedState() {
+        try {
+            return FunctionCallerV2.getSharedState();
+        } catch (Throwable t) {
+            net.shasankp000.GameAI.services.DebugFileLogger.log("Command.safeSharedState unavailable: "
+                    + t.getClass().getSimpleName());
+            return new HashMap<>();
+        }
     }
 }

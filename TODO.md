@@ -4,6 +4,7 @@ Pending work only. Completed items and rationale live in `changelog.md`.
 
 ## P0 — Critical
 - [x] **ReturnBaseStuckService build fix**: Reorder debug logging to use initialized variables (post-revert).
+- [ ] **Verify launch after permission predicate fix**: Ensure bots can start without the LeveledPermissionPredicate OWNERS crash on 1.21.11.
 - [ ] **Persist bot stats on respawn**: Health/XP/hunger restored with the same alias, logged on save/load, happens before spawn completes.
 - [x] **Upward stairs (ascent) simplification**: Walk-and-jump staircase that keeps controller-facing direction, mines only 3 blocks above each tread, climbs exactly one block per step, aborts with a clear message if Y does not increase.
 - [x] **Escape when spawned in walls**: Suffocation escape checks all four corners from head to feet, uses tool-based mining only, and throttles alerts to avoid spam.
@@ -87,6 +88,7 @@ Pending work only. Completed items and rationale live in `changelog.md`.
 - [ ] Follow/defend modes
 - [ ] Fight with teammates
 - [ ] **Water-bucket clutch on deadly falls (low priority)**: If bot has a water bucket and detects a lethal fall, attempt to place water under itself just before impact to avoid death.
+- [x] **Hunting verification**: validate hunt targets, auto-hunt (idle/starving), hunt menu layout, manual hunt feedback, and idle-hobby interruption in-game.
 
 ### Crafting & Building
 - [ ] Place and use crafting table, furnace, chest

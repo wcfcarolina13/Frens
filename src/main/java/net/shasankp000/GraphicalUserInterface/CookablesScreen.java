@@ -13,8 +13,8 @@ import net.minecraft.registry.Registries;
 import net.minecraft.text.Text;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.math.MathHelper;
-import net.shasankp000.Network.CookablesPayload;
-import net.shasankp000.Network.RequestCookablesPayload;
+import net.shasankp000.network.CookablesPayload;
+import net.shasankp000.network.RequestCookablesPayload;
 
 import java.lang.reflect.Type;
 import java.util.ArrayList;
@@ -220,6 +220,11 @@ public class CookablesScreen extends Screen {
         if (client != null) {
             client.setScreen(parent);
         }
+    }
+
+    @Override
+    public boolean shouldPause() {
+        return false;
     }
 
     @Override

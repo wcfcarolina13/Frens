@@ -1,9 +1,10 @@
-package net.shasankp000.Network;
+package net.shasankp000.network;
 
 import net.minecraft.network.PacketByteBuf;
 import net.minecraft.network.codec.PacketCodec;
 import net.minecraft.network.packet.CustomPayload;
 import net.minecraft.util.Identifier;
+import net.shasankp000.network.StringCodec;
 
 /** Server -> Client: indicates whether a bot is awaiting a resume/stop decision. */
 public record ResumeDecisionPayload(boolean active, String botName) implements CustomPayload {

@@ -29,6 +29,7 @@ import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.GameMode;
 import net.minecraft.world.TeleportTarget;
 import net.minecraft.world.World;
+import net.shasankp000.network.FakeClientConnection;
 
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
@@ -39,7 +40,6 @@ import java.util.concurrent.CompletableFuture;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import net.shasankp000.AIPlayer;
-import net.shasankp000.network.FakeClientConnection;
 import net.shasankp000.GameAI.services.BotPersistenceService;
 
 // Same as carpet's code for spawning fake players, only difference is that it will work even if the command executor is in offline mode

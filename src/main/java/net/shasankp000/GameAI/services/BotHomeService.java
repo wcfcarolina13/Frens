@@ -35,6 +35,7 @@ import java.util.Optional;
  *   <li>Auto-return-at-sunset toggle per bot</li>
  *   <li>Auto-return-at-sunset eligibility for guard/patrol per bot</li>
  *   <li>Idle/ambient hobbies toggle per bot</li>
+ *   <li>Auto-hunt-when-starving toggle per bot</li>
  * </ul>
  *
  * <p>Data is keyed by server save name + dimension key so integrated-server worlds do not collide.
@@ -388,6 +389,59 @@ public final class BotHomeService {
         }
     }
 
+    public static boolean setAutoHuntStarvingEnabled(ServerPlayerEntity bot, boolean enabled) {
+        if (bot == null || !(bot.getEntityWorld() instanceof ServerWorld world)) {
+            return false;
+        }
+        MinecraftServer server = world.getServer();
+        if (server == null) {
+            return false;
+        }
+        String botId = botKey(bot);
+        if (botId.isBlank()) {
+            return false;
+        }
+
+        WorldData wd = worldData(server, world);
+        synchronized (LOCK) {
+            if (wd.autoHuntStarvingEnabledByBot == null) {
+                wd.autoHuntStarvingEnabledByBot = new HashMap<>();
+            }
+            wd.autoHuntStarvingEnabledByBot.put(botId, enabled);
+        }
+        flush();
+        return true;
+    }
+
+    public static boolean toggleAutoHuntStarvingEnabled(ServerPlayerEntity bot) {
+        boolean next = !isAutoHuntStarvingEnabled(bot);
+        return setAutoHuntStarvingEnabled(bot, next);
+    }
+
+    /** Default: false (auto-hunt while starving is opt-in). */
+    public static boolean isAutoHuntStarvingEnabled(ServerPlayerEntity bot) {
+        if (bot == null || !(bot.getEntityWorld() instanceof ServerWorld world)) {
+            return false;
+        }
+        MinecraftServer server = world.getServer();
+        if (server == null) {
+            return false;
+        }
+        String botId = botKey(bot);
+        if (botId.isBlank()) {
+            return false;
+        }
+
+        WorldData wd = worldData(server, world);
+        synchronized (LOCK) {
+            if (wd.autoHuntStarvingEnabledByBot == null) {
+                return false;
+            }
+            Boolean val = wd.autoHuntStarvingEnabledByBot.get(botId);
+            return Boolean.TRUE.equals(val);
+        }
+    }
+
     public static boolean addBase(MinecraftServer server, ServerWorld world, String label, BlockPos pos) {
         if (server == null || world == null || label == null || label.isBlank() || pos == null) {
             return false;
@@ -559,6 +613,7 @@ public final class BotHomeService {
         Map<String, Boolean> autoReturnPreferLastBedAtSunsetByBot = new HashMap<>();
         Map<String, Boolean> autoReturnGuardPatrolEligibleByBot = new HashMap<>();
         Map<String, Boolean> idleHobbiesEnabledByBot = new HashMap<>();
+        Map<String, Boolean> autoHuntStarvingEnabledByBot = new HashMap<>();
         Map<String, SavedBase> basesByLabel = new HashMap<>();
     }
 

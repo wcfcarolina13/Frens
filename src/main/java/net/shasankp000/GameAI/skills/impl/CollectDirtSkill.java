@@ -29,6 +29,7 @@ import net.shasankp000.Entity.LookController;
 import net.shasankp000.GameAI.BotActions;
 import net.shasankp000.GameAI.services.ChestStoreService;
 import net.shasankp000.GameAI.services.MovementService;
+import net.shasankp000.GameAI.services.LavaHazardService;
 import net.shasankp000.GameAI.services.TaskService;
 import net.shasankp000.GameAI.skills.SkillManager;
 import net.shasankp000.GameAI.services.SkillResumeService;
@@ -89,13 +90,6 @@ public class CollectDirtSkill implements Skill {
     private static final Map<UUID, Long> LAST_INVENTORY_FULL_MESSAGE = new HashMap<>();
     private static final Map<UUID, Long> LAST_ESCAPE_ATTEMPT = new HashMap<>();
     private static final Map<UUID, Long> LAST_FALLING_BLOCK_MESSAGE = new HashMap<>();
-    private static final List<Item> LAVA_SAFETY_BLOCKS = List.of(
-            Items.COBBLESTONE,
-            Items.COBBLED_DEEPSLATE,
-            Items.STONE,
-            Items.DEEPSLATE,
-            Items.DEEPSLATE_BRICKS
-    );
     private static final Logger LOGGER = LoggerFactory.getLogger("skill-collect-dirt");
 
     private final String skillName;
@@ -2074,14 +2068,16 @@ public class CollectDirtSkill implements Skill {
             return false;
         }
         SkillResumeService.flagManualResume(player);
-        boolean plugged = false;
-        if (threat.plugPosition() != null) {
-            plugged = BotActions.placeBlockAt(player, threat.plugPosition(), LAVA_SAFETY_BLOCKS);
-        }
-        retreatFromHazard(player, threat.direction());
-        String message = plugged
-                ? "Lava ahead! Plugged it and backing away."
-                : "Lava ahead! Retreating to stay safe.";
+        LavaHazardService.LavaResponse response = LavaHazardService.respondToLava(
+                player,
+                source,
+                threat.direction(),
+                threat.plugPosition(),
+                null
+        );
+        String message = response.usedWater()
+                ? "Lava ahead! Used water and backing away."
+                : (response.plugged() ? "Lava ahead! Plugged it and backing away." : "Lava ahead! Retreating to stay safe.");
         message += " Use /bot resume " + player.getName().getString() + " when it's safe.";
         ChatUtils.sendChatMessages(source.withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS), message);
         return true;
@@ -2195,23 +2191,6 @@ public class CollectDirtSkill implements Skill {
         }
         found.sort(Comparator.comparingDouble(p -> p.getSquaredDistance(origin)));
         return found;
-    }
-
-    private void retreatFromHazard(ServerPlayerEntity player, Direction dangerDirection) {
-        if (player == null || dangerDirection == null) {
-            return;
-        }
-        Vec3d pos = new Vec3d(player.getX(), player.getY(), player.getZ());
-        Vec3d target = pos.add(
-                dangerDirection.getOpposite().getOffsetX() * 3,
-                0,
-                dangerDirection.getOpposite().getOffsetZ() * 3
-        );
-        BotActions.moveToward(player, target, 3.0D);
-        if (player.isOnGround()) {
-            BotActions.jump(player);
-        }
-        BotActions.stop(player);
     }
 
     private LavaThreat detectLavaThreat(ServerPlayerEntity player) {

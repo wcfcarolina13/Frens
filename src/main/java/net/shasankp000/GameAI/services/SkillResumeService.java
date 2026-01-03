@@ -5,7 +5,7 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.shasankp000.ChatUtils.ChatUtils;
-import net.shasankp000.Network.ResumeDecisionPayload;
+import net.shasankp000.network.ResumeDecisionPayload;
 
 import java.util.Locale;
 import java.util.Map;

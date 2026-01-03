@@ -35,6 +35,8 @@ import net.shasankp000.GameAI.services.BotAmbientSocialChatService;
 import net.shasankp000.GameAI.services.BotCampfireAvoidanceService;
 import net.shasankp000.GameAI.services.BotIdleHobbiesService;
 import net.shasankp000.GameAI.llm.LLMOrchestrator;
+import net.shasankp000.GameAI.services.HuntCatalog;
+import net.shasankp000.GameAI.services.HuntHistoryService;
 
 import net.shasankp000.Database.QTableStorage;
 import net.shasankp000.Entity.AutoFaceEntity;
@@ -94,6 +96,7 @@ public class AIPlayer implements ModInitializer {
     public static MinecraftServer serverInstance = null; // default for now
     public static BertModelManager modelManager;
     public static boolean loadedBERTModelIntoMemory = false;
+    private static boolean djlAvailable = false;
     private static final java.util.concurrent.ConcurrentHashMap<java.util.UUID, Long> LAST_OPEN_MS = new java.util.concurrent.ConcurrentHashMap<>();
     private static final ExecutorService MODEL_EXECUTOR = Executors.newSingleThreadExecutor(r -> {
         Thread t = new Thread(r, "bert-loader");
@@ -192,20 +195,23 @@ public class AIPlayer implements ModInitializer {
         PayloadTypeRegistry.playC2S().register(SaveCustomProviderPayload.ID, SaveCustomProviderPayload.CODEC);
 
         // Bases manager UI payloads
-        PayloadTypeRegistry.playC2S().register(net.shasankp000.Network.RequestBasesPayload.ID, net.shasankp000.Network.RequestBasesPayload.CODEC);
-        PayloadTypeRegistry.playS2C().register(net.shasankp000.Network.BasesListPayload.ID, net.shasankp000.Network.BasesListPayload.CODEC);
-        PayloadTypeRegistry.playC2S().register(net.shasankp000.Network.BaseSetPayload.ID, net.shasankp000.Network.BaseSetPayload.CODEC);
-        PayloadTypeRegistry.playC2S().register(net.shasankp000.Network.BaseRemovePayload.ID, net.shasankp000.Network.BaseRemovePayload.CODEC);
-        PayloadTypeRegistry.playC2S().register(net.shasankp000.Network.BaseRenamePayload.ID, net.shasankp000.Network.BaseRenamePayload.CODEC);
-        PayloadTypeRegistry.playC2S().register(net.shasankp000.Network.RequestCraftingHistoryPayload.ID, net.shasankp000.Network.RequestCraftingHistoryPayload.CODEC);
-        PayloadTypeRegistry.playS2C().register(net.shasankp000.Network.CraftingHistoryPayload.ID, net.shasankp000.Network.CraftingHistoryPayload.CODEC);
-        PayloadTypeRegistry.playC2S().register(net.shasankp000.Network.RequestCookablesPayload.ID, net.shasankp000.Network.RequestCookablesPayload.CODEC);
-        PayloadTypeRegistry.playS2C().register(net.shasankp000.Network.CookablesPayload.ID, net.shasankp000.Network.CookablesPayload.CODEC);
-        PayloadTypeRegistry.playS2C().register(net.shasankp000.Network.ResumeDecisionPayload.ID, net.shasankp000.Network.ResumeDecisionPayload.CODEC);
+        PayloadTypeRegistry.playC2S().register(net.shasankp000.network.RequestBasesPayload.ID, net.shasankp000.network.RequestBasesPayload.CODEC);
+        PayloadTypeRegistry.playS2C().register(net.shasankp000.network.BasesListPayload.ID, net.shasankp000.network.BasesListPayload.CODEC);
+        PayloadTypeRegistry.playC2S().register(net.shasankp000.network.BaseSetPayload.ID, net.shasankp000.network.BaseSetPayload.CODEC);
+        PayloadTypeRegistry.playC2S().register(net.shasankp000.network.BaseRemovePayload.ID, net.shasankp000.network.BaseRemovePayload.CODEC);
+        PayloadTypeRegistry.playC2S().register(net.shasankp000.network.BaseRenamePayload.ID, net.shasankp000.network.BaseRenamePayload.CODEC);
+        PayloadTypeRegistry.playC2S().register(net.shasankp000.network.RequestCraftingHistoryPayload.ID, net.shasankp000.network.RequestCraftingHistoryPayload.CODEC);
+        PayloadTypeRegistry.playS2C().register(net.shasankp000.network.CraftingHistoryPayload.ID, net.shasankp000.network.CraftingHistoryPayload.CODEC);
+        PayloadTypeRegistry.playC2S().register(net.shasankp000.network.RequestCookablesPayload.ID, net.shasankp000.network.RequestCookablesPayload.CODEC);
+        PayloadTypeRegistry.playS2C().register(net.shasankp000.network.CookablesPayload.ID, net.shasankp000.network.CookablesPayload.CODEC);
+        PayloadTypeRegistry.playS2C().register(net.shasankp000.network.ResumeDecisionPayload.ID, net.shasankp000.network.ResumeDecisionPayload.CODEC);
+        PayloadTypeRegistry.playC2S().register(net.shasankp000.network.RequestHuntablesPayload.ID, net.shasankp000.network.RequestHuntablesPayload.CODEC);
+        PayloadTypeRegistry.playS2C().register(net.shasankp000.network.HuntablesPayload.ID, net.shasankp000.network.HuntablesPayload.CODEC);
 
-        net.shasankp000.Network.BaseNetworkManager.registerReceiversOnce();
-        net.shasankp000.Network.CraftingHistoryNetworkManager.registerReceiversOnce();
-        net.shasankp000.Network.CookablesNetworkManager.registerReceiversOnce();
+        net.shasankp000.network.BaseNetworkManager.registerReceiversOnce();
+        net.shasankp000.network.CraftingHistoryNetworkManager.registerReceiversOnce();
+        net.shasankp000.network.CookablesNetworkManager.registerReceiversOnce();
+        net.shasankp000.network.HuntablesNetworkManager.registerReceiversOnce();
 
         modCommandRegistry.register();
         configCommand.register();
@@ -227,7 +233,13 @@ public class AIPlayer implements ModInitializer {
             }
         });
 
-        modelManager = BertModelManager.getInstance();
+        djlAvailable = isClassAvailable("ai.djl.Model");
+        if (djlAvailable) {
+            modelManager = BertModelManager.getInstance();
+        } else {
+            modelManager = null;
+            LOGGER.warn("DJL not found on classpath; BERT intent model disabled.");
+        }
 
         ServerLifecycleEvents.SERVER_STARTED.register(server -> {
             configNetworkManager.registerServerModelNameSaveReceiver(server);
@@ -265,15 +277,17 @@ public class AIPlayer implements ModInitializer {
             BotAmbientChatter.resetSession();
             // Clear mood manager state.
             BotMoodManager.resetSession();
-            try {
-                if (modelManager.isModelLoaded() || loadedBERTModelIntoMemory) {
-                    modelManager.unloadModel();
-                    System.out.println("Unloaded BERT Model from memory");
-                } else {
-                    System.out.println("BERT Model was not loaded, skipping unloading...");
+            if (modelManager != null) {
+                try {
+                    if (modelManager.isModelLoaded() || loadedBERTModelIntoMemory) {
+                        modelManager.unloadModel();
+                        System.out.println("Unloaded BERT Model from memory");
+                    } else {
+                        System.out.println("BERT Model was not loaded, skipping unloading...");
+                    }
+                } catch (IOException e) {
+                    LOGGER.error("BERT Model unloading failed!", e);
                 }
-            } catch (IOException e) {
-                LOGGER.error("BERT Model unloading failed!", e);
             }
             MODEL_LOAD_ENQUEUED.set(false);
             net.shasankp000.GameAI.services.BotControlApplier.resetSession();
@@ -357,6 +371,13 @@ public class AIPlayer implements ModInitializer {
                 }
                 BotPersistenceService.onBotDeath(serverPlayer);
             }
+            if (entity instanceof net.minecraft.entity.LivingEntity dead) {
+                var attacker = damageSource != null ? damageSource.getAttacker() : null;
+                if (attacker instanceof ServerPlayerEntity killer
+                        && HuntCatalog.isFoodMob(dead.getType())) {
+                    HuntHistoryService.recordHunt(killer, net.minecraft.entity.EntityType.getId(dead.getType()));
+                }
+            }
         });
 
         ServerPlayerEvents.AFTER_RESPAWN.register((oldPlayer, newPlayer, alive) -> {
@@ -378,6 +399,7 @@ public class AIPlayer implements ModInitializer {
         ServerTickEvents.END_SERVER_TICK.register(BotEventHandler::tickHunger);
         ServerTickEvents.END_SERVER_TICK.register(AIPlayer::processSpawnEscapeChecks);
         ServerTickEvents.END_SERVER_TICK.register(BotCampfireAvoidanceService::onServerTick);
+        ServerTickEvents.END_SERVER_TICK.register(net.shasankp000.GameAI.services.BotAutoHuntService::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(BotAutoReturnSunsetService::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(BotIdleHobbiesService::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(BotAmbientSocialChatService::onServerTick);
@@ -444,6 +466,10 @@ public class AIPlayer implements ModInitializer {
     }
 
     private static void enqueueBertLoad() {
+        if (modelManager == null) {
+            LOGGER.info("Skipping BERT load (DJL unavailable).");
+            return;
+        }
         if (!MODEL_LOAD_ENQUEUED.compareAndSet(false, true)) {
             return;
         }
@@ -522,6 +548,19 @@ public class AIPlayer implements ModInitializer {
         }
         String prompt = String.join(" ", Arrays.copyOfRange(tokens, consumed, tokens.length)).trim();
         return new ChatTarget(targets, prompt);
+    }
+
+    public static boolean isDjlAvailable() {
+        return djlAvailable;
+    }
+
+    private static boolean isClassAvailable(String className) {
+        try {
+            Class.forName(className, false, AIPlayer.class.getClassLoader());
+            return true;
+        } catch (Throwable t) {
+            return false;
+        }
     }
 
     private static String normalizeToken(String token) {

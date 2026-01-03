@@ -124,6 +124,11 @@ public final class TaskService {
             executingThread.set(thread);
         }
 
+        public boolean isExecutingThreadAlive() {
+            Thread t = executingThread.get();
+            return t != null && t.isAlive();
+        }
+
         public void interruptExecutingThread() {
             Thread t = executingThread.get();
             if (t != null) {
@@ -204,6 +209,26 @@ public final class TaskService {
         UUID slot = key(botUuid);
         TaskTicket existing = ACTIVE.putIfAbsent(slot, ticket);
         if (existing != null) {
+            System.out.println("[TaskService] beginSkill blocked: bot=" + botUuid
+                    + " existing=" + existing.name()
+                    + " state=" + existing.state()
+                    + " origin=" + existing.origin()
+                    + " threadAlive=" + existing.isExecutingThreadAlive());
+            LOGGER.warn("Task slot busy for bot {} (existing='{}' state={} origin={} threadAlive={})",
+                    botUuid,
+                    existing.name(),
+                    existing.state(),
+                    existing.origin(),
+                    existing.isExecutingThreadAlive());
+            boolean staleState = existing.state() != State.RUNNING;
+            boolean deadThread = !existing.isExecutingThreadAlive();
+            if (staleState || deadThread) {
+                if (ACTIVE.replace(slot, existing, ticket)) {
+                    LOGGER.warn("Replaced stale task '{}' (state={}, threadAlive={}) with '{}'",
+                            existing.name(), existing.state(), !deadThread, ticket.name());
+                    return Optional.of(ticket);
+                }
+            }
             return Optional.empty();
         }
         LOGGER.info("Task '{}' started for bot {}", skillName, botUuid);
@@ -384,6 +409,24 @@ public final class TaskService {
         }
         abortTicket(ticket, reason);
         BotEventHandler.setExternalOverrideActive(false);
+    }
+
+    /**
+     * Interrupts an ambient task immediately to make room for a command-issued skill.
+     */
+    public static boolean interruptAmbientTask(UUID botUuid, String reason) {
+        if (botUuid == null) {
+            return false;
+        }
+        TaskTicket ticket = ACTIVE.get(key(botUuid));
+        if (ticket == null || ticket.origin() != Origin.AMBIENT) {
+            return false;
+        }
+        abortTicket(ticket, reason);
+        ticket.interruptExecutingThread();
+        ACTIVE.remove(key(botUuid), ticket);
+        LOGGER.info("Ambient task '{}' interrupted for bot {}", ticket.name(), botUuid);
+        return true;
     }
 
     public static Optional<State> currentState() {

@@ -13,6 +13,7 @@ import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 import net.shasankp000.ChatUtils.ChatUtils;
+import net.shasankp000.GameAI.services.LavaHazardService;
 import net.shasankp000.GameAI.BotActions;
 import net.shasankp000.GameAI.services.SkillResumeService;
 import net.shasankp000.GameAI.skills.DirtNavigationPolicy;
@@ -132,6 +133,9 @@ public final class DirtShovelSkill implements Skill {
                         ChatUtils.sendChatMessages(source.withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS), adjacent.chatMessage()));
                 if (detection.blockingHazard().isPresent()) {
                     Hazard hazard = detection.blockingHazard().get();
+                    if (isLavaHazard(hazard)) {
+                        LavaHazardService.respondToLava(player, source, hazard.location());
+                    }
                     SkillResumeService.flagManualResume(player);
                     ChatUtils.sendChatMessages(source.withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS), hazard.chatMessage());
                     return failure(context, hazard.failureMessage());
@@ -1081,6 +1085,13 @@ public final class DirtShovelSkill implements Skill {
         }
         String lower = result.toLowerCase(Locale.ROOT);
         return !(lower.contains("failed") || lower.contains("error") || lower.contains("not found"));
+    }
+
+    private static boolean isLavaHazard(Hazard hazard) {
+        if (hazard == null || hazard.chatMessage() == null) {
+            return false;
+        }
+        return hazard.chatMessage().toLowerCase().contains("lava");
     }
 
     private record ApproachPlan(BlockPos entryPosition, BlockPos standPosition, List<ObstructionStep> steps) {

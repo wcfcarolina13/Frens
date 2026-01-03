@@ -20,6 +20,7 @@
 | `stripmine` | Carve 1×3 tunnels with automatic torch placement |
 | `ascent` / `descent` | Dig staircases up or down to target Y-levels |
 | `fish` | Find water, cast, and reel in catches (idle hobby) |
+| `hunt` | Hunt nearby food mobs (optional auto-hunt when starving) |
 | `collect_dirt` | Gather soft blocks (dirt, gravel, sand, mud) |
 | `shelter hovel` | Build emergency dirt/cobble shelters with doors and torches |
 

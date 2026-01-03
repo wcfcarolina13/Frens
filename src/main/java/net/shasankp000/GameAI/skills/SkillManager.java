@@ -4,11 +4,13 @@ import net.minecraft.server.network.ServerPlayerEntity;
 import net.shasankp000.GameAI.BotEventHandler;
 import net.shasankp000.GameAI.DropSweeper;
 import net.shasankp000.GameAI.services.BotCommandStateService;
+import net.shasankp000.GameAI.services.DebugFileLogger;
 import net.shasankp000.GameAI.services.TaskService;
 import net.shasankp000.GameAI.skills.impl.CollectDirtSkill;
 import net.shasankp000.GameAI.skills.impl.DirtShovelSkill;
 import net.shasankp000.GameAI.skills.impl.DropSweepSkill;
 import net.shasankp000.GameAI.skills.impl.FishingSkill;
+import net.shasankp000.GameAI.skills.impl.HuntSkill;
 import net.shasankp000.GameAI.skills.impl.MiningSkill;
 import net.shasankp000.GameAI.skills.impl.ShelterSkill;
 import net.shasankp000.GameAI.skills.impl.StripMineSkill;
@@ -36,6 +38,7 @@ public final class SkillManager {
     private static final String WOODCUT_SCAFFOLD_MEMORY_UPDATED_AT_KEY = "woodcut.scaffoldMemory.updatedAt";
 
     static {
+        DebugFileLogger.log("SkillManager.staticInit start");
         register(new DirtShovelSkill());
         register(new CollectDirtSkill());
         register(new MiningSkill());
@@ -49,12 +52,17 @@ public final class SkillManager {
         register(new net.shasankp000.GameAI.skills.impl.FarmSkill());
         register(new net.shasankp000.GameAI.skills.impl.WoolSkill());
         register(new net.shasankp000.GameAI.skills.impl.FlareSkill());
+        register(new HuntSkill());
+        DebugFileLogger.log("SkillManager.staticInit end");
     }
 
     private SkillManager() {
     }
 
     public static void register(Skill skill) {
+        if (skill != null) {
+            DebugFileLogger.log("SkillManager.register " + skill.name());
+        }
         SKILLS.put(skill.name(), skill);
     }
 
@@ -65,9 +73,16 @@ public final class SkillManager {
             return SkillExecutionResult.failure("Skill '" + name + "' not available.");
         }
         ServerPlayerEntity botPlayer = context.botSource().getPlayer();
+        String botName = botPlayer != null ? botPlayer.getName().getString() : "(unknown)";
+        System.out.println("[SkillManager] start name=" + name + " bot=" + botName + " thread=" + Thread.currentThread().getName());
+        DebugFileLogger.log("SkillManager.start name=" + name + " bot=" + botName + " thread=" + Thread.currentThread().getName());
+        LOGGER.info("Skill '{}' starting for bot {} on thread {}", name, botName, Thread.currentThread().getName());
         UUID botUuid = botPlayer != null ? botPlayer.getUuid() : null;
         var ticketOpt = TaskService.beginSkill(name, context.botSource(), botUuid);
         if (ticketOpt.isEmpty()) {
+            System.out.println("[SkillManager] blocked name=" + name + " bot=" + botName);
+            DebugFileLogger.log("SkillManager.blocked name=" + name + " bot=" + botName);
+            LOGGER.warn("Skill '{}' blocked for bot {}: active task already running", name, botName);
             return SkillExecutionResult.failure("Another skill is already running.");
         }
         TaskService.TaskTicket ticket = ticketOpt.get();
@@ -113,6 +128,7 @@ public final class SkillManager {
         BotEventHandler.setExternalOverrideActive(true);
         SkillExecutionResult result = SkillExecutionResult.failure("Skill '" + name + "' ended unexpectedly.");
         try {
+            LOGGER.info("Skill '{}' executing for bot {}", name, botName);
             result = skill.execute(context);
             if (TaskService.isAbortRequested(botUuid)) {
                 String reason = TaskService.getCancelReason(botUuid)
@@ -128,6 +144,11 @@ public final class SkillManager {
             boolean abortRequested = TaskService.isAbortRequested(botUuid);
             String abortReason = TaskService.getCancelReason(botUuid).orElse("");
             String resultMsg = result != null ? result.message() : "null";
+            DebugFileLogger.log("SkillManager.exit name=" + name + " bot=" + botName
+                    + " success=" + (result != null && result.success())
+                    + " abortRequested=" + abortRequested
+                    + " reason=" + abortReason
+                    + " msg=" + resultMsg);
             LOGGER.info("Skill '{}' exit: success={} abortRequested={} reason='{}' message='{}'",
                     name,
                     result != null && result.success(),

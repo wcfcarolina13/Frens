@@ -19,12 +19,14 @@ import net.shasankp000.GraphicalUserInterface.BotPlayerInventoryScreen;
 import net.shasankp000.GraphicalUserInterface.CookablesScreen;
 import net.shasankp000.GraphicalUserInterface.CraftingHistoryScreen;
 import net.shasankp000.GraphicalUserInterface.ConfigManager;
-import net.shasankp000.Network.BasesListPayload;
-import net.shasankp000.Network.CookablesPayload;
-import net.shasankp000.Network.CraftingHistoryPayload;
-import net.shasankp000.Network.ConfigJsonUtil;
-import net.shasankp000.Network.OpenConfigPayload;
-import net.shasankp000.Network.ResumeDecisionPayload;
+import net.shasankp000.GraphicalUserInterface.HuntablesScreen;
+import net.shasankp000.network.CookablesPayload;
+import net.shasankp000.network.CraftingHistoryPayload;
+import net.shasankp000.network.BasesListPayload;
+import net.shasankp000.network.ConfigJsonUtil;
+import net.shasankp000.network.HuntablesPayload;
+import net.shasankp000.network.ResumeDecisionPayload;
+import net.shasankp000.network.OpenConfigPayload;
 import org.lwjgl.glfw.GLFW;
 
 public class AIPlayerClient implements ClientModInitializer {
@@ -129,6 +131,11 @@ public class AIPlayerClient implements ClientModInitializer {
         ClientPlayNetworking.registerGlobalReceiver(CookablesPayload.ID, (payload, context) -> {
             String json = payload.cookablesJson();
             context.client().execute(() -> CookablesScreen.applyCookablesJson(json));
+        });
+
+        ClientPlayNetworking.registerGlobalReceiver(HuntablesPayload.ID, (payload, context) -> {
+            String json = payload.huntablesJson();
+            context.client().execute(() -> HuntablesScreen.applyHuntablesJson(json));
         });
 
         ClientPlayNetworking.registerGlobalReceiver(ResumeDecisionPayload.ID, (payload, context) -> {

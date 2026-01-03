@@ -15,6 +15,7 @@ import net.minecraft.util.Identifier;
 import net.minecraft.util.math.MathHelper;
 import net.shasankp000.AIPlayer;
 import net.shasankp000.FilingSystem.ManualConfig;
+import net.shasankp000.GraphicalUserInterface.HuntablesScreen;
 import net.shasankp000.ui.BotPlayerInventoryScreenHandler;
 
 import java.nio.charset.StandardCharsets;
@@ -69,6 +70,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         AUTO_RETURN_SUNSET,
         AUTO_RETURN_SUNSET_GUARD_PATROL,
         IDLE_HOBBIES,
+        AUTO_HUNT_STARVING,
         VOICED_DIALOGUE,
         TELEPORT_SKILLS,
         TELEPORT_DROP_SWEEP,
@@ -76,6 +78,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         BASES,
         CRAFTING,
         COOKING,
+        HUNTING,
         SKILL_FISH,
         SKILL_WOODCUT,
         SKILL_WOODCUT_CLEANUP,
@@ -115,6 +118,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             new TopicEntry("Auto Home @ Sunset", TopicAction.AUTO_RETURN_SUNSET, true, 0),
             new TopicEntry("Guard/Patrol eligible", TopicAction.AUTO_RETURN_SUNSET_GUARD_PATROL, true, 1),
             new TopicEntry("Idle Hobbies", TopicAction.IDLE_HOBBIES, true, 0),
+            new TopicEntry("Auto Hunt (Starving)", TopicAction.AUTO_HUNT_STARVING, true, 1),
             new TopicEntry("Voiced Dialogue", TopicAction.VOICED_DIALOGUE, true, 0),
             new TopicEntry("TP during Skills", TopicAction.TELEPORT_SKILLS, true, 0),
             new TopicEntry("TP during Sweeps", TopicAction.TELEPORT_DROP_SWEEP, true, 0),
@@ -122,6 +126,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             new TopicEntry("Bases…", TopicAction.BASES, false, 0),
             new TopicEntry("Crafting…", TopicAction.CRAFTING, false, 0),
             new TopicEntry("Cooking…", TopicAction.COOKING, false, 0),
+            new TopicEntry("Hunting…", TopicAction.HUNTING, false, 0),
             new TopicEntry("Fishing", TopicAction.SKILL_FISH, false, 0),
             new TopicEntry("Woodcut", TopicAction.SKILL_WOODCUT, false, 0),
                 new TopicEntry("Woodcut Cleanup", TopicAction.SKILL_WOODCUT_CLEANUP, false, 1),
@@ -647,6 +652,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case AUTO_RETURN_SUNSET -> toggleAutoReturnSunset();
             case AUTO_RETURN_SUNSET_GUARD_PATROL -> toggleAutoReturnSunsetGuardPatrol();
             case IDLE_HOBBIES -> toggleIdleHobbies();
+            case AUTO_HUNT_STARVING -> toggleAutoHuntStarving();
             case VOICED_DIALOGUE -> toggleVoicedDialogue();
             case TELEPORT_SKILLS -> toggleTeleportSkills();
             case TELEPORT_DROP_SWEEP -> toggleTeleportDropSweep();
@@ -654,6 +660,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case BASES -> openBasesManager();
             case CRAFTING -> openCraftingHistory();
             case COOKING -> openCookingMenu();
+            case HUNTING -> openHuntingMenu();
             case SKILL_FISH -> runSkillCommand("fish", null);
             case SKILL_WOODCUT -> runSkillCommand("woodcut", null);
             case SKILL_WOODCUT_CLEANUP -> runSkillCommand("woodcut_cleanup", null);
@@ -678,6 +685,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case AUTO_RETURN_SUNSET -> isAutoReturnAtSunsetActive();
             case AUTO_RETURN_SUNSET_GUARD_PATROL -> isAutoReturnGuardPatrolEligibleActive();
             case IDLE_HOBBIES -> isIdleHobbiesActive();
+            case AUTO_HUNT_STARVING -> isAutoHuntStarvingActive();
             case VOICED_DIALOGUE -> isVoicedDialogueActive();
             case TELEPORT_SKILLS -> isTeleportSkillsActive();
             case TELEPORT_DROP_SWEEP -> isTeleportDropSweepActive();
@@ -699,6 +707,10 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
 
     private boolean isIdleHobbiesActive() {
         return this.handler != null && this.handler.isBotIdleHobbiesEnabled();
+    }
+
+    private boolean isAutoHuntStarvingActive() {
+        return this.handler != null && this.handler.isBotAutoHuntStarvingEnabled();
     }
 
     private boolean isAutoReturnGuardPatrolEligibleActive() {
@@ -758,6 +770,11 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
     private void clampTopicScroll(int visibleRows) {
         int maxScroll = Math.max(0, TOPIC_ENTRIES.size() - visibleRows);
         topicScrollIndex = MathHelper.clamp(topicScrollIndex, 0, maxScroll);
+    }
+
+    @Override
+    public boolean shouldPause() {
+        return false;
     }
 
     private boolean isFollowActive() {
@@ -863,6 +880,12 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         sendChatCommand(command);
     }
 
+    private void toggleAutoHuntStarving() {
+        String botTarget = formatBotTarget();
+        String command = "bot auto_hunt_starving toggle " + botTarget;
+        sendChatCommand(command);
+    }
+
     private boolean isVoicedDialogueActive() {
         ManualConfig.BotControlSettings settings = AIPlayer.CONFIG.getEffectiveBotControl(botAlias);
         return settings != null && settings.isVoicedDialogue();
@@ -915,6 +938,13 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             return;
         }
         this.client.setScreen(new CookablesScreen(this, formatBotTarget()));
+    }
+
+    private void openHuntingMenu() {
+        if (this.client == null) {
+            return;
+        }
+        this.client.setScreen(new HuntablesScreen(this, formatBotTarget()));
     }
 
     /**

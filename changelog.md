@@ -25,6 +25,24 @@ Historical record and reasoning. `TODO.md` is the source of truth for what’s n
 - ChestStoreService: fix build by using `getEntityWorld()` for bot world logging.
 - Crafting: force offload retry after failed insert so chest deposit runs even when the initial room check is optimistic.
 - Chest debug logging now routes through DebugToggleService so it can be toggled with the global debug flag.
+- Permissions: align LeveledPermissionPredicate stub field types with runtime to avoid OWNERS NoSuchFieldError on launch.
+- Networking: restore non-null codecs for SaveAPIKey/SaveCustomProvider payloads to prevent Fabric payload registry NPE at init.
+- LLM: skip BERT/LIDSNet loading when DJL is missing to avoid ai.djl.Model classpath crashes at startup.
+- Fake players: use an EmbeddedChannel-backed SERVERBOUND FakeClientConnection to avoid local connection refusals and side mismatches on spawn.
+- Hunt UI: move the huntable list below the control buttons to prevent header/controls overlap.
+- UI: stop pausing the game while the topics/crafting/cooking/hunting screens are open.
+- Hunt debugging: add detailed logging around task starts, blocked slots, and hunt execution flow.
+- Hunt debugging: add temporary stdout markers for skill/task entry so logs capture flow even if logger filters hide INFO.
+- Hunt debugging: write skill flow markers to `config/ai-player/skill_debug.log`.
+- Hunt debugging: add pre-context/pre-run markers and log SkillManager static init/register steps.
+- Skills: build the skill execution context on the server thread before dispatching to the executor to avoid worker-thread stalls.
+- Skills: guard shared state lookup so missing ollama4j classes can't crash `/bot skill`.
+- Hunting: drop-sweep during hunts now runs much more frequently to avoid leaving loot behind.
+- Hunting: run a drop-sweep after each kill and before stopping on depopulation safeguards.
+- Hunting: run a final wider-radius drop-sweep after hunts to catch nearby leftovers.
+- Mining safety: on lava detection, bots try water buckets first, then plug with rock/gravel/dirt, back off to a 2-block buffer, and retreat again if lava closes in (alerts preserved).
+- Git: ignore local status/audio-need markdown notes.
+- Hunt UX: announce hunt start target/count so manual requests give immediate feedback.
 - Smelting: when the furnace already has input, auto-cook or matching cook requests now top it up from inventory and refill matching fuel (direct inventory scan, item-only match); auto fuel selection now prefers leaf litter/leaves/saplings and ranks logs/planks/sticks/charcoal/coal blocks above coal.
 - Woodcut: inventory-full handling now attempts fallback chest deposits for non-tool woodcut drops and uses placed chests for both primary and fallback offloads.
 - Woodcut cleanup: drop sweep radius now reflects the full area traversed during cleanup, and scaffold placements are recorded for later cleanup passes.
@@ -35,9 +53,13 @@ Historical record and reasoning. `TODO.md` is the source of truth for what’s n
 - Topics UI: added Stop/Resume/Drop Sweep entries with disabled states when not applicable.
 - Client: stop keybind now defaults to `\\` and stops the looked-at bot.
 - Commands: `/bot skill woodcutting ...` now aliases to `woodcut` (reduces “unknown skill” typos).
+- Commands: manual skills now interrupt ambient hobbies so `/bot skill ...` can start immediately.
+- TaskService: if a task slot is stale (non-running state or dead thread), replace it so new skills can start.
 - Store: `/bot store deposit|withdraw` now supports no-arg defaults; when not looking at a chest it will prefer the last chest it placed, otherwise use a nearby chest (or place one for deposits). Default deposit now “matches what’s already in the chest” (e.g., chest has oak logs ⇒ deposit oak logs); if the chest is empty it falls back to construction materials + common mob drops. Default deposit also includes construction/clutter items so it can be used as a general stash when you’re trying to make space. Use item filter `all`/`*` to match everything.
 - Crafting: crafting-table placement is now more robust (avoids fluids and blocked tiles, and retries nearby placements) so “logs → planks → place table → chest” works more reliably for storage automation.
 - Shelter: added `/bot shelter hovel <alias?>` to build a quick dirt/cobble hovel (roofed, torches, fills gaps, gathers dirt if short).
+- Hunting: new `hunt` skill with mob catalog, unlock-on-kill gating, hunting grounds based on bot/bases/beds, cooking fallback, and drop/overflow handling. Topics menu adds Hunting popout and an auto-hunt-when-starving toggle.
+- Networking: standardized network payload packages to `net.shasankp000.network` to eliminate mixed-case imports.
 - Shelter: hovel now prefers staying near the build site for material gathering (shallow local dig only; no auto descent/stripmine), and can detect/complete nearby pre-existing shelter footprints.
 - Shelter: hovel siting rejects unsupported/water-edge footprints (won’t try to build walls over shoreline overhangs), and runs a final interior leveling + gap patch pass right before drop-sweeping.
 - Shelter: hovel placement now attempts a “double back and exit” when reach-moves fail inside the footprint (targets doorway/perimeter openings instead of endlessly pushing into walls).

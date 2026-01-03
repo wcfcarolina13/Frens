@@ -1,9 +1,10 @@
-package net.shasankp000.Network;
+package net.shasankp000.network;
 
 import net.minecraft.network.PacketByteBuf;
 import net.minecraft.network.codec.PacketCodec;
 import net.minecraft.network.packet.CustomPayload;
 import net.minecraft.util.Identifier;
+import net.shasankp000.network.StringCodec;
 
 /** Client -> Server: request cookables list for the active bot. */
 public record RequestCookablesPayload(String query) implements CustomPayload {

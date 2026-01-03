@@ -1,4 +1,4 @@
-package net.shasankp000.Network;
+package net.shasankp000.network;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;

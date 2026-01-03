@@ -121,6 +121,30 @@ final class BotHomeCommands {
                                         StringArgumentType.getString(context, "target")))));
     }
 
+    static ArgumentBuilder<ServerCommandSource, ?> buildAutoHuntStarving() {
+        return CommandManager.literal("auto_hunt_starving")
+                .then(CommandManager.literal("on")
+                        .executes(context -> modCommandRegistry.executeAutoHuntStarvingSetTargets(context, null, true))
+                        .then(CommandManager.argument("target", StringArgumentType.string())
+                                .executes(context -> modCommandRegistry.executeAutoHuntStarvingSetTargets(
+                                        context,
+                                        StringArgumentType.getString(context, "target"),
+                                        true))))
+                .then(CommandManager.literal("off")
+                        .executes(context -> modCommandRegistry.executeAutoHuntStarvingSetTargets(context, null, false))
+                        .then(CommandManager.argument("target", StringArgumentType.string())
+                                .executes(context -> modCommandRegistry.executeAutoHuntStarvingSetTargets(
+                                        context,
+                                        StringArgumentType.getString(context, "target"),
+                                        false))))
+                .then(CommandManager.literal("toggle")
+                        .executes(context -> modCommandRegistry.executeAutoHuntStarvingToggleTargets(context, null))
+                        .then(CommandManager.argument("target", StringArgumentType.string())
+                                .executes(context -> modCommandRegistry.executeAutoHuntStarvingToggleTargets(
+                                        context,
+                                        StringArgumentType.getString(context, "target")))));
+    }
+
     static ArgumentBuilder<ServerCommandSource, ?> buildIdleNow() {
         return CommandManager.literal("idle_now")
                 .executes(context -> modCommandRegistry.executeIdleNowTargets(context, null))

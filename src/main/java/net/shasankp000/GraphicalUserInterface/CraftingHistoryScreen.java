@@ -14,8 +14,8 @@ import net.minecraft.registry.Registries;
 import net.minecraft.text.Text;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.math.MathHelper;
-import net.shasankp000.Network.CraftingHistoryPayload;
-import net.shasankp000.Network.RequestCraftingHistoryPayload;
+import net.shasankp000.network.CraftingHistoryPayload;
+import net.shasankp000.network.RequestCraftingHistoryPayload;
 
 import java.lang.reflect.Type;
 import java.util.ArrayList;
@@ -156,6 +156,11 @@ public class CraftingHistoryScreen extends Screen {
         if (client != null) {
             client.setScreen(parent);
         }
+    }
+
+    @Override
+    public boolean shouldPause() {
+        return false;
     }
 
     @Override
