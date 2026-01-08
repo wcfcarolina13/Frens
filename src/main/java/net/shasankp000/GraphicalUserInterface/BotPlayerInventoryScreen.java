@@ -72,6 +72,8 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         IDLE_HOBBIES,
         AUTO_HUNT_STARVING,
         VOICED_DIALOGUE,
+        UNLEASH_TETHERED,
+        LEASH_ON_DISMOUNT,
         TELEPORT_SKILLS,
         TELEPORT_DROP_SWEEP,
         DROP_SWEEP,
@@ -83,6 +85,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         SKILL_WOODCUT,
         SKILL_WOODCUT_CLEANUP,
         SKILL_WOOL,
+        CONSTRUCTION,
         SKILL_HOVEL,
         SKILL_BURROW,
         SKILL_FARM,
@@ -120,25 +123,26 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             new TopicEntry("Idle Hobbies", TopicAction.IDLE_HOBBIES, true, 0),
             new TopicEntry("Auto Hunt (Starving)", TopicAction.AUTO_HUNT_STARVING, true, 1),
             new TopicEntry("Voiced Dialogue", TopicAction.VOICED_DIALOGUE, true, 0),
+            new TopicEntry("Unleash Tethered", TopicAction.UNLEASH_TETHERED, true, 0),
+            new TopicEntry("Leash on Dismount", TopicAction.LEASH_ON_DISMOUNT, true, 0),
             new TopicEntry("TP during Skills", TopicAction.TELEPORT_SKILLS, true, 0),
             new TopicEntry("TP during Sweeps", TopicAction.TELEPORT_DROP_SWEEP, true, 0),
             new TopicEntry("Drop Sweep", TopicAction.DROP_SWEEP, false, 0),
             new TopicEntry("Bases…", TopicAction.BASES, false, 0),
             new TopicEntry("Crafting…", TopicAction.CRAFTING, false, 0),
+            new TopicEntry("Construction…", TopicAction.CONSTRUCTION, false, 0),
             new TopicEntry("Cooking…", TopicAction.COOKING, false, 0),
             new TopicEntry("Hunting…", TopicAction.HUNTING, false, 0),
             new TopicEntry("Fishing", TopicAction.SKILL_FISH, false, 0),
             new TopicEntry("Woodcut", TopicAction.SKILL_WOODCUT, false, 0),
                 new TopicEntry("Woodcut Cleanup", TopicAction.SKILL_WOODCUT_CLEANUP, false, 1),
             new TopicEntry("Wool", TopicAction.SKILL_WOOL, false, 0),
-            new TopicEntry("Hovel", TopicAction.SKILL_HOVEL, false, 0),
-            new TopicEntry("Burrow", TopicAction.SKILL_BURROW, false, 0),
-            new TopicEntry("Farming", TopicAction.SKILL_FARM, false, 0),
-            new TopicEntry("Collect Dirt", TopicAction.SKILL_COLLECT_DIRT, false, 1),
-            new TopicEntry("Mining", TopicAction.SKILL_MINING, false, 0),
-            new TopicEntry("Stripmine", TopicAction.SKILL_STRIPMINE, false, 1),
-            new TopicEntry("Ascent", TopicAction.SKILL_ASCENT, false, 1),
-            new TopicEntry("Descent", TopicAction.SKILL_DESCENT, false, 1)
+            new TopicEntry("Farming", TopicAction.SKILL_FARM, false, 1),
+            new TopicEntry("Collect Dirt", TopicAction.SKILL_COLLECT_DIRT, false, 2),
+            new TopicEntry("Mining", TopicAction.SKILL_MINING, false, 1),
+            new TopicEntry("Stripmine", TopicAction.SKILL_STRIPMINE, false, 2),
+            new TopicEntry("Ascent", TopicAction.SKILL_ASCENT, false, 2),
+            new TopicEntry("Descent", TopicAction.SKILL_DESCENT, false, 2)
     );
 
     public BotPlayerInventoryScreen(BotPlayerInventoryScreenHandler handler, PlayerInventory inventory, Text title) {
@@ -409,7 +413,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         int visibleRows = Math.max(1, listH / TOPIC_ROW_HEIGHT);
         clampTopicScroll(visibleRows);
 
-        int followIndex = 0;
+        int followIndex = getFollowEntryIndex();
         int visibleStart = topicScrollIndex;
         int visibleEnd = topicScrollIndex + visibleRows;
         if (followIndex < visibleStart || followIndex >= visibleEnd) {
@@ -611,7 +615,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
     }
 
     private int getFollowAdjustDirection(double mouseX, double mouseY) {
-        int followIndex = 0;
+        int followIndex = getFollowEntryIndex();
         int listHeight = getTopicListHeight();
         int visibleRows = Math.max(1, listHeight / TOPIC_ROW_HEIGHT);
         clampTopicScroll(visibleRows);
@@ -640,6 +644,15 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         return 0;
     }
 
+    private int getFollowEntryIndex() {
+        for (int i = 0; i < TOPIC_ENTRIES.size(); i++) {
+            if (TOPIC_ENTRIES.get(i).action == TopicAction.FOLLOW) {
+                return i;
+            }
+        }
+        return 0;
+    }
+
     private void handleTopicEntry(TopicEntry entry) {
         switch (entry.action) {
             case STOP -> runStop();
@@ -654,6 +667,8 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case IDLE_HOBBIES -> toggleIdleHobbies();
             case AUTO_HUNT_STARVING -> toggleAutoHuntStarving();
             case VOICED_DIALOGUE -> toggleVoicedDialogue();
+            case UNLEASH_TETHERED -> toggleUnleashTethered();
+            case LEASH_ON_DISMOUNT -> toggleLeashOnDismount();
             case TELEPORT_SKILLS -> toggleTeleportSkills();
             case TELEPORT_DROP_SWEEP -> toggleTeleportDropSweep();
             case DROP_SWEEP -> runSkillCommand("drop_sweep", null);
@@ -661,6 +676,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case CRAFTING -> openCraftingHistory();
             case COOKING -> openCookingMenu();
             case HUNTING -> openHuntingMenu();
+            case CONSTRUCTION -> openConstructionMenu();
             case SKILL_FISH -> runSkillCommand("fish", null);
             case SKILL_WOODCUT -> runSkillCommand("woodcut", null);
             case SKILL_WOODCUT_CLEANUP -> runSkillCommand("woodcut_cleanup", null);
@@ -687,6 +703,8 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case IDLE_HOBBIES -> isIdleHobbiesActive();
             case AUTO_HUNT_STARVING -> isAutoHuntStarvingActive();
             case VOICED_DIALOGUE -> isVoicedDialogueActive();
+            case UNLEASH_TETHERED -> isUnleashTetheredActive();
+            case LEASH_ON_DISMOUNT -> isLeashOnDismountActive();
             case TELEPORT_SKILLS -> isTeleportSkillsActive();
             case TELEPORT_DROP_SWEEP -> isTeleportDropSweepActive();
             default -> false;
@@ -695,7 +713,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
 
     private boolean isEntryEnabled(TopicAction action) {
         return switch (action) {
-            case STOP -> this.handler != null && this.handler.isBotTaskActive() && !this.handler.isBotTaskPaused();
+            case STOP -> (this.handler != null && this.handler.isBotTaskActive() && !this.handler.isBotTaskPaused()) || net.shasankp000.AIPlayerClient.hasPendingShelter();
             case RESUME -> this.handler != null && this.handler.isBotTaskPaused();
             default -> true;
         };
@@ -841,6 +859,9 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         String botTarget = formatBotTarget();
         String command = "bot stop " + botTarget;
         sendChatCommand(command);
+        
+        // Also clear any pending shelter placement
+        net.shasankp000.AIPlayerClient.clearPendingShelter();
     }
 
     private void runResume() {
@@ -919,6 +940,26 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         AIPlayer.CONFIG.save();
     }
 
+    private boolean isUnleashTetheredActive() {
+        return this.handler != null && this.handler.isBotUnleashTetheredEnabled();
+    }
+
+    private void toggleUnleashTethered() {
+        String botTarget = formatBotTarget();
+        String command = "bot unleash_tethered toggle " + botTarget;
+        sendChatCommand(command);
+    }
+
+    private boolean isLeashOnDismountActive() {
+        return this.handler != null && this.handler.isBotLeashOnDismountEnabled();
+    }
+
+    private void toggleLeashOnDismount() {
+        String botTarget = formatBotTarget();
+        String command = "bot leash_on_dismount toggle " + botTarget;
+        sendChatCommand(command);
+    }
+
     private void openBasesManager() {
         if (this.client == null) {
             return;
@@ -945,6 +986,13 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             return;
         }
         this.client.setScreen(new HuntablesScreen(this, formatBotTarget()));
+    }
+
+    private void openConstructionMenu() {
+        if (this.client == null) {
+            return;
+        }
+        this.client.setScreen(new ConstructionScreen(this, formatBotTarget()));
     }
 
     /**

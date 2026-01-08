@@ -26,12 +26,16 @@ import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.RaycastContext;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import net.shasankp000.GameAI.services.MovementService;
 import net.shasankp000.GameAI.services.SneakLockService;
 
 
 
 
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Collections;
 import java.util.HashMap;
@@ -54,6 +58,8 @@ import java.util.function.Supplier;
  */
 public final class BotActions {
 
+    private static final Logger LOGGER = LoggerFactory.getLogger("bot-actions");
+
     private static final double STEP_DISTANCE = 0.45;
     private static final float TURN_DEGREES = 20.0f;
     private static final int BOW_MIN_CHARGE_TICKS = 15;
@@ -63,6 +69,8 @@ public final class BotActions {
     private static final Map<UUID, RangedAttackState> RANGED_STATE = new HashMap<>();
 
     private BotActions() {}
+
+    public record PlaceResult(boolean success, String reason) {}
 
     private static boolean onServerThread(ServerPlayerEntity bot) {
         if (bot == null || bot.getCommandSource() == null || bot.getCommandSource().getServer() == null) {
@@ -516,27 +524,39 @@ public final class BotActions {
     }
 
     public static boolean placeBlockAt(ServerPlayerEntity bot, BlockPos target, Direction face, List<Item> prioritizedBlocks) {
+        return tryPlaceBlockAt(bot, target, face, prioritizedBlocks).success();
+    }
+
+    public static PlaceResult tryPlaceBlockAt(ServerPlayerEntity bot, BlockPos target, Direction face, List<Item> prioritizedBlocks) {
+        PlaceResult fallback = new PlaceResult(false, "timeout-or-thread-error");
         return callOnServerThread(bot, () -> {
             ServerWorld world = bot.getCommandSource().getWorld();
             if (world == null || target == null) {
-                return false;
+                return new PlaceResult(false, "no-world-or-target");
             }
+
             double distSq = bot.squaredDistanceTo(target.getX() + 0.5, target.getY() + 0.5, target.getZ() + 0.5);
             if (distSq > SURVIVAL_REACH_SQ) {
-                return false;
+                return new PlaceResult(false, "out-of-reach distSq=" + String.format(Locale.ROOT, "%.2f", distSq));
             }
+
             if (!world.getBlockState(target).isAir() && world.getFluidState(target).isEmpty()) {
                 // Allow replacing certain "clutter" blocks to avoid placement failures.
-                // (E.g., grass/flowers/snow layers that occupy the cell but should not block building.)
+                // (E.g., grass/flowers/snow layers/carpets that occupy the cell but should not block building.)
                 net.minecraft.block.BlockState state = world.getBlockState(target);
                 boolean allowReplace = state.isOf(net.minecraft.block.Blocks.SNOW)
                         || state.isOf(net.minecraft.block.Blocks.SNOW_BLOCK)
+                        || state.isIn(BlockTags.WOOL_CARPETS)
                         || (state.isReplaceable() && state.getCollisionShape(world, target).isEmpty());
                 if (!allowReplace) {
-                    return false;
+                    return new PlaceResult(false, "occupied=" + state.getBlock().getName().getString());
                 }
-                world.breakBlock(target, false);
+                boolean cleared = world.breakBlock(target, false);
+                if (!cleared && !world.getBlockState(target).isAir()) {
+                    return new PlaceResult(false, "failed-to-clear-occupied=" + state.getBlock().getName().getString());
+                }
             }
+
             // Avoid placing while standing inside the target
             if (bot.getBoundingBox().intersects(new net.minecraft.util.math.Box(target))) {
                 // Allow jump-pillaring: if the bot is airborne and placing into its current foot block,
@@ -553,27 +573,30 @@ public final class BotActions {
                             && bot.getY() > below.getY() + 0.05D;
                 }
                 if (!allowJumpPillar) {
-                    return false;
+                    return new PlaceResult(false, "bot-intersects-target");
                 }
             }
+
             Support support = resolvePlacementSupport(world, target, face);
             if (support == null) {
-                return false;
+                return new PlaceResult(false, "no-solid-support");
             }
+
             int slot = findPreferredBlockItemSlot(bot, prioritizedBlocks);
             if (slot == -1) {
-                return false;
+                return new PlaceResult(false, "no-block-item-available");
             }
             PlayerInventory inventory = bot.getInventory();
             slot = ensureHotbarAccess(bot, inventory, slot);
             ItemStack stack = inventory.getStack(slot);
             if (!(stack.getItem() instanceof BlockItem blockItem)) {
-                return false;
+                return new PlaceResult(false, "selected-item-not-block");
             }
             selectHotbarSlot(bot, slot);
+
             BlockHitResult hit = computePlacementHit(world, bot, support);
             if (hit == null) {
-                return false;
+                return new PlaceResult(false, "no-line-of-sight-to-support support=" + support.clickPos().toShortString() + " face=" + support.face());
             }
             ItemUsageContext usage = new ItemUsageContext(bot, Hand.MAIN_HAND, hit);
             ItemPlacementContext placementContext = new ItemPlacementContext(usage);
@@ -583,10 +606,20 @@ public final class BotActions {
                 if (stack.isEmpty()) {
                     inventory.setStack(slot, ItemStack.EMPTY);
                 }
-                return true;
+                return new PlaceResult(true, null);
             }
-            return false;
-        }, 3500L, false);
+            PlaceResult fail = new PlaceResult(false, "place-rejected=" + result);
+            if (LOGGER.isDebugEnabled()) {
+                LOGGER.debug("Place failed: bot={} target={} support={} face={} item={} reason={}",
+                        bot.getName().getString(),
+                        target.toShortString(),
+                        support.clickPos().toShortString(),
+                        support.face(),
+                        stack.getItem().getName().getString(),
+                        fail.reason());
+            }
+            return fail;
+        }, 3500L, fallback);
     }
 
     private record Support(BlockPos clickPos, Direction face) {}
@@ -647,25 +680,81 @@ public final class BotActions {
             return null;
         }
         Vec3d start = bot.getEyePos();
-        Vec3d end = pointOnFace(support.clickPos(), support.face());
-        RaycastContext ctx = new RaycastContext(
-                start,
-                end,
-                RaycastContext.ShapeType.COLLIDER,
-                RaycastContext.FluidHandling.NONE,
-                bot
-        );
-        BlockHitResult hit = world.raycast(ctx);
-        if (hit.getType() != HitResult.Type.BLOCK) {
-            return null;
+
+        // Raycast to multiple points on the support face. Using only the face center is too brittle:
+        // a single neighboring block can occlude the center point while the face is still clickable
+        // at an edge/corner.
+        for (Vec3d end : candidatePointsOnFace(support.clickPos(), support.face())) {
+            RaycastContext ctx = new RaycastContext(
+                    start,
+                    end,
+                    RaycastContext.ShapeType.COLLIDER,
+                    RaycastContext.FluidHandling.NONE,
+                    bot
+            );
+            BlockHitResult hit = world.raycast(ctx);
+            if (hit.getType() != HitResult.Type.BLOCK) {
+                continue;
+            }
+            if (!support.clickPos().equals(hit.getBlockPos())) {
+                continue;
+            }
+            if (hit.getSide() != support.face()) {
+                continue;
+            }
+            return hit;
         }
-        if (!support.clickPos().equals(hit.getBlockPos())) {
-            return null;
+        return null;
+    }
+
+    private static List<Vec3d> candidatePointsOnFace(BlockPos pos, Direction face) {
+        Vec3d center = Vec3d.ofCenter(pos);
+        if (face == null) {
+            return List.of(center);
         }
-        if (hit.getSide() != support.face()) {
-            return null;
+        double o = 0.32D;
+        double f = 0.49D;
+        List<Vec3d> points = new ArrayList<>(5);
+        points.add(pointOnFace(pos, face));
+        switch (face) {
+            case UP -> {
+                points.add(center.add(o, f, o));
+                points.add(center.add(-o, f, o));
+                points.add(center.add(o, f, -o));
+                points.add(center.add(-o, f, -o));
+            }
+            case DOWN -> {
+                points.add(center.add(o, -f, o));
+                points.add(center.add(-o, -f, o));
+                points.add(center.add(o, -f, -o));
+                points.add(center.add(-o, -f, -o));
+            }
+            case NORTH -> {
+                points.add(center.add(o, o, -f));
+                points.add(center.add(-o, o, -f));
+                points.add(center.add(o, -o, -f));
+                points.add(center.add(-o, -o, -f));
+            }
+            case SOUTH -> {
+                points.add(center.add(o, o, f));
+                points.add(center.add(-o, o, f));
+                points.add(center.add(o, -o, f));
+                points.add(center.add(-o, -o, f));
+            }
+            case EAST -> {
+                points.add(center.add(f, o, o));
+                points.add(center.add(f, o, -o));
+                points.add(center.add(f, -o, o));
+                points.add(center.add(f, -o, -o));
+            }
+            case WEST -> {
+                points.add(center.add(-f, o, o));
+                points.add(center.add(-f, o, -o));
+                points.add(center.add(-f, -o, o));
+                points.add(center.add(-f, -o, -o));
+            }
         }
-        return hit;
+        return points;
     }
 
     private static Vec3d pointOnFace(BlockPos pos, Direction face) {

@@ -23,6 +23,7 @@ import net.shasankp000.GameAI.BotActions;
 import net.shasankp000.GameAI.services.CraftingHelper;
 import net.shasankp000.GameAI.services.ChestStoreService;
 import net.shasankp000.GameAI.services.BlockInteractionService;
+import net.shasankp000.GameAI.services.ToolProvisionService;
 import net.shasankp000.GameAI.services.MovementService;
 import net.shasankp000.GameAI.services.ReturnBaseStuckService;
 import net.shasankp000.GameAI.services.SkillResumeService;
@@ -1052,8 +1053,8 @@ public final class WoodcutSkill implements Skill {
         if (selectAxe(bot)) {
             return true;
         }
-        int crafted = CraftingHelper.craftGeneric(source, bot, source.getPlayer(), "axe", 1, null);
-        if (crafted > 0) {
+        boolean crafted = ToolProvisionService.ensureAxe(bot, source, source.getPlayer());
+        if (crafted) {
             return selectAxe(bot);
         }
         ChatUtils.sendSystemMessage(source, "I'm out of axes and can't craft one (missing sticks/planks/stone/ingots).");

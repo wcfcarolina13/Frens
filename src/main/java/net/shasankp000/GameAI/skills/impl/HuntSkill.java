@@ -21,6 +21,7 @@ import net.shasankp000.GameAI.BotActions;
 import net.shasankp000.GameAI.DropSweeper;
 import net.shasankp000.GameAI.services.BotHomeService;
 import net.shasankp000.GameAI.services.CraftingHelper;
+import net.shasankp000.GameAI.services.ToolProvisionService;
 import net.shasankp000.GameAI.services.HuntCatalog;
 import net.shasankp000.GameAI.services.HuntHistoryService;
 import net.shasankp000.GameAI.services.MovementService;
@@ -228,6 +229,14 @@ public final class HuntSkill implements Skill {
         if (hasRawFood(bot)) {
             SmeltingService.startBatchCook(bot, source, "", "auto");
         }
+        if (request.hobby) {
+            if (bot.getHungerManager().getFoodLevel() <= 19) {
+                eatCookedIfHungry(bot, world);
+            }
+            if (hasNearbyCampfire(world, bot.getBlockPos())) {
+                runHobbyHangout(context, source);
+            }
+        }
 
         if (kills == 0) {
             runFinalDropSweep(source, bot);
@@ -261,6 +270,7 @@ public final class HuntSkill implements Skill {
         String target = null;
         boolean untilSunset = false;
         boolean autoStopOnHunger = false;
+        boolean hobby = false;
 
         Object optionsObj = params != null ? params.get("options") : null;
         if (optionsObj instanceof List<?> list) {
@@ -280,6 +290,10 @@ public final class HuntSkill implements Skill {
                 if (opt.contains("auto")) {
                     autoStopOnHunger = true;
                 }
+                if (opt.contains("hobby")) {
+                    hobby = true;
+                    continue;
+                }
                 if (target == null) {
                     target = opt;
                 }
@@ -287,11 +301,17 @@ public final class HuntSkill implements Skill {
         }
 
         int targetCount = count == -1 ? Integer.MAX_VALUE : Math.max(0, count);
-        boolean checkSunset = untilSunset || count == -1 || openEnded;
+        if (hobby && count == -1) {
+            targetCount = 1;
+        }
+        boolean checkSunset = untilSunset || (count == -1 && !hobby) || openEnded;
         if (openEnded) {
             autoStopOnHunger = true;
         }
-        return new HuntRequest(target, targetCount, checkSunset, listOnly, autoStopOnHunger);
+        if (hobby) {
+            autoStopOnHunger = false;
+        }
+        return new HuntRequest(target, targetCount, checkSunset, listOnly, autoStopOnHunger, hobby);
     }
 
     private static int getIntParameter(Map<String, Object> params, String key, int def) {
@@ -483,7 +503,7 @@ public final class HuntSkill implements Skill {
         if (withdrawWeaponFromContainers(bot, world)) {
             return BotActions.selectBestMeleeWeapon(bot);
         }
-        if (craftSwordIfPossible(bot, source, commander, world)) {
+        if (craftSwordIfPossible(bot, source, commander)) {
             return BotActions.selectBestMeleeWeapon(bot);
         }
         return BotActions.selectBestMeleeWeapon(bot);
@@ -491,59 +511,8 @@ public final class HuntSkill implements Skill {
 
     private static boolean craftSwordIfPossible(ServerPlayerEntity bot,
                                                 ServerCommandSource source,
-                                                ServerPlayerEntity commander,
-                                                ServerWorld world) {
-        if (!canCraftSword(commander != null ? commander : bot)) {
-            return false;
-        }
-        if (hasMaterial(bot, world, Items.COBBLESTONE)
-                || hasMaterial(bot, world, Items.COBBLED_DEEPSLATE)
-                || hasMaterial(bot, world, Items.BLACKSTONE)) {
-            return CraftingHelper.craftGeneric(source, bot, commander, "sword", 1, "stone") > 0;
-        }
-        if (hasMaterial(bot, world, Items.IRON_INGOT)) {
-            return CraftingHelper.craftGeneric(source, bot, commander, "sword", 1, "iron") > 0;
-        }
-        if (hasMaterial(bot, world, Items.DIAMOND)) {
-            return CraftingHelper.craftGeneric(source, bot, commander, "sword", 1, "diamond") > 0;
-        }
-        if (hasPlanks(bot, world)) {
-            return CraftingHelper.craftGeneric(source, bot, commander, "sword", 1, "wood") > 0;
-        }
-        return false;
-    }
-
-    private static boolean canCraftSword(ServerPlayerEntity commander) {
-        if (commander == null) {
-            return false;
-        }
-        Set<Identifier> history = net.shasankp000.GameAI.services.CraftingHistoryService.getHistory(commander);
-        return history.contains(Identifier.of("minecraft", "wooden_sword"))
-                || history.contains(Identifier.of("minecraft", "stone_sword"))
-                || history.contains(Identifier.of("minecraft", "iron_sword"))
-                || history.contains(Identifier.of("minecraft", "diamond_sword"));
-    }
-
-    private static boolean hasMaterial(ServerPlayerEntity bot, ServerWorld world, Item item) {
-        if (countInInventory(bot, item) > 0) {
-            return true;
-        }
-        return countInContainers(world, bot.getBlockPos(), item) > 0;
-    }
-
-    private static boolean hasPlanks(ServerPlayerEntity bot, ServerWorld world) {
-        for (int i = 0; i < bot.getInventory().size(); i++) {
-            ItemStack stack = bot.getInventory().getStack(i);
-            if (!stack.isEmpty() && (stack.isIn(ItemTags.PLANKS) || stack.isIn(ItemTags.LOGS))) {
-                return true;
-            }
-        }
-        for (ContainerSlot slot : scanContainers(world, bot.getBlockPos())) {
-            if (slot.stack.isIn(ItemTags.PLANKS) || slot.stack.isIn(ItemTags.LOGS)) {
-                return true;
-            }
-        }
-        return false;
+                                                ServerPlayerEntity commander) {
+        return ToolProvisionService.ensureSword(bot, source, commander);
     }
 
     private static int countInInventory(ServerPlayerEntity bot, Item item) {
@@ -842,13 +811,58 @@ public final class HuntSkill implements Skill {
         }
     }
 
+    private static void eatCookedIfHungry(ServerPlayerEntity bot, ServerWorld world) {
+        if (bot == null || world == null) {
+            return;
+        }
+        if (bot.getHungerManager().getFoodLevel() > 19) {
+            return;
+        }
+        FoodCandidate cooked = findFoodCandidate(bot, world, true);
+        if (cooked != null) {
+            consumeCandidate(bot, cooked);
+        }
+    }
+
+    private static boolean hasNearbyCampfire(ServerWorld world, BlockPos origin) {
+        if (world == null || origin == null) {
+            return false;
+        }
+        int r = 24;
+        for (BlockPos pos : BlockPos.iterate(origin.add(-r, -2, -r), origin.add(r, 2, r))) {
+            if (!world.isChunkLoaded(pos)) {
+                continue;
+            }
+            var state = world.getBlockState(pos);
+            if (state.isOf(net.minecraft.block.Blocks.CAMPFIRE)
+                    || state.isOf(net.minecraft.block.Blocks.SOUL_CAMPFIRE)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static void runHobbyHangout(SkillContext context, ServerCommandSource source) {
+        try {
+            Map<String, Object> params = new HashMap<>();
+            params.put("_origin", "hunt_hobby");
+            params.put("duration_sec", 25);
+            params.put("until_sunset", true);
+            SkillContext hangoutContext = new SkillContext(source, context.sharedState(), params, context.requestSource());
+            new net.shasankp000.GameAI.skills.impl.HangoutSkill().execute(hangoutContext);
+        } catch (Exception e) {
+            LOGGER.warn("Hobby hangout failed: {}", e.getMessage());
+        }
+    }
+
     private record HuntCandidate(HuntCatalog.HuntTarget target, LivingEntity entity) {}
 
     private record HuntRequest(String targetName,
                                int targetCount,
                                boolean checkSunset,
                                boolean listOnly,
-                               boolean autoStopOnHunger) {}
+                               boolean autoStopOnHunger,
+                               boolean hobby) {}
 
     private record ContainerSlot(Inventory inv, BlockPos pos, int slot, ItemStack stack) {}
 

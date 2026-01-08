@@ -4,6 +4,71 @@
 
 This document originally listed dialogue lines needing audio. All 119 unique sounds (237 files with 2 variants each) have been created and integrated into the mod.
 
+## Pending Dialogue Requests (2026-01)
+
+Add new voiced variants for mount/lead handling. Please record 2-3 variants per line to avoid repetition.
+
+### Environment-Specific Dialogue (NEW)
+
+**Amethyst Geode** (triggers near amethyst blocks underground):
+- "These crystals are beautiful."
+- "So sparkly down here."
+- "We found a geode!"
+
+**Bats** (triggers when bats nearby in caves/dark):
+- "Ah! Bats!"
+- "I hear wings flapping."
+- "Bats give me the creeps."
+
+**Dripstone** (triggers near dripstone in dark caves):
+- "Careful, those are sharp."
+- "Pointy stalactites everywhere."
+- "I can hear dripping."
+
+**Deepslate** (triggers below Y=0 in dark areas with deepslate):
+- "It's cold down here."
+- "We're really deep now."
+- "This stone feels ancient."
+
+### Adventure Banter
+
+- Adventure banter: "Look out, creeper! Haha, just kidding."
+- Adventure banter: "Relax. If I yell \"run,\" then worry."
+- Adventure banter: "I've got your back."
+- Adventure banter: "Stay sharp out here."
+
+### Mount/Lead Handling
+- Low mount health warning: "This horse looks hurt."
+- Low mount health warning: "Mount's looking banged up."
+- Low mount health warning: "My horse is hurt."
+- No apples for healing: "I don't have any apples to heal it."
+- No apples for healing: "I'm out of apples for the horse."
+- No apples for healing: "No apples on me for this horse."
+- No suitable food: "I don't have any suitable food to heal it."
+- No suitable food: "I can't find any mount food right now."
+- No suitable food: "I don't have feed for this horse."
+- No lead available: "I don't have a lead to secure this horse."
+- No lead available: "I'm missing a lead for the horse."
+- No lead available: "I can't secure it without a lead."
+- Can't grab lead: "I can't grab a lead to secure this horse."
+- Can't grab lead: "I couldn't get a lead out."
+- Can't grab lead: "My lead isn't accessible right now."
+- No fence to tie: "I don't have a fence to tie this horse to yet. I'll keep it on a lead."
+- No fence to tie: "No fence nearby, I'll keep it on the lead."
+- No fence to tie: "I'll hold the lead until I can tie it off."
+- Lost track of lead: "I lost track of the horse I was holding."
+- Lost track of lead: "I lost the horse I had on the lead."
+- Lost track of lead: "I can't find the horse I was holding."
+- Horse gone: "The horse I was holding is gone."
+- Horse gone: "The mount I was holding is gone."
+- Horse gone: "I lost the horse I was leading."
+- Lead snapped: "The lead snapped after a sudden drop."
+- Lead snapped: "The lead broke after that fall."
+- Lead snapped: "The lead snapped on that drop."
+- Lead reattach fail: "I don't have a lead to reattach."
+- Lead reattach fail: "I'm out of leads to reattach."
+- Lead reattach fail: "No spare leads to reattach."
+
 ## Current Status
 
 - **Total Audio Files**: 237 (.ogg format)

@@ -59,7 +59,7 @@ public class BotPlayerInventoryScreenHandler extends ScreenHandler {
         this.botInventory = botInventory;
         this.botRef = botRef;
         // Keep this in sync with refreshStats() + getters below.
-        this.botStats = new ArrayPropertyDelegate(17);
+        this.botStats = new ArrayPropertyDelegate(19);
         this.addProperties(this.botStats);
         refreshStats();
 
@@ -242,6 +242,9 @@ public class BotPlayerInventoryScreenHandler extends ScreenHandler {
         botStats.set(14, TaskService.hasActiveTask(botRef.getUuid()) ? 1 : 0);
         botStats.set(15, TaskService.isAbortRequested(botRef.getUuid()) ? 1 : 0);
         botStats.set(16, BotHomeService.isAutoHuntStarvingEnabled(botRef) ? 1 : 0);
+        // Index 17-18: mount leash behavior toggles
+        botStats.set(17, state != null && state.unleashTetheredMounts ? 1 : 0);
+        botStats.set(18, state != null && state.leashMountsOnDismount ? 1 : 0);
     }
 
     public float getBotHealth() {
@@ -306,6 +309,14 @@ public class BotPlayerInventoryScreenHandler extends ScreenHandler {
 
     public boolean isBotAutoHuntStarvingEnabled() {
         return botStats.get(16) != 0;
+    }
+
+    public boolean isBotUnleashTetheredEnabled() {
+        return botStats.get(17) != 0;
+    }
+
+    public boolean isBotLeashOnDismountEnabled() {
+        return botStats.get(18) != 0;
     }
 
     public double getBotFollowDistance() {

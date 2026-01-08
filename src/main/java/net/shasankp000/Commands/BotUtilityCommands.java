@@ -138,5 +138,14 @@ final class BotUtilityCommands {
                                 context,
                                 StringArgumentType.getString(context, "bots"))));
     }
+
+    static ArgumentBuilder<ServerCommandSource, ?> buildTestChatter() {
+        return CommandManager.literal("testchatter")
+                .executes(context -> modCommandRegistry.executeTestChatterTargets(context, null))
+                .then(CommandManager.argument("bots", StringArgumentType.string())
+                        .executes(context -> modCommandRegistry.executeTestChatterTargets(
+                                context,
+                                StringArgumentType.getString(context, "bots"))));
+    }
 }
 

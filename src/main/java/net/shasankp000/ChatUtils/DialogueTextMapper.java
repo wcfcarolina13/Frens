@@ -372,6 +372,26 @@ public final class DialogueTextMapper {
         EXACT_MAP.put("This is creepy.", BotDialogueSounds.LINE_AMBIENT_CREEPY);
         EXACT_MAP.put("It's deep in the cave.", BotDialogueSounds.LINE_AMBIENT_CAVE_DEEP);
 
+        // Special environment - amethyst
+        EXACT_MAP.put("These crystals are beautiful.", BotDialogueSounds.LINE_AMBIENT_AMETHYST_BEAUTIFUL);
+        EXACT_MAP.put("So sparkly down here.", BotDialogueSounds.LINE_AMBIENT_AMETHYST_SPARKLY);
+        EXACT_MAP.put("We found a geode!", BotDialogueSounds.LINE_AMBIENT_AMETHYST_GEODE);
+
+        // Special environment - bats
+        EXACT_MAP.put("Ah! Bats!", BotDialogueSounds.LINE_AMBIENT_BAT_STARTLED);
+        EXACT_MAP.put("I hear wings flapping.", BotDialogueSounds.LINE_AMBIENT_BAT_WINGS);
+        EXACT_MAP.put("Bats give me the creeps.", BotDialogueSounds.LINE_AMBIENT_BAT_CREEPY);
+
+        // Special environment - dripstone
+        EXACT_MAP.put("Careful, those are sharp.", BotDialogueSounds.LINE_AMBIENT_DRIPSTONE_CAREFUL);
+        EXACT_MAP.put("Pointy stalactites everywhere.", BotDialogueSounds.LINE_AMBIENT_DRIPSTONE_SHARP);
+        EXACT_MAP.put("I can hear dripping.", BotDialogueSounds.LINE_AMBIENT_DRIPSTONE_DRIPPING);
+
+        // Special environment - deepslate
+        EXACT_MAP.put("It's cold down here.", BotDialogueSounds.LINE_AMBIENT_DEEPSLATE_COLD);
+        EXACT_MAP.put("We're really deep now.", BotDialogueSounds.LINE_AMBIENT_DEEPSLATE_DEEP);
+        EXACT_MAP.put("This stone feels ancient.", BotDialogueSounds.LINE_AMBIENT_DEEPSLATE_ANCIENT);
+
         // Darkness-related
         EXACT_MAP.put("I can't see a thing.", BotDialogueSounds.LINE_DARK_CANT_SEE);
         EXACT_MAP.put("Where are you?", BotDialogueSounds.LINE_DARK_WHERE_ARE_YOU);

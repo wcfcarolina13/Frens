@@ -174,4 +174,52 @@ final class BotHomeCommands {
                 .then(CommandManager.literal("list")
                         .executes(modCommandRegistry::executeBaseList));
     }
+
+    static ArgumentBuilder<ServerCommandSource, ?> buildUnleashTethered() {
+        return CommandManager.literal("unleash_tethered")
+                .then(CommandManager.literal("on")
+                        .executes(context -> modCommandRegistry.executeUnleashTetheredSetTargets(context, null, true))
+                        .then(CommandManager.argument("target", StringArgumentType.string())
+                                .executes(context -> modCommandRegistry.executeUnleashTetheredSetTargets(
+                                        context,
+                                        StringArgumentType.getString(context, "target"),
+                                        true))))
+                .then(CommandManager.literal("off")
+                        .executes(context -> modCommandRegistry.executeUnleashTetheredSetTargets(context, null, false))
+                        .then(CommandManager.argument("target", StringArgumentType.string())
+                                .executes(context -> modCommandRegistry.executeUnleashTetheredSetTargets(
+                                        context,
+                                        StringArgumentType.getString(context, "target"),
+                                        false))))
+                .then(CommandManager.literal("toggle")
+                        .executes(context -> modCommandRegistry.executeUnleashTetheredToggleTargets(context, null))
+                        .then(CommandManager.argument("target", StringArgumentType.string())
+                                .executes(context -> modCommandRegistry.executeUnleashTetheredToggleTargets(
+                                        context,
+                                        StringArgumentType.getString(context, "target")))));
+    }
+
+    static ArgumentBuilder<ServerCommandSource, ?> buildLeashOnDismount() {
+        return CommandManager.literal("leash_on_dismount")
+                .then(CommandManager.literal("on")
+                        .executes(context -> modCommandRegistry.executeLeashOnDismountSetTargets(context, null, true))
+                        .then(CommandManager.argument("target", StringArgumentType.string())
+                                .executes(context -> modCommandRegistry.executeLeashOnDismountSetTargets(
+                                        context,
+                                        StringArgumentType.getString(context, "target"),
+                                        true))))
+                .then(CommandManager.literal("off")
+                        .executes(context -> modCommandRegistry.executeLeashOnDismountSetTargets(context, null, false))
+                        .then(CommandManager.argument("target", StringArgumentType.string())
+                                .executes(context -> modCommandRegistry.executeLeashOnDismountSetTargets(
+                                        context,
+                                        StringArgumentType.getString(context, "target"),
+                                        false))))
+                .then(CommandManager.literal("toggle")
+                        .executes(context -> modCommandRegistry.executeLeashOnDismountToggleTargets(context, null))
+                        .then(CommandManager.argument("target", StringArgumentType.string())
+                                .executes(context -> modCommandRegistry.executeLeashOnDismountToggleTargets(
+                                        context,
+                                        StringArgumentType.getString(context, "target")))));
+    }
 }

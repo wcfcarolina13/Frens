@@ -4,6 +4,13 @@ import com.mojang.brigadier.builder.ArgumentBuilder;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import net.minecraft.server.command.CommandManager;
 import net.minecraft.server.command.ServerCommandSource;
+import net.minecraft.text.Text;
+import net.shasankp000.GameAI.schematic.SchematicWriter;
+import net.shasankp000.GameAI.schematic.SimpleSchematicBuilder;
+import net.shasankp000.GameAI.schematic.SchematicData;
+
+import java.nio.file.Path;
+import java.nio.file.Paths;
 
 final class BotSkillCommands {
 
@@ -79,5 +86,95 @@ final class BotSkillCommands {
                                                         + StringArgumentType.getString(context, "options"))))
                         )
                 );
+    }
+
+    /**
+     * Build command for schematic/blueprint building.
+     * Usage: /bot build <schematic_name>
+     *        /bot build list
+     *        /bot build preview <schematic_name>
+     *        /bot build export [schematic_name]
+     */
+    static ArgumentBuilder<ServerCommandSource, ?> buildBuild() {
+        return CommandManager.literal("build")
+                .executes(context -> modCommandRegistry.executeSkillTargets(context, "build", null))
+                .then(CommandManager.literal("list")
+                        .executes(context -> modCommandRegistry.executeSkillTargets(context, "build", "list")))
+                .then(CommandManager.literal("preview")
+                        .then(CommandManager.argument("schematic", StringArgumentType.string())
+                                .executes(context -> modCommandRegistry.executeSkillTargets(context, "build",
+                                        "preview " + StringArgumentType.getString(context, "schematic")))))
+                .then(CommandManager.literal("export")
+                        .executes(context -> exportAllSchematics(context.getSource()))
+                        .then(CommandManager.argument("schematic", StringArgumentType.string())
+                                .executes(context -> exportSchematic(context.getSource(), 
+                                        StringArgumentType.getString(context, "schematic")))))
+                .then(CommandManager.argument("schematic", StringArgumentType.string())
+                        .executes(context -> modCommandRegistry.executeSkillTargets(context, "build",
+                                StringArgumentType.getString(context, "schematic"))));
+    }
+
+    /**
+     * Export a single schematic to NBT file.
+     */
+    private static int exportSchematic(ServerCommandSource source, String schematicName) {
+        SchematicData schematic = SimpleSchematicBuilder.getBuiltIn(schematicName);
+        if (schematic == null) {
+            source.sendError(Text.literal("Unknown schematic: " + schematicName));
+            return 0;
+        }
+
+        Path outputDir = Paths.get("schematics");
+        Path outputPath = outputDir.resolve(schematicName + ".nbt");
+        
+        boolean success = SchematicWriter.writeToFile(schematic, outputPath);
+        if (success) {
+            source.sendFeedback(() -> Text.literal("§aExported schematic to " + outputPath), false);
+            return 1;
+        } else {
+            source.sendError(Text.literal("Failed to export schematic"));
+            return 0;
+        }
+    }
+
+    /**
+     * Export all built-in schematics to NBT files.
+     */
+    private static int exportAllSchematics(ServerCommandSource source) {
+        Path outputDir = Paths.get("schematics");
+        int count = SchematicWriter.exportAllBuiltIn(outputDir);
+        
+        if (count > 0) {
+            source.sendFeedback(() -> Text.literal("§aExported " + count + " schematics to " + outputDir), false);
+            return 1;
+        } else {
+            source.sendError(Text.literal("Failed to export schematics"));
+            return 0;
+        }
+    }
+
+    /**
+     * Leash command for tying leashed animals to fences.
+     * Usage: /bot leash
+     *        /bot hitch (alias)
+     */
+    static ArgumentBuilder<ServerCommandSource, ?> buildLeash() {
+        return CommandManager.literal("leash")
+                .executes(context -> modCommandRegistry.executeSkillTargets(context, "leash", null))
+                .then(CommandManager.argument("target", StringArgumentType.string())
+                        .executes(context -> modCommandRegistry.executeSkillTargets(
+                                context,
+                                "leash",
+                                StringArgumentType.getString(context, "target"))));
+    }
+
+    static ArgumentBuilder<ServerCommandSource, ?> buildHitch() {
+        return CommandManager.literal("hitch")
+                .executes(context -> modCommandRegistry.executeSkillTargets(context, "leash", null))
+                .then(CommandManager.argument("target", StringArgumentType.string())
+                        .executes(context -> modCommandRegistry.executeSkillTargets(
+                                context,
+                                "leash",
+                                StringArgumentType.getString(context, "target"))));
     }
 }

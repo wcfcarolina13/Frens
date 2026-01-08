@@ -35,8 +35,20 @@ public final class BotAmbientSocialChatService {
     private static final long NOT_SEEN_FOR_TICKS = 20L * 60L * 5L;   // 5 minutes
     private static final long GREET_COOLDOWN_TICKS = 20L * 45L;      // 45 seconds
 
-    private static final long NEAR_CHAT_AFTER_TICKS = 20L * 25L;     // 25 seconds
-    private static final long NEAR_CHAT_COOLDOWN_TICKS = 20L * 90L;  // 90 seconds
+    private static final long NEAR_CHAT_AFTER_TICKS = 20L * 20L;     // 20 seconds (was 25)
+    private static final long NEAR_CHAT_COOLDOWN_TICKS = 20L * 75L;  // 75 seconds (was 90)
+
+    private static final double ADVENTURE_BASE_RADIUS = 64.0D;
+    private static final double ADVENTURE_BED_RADIUS = 48.0D;
+    private static final long ADVENTURE_RECENT_SLEEP_MS = 20L * 60L * 1000L;
+    private static final double ADVENTURE_BANTER_CHANCE = 0.55D;     // 55% chance (was 45%)
+
+    private static final String[] ADVENTURE_BANTER = {
+            "Look out, creeper! Haha, just kidding.",
+            "Relax. If I yell \"run,\" then worry.",
+            "I've got your back.",
+            "Stay sharp out here."
+    };
 
     private static final ConcurrentHashMap<String, Long> LAST_SEEN_TICK = new ConcurrentHashMap<>();
     private static final ConcurrentHashMap<String, Long> NEAR_SINCE_TICK = new ConcurrentHashMap<>();
@@ -112,8 +124,8 @@ public final class BotAmbientSocialChatService {
 
                     // If they've been nearby a while, very occasionally say something.
                     if ((nowTick - nearSince) > NEAR_CHAT_AFTER_TICKS && (nowTick - lastChat) > NEAR_CHAT_COOLDOWN_TICKS) {
-                        // ~0.08% chance per tick when eligible => roughly once every ~60-90s while hovering.
-                        if (Math.random() < 0.0008) {
+                        // ~0.12% chance per tick when eligible => roughly once every ~40-60s while hovering.
+                        if (Math.random() < 0.0012) {
                             String msg = pickNearbyRemarkLine(player, bot);
                             if (msg != null && !msg.isBlank()) {
                                 say(bot, msg);
@@ -176,8 +188,11 @@ public final class BotAmbientSocialChatService {
             return choose(
                     "I could use a breather.",
                     "Not feeling my best right now.",
-                    "I’ve taken a few too many hits today."
+                    "I've taken a few too many hits today."
             );
+        }
+        if (isAdventuring(player, bot) && Math.random() < ADVENTURE_BANTER_CHANCE) {
+            return choose(ADVENTURE_BANTER);
         }
 
         return choose(
@@ -195,6 +210,23 @@ public final class BotAmbientSocialChatService {
         if (tod < 13_000L) return "sunset";
         if (tod < 23_000L) return "night";
         return "late night";
+    }
+
+    private static boolean isAdventuring(ServerPlayerEntity player, ServerPlayerEntity bot) {
+        if (player == null || bot == null) {
+            return false;
+        }
+        if (!BotEventHandler.isFollowingPlayer(bot)) {
+            return false;
+        }
+        UUID followTarget = BotEventHandler.getFollowTargetUuid(bot);
+        if (followTarget == null || !followTarget.equals(player.getUuid())) {
+            return false;
+        }
+        if (BotHomeService.isNearAnyBase(bot, ADVENTURE_BASE_RADIUS)) {
+            return false;
+        }
+        return !BotHomeService.isNearRecentSleep(bot, ADVENTURE_BED_RADIUS, ADVENTURE_RECENT_SLEEP_MS);
     }
 
     private static String choose(String... options) {

@@ -130,7 +130,6 @@ public class createFakePlayer extends ServerPlayerEntity {
         EntityPosition change = EntityPosition.fromEntity(instance).withRotation((float) yaw, (float) pitch);
         server.getPlayerManager().sendToDimension(new EntityPositionS2CPacket(instance.getId(), change, Set.of(), instance.isOnGround()), dimensionId);
         instance.getAbilities().flying = flying;
-        BotPersistenceService.onBotJoin(instance);
     }
 
 

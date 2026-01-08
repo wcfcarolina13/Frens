@@ -105,8 +105,12 @@ public final class FollowMovementService {
             return;
         }
         double stopDistance = Math.max(followPersonalSpace, MIN_FOLLOW_DISTANCE);
-        if (allowCloseStop && distanceSq <= stopDistance * stopDistance) {
-            BotActions.stop(bot);
+        if (distanceSq <= stopDistance * stopDistance) {
+            if (allowCloseStop) {
+                BotActions.stop(bot);
+            } else {
+                stepBack(bot, targetPos);
+            }
             return;
         }
         LookController.faceBlock(bot, BlockPos.ofFloored(targetPos));

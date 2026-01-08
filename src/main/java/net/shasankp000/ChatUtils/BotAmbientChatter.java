@@ -1,9 +1,15 @@
 package net.shasankp000.ChatUtils;
 
+import net.minecraft.block.Block;
+import net.minecraft.block.BlockState;
+import net.minecraft.block.Blocks;
+import net.minecraft.entity.Entity;
+import net.minecraft.entity.passive.BatEntity;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.sound.SoundEvent;
+import net.minecraft.util.math.Box;
 import net.minecraft.world.World;
 import net.minecraft.world.LightType;
 import net.minecraft.util.math.BlockPos;
@@ -15,6 +21,7 @@ import net.shasankp000.GameAI.services.TaskService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.UUID;
@@ -135,6 +142,34 @@ public final class BotAmbientChatter {
             BotDialogueSounds.LINE_DARK_TORCH_PLEASE,
         };
 
+        // Amethyst geode chatter (used when near amethyst blocks underground)
+        private static final SoundEvent[] AMETHYST_CHATTER = {
+            BotDialogueSounds.LINE_AMBIENT_AMETHYST_BEAUTIFUL,
+            BotDialogueSounds.LINE_AMBIENT_AMETHYST_SPARKLY,
+            BotDialogueSounds.LINE_AMBIENT_AMETHYST_GEODE,
+        };
+
+        // Bat encounter chatter (used when bats nearby in dark/underground areas)
+        private static final SoundEvent[] BAT_CHATTER = {
+            BotDialogueSounds.LINE_AMBIENT_BAT_STARTLED,
+            BotDialogueSounds.LINE_AMBIENT_BAT_WINGS,
+            BotDialogueSounds.LINE_AMBIENT_BAT_CREEPY,
+        };
+
+        // Dripstone chatter (used near dripstone in caves)
+        private static final SoundEvent[] DRIPSTONE_CHATTER = {
+            BotDialogueSounds.LINE_AMBIENT_DRIPSTONE_CAREFUL,
+            BotDialogueSounds.LINE_AMBIENT_DRIPSTONE_SHARP,
+            BotDialogueSounds.LINE_AMBIENT_DRIPSTONE_DRIPPING,
+        };
+
+        // Deepslate chatter (used in deep dark areas with lots of deepslate)
+        private static final SoundEvent[] DEEPSLATE_CHATTER = {
+            BotDialogueSounds.LINE_AMBIENT_DEEPSLATE_COLD,
+            BotDialogueSounds.LINE_AMBIENT_DEEPSLATE_DEEP,
+            BotDialogueSounds.LINE_AMBIENT_DEEPSLATE_ANCIENT,
+        };
+
         // Wildlife chatter (used on surface/daytime)
         private static final SoundEvent[] WILDLIFE_CHATTER = {
             BotDialogueSounds.LINE_WILDLIFE_HEARD_BIRD,
@@ -199,8 +234,9 @@ public final class BotAmbientChatter {
                 continue;
             }
 
-            // Only chatter when truly idle
-            if (BotEventHandler.getCurrentMode(bot) != BotEventHandler.Mode.IDLE) {
+            // Allow chatter when IDLE or FOLLOW mode (not during GUARD/PATROL/combat)
+            BotEventHandler.Mode mode = BotEventHandler.getCurrentMode(bot);
+            if (mode != BotEventHandler.Mode.IDLE && mode != BotEventHandler.Mode.FOLLOW) {
                 continue;
             }
 
@@ -209,9 +245,23 @@ public final class BotAmbientChatter {
                 continue;
             }
 
-            // Check time of day - no chatter at night
+            // Check if underground or in dark area - allow environment chatter anytime
+            BlockPos pos = bot.getBlockPos();
+            int y = pos.getY();
+            int blockLight = 15;
+            try {
+                blockLight = world.getLightLevel(LightType.BLOCK, pos);
+            } catch (Exception ignored) {}
+            
+            boolean isUnderground = y < 60;
+            boolean isDark = blockLight <= 4;
+            
+            // Time of day check - only for surface/idle chatter, not for cave/dark sounds
             int tod = (int) (world.getTimeOfDay() % 24_000L);
-            if (tod >= DONT_CHATTER_AFTER_TOD || tod < DONT_CHATTER_BEFORE_TOD) {
+            boolean isDaytime = tod < DONT_CHATTER_AFTER_TOD && tod >= DONT_CHATTER_BEFORE_TOD;
+            
+            // Skip surface/idle chatter at night, but always allow environment-aware sounds
+            if (!isDaytime && !isUnderground && !isDark) {
                 continue;
             }
 
@@ -313,7 +363,7 @@ public final class BotAmbientChatter {
     }
 
     /**
-     * Pick an environment-specific chatter sound (cave ambient, darkness, wildlife).
+     * Pick an environment-specific chatter sound (cave ambient, darkness, wildlife, special blocks).
      * Returns null if no environment-specific sound should be played.
      */
     private static SoundEvent pickEnvironmentSound(ServerPlayerEntity bot) {
@@ -322,29 +372,131 @@ public final class BotAmbientChatter {
 
         BlockPos pos = bot.getBlockPos();
         int y = pos.getY();
+        
+        int blockLight = 15;
+        try {
+            blockLight = world.getLightLevel(LightType.BLOCK, pos);
+        } catch (Exception ignored) {}
+        
+        boolean isUnderground = y < 60;
+        boolean isDark = blockLight <= 4;
+        boolean isDeepUnderground = y < 0; // Below Y=0 (deepslate layer)
 
-        // Prefer cave/ambient chatter when underground
-        if (y < 60 && RNG.nextFloat() < 0.40f) {
+        // Check for special environment blocks nearby (higher priority, lower chance)
+        
+        // Amethyst geode detection - beautiful crystals deep underground
+        if (isUnderground && RNG.nextFloat() < 0.25f && hasNearbyAmethyst(world, pos)) {
+            return AMETHYST_CHATTER[RNG.nextInt(AMETHYST_CHATTER.length)];
+        }
+        
+        // Bat detection - creepy flapping in caves
+        if ((isUnderground || isDark) && RNG.nextFloat() < 0.30f && hasNearbyBats(world, pos)) {
+            return BAT_CHATTER[RNG.nextInt(BAT_CHATTER.length)];
+        }
+        
+        // Dripstone detection - pointy stalactites/stalagmites
+        if (isUnderground && isDark && RNG.nextFloat() < 0.25f && hasNearbyDripstone(world, pos)) {
+            return DRIPSTONE_CHATTER[RNG.nextInt(DRIPSTONE_CHATTER.length)];
+        }
+        
+        // Deepslate detection - ancient cold stone in the depths
+        if (isDeepUnderground && isDark && RNG.nextFloat() < 0.30f && hasNearbyDeepslate(world, pos)) {
+            return DEEPSLATE_CHATTER[RNG.nextInt(DEEPSLATE_CHATTER.length)];
+        }
+
+        // Generic cave/ambient chatter when underground
+        if (isUnderground && RNG.nextFloat() < 0.40f) {
             return AMBIENT_CAVE_CHATTER[RNG.nextInt(AMBIENT_CAVE_CHATTER.length)];
         }
 
         // Dark-room chatter when light is low
-        try {
-            int blockLight = world.getLightLevel(LightType.BLOCK, pos);
-            if (blockLight <= 4 && RNG.nextFloat() < 0.35f) {
-                return DARK_CHATTER[RNG.nextInt(DARK_CHATTER.length)];
-            }
-        } catch (Exception ignored) {
-            // If light lookup isn't available for some reason, skip dark checks
+        if (isDark && RNG.nextFloat() < 0.35f) {
+            return DARK_CHATTER[RNG.nextInt(DARK_CHATTER.length)];
         }
 
         // Wildlife chatter during daytime on surface
         long tod = Math.floorMod(world.getTimeOfDay(), 24_000L);
-        if (tod < 12_000 && RNG.nextFloat() < 0.20f) {
+        if (!isUnderground && tod < 12_000 && RNG.nextFloat() < 0.20f) {
             return WILDLIFE_CHATTER[RNG.nextInt(WILDLIFE_CHATTER.length)];
         }
 
         return null;
+    }
+    
+    /**
+     * Check if there are amethyst blocks nearby (geode detection).
+     */
+    private static boolean hasNearbyAmethyst(ServerWorld world, BlockPos center) {
+        int radius = 8;
+        for (int dx = -radius; dx <= radius; dx += 2) {
+            for (int dy = -radius; dy <= radius; dy += 2) {
+                for (int dz = -radius; dz <= radius; dz += 2) {
+                    BlockPos checkPos = center.add(dx, dy, dz);
+                    BlockState state = world.getBlockState(checkPos);
+                    Block block = state.getBlock();
+                    if (block == Blocks.AMETHYST_BLOCK || block == Blocks.BUDDING_AMETHYST ||
+                        block == Blocks.AMETHYST_CLUSTER || block == Blocks.LARGE_AMETHYST_BUD ||
+                        block == Blocks.MEDIUM_AMETHYST_BUD || block == Blocks.SMALL_AMETHYST_BUD) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+    
+    /**
+     * Check if there are bats nearby.
+     */
+    private static boolean hasNearbyBats(ServerWorld world, BlockPos center) {
+        Box searchBox = new Box(center).expand(12);
+        List<Entity> entities = world.getOtherEntities(null, searchBox, e -> e instanceof BatEntity);
+        return !entities.isEmpty();
+    }
+    
+    /**
+     * Check if there is dripstone nearby.
+     */
+    private static boolean hasNearbyDripstone(ServerWorld world, BlockPos center) {
+        int radius = 6;
+        for (int dx = -radius; dx <= radius; dx += 2) {
+            for (int dy = -radius; dy <= radius; dy += 2) {
+                for (int dz = -radius; dz <= radius; dz += 2) {
+                    BlockPos checkPos = center.add(dx, dy, dz);
+                    BlockState state = world.getBlockState(checkPos);
+                    Block block = state.getBlock();
+                    if (block == Blocks.POINTED_DRIPSTONE || block == Blocks.DRIPSTONE_BLOCK) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+    
+    /**
+     * Check if there is significant deepslate nearby (at least 5 blocks).
+     */
+    private static boolean hasNearbyDeepslate(ServerWorld world, BlockPos center) {
+        int radius = 5;
+        int count = 0;
+        for (int dx = -radius; dx <= radius; dx += 2) {
+            for (int dy = -radius; dy <= radius; dy += 2) {
+                for (int dz = -radius; dz <= radius; dz += 2) {
+                    BlockPos checkPos = center.add(dx, dy, dz);
+                    BlockState state = world.getBlockState(checkPos);
+                    Block block = state.getBlock();
+                    if (block == Blocks.DEEPSLATE || block == Blocks.COBBLED_DEEPSLATE ||
+                        block == Blocks.DEEPSLATE_BRICKS || block == Blocks.DEEPSLATE_TILES ||
+                        block == Blocks.POLISHED_DEEPSLATE || block == Blocks.CRACKED_DEEPSLATE_BRICKS ||
+                        block == Blocks.CRACKED_DEEPSLATE_TILES || block == Blocks.CHISELED_DEEPSLATE) {
+                        count++;
+                        if (count >= 5) return true;
+                    }
+                }
+            }
+        }
+        return false;
     }
 
     /**

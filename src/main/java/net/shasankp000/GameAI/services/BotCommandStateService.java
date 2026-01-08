@@ -24,6 +24,16 @@ public final class BotCommandStateService {
          * (i.e., "standoff" follow). When LoS breaks, the bot will still pursue/path-plan normally.
          */
         public double followStandoffRange = 0.0D;
+        /**
+         * When true, mounted-follow may take animals tied to fences (unleashing them).
+         * When false, the bot will not disturb fence-tethered animals and will follow on foot instead.
+         */
+        public boolean unleashTetheredMounts = false;
+        /**
+         * When true, the bot will leash its mount with a lead (and tie to a fence if nearby) upon dismounting.
+         * When false, the mount is left as-is after dismounting.
+         */
+        public boolean leashMountsOnDismount = true;
         public BlockPos followFixedGoal;
         public double comeBestGoalDistSq = Double.NaN;
         public int comeTicksSinceBest = 0;

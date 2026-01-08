@@ -34,7 +34,7 @@ Pending work only. Completed items and rationale live in `changelog.md`.
 - [ ] **Follow stability**: Confirm follow continues after other tasks; verify advanced pathfinding stays reliable across dimensions/terrain.
 - [ ] **Come survival movement**: Remove nudge/snap behavior; prefer strict survival-style walking unless explicitly configured.
 - [ ] **Come better rerouting before mining tasks**: Try tighter-corner/vertical reroutes more confidently before suggesting descent/ascent/stripmine.
-- [ ] **Come tool crafting**: Auto-craft torches/shovels/pickaxes from available resources when needed during movement/tasks.
+- [ ] **Come tool crafting**: Hook `ToolProvisionService` into `/bot come` so movement can auto-craft torches/shovels/pickaxes when needed.
 
 ### Shelter (Redo Needed)
 - [ ] **ShelterSkill refactor**: Split `ShelterSkill.java` into smaller hovel/burrow builder classes and tighten shared primitives/logging.
@@ -64,6 +64,7 @@ Pending work only. Completed items and rationale live in `changelog.md`.
 - [ ] Hotbar row (9-slot)
 - [ ] Shift-click, double-click, drag support
 - [ ] Quick-action buttons (Sort, Equip Best, Take All, Give All)
+- [ ] Bundle packing verification: drop_sweep crafts/uses bundles when inventory is truly full.
 
 ### Navigation & Movement
 - [ ] Swimming parity (surface and underwater)
@@ -87,6 +88,11 @@ Pending work only. Completed items and rationale live in `changelog.md`.
 - [ ] Protected build zones (no-grief areas)
 - [ ] Follow/defend modes
 - [ ] Fight with teammates
+- [ ] Ride sync verification: commander mount/dismount mirroring across horse-like/boats/minecarts/pigs/striders with saddles/controls.
+- [ ] Ride sync leashed persistence: leashed (not mounted) horse remains tethered after disconnect/rejoin.
+- [x] Ride sync lead handling: verify lead is removed/picked up before mounting when tethered to fences.
+- [x] Ride sync rejoin handling: verify bot secures last mount with a lead/fence after rejoin when it was mounted before logout.
+- [x] Mount persistence check: log out/in while mounted and ensure the same animal remains without duplication.
 - [ ] **Water-bucket clutch on deadly falls (low priority)**: If bot has a water bucket and detects a lethal fall, attempt to place water under itself just before impact to avoid death.
 - [x] **Hunting verification**: validate hunt targets, auto-hunt (idle/starving), hunt menu layout, manual hunt feedback, and idle-hobby interruption in-game.
 
@@ -107,6 +113,7 @@ Pending work only. Completed items and rationale live in `changelog.md`.
 - [ ] **Farm underground recovery**: Handle cases where bot is underground and can’t pillar upward due to overhead dirt; improve escape logic and add test coverage.
 - [ ] **Farm chest workflow**: Ensure the farm skill can place/store/use chests proactively for inventory/resource management.
 - [ ] **Farm irrigation leak patching**: If irrigation isn’t fillable, detect leakage cause and patch the leak (enclosure improvements).
+- [ ] Hobby verification: flower picking avoids bases/protected zones; feed-animals hobby triggers on low health; hobby hunt cooks/eats and hangs out.
 
 ### Mining & Resource Gathering
 - [ ] Tree chopping (safe climbing, late drop collection)
@@ -142,6 +149,7 @@ Pending work only. Completed items and rationale live in `changelog.md`.
 - [ ] Debug toggle (reduce terminal spam)
 - [ ] Test kit command (`/equip` for testing loadout)
 - [ ] Command queuing (multi-step instructions)
+- [ ] Voiced banter variants for follow-adventure lines (creeper joke, "run" warning).
 
 ## LLM Integration (Future)
 

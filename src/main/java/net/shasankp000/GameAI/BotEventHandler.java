@@ -115,7 +115,7 @@ public class BotEventHandler {
     // Stage-2 refactor: burial/suffocation rescue moved to BotRescueService.
     // Stage-2 refactor: follow/come state maps moved to FollowStateService.
     private static final long FOLLOW_SEALED_STATE_TTL_MS = 1_000L;
-    private static final double FOLLOW_PERSONAL_SPACE = 1.6D; // prefer at least ~1 block gap
+    private static final double FOLLOW_PERSONAL_SPACE = 3.0D; // prefer at least ~3 block gap
     private static final double FOLLOW_BACKUP_DISTANCE = 1.05D; // trigger backup after linger
     private static final long FOLLOW_BACKUP_TRIGGER_MS = 3_000L;
     private static final double FOLLOW_SPRINT_DISTANCE_SQ = 4.0D; // >2 blocks -> sprint
@@ -1748,7 +1748,7 @@ public class BotEventHandler {
         double personalSpaceSq = desiredSpace * desiredSpace;
         // Personal space only applies when following an actual entity. For fixed-goal follow,
         // stopping early based on Euclidean distance can strand the bot behind doors/walls.
-        if (target != null && canSee && !directBlocked && horizDistSq <= personalSpaceSq) {
+        if (target != null && canSee && horizDistSq <= personalSpaceSq) {
             FOLLOW_WAYPOINTS.remove(botId);
             FOLLOW_DOOR_PLAN.remove(botId);
             BotActions.stop(bot);
@@ -2238,11 +2238,18 @@ public class BotEventHandler {
             }
         }
 
-        // Reuse return-to-base stuck escape logic for normal follow (non-fixed goal).
-        // This enables quick nudge / backup / mining / pillar / panic-flee escapes when the bot
-        // is stuck while following a player (useful when teleportation is disabled).
+        // Reuse return-to-base stuck escape logic for normal follow (non-fixed goal), but only when
+        // teleportation is explicitly disabled ("force walk") and the bot is NOT mounted.
+        //
+        // Mining / pillaring escapes are far too destructive for normal follow, and when mounted they
+        // can cause dismount loops and block-breaking while the horse is just trying to climb terrain.
         if (!fixedGoalActive && target != null) {
-            net.shasankp000.GameAI.services.ReturnBaseStuckService.tickAndCheckStuck(bot, positionOf(target));
+            if (forceWalk && !bot.hasVehicle()) {
+                net.shasankp000.GameAI.services.ReturnBaseStuckService.tickAndCheckStuck(bot, positionOf(target));
+            } else {
+                // Prevent stale stuck timers from accumulating when not using the follow stuck system.
+                net.shasankp000.GameAI.services.ReturnBaseStuckService.clear(bot.getUuid());
+            }
         }
 
         if (target != null && shouldPrioritizeCommanderOverDoors(bot, target, canSee, directBlocked, targetDistSq, botSealed, commanderSealed)) {

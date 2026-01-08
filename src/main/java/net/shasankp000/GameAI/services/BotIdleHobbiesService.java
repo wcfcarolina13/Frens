@@ -2,6 +2,7 @@ package net.shasankp000.GameAI.services;
 
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
+import net.minecraft.registry.tag.BlockTags;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.network.ServerPlayerEntity;
@@ -10,6 +11,7 @@ import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.World;
 import net.shasankp000.GameAI.BotEventHandler;
+import net.shasankp000.GameAI.services.AnimalFeedingService;
 import net.shasankp000.GameAI.skills.SkillContext;
 import net.shasankp000.GameAI.skills.SkillExecutionResult;
 import net.shasankp000.GameAI.skills.SkillManager;
@@ -293,9 +295,17 @@ public final class BotIdleHobbiesService {
         boolean huntUnlocked = HuntHistoryService.hasAnyFoodKill(world);
         boolean healthy = bot.getHealth() >= 18.0F && bot.getHungerManager().getFoodLevel() >= 16;
         boolean canHunt = huntUnlocked && healthy && !world.isThundering();
+        boolean canFeedAnimals = hasFeedTargets(bot, world);
+        boolean canPickFlowers = hasNearbyFlowers(world, bot.getBlockPos(), 18);
 
         // Weighted-ish selection: prefer fishing if possible.
-        if (canHunt && RNG.nextDouble() < 0.30D) {
+        if (canFeedAnimals && RNG.nextDouble() < 0.20D) {
+            return "feed_animals";
+        }
+        if (canPickFlowers && RNG.nextDouble() < 0.25D) {
+            return "flowers";
+        }
+        if (canHunt && RNG.nextDouble() < 0.18D) {
             return "hunt";
         }
         if (hasWaterNearby && RNG.nextDouble() < 0.70D) {
@@ -340,6 +350,43 @@ public final class BotIdleHobbiesService {
         return false;
     }
 
+    private static boolean hasNearbyFlowers(ServerWorld world, BlockPos origin, int radius) {
+        if (world == null || origin == null) {
+            return false;
+        }
+        int r = Math.max(6, radius);
+        for (BlockPos pos : BlockPos.iterate(origin.add(-r, -2, -r), origin.add(r, 2, r))) {
+            if (!world.isChunkLoaded(pos)) {
+                continue;
+            }
+            if (world.getBlockState(pos).isIn(BlockTags.FLOWERS)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean hasFeedTargets(ServerPlayerEntity bot, ServerWorld world) {
+        if (bot == null || world == null) {
+            return false;
+        }
+        if (!hasAnyFeedItem(bot)) {
+            return false;
+        }
+        return !AnimalFeedingService.findLowHealthAnimals(world, bot.getBlockPos(), 12).isEmpty();
+    }
+
+    private static boolean hasAnyFeedItem(ServerPlayerEntity bot) {
+        return hasItem(bot, Items.WHEAT)
+                || hasItem(bot, Items.SUGAR)
+                || hasItem(bot, Items.APPLE)
+                || hasItem(bot, Items.HAY_BLOCK)
+                || hasItem(bot, Items.CARROT)
+                || hasItem(bot, Items.POTATO)
+                || hasItem(bot, Items.BEETROOT)
+                || hasItem(bot, Items.WARPED_FUNGUS);
+    }
+
     private static void startAmbientSkill(MinecraftServer server, ServerPlayerEntity bot, String skillName) {
         if (server == null || bot == null || skillName == null || skillName.isBlank()) {
             return;
@@ -355,17 +402,28 @@ public final class BotIdleHobbiesService {
 
         Map<String, Object> params = new HashMap<>();
         params.put("_origin", "ambient");
-        params.put("open_ended", true);
+        params.put("open_ended", false);
 
         // Fishing already interprets missing count as "until sunset"; keep it open-ended.
         if ("fish".equalsIgnoreCase(skillName)) {
             params.put("options", java.util.List.of("until_sunset"));
+            params.put("open_ended", true);
         }
 
         if ("hunt".equalsIgnoreCase(skillName)) {
-            params.put("options", java.util.List.of("until_sunset", "auto"));
-            params.put("open_ended", true);
+            params.put("options", java.util.List.of("hobby"));
+            params.put("count", 1);
         }
+
+        if ("feed_animals".equalsIgnoreCase(skillName)) {
+            params.put("radius", 14);
+        }
+
+        if ("flowers".equalsIgnoreCase(skillName)) {
+            params.put("count", 6);
+            params.put("radius", 18);
+        }
+
 
         // Ambient hangouts should be short so they don't starve other hobbies (like fishing) after failures.
         // If a user explicitly runs /bot ... hangout they can still pass duration_sec.

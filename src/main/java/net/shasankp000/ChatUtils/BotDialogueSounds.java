@@ -240,6 +240,26 @@ public final class BotDialogueSounds {
     public static final SoundEvent LINE_AMBIENT_CREEPY = register("bot.line.ambient_creepy");
     public static final SoundEvent LINE_AMBIENT_CAVE_DEEP = register("bot.line.ambient_cave_deep");
 
+    // Line-specific sound events (special environment - amethyst)
+    public static final SoundEvent LINE_AMBIENT_AMETHYST_BEAUTIFUL = register("bot.line.ambient_amethyst_beautiful");
+    public static final SoundEvent LINE_AMBIENT_AMETHYST_SPARKLY = register("bot.line.ambient_amethyst_sparkly");
+    public static final SoundEvent LINE_AMBIENT_AMETHYST_GEODE = register("bot.line.ambient_amethyst_geode");
+
+    // Line-specific sound events (special environment - bats)
+    public static final SoundEvent LINE_AMBIENT_BAT_STARTLED = register("bot.line.ambient_bat_startled");
+    public static final SoundEvent LINE_AMBIENT_BAT_WINGS = register("bot.line.ambient_bat_wings");
+    public static final SoundEvent LINE_AMBIENT_BAT_CREEPY = register("bot.line.ambient_bat_creepy");
+
+    // Line-specific sound events (special environment - dripstone)
+    public static final SoundEvent LINE_AMBIENT_DRIPSTONE_CAREFUL = register("bot.line.ambient_dripstone_careful");
+    public static final SoundEvent LINE_AMBIENT_DRIPSTONE_SHARP = register("bot.line.ambient_dripstone_sharp");
+    public static final SoundEvent LINE_AMBIENT_DRIPSTONE_DRIPPING = register("bot.line.ambient_dripstone_dripping");
+
+    // Line-specific sound events (special environment - deepslate)
+    public static final SoundEvent LINE_AMBIENT_DEEPSLATE_COLD = register("bot.line.ambient_deepslate_cold");
+    public static final SoundEvent LINE_AMBIENT_DEEPSLATE_DEEP = register("bot.line.ambient_deepslate_deep");
+    public static final SoundEvent LINE_AMBIENT_DEEPSLATE_ANCIENT = register("bot.line.ambient_deepslate_ancient");
+
     // Line-specific sound events (darkness)
     public static final SoundEvent LINE_DARK_CANT_SEE = register("bot.line.dark_cant_see");
     public static final SoundEvent LINE_DARK_WHERE_ARE_YOU = register("bot.line.dark_where_are_you");

@@ -19,7 +19,7 @@ import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 import net.shasankp000.ChatUtils.ChatUtils;
 import net.shasankp000.GameAI.BotActions;
-import net.shasankp000.GameAI.services.CraftingHelper;
+import net.shasankp000.GameAI.services.ToolProvisionService;
 import net.shasankp000.GameAI.services.MovementService;
 import net.shasankp000.GameAI.services.BlockInteractionService;
 import net.shasankp000.GameAI.skills.Skill;
@@ -236,8 +236,8 @@ public class WoolSkill implements Skill {
     private boolean ensureShears(ServerPlayerEntity bot, ServerCommandSource source) {
         int slot = findShearsSlot(bot);
         if (slot == -1) {
-            int crafted = CraftingHelper.craftGeneric(source, bot, source.getPlayer(), "shears", 1, null);
-            if (crafted > 0) {
+            boolean crafted = ToolProvisionService.ensureShears(bot, source, source.getPlayer());
+            if (crafted) {
                 slot = findShearsSlot(bot);
             }
         }

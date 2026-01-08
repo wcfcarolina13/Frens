@@ -89,6 +89,26 @@ public final class BotDialoguePlayer {
         SUBTITLE_MAP.put(BotDialogueSounds.LINE_AMBIENT_CREEPY, "This is creepy.");
         SUBTITLE_MAP.put(BotDialogueSounds.LINE_AMBIENT_CAVE_DEEP, "Deep in the cave.");
 
+        // Special environment - amethyst
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_AMBIENT_AMETHYST_BEAUTIFUL, "These crystals are beautiful.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_AMBIENT_AMETHYST_SPARKLY, "So sparkly down here.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_AMBIENT_AMETHYST_GEODE, "We found a geode!");
+
+        // Special environment - bats
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_AMBIENT_BAT_STARTLED, "Ah! Bats!");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_AMBIENT_BAT_WINGS, "I hear wings flapping.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_AMBIENT_BAT_CREEPY, "Bats give me the creeps.");
+
+        // Special environment - dripstone
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_AMBIENT_DRIPSTONE_CAREFUL, "Careful, those are sharp.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_AMBIENT_DRIPSTONE_SHARP, "Pointy stalactites everywhere.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_AMBIENT_DRIPSTONE_DRIPPING, "I can hear dripping.");
+
+        // Special environment - deepslate
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_AMBIENT_DEEPSLATE_COLD, "It's cold down here.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_AMBIENT_DEEPSLATE_DEEP, "We're really deep now.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_AMBIENT_DEEPSLATE_ANCIENT, "This stone feels ancient.");
+
         // Darkness
         SUBTITLE_MAP.put(BotDialogueSounds.LINE_DARK_CANT_SEE, "I can't see a thing.");
         SUBTITLE_MAP.put(BotDialogueSounds.LINE_DARK_WHERE_ARE_YOU, "Where are you?");

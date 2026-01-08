@@ -12,6 +12,16 @@ Historical record and reasoning. `TODO.md` is the source of truth for what’s n
 - Follow rework: bots now chase with WASD-style input, timeboxed path steps (no tick stalls), sensible teleport catch-up, and chill when adjacent; hill walking and vertical catch-up improved.
 
 ## Unreleased
+- Dialogue: add missing `bot.line.*` sound entries for ambient/dark/wildlife/lost/found lines so code-triggered events play.
+- Dialogue: add follow-adventure banter when following far from base/recent bed; track last-sleep timestamps for "recent bed" checks.
+- Drop sweep: treat inventory full only when there are zero empty slots; attempt bundle packing before terminating.
+- Drop sweep: resolve a commander/follow target for bundle crafting so recipes can be validated against the player's history.
+- Bundles: align crafting inputs with 1.21.10 recipe (leather + string) and allow rabbit hide -> leather fallback.
+- Drop sweep: if bundling and chest storage fail, drop a cheap stack to free a slot and retry bundle packing.
+- Drop sweep: place a crafting table from inventory before dropping stacks when bundling needs a station.
+- Bundles: pack full stacks that cost the least bundle occupancy first, then fill with low-occupancy items.
+- Bundles: add bundle-craft diagnostics for missing rabbit hide/string and recipe lockouts.
+- Mount persistence: secure leashed mounts on disconnect/shutdown and skip fuzzy restore matching when a bot was not mounted.
 - Woodcut: reuse return-to-base stuck escape checks while approaching tree bases to recover from overhang stalls.
 - ReturnBaseStuckService: woodcut profile now triggers escape checks ~3x sooner and tries pillar escape first.
 - ReturnBaseStuckService: stuck timing now scales with real elapsed time, and pillar attempts switch to mine-to-surface when overhead blocks are detected (woodcut pillars wait ~4s of no progress).
@@ -38,6 +48,15 @@ Historical record and reasoning. `TODO.md` is the source of truth for what’s n
 - Skills: build the skill execution context on the server thread before dispatching to the executor to avoid worker-thread stalls.
 - Skills: guard shared state lookup so missing ollama4j classes can't crash `/bot skill`.
 - Hunting: drop-sweep during hunts now runs much more frequently to avoid leaving loot behind.
+- Riding: detach fence-held leads before mounting with a lightweight lead pickup approach (no heavy sweep), retry mount lookup over several ticks with expanding radius, and secure the bot's last mount on rejoin, disconnect, or bot removal with a lead/fence tie-in to prevent wandering (no respawns). Fix mount flagging so rejoin-secure works when dismounting on logout, stop killing bots on disconnect so mounts persist like player mounts, ensure shutdown save/secure uses the live player list so bots are still captured on integrated-server stop, and add pre-shutdown persistence/logging at real-player disconnect to capture bots before the server stops.
+- Inventory: add bundle crafting and bundle-packing support to free slots when inventories fill up.
+- Tools: auto-craft torches/shovels/pickaxes during mining tasks when supplies run out (gated by crafting history).
+- Crafting: add torch crafting support for the auto-provision flow.
+- Tool provisioning: expand auto-craft coverage to axes/hoes/swords/shears/fishing rods/ladders/beds/chests/furnaces/crafting tables/doors/sticks/planks/buckets/shields.
+- Crafting: add door crafting support with plank-type selection.
+- Riding: add ride-sync service for vanilla rideables with commander mirroring and mount feeding.
+- Hobbies: add flower-picking and animal-feeding hobbies; hobby hunting now caps to one kill and can hang out afterward.
+- Crafting: add saddle + control-stick crafting for ride sync.
 - Hunting: run a drop-sweep after each kill and before stopping on depopulation safeguards.
 - Hunting: run a final wider-radius drop-sweep after hunts to catch nearby leftovers.
 - Mining safety: on lava detection, bots try water buckets first, then plug with rock/gravel/dirt, back off to a 2-block buffer, and retreat again if lava closes in (alerts preserved).

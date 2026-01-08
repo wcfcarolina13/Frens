@@ -262,6 +262,20 @@ public class AIPlayer implements ModInitializer {
 
         ServerLifecycleEvents.SERVER_STOPPING.register(server -> {
             net.shasankp000.GameAI.services.TaskService.resetAll("§cServer stopping; aborting active tasks.");
+            for (ServerPlayerEntity bot : server.getPlayerManager().getPlayerList()) {
+                if (!(bot instanceof net.shasankp000.Entity.createFakePlayer)) {
+                    continue;
+                }
+                if (bot.hasVehicle()) {
+                    net.minecraft.entity.Entity vehicle = bot.getVehicle();
+                    boolean wasMounted = true;
+                    bot.stopRiding();
+                    net.shasankp000.GameAI.services.RideSyncService.secureMountAfterRejoin(bot, vehicle);
+                    net.shasankp000.GameAI.services.MountPersistenceService.recordMount(bot, vehicle, wasMounted);
+                } else {
+                    net.shasankp000.GameAI.services.RideSyncService.secureLeashedMountOnDisconnect(bot);
+                }
+            }
             BotPersistenceService.saveAll(server);
         });
 
@@ -308,6 +322,9 @@ public class AIPlayer implements ModInitializer {
         ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> {
             ServerPlayerEntity player = handler.player;
             BotPersistenceService.onBotDisconnect(player);
+            if (!(player instanceof net.shasankp000.Entity.createFakePlayer) && !server.isDedicated()) {
+                BotPersistenceService.saveBotsBeforeShutdown(server);
+            }
         });
 
         // Register damage event to handle suffocation immediately
@@ -405,6 +422,7 @@ public class AIPlayer implements ModInitializer {
         ServerTickEvents.END_SERVER_TICK.register(BotAmbientSocialChatService::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(BotMoodManager::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(BotAmbientChatter::onServerTick);
+        ServerTickEvents.END_SERVER_TICK.register(net.shasankp000.GameAI.services.RideSyncService::onServerTick);
 
         ServerMessageEvents.CHAT_MESSAGE.register((message, sender, params) -> {
             String raw = message.getContent().getString();

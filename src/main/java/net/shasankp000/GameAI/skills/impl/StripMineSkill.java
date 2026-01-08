@@ -13,6 +13,7 @@ import net.shasankp000.GameAI.BotActions;
 import net.shasankp000.ChatUtils.ChatUtils;
 import net.shasankp000.GameAI.services.LavaHazardService;
 import net.shasankp000.GameAI.services.SkillResumeService;
+import net.shasankp000.GameAI.services.ToolProvisionService;
 import net.shasankp000.GameAI.services.WorkDirectionService;
 import net.shasankp000.GameAI.skills.Skill;
 import net.shasankp000.GameAI.skills.SkillContext;
@@ -27,6 +28,7 @@ import net.shasankp000.PlayerUtils.MiningTool;
 import net.shasankp000.Entity.LookController;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import net.minecraft.registry.tag.BlockTags;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -57,6 +59,7 @@ public final class StripMineSkill implements Skill {
     public SkillExecutionResult execute(SkillContext context) {
         ServerCommandSource source = context.botSource();
         ServerPlayerEntity player = Objects.requireNonNull(source.getPlayer(), "player");
+        ServerPlayerEntity commander = context.requestSource() != null ? context.requestSource().getPlayer() : null;
         boolean resumeRequested = SkillResumeService.consumeResumeIntent(player.getUuid());
         if (!resumeRequested) {
             net.shasankp000.GameAI.skills.support.MiningHazardDetector.clear(player);
@@ -120,6 +123,9 @@ public final class StripMineSkill implements Skill {
                 if (state.isAir()) {
                     continue;
                 }
+                if (state.isIn(BlockTags.PICKAXE_MINEABLE)) {
+                    ToolProvisionService.ensurePickaxe(player, source, commander);
+                }
                 // Skip torches - extra safety layer
                 Block blockType = state.getBlock();
                 if (blockType == Blocks.TORCH || blockType == Blocks.WALL_TORCH || 
@@ -167,10 +173,15 @@ public final class StripMineSkill implements Skill {
             if (completed % 6 == 0 && TorchPlacer.shouldPlaceTorch(player)) {
                 TorchPlacer.PlacementResult torchResult = TorchPlacer.placeTorch(player, tunnelDirection);
                 if (torchResult == TorchPlacer.PlacementResult.NO_TORCHES) {
-                    SkillResumeService.flagManualResume(player);
-                    ChatUtils.sendChatMessages(player.getCommandSource().withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS), 
-                            "Ran out of torches!");
-                    return SkillExecutionResult.failure("Stripmine paused: out of torches. Provide torches and /bot resume.");
+                    if (ToolProvisionService.ensureTorches(player, source, commander, 8)) {
+                        torchResult = TorchPlacer.placeTorch(player, tunnelDirection);
+                    }
+                    if (torchResult == TorchPlacer.PlacementResult.NO_TORCHES) {
+                        SkillResumeService.flagManualResume(player);
+                        ChatUtils.sendChatMessages(player.getCommandSource().withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS), 
+                                "Ran out of torches!");
+                        return SkillExecutionResult.failure("Stripmine paused: out of torches. Provide torches and /bot resume.");
+                    }
                 }
             }
         }

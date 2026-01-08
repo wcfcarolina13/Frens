@@ -140,31 +140,65 @@ public final class BotHomeService {
             if (wd.lastSleepByBot == null) {
                 wd.lastSleepByBot = new HashMap<>();
             }
-            wd.lastSleepByBot.put(botId, SavedPos.from(bedPos));
+            wd.lastSleepByBot.put(botId, SavedSleep.from(bedPos));
         }
         flush();
     }
 
     public static Optional<BlockPos> getLastSleep(ServerPlayerEntity bot) {
+        SavedSleep record = getLastSleepRecord(bot);
+        return record != null ? Optional.of(record.toBlockPos()) : Optional.empty();
+    }
+
+    public static boolean isNearAnyBase(ServerPlayerEntity bot, double radiusBlocks) {
+        if (bot == null || radiusBlocks <= 0.0D) {
+            return false;
+        }
+        Optional<BlockPos> base = findNearestBase(bot);
+        if (base.isEmpty()) {
+            return false;
+        }
+        double radiusSq = radiusBlocks * radiusBlocks;
+        Vec3d origin = new Vec3d(bot.getX(), bot.getY(), bot.getZ());
+        return origin.squaredDistanceTo(Vec3d.ofCenter(base.get())) <= radiusSq;
+    }
+
+    public static boolean isNearRecentSleep(ServerPlayerEntity bot, double radiusBlocks, long recentWindowMs) {
+        if (bot == null || radiusBlocks <= 0.0D || recentWindowMs <= 0L) {
+            return false;
+        }
+        SavedSleep record = getLastSleepRecord(bot);
+        if (record == null || record.lastSleepMs <= 0L) {
+            return false;
+        }
+        long ageMs = System.currentTimeMillis() - record.lastSleepMs;
+        if (ageMs > recentWindowMs) {
+            return false;
+        }
+        double radiusSq = radiusBlocks * radiusBlocks;
+        Vec3d origin = new Vec3d(bot.getX(), bot.getY(), bot.getZ());
+        return origin.squaredDistanceTo(Vec3d.ofCenter(record.toBlockPos())) <= radiusSq;
+    }
+
+    private static SavedSleep getLastSleepRecord(ServerPlayerEntity bot) {
         if (bot == null || !(bot.getEntityWorld() instanceof ServerWorld world)) {
-            return Optional.empty();
+            return null;
         }
         MinecraftServer server = world.getServer();
         if (server == null) {
-            return Optional.empty();
+            return null;
         }
         String botId = botKey(bot);
         if (botId.isBlank()) {
-            return Optional.empty();
+            return null;
         }
 
         WorldData wd = worldData(server, world);
         synchronized (LOCK) {
             if (wd.lastSleepByBot == null) {
-                return Optional.empty();
+                return null;
             }
-            SavedPos pos = wd.lastSleepByBot.get(botId);
-            return pos != null ? Optional.of(pos.toBlockPos()) : Optional.empty();
+            return wd.lastSleepByBot.get(botId);
         }
     }
 
@@ -608,7 +642,7 @@ public final class BotHomeService {
     }
 
     private static final class WorldData {
-        Map<String, SavedPos> lastSleepByBot = new HashMap<>();
+        Map<String, SavedSleep> lastSleepByBot = new HashMap<>();
         Map<String, Boolean> autoReturnAtSunsetByBot = new HashMap<>();
         Map<String, Boolean> autoReturnPreferLastBedAtSunsetByBot = new HashMap<>();
         Map<String, Boolean> autoReturnGuardPatrolEligibleByBot = new HashMap<>();
@@ -676,6 +710,26 @@ public final class BotHomeService {
         @Override
         public int hashCode() {
             return Objects.hash(x, y, z);
+        }
+    }
+
+    private static final class SavedSleep {
+        int x;
+        int y;
+        int z;
+        long lastSleepMs;
+
+        private static SavedSleep from(BlockPos pos) {
+            SavedSleep sleep = new SavedSleep();
+            sleep.x = pos.getX();
+            sleep.y = pos.getY();
+            sleep.z = pos.getZ();
+            sleep.lastSleepMs = System.currentTimeMillis();
+            return sleep;
+        }
+
+        private BlockPos toBlockPos() {
+            return new BlockPos(x, y, z);
         }
     }
 }

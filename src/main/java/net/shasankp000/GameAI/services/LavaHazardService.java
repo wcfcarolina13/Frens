@@ -110,7 +110,7 @@ public final class LavaHazardService {
         if (bot == null || direction == null) {
             return;
         }
-        Vec3d pos = bot.getPos();
+        Vec3d pos = new Vec3d(bot.getX(), bot.getY(), bot.getZ());
         Vec3d target = pos.add(
                 direction.getOpposite().getOffsetX() * RETREAT_DISTANCE,
                 0,

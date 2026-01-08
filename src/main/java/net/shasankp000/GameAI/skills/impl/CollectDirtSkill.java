@@ -31,6 +31,7 @@ import net.shasankp000.GameAI.services.ChestStoreService;
 import net.shasankp000.GameAI.services.MovementService;
 import net.shasankp000.GameAI.services.LavaHazardService;
 import net.shasankp000.GameAI.services.TaskService;
+import net.shasankp000.GameAI.services.ToolProvisionService;
 import net.shasankp000.GameAI.skills.SkillManager;
 import net.shasankp000.GameAI.services.SkillResumeService;
 import net.shasankp000.GameAI.services.WorkDirectionService;
@@ -174,6 +175,7 @@ public class CollectDirtSkill implements Skill {
 
         DirtShovelSkill shovelSkill = new DirtShovelSkill();
         ServerCommandSource source = context.botSource();
+        ServerPlayerEntity commander = context.requestSource() != null ? context.requestSource().getPlayer() : null;
         ServerPlayerEntity playerForAbortCheck = source.getPlayer();
         boolean resumeRequested = playerForAbortCheck != null
                 && SkillResumeService.consumeResumeIntent(playerForAbortCheck.getUuid());
@@ -229,7 +231,7 @@ public class CollectDirtSkill implements Skill {
                 LOGGER.info("Ascent mode: climbing from Y={} to Y={}", 
                            playerForAbortCheck.getBlockY(), targetY);
             }
-            return runAscent(context, source, playerForAbortCheck, targetY, resumeRequested, allowChestStore);
+            return runAscent(context, source, commander, playerForAbortCheck, targetY, resumeRequested, allowChestStore);
         }
 
         // Handle descent mode
@@ -244,7 +246,7 @@ public class CollectDirtSkill implements Skill {
                 LOGGER.info("Descent mode: descending from Y={} to Y={}", 
                            playerForAbortCheck.getBlockY(), targetY);
             }
-            return runDescent(context, source, playerForAbortCheck, targetY, resumeRequested, allowChestStore);
+            return runDescent(context, source, commander, playerForAbortCheck, targetY, resumeRequested, allowChestStore);
         }
 
         int collected = 0;
@@ -929,7 +931,7 @@ public class CollectDirtSkill implements Skill {
         if (referencePos != null) {
             targetY = Math.max(targetY, referencePos.getY());
         }
-        SkillExecutionResult ascent = runAscent(new SkillContext(source, new HashMap<>(), new HashMap<>()), source, player, targetY, false, false);
+        SkillExecutionResult ascent = runAscent(new SkillContext(source, new HashMap<>(), new HashMap<>()), source, null, player, targetY, false, false);
         return ascent.success() || player.getBlockY() >= targetY;
     }
 
@@ -941,8 +943,8 @@ public class CollectDirtSkill implements Skill {
         if (have >= needed) {
             return true;
         }
-        int crafted = net.shasankp000.GameAI.services.CraftingHelper.craftGeneric(source, player, source.getPlayer(), "ladder", needed - have, null);
-        return crafted > 0 || countInventoryItems(player, Set.of(Items.LADDER)) >= needed;
+        boolean crafted = ToolProvisionService.ensureLadders(player, source, source.getPlayer(), needed);
+        return crafted || countInventoryItems(player, Set.of(Items.LADDER)) >= needed;
     }
 
     private boolean isLikelyTrappedInPit(ServerWorld world, BlockPos feet) {
@@ -1200,6 +1202,7 @@ public class CollectDirtSkill implements Skill {
     
     private SkillExecutionResult runDescent(SkillContext context,
                                            ServerCommandSource source,
+                                           ServerPlayerEntity commander,
                                            ServerPlayerEntity player,
                                            int targetDepthY,
                                            boolean resumeRequested,
@@ -1342,10 +1345,15 @@ public class CollectDirtSkill implements Skill {
             if (carvedSteps % 6 == 0 && TorchPlacer.shouldPlaceTorch(player)) {
                 TorchPlacer.PlacementResult torchResult = TorchPlacer.placeTorch(player, digDirection);
                 if (torchResult == TorchPlacer.PlacementResult.NO_TORCHES) {
-                    SkillResumeService.flagManualResume(player);
-                    ChatUtils.sendChatMessages(player.getCommandSource().withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS), 
-                            "Ran out of torches!");
-                    return SkillExecutionResult.failure("Descent paused: out of torches. Provide torches and /bot resume.");
+                    if (ToolProvisionService.ensureTorches(player, source, commander, 8)) {
+                        torchResult = TorchPlacer.placeTorch(player, digDirection);
+                    }
+                    if (torchResult == TorchPlacer.PlacementResult.NO_TORCHES) {
+                        SkillResumeService.flagManualResume(player);
+                        ChatUtils.sendChatMessages(player.getCommandSource().withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS), 
+                                "Ran out of torches!");
+                        return SkillExecutionResult.failure("Descent paused: out of torches. Provide torches and /bot resume.");
+                    }
                 }
             }
         }
@@ -1450,6 +1458,7 @@ public class CollectDirtSkill implements Skill {
     
     private SkillExecutionResult runAscent(SkillContext context,
                                           ServerCommandSource source,
+                                          ServerPlayerEntity commander,
                                           ServerPlayerEntity player,
                                           int targetY,
                                           boolean resumeRequested,
@@ -1512,11 +1521,16 @@ public class CollectDirtSkill implements Skill {
             if (steps % 6 == 0 && TorchPlacer.shouldPlaceTorch(player)) {
                 TorchPlacer.PlacementResult torchResult = TorchPlacer.placeTorch(player, direction);
                 if (torchResult == TorchPlacer.PlacementResult.NO_TORCHES) {
-                    SkillResumeService.flagManualResume(player);
-                    WorkDirectionService.setPausePosition(player.getUuid(), player.getBlockPos());
-                    ChatUtils.sendChatMessages(player.getCommandSource().withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS), 
-                            "Ran out of torches!");
-                    return SkillExecutionResult.failure("Ascent paused: out of torches.");
+                    if (ToolProvisionService.ensureTorches(player, source, commander, 8)) {
+                        torchResult = TorchPlacer.placeTorch(player, direction);
+                    }
+                    if (torchResult == TorchPlacer.PlacementResult.NO_TORCHES) {
+                        SkillResumeService.flagManualResume(player);
+                        WorkDirectionService.setPausePosition(player.getUuid(), player.getBlockPos());
+                        ChatUtils.sendChatMessages(player.getCommandSource().withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS), 
+                                "Ran out of torches!");
+                        return SkillExecutionResult.failure("Ascent paused: out of torches.");
+                    }
                 }
             }
         }

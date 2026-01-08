@@ -1,6 +1,7 @@
 # gradle
 
 .gradle/
+.gradle-user/
 build/
 out/
 classes/
@@ -38,6 +39,7 @@ hs_err_*.log
 replay_*.log
 *.hprof
 *.jfr
+javac.*.args
 
 # custom cleanup
 logs-prism/
@@ -71,7 +73,7 @@ ai_search_config.json
 **/venv/
 **/__pycache__/
 
-# Local handoff/notes docs
+# Local handoff/notes docs (internal use only)
 HANDOFF_INSTRUCTIONS.md
 AUDIO_CHANGES_HANDOFF.md
 CHATTERBOX_AUDIO_HANDOFF.md
@@ -80,3 +82,20 @@ PROGRESS_UPDATE.md
 PROBLEMS_REPORT.md
 CURRENT_STATUS.md
 AUDIO_NEEDED.md
+AGENT_RULES.md
+THREADING_RULES.md
+DOCS_INDEX.md
+file_index.md
+TODO.md
+
+# Archive folder (old session notes)
+archive/
+
+# Backup folders
+backup_*/
+
+# Screenshots (local testing)
+screenshots/
+
+# Example mod (not part of main project)
+fabric-example-mod/

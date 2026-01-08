@@ -5,12 +5,15 @@ import net.minecraft.server.PlayerConfigEntry;
 import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
+import net.minecraft.entity.Entity;
 import net.minecraft.text.Text;
 import net.minecraft.util.WorldSavePath;
 import net.shasankp000.AIPlayer;
 import net.shasankp000.Entity.createFakePlayer;
 import net.shasankp000.FilingSystem.ManualConfig;
 import net.shasankp000.GameAI.BotEventHandler;
+import net.shasankp000.GameAI.services.MountPersistenceService;
+import net.shasankp000.GameAI.services.RideSyncService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -20,8 +23,10 @@ import java.lang.reflect.Method;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.HashSet;
-// import java.util.Map; // previously unused; uncomment if needed
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -76,6 +81,7 @@ public final class BotPersistenceService {
                             state.x(), state.y(), state.z(), state.yaw(), state.pitch());
                     bot.refreshPositionAndAngles(state.x(), state.y(), state.z(), state.yaw(), state.pitch());
                 }, () -> LOGGER.info("No prior world-state for {} in world {}", bot.getName().getString(), BotWorldStateService.currentWorldKey(server)));
+                MountPersistenceService.onBotJoin(bot);
             }
         });
         
@@ -87,12 +93,20 @@ public final class BotPersistenceService {
         if (!(bot instanceof createFakePlayer) || server == null) {
             return;
         }
+        if (bot.hasVehicle()) {
+            Entity vehicle = bot.getVehicle();
+            boolean wasMounted = true;
+            bot.stopRiding();
+            RideSyncService.secureMountAfterRejoin(bot, vehicle);
+            MountPersistenceService.recordMount(bot, vehicle, wasMounted);
+        } else {
+            RideSyncService.secureLeashedMountOnDisconnect(bot);
+        }
         if (persistViaPlayerManager(server, bot, "disconnect")) {
             BotInventoryStorageService.save(bot);
         }
         BotWorldStateService.saveState(bot);
         LAST_SAVE_TICK.remove(bot.getUuid());
-        BotEventHandler.unregisterBot(bot);
     }
 
     public static void onBotDeath(ServerPlayerEntity bot) {
@@ -149,6 +163,7 @@ public final class BotPersistenceService {
         }
 
         LAST_SAVE_TICK.keySet().retainAll(active);
+        MountPersistenceService.onServerTick(server);
     }
 
     public static void saveAll(MinecraftServer server) {
@@ -156,18 +171,60 @@ public final class BotPersistenceService {
             return;
         }
         long count = 0;
-        // Prefer registered bots, since PlayerManager#getPlayerList may not include fake players at shutdown
+        Map<UUID, ServerPlayerEntity> bots = new HashMap<>();
+        // Prefer registered bots, since PlayerManager#getPlayerList may not include fake players at shutdown.
         for (ServerPlayerEntity player : net.shasankp000.GameAI.BotEventHandler.getRegisteredBots(server)) {
             if (player instanceof createFakePlayer) {
-                if (persistViaPlayerManager(server, player, "shutdown")) {
-                    BotInventoryStorageService.save(player);
-                    BotWorldStateService.saveState(player);
-                    count++;
-                }
+                bots.put(player.getUuid(), player);
+            }
+        }
+        for (ServerPlayerEntity player : server.getPlayerManager().getPlayerList()) {
+            if (player instanceof createFakePlayer) {
+                bots.putIfAbsent(player.getUuid(), player);
+            }
+        }
+        for (ServerPlayerEntity player : bots.values()) {
+            if (persistViaPlayerManager(server, player, "shutdown")) {
+                BotInventoryStorageService.save(player);
+                BotWorldStateService.saveState(player);
+                count++;
             }
         }
         BotWorldStateService.saveAll(server);
         LOGGER.info("saveAll invoked, persisted {} fakeplayer(s).", count);
+    }
+
+    public static void saveBotsBeforeShutdown(MinecraftServer server) {
+        if (server == null) {
+            return;
+        }
+        List<ServerPlayerEntity> players = server.getPlayerManager().getPlayerList();
+        if (players == null || players.isEmpty()) {
+            return;
+        }
+        long count = 0;
+        for (ServerPlayerEntity player : players) {
+            if (!(player instanceof createFakePlayer)) {
+                continue;
+            }
+            if (player.hasVehicle()) {
+                Entity vehicle = player.getVehicle();
+                boolean wasMounted = true;
+                player.stopRiding();
+                RideSyncService.secureMountAfterRejoin(player, vehicle);
+                MountPersistenceService.recordMount(player, vehicle, wasMounted);
+            } else {
+                RideSyncService.secureLeashedMountOnDisconnect(player);
+            }
+            if (persistViaPlayerManager(server, player, "pre-shutdown")) {
+                BotInventoryStorageService.save(player);
+                BotWorldStateService.saveState(player);
+                count++;
+            }
+        }
+        if (count > 0) {
+            LOGGER.info("Pre-shutdown bot save captured {} fakeplayer(s).", count);
+        }
     }
 
     private static MinecraftServer extractServer(ServerPlayerEntity bot) {
@@ -341,6 +398,16 @@ public final class BotPersistenceService {
         if (server == null) {
             LOGGER.warn("Unable to remove fakeplayer '{}': bot not attached to a server.", bot.getName().getString());
             return;
+        }
+
+        if (bot.hasVehicle()) {
+            Entity vehicle = bot.getVehicle();
+            boolean wasMounted = true;
+            bot.stopRiding();
+            RideSyncService.secureMountAfterRejoin(bot, vehicle);
+            MountPersistenceService.recordMount(bot, vehicle, wasMounted);
+        } else {
+            RideSyncService.secureLeashedMountOnDisconnect(bot);
         }
 
         // Fake players can leave "ghosts" client-side if they aren't explicitly disconnected.

@@ -105,8 +105,8 @@ public final class SleepService {
                 return false;
             }
             ensureCraftingTableNearby(source, bot, world);
-            int crafted = CraftingHelper.craftGeneric(source, bot, commander, "bed", 1, null);
-            if (crafted <= 0 && !hasAnyBed(bot)) {
+            boolean crafted = ToolProvisionService.ensureBed(bot, source, commander, 1);
+            if (!crafted && !hasAnyBed(bot)) {
                 ChatUtils.sendSystemMessage(source, "I couldn't craft a bed (need 3 wool + 3 planks).");
                 return false;
             }
@@ -568,7 +568,7 @@ public final class SleepService {
         if (!hasTable) {
             ServerPlayerEntity commander = source.getPlayer();
             if (commander != null) {
-                CraftingHelper.craftGeneric(source, bot, commander, "crafting_table", 1, null);
+                ToolProvisionService.ensureCraftingTable(bot, source, commander, 1);
             }
         }
         if (countItem(bot, Items.CRAFTING_TABLE) <= 0) {

@@ -1,7 +1,6 @@
 package net.shasankp000.GameAI;
 
 import net.minecraft.entity.ItemEntity;
-import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
 import net.minecraft.item.ItemStack;
@@ -15,8 +14,11 @@ import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Vec3d;
 import net.shasankp000.GameAI.BotActions;
+import net.shasankp000.GameAI.BotEventHandler;
+import net.shasankp000.GameAI.services.CraftingHelper;
 import net.shasankp000.GameAI.services.DropSweepService;
 import net.shasankp000.GameAI.services.ChestStoreService;
+import net.shasankp000.GameAI.services.BundleService;
 import net.shasankp000.GameAI.services.MovementService;
 import net.shasankp000.GameAI.skills.SkillPreferences;
 import net.shasankp000.Entity.LookController;
@@ -87,16 +89,16 @@ public final class DropSweeper {
         long deadline = maxDurationMillis > 0 ? System.currentTimeMillis() + maxDurationMillis : Long.MAX_VALUE;
         int attempts = 0;
         Vec3d origin = currentPosition(player);
+        ServerPlayerEntity commander = resolveCommanderForBundle(player, source);
 
         Set<ItemEntity> excludedDrops = new HashSet<>();
 
         while (attempts < maxTargets && System.currentTimeMillis() <= deadline) {
             if (isInventoryFull(player)) {
-                boolean stored = attemptChestStore(source, player);
-                if (stored && !isInventoryFull(player)) {
+                if (ensureSpaceForDropSweep(source, player, commander)) {
                     continue;
                 }
-                LOGGER.info("Drop sweep ending: inventory full and no chest storage available.");
+                LOGGER.info("Drop sweep ending: inventory full and no storage/drop options available.");
                 break;
             }
             if (DropSweepService.shouldAbort(player)) {
@@ -203,18 +205,56 @@ public final class DropSweeper {
         if (player == null) {
             return false;
         }
-        PlayerInventory inventory = player.getInventory();
-        int emptyCount = 0;
-        for (int i = 0; i < 36; i++) {
-            ItemStack stack = inventory.getStack(i);
-            if (stack.isEmpty()) {
-                emptyCount++;
-                if (emptyCount >= 3) {
-                    return false;
-                }
+        return player.getInventory().getEmptySlot() == -1;
+    }
+
+    public static boolean ensureSpaceForDropSweep(ServerCommandSource source, ServerPlayerEntity player) {
+        return ensureSpaceForDropSweep(source, player, resolveCommanderForBundle(player, source));
+    }
+
+    private static boolean ensureSpaceForDropSweep(ServerCommandSource source,
+                                                   ServerPlayerEntity player,
+                                                   ServerPlayerEntity commander) {
+        if (player == null) {
+            return false;
+        }
+        if (!isInventoryFull(player)) {
+            return true;
+        }
+        if (BundleService.packInventory(source, player, commander) && !isInventoryFull(player)) {
+            return true;
+        }
+        if (source != null) {
+            boolean stored = attemptChestStore(source, player);
+            if (stored && !isInventoryFull(player)) {
+                return true;
             }
         }
-        return true;
+        maybePlaceCraftingTableForBundle(player, source);
+        java.util.Set<net.minecraft.item.Item> reserved = java.util.Set.of(
+                Items.LEATHER,
+                Items.STRING,
+                Items.RABBIT_HIDE
+        );
+        boolean dropped = CraftingHelper.dropCheapStackForSpace(player, source, reserved);
+        if (!dropped) {
+            return false;
+        }
+        BundleService.packInventory(source, player, commander);
+        return !isInventoryFull(player);
+    }
+
+    private static void maybePlaceCraftingTableForBundle(ServerPlayerEntity player, ServerCommandSource source) {
+        if (player == null || source == null) {
+            return;
+        }
+        if (player.getInventory().getEmptySlot() != -1) {
+            return;
+        }
+        if (!hasItem(player, Items.CRAFTING_TABLE)) {
+            return;
+        }
+        CraftingHelper.ensureCraftingStation(player, source);
     }
 
     private static boolean attemptChestStore(ServerCommandSource source, ServerPlayerEntity player) {
@@ -268,6 +308,40 @@ public final class DropSweeper {
         }
         found.sort(java.util.Comparator.comparingDouble(p -> p.getSquaredDistance(origin)));
         return found;
+    }
+
+    private static ServerPlayerEntity resolveCommanderForBundle(ServerPlayerEntity bot, ServerCommandSource source) {
+        if (bot == null) {
+            return null;
+        }
+        if (source != null && source.getPlayer() != null && source.getPlayer() != bot) {
+            return source.getPlayer();
+        }
+        MinecraftServer server = source != null ? source.getServer() : bot.getCommandSource().getServer();
+        if (server == null) {
+            return null;
+        }
+        java.util.UUID followTarget = BotEventHandler.getFollowTargetUuid(bot);
+        if (followTarget != null) {
+            ServerPlayerEntity commander = server.getPlayerManager().getPlayer(followTarget);
+            if (commander != null && !commander.isRemoved()) {
+                return commander;
+            }
+        }
+        return null;
+    }
+
+    private static boolean hasItem(ServerPlayerEntity bot, net.minecraft.item.Item item) {
+        if (bot == null || item == null) {
+            return false;
+        }
+        for (int i = 0; i < bot.getInventory().size(); i++) {
+            ItemStack stack = bot.getInventory().getStack(i);
+            if (!stack.isEmpty() && stack.isOf(item)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     public static boolean attemptManualNudge(ServerPlayerEntity player, ItemEntity targetDrop, BlockPos dropPos) {

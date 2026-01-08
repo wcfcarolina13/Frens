@@ -54,6 +54,7 @@ import net.shasankp000.FilingSystem.ManualConfig;
 import net.shasankp000.AIPlayer;
 import net.shasankp000.GameAI.BotEventHandler;
 import net.shasankp000.GameAI.services.BotPersistenceService;
+import net.shasankp000.GameAI.services.BotCommandStateService;
 import net.shasankp000.GameAI.services.BotHomeService;
 import net.shasankp000.GameAI.services.BotIdleHobbiesService;
 import net.shasankp000.GameAI.services.SafePositionService;
@@ -245,6 +246,9 @@ public class modCommandRegistry {
 	                        .then(BotSkillCommands.buildFish())
 	                        .then(BotSkillCommands.buildFlare())
 	                        .then(BotSkillCommands.buildShelter())
+	                        .then(BotSkillCommands.buildBuild())
+	                        .then(BotSkillCommands.buildLeash())
+	                        .then(BotSkillCommands.buildHitch())
 	                        .then(BotLifecycleCommands.buildList())
 	                        .then(BotLifecycleCommands.buildDespawn())
 	                        .then(BotLifecycleCommands.buildStop())
@@ -258,6 +262,7 @@ public class modCommandRegistry {
 	                        .then(BotUtilityCommands.buildFollow())
                             .then(BotUtilityCommands.buildFollowDistance())
                             .then(BotUtilityCommands.buildSoundTest())
+                            .then(BotUtilityCommands.buildTestChatter())
                             .then(BotHomeCommands.buildAutoReturnSunset())
                             .then(BotHomeCommands.buildAutoReturnSunsetGuardPatrolEligible())
                             .then(BotHomeCommands.buildAutoReturnSunsetPreferLastBed())
@@ -265,10 +270,13 @@ public class modCommandRegistry {
                             .then(BotHomeCommands.buildAutoHuntStarving())
                             .then(BotHomeCommands.buildIdleNow())
                             .then(BotHomeCommands.buildBase())
+                            .then(BotHomeCommands.buildUnleashTethered())
+                            .then(BotHomeCommands.buildLeashOnDismount())
 	                        .then(BotMovementCommands.buildCome())
 	                        .then(BotMovementCommands.buildRegroup())
                             .then(BotMovementCommands.buildGoToLook())
                             .then(BotMovementCommands.buildShelterLook())
+                            .then(BotMovementCommands.buildBuildLook())
 	                        .then(BotMovementCommands.buildGuard())
 	                        .then(BotMovementCommands.buildPatrol())
 	                        .then(BotMovementCommands.buildStay("stay"))
@@ -2331,6 +2339,35 @@ public class modCommandRegistry {
         return successes;
     }
 
+    /**
+     * Test the ambient chatter system by triggering a chatter sound for the specified bot(s).
+     * This bypasses normal timing restrictions and picks an environment-aware sound.
+     */
+    static int executeTestChatterTargets(CommandContext<ServerCommandSource> context,
+                                         String targetArg) throws CommandSyntaxException {
+        List<ServerPlayerEntity> bots = BotTargetingService.resolve(context.getSource(), targetArg);
+        
+        int successes = 0;
+        for (ServerPlayerEntity bot : bots) {
+            if (bot == null) {
+                continue;
+            }
+            // Use the public triggerChatter method which picks an appropriate sound
+            if (net.shasankp000.ChatUtils.BotAmbientChatter.triggerChatter(bot)) {
+                successes++;
+                ChatUtils.sendSystemMessage(context.getSource(),
+                        "§aTriggered ambient chatter for " + bot.getName().getString());
+            } else {
+                ChatUtils.sendSystemMessage(context.getSource(),
+                        "§cCould not trigger chatter for " + bot.getName().getString() + " (check voiced dialogue setting)");
+            }
+        }
+        if (bots.isEmpty()) {
+            ChatUtils.sendSystemMessage(context.getSource(), "§cNo bots found to test chatter.");
+        }
+        return successes;
+    }
+
     static int executeComeTargets(CommandContext<ServerCommandSource> context, String targetArg) throws CommandSyntaxException {
         ServerPlayerEntity commander = context.getSource().getPlayer();
         if (commander == null) {
@@ -2545,6 +2582,124 @@ public class modCommandRegistry {
                         executeSkillTargets(context, "shelter", skillArgs + " " + bot.getGameProfile().name());
                     } catch (CommandSyntaxException e) {
                         LOGGER.warn("Failed to execute shelter skill: {}", e.getMessage());
+                    }
+                });
+            }, 2, java.util.concurrent.TimeUnit.SECONDS);
+        });
+
+        return 1;
+    }
+
+    /**
+     * Executes the build skill at the position the player is looking at.
+     * Bot moves to the looked-at position, then builds the schematic there.
+     */
+    static int executeBuildLook(CommandContext<ServerCommandSource> context, String schematicName, String targetArg) throws CommandSyntaxException {
+        ServerCommandSource source = context.getSource();
+        ServerPlayerEntity commander = source.getPlayer();
+        if (commander == null) {
+            throw new SimpleCommandExceptionType(Text.literal("Only players can direct bots to build at a look target.")).create();
+        }
+        if (!(commander.getEntityWorld() instanceof ServerWorld commanderWorld)) {
+            return 0;
+        }
+
+        // Raycast from player's view to find target position
+        final double maxDistance = 64.0D;
+        HitResult hit = commander.raycast(maxDistance, 1.0F, false);
+        if (!(hit instanceof BlockHitResult bhr) || hit.getType() == HitResult.Type.MISS) {
+            ChatUtils.sendSystemMessage(source, "Look at where you want the " + schematicName + " to be built.");
+            return 0;
+        }
+
+        // Check if the hit block is replaceable (snow, carpet, grass, etc.)
+        // For replaceable blocks, we build AT that position, not offset from it
+        BlockPos hitBlockPos = bhr.getBlockPos();
+        net.minecraft.block.BlockState hitState = commanderWorld.getBlockState(hitBlockPos);
+        boolean isReplaceable = hitState.isReplaceable() 
+            || hitState.isOf(net.minecraft.block.Blocks.SNOW)
+            || hitState.isOf(net.minecraft.block.Blocks.SHORT_GRASS)
+            || hitState.isOf(net.minecraft.block.Blocks.TALL_GRASS)
+            || hitState.isOf(net.minecraft.block.Blocks.FERN);
+        
+        // For replaceable blocks, use the block's position directly
+        // For solid blocks hit from above, offset up by 1
+        BlockPos rawTargetPos;
+        if (isReplaceable) {
+            rawTargetPos = hitBlockPos.toImmutable();
+        } else {
+            rawTargetPos = hitBlockPos.offset(bhr.getSide()).toImmutable();
+        }
+        
+        // Apply same 3-block forward offset that preview uses (centered + forward)
+        float yaw = commander.getYaw();
+        double yawRad = Math.toRadians(yaw);
+        int forwardOffsetX = (int) Math.round(-Math.sin(yawRad) * 3.0);
+        int forwardOffsetZ = (int) Math.round(Math.cos(yawRad) * 3.0);
+        
+        // The preview CENTER is at rawTargetPos + forwardOffset
+        BlockPos targetPos = rawTargetPos.add(forwardOffsetX, 0, forwardOffsetZ);
+        
+        BlockPos goal = SafePositionService.findSafeNear(commanderWorld, targetPos, 8);
+        if (goal == null) {
+            goal = SafePositionService.findSafeNear(commanderWorld, rawTargetPos.toImmutable(), 8);
+        }
+        if (goal == null) {
+            ChatUtils.sendSystemMessage(source, "Can't find a safe spot near there.");
+            return 0;
+        }
+
+        // Resolve target bot(s)
+        List<ServerPlayerEntity> bots;
+        if (targetArg == null) {
+            // Default: find bots following the commander
+            bots = new ArrayList<>();
+            for (ServerPlayerEntity candidate : BotEventHandler.getRegisteredBots(source.getServer())) {
+                if (candidate == null || candidate.isRemoved()) continue;
+                if (candidate.getEntityWorld() != commanderWorld) continue;
+                if (BotEventHandler.getCurrentMode(candidate) != BotEventHandler.Mode.FOLLOW) continue;
+                if (!commander.getUuid().equals(BotEventHandler.getFollowTargetUuid(candidate))) continue;
+                bots.add(candidate);
+            }
+        } else {
+            bots = resolveTargetBots(context, targetArg);
+        }
+
+        if (bots.isEmpty()) {
+            ChatUtils.sendSystemMessage(source, "No bots are following you.");
+            return 0;
+        }
+
+        // Use the first bot
+        ServerPlayerEntity bot = bots.get(0);
+        MinecraftServer server = source.getServer();
+
+        // Abort any current task
+        TaskService.forceAbort(bot.getUuid(), "§cInterrupted by /bot build_look.");
+        BotIdleHobbiesService.snoozeFor(bot, 3_600L);
+
+        // Move the bot to the target location first, then run build skill
+        final BlockPos finalGoal = goal;
+        final String finalSchematic = schematicName;
+        final BlockPos finalTargetPos = targetPos; // Store exact raycast position for build centering
+        ChatUtils.sendSystemMessage(source, bot.getGameProfile().name() + " is heading to build " + schematicName + " where you're looking.");
+
+        // Use async movement to the position, then run the build skill
+        BotEventHandler.setComeModeWalk(bot, commander, finalGoal, 3.2D, true);
+
+        // Schedule the build skill to run after the bot arrives
+        server.execute(() -> {
+            java.util.concurrent.Executors.newSingleThreadScheduledExecutor().schedule(() -> {
+                server.execute(() -> {
+                    // Run the build skill with exact target position for centering
+                    String skillArgs = finalSchematic + " " + bot.getGameProfile().name()
+                            + " targetX=" + finalTargetPos.getX()
+                            + " targetY=" + finalTargetPos.getY()
+                            + " targetZ=" + finalTargetPos.getZ();
+                    try {
+                        executeSkillTargets(context, "build", skillArgs);
+                    } catch (CommandSyntaxException e) {
+                        LOGGER.warn("Failed to execute build skill: {}", e.getMessage());
                     }
                 });
             }, 2, java.util.concurrent.TimeUnit.SECONDS);
@@ -3682,6 +3837,142 @@ public class modCommandRegistry {
         return successes;
     }
 
+    // ===== Unleash Tethered Mounts Toggle =====
+
+    static int executeUnleashTetheredSetTargets(CommandContext<ServerCommandSource> context,
+                                                String targetArg,
+                                                boolean enabled) throws CommandSyntaxException {
+        ServerCommandSource source = context.getSource();
+        List<ServerPlayerEntity> bots = resolveTargetBots(context, targetArg);
+        boolean isAll = targetArg != null && "all".equalsIgnoreCase(targetArg.trim());
+
+        int successes = 0;
+        for (ServerPlayerEntity bot : bots) {
+            if (bot == null) {
+                continue;
+            }
+            BotCommandStateService.State state = BotCommandStateService.stateFor(bot);
+            if (state == null) {
+                continue;
+            }
+            state.unleashTetheredMounts = enabled;
+            successes++;
+        }
+
+        if (!bots.isEmpty()) {
+            String summary = formatBotList(bots, isAll);
+            ChatUtils.sendSystemMessage(source,
+                    summary + " unleash-tethered " + (enabled ? "enabled" : "disabled") + ".");
+        }
+        return successes;
+    }
+
+    static int executeUnleashTetheredToggleTargets(CommandContext<ServerCommandSource> context,
+                                                   String targetArg) throws CommandSyntaxException {
+        ServerCommandSource source = context.getSource();
+        List<ServerPlayerEntity> bots = resolveTargetBots(context, targetArg);
+        boolean isAll = targetArg != null && "all".equalsIgnoreCase(targetArg.trim());
+
+        int successes = 0;
+        int enabledCount = 0;
+        for (ServerPlayerEntity bot : bots) {
+            if (bot == null) {
+                continue;
+            }
+            BotCommandStateService.State state = BotCommandStateService.stateFor(bot);
+            if (state == null) {
+                continue;
+            }
+            state.unleashTetheredMounts = !state.unleashTetheredMounts;
+            successes++;
+            if (state.unleashTetheredMounts) {
+                enabledCount++;
+            }
+        }
+
+        if (!bots.isEmpty()) {
+            String summary = formatBotList(bots, isAll);
+            if (isAll || bots.size() > 1) {
+                ChatUtils.sendSystemMessage(source,
+                        summary + " unleash-tethered enabled for " + enabledCount + "/" + bots.size() + ".");
+            } else if (bots.size() == 1) {
+                BotCommandStateService.State state = BotCommandStateService.stateFor(bots.getFirst());
+                boolean on = state != null && state.unleashTetheredMounts;
+                ChatUtils.sendSystemMessage(source,
+                        summary + " unleash-tethered is now " + (on ? "ON" : "OFF") + ".");
+            }
+        }
+        return successes;
+    }
+
+    // ===== Leash On Dismount Toggle =====
+
+    static int executeLeashOnDismountSetTargets(CommandContext<ServerCommandSource> context,
+                                                String targetArg,
+                                                boolean enabled) throws CommandSyntaxException {
+        ServerCommandSource source = context.getSource();
+        List<ServerPlayerEntity> bots = resolveTargetBots(context, targetArg);
+        boolean isAll = targetArg != null && "all".equalsIgnoreCase(targetArg.trim());
+
+        int successes = 0;
+        for (ServerPlayerEntity bot : bots) {
+            if (bot == null) {
+                continue;
+            }
+            BotCommandStateService.State state = BotCommandStateService.stateFor(bot);
+            if (state == null) {
+                continue;
+            }
+            state.leashMountsOnDismount = enabled;
+            successes++;
+        }
+
+        if (!bots.isEmpty()) {
+            String summary = formatBotList(bots, isAll);
+            ChatUtils.sendSystemMessage(source,
+                    summary + " leash-on-dismount " + (enabled ? "enabled" : "disabled") + ".");
+        }
+        return successes;
+    }
+
+    static int executeLeashOnDismountToggleTargets(CommandContext<ServerCommandSource> context,
+                                                   String targetArg) throws CommandSyntaxException {
+        ServerCommandSource source = context.getSource();
+        List<ServerPlayerEntity> bots = resolveTargetBots(context, targetArg);
+        boolean isAll = targetArg != null && "all".equalsIgnoreCase(targetArg.trim());
+
+        int successes = 0;
+        int enabledCount = 0;
+        for (ServerPlayerEntity bot : bots) {
+            if (bot == null) {
+                continue;
+            }
+            BotCommandStateService.State state = BotCommandStateService.stateFor(bot);
+            if (state == null) {
+                continue;
+            }
+            state.leashMountsOnDismount = !state.leashMountsOnDismount;
+            successes++;
+            if (state.leashMountsOnDismount) {
+                enabledCount++;
+            }
+        }
+
+        if (!bots.isEmpty()) {
+            String summary = formatBotList(bots, isAll);
+            if (isAll || bots.size() > 1) {
+                ChatUtils.sendSystemMessage(source,
+                        summary + " leash-on-dismount enabled for " + enabledCount + "/" + bots.size() + ".");
+            } else if (bots.size() == 1) {
+                BotCommandStateService.State state = BotCommandStateService.stateFor(bots.getFirst());
+                boolean on = state != null && state.leashMountsOnDismount;
+                ChatUtils.sendSystemMessage(source,
+                        summary + " leash-on-dismount is now " + (on ? "ON" : "OFF") + ".");
+            }
+        }
+        return successes;
+    }
+
     static int executeBaseSet(CommandContext<ServerCommandSource> context, String label) throws CommandSyntaxException {
         if (label == null || label.isBlank()) {
             throw new SimpleCommandExceptionType(Text.literal("Provide a base label."))
@@ -4234,6 +4525,33 @@ public class modCommandRegistry {
                         continue;
                     } catch (NumberFormatException ignored) {
                         LOGGER.warn("Invalid descent-y parameter '{}'", numStr);
+                        continue;
+                    }
+                }
+                
+                // Check for key=value parameter pairs (e.g., targetX=-557)
+                if (token.contains("=")) {
+                    int eqIdx = token.indexOf('=');
+                    String key = token.substring(0, eqIdx);
+                    String value = token.substring(eqIdx + 1);
+                    if (!key.isEmpty() && !value.isEmpty()) {
+                        // Try to parse as integer first
+                        try {
+                            int intVal = Integer.parseInt(value);
+                            params.put(key, intVal);
+                            LOGGER.info("Parsed option: {}={}", key, intVal);
+                        } catch (NumberFormatException e) {
+                            // Try as double
+                            try {
+                                double doubleVal = Double.parseDouble(value);
+                                params.put(key, doubleVal);
+                                LOGGER.info("Parsed option: {}={}", key, doubleVal);
+                            } catch (NumberFormatException e2) {
+                                // Store as string
+                                params.put(key, value);
+                                LOGGER.info("Parsed option: {}={}", key, value);
+                            }
+                        }
                         continue;
                     }
                 }

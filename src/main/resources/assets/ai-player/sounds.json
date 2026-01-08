@@ -2574,8 +2574,482 @@
         "weight": 1
       }
     ]
-  }
-  ,
+  },
+  "bot.line.ambient_heard_something": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/ambient_heard_something__01",
+        "weight": 1
+      },
+      {
+        "name": "ai-player:dialogue/ambient_heard_something__02",
+        "weight": 1
+      }
+    ]
+  },
+  "bot.line.ambient_did_you_hear": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/ambient_did_you_hear__01",
+        "weight": 1
+      },
+      {
+        "name": "ai-player:dialogue/ambient_did_you_hear__02",
+        "weight": 1
+      }
+    ]
+  },
+  "bot.line.ambient_something_moved": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/ambient_something_moved__01",
+        "weight": 1
+      },
+      {
+        "name": "ai-player:dialogue/ambient_something_moved__02",
+        "weight": 1
+      }
+    ]
+  },
+  "bot.line.ambient_not_alone": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/ambient_not_alone__01",
+        "weight": 1
+      },
+      {
+        "name": "ai-player:dialogue/ambient_not_alone__02",
+        "weight": 1
+      }
+    ]
+  },
+  "bot.line.ambient_smells_terrible": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/ambient_smells_terrible__01",
+        "weight": 1
+      },
+      {
+        "name": "ai-player:dialogue/ambient_smells_terrible__02",
+        "weight": 1
+      }
+    ]
+  },
+  "bot.line.ambient_dont_like_this": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/ambient_dont_like_this__01",
+        "weight": 1
+      },
+      {
+        "name": "ai-player:dialogue/ambient_dont_like_this__02",
+        "weight": 1
+      }
+    ]
+  },
+  "bot.line.ambient_creepy": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/ambient_creepy__01",
+        "weight": 1
+      },
+      {
+        "name": "ai-player:dialogue/ambient_creepy__02",
+        "weight": 1
+      }
+    ]
+  },
+  "bot.line.ambient_cave_deep": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/ambient_cave_deep__01",
+        "weight": 1
+      },
+      {
+        "name": "ai-player:dialogue/ambient_cave_deep__02",
+        "weight": 1
+      }
+    ]
+  },
+  "bot.line.ambient_amethyst_beautiful": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/ambient_amethyst_beautiful__01", "weight": 1 }
+    ]
+  },
+  "bot.line.ambient_amethyst_sparkly": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/ambient_amethyst_sparkly__01", "weight": 1 }
+    ]
+  },
+  "bot.line.ambient_amethyst_geode": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/ambient_amethyst_geode__01", "weight": 1 }
+    ]
+  },
+  "bot.line.ambient_bat_startled": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/ambient_bat_startled__01", "weight": 1 }
+    ]
+  },
+  "bot.line.ambient_bat_wings": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/ambient_bat_wings__01", "weight": 1 }
+    ]
+  },
+  "bot.line.ambient_bat_creepy": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/ambient_bat_creepy__01", "weight": 1 }
+    ]
+  },
+  "bot.line.ambient_dripstone_careful": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/ambient_dripstone_careful__01", "weight": 1 }
+    ]
+  },
+  "bot.line.ambient_dripstone_sharp": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/ambient_dripstone_sharp__01", "weight": 1 }
+    ]
+  },
+  "bot.line.ambient_dripstone_dripping": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/ambient_dripstone_dripping__01", "weight": 1 }
+    ]
+  },
+  "bot.line.ambient_deepslate_cold": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/ambient_deepslate_cold__01", "weight": 1 }
+    ]
+  },
+  "bot.line.ambient_deepslate_deep": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/ambient_deepslate_deep__01", "weight": 1 }
+    ]
+  },
+  "bot.line.ambient_deepslate_ancient": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/ambient_deepslate_ancient__01", "weight": 1 }
+    ]
+  },
+  "bot.line.dark_cant_see": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/dark_cant_see__01",
+        "weight": 1
+      },
+      {
+        "name": "ai-player:dialogue/dark_cant_see__02",
+        "weight": 1
+      }
+    ]
+  },
+  "bot.line.dark_where_are_you": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/dark_where_are_you__01",
+        "weight": 1
+      },
+      {
+        "name": "ai-player:dialogue/dark_where_are_you__02",
+        "weight": 1
+      }
+    ]
+  },
+  "bot.line.dark_need_light": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/dark_need_light__01",
+        "weight": 1
+      },
+      {
+        "name": "ai-player:dialogue/dark_need_light__02",
+        "weight": 1
+      }
+    ]
+  },
+  "bot.line.dark_too_dark": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/dark_too_dark__01",
+        "weight": 1
+      },
+      {
+        "name": "ai-player:dialogue/dark_too_dark__02",
+        "weight": 1
+      }
+    ]
+  },
+  "bot.line.dark_torch_please": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/dark_torch_please__01",
+        "weight": 1
+      },
+      {
+        "name": "ai-player:dialogue/dark_torch_please__02",
+        "weight": 1
+      }
+    ]
+  },
+  "bot.line.wildlife_heard_bird": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/wildlife_heard_bird__01",
+        "weight": 1
+      },
+      {
+        "name": "ai-player:dialogue/wildlife_heard_bird__02",
+        "weight": 1
+      }
+    ]
+  },
+  "bot.line.wildlife_saw_cow": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/wildlife_saw_cow__01",
+        "weight": 1
+      },
+      {
+        "name": "ai-player:dialogue/wildlife_saw_cow__02",
+        "weight": 1
+      }
+    ]
+  },
+  "bot.line.wildlife_pig_nearby": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/wildlife_pig_nearby__01",
+        "weight": 1
+      },
+      {
+        "name": "ai-player:dialogue/wildlife_pig_nearby__02",
+        "weight": 1
+      }
+    ]
+  },
+  "bot.line.wildlife_sheep_around": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/wildlife_sheep_around__01",
+        "weight": 1
+      },
+      {
+        "name": "ai-player:dialogue/wildlife_sheep_around__02",
+        "weight": 1
+      }
+    ]
+  },
+  "bot.line.wildlife_chicken": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/wildlife_chicken__01",
+        "weight": 1
+      },
+      {
+        "name": "ai-player:dialogue/wildlife_chicken__02",
+        "weight": 1
+      }
+    ]
+  },
+  "bot.line.wildlife_nice_day": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/wildlife_nice_day__01",
+        "weight": 1
+      },
+      {
+        "name": "ai-player:dialogue/wildlife_nice_day__02",
+        "weight": 1
+      }
+    ]
+  },
+  "bot.line.lost_over_here": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/lost_over_here__01",
+        "weight": 1
+      },
+      {
+        "name": "ai-player:dialogue/lost_over_here__02",
+        "weight": 1
+      }
+    ]
+  },
+  "bot.line.lost_can_anyone_hear": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/lost_can_anyone_hear__01",
+        "weight": 1
+      },
+      {
+        "name": "ai-player:dialogue/lost_can_anyone_hear__02",
+        "weight": 1
+      }
+    ]
+  },
+  "bot.line.lost_hello": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/lost_hello__01",
+        "weight": 1
+      },
+      {
+        "name": "ai-player:dialogue/lost_hello__02",
+        "weight": 1
+      }
+    ]
+  },
+  "bot.line.lost_help": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/lost_help__01",
+        "weight": 1
+      },
+      {
+        "name": "ai-player:dialogue/lost_help__02",
+        "weight": 1
+      }
+    ]
+  },
+  "bot.line.lost_stuck_here": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/lost_stuck_here__01",
+        "weight": 1
+      },
+      {
+        "name": "ai-player:dialogue/lost_stuck_here__02",
+        "weight": 1
+      }
+    ]
+  },
+  "bot.line.lost_where_is_everyone": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/lost_where_is_everyone__01",
+        "weight": 1
+      },
+      {
+        "name": "ai-player:dialogue/lost_where_is_everyone__02",
+        "weight": 1
+      }
+    ]
+  },
+  "bot.line.found_finally": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/found_finally__01",
+        "weight": 1
+      },
+      {
+        "name": "ai-player:dialogue/found_finally__02",
+        "weight": 1
+      }
+    ]
+  },
+  "bot.line.found_thank_goodness": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/found_thank_goodness__01",
+        "weight": 1
+      },
+      {
+        "name": "ai-player:dialogue/found_thank_goodness__02",
+        "weight": 1
+      }
+    ]
+  },
+  "bot.line.found_thought_id_be_stuck": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/found_thought_id_be_stuck__01",
+        "weight": 1
+      },
+      {
+        "name": "ai-player:dialogue/found_thought_id_be_stuck__02",
+        "weight": 1
+      }
+    ]
+  },
+  "bot.line.found_so_glad": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/found_so_glad__01",
+        "weight": 1
+      },
+      {
+        "name": "ai-player:dialogue/found_so_glad__02",
+        "weight": 1
+      }
+    ]
+  },
+  "bot.line.found_been_calling": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/found_been_calling__01",
+        "weight": 1
+      },
+      {
+        "name": "ai-player:dialogue/found_been_calling__02",
+        "weight": 1
+      }
+    ]
+  },
+  "bot.line.found_lets_get_out": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/found_lets_get_out__01",
+        "weight": 1
+      },
+      {
+        "name": "ai-player:dialogue/found_lets_get_out__02",
+        "weight": 1
+      }
+    ]
+  },
   "bot.ambient": {
     "category": "voice",
     "sounds": [

@@ -3,13 +3,17 @@ package net.shasankp000.GameAI.skills;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.shasankp000.GameAI.BotEventHandler;
 import net.shasankp000.GameAI.DropSweeper;
+import net.shasankp000.GameAI.services.BundleService;
 import net.shasankp000.GameAI.services.BotCommandStateService;
 import net.shasankp000.GameAI.services.DebugFileLogger;
 import net.shasankp000.GameAI.services.TaskService;
+import net.shasankp000.GameAI.skills.impl.BuildSchematicSkill;
 import net.shasankp000.GameAI.skills.impl.CollectDirtSkill;
 import net.shasankp000.GameAI.skills.impl.DirtShovelSkill;
 import net.shasankp000.GameAI.skills.impl.DropSweepSkill;
+import net.shasankp000.GameAI.skills.impl.FeedAnimalsSkill;
 import net.shasankp000.GameAI.skills.impl.FishingSkill;
+import net.shasankp000.GameAI.skills.impl.FlowerPickSkill;
 import net.shasankp000.GameAI.skills.impl.HuntSkill;
 import net.shasankp000.GameAI.skills.impl.MiningSkill;
 import net.shasankp000.GameAI.skills.impl.ShelterSkill;
@@ -47,11 +51,15 @@ public final class SkillManager {
         register(new WoodcutSkill());
         register(new WoodcutCleanupSkill());
         register(new ShelterSkill());
+        register(new BuildSchematicSkill());
         register(new FishingSkill());
         register(new net.shasankp000.GameAI.skills.impl.HangoutSkill());
         register(new net.shasankp000.GameAI.skills.impl.FarmSkill());
         register(new net.shasankp000.GameAI.skills.impl.WoolSkill());
         register(new net.shasankp000.GameAI.skills.impl.FlareSkill());
+        register(new net.shasankp000.GameAI.skills.impl.LeashToFenceSkill());
+        register(new FeedAnimalsSkill());
+        register(new FlowerPickSkill());
         register(new HuntSkill());
         DebugFileLogger.log("SkillManager.staticInit end");
     }
@@ -211,6 +219,10 @@ public final class SkillManager {
         if (player == null) {
             return false;
         }
+        if (player.getInventory().getEmptySlot() != -1) {
+            return false;
+        }
+        BundleService.packExistingBundles(player);
         return player.getInventory().getEmptySlot() == -1;
     }
 

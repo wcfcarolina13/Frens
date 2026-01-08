@@ -24,7 +24,8 @@ import net.shasankp000.GameAI.BotActions;
 import net.shasankp000.GameAI.DropSweeper;
 import net.shasankp000.GameAI.services.ChestStoreService;
 import net.shasankp000.GameAI.services.BlockInteractionService;
-import net.shasankp000.GameAI.services.CraftingHelper;
+import net.shasankp000.GameAI.services.ToolProvisionService;
+import net.shasankp000.GameAI.services.SmeltingService;
 import net.shasankp000.GameAI.services.FollowPathService;
 import net.shasankp000.GameAI.services.MovementService;
 import net.shasankp000.GameAI.services.MovementService.Mode;
@@ -42,6 +43,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -95,6 +97,7 @@ public final class FishingSkill implements Skill {
     public SkillExecutionResult execute(SkillContext context) {
         ServerCommandSource source = context.botSource();
         ServerPlayerEntity bot = source.getPlayer();
+        boolean hobby = isHobby(context);
         if (bot == null) {
             return SkillExecutionResult.failure("Bot not available.");
         }
@@ -378,7 +381,10 @@ public final class FishingSkill implements Skill {
         if (caught == 0 && attempts > 0) {
             return SkillExecutionResult.failure("No bites after " + attempts + " casts.");
         }
-        
+        if (hobby) {
+            maybeCookFish(bot, source);
+            eatCookedFishIfHungry(bot);
+        }
         ChatUtils.sendSystemMessage(source, "Fishing session finished. Caught " + caught + " items.");
         return SkillExecutionResult.success("Fishing succeeded (" + caught + " items).");
     }
@@ -742,7 +748,7 @@ public final class FishingSkill implements Skill {
         if (chestPos == null) {
             LOGGER.info("No nearby empty chest detected around {}; crafting/placing chest...", bot.getBlockPos().toShortString());
             if (!hasItem(bot, Items.CHEST)) {
-                CraftingHelper.craftGeneric(source, bot, source.getPlayer(), "chest", 1, null);
+                ToolProvisionService.ensureChest(bot, source, source.getPlayer(), 1);
             }
             if (hasItem(bot, Items.CHEST)) {
                 chestPos = placeChestNearby(bot, safeStand);
@@ -845,8 +851,8 @@ public final class FishingSkill implements Skill {
         if (hasItem(bot, Items.FISHING_ROD)) {
             return true;
         }
-        int crafted = CraftingHelper.craftGeneric(source, bot, source.getPlayer(), "fishing_rod", 1, null);
-        return crafted > 0 && hasItem(bot, Items.FISHING_ROD);
+        boolean crafted = ToolProvisionService.ensureFishingRod(bot, source, source.getPlayer());
+        return crafted && hasItem(bot, Items.FISHING_ROD);
     }
 
     private static FishingSpot findFishingSpot(ServerPlayerEntity bot, int radius) {
@@ -1569,6 +1575,63 @@ bot.getName().getString());
             Thread.sleep(millis);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+        }
+    }
+
+    private static boolean isHobby(SkillContext context) {
+        if (context == null || context.parameters() == null) {
+            return false;
+        }
+        Object origin = context.parameters().get("_origin");
+        if (origin != null && "ambient".equalsIgnoreCase(origin.toString())) {
+            return true;
+        }
+        Object optionsObj = context.parameters().get("options");
+        if (optionsObj instanceof List<?> list) {
+            for (Object raw : list) {
+                if (raw != null && raw.toString().toLowerCase(Locale.ROOT).contains("hobby")) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private static void maybeCookFish(ServerPlayerEntity bot, ServerCommandSource source) {
+        if (bot == null || source == null) {
+            return;
+        }
+        if (countRawFish(bot) <= 0) {
+            return;
+        }
+        SmeltingService.startBatchCook(bot, source, "fish", "auto");
+    }
+
+    private static int countRawFish(ServerPlayerEntity bot) {
+        int total = 0;
+        for (int i = 0; i < bot.getInventory().size(); i++) {
+            ItemStack stack = bot.getInventory().getStack(i);
+            if (stack.isEmpty()) continue;
+            if (stack.isOf(Items.COD) || stack.isOf(Items.SALMON) || stack.isOf(Items.TROPICAL_FISH) || stack.isOf(Items.PUFFERFISH)) {
+                total += stack.getCount();
+            }
+        }
+        return total;
+    }
+
+    private static void eatCookedFishIfHungry(ServerPlayerEntity bot) {
+        if (bot == null) {
+            return;
+        }
+        if (bot.getHungerManager().getFoodLevel() > 19) {
+            return;
+        }
+        if (BotActions.ensureHotbarItem(bot, Items.COOKED_COD)) {
+            BotActions.useSelectedItem(bot);
+            return;
+        }
+        if (BotActions.ensureHotbarItem(bot, Items.COOKED_SALMON)) {
+            BotActions.useSelectedItem(bot);
         }
     }
 

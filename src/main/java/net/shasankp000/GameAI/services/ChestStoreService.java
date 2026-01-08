@@ -352,8 +352,8 @@ public final class ChestStoreService {
             return null;
         }
         if (countItem(bot, Items.CHEST) <= 0) {
-            int crafted = CraftingHelper.craftGeneric(source, bot, source.getPlayer(), "chest", 1, null);
-            if (crafted <= 0 && countItem(bot, Items.CHEST) <= 0) {
+            boolean crafted = ToolProvisionService.ensureChest(bot, source, source.getPlayer(), 1);
+            if (!crafted && countItem(bot, Items.CHEST) <= 0) {
                 LOGGER.warn("Store: no chest in inventory and couldn't craft one.");
                 return null;
             }

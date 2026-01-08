@@ -64,7 +64,8 @@ public final class CraftingHelper {
             Items.RED_SAND,
             Items.COBBLESTONE,
             Items.COBBLED_DEEPSLATE,
-            Items.BLACKSTONE
+            Items.BLACKSTONE,
+            Items.CRAFTING_TABLE
     );
     private static final int CRAFTING_TABLE_SEARCH_RADIUS = 40;
     private static final int CRAFTING_TABLE_SEARCH_YSPAN = 6;
@@ -107,6 +108,15 @@ public final class CraftingHelper {
         return switch (normalized) {
             case "crafting_table" -> craftWithPlanks(bot, source, commander, CRAFTING_TABLE_ID, 4, Items.CRAFTING_TABLE, amount);
             case "sticks", "stick" -> craftSticks(bot, source, commander, amount);
+            case "torch", "torches" -> craftTorches(bot, source, commander, amount);
+            case "door", "doors" -> craftDoor(bot, source, commander, amount);
+            case "fence", "fences" -> craftFence(bot, source, commander, amount);
+            case "saddle" -> craftSaddle(bot, source, commander, amount);
+            case "lead", "leads" -> craftLead(bot, source, commander, amount);
+            case "bundle", "bundles" -> craftBundle(bot, source, commander, amount);
+            case "leather" -> craftLeather(bot, source, commander, amount);
+            case "carrot_on_a_stick" -> craftCarrotOnStick(bot, source, commander, amount);
+            case "warped_fungus_on_a_stick" -> craftWarpedFungusOnStick(bot, source, commander, amount);
             case "axe" -> craftToolMaterialAware(bot, source, commander, amount, ToolKind.AXE, materialPreference);
             case "shovel" -> craftToolMaterialAware(bot, source, commander, amount, ToolKind.SHOVEL, materialPreference);
             case "pickaxe" -> craftToolMaterialAware(bot, source, commander, amount, ToolKind.PICKAXE, materialPreference);
@@ -403,6 +413,412 @@ public final class CraftingHelper {
         distributeOutput(bot, Items.STICK, crafts * 4);
         recordCraftHistory(commander, Identifier.of("minecraft", "stick"));
         return crafts * 4;
+    }
+
+    private static int craftTorches(ServerPlayerEntity bot, ServerCommandSource source, ServerPlayerEntity commander, int amountRequested) {
+        if (bot == null || source == null) {
+            return 0;
+        }
+        Identifier recipeId = Identifier.of("minecraft", "torch");
+        if (!hasRecipePermission(commander, source.getServer(), recipeId)) {
+            ChatUtils.sendSystemMessage(source, "I don't know how to craft that yet.");
+            return 0;
+        }
+        int targetTorches = Math.max(1, amountRequested);
+        int craftsNeeded = (int) Math.ceil(targetTorches / 4.0);
+        if (!ensureSticks(bot, source, craftsNeeded)) {
+            ChatUtils.sendSystemMessage(source, "Torches need sticks; I don't have enough.");
+            return 0;
+        }
+        ensureItemAvailable(bot, source, Items.COAL, craftsNeeded);
+        int coal = countItem(bot, Items.COAL);
+        int remaining = Math.max(0, craftsNeeded - coal);
+        if (remaining > 0) {
+            ensureItemAvailable(bot, source, Items.CHARCOAL, remaining);
+        }
+        int charcoal = countItem(bot, Items.CHARCOAL);
+        int sticks = countItem(bot, Items.STICK);
+        int fuel = coal + charcoal;
+        int crafts = Math.min(craftsNeeded, Math.min(sticks, fuel));
+        if (crafts <= 0) {
+            ChatUtils.sendSystemMessage(source, "Torches need 1 stick and 1 coal/charcoal per craft.");
+            return 0;
+        }
+        Map<Item, Integer> reserveItems = new HashMap<>();
+        reserveItems.put(Items.STICK, crafts);
+        if (coal > 0) {
+            reserveItems.put(Items.COAL, Math.min(crafts, coal));
+        }
+        if (charcoal > 0 && coal < crafts) {
+            reserveItems.put(Items.CHARCOAL, Math.min(crafts - coal, charcoal));
+        }
+        ensureInventorySpaceForOutput(bot, source, Items.TORCH, crafts * 4, 0, 0, reserveItems);
+        consumeItem(bot, Items.STICK, crafts);
+        int useCoal = Math.min(crafts, coal);
+        if (useCoal > 0) {
+            consumeItem(bot, Items.COAL, useCoal);
+        }
+        int useCharcoal = crafts - useCoal;
+        if (useCharcoal > 0) {
+            consumeItem(bot, Items.CHARCOAL, useCharcoal);
+        }
+        distributeOutput(bot, Items.TORCH, crafts * 4);
+        recordCraftHistory(commander, recipeId);
+        return crafts * 4;
+    }
+
+    private static int craftDoor(ServerPlayerEntity bot, ServerCommandSource source, ServerPlayerEntity commander, int amountRequested) {
+        if (bot == null || source == null) {
+            return 0;
+        }
+        if (!ensureCraftingStation(bot, source)) {
+            ChatUtils.sendSystemMessage(source, "I need a crafting table placed nearby to craft a door.");
+            return 0;
+        }
+        record DoorRecipe(Item plank, Item door, Identifier recipeId) {}
+        List<DoorRecipe> recipes = List.of(
+                new DoorRecipe(Items.OAK_PLANKS, Items.OAK_DOOR, Identifier.of("minecraft", "oak_door")),
+                new DoorRecipe(Items.SPRUCE_PLANKS, Items.SPRUCE_DOOR, Identifier.of("minecraft", "spruce_door")),
+                new DoorRecipe(Items.BIRCH_PLANKS, Items.BIRCH_DOOR, Identifier.of("minecraft", "birch_door")),
+                new DoorRecipe(Items.JUNGLE_PLANKS, Items.JUNGLE_DOOR, Identifier.of("minecraft", "jungle_door")),
+                new DoorRecipe(Items.ACACIA_PLANKS, Items.ACACIA_DOOR, Identifier.of("minecraft", "acacia_door")),
+                new DoorRecipe(Items.DARK_OAK_PLANKS, Items.DARK_OAK_DOOR, Identifier.of("minecraft", "dark_oak_door")),
+                new DoorRecipe(Items.MANGROVE_PLANKS, Items.MANGROVE_DOOR, Identifier.of("minecraft", "mangrove_door")),
+                new DoorRecipe(Items.CHERRY_PLANKS, Items.CHERRY_DOOR, Identifier.of("minecraft", "cherry_door")),
+                new DoorRecipe(Items.BAMBOO_PLANKS, Items.BAMBOO_DOOR, Identifier.of("minecraft", "bamboo_door")),
+                new DoorRecipe(Items.CRIMSON_PLANKS, Items.CRIMSON_DOOR, Identifier.of("minecraft", "crimson_door")),
+                new DoorRecipe(Items.WARPED_PLANKS, Items.WARPED_DOOR, Identifier.of("minecraft", "warped_door"))
+        );
+
+        List<Item> plankItems = new ArrayList<>();
+        for (DoorRecipe recipe : recipes) {
+            plankItems.add(recipe.plank());
+        }
+        Map<Item, Integer> totals = countItemsInInventoryAndNearbyChests(bot, source, plankItems);
+        DoorRecipe best = null;
+        int bestCount = 0;
+        for (DoorRecipe recipe : recipes) {
+            int count = totals.getOrDefault(recipe.plank(), 0);
+            if (count > bestCount) {
+                bestCount = count;
+                best = recipe;
+            }
+        }
+        if (bestCount < 6) {
+            ensurePlanksAvailable(bot, source, 6);
+            totals = countItemsInInventoryAndNearbyChests(bot, source, plankItems);
+            for (DoorRecipe recipe : recipes) {
+                int count = totals.getOrDefault(recipe.plank(), 0);
+                if (count > bestCount) {
+                    bestCount = count;
+                    best = recipe;
+                }
+            }
+        }
+        if (best == null || bestCount < 6) {
+            ChatUtils.sendSystemMessage(source, "I need 6 matching planks to craft a door.");
+            return 0;
+        }
+        if (!hasRecipePermission(commander, source.getServer(), best.recipeId())) {
+            ChatUtils.sendSystemMessage(source, "I don't know how to craft that yet.");
+            return 0;
+        }
+
+        int craftsNeeded = (int) Math.ceil(amountRequested / 3.0);
+        ensureItemAvailable(bot, source, best.plank(), craftsNeeded * 6);
+        int availablePlanks = countItem(bot, best.plank());
+        int crafts = Math.min(craftsNeeded, availablePlanks / 6);
+        if (crafts <= 0) {
+            ChatUtils.sendSystemMessage(source, "I need 6 matching planks per door craft.");
+            return 0;
+        }
+        Map<Item, Integer> reserveItems = new HashMap<>();
+        reserveItems.put(best.plank(), crafts * 6);
+        ensureInventorySpaceForOutput(bot, source, best.door(), crafts * 3, 0, 0, reserveItems);
+        consumeItem(bot, best.plank(), crafts * 6);
+        distributeOutput(bot, best.door(), crafts * 3);
+        recordCraftHistory(commander, best.recipeId());
+        return crafts * 3;
+    }
+
+    private static int craftFence(ServerPlayerEntity bot, ServerCommandSource source, ServerPlayerEntity commander, int amountRequested) {
+        if (bot == null || source == null) {
+            return 0;
+        }
+        if (!ensureCraftingStation(bot, source)) {
+            ChatUtils.sendSystemMessage(source, "I need a crafting table placed nearby to craft that.");
+            return 0;
+        }
+        record FenceRecipe(Item plank, Item fence, Identifier recipeId) {}
+        List<FenceRecipe> recipes = List.of(
+                new FenceRecipe(Items.OAK_PLANKS, Items.OAK_FENCE, Identifier.of("minecraft", "oak_fence")),
+                new FenceRecipe(Items.SPRUCE_PLANKS, Items.SPRUCE_FENCE, Identifier.of("minecraft", "spruce_fence")),
+                new FenceRecipe(Items.BIRCH_PLANKS, Items.BIRCH_FENCE, Identifier.of("minecraft", "birch_fence")),
+                new FenceRecipe(Items.JUNGLE_PLANKS, Items.JUNGLE_FENCE, Identifier.of("minecraft", "jungle_fence")),
+                new FenceRecipe(Items.ACACIA_PLANKS, Items.ACACIA_FENCE, Identifier.of("minecraft", "acacia_fence")),
+                new FenceRecipe(Items.DARK_OAK_PLANKS, Items.DARK_OAK_FENCE, Identifier.of("minecraft", "dark_oak_fence")),
+                new FenceRecipe(Items.MANGROVE_PLANKS, Items.MANGROVE_FENCE, Identifier.of("minecraft", "mangrove_fence")),
+                new FenceRecipe(Items.CHERRY_PLANKS, Items.CHERRY_FENCE, Identifier.of("minecraft", "cherry_fence")),
+                new FenceRecipe(Items.BAMBOO_PLANKS, Items.BAMBOO_FENCE, Identifier.of("minecraft", "bamboo_fence")),
+                new FenceRecipe(Items.CRIMSON_PLANKS, Items.CRIMSON_FENCE, Identifier.of("minecraft", "crimson_fence")),
+                new FenceRecipe(Items.WARPED_PLANKS, Items.WARPED_FENCE, Identifier.of("minecraft", "warped_fence"))
+        );
+        List<Item> plankItems = new ArrayList<>();
+        for (FenceRecipe recipe : recipes) {
+            plankItems.add(recipe.plank());
+        }
+        Map<Item, Integer> totals = countItemsInInventoryAndNearbyChests(bot, source, plankItems);
+        FenceRecipe best = null;
+        int bestCount = 0;
+        for (FenceRecipe recipe : recipes) {
+            int count = totals.getOrDefault(recipe.plank(), 0);
+            if (count > bestCount) {
+                bestCount = count;
+                best = recipe;
+            }
+        }
+        if (bestCount < 4) {
+            ensurePlanksAvailable(bot, source, 4);
+            totals = countItemsInInventoryAndNearbyChests(bot, source, plankItems);
+            for (FenceRecipe recipe : recipes) {
+                int count = totals.getOrDefault(recipe.plank(), 0);
+                if (count > bestCount) {
+                    bestCount = count;
+                    best = recipe;
+                }
+            }
+        }
+        if (best == null || bestCount < 4) {
+            ChatUtils.sendSystemMessage(source, "I need 4 matching planks to craft a fence.");
+            return 0;
+        }
+        if (!hasRecipePermission(commander, source.getServer(), best.recipeId())) {
+            ChatUtils.sendSystemMessage(source, "I don't know how to craft that yet.");
+            return 0;
+        }
+        int craftsNeeded = (int) Math.ceil(amountRequested / 3.0);
+        ensureItemAvailable(bot, source, Items.STICK, craftsNeeded * 2);
+        int sticks = countItem(bot, Items.STICK);
+        if (sticks < craftsNeeded * 2 && ensurePlanksAvailable(bot, source, 2)) {
+            int missing = craftsNeeded * 2 - sticks;
+            craftSticks(bot, source, commander, missing);
+            sticks = countItem(bot, Items.STICK);
+        }
+        int plankCount = countItem(bot, best.plank());
+        int crafts = Math.min(craftsNeeded, Math.min(plankCount / 4, sticks / 2));
+        if (crafts <= 0) {
+            ChatUtils.sendSystemMessage(source, "Fences need 4 matching planks and 2 sticks per craft.");
+            return 0;
+        }
+        Map<Item, Integer> reserveItems = new HashMap<>();
+        reserveItems.put(best.plank(), crafts * 4);
+        reserveItems.put(Items.STICK, crafts * 2);
+        ensureInventorySpaceForOutput(bot, source, best.fence(), crafts * 3, 0, 0, reserveItems);
+        consumeItem(bot, best.plank(), crafts * 4);
+        consumeItem(bot, Items.STICK, crafts * 2);
+        distributeOutput(bot, best.fence(), crafts * 3);
+        recordCraftHistory(commander, best.recipeId());
+        return crafts * 3;
+    }
+
+    private static int craftLead(ServerPlayerEntity bot, ServerCommandSource source, ServerPlayerEntity commander, int amountRequested) {
+        if (bot == null || source == null) {
+            return 0;
+        }
+        if (!ensureCraftingStation(bot, source)) {
+            ChatUtils.sendSystemMessage(source, "I need a crafting table placed nearby to craft that.");
+            return 0;
+        }
+        Identifier recipeId = Identifier.of("minecraft", "lead");
+        if (!hasRecipePermission(commander, source.getServer(), recipeId)) {
+            ChatUtils.sendSystemMessage(source, "I don't know how to craft that yet.");
+            return 0;
+        }
+        int craftsNeeded = (int) Math.ceil(amountRequested / 2.0);
+        ensureItemAvailable(bot, source, Items.STRING, craftsNeeded * 4);
+        ensureItemAvailable(bot, source, Items.SLIME_BALL, craftsNeeded);
+        int string = countItem(bot, Items.STRING);
+        int slime = countItem(bot, Items.SLIME_BALL);
+        int crafts = Math.min(craftsNeeded, Math.min(string / 4, slime));
+        if (crafts <= 0) {
+            ChatUtils.sendSystemMessage(source, "Leads need 4 string and 1 slime ball each.");
+            return 0;
+        }
+        Map<Item, Integer> reserveItems = new HashMap<>();
+        reserveItems.put(Items.STRING, crafts * 4);
+        reserveItems.put(Items.SLIME_BALL, crafts);
+        ensureInventorySpaceForOutput(bot, source, Items.LEAD, crafts * 2, 0, 0, reserveItems);
+        consumeItem(bot, Items.STRING, crafts * 4);
+        consumeItem(bot, Items.SLIME_BALL, crafts);
+        distributeOutput(bot, Items.LEAD, crafts * 2);
+        recordCraftHistory(commander, recipeId);
+        return crafts * 2;
+    }
+
+    private static int craftBundle(ServerPlayerEntity bot, ServerCommandSource source, ServerPlayerEntity commander, int amountRequested) {
+        if (bot == null || source == null) {
+            return 0;
+        }
+        if (!ensureCraftingStation(bot, source)) {
+            ChatUtils.sendSystemMessage(source, "I need a crafting table placed nearby to craft that.");
+            return 0;
+        }
+        Identifier recipeId = Identifier.of("minecraft", "bundle");
+        if (!hasRecipePermission(commander, source.getServer(), recipeId)) {
+            ChatUtils.sendSystemMessage(source, "I don't know how to craft that yet.");
+            return 0;
+        }
+        int craftsNeeded = Math.max(1, amountRequested);
+        ensureItemAvailable(bot, source, Items.LEATHER, craftsNeeded);
+        ensureItemAvailable(bot, source, Items.STRING, craftsNeeded);
+        int leather = countItem(bot, Items.LEATHER);
+        int string = countItem(bot, Items.STRING);
+        int crafts = Math.min(craftsNeeded, Math.min(leather, string));
+        if (crafts <= 0) {
+            ChatUtils.sendSystemMessage(source, "Bundles need 1 leather and 1 string each.");
+            return 0;
+        }
+        Map<Item, Integer> reserveItems = new HashMap<>();
+        reserveItems.put(Items.LEATHER, crafts);
+        reserveItems.put(Items.STRING, crafts);
+        ensureInventorySpaceForOutput(bot, source, Items.BUNDLE, crafts, 0, 0, reserveItems);
+        consumeItem(bot, Items.LEATHER, crafts);
+        consumeItem(bot, Items.STRING, crafts);
+        distributeOutput(bot, Items.BUNDLE, crafts);
+        recordCraftHistory(commander, recipeId);
+        return crafts;
+    }
+
+    private static int craftLeather(ServerPlayerEntity bot, ServerCommandSource source, ServerPlayerEntity commander, int amountRequested) {
+        if (bot == null || source == null) {
+            return 0;
+        }
+        Identifier recipeId = Identifier.of("minecraft", "leather");
+        if (!hasRecipePermission(commander, source.getServer(), recipeId)) {
+            ChatUtils.sendSystemMessage(source, "I don't know how to craft that yet.");
+            return 0;
+        }
+        int craftsNeeded = Math.max(1, amountRequested);
+        ensureItemAvailable(bot, source, Items.RABBIT_HIDE, craftsNeeded * 4);
+        int hides = countItem(bot, Items.RABBIT_HIDE);
+        int crafts = Math.min(craftsNeeded, hides / 4);
+        if (crafts <= 0) {
+            ChatUtils.sendSystemMessage(source, "Leather needs 4 rabbit hide each.");
+            return 0;
+        }
+        Map<Item, Integer> reserveItems = new HashMap<>();
+        reserveItems.put(Items.RABBIT_HIDE, crafts * 4);
+        ensureInventorySpaceForOutput(bot, source, Items.LEATHER, crafts, 0, 0, reserveItems);
+        consumeItem(bot, Items.RABBIT_HIDE, crafts * 4);
+        distributeOutput(bot, Items.LEATHER, crafts);
+        recordCraftHistory(commander, recipeId);
+        return crafts;
+    }
+
+    private static int craftSaddle(ServerPlayerEntity bot, ServerCommandSource source, ServerPlayerEntity commander, int amountRequested) {
+        if (bot == null || source == null) {
+            return 0;
+        }
+        if (!ensureCraftingStation(bot, source)) {
+            ChatUtils.sendSystemMessage(source, "I need a crafting table placed nearby to craft a saddle.");
+            return 0;
+        }
+        Identifier recipeId = Identifier.of("minecraft", "saddle");
+        if (!hasRecipePermission(commander, source.getServer(), recipeId)) {
+            ChatUtils.sendSystemMessage(source, "I don't know how to craft that yet.");
+            return 0;
+        }
+        int craftsNeeded = Math.max(1, amountRequested);
+        ensureItemAvailable(bot, source, Items.LEATHER, craftsNeeded * 3);
+        ensureItemAvailable(bot, source, Items.IRON_INGOT, craftsNeeded);
+        int leather = countItem(bot, Items.LEATHER);
+        int iron = countItem(bot, Items.IRON_INGOT);
+        int crafts = Math.min(craftsNeeded, Math.min(leather / 3, iron));
+        if (crafts <= 0) {
+            ChatUtils.sendSystemMessage(source, "Saddles need 3 leather and 1 iron ingot each.");
+            return 0;
+        }
+        Map<Item, Integer> reserveItems = new HashMap<>();
+        reserveItems.put(Items.LEATHER, crafts * 3);
+        reserveItems.put(Items.IRON_INGOT, crafts);
+        ensureInventorySpaceForOutput(bot, source, Items.SADDLE, crafts, 0, 0, reserveItems);
+        consumeItem(bot, Items.LEATHER, crafts * 3);
+        consumeItem(bot, Items.IRON_INGOT, crafts);
+        distributeOutput(bot, Items.SADDLE, crafts);
+        recordCraftHistory(commander, recipeId);
+        return crafts;
+    }
+
+    private static int craftCarrotOnStick(ServerPlayerEntity bot, ServerCommandSource source, ServerPlayerEntity commander, int amountRequested) {
+        if (bot == null || source == null) {
+            return 0;
+        }
+        if (!ensureCraftingStation(bot, source)) {
+            ChatUtils.sendSystemMessage(source, "I need a crafting table placed nearby to craft that.");
+            return 0;
+        }
+        Identifier recipeId = Identifier.of("minecraft", "carrot_on_a_stick");
+        if (!hasRecipePermission(commander, source.getServer(), recipeId)) {
+            ChatUtils.sendSystemMessage(source, "I don't know how to craft that yet.");
+            return 0;
+        }
+        int craftsNeeded = Math.max(1, amountRequested);
+        ensureItemAvailable(bot, source, Items.CARROT, craftsNeeded);
+        int carrots = countItem(bot, Items.CARROT);
+        if (countItem(bot, Items.FISHING_ROD) <= 0) {
+            craftFishingRod(bot, source, commander, 1);
+        }
+        int rods = countItem(bot, Items.FISHING_ROD);
+        int crafts = Math.min(craftsNeeded, Math.min(carrots, rods));
+        if (crafts <= 0) {
+            ChatUtils.sendSystemMessage(source, "Carrot on a stick needs a fishing rod and a carrot.");
+            return 0;
+        }
+        Map<Item, Integer> reserveItems = new HashMap<>();
+        reserveItems.put(Items.CARROT, crafts);
+        reserveItems.put(Items.FISHING_ROD, crafts);
+        ensureInventorySpaceForOutput(bot, source, Items.CARROT_ON_A_STICK, crafts, 0, 0, reserveItems);
+        consumeItem(bot, Items.CARROT, crafts);
+        consumeItem(bot, Items.FISHING_ROD, crafts);
+        distributeOutput(bot, Items.CARROT_ON_A_STICK, crafts);
+        recordCraftHistory(commander, recipeId);
+        return crafts;
+    }
+
+    private static int craftWarpedFungusOnStick(ServerPlayerEntity bot, ServerCommandSource source, ServerPlayerEntity commander, int amountRequested) {
+        if (bot == null || source == null) {
+            return 0;
+        }
+        if (!ensureCraftingStation(bot, source)) {
+            ChatUtils.sendSystemMessage(source, "I need a crafting table placed nearby to craft that.");
+            return 0;
+        }
+        Identifier recipeId = Identifier.of("minecraft", "warped_fungus_on_a_stick");
+        if (!hasRecipePermission(commander, source.getServer(), recipeId)) {
+            ChatUtils.sendSystemMessage(source, "I don't know how to craft that yet.");
+            return 0;
+        }
+        int craftsNeeded = Math.max(1, amountRequested);
+        ensureItemAvailable(bot, source, Items.WARPED_FUNGUS, craftsNeeded);
+        int fungus = countItem(bot, Items.WARPED_FUNGUS);
+        if (countItem(bot, Items.FISHING_ROD) <= 0) {
+            craftFishingRod(bot, source, commander, 1);
+        }
+        int rods = countItem(bot, Items.FISHING_ROD);
+        int crafts = Math.min(craftsNeeded, Math.min(fungus, rods));
+        if (crafts <= 0) {
+            ChatUtils.sendSystemMessage(source, "Warped fungus on a stick needs a fishing rod and warped fungus.");
+            return 0;
+        }
+        Map<Item, Integer> reserveItems = new HashMap<>();
+        reserveItems.put(Items.WARPED_FUNGUS, crafts);
+        reserveItems.put(Items.FISHING_ROD, crafts);
+        ensureInventorySpaceForOutput(bot, source, Items.WARPED_FUNGUS_ON_A_STICK, crafts, 0, 0, reserveItems);
+        consumeItem(bot, Items.WARPED_FUNGUS, crafts);
+        consumeItem(bot, Items.FISHING_ROD, crafts);
+        distributeOutput(bot, Items.WARPED_FUNGUS_ON_A_STICK, crafts);
+        recordCraftHistory(commander, recipeId);
+        return crafts;
     }
 
     private enum ToolKind {
@@ -1113,6 +1529,52 @@ public final class CraftingHelper {
                                                        int reserveLogs,
                                                        Map<Item, Integer> reserveItems) {
         return offloadCheapItemsToNearbyChestInternal(bot, source, reservePlanks, reserveLogs, reserveItems);
+    }
+
+    public static boolean dropCheapStackForSpace(ServerPlayerEntity bot,
+                                                 ServerCommandSource source,
+                                                 Set<Item> reservedItems) {
+        if (bot == null) {
+            return false;
+        }
+        if (bot.getInventory().getEmptySlot() != -1) {
+            return true;
+        }
+        int bestSlot = -1;
+        int bestCount = -1;
+        boolean bestCheap = false;
+        for (int i = 0; i < 36; i++) {
+            ItemStack stack = bot.getInventory().getStack(i);
+            if (stack.isEmpty()) {
+                continue;
+            }
+            if (reservedItems != null && reservedItems.contains(stack.getItem())) {
+                continue;
+            }
+            if (isProtectedItem(stack) || stack.isDamageable()) {
+                continue;
+            }
+            boolean cheap = isCheapDumpItem(stack);
+            if (bestSlot == -1
+                    || (cheap && !bestCheap)
+                    || (cheap == bestCheap && stack.getCount() > bestCount)) {
+                bestSlot = i;
+                bestCount = stack.getCount();
+                bestCheap = cheap;
+            }
+        }
+        if (bestSlot == -1) {
+            LOGGER.info("No disposable stack available to free inventory space.");
+            return false;
+        }
+        ItemStack removed = bot.getInventory().removeStack(bestSlot);
+        if (removed.isEmpty()) {
+            return false;
+        }
+        bot.dropItem(removed, false, false);
+        String name = removed.getItem().getName().getString();
+        LOGGER.info("Dropped {}x {} to free inventory space.", removed.getCount(), name);
+        return bot.getInventory().getEmptySlot() != -1;
     }
 
     private static boolean offloadCheapItemsToNearbyChestInternal(ServerPlayerEntity bot,

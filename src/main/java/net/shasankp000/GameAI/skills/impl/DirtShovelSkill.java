@@ -14,6 +14,7 @@ import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 import net.shasankp000.ChatUtils.ChatUtils;
 import net.shasankp000.GameAI.services.LavaHazardService;
+import net.shasankp000.GameAI.services.ToolProvisionService;
 import net.shasankp000.GameAI.BotActions;
 import net.shasankp000.GameAI.services.SkillResumeService;
 import net.shasankp000.GameAI.skills.DirtNavigationPolicy;
@@ -73,6 +74,7 @@ public final class DirtShovelSkill implements Skill {
     public SkillExecutionResult execute(SkillContext context) {
         ServerCommandSource source = context.botSource();
         ServerPlayerEntity player = Objects.requireNonNull(source.getPlayer(), "player");
+        ServerPlayerEntity commander = context.requestSource() != null ? context.requestSource().getPlayer() : null;
         boolean preserveHazards = getBooleanParameter(context, "preserveHazardMemory", false);
         boolean resumeRequested = preserveHazards || SkillResumeService.consumeResumeIntent(player.getUuid());
         if (!resumeRequested) {
@@ -164,6 +166,7 @@ public final class DirtShovelSkill implements Skill {
 
                 DirtNavigationPolicy.record(originBeforeMove, detectedPos, true);
 
+                ToolProvisionService.ensureToolForKeyword(player, source, commander, preferredTool);
                 BotActions.selectBestTool(player, preferredTool, "sword");
 
                 if (!isWithinMiningReach(player, detectedPos)) {
@@ -233,8 +236,13 @@ public final class DirtShovelSkill implements Skill {
                     Direction facing = player.getHorizontalFacing();
                     TorchPlacer.PlacementResult torchResult = TorchPlacer.placeTorch(player, facing);
                     if (torchResult == TorchPlacer.PlacementResult.NO_TORCHES) {
-                        // Just log, don't fail the job - torches are optional for generic mining
-                        LOGGER.info("Out of torches during generic mining at {}", detectedPos);
+                        if (ToolProvisionService.ensureTorches(player, source, commander, 8)) {
+                            torchResult = TorchPlacer.placeTorch(player, facing);
+                        }
+                        if (torchResult == TorchPlacer.PlacementResult.NO_TORCHES) {
+                            // Just log, don't fail the job - torches are optional for generic mining
+                            LOGGER.info("Out of torches during generic mining at {}", detectedPos);
+                        }
                     }
                 }
 

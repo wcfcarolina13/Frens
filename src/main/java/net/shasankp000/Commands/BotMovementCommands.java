@@ -98,4 +98,19 @@ final class BotMovementCommands {
                                 .executes(context -> modCommandRegistry.executeShelterLook(context, "burrow",
                                         StringArgumentType.getString(context, "bot")))));
     }
+
+    /**
+     * Build schematic at the position where the player is looking.
+     * Usage: /bot build_look <schematic> [bot]
+     */
+    static ArgumentBuilder<ServerCommandSource, ?> buildBuildLook() {
+        return CommandManager.literal("build_look")
+                .then(CommandManager.argument("schematic", StringArgumentType.string())
+                        .executes(context -> modCommandRegistry.executeBuildLook(context,
+                                StringArgumentType.getString(context, "schematic"), null))
+                        .then(CommandManager.argument("bot", StringArgumentType.string())
+                                .executes(context -> modCommandRegistry.executeBuildLook(context,
+                                        StringArgumentType.getString(context, "schematic"),
+                                        StringArgumentType.getString(context, "bot")))));
+    }
 }
