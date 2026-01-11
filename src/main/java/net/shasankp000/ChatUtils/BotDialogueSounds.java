@@ -57,6 +57,18 @@ public final class BotDialogueSounds {
     public static final SoundEvent LINE_IDLE_HERE_IF_NEEDED = register("bot.line.idle_here_if_needed");
     public static final SoundEvent LINE_IDLE_ENJOYING_CALM = register("bot.line.idle_enjoying_calm");
 
+    // Line-specific sound events (weather)
+    public static final SoundEvent LINE_WEATHER_RAIN = register("bot.line.weather_rain");
+    public static final SoundEvent LINE_WEATHER_SNOW = register("bot.line.weather_snow");
+    public static final SoundEvent LINE_WEATHER_THUNDER = register("bot.line.weather_thunder");
+    public static final SoundEvent LINE_WEATHER_SUNNY = register("bot.line.weather_sunny");
+
+    // Line-specific sound events (time)
+    public static final SoundEvent LINE_TIME_SUNSET_SOON = register("bot.line.time_sunset_soon");
+
+    // Nonverbal / foley
+    public static final SoundEvent FX_HURT_GRUNT = register("bot.fx.hurt_grunt");
+
     // Line-specific sound events (skill: fishing)
     public static final SoundEvent LINE_SKILL_FISHING_WATCHING = register("bot.line.skill_fishing_watching");
     public static final SoundEvent LINE_SKILL_FISHING_BITING = register("bot.line.skill_fishing_biting");
@@ -147,13 +159,57 @@ public final class BotDialogueSounds {
     public static final SoundEvent BOT_LOST = register("bot.lost");
     public static final SoundEvent BOT_FOUND = register("bot.found");
 
-    // Line-specific sound events (combat)
+    // Line-specific sound events (combat mode toggles)
     public static final SoundEvent LINE_COMBAT_ENGAGING = register("bot.line.combat_engaging");
     public static final SoundEvent LINE_COMBAT_STANDING_DOWN = register("bot.line.combat_standing_down");
     public static final SoundEvent LINE_COMBAT_DEFEND_BOTS = register("bot.line.combat_defend_bots");
     public static final SoundEvent LINE_COMBAT_FOCUS_SELF = register("bot.line.combat_focus_self");
     public static final SoundEvent LINE_COMBAT_AGGRESSIVE = register("bot.line.combat_aggressive");
     public static final SoundEvent LINE_COMBAT_EVASIVE = register("bot.line.combat_evasive");
+
+    // Line-specific sound events (combat callouts - during fights)
+    public static final SoundEvent LINE_COMBAT_THREAT_DETECTED = register("bot.line.combat_threat_detected");
+    public static final SoundEvent LINE_COMBAT_ATTACKING = register("bot.line.combat_attacking");
+    public static final SoundEvent LINE_COMBAT_KILL = register("bot.line.combat_kill");
+    public static final SoundEvent LINE_COMBAT_KILL_GOT_IT = register("bot.line.combat_kill_got_it");
+    public static final SoundEvent LINE_COMBAT_KILL_TARGET_DOWN = register("bot.line.combat_kill_target_down");
+    public static final SoundEvent LINE_COMBAT_KILL_ONE_LESS = register("bot.line.combat_kill_one_less");
+
+    // Creature-specific kill confirmations (combat)
+    public static final SoundEvent LINE_COMBAT_KILL_CREEPER_1 = register("bot.line.combat_kill_creeper_1");
+    public static final SoundEvent LINE_COMBAT_KILL_CREEPER_2 = register("bot.line.combat_kill_creeper_2");
+    public static final SoundEvent LINE_COMBAT_KILL_SKELETON_1 = register("bot.line.combat_kill_skeleton_1");
+    public static final SoundEvent LINE_COMBAT_KILL_SKELETON_2 = register("bot.line.combat_kill_skeleton_2");
+    public static final SoundEvent LINE_COMBAT_KILL_ZOMBIE_1 = register("bot.line.combat_kill_zombie_1");
+    public static final SoundEvent LINE_COMBAT_KILL_ZOMBIE_2 = register("bot.line.combat_kill_zombie_2");
+    public static final SoundEvent LINE_COMBAT_KILL_SPIDER_1 = register("bot.line.combat_kill_spider_1");
+    public static final SoundEvent LINE_COMBAT_KILL_SPIDER_2 = register("bot.line.combat_kill_spider_2");
+    public static final SoundEvent LINE_COMBAT_KILL_ENDERMAN_1 = register("bot.line.combat_kill_enderman_1");
+    public static final SoundEvent LINE_COMBAT_KILL_ENDERMAN_2 = register("bot.line.combat_kill_enderman_2");
+    public static final SoundEvent LINE_COMBAT_KILL_WITCH_1 = register("bot.line.combat_kill_witch_1");
+    public static final SoundEvent LINE_COMBAT_KILL_WITCH_2 = register("bot.line.combat_kill_witch_2");
+    public static final SoundEvent LINE_COMBAT_KILL_SLIME_1 = register("bot.line.combat_kill_slime_1");
+    public static final SoundEvent LINE_COMBAT_KILL_SLIME_2 = register("bot.line.combat_kill_slime_2");
+    public static final SoundEvent LINE_COMBAT_KILL_PILLAGER_1 = register("bot.line.combat_kill_pillager_1");
+    public static final SoundEvent LINE_COMBAT_KILL_PILLAGER_2 = register("bot.line.combat_kill_pillager_2");
+    public static final SoundEvent LINE_COMBAT_KILL_VINDICATOR_1 = register("bot.line.combat_kill_vindicator_1");
+    public static final SoundEvent LINE_COMBAT_KILL_VINDICATOR_2 = register("bot.line.combat_kill_vindicator_2");
+    public static final SoundEvent LINE_COMBAT_KILL_EVOKER_1 = register("bot.line.combat_kill_evoker_1");
+    public static final SoundEvent LINE_COMBAT_KILL_EVOKER_2 = register("bot.line.combat_kill_evoker_2");
+    public static final SoundEvent LINE_COMBAT_KILL_MAGMA_CUBE_1 = register("bot.line.combat_kill_magma_cube_1");
+    public static final SoundEvent LINE_COMBAT_KILL_MAGMA_CUBE_2 = register("bot.line.combat_kill_magma_cube_2");
+    public static final SoundEvent LINE_COMBAT_KILL_RAVAGER_1 = register("bot.line.combat_kill_ravager_1");
+    public static final SoundEvent LINE_COMBAT_KILL_RAVAGER_2 = register("bot.line.combat_kill_ravager_2");
+    public static final SoundEvent LINE_COMBAT_KILL_VEX_1 = register("bot.line.combat_kill_vex_1");
+    public static final SoundEvent LINE_COMBAT_KILL_VEX_2 = register("bot.line.combat_kill_vex_2");
+    public static final SoundEvent LINE_COMBAT_CLEAR = register("bot.line.combat_clear");
+    public static final SoundEvent LINE_COMBAT_PLAYER_HIT = register("bot.line.combat_player_hit");
+
+    // Line-specific sound events (combat: ranged misses)
+    public static final SoundEvent LINE_COMBAT_MISSED_1 = register("bot.line.combat_missed_1");
+    public static final SoundEvent LINE_COMBAT_MISSED_2 = register("bot.line.combat_missed_2");
+    public static final SoundEvent LINE_COMBAT_MISSED_3 = register("bot.line.combat_missed_3");
+    public static final SoundEvent LINE_COMBAT_MISSED_4 = register("bot.line.combat_missed_4");
 
     // Line-specific sound events (confirm)
     public static final SoundEvent LINE_CONFIRM_ON_IT = register("bot.line.confirm_on_it");
@@ -164,6 +220,12 @@ public final class BotDialogueSounds {
     public static final SoundEvent LINE_CRAFT_NEED_TABLE = register("bot.line.craft_need_table");
     public static final SoundEvent LINE_CRAFT_UNKNOWN = register("bot.line.craft_unknown");
     public static final SoundEvent LINE_CRAFT_CANT_PLACE = register("bot.line.craft_cant_place");
+    public static final SoundEvent LINE_CRAFT_RECIPE_UNLOCKED_1 = register("bot.line.craft_recipe_unlocked_1");
+    public static final SoundEvent LINE_CRAFT_RECIPE_UNLOCKED_2 = register("bot.line.craft_recipe_unlocked_2");
+    public static final SoundEvent LINE_CRAFT_RECIPE_UNLOCKED_3 = register("bot.line.craft_recipe_unlocked_3");
+    public static final SoundEvent LINE_CRAFT_RECIPE_UNLOCKED_4 = register("bot.line.craft_recipe_unlocked_4");
+    public static final SoundEvent LINE_CRAFT_RECIPE_UNLOCKED_5 = register("bot.line.craft_recipe_unlocked_5");
+    public static final SoundEvent LINE_CRAFT_RECIPE_UNLOCKED_6 = register("bot.line.craft_recipe_unlocked_6");
 
     // Line-specific sound events (death)
     public static final SoundEvent LINE_DEATH_RESUME_ASK = register("bot.line.death_resume_ask");
@@ -181,6 +243,8 @@ public final class BotDialogueSounds {
     public static final SoundEvent LINE_DISCOVER_CHEST = register("bot.line.discover_chest");
     public static final SoundEvent LINE_DISCOVER_GEODE = register("bot.line.discover_geode");
     public static final SoundEvent LINE_DISCOVER_STRUCTURE = register("bot.line.discover_structure");
+    public static final SoundEvent LINE_DISCOVER_MINESHAFT = register("bot.line.discover_mineshaft");
+    public static final SoundEvent LINE_DISCOVER_SPAWNER = register("bot.line.discover_spawner");
 
     // Line-specific sound events (eating)
     public static final SoundEvent LINE_EATING_NO_FOOD = register("bot.line.eating_no_food");
@@ -275,6 +339,81 @@ public final class BotDialogueSounds {
     public static final SoundEvent LINE_WILDLIFE_SHEEP_AROUND = register("bot.line.wildlife_sheep_around");
     public static final SoundEvent LINE_WILDLIFE_CHICKEN = register("bot.line.wildlife_chicken");
     public static final SoundEvent LINE_WILDLIFE_NICE_DAY = register("bot.line.wildlife_nice_day");
+
+    // Line-specific sound events (dimension ambience: Nether)
+    public static final SoundEvent LINE_NETHER_ENTER_1 = register("bot.line.nether_enter_1");
+    public static final SoundEvent LINE_NETHER_ENTER_2 = register("bot.line.nether_enter_2");
+    public static final SoundEvent LINE_NETHER_HOT = register("bot.line.nether_hot");
+    public static final SoundEvent LINE_NETHER_LAVA = register("bot.line.nether_lava");
+    public static final SoundEvent LINE_NETHER_GHASTS = register("bot.line.nether_ghasts");
+    public static final SoundEvent LINE_NETHER_PIGLINS = register("bot.line.nether_piglins");
+    public static final SoundEvent LINE_NETHER_SOUL_SAND = register("bot.line.nether_soul_sand");
+    public static final SoundEvent LINE_NETHER_FORTRESS = register("bot.line.nether_fortress");
+    public static final SoundEvent LINE_NETHER_BASTION = register("bot.line.nether_bastion");
+
+    // Line-specific sound events (biome flavor: Nether)
+    public static final SoundEvent LINE_NETHER_BIOME_CRIMSON_FOREST = register("bot.line.nether_biome_crimson_forest");
+    public static final SoundEvent LINE_NETHER_BIOME_WARPED_FOREST = register("bot.line.nether_biome_warped_forest");
+    public static final SoundEvent LINE_NETHER_BIOME_SOUL_SAND_VALLEY = register("bot.line.nether_biome_soul_sand_valley");
+    public static final SoundEvent LINE_NETHER_BIOME_BASALT_DELTAS = register("bot.line.nether_biome_basalt_deltas");
+    public static final SoundEvent LINE_NETHER_BIOME_WASTES = register("bot.line.nether_biome_wastes");
+
+    // Line-specific sound events (dimension ambience: The End)
+    public static final SoundEvent LINE_END_ENTER_1 = register("bot.line.end_enter_1");
+    public static final SoundEvent LINE_END_ENTER_2 = register("bot.line.end_enter_2");
+    public static final SoundEvent LINE_END_EERIE = register("bot.line.end_eerie");
+    public static final SoundEvent LINE_END_VOID = register("bot.line.end_void");
+    public static final SoundEvent LINE_END_ISLANDS = register("bot.line.end_islands");
+    public static final SoundEvent LINE_END_CHORUS = register("bot.line.end_chorus");
+    public static final SoundEvent LINE_END_ENDERMEN = register("bot.line.end_endermen");
+    public static final SoundEvent LINE_END_KEEP_EYES_UP = register("bot.line.end_keep_eyes_up");
+    public static final SoundEvent LINE_END_CITY = register("bot.line.end_city");
+    public static final SoundEvent LINE_END_GATEWAY = register("bot.line.end_gateway");
+
+    // Line-specific sound events (biome flavor: The End)
+    public static final SoundEvent LINE_END_BIOME_MAIN_ISLAND = register("bot.line.end_biome_main_island");
+    public static final SoundEvent LINE_END_BIOME_HIGHLANDS = register("bot.line.end_biome_highlands");
+    public static final SoundEvent LINE_END_BIOME_MIDLANDS = register("bot.line.end_biome_midlands");
+    public static final SoundEvent LINE_END_BIOME_BARRENS = register("bot.line.end_biome_barrens");
+    public static final SoundEvent LINE_END_BIOME_SMALL_ISLANDS = register("bot.line.end_biome_small_islands");
+
+    // Line-specific sound events (banter)
+    public static final SoundEvent LINE_BANTER_CREEPER_KIDDING = register("bot.line.banter_creeper_kidding");
+    public static final SoundEvent LINE_BANTER_IF_YELL_RUN = register("bot.line.banter_if_yell_run");
+    public static final SoundEvent LINE_BANTER_GOT_YOUR_BACK = register("bot.line.banter_got_your_back");
+    public static final SoundEvent LINE_BANTER_STAY_SHARP = register("bot.line.banter_stay_sharp");
+
+    // Line-specific sound events (mount / lead handling)
+    public static final SoundEvent LINE_MOUNT_HORSE_HURT = register("bot.line.mount_horse_hurt");
+    public static final SoundEvent LINE_MOUNT_BANGED_UP = register("bot.line.mount_banged_up");
+    public static final SoundEvent LINE_MOUNT_MY_HORSE_HURT = register("bot.line.mount_my_horse_hurt");
+    public static final SoundEvent LINE_MOUNT_NO_APPLES = register("bot.line.mount_no_apples");
+    public static final SoundEvent LINE_MOUNT_OUT_OF_APPLES = register("bot.line.mount_out_of_apples");
+    public static final SoundEvent LINE_MOUNT_NO_APPLES_ON_ME = register("bot.line.mount_no_apples_on_me");
+    public static final SoundEvent LINE_MOUNT_NO_SUITABLE_FOOD = register("bot.line.mount_no_suitable_food");
+    public static final SoundEvent LINE_MOUNT_CANT_FIND_FOOD = register("bot.line.mount_cant_find_food");
+    public static final SoundEvent LINE_MOUNT_NO_FEED = register("bot.line.mount_no_feed");
+    public static final SoundEvent LINE_MOUNT_NO_LEAD_SECURE = register("bot.line.mount_no_lead_secure");
+    public static final SoundEvent LINE_MOUNT_MISSING_LEAD = register("bot.line.mount_missing_lead");
+    public static final SoundEvent LINE_MOUNT_CANT_SECURE = register("bot.line.mount_cant_secure");
+    public static final SoundEvent LINE_MOUNT_CANT_GRAB_LEAD = register("bot.line.mount_cant_grab_lead");
+    public static final SoundEvent LINE_MOUNT_COULDNT_GET_LEAD = register("bot.line.mount_couldnt_get_lead");
+    public static final SoundEvent LINE_MOUNT_LEAD_NOT_ACCESSIBLE = register("bot.line.mount_lead_not_accessible");
+    public static final SoundEvent LINE_MOUNT_NO_FENCE_KEEP_LEAD = register("bot.line.mount_no_fence_keep_lead");
+    public static final SoundEvent LINE_MOUNT_NO_FENCE_NEARBY = register("bot.line.mount_no_fence_nearby");
+    public static final SoundEvent LINE_MOUNT_HOLD_LEAD_UNTIL_TIE = register("bot.line.mount_hold_lead_until_tie");
+    public static final SoundEvent LINE_MOUNT_LOST_TRACK_HOLDING = register("bot.line.mount_lost_track_holding");
+    public static final SoundEvent LINE_MOUNT_LOST_HORSE_LEAD = register("bot.line.mount_lost_horse_lead");
+    public static final SoundEvent LINE_MOUNT_CANT_FIND_HORSE = register("bot.line.mount_cant_find_horse");
+    public static final SoundEvent LINE_MOUNT_HORSE_GONE = register("bot.line.mount_horse_gone");
+    public static final SoundEvent LINE_MOUNT_MOUNT_GONE = register("bot.line.mount_mount_gone");
+    public static final SoundEvent LINE_MOUNT_LOST_LEADING = register("bot.line.mount_lost_leading");
+    public static final SoundEvent LINE_MOUNT_LEAD_SNAPPED_DROP = register("bot.line.mount_lead_snapped_drop");
+    public static final SoundEvent LINE_MOUNT_LEAD_BROKE_FALL = register("bot.line.mount_lead_broke_fall");
+    public static final SoundEvent LINE_MOUNT_LEAD_SNAPPED_ON_DROP = register("bot.line.mount_lead_snapped_on_drop");
+    public static final SoundEvent LINE_MOUNT_NO_LEAD_REATTACH = register("bot.line.mount_no_lead_reattach");
+    public static final SoundEvent LINE_MOUNT_OUT_OF_LEADS = register("bot.line.mount_out_of_leads");
+    public static final SoundEvent LINE_MOUNT_NO_SPARE_LEADS = register("bot.line.mount_no_spare_leads");
 
     // Line-specific sound events (lost / shouts)
     public static final SoundEvent LINE_LOST_OVER_HERE = register("bot.line.lost_over_here");

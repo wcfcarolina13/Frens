@@ -82,6 +82,12 @@ public final class BotControlApplier {
         if (server == null || AIPlayer.CONFIG == null) {
             return;
         }
+
+        // Survival recruitment mode: don't auto-spawn any bots until the world has been recruited.
+        if (net.shasankp000.GameAI.services.SurvivalRecruitmentService.isEnabled(server)
+                && !net.shasankp000.GameAI.services.SurvivalRecruitmentService.isWorldRecruited(server)) {
+            return;
+        }
         for (Map.Entry<String, ManualConfig.BotControlSettings> entry : AIPlayer.CONFIG.getBotControls().entrySet()) {
             String alias = entry.getKey();
             if (alias == null || alias.equalsIgnoreCase("default")) {

@@ -105,6 +105,25 @@ public final class BotWorldStateService {
         flush();
     }
 
+    /** Clears the saved location snapshot for {@code alias} in the current world. */
+    public static void clearState(MinecraftServer server, String alias) {
+        if (server == null || alias == null || alias.isBlank()) {
+            return;
+        }
+        ensureLoaded();
+        String key = worldKey(server);
+        Map<String, BotState> worldMap = STATE.get(alias.toLowerCase());
+        if (worldMap == null) {
+            return;
+        }
+        if (worldMap.remove(key) != null) {
+            if (worldMap.isEmpty()) {
+                STATE.remove(alias.toLowerCase());
+            }
+            flush();
+        }
+    }
+
     public static String currentWorldKey(MinecraftServer server) {
         return worldKey(server);
     }

@@ -153,6 +153,8 @@ public final class DialogueTextMapper {
 
         // ============ MODE: FOLLOW ============
         PATTERN_MAP.put(patternWithName("I'm right behind you, {name}."), BotDialogueSounds.LINE_MODE_FOLLOW_BEHIND);
+        PATTERN_MAP.put(patternWithName("Now following {name}."), BotDialogueSounds.LINE_MODE_FOLLOW_KEEPING_UP);
+        PATTERN_MAP.put(patternWithName("Now following {name} at a distance."), BotDialogueSounds.LINE_MODE_FOLLOW_KEEPING_UP);
         EXACT_MAP.put("Lead the way.", BotDialogueSounds.LINE_MODE_FOLLOW_LEAD);
         EXACT_MAP.put("Keeping up.", BotDialogueSounds.LINE_MODE_FOLLOW_KEEPING_UP);
 
@@ -160,11 +162,15 @@ public final class DialogueTextMapper {
         EXACT_MAP.put("All clear. I'm keeping watch.", BotDialogueSounds.LINE_MODE_GUARD_CLEAR);
         EXACT_MAP.put("Guard duty. Nothing gets past me.", BotDialogueSounds.LINE_MODE_GUARD_NOTHING_PAST);
         EXACT_MAP.put("Quiet so far.", BotDialogueSounds.LINE_MODE_GUARD_QUIET);
+        // Dynamic guard radius messages use guard clear sound
+        PATTERN_MAP.put(Pattern.compile("Guarding this area \\(radius [\\d.]+ blocks\\)\\."), BotDialogueSounds.LINE_MODE_GUARD_CLEAR);
 
         // ============ MODE: PATROL ============
         EXACT_MAP.put("Doing my rounds.", BotDialogueSounds.LINE_MODE_PATROL_ROUNDS);
         EXACT_MAP.put("Patrolling the area.", BotDialogueSounds.LINE_MODE_PATROL_AREA);
         EXACT_MAP.put("Just checking the perimeter.", BotDialogueSounds.LINE_MODE_PATROL_PERIMETER);
+        // Dynamic patrol radius messages use patrol area sound
+        PATTERN_MAP.put(Pattern.compile("Patrolling this area \\(radius [\\d.]+ blocks\\)\\."), BotDialogueSounds.LINE_MODE_PATROL_AREA);
 
         // ============ MODE: RETURNING BASE ============
         EXACT_MAP.put("Heading home before it gets too dark.", BotDialogueSounds.LINE_MODE_RETURN_HEADING);
@@ -179,6 +185,7 @@ public final class DialogueTextMapper {
         // ============ MODE: IDLE ============
         EXACT_MAP.put("Just taking it easy.", BotDialogueSounds.LINE_IDLE_TAKING_IT_EASY);
         EXACT_MAP.put("Nothing urgent-I'm here if you need me.", BotDialogueSounds.LINE_IDLE_HERE_IF_NEEDED);
+        EXACT_MAP.put("I'm here if you need me.", BotDialogueSounds.LINE_IDLE_HERE_IF_NEEDED);
         EXACT_MAP.put("Enjoying the calm.", BotDialogueSounds.LINE_IDLE_ENJOYING_CALM);
 
         // ============ GREETINGS ============
@@ -245,10 +252,15 @@ public final class DialogueTextMapper {
         EXACT_MAP.put("I found a chest!", BotDialogueSounds.LINE_DISCOVER_CHEST);
         EXACT_MAP.put("I found an amethyst geode!", BotDialogueSounds.LINE_DISCOVER_GEODE);
         EXACT_MAP.put("I found a structure.", BotDialogueSounds.LINE_DISCOVER_STRUCTURE);
+        EXACT_MAP.put("I found a mineshaft!", BotDialogueSounds.LINE_DISCOVER_MINESHAFT);
+        EXACT_MAP.put("I found a mob spawner!", BotDialogueSounds.LINE_DISCOVER_SPAWNER);
 
         // ============ HAZARD ============
         EXACT_MAP.put("Careful, there's lava ahead.", BotDialogueSounds.LINE_HAZARD_LAVA);
+        // Common variants (some skills historically used these)
+        EXACT_MAP.put("There's lava ahead.", BotDialogueSounds.LINE_HAZARD_LAVA);
         EXACT_MAP.put("Water detected ahead.", BotDialogueSounds.LINE_HAZARD_WATER);
+        EXACT_MAP.put("There's water ahead.", BotDialogueSounds.LINE_HAZARD_WATER);
         EXACT_MAP.put("Ran out of torches!", BotDialogueSounds.LINE_HAZARD_NO_TORCHES);
 
         // ============ COMBAT ============
@@ -258,6 +270,12 @@ public final class DialogueTextMapper {
         EXACT_MAP.put("I'll focus on my own fights.", BotDialogueSounds.LINE_COMBAT_FOCUS_SELF);
         EXACT_MAP.put("Combat stance set to aggressive.", BotDialogueSounds.LINE_COMBAT_AGGRESSIVE);
         EXACT_MAP.put("Combat stance set to evasive.", BotDialogueSounds.LINE_COMBAT_EVASIVE);
+
+        // Combat: ranged misses (randomized variants)
+        EXACT_MAP.put("I missed!", BotDialogueSounds.LINE_COMBAT_MISSED_1);
+        EXACT_MAP.put("Dang, missed!", BotDialogueSounds.LINE_COMBAT_MISSED_2);
+        EXACT_MAP.put("Ugh. Missed.", BotDialogueSounds.LINE_COMBAT_MISSED_3);
+        EXACT_MAP.put("That one went wide!", BotDialogueSounds.LINE_COMBAT_MISSED_4);
 
         // ============ HUNGER ============
         EXACT_MAP.put("I'll die if I don't eat!", BotDialogueSounds.LINE_HUNGER_DYING);
@@ -306,6 +324,14 @@ public final class DialogueTextMapper {
         EXACT_MAP.put("I don't know how to craft that yet.", BotDialogueSounds.LINE_CRAFT_UNKNOWN);
         EXACT_MAP.put("I couldn't place a crafting table here.", BotDialogueSounds.LINE_CRAFT_CANT_PLACE);
 
+        // Recipe unlock reactions (triggered when a new craft-history entry is created)
+        EXACT_MAP.put("New recipe unlocked.", BotDialogueSounds.LINE_CRAFT_RECIPE_UNLOCKED_1);
+        EXACT_MAP.put("Nice. New recipe.", BotDialogueSounds.LINE_CRAFT_RECIPE_UNLOCKED_2);
+        EXACT_MAP.put("That's a new one.", BotDialogueSounds.LINE_CRAFT_RECIPE_UNLOCKED_3);
+        EXACT_MAP.put("Good. More options now.", BotDialogueSounds.LINE_CRAFT_RECIPE_UNLOCKED_4);
+        EXACT_MAP.put("Another recipe for the book.", BotDialogueSounds.LINE_CRAFT_RECIPE_UNLOCKED_5);
+        EXACT_MAP.put("That might come in handy.", BotDialogueSounds.LINE_CRAFT_RECIPE_UNLOCKED_6);
+
         // ============ SMELT ============
         EXACT_MAP.put("I need a furnace placed nearby.", BotDialogueSounds.LINE_SMELT_NEED_FURNACE);
         EXACT_MAP.put("I have nothing cookable.", BotDialogueSounds.LINE_SMELT_NOTHING);
@@ -320,6 +346,7 @@ public final class DialogueTextMapper {
         // ============ WARNINGS ============
         EXACT_MAP.put("I'm suffocating!", BotDialogueSounds.LINE_WARNING_SUFFOCATING);
         EXACT_MAP.put("There's a drop ahead.", BotDialogueSounds.LINE_WARNING_DROP_AHEAD);
+        EXACT_MAP.put("That's a big drop.", BotDialogueSounds.LINE_WARNING_DROP_AHEAD);
         EXACT_MAP.put("I'm stuck down here - attempting a ladder or stair escape...", BotDialogueSounds.LINE_WARNING_STUCK);
         // Additional warning variations
         EXACT_MAP.put("I'm stuck!", BotDialogueSounds.LINE_WARNING_STUCK);
@@ -327,6 +354,11 @@ public final class DialogueTextMapper {
         // ============ OTHER STATUS ============
         EXACT_MAP.put("It's getting late; heading home.", BotDialogueSounds.LINE_STATUS_LATE_HEADING_HOME);
         EXACT_MAP.put("It's getting late-heading home.", BotDialogueSounds.LINE_STATUS_LATE_HEADING_HOME);
+        // Return/base arrival messages - reuse mode_return sounds
+        EXACT_MAP.put("Arrived at base.", BotDialogueSounds.LINE_MODE_RETURN_RETURNING);
+        EXACT_MAP.put("Arrived at base. Holding position.", BotDialogueSounds.LINE_MODE_STAY_HOLDING);
+        // Busy messages - reuse confirm_hold_off sound
+        EXACT_MAP.put("Busy with another task right now.", BotDialogueSounds.LINE_CONFIRM_HOLD_OFF);
 
         // ============ ADDITIONAL HANGOUT LINES ============
         // From HangoutSkill.java
@@ -407,6 +439,7 @@ public final class DialogueTextMapper {
         EXACT_MAP.put("Sheep around.", BotDialogueSounds.LINE_WILDLIFE_SHEEP_AROUND);
         EXACT_MAP.put("Chicken nearby.", BotDialogueSounds.LINE_WILDLIFE_CHICKEN);
         EXACT_MAP.put("Nice day.", BotDialogueSounds.LINE_WILDLIFE_NICE_DAY);
+        EXACT_MAP.put("I heard a wolf.", BotDialogueSounds.LINE_WILDLIFE_HEARD_WOLF);
 
         // Lost / shouts
         EXACT_MAP.put("Over here!", BotDialogueSounds.LINE_LOST_OVER_HERE);
@@ -423,6 +456,24 @@ public final class DialogueTextMapper {
         EXACT_MAP.put("So glad.", BotDialogueSounds.LINE_FOUND_SO_GLAD);
         EXACT_MAP.put("I've been calling.", BotDialogueSounds.LINE_FOUND_BEEN_CALLING);
         EXACT_MAP.put("Let's get out of here.", BotDialogueSounds.LINE_FOUND_LETS_GET_OUT);
+
+        // ============ MOUNT / LEAD HANDLING (January 2026) ============
+        // RideSyncService: low health / feeding
+        EXACT_MAP.put("This horse looks hurt.", BotDialogueSounds.LINE_MOUNT_HORSE_HURT);
+        EXACT_MAP.put("I don't have any apples to heal it.", BotDialogueSounds.LINE_MOUNT_NO_APPLES);
+        EXACT_MAP.put("I don't have any suitable food to heal it.", BotDialogueSounds.LINE_MOUNT_NO_SUITABLE_FOOD);
+
+        // RideSyncService: securing/leashing issues
+        EXACT_MAP.put("I don't have a lead to secure this horse.", BotDialogueSounds.LINE_MOUNT_NO_LEAD_SECURE);
+        EXACT_MAP.put("I can't grab a lead to secure this horse.", BotDialogueSounds.LINE_MOUNT_CANT_GRAB_LEAD);
+        EXACT_MAP.put("I don't have a fence to tie this horse to yet. I'll keep it on a lead.", BotDialogueSounds.LINE_MOUNT_NO_FENCE_KEEP_LEAD);
+        EXACT_MAP.put("I lost track of the horse I was holding.", BotDialogueSounds.LINE_MOUNT_LOST_TRACK_HOLDING);
+        EXACT_MAP.put("The horse I was holding is gone.", BotDialogueSounds.LINE_MOUNT_HORSE_GONE);
+        EXACT_MAP.put("The lead snapped after a sudden drop.", BotDialogueSounds.LINE_MOUNT_LEAD_SNAPPED_DROP);
+        EXACT_MAP.put("I don't have a lead to reattach.", BotDialogueSounds.LINE_MOUNT_NO_LEAD_REATTACH);
+
+        // Best-effort mapping (no exact recorded line in the pack)
+        EXACT_MAP.put("I couldn't secure the lead on the horse.", BotDialogueSounds.LINE_MOUNT_CANT_SECURE);
 
         LOGGER.info("Initialized {} exact mappings and {} pattern mappings", EXACT_MAP.size(), PATTERN_MAP.size());
     }

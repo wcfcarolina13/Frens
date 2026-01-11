@@ -192,7 +192,8 @@ public final class MiningHazardDetector {
                 }
                 if (isDangerousDrop(world, foot)) {
                     acknowledgeBlocker(bot, foot);
-                    blocking = hazard(foot, "That's a big drop.", true);
+                    // Canonicalize to the voice-mapped warning line.
+                    blocking = hazard(foot, "There's a drop ahead.", true);
                     break;
                 }
             }
@@ -233,10 +234,12 @@ public final class MiningHazardDetector {
             if (id != null && !"minecraft:lava".equals(id.toString())) {
                 LOGGER.info("MiningHazardDetector: lava-like fluid detected at {} (fluid={})", pos.toShortString(), id);
             }
-            return hazard(pos, "There's lava ahead.", true);
+            // Canonicalize to the voice-mapped hazard line.
+            return hazard(pos, "Careful, there's lava ahead.", true);
         }
         if (fluid.isIn(FluidTags.WATER)) {
-            return hazard(pos, "There's water ahead.", true);
+            // Canonicalize to the voice-mapped hazard line.
+            return hazard(pos, "Water detected ahead.", true);
         }
         String precious = VALUABLE_MESSAGES.get(block);
         if (precious != null) {
@@ -254,9 +257,28 @@ public final class MiningHazardDetector {
             return hazard(pos, "I found an amethyst geode!", true);
         }
         if (STRUCTURE_BLOCKS.contains(block)) {
-            return hazard(pos, "I found a structure.", true);
+            String structureMessage = structureMessageFor(block);
+            return hazard(pos, structureMessage, true);
         }
         return null;
+    }
+
+    private static String structureMessageFor(Block block) {
+        if (block == null) {
+            return "I found a structure.";
+        }
+        if (block == Blocks.SPAWNER) {
+            return "I found a mob spawner!";
+        }
+        if (block == Blocks.RAIL
+                || block == Blocks.POWERED_RAIL
+                || block == Blocks.DETECTOR_RAIL
+                || block == Blocks.ACTIVATOR_RAIL
+                || block == Blocks.OAK_PLANKS
+                || block == Blocks.OAK_FENCE) {
+            return "I found a mineshaft!";
+        }
+        return "I found a structure.";
     }
 
     private static boolean isLavaLike(FluidState fluid) {
@@ -267,9 +289,6 @@ public final class MiningHazardDetector {
             return true;
         }
         Identifier id = Registries.FLUID.getId(fluid.getFluid());
-        if (id == null) {
-            return false;
-        }
         String path = id.getPath().toLowerCase(java.util.Locale.ROOT);
         return path.contains("lava") || path.contains("molten");
     }

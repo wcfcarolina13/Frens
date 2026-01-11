@@ -45,6 +45,7 @@ import net.shasankp000.GameAI.services.GuardPatrolService;
 import net.shasankp000.GameAI.services.HealingService;
 import net.shasankp000.GameAI.services.BotRescueService;
 import net.shasankp000.GameAI.services.BotThreatService;
+import net.shasankp000.GameAI.services.BotArrowRecoveryService;
 import net.shasankp000.GameAI.services.BotStuckService;
 import net.shasankp000.GameAI.services.BotRLActionService;
 import net.shasankp000.GameAI.services.BotRLPersistenceThrottleService;
@@ -460,6 +461,26 @@ public class BotEventHandler {
     }
 
     public static void ensureBotPresence(MinecraftServer srv) {
+        // Survival recruitment mode: do not conjure bots into existence before the player recruits in a village.
+        if (srv != null
+                && net.shasankp000.GameAI.services.SurvivalRecruitmentService.isEnabled(srv)
+                && !net.shasankp000.GameAI.services.SurvivalRecruitmentService.isWorldRecruited(srv)) {
+            return;
+        }
+
+        // Survival recruitment mode: if the recruited companion is marked dead, do not auto-respawn them.
+        // Resurrection should be performed via the ritual flow.
+        if (srv != null && net.shasankp000.GameAI.services.SurvivalRecruitmentService.isEnabled(srv)) {
+            try {
+                net.shasankp000.FilingSystem.ManualConfig.SurvivalRecruitmentState st =
+                        net.shasankp000.GameAI.services.SurvivalRecruitmentService.getState(srv);
+                if (st != null && st.isRecruited() && st.isCompanionDead()) {
+                    return;
+                }
+            } catch (Throwable ignored) {
+                // If state lookup fails, fall back to legacy behavior.
+            }
+        }
         String lastBotName = BotLifecycleService.getLastBotName();
         if (srv == null || lastBotName == null) {
             return;
@@ -678,6 +699,14 @@ public class BotEventHandler {
             String dimension = dimType.getValue().toString();
 
             if (!hostileEntities.isEmpty()) {
+                // Combat callout: threat detected
+                Entity closestThreat = hostileEntities.stream()
+                        .min(Comparator.comparingDouble(e -> e.squaredDistanceTo(bot)))
+                        .orElse(null);
+                if (closestThreat != null) {
+                    net.shasankp000.GameAI.services.BotCombatCalloutService.onThreatDetected(bot, closestThreat);
+                }
+                
                 List<EntityDetails> nearbyEntitiesList = nearbyEntities.stream()
                         .map(entity -> EntityDetails.from(bot, entity))
                         .toList();
@@ -895,7 +924,23 @@ public class BotEventHandler {
             case STOP_MOVING -> performAction("stopMoving");
             case USE_ITEM -> performAction("useItem");
             case EQUIP_ARMOR -> armorUtils.autoEquipArmor(bot);
-            case ATTACK -> performAction("attack");
+            case ATTACK -> {
+                performAction("attack");
+                // Combat callout: engagement - find nearest hostile at attack time
+                if (bot != null) {
+                    List<Entity> nearbyHostiles = AutoFaceEntity.detectNearbyEntities(bot, 10.0D).stream()
+                            .filter(e -> e instanceof net.minecraft.entity.mob.HostileEntity)
+                            .toList();
+                    if (!nearbyHostiles.isEmpty()) {
+                        Entity target = nearbyHostiles.stream()
+                                .min(Comparator.comparingDouble(e -> e.squaredDistanceTo(bot)))
+                                .orElse(null);
+                        if (target != null) {
+                            net.shasankp000.GameAI.services.BotCombatCalloutService.onEngagement(bot, target);
+                        }
+                    }
+                }
+            }
             case BREAK_BLOCK_FORWARD -> performAction("breakBlock");
             case PLACE_SUPPORT_BLOCK -> performAction("placeSupportBlock");
             case ESCAPE_STAIRS -> performAction("escapeStairs");
@@ -1045,8 +1090,49 @@ public class BotEventHandler {
                 server,
                 BotRegistry.ids());
 
+        // Combat callout bookkeeping: treat "hostiles present" as ongoing combat activity.
+        // Without this, long skeleton fights can go quiet for >5s and trigger a premature "standing down".
+        try {
+            net.shasankp000.GameAI.services.BotCombatCalloutService.noteCombatOngoing(bot, !augmentedHostiles.isEmpty());
+        } catch (Throwable ignored) {
+        }
+
+        // Arrow recovery bookkeeping:
+        // - if hostiles present, remember the last "combat" tick
+        // - always tick arrow tracking so we can detect "miss" events (cooldown-gated)
+        if (!augmentedHostiles.isEmpty()) {
+            BotArrowRecoveryService.noteHostilesSeen(bot, server.getTicks());
+        }
+        BotArrowRecoveryService.tickArrowTracking(bot, server, !augmentedHostiles.isEmpty());
+
         switch (mode) {
             case FOLLOW -> {
+                // Arrow recovery during FOLLOW: only allow short, bounded detours when we're not far from
+                // the commander (or fixed goal). This makes post-combat arrow pickup much more reliable.
+                if (augmentedHostiles.isEmpty()) {
+                    boolean allowRecovery = false;
+                    if (state != null) {
+                        if (state.followTargetUuid != null) {
+                            ServerPlayerEntity commander = server != null
+                                    ? server.getPlayerManager().getPlayer(state.followTargetUuid)
+                                    : null;
+                            if (commander != null && !commander.isRemoved()) {
+                                double dx = commander.getX() - bot.getX();
+                                double dz = commander.getZ() - bot.getZ();
+                                allowRecovery = (dx * dx + dz * dz) <= (30.0D * 30.0D);
+                            }
+                        } else if (state.followFixedGoal != null) {
+                            double gx = state.followFixedGoal.getX() + 0.5D;
+                            double gz = state.followFixedGoal.getZ() + 0.5D;
+                            double dx = gx - bot.getX();
+                            double dz = gz - bot.getZ();
+                            allowRecovery = (dx * dx + dz * dz) <= (30.0D * 30.0D);
+                        }
+                    }
+                    if (allowRecovery && BotArrowRecoveryService.tryRecoverMissedArrows(bot, server, null, 26.0D)) {
+                        return true;
+                    }
+                }
                 return handleFollow(bot, state, server, augmentedHostiles);
             }
             case GUARD -> {
@@ -1057,6 +1143,10 @@ public class BotEventHandler {
             }
             case STAY -> {
                 if (!augmentedHostiles.isEmpty() && engageHostiles(bot, server, augmentedHostiles)) {
+                    return true;
+                }
+                // Use the combat anchor so slight post-fight drift doesn't make arrows "fall off" the radar.
+                if (BotArrowRecoveryService.tryRecoverMissedArrows(bot, server, null, 18.0D)) {
                     return true;
                 }
                 BotActions.stop(bot);
@@ -1073,6 +1163,9 @@ public class BotEventHandler {
             default -> {
                 if (!augmentedHostiles.isEmpty()) {
                     return engageHostiles(bot, server, augmentedHostiles);
+                }
+                if (BotArrowRecoveryService.tryRecoverMissedArrows(bot, server, null, 24.0D)) {
+                    return true;
                 }
                 return false;
             }
@@ -1545,6 +1638,18 @@ public class BotEventHandler {
 
         Vec3d targetPos = fixedGoal != null ? Vec3d.ofCenter(fixedGoal) : positionOf(target);
 
+        // Post-combat arrow recovery (FOLLOW mode):
+        // Only when following an actual player (not fixed-goal return-to-base/come),
+        // and keep it bounded near the commander so we don't take long detours.
+        if (target != null && fixedGoal == null && server != null) {
+            double distToCommanderSq = bot.squaredDistanceTo(targetPos);
+            if (distToCommanderSq <= 16.0D * 16.0D) {
+                if (BotArrowRecoveryService.tryRecoverMissedArrows(bot, server, targetPos, 10.0D)) {
+                    return true;
+                }
+            }
+        }
+
     double distanceSq = bot.squaredDistanceTo(targetPos);
     double horizDistSq = horizontalDistanceSq(bot, targetPos);
 	        if (target != null) {
@@ -1796,6 +1901,11 @@ public class BotEventHandler {
 
         lowerShieldTracking(bot);
 
+        // After combat, try to recover missed arrows (stay within the guard radius).
+        if (server != null && BotArrowRecoveryService.tryRecoverMissedArrows(bot, server, center, radius)) {
+            return true;
+        }
+
         // If a sweep is in-flight for this bot, let it keep driving movement unless we've requested cancellation.
         if (DropSweepService.isInProgressFor(bot) && !DropSweepService.isCancelRequestedFor(bot)) {
             return true;
@@ -1831,6 +1941,11 @@ public class BotEventHandler {
         }
 
         lowerShieldTracking(bot);
+
+        // After combat, try to recover missed arrows (stay within the patrol radius).
+        if (server != null && BotArrowRecoveryService.tryRecoverMissedArrows(bot, server, center, radius)) {
+            return true;
+        }
 
         // If a sweep is in-flight for this bot, let it keep driving movement unless we've requested cancellation.
         if (DropSweepService.isInProgressFor(bot) && !DropSweepService.isCancelRequestedFor(bot)) {
@@ -2064,6 +2179,9 @@ public class BotEventHandler {
         }
 
         if (hasRanged && distance >= 5.0D && closest instanceof LivingEntity living) {
+            if (BotActions.tryRepositionForRanged(bot, living, server.getTicks())) {
+                return true;
+            }
             if (BotActions.performRangedAttack(bot, living, server.getTicks())) {
                 return true;
             }
@@ -2108,6 +2226,9 @@ public class BotEventHandler {
             boolean hasMelee = BotActions.selectBestMeleeWeapon(bot);
             if (!hasMelee && hasRanged && closest instanceof LivingEntity living) {
                 BotActions.clearForceMelee(bot);
+                if (BotActions.tryRepositionForRanged(bot, living, server.getTicks())) {
+                    return true;
+                }
                 BotActions.performRangedAttack(bot, living, server.getTicks());
             } else {
                 if (!hasMelee) {
@@ -3409,7 +3530,8 @@ public class BotEventHandler {
         if (safe == null) {
             return false;
         }
-        Vec3d center = Vec3d.ofCenter(safe);
+        // BlockPos here represents a *feet* position (2-block headroom checked); teleport using feet Y.
+        Vec3d center = new Vec3d(safe.getX() + 0.5D, safe.getY(), safe.getZ() + 0.5D);
         bot.teleport(world,
                 center.x, center.y, center.z,
                 EnumSet.noneOf(PositionFlag.class),

@@ -3,5 +3,6 @@
   "key.ai-player.go_to_look": "Frens: Go To Look",
   "key.ai-player.resume": "Frens: Resume (pending)",
   "key.ai-player.stop_look": "Frens: Stop (look target)",
-  "key.ai-player.leash": "Frens: Tie Lead to Fence"
+  "key.ai-player.leash": "Frens: Tie Lead to Fence",
+  "key.ai-player.recruit_contact": "Frens: Initiate Contact (village)"
 }

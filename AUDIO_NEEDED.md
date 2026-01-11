@@ -1,80 +1,210 @@
 # Audio Files for Bot Dialogue System
 
-✅ **ALL AUDIO FILES HAVE BEEN GENERATED AND INTEGRATED**
+⚠️ **AUDIO IS MOSTLY COMPLETE — SOME NEW LINES STILL PENDING**
 
-This document originally listed dialogue lines needing audio. All 119 unique sounds (237 files with 2 variants each) have been created and integrated into the mod.
+This document tracks dialogue audio for the AI Player mod.
 
-## Pending Dialogue Requests (2026-01)
+## New Audio Needed (January 2026 additions)
 
-Add new voiced variants for mount/lead handling. Please record 2-3 variants per line to avoid repetition.
+These were added after the previous “complete” pass. Code support is in place (sound events registered, chat→sound mapping added, subtitles added). The **Status** column reflects whether the corresponding `.ogg` assets are present and wired up via `sounds.json`.
 
-### Environment-Specific Dialogue (NEW)
+| Sound event id | sounds.json entry (suggested file) | Chat text | Status |
+|---|---|---|---|
+| `bot.line.combat_missed_1` | `ai-player:dialogue/combat_missed_i_missed__01` | "I missed!" | ✅ Integrated |
+| `bot.line.combat_missed_2` | `ai-player:dialogue/combat_missed_dang_missed__01` | "Dang, missed!" | ✅ Integrated |
+| `bot.line.combat_missed_3` | `ai-player:dialogue/combat_missed_ugh_missed__01` | "Ugh. Missed." | ✅ Integrated |
+| `bot.line.combat_missed_4` | `ai-player:dialogue/combat_missed_went_wide__01` | "That one went wide!" | ✅ Integrated |
+| `bot.line.craft_recipe_unlocked_1` | `ai-player:dialogue/craft_recipe_unlocked_1__01` | "New recipe unlocked." | ✅ Integrated |
+| `bot.line.craft_recipe_unlocked_2` | `ai-player:dialogue/craft_recipe_unlocked_2__01` | "Nice. New recipe." | ✅ Integrated |
+| `bot.line.craft_recipe_unlocked_3` | `ai-player:dialogue/craft_recipe_unlocked_3__01` | "That's a new one." | ✅ Integrated |
+| `bot.line.craft_recipe_unlocked_4` | `ai-player:dialogue/craft_recipe_unlocked_4__01` | "Good. More options now." | ✅ Integrated |
+| `bot.line.craft_recipe_unlocked_5` | `ai-player:dialogue/craft_recipe_unlocked_5__01` | "Another recipe for the book." | ✅ Integrated |
+| `bot.line.craft_recipe_unlocked_6` | `ai-player:dialogue/craft_recipe_unlocked_6__01` | "That might come in handy." | ✅ Integrated |
 
-**Amethyst Geode** (triggers near amethyst blocks underground):
-- "These crystals are beautiful."
-- "So sparkly down here."
-- "We found a geode!"
+### Mining POI callouts (new)
 
-**Bats** (triggers when bats nearby in caves/dark):
-- "Ah! Bats!"
-- "I hear wings flapping."
-- "Bats give me the creeps."
+Mining-specific discoveries emitted by `MiningHazardDetector` now have dedicated voiced lines.
 
-**Dripstone** (triggers near dripstone in dark caves):
-- "Careful, those are sharp."
-- "Pointy stalactites everywhere."
-- "I can hear dripping."
+| Sound event id | sounds.json entry (suggested file) | Chat text | Status |
+|---|---|---|---|
+| `bot.line.discover_mineshaft` | `ai-player:dialogue/discover_mineshaft__01` (+ `__02`) | "I found a mineshaft!" | ❌ Needed |
+| `bot.line.discover_spawner` | `ai-player:dialogue/discover_spawner__01` (+ `__02`) | "I found a mob spawner!" | ❌ Needed |
 
-**Deepslate** (triggers below Y=0 in dark areas with deepslate):
-- "It's cold down here."
-- "We're really deep now."
-- "This stone feels ancient."
+### Weather chatter + time-of-day reminders (new)
 
-### Adventure Banter
+Overworld ambient callouts triggered when the bot is above ground (sky visible). These should have **lots of variants** so they don't get repetitive.
 
-- Adventure banter: "Look out, creeper! Haha, just kidding."
-- Adventure banter: "Relax. If I yell \"run,\" then worry."
-- Adventure banter: "I've got your back."
-- Adventure banter: "Stay sharp out here."
+| Sound event id | sounds.json entry (suggested file) | Trigger | Status |
+|---|---|---|---|
+| `bot.line.weather_rain` | `ai-player:dialogue/weather_rain__01` (+ `__02`…`__06`) | Weather changed to rain | ❌ Needed |
+| `bot.line.weather_snow` | `ai-player:dialogue/weather_snow__01` (+ `__02`…`__06`) | Weather changed to snow (cold biome) | ❌ Needed |
+| `bot.line.weather_thunder` | `ai-player:dialogue/weather_thunder__01` (+ `__02`…`__06`) | Weather changed to thunderstorm | ❌ Needed |
+| `bot.line.weather_sunny` | `ai-player:dialogue/weather_sunny__01` (+ `__02`…`__06`) | Weather cleared (sometimes) | ❌ Needed |
+| `bot.line.time_sunset_soon` | `ai-player:dialogue/time_sunset_soon__01` (+ `__02`…`__06`) | After noon, if not near base or recent bed | ❌ Needed |
 
-### Mount/Lead Handling
-- Low mount health warning: "This horse looks hurt."
-- Low mount health warning: "Mount's looking banged up."
-- Low mount health warning: "My horse is hurt."
-- No apples for healing: "I don't have any apples to heal it."
-- No apples for healing: "I'm out of apples for the horse."
-- No apples for healing: "No apples on me for this horse."
-- No suitable food: "I don't have any suitable food to heal it."
-- No suitable food: "I can't find any mount food right now."
-- No suitable food: "I don't have feed for this horse."
-- No lead available: "I don't have a lead to secure this horse."
-- No lead available: "I'm missing a lead for the horse."
-- No lead available: "I can't secure it without a lead."
-- Can't grab lead: "I can't grab a lead to secure this horse."
-- Can't grab lead: "I couldn't get a lead out."
-- Can't grab lead: "My lead isn't accessible right now."
-- No fence to tie: "I don't have a fence to tie this horse to yet. I'll keep it on a lead."
-- No fence to tie: "No fence nearby, I'll keep it on the lead."
-- No fence to tie: "I'll hold the lead until I can tie it off."
-- Lost track of lead: "I lost track of the horse I was holding."
-- Lost track of lead: "I lost the horse I had on the lead."
-- Lost track of lead: "I can't find the horse I was holding."
-- Horse gone: "The horse I was holding is gone."
-- Horse gone: "The mount I was holding is gone."
-- Horse gone: "I lost the horse I was leading."
-- Lead snapped: "The lead snapped after a sudden drop."
-- Lead snapped: "The lead broke after that fall."
-- Lead snapped: "The lead snapped on that drop."
-- Lead reattach fail: "I don't have a lead to reattach."
-- Lead reattach fail: "I'm out of leads to reattach."
-- Lead reattach fail: "No spare leads to reattach."
+### Nonverbal hurt grunts (new)
 
-## Current Status
+Short nonverbal reactions when the bot is hit. Should be **wordless** (grunt/breath/effort sounds). Rate-limited in code (~1s).
 
-- **Total Audio Files**: 237 (.ogg format)
-- **Unique Sounds**: 119
-- **Location**: `src/main/resources/assets/ai-player/sounds/dialogue/`
-- **Sound Events Registered**: 142
+| Sound event id | sounds.json entry (suggested file) | Trigger | Status |
+|---|---|---|---|
+| `bot.fx.hurt_grunt` | `ai-player:dialogue/hurt_grunt__01` (+ `__02`…`__08`) | On damage taken | ❌ Needed |
+
+### The Nether & The End ambience (new)
+
+Idle/environment chatter that only plays while bots are in the Nether or The End.
+
+| Sound event id | sounds.json entry (suggested file) | Chat text | Status |
+|---|---|---|---|
+| `bot.line.nether_enter_1` | `ai-player:dialogue/nether_enter_stay_close__01` | "Nether... stay close." | ✅ Integrated |
+| `bot.line.nether_enter_2` | `ai-player:dialogue/nether_enter_watch_your_step__01` | "We're in the Nether. Watch your step." | ✅ Integrated |
+| `bot.line.nether_hot` | `ai-player:dialogue/nether_hot_real_hot__01` | "It's hot. Real hot." | ✅ Integrated |
+| `bot.line.nether_lava` | `ai-player:dialogue/nether_lava_everywhere__01` | "Lava everywhere. Careful." | ✅ Integrated |
+| `bot.line.nether_ghasts` | `ai-player:dialogue/nether_ghasts_keep_an_eye_out__01` | "Keep an eye out for ghasts." | ✅ Integrated |
+| `bot.line.nether_piglins` | `ai-player:dialogue/nether_piglins_watching__01` | "Piglins are watching us." | ✅ Integrated |
+| `bot.line.nether_soul_sand` | `ai-player:dialogue/nether_soul_sand_hate_it__01` | "This soul sand... I hate it." | ✅ Integrated |
+| `bot.line.nether_fortress` | `ai-player:dialogue/nether_fortress_spotted__01` | "That looks like a fortress." | ✅ Integrated |
+| `bot.line.nether_bastion` | `ai-player:dialogue/nether_blackstone_bastion_nearby__01` | "Lots of blackstone... could be a bastion nearby." | ✅ Integrated |
+| `bot.line.nether_biome_crimson_forest` | `ai-player:dialogue/nether_biome_crimson_forest__01` | "Crimson forest... red as far as I can see." | ✅ Integrated |
+| `bot.line.nether_biome_warped_forest` | `ai-player:dialogue/nether_biome_warped_forest__01` | "Warped forest... keep your eyes open." | ✅ Integrated |
+| `bot.line.nether_biome_soul_sand_valley` | `ai-player:dialogue/nether_biome_soul_sand_valley__01` | "Soul Sand Valley... I don't like the sound of it." | ✅ Integrated |
+| `bot.line.nether_biome_basalt_deltas` | `ai-player:dialogue/nether_biome_basalt_deltas__01` | "Basalt deltas. Lots of sharp stone." | ✅ Integrated |
+| `bot.line.nether_biome_wastes` | `ai-player:dialogue/nether_biome_wastes__01` | "Nether wastes... heat and ash." | ✅ Integrated |
+| `bot.line.end_enter_1` | `ai-player:dialogue/end_enter_this_is_the_end__01` | "This is The End..." | ✅ Integrated |
+| `bot.line.end_enter_2` | `ai-player:dialogue/end_enter_dont_look_down__01` | "Don't look down. Just... don't." | ✅ Integrated |
+| `bot.line.end_eerie` | `ai-player:dialogue/end_eerie_this_place_feels_wrong__01` | "This place feels wrong." | ✅ Integrated |
+| `bot.line.end_void` | `ai-player:dialogue/end_void_one_step_and_its_over__01` | "One step and it's over." | ✅ Integrated |
+| `bot.line.end_islands` | `ai-player:dialogue/end_islands_floating_in_void__01` | "Islands floating in the void..." | ✅ Integrated |
+| `bot.line.end_chorus` | `ai-player:dialogue/end_chorus_fruit_nearby__01` | "Chorus fruit nearby." | ✅ Integrated |
+| `bot.line.end_endermen` | `ai-player:dialogue/end_endermen_everywhere__01` | "Endermen everywhere..." | ✅ Integrated |
+| `bot.line.end_keep_eyes_up` | `ai-player:dialogue/end_keep_your_eyes_up__01` | "Keep your eyes up. Stay sharp." | ✅ Integrated |
+| `bot.line.end_city` | `ai-player:dialogue/end_city_nearby__01` | "End City nearby." | ✅ Integrated |
+| `bot.line.end_gateway` | `ai-player:dialogue/end_gateway_spotted__01` | "End gateway spotted." | ✅ Integrated |
+| `bot.line.end_biome_main_island` | `ai-player:dialogue/end_biome_main_island__01` | "Main island. Stay focused." | ✅ Integrated |
+| `bot.line.end_biome_highlands` | `ai-player:dialogue/end_biome_highlands__01` | "End highlands ahead." | ✅ Integrated |
+| `bot.line.end_biome_midlands` | `ai-player:dialogue/end_biome_midlands__01` | "End midlands... still feels like the void." | ✅ Integrated |
+| `bot.line.end_biome_barrens` | `ai-player:dialogue/end_biome_barrens__01` | "End barrens... nothing out here." | ✅ Integrated |
+| `bot.line.end_biome_small_islands` | `ai-player:dialogue/end_biome_small_islands__01` | "Small islands... careful crossing." | ✅ Integrated |
+
+### Creature-specific kill callouts (new)
+
+These add extra variety for kill confirmations and make them feel more contextual. Two variants each.
+
+| Sound event id | sounds.json entry (suggested file) | Chat text | Status |
+|---|---|---|---|
+| `bot.line.combat_kill_creeper_1` | `ai-player:dialogue/combat_kill_creeper_down__01` | "Creeper down." | ✅ Integrated |
+| `bot.line.combat_kill_creeper_2` | `ai-player:dialogue/combat_kill_creeper_no_boom__01` | "No boom today." | ✅ Integrated |
+| `bot.line.combat_kill_skeleton_1` | `ai-player:dialogue/combat_kill_skeleton_down__01` | "Skeleton down." | ✅ Integrated |
+| `bot.line.combat_kill_skeleton_2` | `ai-player:dialogue/combat_kill_skeleton_bones_scattered__01` | "Bones scattered." | ✅ Integrated |
+| `bot.line.combat_kill_zombie_1` | `ai-player:dialogue/combat_kill_zombie_down__01` | "Zombie down." | ✅ Integrated |
+| `bot.line.combat_kill_zombie_2` | `ai-player:dialogue/combat_kill_zombie_back_in_ground__01` | "Back in the ground." | ✅ Integrated |
+| `bot.line.combat_kill_spider_1` | `ai-player:dialogue/combat_kill_spider_down__01` | "Spider down." | ✅ Integrated |
+| `bot.line.combat_kill_spider_2` | `ai-player:dialogue/combat_kill_spider_webs_wont_save_you__01` | "Webs won't save you." | ✅ Integrated |
+| `bot.line.combat_kill_enderman_1` | `ai-player:dialogue/combat_kill_enderman_down__01` | "Enderman down." | ✅ Integrated |
+| `bot.line.combat_kill_enderman_2` | `ai-player:dialogue/combat_kill_enderman_didnt_blink__01` | "Glad I didn't blink." | ✅ Integrated |
+| `bot.line.combat_kill_witch_1` | `ai-player:dialogue/combat_kill_witch_down__01` | "Witch down." | ✅ Integrated |
+| `bot.line.combat_kill_witch_2` | `ai-player:dialogue/combat_kill_witch_potion_solved__01` | "Potion problem solved." | ✅ Integrated |
+| `bot.line.combat_kill_slime_1` | `ai-player:dialogue/combat_kill_slime_down__01` | "Slime down." | ✅ Integrated |
+| `bot.line.combat_kill_slime_2` | `ai-player:dialogue/combat_kill_slime_back_to_goo__01` | "Back to goo." | ✅ Integrated |
+| `bot.line.combat_kill_pillager_1` | `ai-player:dialogue/combat_kill_pillager_down__01` | "Pillager down." | ✅ Integrated |
+| `bot.line.combat_kill_pillager_2` | `ai-player:dialogue/combat_kill_pillager_one_less_raider__01` | "One less raider." | ✅ Integrated |
+| `bot.line.combat_kill_vindicator_1` | `ai-player:dialogue/combat_kill_vindicator_down__01` | "Vindicator down." | ✅ Integrated |
+| `bot.line.combat_kill_vindicator_2` | `ai-player:dialogue/combat_kill_vindicator_axe_is_out__01` | "Axe is out." | ✅ Integrated |
+| `bot.line.combat_kill_evoker_1` | `ai-player:dialogue/combat_kill_evoker_down__01` | "Evoker down." | ✅ Integrated |
+| `bot.line.combat_kill_evoker_2` | `ai-player:dialogue/combat_kill_evoker_no_more_tricks__01` | "No more tricks." | ✅ Integrated |
+| `bot.line.combat_kill_magma_cube_1` | `ai-player:dialogue/combat_kill_magma_cube_down__01` | "Magma cube down." | ✅ Integrated |
+| `bot.line.combat_kill_magma_cube_2` | `ai-player:dialogue/combat_kill_magma_cube_back_to_magma__01` | "Back to magma." | ✅ Integrated |
+| `bot.line.combat_kill_ravager_1` | `ai-player:dialogue/combat_kill_ravager_down__01` | "Ravager down." | ✅ Integrated |
+| `bot.line.combat_kill_ravager_2` | `ai-player:dialogue/combat_kill_ravager_beast_down__01` | "Beast is down." | ✅ Integrated |
+| `bot.line.combat_kill_vex_1` | `ai-player:dialogue/combat_kill_vex_down__01` | "Vex down." | ✅ Integrated |
+| `bot.line.combat_kill_vex_2` | `ai-player:dialogue/combat_kill_vex_no_more_flying_blades__01` | "No more flying blades." | ✅ Integrated |
+
+**Target location for new files:** `src/main/resources/assets/ai-player/sounds/dialogue/`
+
+## Status: Mostly complete (January 2026)
+
+The January 2026 audio batch has been fully integrated:
+- **195 new audio files** converted from WAV to OGG
+- **65 new dialogue lines** across combat, environment, banter, and mount categories
+- **Total dialogue files**: 494 (.ogg format)
+- **Sound events registered**: ~260
+
+## January 2026 Audio (INTEGRATED ✅)
+
+### Combat Callouts ✅
+
+| Type | Lines | Status |
+|------|-------|--------|
+| Threat Detection | "Heads up!", "Enemy spotted!", "Hostile incoming!" | ✅ Integrated |
+| Engagement | "Engaging!", "Taking it out!", "On it!" | ✅ Integrated |
+| Damage Taken | "Ow!", "Taking damage!", "Getting hit here!" | ✅ Integrated |
+| Kill Confirmation | "Got it!", "Target down!", "One less to worry about." | ✅ Integrated |
+| Combat Clear | "All clear.", "Area secure.", "That's the last of them." | ✅ Integrated |
+| Player Hit Reaction | "Hey! What was that for?!", "Ow! Watch it!", "Did you just hit me?!" | ✅ Integrated |
+
+### Environment-Specific Dialogue ✅
+
+| Environment | Lines | Status |
+|-------------|-------|--------|
+| Amethyst Geode | "These crystals are beautiful.", "So sparkly down here.", "We found a geode!" | ✅ Integrated |
+| Bats | "Ah! Bats!", "I hear wings flapping.", "Bats give me the creeps." | ✅ Integrated |
+| Dripstone | "Careful, those are sharp.", "Pointy stalactites everywhere.", "I can hear dripping." | ✅ Integrated |
+| Deepslate | "It's cold down here.", "We're really deep now.", "This stone feels ancient." | ✅ Integrated |
+
+### Adventure Banter ✅
+
+- "Look out, creeper! Haha, just kidding." ✅
+- "Relax. If I yell run, then worry." ✅
+- "I've got your back." ✅
+- "Stay sharp out here." ✅
+
+### Mount/Lead Handling ✅
+
+| Category | Lines | Status |
+|----------|-------|--------|
+| Horse Hurt | 3 variants | ✅ Integrated |
+| No Apples | 3 variants | ✅ Integrated |
+| No Suitable Food | 3 variants | ✅ Integrated |
+| No Lead | 3 variants | ✅ Integrated |
+| Can't Grab Lead | 3 variants | ✅ Integrated |
+| No Fence | 3 variants | ✅ Integrated |
+| Lost Track | 3 variants | ✅ Integrated |
+| Horse Gone | 3 variants | ✅ Integrated |
+| Lead Snapped | 3 variants | ✅ Integrated |
+| Lead Reattach Fail | 3 variants | ✅ Integrated |
+
+### Touch Variant ✅
+
+- "Hmm?" (3 variants) ✅
+
+## Sound Categories Summary
+
+| Category | Count | Examples |
+|----------|-------|----------|
+| Greeting | 4 | hey, good_to_see, welcome_back, there_you_are |
+| Touch | 5 | hmm, yeah, what_need, need_something |
+| Status | 7 | hungry, find_food, snack_time, need_breather, not_best, too_many_hits |
+| Idle | 5 | all_quiet, still_standing, taking_it_easy, here_if_needed, enjoying_calm |
+| Context | 7 | fish_earlier, smells_fish, fish_cooperating, warming_earlier, campfire_wonders |
+| Skill | 15 | fishing_*, woodcut_*, hangout_*, sleep_* |
+| Mode | 15 | follow_*, guard_*, patrol_*, return_*, stay_* |
+| Warning | 6 | suffocating, drop_ahead, stuck, banged_up, not_full_strength |
+| **Combat** | **29** | threat_*, engage_*, damage_*, kill_*, clear_*, player_hit_* |
+| **Banter** | **4** | creeper_kidding, if_yell_run, got_your_back, stay_sharp |
+| **Mount** | **30** | horse_hurt, no_apples, no_lead, lost_horse, lead_snapped |
+| **Environment** | **12** | amethyst_*, bat_*, dripstone_*, deepslate_* |
+| Confirm | 3 | on_it, hold_off, ask_yesno |
+| Discover | 12 | diamonds, ancient_debris, emeralds, gold, iron, coal |
+| Hazard | 3 | lava, water, no_torches |
+| Hunger | 3 | dying, starving, warning |
+| Eating | 4 | no_food, still_hungry, progress, done |
+| Death | 1 | resume_ask |
+| Move | 5 | cant_reach, blocked, walking_to_you, target_lost |
+| Inventory | 3 | full, dont_have, give_item |
+| Craft | 3 | need_table, unknown, cant_place |
+| Lost/Found | 12 | over_here, hello, help, finally, thank_goodness |
+| Dark | 5 | cant_see, where_are_you, need_light, too_dark, torch_please |
+| Wildlife | 7 | heard_bird, saw_cow, pig_nearby, sheep_around, heard_wolf |
 
 ## Features Implemented
 
@@ -83,35 +213,17 @@ Add new voiced variants for mount/lead handling. Please record 2-3 variants per 
 3. ✅ **Subtitle System** - Action bar subtitles for ambient chatter
 4. ✅ **3D Positional Audio** - 8-block attenuation distance
 5. ✅ **Config Toggle** - Per-bot voicedDialogue setting
+6. ✅ **Combat Callout System** - Real-time callouts during fights
+7. ✅ **Environment Detection** - Special dialogue for unique biomes/blocks
 
-## Sound Categories
+## File Locations
 
-| Category | Count | Examples |
-|----------|-------|----------|
-| Greeting | 4 | hey, good_to_see, welcome_back, there_you_are |
-| Touch | 4 | hmm, yeah, what_need, need_something |
-| Status | 7 | hungry, find_food, snack_time, need_breather, not_best, too_many_hits, late_heading_home |
-| Idle | 5 | all_quiet, still_standing, taking_it_easy, here_if_needed, enjoying_calm |
-| Context | 7 | fish_earlier, smells_fish, fish_cooperating, warming_earlier, breather_sometimes, campfire_wonders, listening |
-| Skill | 15 | fishing_*, woodcut_*, hangout_*, sleep_*, fish_session_done, fish_sunset |
-| Mode | 15 | follow_*, guard_*, patrol_*, return_*, stay_* |
-| Warning | 6 | suffocating, drop_ahead, stuck, banged_up, not_full_strength, prefer_chicken |
-| Combat | 6 | engaging, standing_down, defend_bots, focus_self, aggressive, evasive |
-| Confirm | 3 | on_it, hold_off, ask_yesno |
-| Discover | 12 | diamonds, ancient_debris, emeralds, gold, iron, coal, redstone, lapis, quartz, chest, geode, structure |
-| Hazard | 3 | lava, water, no_torches |
-| Hunger | 3 | dying, starving, warning |
-| Eating | 4 | no_food, still_hungry, progress, done |
-| Death | 1 | resume_ask |
-| Move | 5 | cant_reach, blocked, walking_to_you, target_lost, back_to_idle |
-| Inventory | 3 | full, dont_have, give_item |
-| Fish | 1 | no_water |
-| Sleep | 4 | cant_now, no_bed, no_spot, bed_blocked |
-| Craft | 3 | need_table, unknown, cant_place |
-| Smelt | 2 | need_furnace, nothing |
-| Farm | 2 | need_seeds, need_hoe |
-| Shelter | 1 | cant_build |
+- **Audio Files**: `src/main/resources/assets/ai-player/sounds/dialogue/`
+- **Sound Registry**: `sounds.json`
+- **Sound Events**: `BotDialogueSounds.java`
+- **Text Mappings**: `DialogueTextMapper.java`
+- **Subtitles**: `BotDialoguePlayer.java`
 
 ---
 
-*Last updated: December 2024*
+*Last updated: January 10, 2026*

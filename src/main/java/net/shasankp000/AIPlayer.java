@@ -1,6 +1,5 @@
 package net.shasankp000;
 
-import ai.djl.ModelException;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
 import net.fabricmc.fabric.api.entity.event.v1.ServerPlayerEvents;
@@ -10,6 +9,7 @@ import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
 import net.fabricmc.fabric.api.message.v1.ServerMessageEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.fabricmc.loader.api.FabricLoader;
+import net.minecraft.entity.Entity;
 import net.minecraft.entity.damage.DamageTypes;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.PlayerConfigEntry;
@@ -37,6 +37,7 @@ import net.shasankp000.GameAI.services.BotIdleHobbiesService;
 import net.shasankp000.GameAI.llm.LLMOrchestrator;
 import net.shasankp000.GameAI.services.HuntCatalog;
 import net.shasankp000.GameAI.services.HuntHistoryService;
+import net.shasankp000.GameAI.services.BotQuestService;
 
 import net.shasankp000.Database.QTableStorage;
 import net.shasankp000.Entity.AutoFaceEntity;
@@ -45,6 +46,12 @@ import net.shasankp000.network.SaveAPIKeyPayload;
 import net.shasankp000.network.SaveConfigPayload;
 import net.shasankp000.network.SaveCustomProviderPayload;
 import net.shasankp000.network.configNetworkManager;
+import net.shasankp000.network.ConfirmRecruitmentPayload;
+import net.shasankp000.network.OpenRecruitmentDialoguePayload;
+import net.shasankp000.network.RecruitmentPromptPayload;
+import net.shasankp000.network.RecruitmentStatePayload;
+import net.shasankp000.network.RequestRecruitmentDialoguePayload;
+import net.shasankp000.network.SurvivalRecruitmentNetworkManager;
 import net.shasankp000.WebSearch.AISearchConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -62,9 +69,9 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import net.fabricmc.fabric.api.event.player.UseEntityCallback;
+import net.fabricmc.fabric.api.event.player.UseBlockCallback;
 import net.minecraft.screen.ScreenHandlerType;
 import net.minecraft.util.Identifier;
-import net.shasankp000.ui.BotInventoryAccess;
 import net.minecraft.registry.Registry;
 import net.minecraft.registry.Registries;
 import net.minecraft.resource.featuretoggle.FeatureFlags;
@@ -104,6 +111,10 @@ public class AIPlayer implements ModInitializer {
         return t;
     });
     private static final AtomicBoolean MODEL_LOAD_ENQUEUED = new AtomicBoolean(false);
+
+    // If the optional Ollama client library isn't present (aiEnabled=false builds), do not touch FunctionCallerV2.
+    private static final boolean OLLAMA4J_AVAILABLE = isClassAvailable("io.github.amithkoujalgi.ollama4j.core.exceptions.OllamaBaseException");
+    private static final AtomicBoolean WARNED_MISSING_OLLAMA4J = new AtomicBoolean(false);
     
     // Track bots that need spawn escape checks
     private static final ConcurrentHashMap<UUID, SpawnEscapeCheck> SPAWN_ESCAPE_CHECKS = new ConcurrentHashMap<>();
@@ -134,6 +145,14 @@ public class AIPlayer implements ModInitializer {
             if (world.isClient()) return net.minecraft.util.ActionResult.PASS;
             // Only react once (MAIN_HAND). OFF_HAND callback will return PASS to avoid double-fire.
             if (hand != net.minecraft.util.Hand.MAIN_HAND) return net.minecraft.util.ActionResult.PASS;
+
+            // Survival recruitment: interacting with a villager counts as a trigger.
+            if (player instanceof net.minecraft.server.network.ServerPlayerEntity serverPlayer
+                    && entity instanceof net.minecraft.entity.passive.VillagerEntity) {
+                net.shasankp000.GameAI.services.SurvivalRecruitmentService.notePlayerInteraction(serverPlayer, "villager");
+                return net.minecraft.util.ActionResult.PASS;
+            }
+
             if (!(entity instanceof net.minecraft.server.network.ServerPlayerEntity bot)) return net.minecraft.util.ActionResult.PASS;
 
             // Only handle interactions for registered bot players.
@@ -168,6 +187,33 @@ public class AIPlayer implements ModInitializer {
                     (net.minecraft.server.network.ServerPlayerEntity) player, bot
             );
             return ok ? net.minecraft.util.ActionResult.SUCCESS : net.minecraft.util.ActionResult.PASS;
+        });
+
+        // Nether ritual resurrection: sneak-right-click a Respawn Anchor with a Ghast Tear.
+        UseBlockCallback.EVENT.register((player, world, hand, hitResult) -> {
+            if (world == null || world.isClient()) return net.minecraft.util.ActionResult.PASS;
+            if (!(player instanceof net.minecraft.server.network.ServerPlayerEntity serverPlayer)) return net.minecraft.util.ActionResult.PASS;
+            if (!(world instanceof net.minecraft.server.world.ServerWorld serverWorld)) return net.minecraft.util.ActionResult.PASS;
+
+            // Survival recruitment: interacting with a bell or a bed counts as a trigger.
+            // Don't consume the action; just record it.
+            if (hand == net.minecraft.util.Hand.MAIN_HAND) {
+                try {
+                    var pos = hitResult.getBlockPos();
+                    var state = serverWorld.getBlockState(pos);
+                    if (state != null) {
+                        if (state.isOf(net.minecraft.block.Blocks.BELL)) {
+                            net.shasankp000.GameAI.services.SurvivalRecruitmentService.notePlayerInteraction(serverPlayer, "bell");
+                        } else if (state.isIn(net.minecraft.registry.tag.BlockTags.BEDS)) {
+                            net.shasankp000.GameAI.services.SurvivalRecruitmentService.notePlayerInteraction(serverPlayer, "bed");
+                        }
+                    }
+                } catch (Throwable ignored) {
+                    // Best effort only.
+                }
+            }
+            return net.shasankp000.GameAI.services.CompanionResurrectionService
+                    .tryHandleUseBlock(serverPlayer, serverWorld, hand, hitResult.getBlockPos());
         });
 
         LOGGER.info("Hello Fabric world!");
@@ -208,10 +254,31 @@ public class AIPlayer implements ModInitializer {
         PayloadTypeRegistry.playC2S().register(net.shasankp000.network.RequestHuntablesPayload.ID, net.shasankp000.network.RequestHuntablesPayload.CODEC);
         PayloadTypeRegistry.playS2C().register(net.shasankp000.network.HuntablesPayload.ID, net.shasankp000.network.HuntablesPayload.CODEC);
 
+        // Survival recruitment (find village -> recruit bot) payloads.
+        PayloadTypeRegistry.playS2C().register(RecruitmentPromptPayload.ID, RecruitmentPromptPayload.CODEC);
+        PayloadTypeRegistry.playS2C().register(OpenRecruitmentDialoguePayload.ID, OpenRecruitmentDialoguePayload.CODEC);
+        PayloadTypeRegistry.playS2C().register(RecruitmentStatePayload.ID, RecruitmentStatePayload.CODEC);
+        PayloadTypeRegistry.playC2S().register(RequestRecruitmentDialoguePayload.ID, RequestRecruitmentDialoguePayload.CODEC);
+        PayloadTypeRegistry.playC2S().register(ConfirmRecruitmentPayload.ID, ConfirmRecruitmentPayload.CODEC);
+        PayloadTypeRegistry.playC2S().register(net.shasankp000.network.RequestRecruitmentReplayPayload.ID, net.shasankp000.network.RequestRecruitmentReplayPayload.CODEC);
+
+        // Companion questline (server-authoritative dialogue checks)
+        PayloadTypeRegistry.playC2S().register(net.shasankp000.network.CompanionQuestTopicPayload.ID, net.shasankp000.network.CompanionQuestTopicPayload.CODEC);
+        PayloadTypeRegistry.playS2C().register(net.shasankp000.network.CompanionQuestResponsePayload.ID, net.shasankp000.network.CompanionQuestResponsePayload.CODEC);
+        PayloadTypeRegistry.playC2S().register(net.shasankp000.network.CompanionQuestStateRequestPayload.ID, net.shasankp000.network.CompanionQuestStateRequestPayload.CODEC);
+        PayloadTypeRegistry.playS2C().register(net.shasankp000.network.CompanionQuestStatePayload.ID, net.shasankp000.network.CompanionQuestStatePayload.CODEC);
+
+        // Operator-only admin actions for survival recruitment mode.
+        PayloadTypeRegistry.playC2S().register(net.shasankp000.network.RecruitmentAdminActionPayload.ID, net.shasankp000.network.RecruitmentAdminActionPayload.CODEC);
+        PayloadTypeRegistry.playS2C().register(net.shasankp000.network.RecruitmentAdminStatusPayload.ID, net.shasankp000.network.RecruitmentAdminStatusPayload.CODEC);
+
         net.shasankp000.network.BaseNetworkManager.registerReceiversOnce();
         net.shasankp000.network.CraftingHistoryNetworkManager.registerReceiversOnce();
         net.shasankp000.network.CookablesNetworkManager.registerReceiversOnce();
         net.shasankp000.network.HuntablesNetworkManager.registerReceiversOnce();
+        SurvivalRecruitmentNetworkManager.registerReceiversOnce();
+        net.shasankp000.network.CompanionQuestNetworkManager.registerReceiversOnce();
+        net.shasankp000.network.RecruitmentAdminNetworkManager.registerReceiversOnce();
 
         modCommandRegistry.register();
         configCommand.register();
@@ -291,6 +358,8 @@ public class AIPlayer implements ModInitializer {
             BotAmbientChatter.resetSession();
             // Clear mood manager state.
             BotMoodManager.resetSession();
+            // Clear quest runtime session state (quest memory persists in config).
+            BotQuestService.resetSession();
             if (modelManager != null) {
                 try {
                     if (modelManager.isModelLoaded() || loadedBERTModelIntoMemory) {
@@ -310,6 +379,11 @@ public class AIPlayer implements ModInitializer {
         ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> {
             ServerPlayerEntity player = handler.player;
             BotPersistenceService.onBotJoin(player);
+
+            // Sync survival recruitment state to real players on join.
+            if (!(player instanceof net.shasankp000.Entity.createFakePlayer)) {
+                net.shasankp000.GameAI.services.SurvivalRecruitmentService.sendRecruitmentState(player);
+            }
             
             // Check if bot spawned in a wall and needs to dig out
             if (BotEventHandler.isRegisteredBot(player)) {
@@ -333,15 +407,23 @@ public class AIPlayer implements ModInitializer {
                 // Notify mood manager of damage (triggers STRESSED state)
                 BotMoodManager.noteDamage(serverPlayer);
 
-                // If a real player hits a bot, treat it like a "touch" interaction for flavor text.
-                if (source != null && source.getAttacker() instanceof ServerPlayerEntity attacker
-                        && attacker != serverPlayer && !attacker.isRemoved()) {
-                    net.shasankp000.GameAI.services.BotTouchChatService.trySendTouchLine(attacker, serverPlayer);
+                // Handle damage callouts based on attacker type
+                if (source != null && source.getAttacker() != null && source.getAttacker() != serverPlayer) {
+                    Entity attacker = source.getAttacker();
+                    if (attacker instanceof ServerPlayerEntity playerAttacker && !playerAttacker.isRemoved()) {
+                        // Player hit the bot - use combat callout (not touch dialogue!)
+                        net.shasankp000.GameAI.services.BotCombatCalloutService.onPlayerHit(serverPlayer, playerAttacker, amount);
+                    } else if (attacker instanceof net.minecraft.entity.mob.HostileEntity) {
+                        // Mob hit the bot - use damage taken callout
+                        net.shasankp000.GameAI.services.BotCombatCalloutService.onDamageTaken(serverPlayer, attacker, amount);
+                    }
                 }
 
                 // If bot is taking IN_WALL damage, try to escape immediately
                 // BUT: skip aggressive escape if bot is in ascent mode (digging upward)
-                if (source.isOf(DamageTypes.IN_WALL) || source.isOf(DamageTypes.FLY_INTO_WALL) || source.isOf(DamageTypes.CRAMMING)) {
+                if (source != null && (source.isOf(DamageTypes.IN_WALL)
+                    || source.isOf(DamageTypes.FLY_INTO_WALL)
+                    || source.isOf(DamageTypes.CRAMMING))) {
                     // Record recent obstruction-like damage (2s window gating)
                     BotEventHandler.noteObstructDamage(serverPlayer);
 
@@ -394,6 +476,12 @@ public class AIPlayer implements ModInitializer {
                         && HuntCatalog.isFoodMob(dead.getType())) {
                     HuntHistoryService.recordHunt(killer, net.minecraft.entity.EntityType.getId(dead.getType()));
                 }
+                // Combat callout: bot killed something
+                if (attacker instanceof ServerPlayerEntity killer2 && BotEventHandler.isRegisteredBot(killer2)) {
+                    if (dead instanceof net.minecraft.entity.mob.HostileEntity) {
+                        net.shasankp000.GameAI.services.BotCombatCalloutService.onKill(killer2, dead);
+                    }
+                }
             }
         });
 
@@ -412,6 +500,7 @@ public class AIPlayer implements ModInitializer {
         });
 
         ServerTickEvents.END_SERVER_TICK.register(BotPersistenceService::onServerTick);
+        ServerTickEvents.END_SERVER_TICK.register(net.shasankp000.GameAI.services.SurvivalRecruitmentService::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(BotEventHandler::tickBurialRescue);
         ServerTickEvents.END_SERVER_TICK.register(BotEventHandler::tickHunger);
         ServerTickEvents.END_SERVER_TICK.register(AIPlayer::processSpawnEscapeChecks);
@@ -422,11 +511,28 @@ public class AIPlayer implements ModInitializer {
         ServerTickEvents.END_SERVER_TICK.register(BotAmbientSocialChatService::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(BotMoodManager::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(BotAmbientChatter::onServerTick);
+        ServerTickEvents.END_SERVER_TICK.register(BotQuestService::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(net.shasankp000.GameAI.services.RideSyncService::onServerTick);
+        ServerTickEvents.END_SERVER_TICK.register(net.shasankp000.GameAI.services.BotCombatCalloutService::onServerTick);
 
         ServerMessageEvents.CHAT_MESSAGE.register((message, sender, params) -> {
             String raw = message.getContent().getString();
-            boolean consumed = FunctionCallerV2.tryHandleConfirmation(sender.getUuid(), raw);
+
+            // Quest usability: allow a bare "quest"/"mission" ask to target the nearest bot.
+            // This keeps the feature discoverable without requiring "<botname> quest".
+            tryHandleNearbyQuestAsk(sender, raw);
+
+            boolean consumed = false;
+            if (OLLAMA4J_AVAILABLE) {
+                try {
+                    consumed = FunctionCallerV2.tryHandleConfirmation(sender.getUuid(), raw);
+                } catch (Throwable t) {
+                    // Don't let optional AI wiring break chat (or quests).
+                    if (WARNED_MISSING_OLLAMA4J.compareAndSet(false, true)) {
+                        LOGGER.warn("FunctionCallerV2 unavailable; skipping confirmation handling ({}: {})", t.getClass().getSimpleName(), t.getMessage());
+                    }
+                }
+            }
             if (consumed) {
                 return;
             }
@@ -435,6 +541,20 @@ public class AIPlayer implements ModInitializer {
 
             ChatTarget target = resolveChatTargets(raw);
             if (!target.bots().isEmpty()) {
+                // Fast-path: local quest system (no LLM).
+                if (!target.prompt().isEmpty()) {
+                    boolean questHandled = false;
+                    for (ServerPlayerEntity bot : target.bots()) {
+                        if (bot == null) {
+                            continue;
+                        }
+                        questHandled |= BotQuestService.tryHandleQuestPrompt(bot, sender, target.prompt());
+                    }
+                    if (questHandled) {
+                        return;
+                    }
+                }
+
                 boolean handled = false;
                 for (ServerPlayerEntity bot : target.bots()) {
                     if (target.prompt().isEmpty()) {
@@ -472,15 +592,92 @@ public class AIPlayer implements ModInitializer {
                 NLPProcessor.Intent intent = NLPProcessor.getIntention(userPrompt);
 
                 if (intent == NLPProcessor.Intent.REQUEST_ACTION) {
-                    FunctionCallerV2 functionCaller = new FunctionCallerV2(bot.getCommandSource(), sender.getUuid());
+                    if (!OLLAMA4J_AVAILABLE) {
+                        if (WARNED_MISSING_OLLAMA4J.compareAndSet(false, true)) {
+                            LOGGER.warn("AI action handling requested but ollama4j is not available; ignoring inline action prompt.");
+                        }
+                        return;
+                    }
                     try {
-                        functionCaller.run(userPrompt);
+                        // Constructor sets thread-local context used by the static run(..) entrypoint.
+                        new FunctionCallerV2(bot.getCommandSource(), sender.getUuid());
+                        FunctionCallerV2.run(userPrompt);
+                    } catch (Throwable t) {
+                        if (WARNED_MISSING_OLLAMA4J.compareAndSet(false, true)) {
+                            LOGGER.warn("AI action handling failed ({}: {})", t.getClass().getSimpleName(), t.getMessage());
+                        }
                     } finally {
-                        FunctionCallerV2.clearContext();
+                        try {
+                            FunctionCallerV2.clearContext();
+                        } catch (Throwable ignored) {
+                        }
                     }
                 }
             }
         });
+    }
+
+    private static void tryHandleNearbyQuestAsk(ServerPlayerEntity sender, String raw) {
+        if (serverInstance == null || sender == null || sender.isRemoved()) {
+            return;
+        }
+        if (BotEventHandler.isRegisteredBot(sender)) {
+            return;
+        }
+        if (!looksLikeQuestAsk(raw)) {
+            return;
+        }
+
+        // If message already explicitly targets bots ("Jake quest", "bots quest"), normal routing will handle it.
+        ChatTarget explicit = resolveChatTargets(raw);
+        if (!explicit.bots().isEmpty()) {
+            return;
+        }
+
+        // Route to nearest registered bot within a small radius.
+        final double maxDistSq = 10.0D * 10.0D;
+        ServerPlayerEntity nearest = null;
+        double best = Double.POSITIVE_INFINITY;
+        for (ServerPlayerEntity bot : BotEventHandler.getRegisteredBots(serverInstance)) {
+            if (bot == null || bot.isRemoved()) {
+                continue;
+            }
+            if (bot.getEntityWorld() != sender.getEntityWorld()) {
+                continue;
+            }
+            double d = bot.squaredDistanceTo(sender);
+            if (d <= maxDistSq && d < best) {
+                best = d;
+                nearest = bot;
+            }
+        }
+        if (nearest == null) {
+            return;
+        }
+
+        // Let the quest service decide if it should respond.
+        BotQuestService.tryHandleQuestPrompt(nearest, sender, raw);
+    }
+
+    private static boolean looksLikeQuestAsk(String raw) {
+        if (raw == null) {
+            return false;
+        }
+        String normalized = raw.trim().toLowerCase(Locale.ROOT);
+        if (normalized.isEmpty()) {
+            return false;
+        }
+        return normalized.equals("quest")
+                || normalized.equals("sidequest")
+                || normalized.equals("side quest")
+                || normalized.equals("mission")
+                || normalized.startsWith("quest ")
+                || normalized.startsWith("sidequest ")
+                || normalized.startsWith("side quest ")
+                || normalized.startsWith("got a quest")
+                || normalized.startsWith("any quests")
+                || normalized.startsWith("give me a quest")
+                || normalized.startsWith("give us a quest");
     }
 
     private static void enqueueBertLoad() {

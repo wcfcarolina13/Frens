@@ -120,6 +120,10 @@ import net.minecraft.entity.player.PlayerInventory;
 import static net.shasankp000.PathFinding.PathFinder.*;
 import static net.minecraft.server.command.CommandManager.literal;
 import net.shasankp000.PacketHandler.InputPacketHandler;
+import net.shasankp000.GameAI.services.SurvivalRecruitmentService;
+import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
+import net.shasankp000.network.RecruitmentPromptPayload;
+import net.shasankp000.network.CompanionQuestStatePayload;
 
 public class modCommandRegistry {
 
@@ -130,6 +134,10 @@ public class modCommandRegistry {
     public static boolean enableReinforcementLearning = false;
     public static String botName = "";
     public static final Logger LOGGER = LoggerFactory.getLogger("mod-command-registry");
+
+    // Eye-of-Ender access is intentionally limited: it has a cooldown and does NOT represent a full "Spellbook" unlock.
+    private static final long COMPANION_EYE_SPELL_COOLDOWN_TICKS = 20L * 60L; // 60s
+    private static final Map<UUID, Long> COMPANION_EYE_SPELL_LAST_TICK = new ConcurrentHashMap<>();
 
 
     public record BotStopTask(MinecraftServer server, ServerCommandSource botSource,
@@ -149,8 +157,8 @@ public class modCommandRegistry {
     public static void register() {
         CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> {
             dispatcher.register(
-	                    literal("bot")
-	                        .then(literal("spawn")
+                        literal("bot")
+                            .then(literal("spawn")
                                 .then(CommandManager.argument("bot_name", StringArgumentType.string())
                                         .then(CommandManager.argument("mode", StringArgumentType.string())
                                                 .executes(context -> {
@@ -158,7 +166,7 @@ public class modCommandRegistry {
                                                     String spawnMode = StringArgumentType.getString(context, "mode");
                                                     try {
                                                         LOGGER.info("Executing /bot spawn {} {}", botName, spawnMode);
-                                                        spawnBot(context, spawnMode);
+                                                        spawnBot(context, spawnMode, null);
                                                         LOGGER.info("/bot spawn completed successfully for {} {}", botName, spawnMode);
                                                         return 1;
                                                     } catch (Exception e) {
@@ -169,8 +177,27 @@ public class modCommandRegistry {
                                                         return 0;
                                                     }
                                                 })
-                                        )
-                                        )
+                                                .then(CommandManager.argument("gamemode", StringArgumentType.string())
+                                                        .executes(context -> {
+                                                            String botName = StringArgumentType.getString(context, "bot_name");
+                                                            String spawnMode = StringArgumentType.getString(context, "mode");
+                                                            String gameMode = StringArgumentType.getString(context, "gamemode");
+                                                            try {
+                                                                LOGGER.info("Executing /bot spawn {} {} {}", botName, spawnMode, gameMode);
+                                                                spawnBot(context, spawnMode, gameMode);
+                                                                LOGGER.info("/bot spawn completed successfully for {} {} {}", botName, spawnMode, gameMode);
+                                                                return 1;
+                                                            } catch (Exception e) {
+                                                                LOGGER.error("❌ Exception while executing /bot spawn {} {} {}", botName, spawnMode, gameMode, e);
+                                                                context.getSource().sendError(Text.literal(
+                                                                        "An internal error occurred while running /bot spawn. Check server log for details."
+                                                                ));
+                                                                return 0;
+                                                            }
+                                                        })
+                                                )
+                                            )
+                                            )
 
                                         // In-game debug toggle: /bot debug <on|off>, /bot debug status, /bot debug clear
                                         .then(literal("debug")
@@ -273,6 +300,7 @@ public class modCommandRegistry {
                             .then(BotHomeCommands.buildUnleashTethered())
                             .then(BotHomeCommands.buildLeashOnDismount())
 	                        .then(BotMovementCommands.buildCome())
+                            .then(BotCompanionCommands.build())
 	                        .then(BotMovementCommands.buildRegroup())
                             .then(BotMovementCommands.buildGoToLook())
                             .then(BotMovementCommands.buildShelterLook())
@@ -1210,13 +1238,252 @@ public class modCommandRegistry {
                                     .executes(context -> executeEquip(context, EntityArgumentType.getPlayer(context, "player")))
                             )
             );
+
+                // Register admin tooling for survival recruitment mode as a separate command tree.
+                // This avoids accidental nesting under other subcommands in the huge /bot tree above.
+                dispatcher.register(
+                    literal("bot")
+                        .then(literal("recruit")
+                            .then(literal("status")
+                                .executes(context -> executeRecruitStatus(context))
+                            )
+                            .then(literal("reset")
+                                .executes(context -> executeRecruitReset(context))
+                            )
+                            .then(literal("enable")
+                                .executes(context -> executeRecruitEnable(context, true))
+                            )
+                            .then(literal("disable")
+                                .executes(context -> executeRecruitEnable(context, false))
+                            )
+                            .then(literal("setstage")
+                                .then(CommandManager.argument("stage", IntegerArgumentType.integer(0))
+                                    .executes(context -> executeRecruitSetStage(context, IntegerArgumentType.getInteger(context, "stage")))
+                                )
+                            )
+                        )
+                );
         });
     }
 
 
-    private static void spawnBot(CommandContext<ServerCommandSource> context, String spawnMode) {
+    private static GameMode parseGameModeOrNull(String value) {
+        if (value == null) {
+            return null;
+        }
+        String v = value.trim().toLowerCase(java.util.Locale.ROOT);
+        return switch (v) {
+            case "creative", "c" -> GameMode.CREATIVE;
+            case "survival", "s" -> GameMode.SURVIVAL;
+            default -> null;
+        };
+    }
+
+    private static ServerPlayerEntity getIssuerOrNull(CommandContext<ServerCommandSource> context) {
+        if (context == null || context.getSource() == null) {
+            return null;
+        }
+        // In this MC/Fabric version, getPlayer() returns null for console/command blocks.
+        return context.getSource().getPlayer();
+    }
+
+    private static boolean hasOperatorPermissions(CommandContext<ServerCommandSource> context) {
+        ServerPlayerEntity issuer = getIssuerOrNull(context);
+        if (issuer != null) {
+            return AIPlayer.isOperator(issuer);
+        }
+        // Console/command blocks: allow by default.
+        return true;
+    }
+
+    private static int executeRecruitStatus(CommandContext<ServerCommandSource> context) {
+        if (!hasOperatorPermissions(context)) {
+            ChatUtils.sendSystemMessage(context.getSource(), "You must be an operator to use /bot recruit.");
+            return 0;
+        }
+        MinecraftServer server = context.getSource().getServer();
+        if (server == null || AIPlayer.CONFIG == null) {
+            ChatUtils.sendSystemMessage(context.getSource(), "Recruitment status unavailable: server/config not ready.");
+            return 0;
+        }
+
+        String worldKey = server.getSaveProperties().getLevelName();
+        ManualConfig.SurvivalRecruitmentState st = AIPlayer.CONFIG.getOrCreateSurvivalRecruitmentState(worldKey);
+        boolean enabled = AIPlayer.CONFIG.isSurvivalRecruitmentMode();
+
+        ChatUtils.sendSystemMessage(context.getSource(), "Survival recruitment mode: " + enabled);
+        ChatUtils.sendSystemMessage(context.getSource(), "World key: " + (worldKey == null ? "default" : worldKey));
+        ChatUtils.sendSystemMessage(context.getSource(), "Recruited: " + st.isRecruited() + " (botAlias=" + st.getBotAlias() + ")");
+        if (st.isRecruited()) {
+            String by = (st.getRecruitedByName() == null || st.getRecruitedByName().isBlank()) ? "unknown" : st.getRecruitedByName();
+            String uuid = (st.getRecruitedByUuid() == null || st.getRecruitedByUuid().isBlank()) ? "unknown" : st.getRecruitedByUuid();
+            ChatUtils.sendSystemMessage(context.getSource(), "Recruited by: " + by + " (" + uuid + ")");
+            ChatUtils.sendSystemMessage(context.getSource(), "Recruited at (epoch ms): " + st.getRecruitedAtEpochMs());
+        }
+
+        ChatUtils.sendSystemMessage(context.getSource(), "Companion quest: stage=" + st.getCompanionQuestStage() + " permanent=" + st.isPermanentCompanion());
+        if (st.isCompanionAnchorSet()) {
+            BlockPos anchor = BlockPos.fromLong(st.getCompanionAnchorPos());
+            String dim = st.getCompanionAnchorDimension();
+            ChatUtils.sendSystemMessage(context.getSource(), "Anchor: set=true dim=" + (dim == null ? "?" : dim)
+                    + " pos=" + anchor.getX() + "," + anchor.getY() + "," + anchor.getZ());
+        } else {
+            ChatUtils.sendSystemMessage(context.getSource(), "Anchor: set=false");
+        }
+
+        return 1;
+    }
+
+    private static int executeRecruitEnable(CommandContext<ServerCommandSource> context, boolean enabled) {
+        if (!hasOperatorPermissions(context)) {
+            ChatUtils.sendSystemMessage(context.getSource(), "You must be an operator to use /bot recruit.");
+            return 0;
+        }
+        if (AIPlayer.CONFIG == null) {
+            ChatUtils.sendSystemMessage(context.getSource(), "Recruitment toggle unavailable: config not ready.");
+            return 0;
+        }
+
+        AIPlayer.CONFIG.setSurvivalRecruitmentMode(enabled);
+        AIPlayer.CONFIG.save();
+
+        MinecraftServer server = context.getSource().getServer();
+        String botAlias = "Jake";
+        if (server != null) {
+            ManualConfig.SurvivalRecruitmentState st = SurvivalRecruitmentService.getState(server);
+            botAlias = st != null ? st.getBotAlias() : botAlias;
+            for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
+                if (p != null && !(p instanceof createFakePlayer)) {
+                    SurvivalRecruitmentService.sendRecruitmentState(p);
+                    if (!enabled) {
+                        ServerPlayNetworking.send(p, new RecruitmentPromptPayload(false, botAlias));
+                    }
+                }
+            }
+        }
+
+        ChatUtils.sendSystemMessage(context.getSource(), "Survival recruitment mode set to " + enabled + ".");
+        return 1;
+    }
+
+    private static int executeRecruitReset(CommandContext<ServerCommandSource> context) {
+        if (!hasOperatorPermissions(context)) {
+            ChatUtils.sendSystemMessage(context.getSource(), "You must be an operator to use /bot recruit.");
+            return 0;
+        }
+        MinecraftServer server = context.getSource().getServer();
+        if (server == null || AIPlayer.CONFIG == null) {
+            ChatUtils.sendSystemMessage(context.getSource(), "Recruitment reset unavailable: server/config not ready.");
+            return 0;
+        }
+
+        String worldKey = server.getSaveProperties().getLevelName();
+        ManualConfig.SurvivalRecruitmentState st = AIPlayer.CONFIG.getOrCreateSurvivalRecruitmentState(worldKey);
+        st.setRecruited(false);
+        st.setRecruitedByUuid(null);
+        st.setRecruitedByName(null);
+        st.setRecruitedAtEpochMs(0L);
+        // Keep botAlias as-is to preserve customization.
+
+        st.setCompanionQuestStage(0);
+        st.setPermanentCompanion(false);
+        st.setCompanionAnchorSet(false);
+        st.setCompanionAnchorDimension(null);
+        st.setCompanionAnchorPos(0L);
+
+        st.setCompanionDead(false);
+        st.setCompanionDiedAtEpochMs(0L);
+        st.setCompanionDiedDimension(null);
+        st.setCompanionDiedPos(0L);
+
+        AIPlayer.CONFIG.save();
+
+        String alias = st.getBotAlias();
+        for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
+            if (p != null && !(p instanceof createFakePlayer)) {
+                SurvivalRecruitmentService.sendRecruitmentState(p);
+                ServerPlayNetworking.send(p, new CompanionQuestStatePayload(alias, 0, false));
+            }
+        }
+
+        ChatUtils.sendSystemMessage(context.getSource(), "Survival recruitment state reset for world '" + (worldKey == null ? "default" : worldKey) + "'.");
+        return 1;
+    }
+
+    private static int executeRecruitSetStage(CommandContext<ServerCommandSource> context, int stage) {
+        if (!hasOperatorPermissions(context)) {
+            ChatUtils.sendSystemMessage(context.getSource(), "You must be an operator to use /bot recruit.");
+            return 0;
+        }
+        MinecraftServer server = context.getSource().getServer();
+        if (server == null || AIPlayer.CONFIG == null) {
+            ChatUtils.sendSystemMessage(context.getSource(), "Setstage unavailable: server/config not ready.");
+            return 0;
+        }
+        if (!SurvivalRecruitmentService.isEnabled(server)) {
+            ChatUtils.sendSystemMessage(context.getSource(), "Survival recruitment mode is disabled. Enable it first with /bot recruit enable.");
+            return 0;
+        }
+
+        ManualConfig.SurvivalRecruitmentState st = SurvivalRecruitmentService.getState(server);
+        if (st == null || !st.isRecruited()) {
+            ChatUtils.sendSystemMessage(context.getSource(), "World is not recruited yet. Use /bot recruit status or complete recruitment first.");
+            return 0;
+        }
+
+        st.setCompanionQuestStage(stage);
+        AIPlayer.CONFIG.save();
+
+        String alias = st.getBotAlias();
+        int updatedStage = st.getCompanionQuestStage();
+        boolean perm = st.isPermanentCompanion();
+        for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
+            if (p != null && !(p instanceof createFakePlayer)) {
+                ServerPlayNetworking.send(p, new CompanionQuestStatePayload(alias, updatedStage, perm));
+            }
+        }
+
+        ChatUtils.sendSystemMessage(context.getSource(), "Companion quest stage set to " + updatedStage + " for botAlias='" + alias + "'.");
+        return 1;
+    }
+
+    private static void spawnBot(CommandContext<ServerCommandSource> context, String spawnMode, String explicitGameMode) {
         try {
             MinecraftServer server = context.getSource().getServer(); // gets the minecraft server
+
+            // Survival recruitment gating: don't let non-ops bypass recruitment or resurrection.
+            // Non-ops may only spawn the recruited companion (and only in play mode, and only if alive).
+            if (SurvivalRecruitmentService.isEnabled(server)) {
+                ServerPlayerEntity issuer = context.getSource().getEntity() instanceof ServerPlayerEntity p ? p : null;
+                if (issuer != null && !AIPlayer.isOperator(issuer)) {
+                    ManualConfig.SurvivalRecruitmentState st = SurvivalRecruitmentService.getState(server);
+                    if (st == null || !st.isRecruited()) {
+                        ChatUtils.sendSystemMessage(context.getSource(),
+                                "Bots are unavailable until recruited. Find a village and recruit first (or ask an admin)."
+                        );
+                        return;
+                    }
+
+                    String requested = StringArgumentType.getString(context, "bot_name");
+                    String recruitedAlias = st.getBotAlias();
+                    if (requested == null || recruitedAlias == null || !recruitedAlias.equalsIgnoreCase(requested.trim())) {
+                        ChatUtils.sendSystemMessage(context.getSource(), "You can only spawn the recruited companion ('" + recruitedAlias + "') in this world.");
+                        return;
+                    }
+
+                    if (!"play".equalsIgnoreCase(spawnMode)) {
+                        ChatUtils.sendSystemMessage(context.getSource(), "Only play-mode spawning is allowed for the recruited companion.");
+                        return;
+                    }
+
+                    if (st.isCompanionDead()) {
+                        ChatUtils.sendSystemMessage(context.getSource(), recruitedAlias + " is dead.");
+                        ChatUtils.sendSystemMessage(context.getSource(), "You must perform the Nether ritual to bring them back.");
+                        return;
+                    }
+                }
+            }
+
             BlockPos spawnPos = getBlockPos(context);
 
             RegistryKey<World> dimType = context.getSource().getWorld().getRegistryKey();
@@ -1227,6 +1494,15 @@ public class modCommandRegistry {
             Vec3d pos = new Vec3d(spawnPos.getX() + 0.5, spawnPos.getY(), spawnPos.getZ() + 0.5);
 
             GameMode mode = GameMode.SURVIVAL;
+            GameMode parsedExplicit = parseGameModeOrNull(explicitGameMode);
+            if (parsedExplicit != null) {
+                mode = parsedExplicit;
+            } else if (AIPlayer.CONFIG != null) {
+                ManualConfig.BotControlSettings ctrl = AIPlayer.CONFIG.getEffectiveBotControl(StringArgumentType.getString(context, "bot_name"));
+                if (ctrl != null && "creative".equalsIgnoreCase(ctrl.getGameMode())) {
+                    mode = GameMode.CREATIVE;
+                }
+            }
 
             botName = StringArgumentType.getString(context, "bot_name");
 
@@ -1277,6 +1553,29 @@ public class modCommandRegistry {
 
                 BotEventHandler.rememberSpawn(targetWorld, pos, facing.y, facing.x);
                 LOGGER.info("spawnBot: repositioned existing bot {} at {} (mode={})", botName, spawnPos.toShortString(), spawnMode);
+
+                // If an admin force-spawns a play bot before recruitment, treat the world as recruited to avoid UI/gating confusion.
+                if ("play".equalsIgnoreCase(spawnMode)
+                        && SurvivalRecruitmentService.isEnabled(server)
+                        && !SurvivalRecruitmentService.isWorldRecruited(server)
+                        && AIPlayer.CONFIG != null) {
+                    ManualConfig.SurvivalRecruitmentState updated = AIPlayer.CONFIG.getOrCreateSurvivalRecruitmentState(server.getSaveProperties().getLevelName());
+                    updated.setBotAlias(botName);
+                    updated.setRecruited(true);
+                    ServerPlayerEntity issuer = context.getSource().getEntity() instanceof ServerPlayerEntity p ? p : null;
+                    if (issuer != null) {
+                        updated.setRecruitedByUuid(issuer.getUuidAsString());
+                        updated.setRecruitedByName(issuer.getName().getString());
+                    }
+                    updated.setRecruitedAtEpochMs(System.currentTimeMillis());
+                    AIPlayer.CONFIG.save();
+                    for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
+                        if (p != null && !(p instanceof createFakePlayer)) {
+                            SurvivalRecruitmentService.sendRecruitmentState(p);
+                            ServerPlayNetworking.send(p, new RecruitmentPromptPayload(false, botName));
+                        }
+                    }
+                }
                 return;
             }
 
@@ -1474,11 +1773,33 @@ public class modCommandRegistry {
                     ChatUtils.sendSystemMessage(serverSource, "Error: " + botName + " cannot be spawned");
                 }
 
+                // If an admin force-spawns a play bot before recruitment, treat the world as recruited to avoid UI/gating confusion.
+                if (SurvivalRecruitmentService.isEnabled(server)
+                        && !SurvivalRecruitmentService.isWorldRecruited(server)
+                        && AIPlayer.CONFIG != null) {
+                    ManualConfig.SurvivalRecruitmentState updated = AIPlayer.CONFIG.getOrCreateSurvivalRecruitmentState(server.getSaveProperties().getLevelName());
+                    updated.setBotAlias(botName);
+                    updated.setRecruited(true);
+                    ServerPlayerEntity issuer = context.getSource().getEntity() instanceof ServerPlayerEntity p ? p : null;
+                    if (issuer != null) {
+                        updated.setRecruitedByUuid(issuer.getUuidAsString());
+                        updated.setRecruitedByName(issuer.getName().getString());
+                    }
+                    updated.setRecruitedAtEpochMs(System.currentTimeMillis());
+                    AIPlayer.CONFIG.save();
+                    for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
+                        if (p != null && !(p instanceof createFakePlayer)) {
+                            SurvivalRecruitmentService.sendRecruitmentState(p);
+                            ServerPlayNetworking.send(p, new RecruitmentPromptPayload(false, botName));
+                        }
+                    }
+                }
+
             } else {
                 LOGGER.warn("spawnBot: invalid spawn mode '{}' for bot {}", spawnMode, botName);
                 ChatUtils.sendSystemMessage(serverSource, "Invalid spawn mode!");
                 ChatUtils.sendSystemMessage(serverSource,
-                        "Usage: /bot spawn <your bot's name> <spawnMode: training or play>");
+                        "Usage: /bot spawn <your bot's name> <spawnMode: training or play> [gamemode: survival or creative]");
             }
 
         } catch (Exception e) {
@@ -2481,7 +2802,8 @@ public class modCommandRegistry {
             TaskService.forceAbort(bot.getUuid(), "§cInterrupted by /bot go_to_look.");
             // After a commander-directed move, wait longer before starting idle hobbies.
             BotIdleHobbiesService.snoozeFor(bot, 3_600L);
-            BotEventHandler.setComeModeWalk(bot, commander, goal, 3.2D, true);
+            // Non-destructive move: do not trigger come-recovery digging skills while repositioning.
+            BotEventHandler.setComeModeWalk(bot, commander, goal, 3.2D, false);
             successes++;
         }
 
@@ -2567,7 +2889,8 @@ public class modCommandRegistry {
         ChatUtils.sendSystemMessage(source, bot.getGameProfile().name() + " is heading to build a " + shelterType + " where you're looking.");
 
         // Use async movement to the position, then run the shelter skill
-        BotEventHandler.setComeModeWalk(bot, commander, finalGoal, 3.2D, true);
+        // Non-destructive move: do not trigger come-recovery digging skills while repositioning.
+        BotEventHandler.setComeModeWalk(bot, commander, finalGoal, 3.2D, false);
 
         // Schedule the shelter skill to run after the bot arrives
         // We'll do a simple approach: run the skill after a short delay / when bot is close
@@ -2685,7 +3008,8 @@ public class modCommandRegistry {
         ChatUtils.sendSystemMessage(source, bot.getGameProfile().name() + " is heading to build " + schematicName + " where you're looking.");
 
         // Use async movement to the position, then run the build skill
-        BotEventHandler.setComeModeWalk(bot, commander, finalGoal, 3.2D, true);
+        // Non-destructive move: do not trigger come-recovery digging skills while repositioning.
+        BotEventHandler.setComeModeWalk(bot, commander, finalGoal, 3.2D, false);
 
         // Schedule the build skill to run after the bot arrives
         server.execute(() -> {
@@ -2768,7 +3092,7 @@ public class modCommandRegistry {
             null,
             null,
             bot.getHorizontalFacing());
-        MovementService.MovementResult result = MovementService.execute(bot.getCommandSource(), bot, plan, false);
+        MovementService.MovementResult result = MovementService.execute(bot.getCommandSource(), bot, plan, Boolean.TRUE);
         if (result.success()) {
             return 1;
         }
@@ -2791,6 +3115,548 @@ public class modCommandRegistry {
             }
         }
         return false;
+    }
+
+    static int executeCompanionComeTargets(CommandContext<ServerCommandSource> context, String targetArg) {
+        ServerCommandSource source = context.getSource();
+        MinecraftServer server = source.getServer();
+        ServerPlayerEntity commander;
+        try {
+            commander = source.getPlayer();
+        } catch (Exception e) {
+            commander = null;
+        }
+        if (server == null || commander == null) {
+            ChatUtils.sendSystemMessage(source, "Only players can call a companion.");
+            return 0;
+        }
+        if (!SurvivalRecruitmentService.isEnabled(server)) {
+            ChatUtils.sendSystemMessage(source, "Companion controls are only available in survival recruitment worlds.");
+            return 0;
+        }
+        ManualConfig.SurvivalRecruitmentState st = SurvivalRecruitmentService.getState(server);
+        if (st == null || !st.isRecruited()) {
+            ChatUtils.sendSystemMessage(source, "This world hasn't recruited a companion yet. Go to a village and recruit first (HUD prompt / Dialogue → Make contact (Recruit)).");
+            return 0;
+        }
+        if (!st.isPermanentCompanion()) {
+            ChatUtils.sendSystemMessage(source, "They're not a permanent companion yet.");
+            return 0;
+        }
+        if (!isAuthorizedCompanionCommander(commander, st)) {
+            ChatUtils.sendSystemMessage(source, "You aren't the one they pledged to.");
+            return 0;
+        }
+        String alias = st.getBotAlias();
+        if (targetArg != null && !targetArg.isBlank() && !alias.equalsIgnoreCase(targetArg.trim())) {
+            ChatUtils.sendSystemMessage(source, "This companion command only applies to '" + alias + "'.");
+            return 0;
+        }
+
+        if (!canUseCompanionCome(server, commander, st)) {
+            ChatUtils.sendSystemMessage(source, "To call your companion, cast the spell at an Enchanting Table (or use your Spellbook / Goat Horn)." );
+            return 0;
+        }
+
+        ServerPlayerEntity bot = server.getPlayerManager().getPlayer(alias);
+        if (bot == null || bot.isRemoved() || !bot.isAlive()) {
+            ChatUtils.sendSystemMessage(source, alias + " isn't here right now. Try: /bot companion summon");
+            return 0;
+        }
+        if (!(bot instanceof createFakePlayer)) {
+            ChatUtils.sendSystemMessage(source, "Can't control a real player as a companion.");
+            return 0;
+        }
+        if (!(commander.getEntityWorld() instanceof ServerWorld commanderWorld)) {
+            return 0;
+        }
+        if (!(bot.getEntityWorld() instanceof ServerWorld botWorld)
+                || botWorld.getRegistryKey() != commanderWorld.getRegistryKey()) {
+            ChatUtils.sendSystemMessage(source, alias + " can't come to you across dimensions.");
+            return 0;
+        }
+
+        TaskService.forceAbort(bot.getUuid(), "§cInterrupted by /bot companion come.");
+        BotIdleHobbiesService.snoozeFor(bot, 3_600L);
+
+        BlockPos goal = commander.getBlockPos().toImmutable();
+        BlockPos safe = net.shasankp000.GameAI.services.SafePositionService.findForwardSafeSpot(commanderWorld, commander);
+        if (safe == null) {
+            safe = net.shasankp000.GameAI.services.SafePositionService.findSafeNear(commanderWorld, goal, 8);
+        }
+        if (safe != null) {
+            goal = safe;
+        }
+
+        // Non-destructive move: do not trigger come-recovery digging skills while coming to the commander.
+        String result = BotEventHandler.setComeModeWalk(bot, commander, goal, 3.2D, false);
+        ChatUtils.sendSystemMessage(source, result);
+        return 1;
+    }
+
+    static int executeCompanionSummonTargets(CommandContext<ServerCommandSource> context, String targetArg) {
+        ServerCommandSource source = context.getSource();
+        MinecraftServer server = source.getServer();
+        ServerPlayerEntity commander;
+        try {
+            commander = source.getPlayer();
+        } catch (Exception e) {
+            commander = null;
+        }
+        if (server == null || commander == null) {
+            ChatUtils.sendSystemMessage(source, "Only players can summon a companion.");
+            return 0;
+        }
+        if (!SurvivalRecruitmentService.isEnabled(server)) {
+            ChatUtils.sendSystemMessage(source, "Companion controls are only available in survival recruitment worlds.");
+            return 0;
+        }
+        ManualConfig.SurvivalRecruitmentState st = SurvivalRecruitmentService.getState(server);
+        if (st == null || !st.isRecruited()) {
+            ChatUtils.sendSystemMessage(source, "This world hasn't recruited a companion yet. Go to a village and recruit first (HUD prompt / Dialogue → Make contact (Recruit)).");
+            return 0;
+        }
+        if (!st.isPermanentCompanion()) {
+            ChatUtils.sendSystemMessage(source, "They're not a permanent companion yet.");
+            return 0;
+        }
+        if (!isAuthorizedCompanionCommander(commander, st)) {
+            ChatUtils.sendSystemMessage(source, "You aren't the one they pledged to.");
+            return 0;
+        }
+        String alias = st.getBotAlias();
+        if (targetArg != null && !targetArg.isBlank() && !alias.equalsIgnoreCase(targetArg.trim())) {
+            ChatUtils.sendSystemMessage(source, "This companion command only applies to '" + alias + "'.");
+            return 0;
+        }
+
+        if (!canUseCompanionSummon(server, commander, st)) {
+            ChatUtils.sendSystemMessage(source, "To summon your companion, cast the spell at an Enchanting Table (or use your Spellbook), or carry an Eye of Ender (cooldown)." );
+            return 0;
+        }
+
+        boolean hasBook = hasSpellbookToken(commander);
+        boolean nearTable = isNearEnchantingTable(commander, 4);
+        boolean nearAnchor = isNearCompanionAnchor(server, commander, st, 12.0D);
+        boolean hasEye = hasEyeOfEnderToken(commander);
+        boolean usingEye = !hasBook && !nearTable && !nearAnchor && hasEye;
+
+        ServerPlayerEntity bot = server.getPlayerManager().getPlayer(alias);
+        if (bot == null || bot.isRemoved() || !bot.isAlive()) {
+            // If the companion is permanent, it's reasonable to spawn them if missing.
+            bot = trySpawnCompanion(server, source, alias);
+        }
+        if (bot == null || bot.isRemoved() || !bot.isAlive()) {
+            ChatUtils.sendSystemMessage(source, "Couldn't summon " + alias + " (not spawned)." );
+            return 0;
+        }
+        if (!(bot instanceof createFakePlayer)) {
+            ChatUtils.sendSystemMessage(source, "Can't summon a real player as a companion.");
+            return 0;
+        }
+        if (!(commander.getEntityWorld() instanceof ServerWorld commanderWorld)) {
+            return 0;
+        }
+        if (!(bot.getEntityWorld() instanceof ServerWorld botWorld)
+                || botWorld.getRegistryKey() != commanderWorld.getRegistryKey()) {
+            ChatUtils.sendSystemMessage(source, alias + " can't be summoned across dimensions.");
+            return 0;
+        }
+
+        long nowTick = server.getTicks();
+        if (usingEye) {
+            Long last = COMPANION_EYE_SPELL_LAST_TICK.get(commander.getUuid());
+            if (last != null && (nowTick - last) < COMPANION_EYE_SPELL_COOLDOWN_TICKS) {
+                long remaining = COMPANION_EYE_SPELL_COOLDOWN_TICKS - (nowTick - last);
+                ChatUtils.sendSystemMessage(source, "Eye of Ender spell is on cooldown (" + (remaining / 20L) + "s)." );
+                return 0;
+            }
+        }
+
+        BlockPos goal = net.shasankp000.GameAI.services.SafePositionService.findForwardSafeSpot(commanderWorld, commander);
+        if (goal == null) {
+            goal = net.shasankp000.GameAI.services.SafePositionService.findSafeNear(commanderWorld, commander.getBlockPos(), 8);
+        }
+        if (goal == null) {
+            goal = commander.getBlockPos().toImmutable();
+        }
+
+        // Stop what the bot was doing before teleporting.
+        TaskService.forceAbort(bot.getUuid(), "§cSummoned by companion command.");
+        BotIdleHobbiesService.snoozeFor(bot, 3_600L);
+        try {
+            BotEventHandler.stopFollowing(bot);
+        } catch (Exception ignored) {
+        }
+        BotActions.stop(bot);
+
+        // goal is a *feet* position (2-block headroom); teleport using feet Y.
+        Vec3d center = new Vec3d(goal.getX() + 0.5D, goal.getY(), goal.getZ() + 0.5D);
+        bot.teleport(commanderWorld,
+                center.x, center.y, center.z,
+            EnumSet.noneOf(net.minecraft.network.packet.s2c.play.PositionFlag.class),
+                commander.getYaw(),
+                commander.getPitch(),
+                true);
+        bot.setVelocity(Vec3d.ZERO);
+        if (usingEye) {
+            COMPANION_EYE_SPELL_LAST_TICK.put(commander.getUuid(), nowTick);
+        }
+
+        ChatUtils.sendSystemMessage(source, "Summoned " + alias + " to your location.");
+        return 1;
+    }
+
+    static int executeCompanionHomeTargets(CommandContext<ServerCommandSource> context, String targetArg) {
+        ServerCommandSource source = context.getSource();
+        MinecraftServer server = source.getServer();
+        ServerPlayerEntity commander;
+        try {
+            commander = source.getPlayer();
+        } catch (Exception e) {
+            commander = null;
+        }
+        if (server == null || commander == null) {
+            ChatUtils.sendSystemMessage(source, "Only players can send a companion home.");
+            return 0;
+        }
+        if (!SurvivalRecruitmentService.isEnabled(server)) {
+            ChatUtils.sendSystemMessage(source, "Companion controls are only available in survival recruitment worlds.");
+            return 0;
+        }
+        ManualConfig.SurvivalRecruitmentState st = SurvivalRecruitmentService.getState(server);
+        if (st == null || !st.isRecruited()) {
+            ChatUtils.sendSystemMessage(source, "This world hasn't recruited a companion yet. Go to a village and recruit first (HUD prompt / Dialogue → Make contact (Recruit)).");
+            return 0;
+        }
+        if (!st.isPermanentCompanion()) {
+            ChatUtils.sendSystemMessage(source, "They're not a permanent companion yet.");
+            return 0;
+        }
+        if (!isAuthorizedCompanionCommander(commander, st)) {
+            ChatUtils.sendSystemMessage(source, "You aren't the one they pledged to.");
+            return 0;
+        }
+        String alias = st.getBotAlias();
+        if (targetArg != null && !targetArg.isBlank() && !alias.equalsIgnoreCase(targetArg.trim())) {
+            ChatUtils.sendSystemMessage(source, "This companion command only applies to '" + alias + "'.");
+            return 0;
+        }
+
+        if (!canUseCompanionHome(server, commander, st)) {
+            ChatUtils.sendSystemMessage(source, "To send your companion home, cast the spell at an Enchanting Table (or use your Spellbook)." );
+            return 0;
+        }
+
+        ServerPlayerEntity bot = server.getPlayerManager().getPlayer(alias);
+        if (bot == null || bot.isRemoved() || !bot.isAlive()) {
+            ChatUtils.sendSystemMessage(source, alias + " isn't here right now.");
+            return 0;
+        }
+        if (!(bot instanceof createFakePlayer)) {
+            ChatUtils.sendSystemMessage(source, "Can't control a real player as a companion.");
+            return 0;
+        }
+
+        ResolvedCompanionAnchor anchor = resolveCompanionAnchor(server, st);
+        if (anchor == null || anchor.world == null || anchor.pos == null) {
+            ChatUtils.sendSystemMessage(source, "No village anchor set. Use the Dialogue topic 'Set this as our home'.");
+            return 0;
+        }
+        if (!(bot.getEntityWorld() instanceof ServerWorld botWorld)
+                || botWorld.getRegistryKey() != anchor.world.getRegistryKey()) {
+            ChatUtils.sendSystemMessage(source, alias + " can't go home across dimensions.");
+            return 0;
+        }
+
+        BlockPos home = net.shasankp000.GameAI.services.SafePositionService.findSafeNear(anchor.world, anchor.pos, 8);
+        if (home == null) {
+            home = anchor.pos;
+        }
+        String result = BotEventHandler.setReturnToBase(bot, Vec3d.ofCenter(home));
+        ChatUtils.sendSystemMessage(source, result);
+        return 1;
+    }
+
+    private static boolean isAuthorizedCompanionCommander(ServerPlayerEntity player, ManualConfig.SurvivalRecruitmentState st) {
+        if (player == null || st == null) {
+            return false;
+        }
+        String recruiterUuid = st.getRecruitedByUuid();
+        if (recruiterUuid != null && !recruiterUuid.isBlank() && recruiterUuid.equals(player.getUuidAsString())) {
+            return true;
+        }
+        return AIPlayer.isOperator(player);
+    }
+
+    private static boolean canUseCompanionCome(MinecraftServer server, ServerPlayerEntity commander, ManualConfig.SurvivalRecruitmentState st) {
+        if (commander == null || server == null || st == null) {
+            return false;
+        }
+        if (hasSpellbookToken(commander)) {
+            return true;
+        }
+        if (isNearEnchantingTable(commander, 4)) {
+            return true;
+        }
+        // Mid-game convenience: Goat Horn can call them (come-only).
+        if (hasGoatHornToken(commander)) {
+            return true;
+        }
+        return isNearCompanionAnchor(server, commander, st, 12.0D);
+    }
+
+    private static boolean canUseCompanionSummon(MinecraftServer server, ServerPlayerEntity commander, ManualConfig.SurvivalRecruitmentState st) {
+        if (commander == null || server == null || st == null) {
+            return false;
+        }
+        if (hasSpellbookToken(commander)) {
+            return true;
+        }
+        if (isNearEnchantingTable(commander, 4)) {
+            return true;
+        }
+        // Emergency/limited access: Eye of Ender (cooldown handled at cast time).
+        if (hasEyeOfEnderToken(commander)) {
+            return true;
+        }
+        return isNearCompanionAnchor(server, commander, st, 12.0D);
+    }
+
+    private static boolean hasEyeOfEnderToken(ServerPlayerEntity commander) {
+        if (commander == null) {
+            return false;
+        }
+        var inv = commander.getInventory();
+        for (int i = 0; i < inv.size(); i++) {
+            ItemStack stack = inv.getStack(i);
+            if (stack == null || stack.isEmpty()) {
+                continue;
+            }
+            if (stack.isOf(Items.ENDER_EYE)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean hasGoatHornToken(ServerPlayerEntity commander) {
+        if (commander == null) {
+            return false;
+        }
+        var inv = commander.getInventory();
+        for (int i = 0; i < inv.size(); i++) {
+            ItemStack stack = inv.getStack(i);
+            if (stack == null || stack.isEmpty()) {
+                continue;
+            }
+            if (stack.isOf(Items.GOAT_HORN)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean canUseCompanionHome(MinecraftServer server, ServerPlayerEntity commander, ManualConfig.SurvivalRecruitmentState st) {
+        if (commander == null || server == null || st == null) {
+            return false;
+        }
+        if (hasSpellbookToken(commander)) {
+            return true;
+        }
+        if (isNearEnchantingTable(commander, 4)) {
+            return true;
+        }
+        return isNearCompanionAnchor(server, commander, st, 16.0D);
+    }
+
+    private static boolean isNearEnchantingTable(ServerPlayerEntity commander, int radius) {
+        if (commander == null) {
+            return false;
+        }
+        if (!(commander.getEntityWorld() instanceof ServerWorld world)) {
+            return false;
+        }
+        BlockPos origin = commander.getBlockPos();
+        int r = Math.max(1, radius);
+        for (BlockPos pos : BlockPos.iterate(origin.add(-r, -2, -r), origin.add(r, 2, r))) {
+            if (!world.isChunkLoaded(pos)) {
+                continue;
+            }
+            BlockState state = world.getBlockState(pos);
+            if (state.isOf(net.minecraft.block.Blocks.ENCHANTING_TABLE)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean hasSpellbookToken(ServerPlayerEntity commander) {
+        if (commander == null) {
+            return false;
+        }
+        var inv = commander.getInventory();
+        for (int i = 0; i < inv.size(); i++) {
+            ItemStack stack = inv.getStack(i);
+            if (stack == null || stack.isEmpty()) {
+                continue;
+            }
+            if (!(stack.isOf(Items.WRITTEN_BOOK) || stack.isOf(Items.ENCHANTED_BOOK))) {
+                continue;
+            }
+            String name = stack.getName() != null ? stack.getName().getString() : "";
+            if (name != null && name.toLowerCase(Locale.ROOT).contains("spellbook")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean isNearCompanionAnchor(MinecraftServer server, ServerPlayerEntity commander, ManualConfig.SurvivalRecruitmentState st, double maxDist) {
+        if (server == null || commander == null || st == null) {
+            return false;
+        }
+        ResolvedCompanionAnchor anchor = resolveCompanionAnchor(server, st);
+        if (anchor == null || anchor.world == null || anchor.pos == null) {
+            return false;
+        }
+        if (!(commander.getEntityWorld() instanceof ServerWorld world)
+                || world.getRegistryKey() != anchor.world.getRegistryKey()) {
+            return false;
+        }
+        double maxSq = maxDist * maxDist;
+        return commander.getBlockPos().getSquaredDistance(anchor.pos) <= maxSq;
+    }
+
+    private static ServerPlayerEntity trySpawnCompanion(MinecraftServer server, ServerCommandSource source, String alias) {
+        if (server == null || source == null || alias == null || alias.isBlank()) {
+            return null;
+        }
+
+        // Do not bypass the Nether ritual if the companion is dead.
+        try {
+            if (SurvivalRecruitmentService.isEnabled(server)) {
+                ManualConfig.SurvivalRecruitmentState st = SurvivalRecruitmentService.getState(server);
+                if (st != null && st.isRecruited() && st.isCompanionDead()) {
+                    ChatUtils.sendSystemMessage(source, alias + " is dead.");
+                    ChatUtils.sendSystemMessage(source, "You need to perform the Nether ritual to bring them back.");
+                    return null;
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+
+        ServerPlayerEntity commander = null;
+        try {
+            commander = source.getPlayer();
+        } catch (Exception ignored) {
+        }
+
+        ServerWorld commanderWorld = null;
+        if (commander != null && commander.getEntityWorld() instanceof ServerWorld sw) {
+            commanderWorld = sw;
+        }
+        if (commanderWorld == null) {
+            commanderWorld = server.getOverworld();
+        }
+        if (commanderWorld == null) {
+            return null;
+        }
+
+        // Spawn near the commander.
+        BlockPos goal = commander != null
+                ? net.shasankp000.GameAI.services.SafePositionService.findForwardSafeSpot(commanderWorld, commander)
+                : null;
+        if (goal == null && commander != null) {
+            goal = net.shasankp000.GameAI.services.SafePositionService.findSafeNear(commanderWorld, commander.getBlockPos(), 8);
+        }
+        if (goal == null) {
+            double centerX = commanderWorld.getWorldBorder().getCenterX();
+            double centerZ = commanderWorld.getWorldBorder().getCenterZ();
+            int spawnX = (int) Math.round(centerX);
+            int spawnZ = (int) Math.round(centerZ);
+            int spawnY = commanderWorld.getTopY(net.minecraft.world.Heightmap.Type.MOTION_BLOCKING, spawnX, spawnZ);
+            goal = new BlockPos(spawnX, spawnY, spawnZ);
+        }
+
+        // goal is a *feet* position (2-block headroom); spawn using feet Y.
+        Vec3d pos = new Vec3d(goal.getX() + 0.5D, goal.getY(), goal.getZ() + 0.5D);
+
+        GameMode mode = GameMode.SURVIVAL;
+        if (AIPlayer.CONFIG != null) {
+            ManualConfig.BotControlSettings ctrl = AIPlayer.CONFIG.getEffectiveBotControl(alias);
+            if (ctrl != null && "creative".equalsIgnoreCase(ctrl.getGameMode())) {
+                mode = GameMode.CREATIVE;
+            }
+        }
+
+        // Prevent immediate "resume where you were" from overriding this summon.
+        try {
+            net.shasankp000.GameAI.services.BotWorldStateService.clearState(server, alias);
+        } catch (Throwable ignored) {
+        }
+
+        try {
+            createFakePlayer.createFake(alias, server, pos,
+                    commander != null ? commander.getYaw() : 0.0F,
+                    commander != null ? commander.getPitch() : 0.0F,
+                    commanderWorld.getRegistryKey(),
+                    mode,
+                    false);
+        } catch (Exception e) {
+            LOGGER.warn("Companion summon: failed to spawn {}: {}", alias, e.getMessage());
+            return null;
+        }
+
+        server.execute(() -> {
+            ServerPlayerEntity bot = server.getPlayerManager().getPlayer(alias);
+            if (bot != null && !bot.isRemoved() && bot instanceof createFakePlayer) {
+                try {
+                    BotEventHandler.registerBot(bot);
+                } catch (Throwable ignored) {
+                }
+                try {
+                    net.shasankp000.Entity.AutoFaceEntity.startAutoFace(bot);
+                } catch (Throwable ignored) {
+                }
+            }
+        });
+
+        return server.getPlayerManager().getPlayer(alias);
+    }
+
+    private static final class ResolvedCompanionAnchor {
+        final ServerWorld world;
+        final BlockPos pos;
+
+        private ResolvedCompanionAnchor(ServerWorld world, BlockPos pos) {
+            this.world = world;
+            this.pos = pos;
+        }
+    }
+
+    private static ResolvedCompanionAnchor resolveCompanionAnchor(MinecraftServer server, ManualConfig.SurvivalRecruitmentState st) {
+        if (server == null || st == null) {
+            return null;
+        }
+        if (!st.isCompanionAnchorSet()) {
+            return null;
+        }
+        String dim = st.getCompanionAnchorDimension();
+        long posLong = st.getCompanionAnchorPos();
+        if (dim == null || dim.isBlank() || posLong == 0L) {
+            return null;
+        }
+        Identifier id = Identifier.tryParse(dim.trim());
+        if (id == null) {
+            return null;
+        }
+        RegistryKey<World> key = RegistryKey.of(RegistryKeys.WORLD, id);
+        ServerWorld world = server.getWorld(key);
+        if (world == null) {
+            return null;
+        }
+        return new ResolvedCompanionAnchor(world, BlockPos.fromLong(posLong));
     }
 
     private record PlacementTarget(BlockPos hitPos, Direction face, float yaw, float pitch) {}

@@ -25,6 +25,8 @@ import org.joml.Matrix4f;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.mob.MobEntity;
 import net.minecraft.entity.player.PlayerEntity;
+import net.minecraft.item.Items;
+import net.minecraft.block.Blocks;
 import net.minecraft.text.Text;
 import net.minecraft.util.hit.EntityHitResult;
 import net.minecraft.util.hit.HitResult;
@@ -34,13 +36,21 @@ import net.shasankp000.GraphicalUserInterface.CookablesScreen;
 import net.shasankp000.GraphicalUserInterface.CraftingHistoryScreen;
 import net.shasankp000.GraphicalUserInterface.ConfigManager;
 import net.shasankp000.GraphicalUserInterface.HuntablesScreen;
+import net.shasankp000.GraphicalUserInterface.CompanionSpellsScreen;
+import net.shasankp000.GraphicalUserInterface.RecruitmentDialogueScreen;
 import net.shasankp000.network.CookablesPayload;
 import net.shasankp000.network.CraftingHistoryPayload;
 import net.shasankp000.network.BasesListPayload;
 import net.shasankp000.network.ConfigJsonUtil;
+import net.shasankp000.network.ConfirmRecruitmentPayload;
 import net.shasankp000.network.HuntablesPayload;
+import net.shasankp000.network.OpenRecruitmentDialoguePayload;
+import net.shasankp000.network.RecruitmentPromptPayload;
+import net.shasankp000.network.RecruitmentStatePayload;
+import net.shasankp000.network.RequestRecruitmentDialoguePayload;
 import net.shasankp000.network.ResumeDecisionPayload;
 import net.shasankp000.network.OpenConfigPayload;
+import net.shasankp000.network.RecruitmentAdminStatusPayload;
 import org.lwjgl.glfw.GLFW;
 
 public class AIPlayerClient implements ClientModInitializer {
@@ -50,6 +60,7 @@ public class AIPlayerClient implements ClientModInitializer {
     private static KeyBinding KEY_RESUME;
     private static KeyBinding KEY_STOP_LOOK;
     private static KeyBinding KEY_LEASH;
+    private static KeyBinding KEY_RECRUIT_CONTACT;
 
     // Pending shelter type from the Topics menu (null = no pending shelter, use go_to_look as normal)
     private static String pendingShelterType = null;
@@ -65,6 +76,117 @@ public class AIPlayerClient implements ClientModInitializer {
     // Mounted leash hint - shows when player is mounted and a nearby bot is also mounted
     private static boolean mountedLeashHintVisible = false;
     private static String mountedLeashBotName = null;
+
+    // ===== Survival recruitment mode (client UI) =====
+    private static boolean survivalRecruitmentEnabled = false;
+    private static boolean survivalRecruitmentCompleted = false;
+    private static boolean recruitmentPromptVisible = false;
+    private static String recruitmentBotAlias = "Jake";
+
+    // Auto-open recruitment dialogue once when entering a village (prompt transitions hidden -> visible).
+    private static boolean recruitmentAutoOpenPending = false;
+    private static boolean recruitmentAutoOpenedThisSession = false;
+
+    // ===== Companion spells (client UX) =====
+    // Client-side only (UX hint). Server remains authoritative.
+    private static long eyeSpellCooldownUntilMs = 0L;
+
+    // Simple per-bot dialogue log used by the Topics overlay.
+    private static final java.util.Map<String, java.util.ArrayDeque<String>> DIALOGUE_LOG = new java.util.HashMap<>();
+
+    // Server-authoritative companion quest state snapshot (for stage-gated dialogue topics).
+    private static final java.util.Map<String, Integer> COMPANION_STAGE = new java.util.HashMap<>();
+    private static final java.util.Set<String> COMPANION_PERMANENT = new java.util.HashSet<>();
+
+    // Expose recruitment UI state to other client UI surfaces (e.g., bot inventory overlay).
+    public static boolean isSurvivalRecruitmentEnabled() {
+        return survivalRecruitmentEnabled;
+    }
+
+    public static boolean isSurvivalRecruitmentCompleted() {
+        return survivalRecruitmentCompleted;
+    }
+
+    public static boolean isRecruitmentPromptVisible() {
+        return recruitmentPromptVisible;
+    }
+
+    public static String getRecruitmentBotAlias() {
+        return recruitmentBotAlias;
+    }
+
+    public static boolean isEyeSpellOnCooldown() {
+        return getEyeSpellCooldownRemainingMs() > 0L;
+    }
+
+    public static long getEyeSpellCooldownRemainingMs() {
+        long remaining = eyeSpellCooldownUntilMs - System.currentTimeMillis();
+        return Math.max(0L, remaining);
+    }
+
+    public static void armEyeSpellCooldown() {
+        // Keep aligned with server default (currently 60s). This is just a UX hint.
+        eyeSpellCooldownUntilMs = System.currentTimeMillis() + 60_000L;
+    }
+
+    public static int getCompanionQuestStage(String botAlias) {
+        if (botAlias == null || botAlias.isBlank()) {
+            return -1;
+        }
+        Integer v = COMPANION_STAGE.get(botAlias.trim());
+        return v != null ? v : -1;
+    }
+
+    public static boolean isCompanionPermanent(String botAlias) {
+        if (botAlias == null || botAlias.isBlank()) {
+            return false;
+        }
+        return COMPANION_PERMANENT.contains(botAlias.trim());
+    }
+
+    public static void applyCompanionQuestState(String botAlias, int stage, boolean permanent) {
+        if (botAlias == null || botAlias.isBlank()) {
+            return;
+        }
+        String key = botAlias.trim();
+        COMPANION_STAGE.put(key, Math.max(0, stage));
+        if (permanent) {
+            COMPANION_PERMANENT.add(key);
+        } else {
+            COMPANION_PERMANENT.remove(key);
+        }
+    }
+
+    public static void appendDialogue(String botAlias, String line) {
+        if (botAlias == null || botAlias.isBlank() || line == null || line.isBlank()) {
+            return;
+        }
+        String key = botAlias.trim();
+        java.util.ArrayDeque<String> q = DIALOGUE_LOG.computeIfAbsent(key, ignored -> new java.util.ArrayDeque<>());
+        q.addLast(line);
+        while (q.size() > 48) {
+            q.removeFirst();
+        }
+    }
+
+    public static java.util.List<String> getDialogueLines(String botAlias, int maxLines) {
+        if (botAlias == null || botAlias.isBlank()) {
+            return java.util.List.of();
+        }
+        java.util.ArrayDeque<String> q = DIALOGUE_LOG.get(botAlias.trim());
+        if (q == null || q.isEmpty()) {
+            return java.util.List.of();
+        }
+        int limit = Math.max(1, maxLines);
+        java.util.ArrayList<String> out = new java.util.ArrayList<>(Math.min(limit, q.size()));
+        int skip = Math.max(0, q.size() - limit);
+        int i = 0;
+        for (String s : q) {
+            if (i++ < skip) continue;
+            out.add(s);
+        }
+        return out;
+    }
 
     public static void setPendingShelter(String type, String botTarget) {
         pendingShelterType = type;
@@ -145,7 +267,11 @@ public class AIPlayerClient implements ClientModInitializer {
         ));
         KEY_GO_TO_LOOK = KeyBindingHelper.registerKeyBinding(new KeyBinding(
             "key.ai-player.go_to_look",
-            GLFW.GLFW_KEY_UNKNOWN,
+            // Default '-' as a single, memorable "context" key:
+            // - before recruitment: opens recruitment dialogue
+            // - after recruitment (when spells are available and companion is far away): opens spells
+            // - otherwise: go-to-look
+            GLFW.GLFW_KEY_MINUS,
             KeyBinding.Category.MISC
         ));
 
@@ -167,6 +293,13 @@ public class AIPlayerClient implements ClientModInitializer {
             KeyBinding.Category.MISC
         ));
 
+        KEY_RECRUIT_CONTACT = KeyBindingHelper.registerKeyBinding(new KeyBinding(
+            "key.ai-player.recruit_contact",
+            // Optional dedicated key; unbound by default (the go-to key provides the main context behavior).
+            GLFW.GLFW_KEY_UNKNOWN,
+            KeyBinding.Category.MISC
+        ));
+
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             if (client == null || client.player == null || client.getNetworkHandler() == null) {
                 return;
@@ -175,11 +308,35 @@ public class AIPlayerClient implements ClientModInitializer {
                 return;
             }
 
+            // If the server just told us we're eligible (entered a village), auto-open the dialogue once.
+            if (recruitmentAutoOpenPending) {
+                if (survivalRecruitmentEnabled
+                        && !survivalRecruitmentCompleted
+                        && recruitmentPromptVisible
+                        && !recruitmentAutoOpenedThisSession) {
+                    ClientPlayNetworking.send(new RequestRecruitmentDialoguePayload());
+                    recruitmentAutoOpenedThisSession = true;
+                }
+                recruitmentAutoOpenPending = false;
+            }
+
             if (KEY_FOLLOW_TOGGLE_LOOK.wasPressed()) {
                 handleFollowToggleLookedAt(client);
             }
             if (KEY_GO_TO_LOOK.wasPressed()) {
-                handleGoToLook(client);
+                // Contextual behavior: before recruitment is complete and no companion is present,
+                // reuse the user's go-to key to initiate recruitment dialogue (prevents keybind conflicts).
+                if (shouldUseGoToKeyForRecruitmentContact(client)) {
+                    handleRecruitContactKey(client);
+                } else {
+                    // After recruitment: if spells are available and the companion isn't currently present
+                    // (far away / unloaded), override go-to with spells.
+                    if (!isCompanionNearPlayer(client, 32.0D) && handleSpellsContextKey(client)) {
+                        // Consumed.
+                    } else {
+                        handleGoToLook(client);
+                    }
+                }
             }
             if (KEY_RESUME.wasPressed()) {
                 handleResumeKey(client);
@@ -189,6 +346,14 @@ public class AIPlayerClient implements ClientModInitializer {
             }
             if (KEY_LEASH.wasPressed()) {
                 handleLeashKey(client);
+            }
+            if (KEY_RECRUIT_CONTACT.wasPressed()) {
+                // Context key (default '-'):
+                // - During recruitment: initiates contact.
+                // - After recruitment: opens companion spells when available.
+                if (!handleSpellsContextKey(client)) {
+                    handleRecruitContactKey(client);
+                }
             }
 
             // Update leash button visibility based on whether we're looking at a bot with leashed animals
@@ -231,12 +396,472 @@ public class AIPlayerClient implements ClientModInitializer {
             });
         });
 
+        ClientPlayNetworking.registerGlobalReceiver(RecruitmentStatePayload.ID, (payload, context) -> {
+            context.client().execute(() -> {
+                survivalRecruitmentEnabled = payload.enabled();
+                survivalRecruitmentCompleted = payload.recruited();
+                if (payload.botAlias() != null && !payload.botAlias().isBlank()) {
+                    recruitmentBotAlias = payload.botAlias();
+                }
+                if (survivalRecruitmentCompleted) {
+                    recruitmentPromptVisible = false;
+                    recruitmentAutoOpenPending = false;
+                    MinecraftClient client = MinecraftClient.getInstance();
+                    if (client != null && client.currentScreen instanceof RecruitmentDialogueScreen) {
+                        client.setScreen(null);
+                    }
+                }
+            });
+        });
+
+        ClientPlayNetworking.registerGlobalReceiver(RecruitmentPromptPayload.ID, (payload, context) -> {
+            context.client().execute(() -> {
+                MinecraftClient client = MinecraftClient.getInstance();
+                boolean wasVisible = recruitmentPromptVisible;
+                if (payload.botAlias() != null && !payload.botAlias().isBlank()) {
+                    recruitmentBotAlias = payload.botAlias();
+                }
+                boolean dialogOpen = client != null && client.currentScreen instanceof RecruitmentDialogueScreen;
+                if (dialogOpen) {
+                    recruitmentPromptVisible = false;
+                    recruitmentAutoOpenPending = false;
+                    return;
+                }
+                recruitmentPromptVisible = payload.visible();
+                if (survivalRecruitmentCompleted) {
+                    recruitmentPromptVisible = false;
+                }
+
+                // Trigger auto-open only on the edge: hidden -> visible.
+                if (!survivalRecruitmentCompleted
+                        && survivalRecruitmentEnabled
+                        && recruitmentPromptVisible
+                        && !wasVisible
+                        && !recruitmentAutoOpenedThisSession) {
+                    recruitmentAutoOpenPending = true;
+                }
+                if (!recruitmentPromptVisible) {
+                    recruitmentAutoOpenPending = false;
+                }
+            });
+        });
+
+        ClientPlayNetworking.registerGlobalReceiver(OpenRecruitmentDialoguePayload.ID, (payload, context) -> {
+            context.client().execute(() -> {
+                MinecraftClient client = MinecraftClient.getInstance();
+                if (client == null) {
+                    return;
+                }
+                String alias = payload.botAlias();
+                String flavor = payload.villageFlavor();
+                client.setScreen(new RecruitmentDialogueScreen(alias, flavor));
+                recruitmentPromptVisible = false;
+                recruitmentAutoOpenPending = false;
+            });
+        });
+
+        ClientPlayNetworking.registerGlobalReceiver(net.shasankp000.network.CompanionQuestResponsePayload.ID, (payload, context) -> {
+            context.client().execute(() -> {
+                String alias = payload.botAlias();
+                String joined = payload.linesJoined();
+                applyCompanionQuestState(alias, payload.stage(), payload.permanent());
+                if (alias == null || alias.isBlank() || joined == null || joined.isBlank()) {
+                    return;
+                }
+                // Each line is already "bot-authored" server-side; we prefix it with the bot alias here.
+                String[] lines = joined.split("\\n");
+                for (String line : lines) {
+                    if (line != null && !line.isBlank()) {
+                        appendDialogue(alias, alias + ": " + line);
+                    }
+                }
+            });
+        });
+
+        ClientPlayNetworking.registerGlobalReceiver(net.shasankp000.network.CompanionQuestStatePayload.ID, (payload, context) -> {
+            context.client().execute(() -> applyCompanionQuestState(payload.botAlias(), payload.stage(), payload.permanent()));
+        });
+
+        ClientPlayNetworking.registerGlobalReceiver(RecruitmentAdminStatusPayload.ID, (payload, context) -> {
+            context.client().execute(() -> {
+                String alias = payload.botAlias();
+                String joined = payload.linesJoined();
+                if (alias == null || alias.isBlank() || joined == null || joined.isBlank()) {
+                    return;
+                }
+                String[] lines = joined.split("\\n");
+                for (String line : lines) {
+                    if (line == null || line.isBlank()) continue;
+                    appendDialogue(alias, "Admin: " + line);
+                }
+            });
+        });
+
         HudRenderCallback.EVENT.register((context, tickDelta) -> renderResumeDecisionHint(context));
         HudRenderCallback.EVENT.register((context, tickDelta) -> renderLeashButton(context));
+        HudRenderCallback.EVENT.register((context, tickDelta) -> renderRecruitmentPrompt(context));
+        HudRenderCallback.EVENT.register((context, tickDelta) -> renderSpellsPrompt(context));
         HudRenderCallback.EVENT.register((context, tickDelta) -> renderSchematicPreview(context));
         
         // Update schematic preview box every client tick
         ClientTickEvents.END_CLIENT_TICK.register(AIPlayerClient::updateSchematicPreviewBox);
+    }
+
+    private static void handleRecruitContactKey(MinecraftClient client) {
+        if (client == null || client.getNetworkHandler() == null) {
+            return;
+        }
+        var player = client.player;
+        if (player == null) {
+            return;
+        }
+        if (!survivalRecruitmentEnabled || survivalRecruitmentCompleted) {
+            return;
+        }
+        // Always allow an attempt; the server remains authoritative and will respond with an explanation
+        // (e.g., not in a village / mode disabled). This avoids a soft-lock if the prompt desyncs.
+        if (!recruitmentPromptVisible) {
+            player.sendMessage(Text.literal("You try to make contact..."), true);
+        }
+        ClientPlayNetworking.send(new RequestRecruitmentDialoguePayload());
+    }
+
+    private static void renderRecruitmentPrompt(DrawContext context) {
+        MinecraftClient client = MinecraftClient.getInstance();
+        if (client == null || client.player == null || client.currentScreen != null) {
+            return;
+        }
+        if (!survivalRecruitmentEnabled || survivalRecruitmentCompleted || !recruitmentPromptVisible) {
+            return;
+        }
+
+        // Prefer showing the key that the player is most likely to have already bound:
+        // their go-to key (which we treat as a contextual "contact" key when no companion is present).
+        // Fall back to the dedicated recruit-contact binding if go-to is unbound.
+        String keyName = resolveRecruitmentPromptKeyName();
+        String line1 = "You sense someone watching...";
+        String line2 = "Press [" + keyName + "] to initiate contact";
+
+        int w1 = client.textRenderer.getWidth(line1);
+        int w2 = client.textRenderer.getWidth(line2);
+        int maxW = Math.max(w1, w2);
+        int x = 12;
+        int y = 10;
+        int boxH = client.textRenderer.fontHeight * 2 + 6;
+
+        context.fill(x - 6, y - 4, x + maxW + 6, y + boxH, 0xAA101010);
+        context.fill(x - 7, y - 5, x + maxW + 7, y - 4, 0xFF4A4A4A);
+        context.fill(x - 7, y + boxH, x + maxW + 7, y + boxH + 1, 0xFF4A4A4A);
+        context.fill(x - 7, y - 5, x - 6, y + boxH + 1, 0xFF4A4A4A);
+        context.fill(x + maxW + 6, y - 5, x + maxW + 7, y + boxH + 1, 0xFF4A4A4A);
+
+        context.drawTextWithShadow(client.textRenderer, line1, x, y, 0xFFE6D7A3);
+        context.drawTextWithShadow(client.textRenderer, line2, x, y + client.textRenderer.fontHeight + 2, 0xFFB8A76A);
+    }
+
+    private static boolean handleSpellsContextKey(MinecraftClient client) {
+        if (client == null || client.player == null || client.currentScreen != null) {
+            return false;
+        }
+
+        // Don't interfere with recruitment flow.
+        if (survivalRecruitmentEnabled && !survivalRecruitmentCompleted) {
+            return false;
+        }
+        // Spells are only meaningful after a companion exists.
+        if (!survivalRecruitmentEnabled || !survivalRecruitmentCompleted) {
+            return false;
+        }
+
+        if (!canAccessCompanionSpells(client)) {
+            return false;
+        }
+
+        // If Eye is the only access method and we are on cooldown, show an actionbar hint.
+        if (isEyeOnlyAccess(client) && isEyeSpellOnCooldown()) {
+            long sec = Math.max(1L, getEyeSpellCooldownRemainingMs() / 1000L);
+            client.player.sendMessage(Text.literal("Eye of Ender spell is on cooldown (" + sec + "s)."), true);
+            return true;
+        }
+
+        String alias = getRecruitmentBotAlias();
+        client.setScreen(new CompanionSpellsScreen(null, alias));
+        return true;
+    }
+
+    private static void renderSpellsPrompt(DrawContext context) {
+        MinecraftClient client = MinecraftClient.getInstance();
+        if (client == null || client.player == null || client.currentScreen != null) {
+            return;
+        }
+        if (!survivalRecruitmentEnabled || !survivalRecruitmentCompleted) {
+            return;
+        }
+
+        boolean anyAccess = isNearEnchantingTable(client, 4)
+            || hasSpellbookToken(client)
+            || hasEyeOfEnderToken(client)
+            || hasGoatHornToken(client);
+        if (!anyAccess) {
+            return;
+        }
+
+        // If companion is already nearby, these remote spells are usually redundant.
+        if (isCompanionNearPlayer(client, 32.0D)) {
+            return;
+        }
+
+        // Prefer the go-to key (the one that actually overrides behavior), fall back to dedicated binding.
+        String keyName = keyNameOrNull(KEY_GO_TO_LOOK);
+        if (keyName == null) {
+            keyName = keyNameOrNull(KEY_RECRUIT_CONTACT);
+        }
+        if (keyName == null) {
+            keyName = "-";
+        }
+
+        String line1 = "You feel the tether pull...";
+        String line2;
+        boolean hasBook = hasSpellbookToken(client);
+        boolean nearTable = isNearEnchantingTable(client, 4);
+        boolean hasEye = hasEyeOfEnderToken(client);
+        boolean hasHorn = hasGoatHornToken(client);
+        boolean full = hasBook || nearTable;
+        boolean eyePartial = hasEye && !full;
+        boolean hornPartial = hasHorn && !full;
+
+        if (eyePartial && hornPartial) {
+            if (isEyeSpellOnCooldown()) {
+                long sec = Math.max(1L, getEyeSpellCooldownRemainingMs() / 1000L);
+                line2 = "Press [" + keyName + "] for spells (Horn: come, Eye cooldown " + sec + "s)";
+            } else {
+                line2 = "Press [" + keyName + "] for spells (Horn: come, Eye: summon-only)";
+            }
+        } else if (hornPartial) {
+            line2 = "Press [" + keyName + "] for spells (Goat Horn: come-only)";
+        } else if (eyePartial) {
+            if (isEyeSpellOnCooldown()) {
+                long sec = Math.max(1L, getEyeSpellCooldownRemainingMs() / 1000L);
+                line2 = "Press [" + keyName + "] for spells (Eye cooldown " + sec + "s)";
+            } else {
+                line2 = "Press [" + keyName + "] for spells (Eye: summon-only)";
+            }
+        } else if (hasBook) {
+            line2 = "Press [" + keyName + "] for spells (Spellbook)";
+        } else if (nearTable) {
+            line2 = "Press [" + keyName + "] for spells (Enchanting Table)";
+        } else {
+            line2 = "Press [" + keyName + "] for spells";
+        }
+
+        int w1 = client.textRenderer.getWidth(line1);
+        int w2 = client.textRenderer.getWidth(line2);
+        int maxW = Math.max(w1, w2);
+        int x = 12;
+        // Stack beneath the recruitment prompt area.
+        int y = 10 + (client.textRenderer.fontHeight * 2 + 10);
+        int boxH = client.textRenderer.fontHeight * 2 + 6;
+
+        context.fill(x - 6, y - 4, x + maxW + 6, y + boxH, 0xAA101010);
+        context.fill(x - 7, y - 5, x + maxW + 7, y - 4, 0xFF4A4A4A);
+        context.fill(x - 7, y + boxH, x + maxW + 7, y + boxH + 1, 0xFF4A4A4A);
+        context.fill(x - 7, y - 5, x - 6, y + boxH + 1, 0xFF4A4A4A);
+        context.fill(x + maxW + 6, y - 5, x + maxW + 7, y + boxH + 1, 0xFF4A4A4A);
+
+        context.drawTextWithShadow(client.textRenderer, line1, x, y, 0xFFE6D7A3);
+        context.drawTextWithShadow(client.textRenderer, line2, x, y + client.textRenderer.fontHeight + 2, 0xFFB8A76A);
+    }
+
+    private static boolean canAccessCompanionSpells(MinecraftClient client) {
+        return hasSpellbookToken(client)
+                || isNearEnchantingTable(client, 4)
+                || hasEyeOfEnderToken(client)
+                || hasGoatHornToken(client);
+    }
+
+    private static boolean isEyeOnlyAccess(MinecraftClient client) {
+        boolean full = hasSpellbookToken(client) || isNearEnchantingTable(client, 4);
+        boolean horn = !full && hasGoatHornToken(client);
+        return !full && !horn && hasEyeOfEnderToken(client);
+    }
+
+    private static boolean isNearEnchantingTable(MinecraftClient client, int radius) {
+        if (client == null || client.player == null || client.world == null) {
+            return false;
+        }
+        BlockPos origin = client.player.getBlockPos();
+        int r = Math.max(1, radius);
+        for (BlockPos pos : BlockPos.iterate(origin.add(-r, -2, -r), origin.add(r, 2, r))) {
+            if (!client.world.isChunkLoaded(pos)) {
+                continue;
+            }
+            var state = client.world.getBlockState(pos);
+            if (state.isOf(Blocks.ENCHANTING_TABLE)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean hasSpellbookToken(MinecraftClient client) {
+        if (client == null || client.player == null) {
+            return false;
+        }
+        var inv = client.player.getInventory();
+        int n = inv.size();
+        for (int i = 0; i < n; i++) {
+            var stack = inv.getStack(i);
+            if (stack == null || stack.isEmpty()) {
+                continue;
+            }
+            if (!(stack.isOf(Items.WRITTEN_BOOK) || stack.isOf(Items.ENCHANTED_BOOK))) {
+                continue;
+            }
+            String name = stack.getName() != null ? stack.getName().getString() : "";
+            if (name != null && name.toLowerCase(java.util.Locale.ROOT).contains("spellbook")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean hasEyeOfEnderToken(MinecraftClient client) {
+        if (client == null || client.player == null) {
+            return false;
+        }
+        var inv = client.player.getInventory();
+        int n = inv.size();
+        for (int i = 0; i < n; i++) {
+            var stack = inv.getStack(i);
+            if (stack == null || stack.isEmpty()) {
+                continue;
+            }
+            if (stack.isOf(Items.ENDER_EYE)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean hasGoatHornToken(MinecraftClient client) {
+        if (client == null || client.player == null) {
+            return false;
+        }
+        var inv = client.player.getInventory();
+        int n = inv.size();
+        for (int i = 0; i < n; i++) {
+            var stack = inv.getStack(i);
+            if (stack == null || stack.isEmpty()) {
+                continue;
+            }
+            if (stack.isOf(Items.GOAT_HORN)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean shouldUseGoToKeyForRecruitmentContact(MinecraftClient client) {
+        if (client == null || client.player == null) {
+            return false;
+        }
+        if (!survivalRecruitmentEnabled || survivalRecruitmentCompleted) {
+            return false;
+        }
+        if (!recruitmentPromptVisible) {
+            return false;
+        }
+        // If the recruited companion is already nearby, don't steal the go-to key.
+        return !isCompanionNearPlayer(client, 32.0D);
+    }
+
+    private static boolean isCompanionNearPlayer(MinecraftClient client, double maxDistanceBlocks) {
+        if (client == null || client.player == null) {
+            return false;
+        }
+        var world = client.world;
+        if (world == null) {
+            return false;
+        }
+        if (recruitmentBotAlias == null || recruitmentBotAlias.isBlank()) {
+            return false;
+        }
+        String alias = recruitmentBotAlias.trim();
+        double maxSq = maxDistanceBlocks * maxDistanceBlocks;
+        try {
+            for (PlayerEntity p : world.getPlayers()) {
+                if (p == null || p == client.player) {
+                    continue;
+                }
+                String name = p.getName() != null ? p.getName().getString() : null;
+                if (name != null && name.equalsIgnoreCase(alias)) {
+                    // "Near" is defined by distance, not mere client-side existence.
+                    return p.squaredDistanceTo(client.player) <= maxSq;
+                }
+            }
+        } catch (Throwable ignored) {
+            // Best effort; if something changes in mappings, just don't gate on it.
+        }
+        return false;
+    }
+
+    private static boolean isCompanionPresentInClientWorld(MinecraftClient client) {
+        if (client == null) {
+            return false;
+        }
+        var world = client.world;
+        if (world == null) {
+            return false;
+        }
+        if (recruitmentBotAlias == null || recruitmentBotAlias.isBlank()) {
+            return false;
+        }
+        String alias = recruitmentBotAlias.trim();
+        try {
+            for (PlayerEntity p : world.getPlayers()) {
+                if (p == null || p == client.player) {
+                    continue;
+                }
+                String name = p.getName() != null ? p.getName().getString() : null;
+                if (name != null && name.equalsIgnoreCase(alias)) {
+                    return true;
+                }
+            }
+        } catch (Throwable ignored) {
+            // Best effort; if something changes in mappings, just don't gate on it.
+        }
+        return false;
+    }
+
+    private static String resolveRecruitmentPromptKeyName() {
+        String goTo = keyNameOrNull(KEY_GO_TO_LOOK);
+        if (goTo != null) {
+            return goTo;
+        }
+        String recruit = keyNameOrNull(KEY_RECRUIT_CONTACT);
+        if (recruit != null) {
+            return recruit;
+        }
+        return "?";
+    }
+
+    private static String keyNameOrNull(KeyBinding binding) {
+        if (binding == null) {
+            return null;
+        }
+        try {
+            String name = binding.getBoundKeyLocalizedText().getString();
+            if (name == null || name.isBlank()) {
+                return null;
+            }
+            // Heuristic: treat common "unbound" labels as unavailable.
+            if ("unknown".equalsIgnoreCase(name) || "unassigned".equalsIgnoreCase(name)) {
+                return null;
+            }
+            return name;
+        } catch (Throwable ignored) {
+            return null;
+        }
     }
     
     /**

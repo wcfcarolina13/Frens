@@ -127,6 +127,18 @@ public final class BotPersistenceService {
             }
         }
         BotInventoryStorageService.delete(bot);
+
+        // Survival recruitment: record companion death (for resurrection gating) and clear world-position snapshot.
+        try {
+            SurvivalRecruitmentService.noteCompanionDeath(server, bot);
+        } catch (Throwable t) {
+            LOGGER.debug("Failed to note companion death for {}: {}", bot.getName().getString(), t.getMessage());
+        }
+        try {
+            BotWorldStateService.clearState(server, bot.getName().getString());
+        } catch (Throwable t) {
+            LOGGER.debug("Failed to clear world state for {} after death: {}", bot.getName().getString(), t.getMessage());
+        }
         
         SkillResumeService.handleDeath(bot);
         LAST_SAVE_TICK.remove(bot.getUuid());

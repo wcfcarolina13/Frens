@@ -6,6 +6,10 @@ import net.minecraft.util.math.Vec3d;
 import net.shasankp000.Entity.LookController;
 import net.shasankp000.GameAI.BotActions;
 
+import net.minecraft.server.world.ServerWorld;
+import net.minecraft.block.BlockState;
+import java.util.concurrent.ConcurrentHashMap;
+
 import java.util.UUID;
 
 /**
@@ -18,6 +22,10 @@ public final class FollowMovementService {
     private static final double MIN_FOLLOW_DISTANCE = 1.0D;
     private static final double MIN_FOLLOW_DISTANCE_SQ = MIN_FOLLOW_DISTANCE * MIN_FOLLOW_DISTANCE;
     private static final double CLOSE_RANGE_CLEAR_DISTANCE_SQ = 2.25D;
+
+    // Simple local obstacle avoidance for FOLLOW when pathing/door logic doesn't kick in quickly.
+    private static final long LOCAL_NUDGE_COOLDOWN_MS = 650L;
+    private static final ConcurrentHashMap<UUID, Long> LAST_LOCAL_NUDGE_MS = new ConcurrentHashMap<>();
 
     private FollowMovementService() {}
 
@@ -114,6 +122,13 @@ public final class FollowMovementService {
             return;
         }
         LookController.faceBlock(bot, BlockPos.ofFloored(targetPos));
+
+        // If we are pressed against a too-tall obstacle, do a small sidestep to try a new lane.
+        // This is intentionally lightweight and non-destructive.
+        if (tryLocalObstacleNudge(bot, targetPos)) {
+            return;
+        }
+
         boolean sprint = distanceSq > followSprintDistanceSq;
         BotActions.sprint(bot, sprint);
         double dy = targetPos.y - bot.getY();
@@ -124,6 +139,86 @@ public final class FollowMovementService {
         }
         double impulse = sprint ? 0.22 : 0.16;
         BotActions.applyMovementInput(bot, targetPos, impulse);
+    }
+
+    private static boolean tryLocalObstacleNudge(ServerPlayerEntity bot, Vec3d targetPos) {
+        if (bot == null || targetPos == null) {
+            return false;
+        }
+        if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
+            return false;
+        }
+        if (!bot.isOnGround() || bot.isUsingItem() || bot.hasVehicle()) {
+            return false;
+        }
+
+        // Only nudge when we appear "pinned" (not moving much).
+        if (bot.getVelocity().horizontalLengthSquared() > 0.0025D) {
+            return false;
+        }
+
+        UUID id = bot.getUuid();
+        long now = System.currentTimeMillis();
+        long last = LAST_LOCAL_NUDGE_MS.getOrDefault(id, 0L);
+        if (now - last < LOCAL_NUDGE_COOLDOWN_MS) {
+            return false;
+        }
+
+        Vec3d pos = new Vec3d(bot.getX(), bot.getY(), bot.getZ());
+        Vec3d toTarget = new Vec3d(targetPos.x - pos.x, 0.0D, targetPos.z - pos.z);
+        if (toTarget.lengthSquared() < 1.0E-4) {
+            return false;
+        }
+        Vec3d dir = toTarget.normalize();
+
+        // Probe the block we are trying to move into.
+        BlockPos front = BlockPos.ofFloored(pos.x + dir.x * 0.65D, pos.y, pos.z + dir.z * 0.65D);
+        if (hasTwoHighClearance(world, front)) {
+            return false;
+        }
+
+        // If stepping up would work, let jump/autojump handle it.
+        if (hasTwoHighClearance(world, front.up())) {
+            return false;
+        }
+
+        // Two-high wall / unjumpable obstruction: sidestep.
+        Vec3d left = new Vec3d(-dir.z, 0.0D, dir.x);
+        Vec3d right = new Vec3d(dir.z, 0.0D, -dir.x);
+        Vec3d leftPos = pos.add(left.multiply(0.95D));
+        Vec3d rightPos = pos.add(right.multiply(0.95D));
+
+        BlockPos leftBlock = BlockPos.ofFloored(leftPos.x, leftPos.y, leftPos.z);
+        BlockPos rightBlock = BlockPos.ofFloored(rightPos.x, rightPos.y, rightPos.z);
+        boolean leftClear = hasTwoHighClearance(world, leftBlock) && world.getFluidState(leftBlock).isEmpty();
+        boolean rightClear = hasTwoHighClearance(world, rightBlock) && world.getFluidState(rightBlock).isEmpty();
+
+        if (!leftClear && !rightClear) {
+            return false;
+        }
+
+        Vec3d nudgeTarget;
+        if (leftClear && rightClear) {
+            // Stable choice to reduce oscillation.
+            nudgeTarget = (id.getLeastSignificantBits() & 1L) == 0L ? leftPos : rightPos;
+        } else {
+            nudgeTarget = leftClear ? leftPos : rightPos;
+        }
+
+        LAST_LOCAL_NUDGE_MS.put(id, now);
+        BotActions.sprint(bot, false);
+        BotActions.applyMovementInput(bot, nudgeTarget, 0.18D);
+        return true;
+    }
+
+    @SuppressWarnings("deprecation")
+    private static boolean hasTwoHighClearance(ServerWorld world, BlockPos pos) {
+        if (world == null || pos == null) {
+            return false;
+        }
+        BlockState feet = world.getBlockState(pos);
+        BlockState head = world.getBlockState(pos.up());
+        return (feet.isAir() || !feet.blocksMovement()) && (head.isAir() || !head.blocksMovement());
     }
 
     private static void stepBack(ServerPlayerEntity bot, Vec3d targetPos) {

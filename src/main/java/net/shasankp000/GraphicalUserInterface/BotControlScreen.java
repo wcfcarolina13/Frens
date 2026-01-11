@@ -34,6 +34,7 @@ public class BotControlScreen extends Screen {
     private final Screen parent;
     private final List<Row> rows = new ArrayList<>();
     private CyclingButtonWidget<Boolean> worldToggle;
+    private CyclingButtonWidget<Boolean> survivalRecruitmentToggle;
     private ToggleLayout toggleLayout;
     private double scrollOffset;
     private int listTop;
@@ -60,6 +61,14 @@ public class BotControlScreen extends Screen {
         worldToggle.setX((this.width - worldToggle.getWidth()) / 2);
         this.addDrawableChild(worldToggle);
 
+        boolean survivalMode = AIPlayer.CONFIG.isSurvivalRecruitmentMode();
+        survivalRecruitmentToggle = CyclingButtonWidget.onOffBuilder(survivalMode)
+            .build(centerX - 90, worldToggle.getY() + 24, Math.min(this.width - 80, 260), 20,
+                Text.of("Survival Recruitment"), (button, value) -> {});
+        survivalRecruitmentToggle.setTooltip(Tooltip.of(Text.of("When ON: bots won't spawn until you find a village and recruit.")));
+        survivalRecruitmentToggle.setX((this.width - survivalRecruitmentToggle.getWidth()) / 2);
+        this.addDrawableChild(survivalRecruitmentToggle);
+
         List<String> aliases = new ArrayList<>(AIPlayer.CONFIG.getBotGameProfile().keySet());
         java.util.LinkedHashSet<String> aliasSet = new java.util.LinkedHashSet<>(aliases);
         aliasSet.add("Jake");
@@ -73,7 +82,7 @@ public class BotControlScreen extends Screen {
         }
         refreshRowMetrics();
 
-        listTop = worldToggle.getY() + 40;
+        listTop = survivalRecruitmentToggle.getY() + 40;
         listHeight = Math.max(60, this.height - listTop - 120);
 
         ButtonWidget saveButton = ButtonWidget.builder(Text.of("Save"), button -> {
@@ -120,6 +129,14 @@ public class BotControlScreen extends Screen {
         spawnMode.setTooltip(Tooltip.of(Text.of("Training keeps the bot sandboxed. Play enables full AI behaviors.")));
         this.addDrawableChild(spawnMode);
 
+        CyclingButtonWidget<String> gameMode = CyclingButtonWidget.<String>builder(
+                value -> Text.of("creative".equals(value) ? "Creative" : "Survival"),
+                () -> settings.getGameMode())
+            .values("survival", "creative")
+            .build(0, 0, buttonWidth, 20, Text.of("Game"), (button, value) -> {});
+        gameMode.setTooltip(Tooltip.of(Text.of("Minecraft gamemode for this bot (affects inventory, damage, etc).")));
+        this.addDrawableChild(gameMode);
+
         CyclingButtonWidget<Boolean> teleport = CyclingButtonWidget.onOffBuilder(settings.isTeleportDuringSkills())
                 .build(0, 0, buttonWidth, 20, Text.of("Teleport"), (button, value) -> {});
         teleport.setTooltip(Tooltip.of(Text.of("Allow emergency teleports during skills (needed for tight shafts).")));
@@ -140,16 +157,18 @@ public class BotControlScreen extends Screen {
         llm.setTooltip(Tooltip.of(Text.of("Enable natural-language control for this bot.")));
         this.addDrawableChild(llm);
 
-        return new Row(alias, title, subtitle, helper, autoSpawn, spawnMode, teleport, pause, dropTeleport, llm);
+        return new Row(alias, title, subtitle, helper, autoSpawn, spawnMode, gameMode, teleport, pause, dropTeleport, llm);
     }
 
     private void saveSettings() {
         ManualConfig config = AIPlayer.CONFIG;
         config.setDefaultLlmWorldEnabled(worldToggle.getValue());
+        config.setSurvivalRecruitmentMode(survivalRecruitmentToggle.getValue());
         for (Row row : rows) {
             ManualConfig.BotControlSettings settings = config.getOrCreateBotControl(row.alias);
             settings.setAutoSpawn(row.autoSpawn.getValue());
             settings.setSpawnMode(row.spawnMode.getValue());
+            settings.setGameMode(row.gameMode.getValue());
             settings.setTeleportDuringSkills(row.teleport.getValue());
             settings.setPauseOnFullInventory(row.inventoryPause.getValue());
             settings.setTeleportDuringDropSweep(row.dropTeleport.getValue());
@@ -176,7 +195,7 @@ public class BotControlScreen extends Screen {
             tipY += this.textRenderer.fontHeight;
         }
         int headerY = worldToggle != null ? worldToggle.getY() + 18 : 50;
-        String[] headers = {"Auto Spawn", "Mode", "Teleport", "Pause Inv", "Drop TP", "LLM Bot"};
+        String[] headers = {"Auto Spawn", "Mode", "Game", "Teleport", "Pause Inv", "Drop TP", "LLM Bot"};
         int columnWidth = layout.buttonWidth();
         int startX = layout.startX();
         int spacing = layout.spacing();
@@ -240,7 +259,7 @@ public class BotControlScreen extends Screen {
     }
 
     private ToggleLayout computeToggleLayout() {
-        int columns = 5;
+        int columns = 7;
         int spacing = 8;
         int available = Math.max(140, this.width - 80);
         int buttonWidth = Math.max(70, (available - spacing * (columns - 1)) / columns);
@@ -273,6 +292,7 @@ public class BotControlScreen extends Screen {
         final String helper;
         final CyclingButtonWidget<Boolean> autoSpawn;
         final CyclingButtonWidget<String> spawnMode;
+        final CyclingButtonWidget<String> gameMode;
         final CyclingButtonWidget<Boolean> teleport;
         final CyclingButtonWidget<Boolean> inventoryPause;
         final CyclingButtonWidget<Boolean> dropTeleport;
@@ -286,6 +306,7 @@ public class BotControlScreen extends Screen {
             String helper,
             CyclingButtonWidget<Boolean> autoSpawn,
             CyclingButtonWidget<String> spawnMode,
+            CyclingButtonWidget<String> gameMode,
             CyclingButtonWidget<Boolean> teleport,
             CyclingButtonWidget<Boolean> inventoryPause,
             CyclingButtonWidget<Boolean> dropTeleport,
@@ -296,6 +317,7 @@ public class BotControlScreen extends Screen {
             this.helper = helper;
             this.autoSpawn = autoSpawn;
             this.spawnMode = spawnMode;
+            this.gameMode = gameMode;
             this.teleport = teleport;
             this.inventoryPause = inventoryPause;
             this.dropTeleport = dropTeleport;
@@ -332,23 +354,28 @@ public class BotControlScreen extends Screen {
             spawnMode.setY(buttonY);
             spawnMode.setWidth(buttonWidth);
 
+            gameMode.visible = visible;
+            gameMode.setX(startX + (buttonWidth + spacing) * 2);
+            gameMode.setY(buttonY);
+            gameMode.setWidth(buttonWidth);
+
             teleport.visible = visible;
-            teleport.setX(startX + (buttonWidth + spacing) * 2);
+            teleport.setX(startX + (buttonWidth + spacing) * 3);
             teleport.setY(buttonY);
             teleport.setWidth(buttonWidth);
 
             inventoryPause.visible = visible;
-            inventoryPause.setX(startX + (buttonWidth + spacing) * 3);
+            inventoryPause.setX(startX + (buttonWidth + spacing) * 4);
             inventoryPause.setY(buttonY);
             inventoryPause.setWidth(buttonWidth);
             
             dropTeleport.visible = visible;
-            dropTeleport.setX(startX + (buttonWidth + spacing) * 4);
+            dropTeleport.setX(startX + (buttonWidth + spacing) * 5);
             dropTeleport.setY(buttonY);
             dropTeleport.setWidth(buttonWidth);
 
             llmEnabled.visible = visible;
-            llmEnabled.setX(startX + (buttonWidth + spacing) * 5);
+            llmEnabled.setX(startX + (buttonWidth + spacing) * 6);
             llmEnabled.setY(buttonY);
             llmEnabled.setWidth(buttonWidth);
         }

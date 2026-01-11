@@ -174,8 +174,6 @@ public final class BotAmbientSocialChatService {
         String weather = world.isThundering() ? "thundering" : (world.isRaining() ? "raining" : "clear");
         BlockPos pos = bot.getBlockPos();
 
-        String name = player != null ? player.getName().getString() : "there";
-
         // Keep it short and not too LLM-ish.
         if (bot.getHungerManager() != null && bot.getHungerManager().getFoodLevel() <= 6) {
             return choose(
@@ -197,8 +195,10 @@ public final class BotAmbientSocialChatService {
 
         return choose(
                 "It’s " + time + "… sky’s " + weather + ".",
-                "All quiet around here, " + name + ".",
-                "Still standing. Still ready.",
+                "Just taking it easy.",
+                "Enjoying the calm.",
+                "Nothing urgent—I'm here if you need me.",
+                "If you need me, I'm listening.",
                 "We’re at " + pos.getX() + ", " + pos.getY() + ", " + pos.getZ() + "."
         );
     }

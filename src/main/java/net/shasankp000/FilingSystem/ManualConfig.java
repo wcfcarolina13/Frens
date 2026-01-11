@@ -48,6 +48,14 @@ public class ManualConfig {
     private Map<String, BotSpawn> botSpawnPoints = new HashMap<>();
     private boolean defaultLlmWorldEnabled = true;
     private Map<String, BotControlSettings> botControls = new HashMap<>();
+    // Seed-agnostic, bot-persistent quest continuity (non-power progression).
+    private Map<String, BotQuestMemory> botQuestMemory = new HashMap<>();
+
+    // === Survival recruitment mode ("find a village, then recruit") ===
+    // When enabled, bots do not auto-spawn / restore until the world has been "recruited".
+    private boolean survivalRecruitmentMode = false;
+    // Per-world (level-name key) recruitment state.
+    private Map<String, SurvivalRecruitmentState> survivalRecruitment = new HashMap<>();
 
     /**
      * Private constructor to prevent direct instantiation.
@@ -204,6 +212,12 @@ public class ManualConfig {
             loadedConfig.checkAndUpdateProvider(currentProvider);
             if (loadedConfig.botControls == null) {
                 loadedConfig.botControls = new HashMap<>();
+            }
+            if (loadedConfig.botQuestMemory == null) {
+                loadedConfig.botQuestMemory = new HashMap<>();
+            }
+            if (loadedConfig.survivalRecruitment == null) {
+                loadedConfig.survivalRecruitment = new HashMap<>();
             }
             return loadedConfig;
         } catch (IOException e) {
@@ -386,6 +400,55 @@ public class ManualConfig {
         return botControls;
     }
 
+    public Map<String, BotQuestMemory> getBotQuestMemory() {
+        if (botQuestMemory == null) {
+            botQuestMemory = new HashMap<>();
+        }
+        return botQuestMemory;
+    }
+
+    // ===== Survival recruitment mode =====
+
+    public boolean isSurvivalRecruitmentMode() {
+        return survivalRecruitmentMode;
+    }
+
+    public void setSurvivalRecruitmentMode(boolean survivalRecruitmentMode) {
+        this.survivalRecruitmentMode = survivalRecruitmentMode;
+    }
+
+    public Map<String, SurvivalRecruitmentState> getSurvivalRecruitment() {
+        if (survivalRecruitment == null) {
+            survivalRecruitment = new HashMap<>();
+        }
+        return survivalRecruitment;
+    }
+
+    public SurvivalRecruitmentState getOrCreateSurvivalRecruitmentState(String worldKey) {
+        if (worldKey == null || worldKey.isBlank()) {
+            worldKey = "default";
+        }
+        String key = worldKey.trim();
+        survivalRecruitment = getSurvivalRecruitment();
+        return survivalRecruitment.computeIfAbsent(key, ignored -> new SurvivalRecruitmentState());
+    }
+
+    public void setSurvivalRecruitmentState(String worldKey, SurvivalRecruitmentState state) {
+        if (worldKey == null || worldKey.isBlank() || state == null) {
+            return;
+        }
+        getSurvivalRecruitment().put(worldKey.trim(), state);
+    }
+
+    public BotQuestMemory getOrCreateBotQuestMemory(String alias) {
+        if (alias == null || alias.isBlank()) {
+            alias = "default";
+        }
+        String key = alias.trim();
+        botQuestMemory = getBotQuestMemory();
+        return botQuestMemory.computeIfAbsent(key, ignored -> new BotQuestMemory());
+    }
+
     public void setBotControls(Map<String, BotControlSettings> botControls) {
         this.botControls = botControls != null ? new HashMap<>(botControls) : new HashMap<>();
     }
@@ -438,6 +501,9 @@ public class ManualConfig {
         }
         if (botControls != null) {
             botControls.remove(trimmedAlias);
+        }
+        if (botQuestMemory != null) {
+            botQuestMemory.remove(trimmedAlias);
         }
     }
 
@@ -518,6 +584,7 @@ public class ManualConfig {
     public static class BotControlSettings {
         private boolean autoSpawn;
         private String spawnMode = "training";
+        private String gameMode = "survival";
         private boolean teleportDuringSkills = true;
         private boolean pauseOnFullInventory;
         private boolean teleportDuringDropSweep = false;
@@ -543,6 +610,19 @@ public class ManualConfig {
             }
             String normalized = spawnMode.trim().toLowerCase();
             this.spawnMode = normalized.equals("play") ? "play" : "training";
+        }
+
+        public String getGameMode() {
+            return (gameMode == null || gameMode.isBlank()) ? "survival" : gameMode;
+        }
+
+        public void setGameMode(String gameMode) {
+            if (gameMode == null) {
+                this.gameMode = "survival";
+                return;
+            }
+            String normalized = gameMode.trim().toLowerCase();
+            this.gameMode = normalized.equals("creative") ? "creative" : "survival";
         }
 
         public boolean isTeleportDuringSkills() {
@@ -583,6 +663,208 @@ public class ManualConfig {
 
         public void setVoicedDialogue(boolean voicedDialogue) {
             this.voicedDialogue = voicedDialogue;
+        }
+    }
+
+    /**
+     * Persistent, non-power quest continuity for a bot.
+     *
+     * <p>Intentionally minimal. Quests are templates; continuity lives here.
+     */
+    public static class BotQuestMemory {
+        private List<String> completedQuestIds = new ArrayList<>();
+        private Map<String, Integer> tags = new HashMap<>();
+
+        public List<String> getCompletedQuestIds() {
+            if (completedQuestIds == null) {
+                completedQuestIds = new ArrayList<>();
+            }
+            return completedQuestIds;
+        }
+
+        public Map<String, Integer> getTags() {
+            if (tags == null) {
+                tags = new HashMap<>();
+            }
+            return tags;
+        }
+
+        public void recordCompletion(String questId, boolean success) {
+            if (questId == null || questId.isBlank()) {
+                return;
+            }
+            // Keep order (most-recent last) but avoid duplicates.
+            List<String> list = getCompletedQuestIds();
+            list.removeIf(id -> id != null && id.equals(questId));
+            list.add(questId);
+            // Bound history to avoid config bloat.
+            while (list.size() > 64) {
+                list.remove(0);
+            }
+
+            // Lightweight tag hooks (optional). No power progression.
+            // Example: track reliability/patience signals without schema rewrite.
+            if (success) {
+                bumpTag("quest_success");
+            } else {
+                bumpTag("quest_failure");
+            }
+        }
+
+        private void bumpTag(String tag) {
+            if (tag == null || tag.isBlank()) {
+                return;
+            }
+            Map<String, Integer> map = getTags();
+            map.put(tag, map.getOrDefault(tag, 0) + 1);
+        }
+    }
+
+    /** Per-world gating info for the survival recruitment flow. */
+    public static class SurvivalRecruitmentState {
+        private boolean recruited;
+        private String recruitedByUuid;
+        private String recruitedByName;
+        private String botAlias = "Jake";
+        private long recruitedAtEpochMs;
+
+        // ===== Companion questline (per-world, survival recruitment mode) =====
+        // Anchor location for village improvement checks.
+        private boolean companionAnchorSet;
+        private String companionAnchorDimension;
+        private long companionAnchorPos;
+
+        // Progression stage for the village/companion arc.
+        // 0..N (implementation-defined); stage advances only via server-side validation.
+        private int companionQuestStage;
+        private boolean permanentCompanion;
+
+        // ===== Companion death / resurrection (survival recruitment mode) =====
+        // When true, the recruited companion has died and must be resurrected via the ritual.
+        private boolean companionDead;
+        private long companionDiedAtEpochMs;
+        private String companionDiedDimension;
+        private long companionDiedPos;
+        private int companionDeathCount;
+
+        public boolean isRecruited() {
+            return recruited;
+        }
+
+        public void setRecruited(boolean recruited) {
+            this.recruited = recruited;
+        }
+
+        public String getRecruitedByUuid() {
+            return recruitedByUuid;
+        }
+
+        public void setRecruitedByUuid(String recruitedByUuid) {
+            this.recruitedByUuid = recruitedByUuid;
+        }
+
+        public String getRecruitedByName() {
+            return recruitedByName;
+        }
+
+        public void setRecruitedByName(String recruitedByName) {
+            this.recruitedByName = recruitedByName;
+        }
+
+        public String getBotAlias() {
+            return (botAlias == null || botAlias.isBlank()) ? "Jake" : botAlias;
+        }
+
+        public void setBotAlias(String botAlias) {
+            this.botAlias = (botAlias == null || botAlias.isBlank()) ? "Jake" : botAlias.trim();
+        }
+
+        public long getRecruitedAtEpochMs() {
+            return recruitedAtEpochMs;
+        }
+
+        public void setRecruitedAtEpochMs(long recruitedAtEpochMs) {
+            this.recruitedAtEpochMs = recruitedAtEpochMs;
+        }
+
+        public boolean isCompanionAnchorSet() {
+            return companionAnchorSet;
+        }
+
+        public void setCompanionAnchorSet(boolean companionAnchorSet) {
+            this.companionAnchorSet = companionAnchorSet;
+        }
+
+        public String getCompanionAnchorDimension() {
+            return companionAnchorDimension;
+        }
+
+        public void setCompanionAnchorDimension(String companionAnchorDimension) {
+            this.companionAnchorDimension = companionAnchorDimension;
+        }
+
+        public long getCompanionAnchorPos() {
+            return companionAnchorPos;
+        }
+
+        public void setCompanionAnchorPos(long companionAnchorPos) {
+            this.companionAnchorPos = companionAnchorPos;
+        }
+
+        public int getCompanionQuestStage() {
+            return companionQuestStage;
+        }
+
+        public void setCompanionQuestStage(int companionQuestStage) {
+            this.companionQuestStage = Math.max(0, companionQuestStage);
+        }
+
+        public boolean isPermanentCompanion() {
+            return permanentCompanion;
+        }
+
+        public void setPermanentCompanion(boolean permanentCompanion) {
+            this.permanentCompanion = permanentCompanion;
+        }
+
+        public boolean isCompanionDead() {
+            return companionDead;
+        }
+
+        public void setCompanionDead(boolean companionDead) {
+            this.companionDead = companionDead;
+        }
+
+        public long getCompanionDiedAtEpochMs() {
+            return companionDiedAtEpochMs;
+        }
+
+        public void setCompanionDiedAtEpochMs(long companionDiedAtEpochMs) {
+            this.companionDiedAtEpochMs = Math.max(0L, companionDiedAtEpochMs);
+        }
+
+        public String getCompanionDiedDimension() {
+            return companionDiedDimension;
+        }
+
+        public void setCompanionDiedDimension(String companionDiedDimension) {
+            this.companionDiedDimension = companionDiedDimension;
+        }
+
+        public long getCompanionDiedPos() {
+            return companionDiedPos;
+        }
+
+        public void setCompanionDiedPos(long companionDiedPos) {
+            this.companionDiedPos = companionDiedPos;
+        }
+
+        public int getCompanionDeathCount() {
+            return companionDeathCount;
+        }
+
+        public void setCompanionDeathCount(int companionDeathCount) {
+            this.companionDeathCount = Math.max(0, companionDeathCount);
         }
     }
 }

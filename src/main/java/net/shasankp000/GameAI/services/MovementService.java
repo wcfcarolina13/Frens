@@ -5,6 +5,7 @@ import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
 import net.minecraft.block.DoorBlock;
 import net.minecraft.block.FenceGateBlock;
+import net.minecraft.block.LeavesBlock;
 import net.minecraft.block.TrapdoorBlock;
 import net.minecraft.util.ActionResult;
 import net.minecraft.util.Hand;
@@ -32,6 +33,7 @@ import net.minecraft.state.property.Properties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
 import java.util.ArrayDeque;
 import java.util.HashSet;
 import java.util.List;
@@ -85,6 +87,13 @@ public final class MovementService {
 
     private static final long OBSTRUCTION_MINE_COOLDOWN_MS = 4500L;
     private static final Map<UUID, Map<BlockPos, Long>> OBSTRUCTION_MINE_COOLDOWN = new ConcurrentHashMap<>();
+
+    // Leaves are an extremely common "soft" obstruction (foliage). We want to avoid them first, and only
+    // break a single natural leaf occasionally as a last resort. Also, never block the server thread.
+    private static final long LEAF_MINE_GLOBAL_COOLDOWN_MS = 1200L;
+    private static final Map<UUID, Long> LEAF_MINE_LAST_MS = new ConcurrentHashMap<>();
+    private static final Map<UUID, CompletableFuture<String>> LEAF_MINE_INFLIGHT = new ConcurrentHashMap<>();
+    private static final Map<UUID, BlockPos> LEAF_MINE_TARGET = new ConcurrentHashMap<>();
 
     private MovementService() {
     }
@@ -1468,19 +1477,31 @@ public final class MovementService {
         if (!toward.getAxis().isHorizontal()) {
             toward = player.getHorizontalFacing();
         }
-        Direction[] options = new Direction[] {
-                toward.rotateYClockwise(),
-                toward.rotateYCounterclockwise(),
-                toward.getOpposite()
-        };
-
         BlockPos start = player.getBlockPos();
-        for (Direction dir : options) {
-            BlockPos stand = start.offset(dir);
+
+        // When foliage is involved, a diagonal step is often enough to "go around" without breaking.
+        boolean leafAhead = hasLeafInImmediatePath(world, start, toward);
+        Direction left = toward.rotateYCounterclockwise();
+        Direction right = toward.rotateYClockwise();
+
+        List<BlockPos> standCandidates = new ArrayList<>();
+        if (leafAhead) {
+            standCandidates.add(start.offset(toward).offset(left));
+            standCandidates.add(start.offset(toward).offset(right));
+            standCandidates.add(start.offset(left));
+            standCandidates.add(start.offset(right));
+        } else {
+            standCandidates.add(start.offset(right));
+            standCandidates.add(start.offset(left));
+        }
+        // Always keep a "back out" option.
+        standCandidates.add(start.offset(toward.getOpposite()));
+
+        for (BlockPos stand : standCandidates) {
             if (!isSolidStandable(world, stand.down(), stand)) {
                 continue;
             }
-            LOGGER.debug("walkSegment sidestep attempt dir={} stand={}", dir, stand.toShortString());
+            LOGGER.debug("walkSegment sidestep attempt stand={}", stand.toShortString());
             LookController.faceBlock(player, stand);
             if (pursuitUntilClose(player, stand, 900L, 2.25D, "sidestep")) {
                 return true;
@@ -1506,24 +1527,123 @@ public final class MovementService {
                 sleep(90L);
             }
         }
-        // If we're stuck against leaves (common with foliage), clear leaf blocks around headroom using shears/hand.
-        List<BlockPos> candidates = leafCandidates(start, toward);
-        int cleared = 0;
-        for (BlockPos leaf : candidates) {
-            if (isBreakableLeaf(world, leaf) && isWithinReach(player, leaf)) {
-                LOGGER.debug("walkSegment leaf-stuck: breaking leaf at {}", leaf.toShortString());
-                selectHarmlessForLeaves(player);
-                try {
-                    MiningTool.mineBlock(player, leaf).get(4, TimeUnit.SECONDS);
-                } catch (Exception ignored) {
-                }
-                cleared++;
-                if (cleared >= 2) {
-                    return true;
-                }
+        // If we're stuck against leaves (common with foliage), start mining a SINGLE natural leaf as a last resort.
+        // Do this asynchronously and with cooldown so we don't turn forests into clearcuts.
+        for (BlockPos leaf : leafCandidates(start, toward)) {
+            if (!isBreakableLeaf(world, leaf) || !isWithinReach(player, leaf)) {
+                continue;
+            }
+            if (startLeafMining(player, leaf, "walkSegment")) {
+                return true;
             }
         }
-        return cleared > 0;
+        return false;
+    }
+
+    private static boolean hasLeafInImmediatePath(ServerWorld world, BlockPos start, Direction toward) {
+        if (world == null || start == null || toward == null) {
+            return false;
+        }
+        BlockPos front = start.offset(toward);
+        // Only consider leaf blocks that are plausibly colliding with the bot's body/head.
+        return isLeafBlock(world, front)
+                || isLeafBlock(world, front.up())
+                || isLeafBlock(world, front.up(2));
+    }
+
+    private static boolean isLeafBlock(ServerWorld world, BlockPos pos) {
+        if (world == null || pos == null) {
+            return false;
+        }
+        return world.getBlockState(pos).isIn(BlockTags.LEAVES);
+    }
+
+    private static boolean tryLeafBypassInputStep(ServerPlayerEntity bot, Direction toward) {
+        if (bot == null || toward == null) {
+            return false;
+        }
+        ServerWorld world = getWorld(bot);
+        if (world == null) {
+            return false;
+        }
+        BlockPos start = bot.getBlockPos();
+        Direction left = toward.rotateYCounterclockwise();
+        Direction right = toward.rotateYClockwise();
+
+        // Prefer diagonal-forward to slip around leaf hedges without breaking.
+        BlockPos[] candidates = new BlockPos[] {
+                start.offset(toward).offset(left),
+                start.offset(toward).offset(right),
+                start.offset(left),
+                start.offset(right)
+        };
+
+        BlockPos best = null;
+        for (BlockPos cand : candidates) {
+            if (cand == null) {
+                continue;
+            }
+            if (isSolidStandable(world, cand.down(), cand)) {
+                best = cand;
+                break;
+            }
+        }
+        if (best == null) {
+            return false;
+        }
+
+        final BlockPos bestPos = best.toImmutable();
+        final Vec3d bestCenter = Vec3d.ofCenter(bestPos);
+        return runOnServerThread(bot, () -> {
+            LookController.faceBlock(bot, bestPos);
+            BotActions.sprint(bot, false);
+            BotActions.autoJumpIfNeeded(bot);
+            BotActions.applyMovementInput(bot, bestCenter, 0.16);
+        });
+    }
+
+    private static boolean startLeafMining(ServerPlayerEntity bot, BlockPos leafPos, String label) {
+        if (bot == null || leafPos == null) {
+            return false;
+        }
+        UUID id = bot.getUuid();
+        if (id == null) {
+            return false;
+        }
+
+        CompletableFuture<String> inflight = LEAF_MINE_INFLIGHT.get(id);
+        if (inflight != null && !inflight.isDone()) {
+            BlockPos target = LEAF_MINE_TARGET.get(id);
+            // If we're already mining this leaf, treat it as "handled".
+            if (target != null && target.equals(leafPos)) {
+                return true;
+            }
+            // Only mine one leaf at a time per bot.
+            return false;
+        }
+
+        long now = System.currentTimeMillis();
+        long last = LEAF_MINE_LAST_MS.getOrDefault(id, 0L);
+        if (now - last < LEAF_MINE_GLOBAL_COOLDOWN_MS) {
+            return false;
+        }
+
+        LEAF_MINE_LAST_MS.put(id, now);
+        LEAF_MINE_TARGET.put(id, leafPos.toImmutable());
+        selectHarmlessForLeaves(bot);
+
+        LOGGER.debug("leaf-mine start [{}]: bot={} pos={}",
+                label,
+                bot.getName().getString(),
+                leafPos.toShortString());
+
+        CompletableFuture<String> future = MiningTool.mineBlock(bot, leafPos);
+        LEAF_MINE_INFLIGHT.put(id, future);
+        future.whenComplete((result, error) -> {
+            LEAF_MINE_INFLIGHT.remove(id, future);
+            LEAF_MINE_TARGET.remove(id);
+        });
+        return true;
     }
 
     private static boolean isBreakableLeaf(ServerWorld world, BlockPos pos) {
@@ -1531,7 +1651,14 @@ public final class MovementService {
             return false;
         }
         var state = world.getBlockState(pos);
-        return state.isIn(BlockTags.LEAVES);
+        if (!state.isIn(BlockTags.LEAVES)) {
+            return false;
+        }
+        // Respect player-placed leaves: vanilla sets PERSISTENT=true when placed.
+        if (state.contains(LeavesBlock.PERSISTENT) && Boolean.TRUE.equals(state.get(LeavesBlock.PERSISTENT))) {
+            return false;
+        }
+        return true;
     }
 
     private static boolean isWithinReach(ServerPlayerEntity player, BlockPos pos) {
@@ -1568,15 +1695,20 @@ public final class MovementService {
         if (start == null || toward == null) {
             return List.of();
         }
+        // Prefer only the blocks that plausibly collide with the bot's body/head in the travel direction.
+        // Avoid scanning high canopy blocks (which caused unnecessary leaf breaking).
         BlockPos front = start.offset(toward);
-        BlockPos head = start.up(2);
-        BlockPos ceiling = start.up(3);
+        BlockPos front2 = front.offset(toward);
         return List.of(
-                head, head.up(), ceiling,
-                head.offset(toward), head.offset(toward).up(), head.offset(toward).up(2),
-                front.up(), front.up(2), front.up(3), front,
-                head.offset(toward.rotateYClockwise()), head.offset(toward.rotateYClockwise()).up(),
-                head.offset(toward.rotateYCounterclockwise()), head.offset(toward.rotateYCounterclockwise()).up()
+                front,
+                front.up(),
+                front.up(2),
+                front2,
+                front2.up(),
+                front2.up(2),
+                // If we're already wedged into leaves, try the body/head blocks too.
+                start.up(),
+                start.up(2)
         );
     }
 
@@ -1588,18 +1720,19 @@ public final class MovementService {
         if (world == null) {
             return false;
         }
+
+        // First try a non-destructive "route around" nudge. This is safe to run even on the server thread.
+        if (hasLeafInImmediatePath(world, player.getBlockPos(), toward) && tryLeafBypassInputStep(player, toward)) {
+            return true;
+        }
+
+        // If bypass isn't possible, start mining a single natural leaf asynchronously (no blocking waits).
         BlockPos start = player.getBlockPos();
-        List<BlockPos> candidates = leafCandidates(start, toward);
-        for (BlockPos leaf : candidates) {
-            if (isBreakableLeaf(world, leaf) && isWithinReach(player, leaf)) {
-                LOGGER.debug("clearLeafObstruction: breaking leaf at {}", leaf.toShortString());
-                selectHarmlessForLeaves(player);
-                try {
-                    MiningTool.mineBlock(player, leaf).get(4, TimeUnit.SECONDS);
-                } catch (Exception ignored) {
-                }
-                return true;
+        for (BlockPos leaf : leafCandidates(start, toward)) {
+            if (!isBreakableLeaf(world, leaf) || !isWithinReach(player, leaf)) {
+                continue;
             }
+            return startLeafMining(player, leaf, "clearLeafObstruction");
         }
         return false;
     }
@@ -1612,13 +1745,8 @@ public final class MovementService {
         if (world == null) {
             return false;
         }
-        List<BlockPos> candidates = leafCandidates(player.getBlockPos(), toward);
-        for (BlockPos leaf : candidates) {
-            if (isBreakableLeaf(world, leaf)) {
-                return true;
-            }
-        }
-        return false;
+        // Only treat leaves as an obstruction when they're in the immediate forward collision space.
+        return hasLeafInImmediatePath(world, player.getBlockPos(), toward);
     }
 
     private static boolean walkDirect(ServerPlayerEntity player, BlockPos destination, long timeoutMs) {

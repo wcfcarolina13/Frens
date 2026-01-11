@@ -7,10 +7,7 @@ import net.shasankp000.ChatUtils.BotMoodManager;
 import net.shasankp000.ChatUtils.ChatUtils;
 import net.shasankp000.ChatUtils.EmotionalState;
 import net.shasankp000.GameAI.BotEventHandler;
-
-import java.util.List;
 import java.util.Locale;
-import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -215,7 +212,6 @@ public final class BotTouchChatService {
             return null;
         }
 
-        String name = toucher != null ? toucher.getName().getString() : "there";
         BlockPos pos = bot.getBlockPos();
 
         String biome = world.getBiome(pos)
@@ -270,7 +266,9 @@ public final class BotTouchChatService {
             "It’s " + timePhase + "… and the sky looks " + weather + ".",
             "This " + biome + " has a vibe to it.",
             "We’re at " + pos.getX() + ", " + pos.getY() + ", " + pos.getZ() + ".",
-            "All quiet around here, " + name + ".",
+            "Just taking it easy.",
+            "Enjoying the calm.",
+            "Nothing urgent—I'm here if you need me.",
             "If you need me, I’m listening."
         );
         }

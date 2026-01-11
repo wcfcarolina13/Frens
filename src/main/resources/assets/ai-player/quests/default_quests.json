@@ -1,0 +1,219 @@
+[
+  {
+    "quest_id": "bonding_stay_with_me",
+    "category": "bonding",
+    "intent": "Don't run ahead. Just stay close.",
+    "constraints": {
+      "environment_predicates": [],
+      "entity_predicates": [],
+      "state_predicates": []
+    },
+    "actions": [
+      {
+        "type": "wait",
+        "parameters": {
+          "player_within_blocks": 6,
+          "duration_seconds": 30
+        }
+      }
+    ],
+    "completion_conditions": [],
+    "bot_reflection": {
+      "on_success": "Thanks. That helps more than you think.",
+      "on_failure": "You always rush. It's fine."
+    }
+  },
+  {
+    "quest_id": "explore_somewhere_new",
+    "category": "exploration",
+    "intent": "Let's go somewhere you haven't been.",
+    "constraints": {
+      "environment_predicates": [],
+      "entity_predicates": [],
+      "state_predicates": []
+    },
+    "actions": [
+      {
+        "type": "move",
+        "parameters": {
+          "predicate": "player_unvisited_chunk"
+        }
+      }
+    ],
+    "completion_conditions": [],
+    "bot_reflection": {
+      "on_success": "Good. New ground.",
+      "on_failure": "We'll try again later."
+    }
+  },
+  {
+    "quest_id": "curiosity_step_into_the_light",
+    "category": "curiosity",
+    "intent": "Let's find a brighter spot.",
+    "constraints": {
+      "environment_predicates": ["low_light"],
+      "entity_predicates": [],
+      "state_predicates": []
+    },
+    "actions": [
+      {
+        "type": "move",
+        "parameters": {
+          "predicate": "open_area"
+        }
+      }
+    ],
+    "completion_conditions": [],
+    "bot_reflection": {
+      "on_success": "Much better. I can think again.",
+      "on_failure": "Still too dark. We'll do this later."
+    }
+  },
+  {
+    "quest_id": "combat_clear_the_nearby_threat",
+    "category": "combat",
+    "intent": "Something hostile is close. Let's clear it out.",
+    "constraints": {
+      "environment_predicates": [],
+      "entity_predicates": ["any_hostile_mob"],
+      "state_predicates": []
+    },
+    "actions": [
+      {
+        "type": "fight",
+        "parameters": {
+          "radius_blocks": 12
+        }
+      }
+    ],
+    "completion_conditions": [],
+    "bot_reflection": {
+      "on_success": "Okay. Quiet again.",
+      "on_failure": "Not worth it right now. Let's back off."
+    }
+  },
+  {
+    "quest_id": "exploration_find_something_built",
+    "category": "exploration",
+    "intent": "Let's find something that looks built.",
+    "constraints": {
+      "environment_predicates": [],
+      "entity_predicates": [],
+      "state_predicates": []
+    },
+    "actions": [
+      {
+        "type": "move",
+        "parameters": {
+          "predicate": "structure_like_block_cluster"
+        }
+      }
+    ],
+    "completion_conditions": [],
+    "bot_reflection": {
+      "on_success": "Yeah. Someone's been here.",
+      "on_failure": "No luck. We'll spot something eventually."
+    }
+  },
+  {
+    "quest_id": "curiosity_take_a_look_around_here",
+    "category": "curiosity",
+    "intent": "Hold up—let's take a look around this place.",
+    "constraints": {
+      "environment_predicates": ["structure_like_block_cluster"],
+      "entity_predicates": [],
+      "state_predicates": []
+    },
+    "actions": [
+      {
+        "type": "observe",
+        "parameters": {
+          "predicate": "structure_like_block_cluster",
+          "duration_seconds": 3
+        }
+      }
+    ],
+    "completion_conditions": [],
+    "bot_reflection": {
+      "on_success": "Good. Let's remember this spot.",
+      "on_failure": "Doesn't feel safe to linger."
+    }
+  },
+  {
+    "quest_id": "bonding_stay_close_under_cover",
+    "category": "bonding",
+    "intent": "Let's stick together a minute. No rushing.",
+    "constraints": {
+      "environment_predicates": [],
+      "entity_predicates": [],
+      "state_predicates": []
+    },
+    "actions": [
+      {
+        "type": "move",
+        "parameters": {
+          "predicate": "structure_like_block_cluster"
+        }
+      },
+      {
+        "type": "wait",
+        "parameters": {
+          "player_within_blocks": 6,
+          "duration_seconds": 20
+        }
+      }
+    ],
+    "completion_conditions": [],
+    "bot_reflection": {
+      "on_success": "There. That's better.",
+      "on_failure": "Not the time. We'll do it later."
+    }
+  },
+  {
+    "quest_id": "combat_secure_this_place",
+    "category": "combat",
+    "intent": "If we're stopping here, let's make it safe.",
+    "constraints": {
+      "environment_predicates": ["structure_like_block_cluster"],
+      "entity_predicates": ["any_hostile_mob"],
+      "state_predicates": []
+    },
+    "actions": [
+      {
+        "type": "fight",
+        "parameters": {
+          "radius_blocks": 12
+        }
+      }
+    ],
+    "completion_conditions": [],
+    "bot_reflection": {
+      "on_success": "Alright. We can breathe.",
+      "on_failure": "Too hot. Let's pull back."
+    }
+  },
+  {
+    "quest_id": "curiosity_check_the_lighting_here",
+    "category": "curiosity",
+    "intent": "Hold up—do we need more light here?",
+    "constraints": {
+      "environment_predicates": ["structure_like_block_cluster", "low_light"],
+      "entity_predicates": [],
+      "state_predicates": []
+    },
+    "actions": [
+      {
+        "type": "observe",
+        "parameters": {
+          "predicate": "low_light",
+          "duration_seconds": 2
+        }
+      }
+    ],
+    "completion_conditions": [],
+    "bot_reflection": {
+      "on_success": "Still too dim. We should add light.",
+      "on_failure": "Not too dark. Good."
+    }
+  }
+]

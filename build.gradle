@@ -121,6 +121,16 @@ processResources {
 	filesMatching("fabric.mod.json") {
 		expand "version": project.version
 	}
+
+	// Minecraft is strict about the schema of assets/*/sounds.json.
+	// The project-level sounds.json includes a non-vanilla "category" field for readability,
+	// but vanilla's loader will reject it (and then ALL custom sounds become "missing").
+	// Strip those lines at build-time so the packaged JAR contains a valid sounds.json.
+	filesMatching("assets/ai-player/sounds.json") {
+		filter { String line ->
+			line.contains('"category"') ? "" : line
+		}
+	}
 }
 
 tasks.withType(JavaCompile).configureEach {

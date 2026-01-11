@@ -4,6 +4,7 @@ Updated 2025-11-19. Use this to see which docs are active vs archived.
 
 ## Active
 - `README.md` — user-facing guide to commands and behaviors.
+- `COMPANION_QUESTING_GUIDE.md` — player-facing walkthrough of the survival companion questline (stages, unlocks, spells access).
 - `TODO.md` — current tasks (pending only; source of truth for next steps).
 - `changelog.md` — history and detailed reasoning.
 - `AGENT_RULES.md` — rules for LLM agents.

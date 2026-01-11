@@ -109,20 +109,26 @@ public final class CraftingHistoryService {
         }
     }
 
-    public static void recordCraft(ServerPlayerEntity bot, Identifier recipeId) {
+    /**
+     * Record a craft entry for this player/bot.
+     *
+     * @return true if this call added a new recipe id to the persisted history, false otherwise.
+     */
+    public static boolean recordCraft(ServerPlayerEntity bot, Identifier recipeId) {
         if (bot == null || recipeId == null || !(bot.getEntityWorld() instanceof ServerWorld world)) {
-            return;
+            return false;
         }
         Identifier airId = Registries.ITEM.getId(Items.AIR);
         if (recipeId.equals(airId) || ("minecraft".equals(recipeId.getNamespace()) && "air".equals(recipeId.getPath()))) {
-            return;
+            return false;
         }
         MinecraftServer server = world.getServer();
-        if (server == null) return;
+        if (server == null) return false;
         String botId = botKey(bot);
-        if (botId.isBlank()) return;
+        if (botId.isBlank()) return false;
 
         WorldData wd = worldData(server, world);
+        boolean changed = false;
         synchronized (LOCK) {
             if (wd.recipesByBot == null) {
                 wd.recipesByBot = new HashMap<>();
@@ -131,9 +137,13 @@ public final class CraftingHistoryService {
             String idStr = recipeId.toString();
             if (!list.contains(idStr)) {
                 list.add(idStr);
+                changed = true;
             }
         }
-        flush();
+        if (changed) {
+            flush();
+        }
+        return changed;
     }
 
     public static Set<Identifier> getHistory(ServerPlayerEntity bot) {

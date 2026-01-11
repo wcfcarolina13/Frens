@@ -31,6 +31,7 @@ import org.slf4j.LoggerFactory;
 
 import net.shasankp000.GameAI.services.MovementService;
 import net.shasankp000.GameAI.services.SneakLockService;
+import net.shasankp000.GameAI.services.BotArrowRecoveryService;
 
 
 
@@ -64,6 +65,14 @@ public final class BotActions {
     private static final float TURN_DEGREES = 20.0f;
     private static final int BOW_MIN_CHARGE_TICKS = 15;
     private static final int RANGED_COOLDOWN_TICKS = 20;
+    // Ranged repositioning: dripstone/uneven terrain often blocks arrows even when canSee() is true.
+    // We treat repeated blocked shots / misses as a signal to strafe to a better angle.
+    private static final int RANGED_MISSES_BEFORE_REPOSITION = 3;
+    private static final int RANGED_BLOCKED_BEFORE_REPOSITION = 3;
+    private static final int RANGED_REPOSITION_COOLDOWN_TICKS = 35;
+    private static final int RANGED_REPOSITION_SUPPRESS_FIRE_TICKS = 10;
+    private static final int RANGED_MISS_RECENT_SHOT_WINDOW_TICKS = 80;
+    private static final double RANGED_REPOSITION_MIN_DISTANCE_SQ = 4.5D * 4.5D;
     private static final double SURVIVAL_REACH_SQ = 4.5D * 4.5D;
 
     private static final Map<UUID, RangedAttackState> RANGED_STATE = new HashMap<>();
@@ -1213,10 +1222,19 @@ public final class BotActions {
         UUID botUuid = bot.getUuid();
         RangedAttackState state = RANGED_STATE.computeIfAbsent(botUuid, uuid -> new RangedAttackState());
 
-        // face target
+        // Face target.
+        // Prefer an aim point that is not ray-blocked (dripstone / uneven terrain often blocks torso shots).
         double targetX = target.getX();
         double targetY = target.getBodyY(0.333333333333d);
         double targetZ = target.getZ();
+        if (bot.getEntityWorld() instanceof ServerWorld world) {
+            Vec3d aim = pickPreferredAimPoint(world, bot, bot.getEyePos(), target);
+            if (aim != null) {
+                targetX = aim.x;
+                targetY = aim.y;
+                targetZ = aim.z;
+            }
+        }
         double dx = targetX - bot.getX();
         double dy = targetY - bot.getEyeY();
         double dz = targetZ - bot.getZ();
@@ -1226,6 +1244,12 @@ public final class BotActions {
         bot.setHeadYaw(yaw);
         bot.setBodyYaw(yaw);
         bot.setPitch(pitch);
+
+        // If we're currently repositioning, suppress firing for a few ticks while we move.
+        // (Otherwise the bot keeps releasing arrows from the same blocked angle.)
+        if (state.repositioningUntilTick > serverTick && state.isCurrentTarget(target)) {
+            return true;
+        }
 
         if (stack.getItem() instanceof net.minecraft.item.CrossbowItem crossbow) {
             if (state.forceMelee && state.isCurrentTarget(target)) {
@@ -1271,7 +1295,8 @@ public final class BotActions {
                 bot.stopUsingItem();
                 state.cooldownTick = serverTick + RANGED_COOLDOWN_TICKS;
                 state.chargeStartTick = 0L;
-                state.recordShot(bot, target);
+                state.recordShot(bot, target, serverTick);
+                BotArrowRecoveryService.noteRangedShot(bot, serverTick);
             }
             return true;
         }
@@ -1295,7 +1320,8 @@ public final class BotActions {
             float divergence = 14 - bot.getEntityWorld().getDifficulty().getId() * 4;
             crossbow.shootAll(bot.getEntityWorld(), bot, hand, stack, velocity, divergence, target);
             state.cooldownTick = serverTick + RANGED_COOLDOWN_TICKS;
-            state.recordShot(bot, target);
+            state.recordShot(bot, target, serverTick);
+            BotArrowRecoveryService.noteRangedShot(bot, serverTick);
             return true;
         }
 
@@ -1365,6 +1391,252 @@ public final class BotActions {
         }
     }
 
+    /**
+     * Called when arrow tracking observes a bot-owned arrow become stationary during active combat.
+     * This is a strong proxy for a "miss" (arrow hit terrain).
+     */
+    public static void noteRangedMiss(ServerPlayerEntity bot, long serverTick) {
+        if (bot == null) {
+            return;
+        }
+        RangedAttackState state = RANGED_STATE.get(bot.getUuid());
+        if (state == null) {
+            return;
+        }
+        state.noteMiss(serverTick);
+    }
+
+    /**
+     * If repeated misses (or repeated blocked line checks) are observed, strafe to a new firing angle.
+     * Returns true if this call drove movement.
+     */
+    public static boolean tryRepositionForRanged(ServerPlayerEntity bot, LivingEntity target, long serverTick) {
+        if (bot == null || target == null) {
+            return false;
+        }
+        if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
+            return false;
+        }
+
+        RangedAttackState state = RANGED_STATE.get(bot.getUuid());
+        if (state == null || !state.isCurrentTarget(target)) {
+            return false;
+        }
+        if (state.forceMelee) {
+            return false;
+        }
+        if (bot.hasVehicle() || bot.isUsingItem()) {
+            return false;
+        }
+        if (state.repositionCooldownTick > serverTick || state.repositioningUntilTick > serverTick) {
+            return false;
+        }
+
+        // Update blocked-shot streak from the current stance.
+        boolean blockedNow = isRangedLineBlocked(world, bot, bot.getEyePos(), target);
+        state.noteBlockedCheck(blockedNow, serverTick);
+
+        // Decay miss streak if we've gone a while without additional miss signals.
+        state.decayMisses(serverTick);
+
+        if (state.missStreak < RANGED_MISSES_BEFORE_REPOSITION && state.blockedShotStreak < RANGED_BLOCKED_BEFORE_REPOSITION) {
+            return false;
+        }
+
+        // Don't waste time shuffling when already close enough to just melee.
+        if (bot.squaredDistanceTo(target) <= RANGED_REPOSITION_MIN_DISTANCE_SQ) {
+            return false;
+        }
+
+        Vec3d best = pickRangedReposition(world, bot, target);
+        if (best == null) {
+            return false;
+        }
+
+        // Drive a gentle step.
+        // If the chosen stance is vertically offset (uneven caves), prefer the step/clearance move logic.
+        double dyToBest = best.y - bot.getY();
+        if (Math.abs(dyToBest) > 0.35D) {
+            moveToward(bot, best, 0.9D);
+        } else {
+            applyMovementInput(bot, best, 0.24D);
+            if (bot.isOnGround()) {
+                autoJumpIfNeeded(bot);
+            }
+        }
+
+        state.repositioningUntilTick = serverTick + RANGED_REPOSITION_SUPPRESS_FIRE_TICKS;
+        state.repositionCooldownTick = serverTick + RANGED_REPOSITION_COOLDOWN_TICKS;
+        state.missStreak = 0;
+        state.blockedShotStreak = 0;
+        return true;
+    }
+
+    private static Vec3d pickRangedReposition(ServerWorld world, ServerPlayerEntity bot, LivingEntity target) {
+        // Compute a local strafe basis around the target.
+        Vec3d toTarget = new Vec3d(target.getX() - bot.getX(), 0.0D, target.getZ() - bot.getZ());
+        double lenSq = toTarget.lengthSquared();
+        if (lenSq < 1.0E-6) {
+            return null;
+        }
+        Vec3d dir = toTarget.normalize();
+        Vec3d left = new Vec3d(-dir.z, 0.0D, dir.x);
+        Vec3d right = new Vec3d(dir.z, 0.0D, -dir.x);
+
+        // Candidate offsets (in blocks). Keep them small to avoid running off ledges in caves.
+        List<Vec3d> offsets = List.of(
+                left.multiply(1.45D),
+                right.multiply(1.45D),
+                dir.multiply(-1.35D),
+                dir.multiply(-0.9D).add(left.multiply(1.0D)),
+                dir.multiply(-0.9D).add(right.multiply(1.0D)),
+                left.multiply(0.95D),
+                right.multiply(0.95D)
+        );
+
+        Vec3d botPos = new Vec3d(bot.getX(), bot.getY(), bot.getZ());
+        Vec3d bestPos = null;
+        double bestScore = Double.NEGATIVE_INFINITY;
+
+        for (Vec3d off : offsets) {
+            BlockPos base = BlockPos.ofFloored(botPos.x + off.x, botPos.y, botPos.z + off.z);
+            Vec3d stand = resolveNearbyStandPos(world, base);
+            if (stand == null) {
+                continue;
+            }
+            double moveCost = stand.squaredDistanceTo(botPos);
+            Vec3d eye = stand.add(0.0D, bot.getStandingEyeHeight(), 0.0D);
+
+            double visibility = rangedVisibilityScore(world, bot, eye, target);
+            // Prefer clear LoS (huge score), then prefer minimal movement.
+            double score = visibility - moveCost * 2.0D;
+            if (score > bestScore) {
+                bestScore = score;
+                bestPos = stand;
+            }
+        }
+
+        // Only reposition if we found a meaningfully better angle.
+        if (bestPos == null) {
+            return null;
+        }
+        Vec3d curEye = bot.getEyePos();
+        double curScore = rangedVisibilityScore(world, bot, curEye, target);
+        if (bestScore <= curScore + 0.5D) {
+            return null;
+        }
+        return bestPos;
+    }
+
+    private static Vec3d resolveNearbyStandPos(ServerWorld world, BlockPos base) {
+        if (world == null || base == null) {
+            return null;
+        }
+        // Probe a small vertical window to cope with uneven terrain.
+        int[] dyOrder = new int[]{0, 1, -1, 2, -2};
+        for (int dy : dyOrder) {
+            BlockPos pos = base.up(dy);
+            if (!hasMovementClearance(world, pos)) {
+                continue;
+            }
+            // Avoid stepping into fluids.
+            if (!world.getFluidState(pos).isEmpty()) {
+                continue;
+            }
+            BlockPos below = pos.down();
+            BlockState belowState = world.getBlockState(below);
+            if (belowState.isAir()) {
+                continue;
+            }
+            if (belowState.getCollisionShape(world, below).isEmpty()) {
+                continue;
+            }
+            return new Vec3d(pos.getX() + 0.5D, pos.getY(), pos.getZ() + 0.5D);
+        }
+        return null;
+    }
+
+    private static double rangedVisibilityScore(ServerWorld world, ServerPlayerEntity bot, Vec3d fromEye, LivingEntity target) {
+        // Score is the best (most open) among several aim points on the target.
+        // If ANY point is clear (no block collision), return a large value.
+        Vec3d[] aimPoints = new Vec3d[]{
+                target.getEyePos(),
+                new Vec3d(target.getX(), target.getBodyY(0.333333333333d), target.getZ()),
+                new Vec3d(target.getX(), target.getBodyY(0.55D), target.getZ())
+        };
+
+        double bestBlockedDist = 0.0D;
+        for (Vec3d aim : aimPoints) {
+            RaycastContext ctx = new RaycastContext(
+                    fromEye,
+                    aim,
+                    RaycastContext.ShapeType.COLLIDER,
+                    RaycastContext.FluidHandling.NONE,
+                    bot
+            );
+            BlockHitResult hit = world.raycast(ctx);
+            if (hit.getType() == HitResult.Type.MISS) {
+                return 1_000_000.0D;
+            }
+            if (hit.getType() == HitResult.Type.BLOCK) {
+                double dist = fromEye.distanceTo(hit.getPos());
+                if (dist > bestBlockedDist) {
+                    bestBlockedDist = dist;
+                }
+            }
+        }
+        return bestBlockedDist;
+    }
+
+    /**
+     * Choose an aim point on the target that is not blocked by terrain.
+     * If none are clear, falls back to the usual torso-ish point.
+     */
+    private static Vec3d pickPreferredAimPoint(ServerWorld world, ServerPlayerEntity bot, Vec3d fromEye, LivingEntity target) {
+        if (world == null || bot == null || fromEye == null || target == null) {
+            return null;
+        }
+        Vec3d body = new Vec3d(target.getX(), target.getBodyY(0.333333333333d), target.getZ());
+        Vec3d eye = target.getEyePos();
+        Vec3d mid = new Vec3d(target.getX(), target.getBodyY(0.55D), target.getZ());
+
+        // Priority: body (natural), then eye (often above dripstone spikes), then mid.
+        Vec3d[] candidates = new Vec3d[]{body, eye, mid};
+        for (Vec3d aim : candidates) {
+            RaycastContext ctx = new RaycastContext(
+                    fromEye,
+                    aim,
+                    RaycastContext.ShapeType.COLLIDER,
+                    RaycastContext.FluidHandling.NONE,
+                    bot
+            );
+            BlockHitResult hit = world.raycast(ctx);
+            if (hit.getType() == HitResult.Type.MISS) {
+                return aim;
+            }
+        }
+        return body;
+    }
+
+    private static boolean isRangedLineBlocked(ServerWorld world, ServerPlayerEntity bot, Vec3d fromEye, LivingEntity target) {
+        if (world == null || bot == null || fromEye == null || target == null) {
+            return false;
+        }
+        Vec3d aim = pickPreferredAimPoint(world, bot, fromEye, target);
+        if (aim == null) {
+            return false;
+        }
+        RaycastContext ctx = new RaycastContext(
+                fromEye,
+                aim,
+                RaycastContext.ShapeType.COLLIDER,
+                RaycastContext.FluidHandling.NONE,
+                bot
+        );
+        BlockHitResult hit = world.raycast(ctx);
+        return hit.getType() != HitResult.Type.MISS;
+    }
+
     public static void resetRangedState(UUID uuid) {
         if (uuid == null) {
             return;
@@ -1427,12 +1699,27 @@ public final class BotActions {
         int lowAngleStreak = 0;
         boolean forceMelee = false;
 
+        // Miss/reposition bookkeeping.
+        long lastShotTick = -1L;
+        long lastMissTick = -1L;
+        int missStreak = 0;
+        int blockedShotStreak = 0;
+        long repositionCooldownTick = 0L;
+        long repositioningUntilTick = 0L;
+
         void ensureTarget(LivingEntity target) {
             UUID targetUuid = target.getUuid();
             if (!Objects.equals(currentTarget, targetUuid)) {
                 currentTarget = targetUuid;
                 lowAngleStreak = 0;
                 forceMelee = false;
+
+                lastShotTick = -1L;
+                lastMissTick = -1L;
+                missStreak = 0;
+                blockedShotStreak = 0;
+                repositionCooldownTick = 0L;
+                repositioningUntilTick = 0L;
             }
         }
 
@@ -1440,10 +1727,11 @@ public final class BotActions {
             return Objects.equals(currentTarget, target.getUuid());
         }
 
-        void recordShot(ServerPlayerEntity bot, LivingEntity target) {
+        void recordShot(ServerPlayerEntity bot, LivingEntity target, long serverTick) {
             if (!isCurrentTarget(target)) {
                 ensureTarget(target);
             }
+            lastShotTick = serverTick;
             double verticalDiff = bot.getY() - target.getY();
             if (verticalDiff > 1.5D) {
                 lowAngleStreak++;
@@ -1452,6 +1740,35 @@ public final class BotActions {
                 }
             } else {
                 lowAngleStreak = 0;
+            }
+        }
+
+        void noteMiss(long serverTick) {
+            // Only count misses that correlate with a recent shot.
+            if (lastShotTick < 0L || serverTick < lastShotTick) {
+                return;
+            }
+            if (serverTick - lastShotTick > RANGED_MISS_RECENT_SHOT_WINDOW_TICKS) {
+                return;
+            }
+            lastMissTick = serverTick;
+            missStreak = Math.min(12, missStreak + 1);
+        }
+
+        void noteBlockedCheck(boolean blockedNow, long serverTick) {
+            if (blockedNow) {
+                blockedShotStreak = Math.min(12, blockedShotStreak + 1);
+            } else {
+                blockedShotStreak = 0;
+            }
+        }
+
+        void decayMisses(long serverTick) {
+            if (missStreak <= 0) {
+                return;
+            }
+            if (lastMissTick >= 0L && serverTick - lastMissTick > 60L) {
+                missStreak = 0;
             }
         }
     }

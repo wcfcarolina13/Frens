@@ -2275,7 +2275,10 @@ public final class CraftingHelper {
         if (commander == null || recipeId == null) {
             return;
         }
-        CraftingHistoryService.recordCraft(commander, recipeId);
+        boolean newlyAdded = CraftingHistoryService.recordCraft(commander, recipeId);
+        if (newlyAdded) {
+            RecipeUnlockReactionService.onNewCraftedRecipe(commander, recipeId);
+        }
     }
 
     private static void recordCraftHistory(ServerPlayerEntity commander, net.minecraft.item.Item output) {

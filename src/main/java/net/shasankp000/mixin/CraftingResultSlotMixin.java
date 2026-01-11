@@ -10,6 +10,7 @@ import net.minecraft.screen.slot.CraftingResultSlot;
 import org.spongepowered.asm.mixin.Final;
 import net.shasankp000.GameAI.BotEventHandler;
 import net.shasankp000.GameAI.services.CraftingHistoryService;
+import net.shasankp000.GameAI.services.RecipeUnlockReactionService;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.injection.At;
@@ -52,7 +53,10 @@ public class CraftingResultSlotMixin {
         }
         Identifier id = Registries.ITEM.getId(result.getItem());
         if (id != null) {
-            CraftingHistoryService.recordCraft(serverPlayer, id);
+            boolean newlyAdded = CraftingHistoryService.recordCraft(serverPlayer, id);
+            if (newlyAdded) {
+                RecipeUnlockReactionService.onNewCraftedRecipe(serverPlayer, id);
+            }
         }
     }
 }
