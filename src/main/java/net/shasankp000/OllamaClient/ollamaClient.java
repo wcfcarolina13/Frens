@@ -10,7 +10,6 @@ import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.command.argument.EntityArgumentType;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.command.ServerCommandSource;
-import net.shasankp000.CommandUtils;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.text.Text;
 import net.shasankp000.AIPlayer;
@@ -73,11 +72,10 @@ public class ollamaClient {
         ServerCommandSource botSource = Objects.requireNonNull(server.getPlayerManager().getPlayer(botName))
             .getCommandSource().withSilent();
 
-        String formatter = ChatUtils.getRandomColorCode();
-
         server.execute(() -> {
-            CommandUtils.run(playerSource, "say " + formatter + message);
-            CommandUtils.run(botSource, "say Processing your message, please wait.");
+            // Private/direct feedback instead of server-wide broadcast.
+            ChatUtils.sendSystemMessage(playerSource, message);
+            ChatUtils.sendSystemMessage(botSource, "Processing your message, please wait.");
         });
 
         server.execute(() -> {

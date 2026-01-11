@@ -2,13 +2,17 @@ package net.shasankp000.ChatUtils;
 
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.command.ServerCommandSource;
+import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.text.Text;
-import net.shasankp000.CommandUtils;
+import net.minecraft.util.Formatting;
+import net.shasankp000.GameAI.BotEventHandler;
+import net.shasankp000.GameAI.services.CompanionCommunicationPolicy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -48,6 +52,24 @@ public class ChatUtils {
             return;
         }
 
+        Recipient recipient = resolveRecipientForDialogue(server, source);
+        if (recipient == null) {
+            LOGGER.warn("No recipient resolved for dialogue message; dropping: '{}'", message);
+            return;
+        }
+
+        LOGGER.info("Dialogue routed: botSender={} bot={} -> recipient={}",
+            recipient.botSender,
+            recipient.bot != null ? recipient.bot.getName().getString() : "(none)",
+            recipient.player != null ? recipient.player.getName().getString() : "(null)");
+
+        // Apply requested comms gating for bot dialogue.
+        if (recipient.botSender && recipient.bot != null) {
+            if (!CompanionCommunicationPolicy.canBotChatToController(recipient.bot, recipient.player)) {
+                return;
+            }
+        }
+
         LOGGER.info("Sending chat message (withDelay={}): '{}'", withDelay, message);
 
         List<String> messageParts = splitMessage(message.trim());
@@ -55,7 +77,7 @@ public class ChatUtils {
 
         // This is the core fix. We are queuing a single task on the server's main thread.
         // The task itself handles all logic, including delays.
-        server.execute(() -> scheduleAndSendMessages(server, source, messageParts, 0, withDelay));
+        server.execute(() -> scheduleAndSendMessages(server, source, recipient.playerUuid, recipient.botSender, messageParts, 0, withDelay));
     }
 
     /**
@@ -66,19 +88,25 @@ public class ChatUtils {
      * @param partIndex The current index of the message part to send.
      * @param withDelay If delays should be used.
      */
-    private static void scheduleAndSendMessages(MinecraftServer server, ServerCommandSource source, List<String> messageParts, int partIndex, boolean withDelay) {
+    private static void scheduleAndSendMessages(MinecraftServer server,
+                                                ServerCommandSource source,
+                                                UUID recipientUuid,
+                                                boolean botSender,
+                                                List<String> messageParts,
+                                                int partIndex,
+                                                boolean withDelay) {
         if (partIndex >= messageParts.size()) {
             // All parts have been sent, stop the recursion.
             return;
         }
 
         // Send the current message part.
-        sendSingleMessage(server, source, messageParts.get(partIndex), partIndex);
+        sendSingleMessage(server, source, recipientUuid, botSender, messageParts.get(partIndex), partIndex);
 
         // Schedule the next part if there are more to send and a delay is requested.
         if (withDelay && partIndex < messageParts.size() - 1) {
             CHAT_DELAY_EXECUTOR.schedule(
-                    () -> server.execute(() -> scheduleAndSendMessages(server, source, messageParts, partIndex + 1, true)),
+                    () -> server.execute(() -> scheduleAndSendMessages(server, source, recipientUuid, botSender, messageParts, partIndex + 1, true)),
                     MESSAGE_DELAY_MS,
                     TimeUnit.MILLISECONDS
             );
@@ -88,11 +116,30 @@ public class ChatUtils {
     /**
      * Send a single message part to the chat.
      */
-    private static void sendSingleMessage(MinecraftServer server, ServerCommandSource source, String message, int partIndex) {
+    private static void sendSingleMessage(MinecraftServer server,
+                                          ServerCommandSource source,
+                                          UUID recipientUuid,
+                                          boolean botSender,
+                                          String message,
+                                          int partIndex) {
         try {
 
+            if (server == null || recipientUuid == null) {
+                return;
+            }
+            ServerPlayerEntity recipient = server.getPlayerManager().getPlayer(recipientUuid);
+            if (recipient == null || recipient.isRemoved()) {
+                return;
+            }
+
             // Inside sendSingleMessage
-            String sourceName = (source.getPlayer() != null) ? source.getPlayer().getName().getString() : source.getName();
+            String sourceName;
+            try {
+                ServerPlayerEntity p = source.getPlayer();
+                sourceName = (p != null) ? p.getName().getString() : source.getName();
+            } catch (Throwable t) {
+                sourceName = source.getName();
+            }
             String formattedMessage = message;
 
             // Check if the message already starts with the source name.
@@ -100,21 +147,17 @@ public class ChatUtils {
                 formattedMessage = formattedMessage.replace(sourceName + ": ", "");
             }
 
-            // Now use the formattedMessage to build the final colored message.
-            String coloredMessage = formattedMessage;
+            // Now use the formattedMessage to build the final message.
+            String cleanedMessage = stripLegacyFormatting(formattedMessage);
 
             // Play dialogue sound for the first message part only
             // This avoids playing the sound multiple times for split messages
             if (partIndex == 0) {
-                BotDialoguePlayer.tryPlayDialogue(source, coloredMessage);
+                BotDialoguePlayer.tryPlayDialogue(source, cleanedMessage);
             }
 
-            LOGGER.info("Broadcasting message part {}: '{}' from source: {}", partIndex, coloredMessage, sourceName);
-
-            // Using the command manager to send the message
-            CommandUtils.run(source, "say " + coloredMessage);
-
-            LOGGER.debug("Successfully broadcasted message part {}", partIndex);
+            String toSend = botSender ? (sourceName + ": " + cleanedMessage) : cleanedMessage;
+            recipient.sendMessage(Text.literal(toSend), false);
 
         } catch (Exception e) {
             LOGGER.error("Failed to send message part {}: {}", partIndex, e.getMessage(), e);
@@ -140,16 +183,75 @@ public class ChatUtils {
             return;
         }
 
+        Recipient recipient = resolveRecipientForSystem(server, source);
+        if (recipient == null) {
+            LOGGER.warn("No recipient resolved for system message; dropping: '{}'", message);
+            return;
+        }
+
+        LOGGER.info("System routed: botSender={} bot={} -> recipient={}",
+            recipient.botSender,
+            recipient.bot != null ? recipient.bot.getName().getString() : "(none)",
+            recipient.player != null ? recipient.player.getName().getString() : "(null)");
+
         // Execute immediately on the server thread to prevent threading issues.
         server.execute(() -> {
             try {
-                Text textComponent = Text.literal("§7" + message); // Gray color for system messages
-                CommandUtils.run(source.withSilent(), "say " + textComponent.getString());
-                LOGGER.debug("Successfully sent system message");
+                ServerPlayerEntity player = server.getPlayerManager().getPlayer(recipient.playerUuid);
+                if (player == null || player.isRemoved()) {
+                    return;
+                }
+                String cleaned = stripLegacyFormatting(message.trim());
+                String prefix = recipient.botSender && recipient.bot != null
+                        ? (recipient.bot.getName().getString() + ": ")
+                        : "";
+                player.sendMessage(Text.literal(prefix + cleaned).formatted(Formatting.GRAY), false);
             } catch (Exception e) {
                 LOGGER.error("Failed to send system message: {}", e.getMessage(), e);
             }
         });
+    }
+
+    private static Recipient resolveRecipientForDialogue(MinecraftServer server, ServerCommandSource source) {
+        if (server == null || source == null) {
+            return null;
+        }
+        ServerPlayerEntity player = null;
+        try {
+            player = source.getPlayer();
+        } catch (Throwable ignored) {
+        }
+
+        if (player != null && BotEventHandler.isRegisteredBot(player)) {
+            ServerPlayerEntity controller = CompanionCommunicationPolicy.resolveController(server, player);
+            if (controller == null || controller.isRemoved()) {
+                return null;
+            }
+            return new Recipient(controller.getUuid(), controller, true, player);
+        }
+
+        // Non-bot: send back to the issuing player (direct/private).
+        if (player != null && !player.isRemoved()) {
+            return new Recipient(player.getUuid(), player, false, null);
+        }
+
+        return null;
+    }
+
+    private static Recipient resolveRecipientForSystem(MinecraftServer server, ServerCommandSource source) {
+        // For now, same routing as dialogue, but without gating.
+        return resolveRecipientForDialogue(server, source);
+    }
+
+    private static String stripLegacyFormatting(String s) {
+        if (s == null || s.isEmpty()) {
+            return "";
+        }
+        // Strip legacy section-sign formatting codes (e.g., §a, §c, §l).
+        return s.replaceAll("§[0-9A-FK-ORa-fk-or]", "");
+    }
+
+    private record Recipient(UUID playerUuid, ServerPlayerEntity player, boolean botSender, ServerPlayerEntity bot) {
     }
 
     /**

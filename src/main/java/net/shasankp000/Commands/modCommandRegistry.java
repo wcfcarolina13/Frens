@@ -38,6 +38,7 @@ import net.minecraft.util.math.Vec2f;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.GameMode;
 import net.minecraft.world.World;
+import net.shasankp000.items.ModItems;
 import net.minecraft.sound.SoundEvent;
 import net.shasankp000.ChatUtils.BotDialoguePlayer;
 import net.shasankp000.ChatUtils.BotDialogueSounds;
@@ -135,7 +136,7 @@ public class modCommandRegistry {
     public static String botName = "";
     public static final Logger LOGGER = LoggerFactory.getLogger("mod-command-registry");
 
-    // Eye-of-Ender access is intentionally limited: it has a cooldown and does NOT represent a full "Spellbook" unlock.
+    // Eye-of-Ender access is intentionally limited: it has a cooldown and does NOT represent a full Wizard's Tome unlock.
     private static final long COMPANION_EYE_SPELL_COOLDOWN_TICKS = 20L * 60L; // 60s
     private static final Map<UUID, Long> COMPANION_EYE_SPELL_LAST_TICK = new ConcurrentHashMap<>();
 
@@ -217,6 +218,16 @@ public class modCommandRegistry {
                                                     ChatUtils.sendSystemMessage(context.getSource(), msg);
                                                     return 1;
                                                 })
+                                // Operator helper: quickly give yourself the Wizard's Tome quest item.
+                                .then(literal("wizard_tome")
+                                        .executes(context -> executeGiveWizardTome(context.getSource(), 1))
+                                        .then(CommandManager.argument("amount", IntegerArgumentType.integer(1, 64))
+                                                .executes(context -> executeGiveWizardTome(
+                                                        context.getSource(),
+                                                        IntegerArgumentType.getInteger(context, "amount")
+                                                ))
+                                        )
+                                )
                                             )
                                             .then(literal("clear")
                                                 .executes(context -> {
@@ -2561,7 +2572,8 @@ public class modCommandRegistry {
 
     private static int executeFollow(CommandContext<ServerCommandSource> context, ServerPlayerEntity bot, ServerPlayerEntity target) {
         interruptAmbientHobbyIfAny(bot, "§cInterrupted by /bot follow.");
-        BotEventHandler.setFollowMode(bot, target);
+        // Commands already emit a system summary; avoid redundant bot-authored chat acks.
+        BotEventHandler.setFollowMode(bot, target, false);
         return 1;
     }
 
@@ -3154,7 +3166,7 @@ public class modCommandRegistry {
         }
 
         if (!canUseCompanionCome(server, commander, st)) {
-            ChatUtils.sendSystemMessage(source, "To call your companion, cast the spell at an Enchanting Table (or use your Spellbook / Goat Horn)." );
+            ChatUtils.sendSystemMessage(source, "To call your companion, cast the spell at an Enchanting Table (or use your Wizard's Tome / Goat Horn)." );
             return 0;
         }
 
@@ -3231,7 +3243,7 @@ public class modCommandRegistry {
         }
 
         if (!canUseCompanionSummon(server, commander, st)) {
-            ChatUtils.sendSystemMessage(source, "To summon your companion, cast the spell at an Enchanting Table (or use your Spellbook), or carry an Eye of Ender (cooldown)." );
+            ChatUtils.sendSystemMessage(source, "To summon your companion, cast the spell at an Enchanting Table (or use your Wizard's Tome), or carry an Eye of Ender (cooldown)." );
             return 0;
         }
 
@@ -3344,7 +3356,7 @@ public class modCommandRegistry {
         }
 
         if (!canUseCompanionHome(server, commander, st)) {
-            ChatUtils.sendSystemMessage(source, "To send your companion home, cast the spell at an Enchanting Table (or use your Spellbook)." );
+            ChatUtils.sendSystemMessage(source, "To send your companion home, cast the spell at an Enchanting Table (or use your Wizard's Tome)." );
             return 0;
         }
 
@@ -3501,15 +3513,54 @@ public class modCommandRegistry {
             if (stack == null || stack.isEmpty()) {
                 continue;
             }
+            if (stack.isOf(ModItems.WIZARD_TOME)) {
+                return true;
+            }
             if (!(stack.isOf(Items.WRITTEN_BOOK) || stack.isOf(Items.ENCHANTED_BOOK))) {
                 continue;
             }
             String name = stack.getName() != null ? stack.getName().getString() : "";
-            if (name != null && name.toLowerCase(Locale.ROOT).contains("spellbook")) {
+            String lower = name != null ? name.toLowerCase(Locale.ROOT) : "";
+            if (lower.contains("spellbook")) {
+                return true;
+            }
+            if (lower.contains("wizard") && lower.contains("tome")) {
                 return true;
             }
         }
         return false;
+    }
+
+    private static int executeGiveWizardTome(ServerCommandSource source, int amount) {
+        if (source == null) {
+            return 0;
+        }
+        if (!net.shasankp000.AIPlayer.isOperator(source)) {
+            ChatUtils.sendSystemMessage(source, "Operator-only command.");
+            return 0;
+        }
+
+        ServerPlayerEntity player;
+        try {
+            player = source.getPlayer();
+        } catch (Exception e) {
+            player = null;
+        }
+        if (player == null) {
+            ChatUtils.sendSystemMessage(source, "Only players can receive items.");
+            return 0;
+        }
+
+        int n = Math.max(1, Math.min(64, amount));
+        for (int i = 0; i < n; i++) {
+            ItemStack stack = new ItemStack(ModItems.WIZARD_TOME);
+            boolean inserted = player.getInventory().insertStack(stack);
+            if (!inserted && !stack.isEmpty()) {
+                player.dropItem(stack, false);
+            }
+        }
+        ChatUtils.sendSystemMessage(source, "Gave Wizard's Tome x" + n + ".");
+        return 1;
     }
 
     private static boolean isNearCompanionAnchor(MinecraftServer server, ServerPlayerEntity commander, ManualConfig.SurvivalRecruitmentState st, double maxDist) {
@@ -3755,7 +3806,8 @@ public class modCommandRegistry {
 
     private static int executeFollowStop(CommandContext<ServerCommandSource> context, ServerPlayerEntity bot) {
         interruptAmbientHobbyIfAny(bot, "§cInterrupted by /bot follow stop.");
-        BotEventHandler.stopFollowing(bot);
+        // Commands already emit a system summary; avoid redundant bot-authored chat acks.
+        BotEventHandler.stopFollowing(bot, false);
         return 1;
     }
 
@@ -5062,9 +5114,9 @@ public class modCommandRegistry {
             boolean isFollowingTarget = BotEventHandler.getCurrentMode(bot) == BotEventHandler.Mode.FOLLOW
                     && followTarget.getUuid().equals(BotEventHandler.getFollowTargetUuid(bot));
             if (isFollowingTarget) {
-                BotEventHandler.stopFollowing(bot);
+                BotEventHandler.stopFollowing(bot, false);
             } else {
-                BotEventHandler.setFollowMode(bot, followTarget);
+                BotEventHandler.setFollowMode(bot, followTarget, false);
                 turnedOn++;
             }
             successes++;

@@ -1632,6 +1632,9 @@ public final class MovementService {
         LEAF_MINE_TARGET.put(id, leafPos.toImmutable());
         selectHarmlessForLeaves(bot);
 
+        // UX: when foliage is actually blocking us, show a short overhead line (not chat).
+        CompanionOverheadDialogueService.tryShowLeafStuck(bot, label);
+
         LOGGER.debug("leaf-mine start [{}]: bot={} pos={}",
                 label,
                 bot.getName().getString(),
@@ -1721,8 +1724,10 @@ public final class MovementService {
             return false;
         }
 
+        boolean leafInPath = hasLeafInImmediatePath(world, player.getBlockPos(), toward);
+
         // First try a non-destructive "route around" nudge. This is safe to run even on the server thread.
-        if (hasLeafInImmediatePath(world, player.getBlockPos(), toward) && tryLeafBypassInputStep(player, toward)) {
+        if (leafInPath && tryLeafBypassInputStep(player, toward)) {
             return true;
         }
 
@@ -1733,6 +1738,12 @@ public final class MovementService {
                 continue;
             }
             return startLeafMining(player, leaf, "clearLeafObstruction");
+        }
+
+        // Leaves are present in the immediate collision space, but we couldn't clear them (persistent/unreachable).
+        // Emit an overhead hint so it doesn't feel like silent failure.
+        if (leafInPath) {
+            CompanionOverheadDialogueService.tryShowLeafStuck(player, "clearLeafObstruction-noClear");
         }
         return false;
     }

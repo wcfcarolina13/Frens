@@ -4,5 +4,6 @@
   "key.ai-player.resume": "Frens: Resume (pending)",
   "key.ai-player.stop_look": "Frens: Stop (look target)",
   "key.ai-player.leash": "Frens: Tie Lead to Fence",
-  "key.ai-player.recruit_contact": "Frens: Initiate Contact (village)"
+  "key.ai-player.recruit_contact": "Frens: Initiate Contact (village)",
+  "item.ai-player.wizard_tome": "Wizard's Tome"
 }

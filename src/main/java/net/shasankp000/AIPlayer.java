@@ -75,6 +75,7 @@ import net.minecraft.util.Identifier;
 import net.minecraft.registry.Registry;
 import net.minecraft.registry.Registries;
 import net.minecraft.resource.featuretoggle.FeatureFlags;
+import net.shasankp000.items.ModItems;
 
 public class AIPlayer implements ModInitializer {
 
@@ -140,6 +141,9 @@ public class AIPlayer implements ModInitializer {
 
         // Register bot dialogue sound events
         net.shasankp000.ChatUtils.BotDialogueSounds.registerAll();
+
+        // Register mod items
+        ModItems.registerAll();
 
         UseEntityCallback.EVENT.register((player, world, hand, entity, hit) -> {
             if (world.isClient()) return net.minecraft.util.ActionResult.PASS;
@@ -207,6 +211,15 @@ public class AIPlayer implements ModInitializer {
                         } else if (state.isIn(net.minecraft.registry.tag.BlockTags.BEDS)) {
                             net.shasankp000.GameAI.services.SurvivalRecruitmentService.notePlayerInteraction(serverPlayer, "bed");
                         }
+
+                        // Wizard's Tome ritual: sneak-right-click Enchanting Table in The End with Eye of Ender.
+                        if (state.isOf(net.minecraft.block.Blocks.ENCHANTING_TABLE)) {
+                            net.minecraft.util.ActionResult tome = net.shasankp000.GameAI.services.WizardTomeCraftingService
+                                    .tryHandleUseBlock(serverPlayer, serverWorld, hand, pos);
+                            if (tome != net.minecraft.util.ActionResult.PASS) {
+                                return tome;
+                            }
+                        }
                     }
                 } catch (Throwable ignored) {
                     // Best effort only.
@@ -253,6 +266,9 @@ public class AIPlayer implements ModInitializer {
         PayloadTypeRegistry.playS2C().register(net.shasankp000.network.ResumeDecisionPayload.ID, net.shasankp000.network.ResumeDecisionPayload.CODEC);
         PayloadTypeRegistry.playC2S().register(net.shasankp000.network.RequestHuntablesPayload.ID, net.shasankp000.network.RequestHuntablesPayload.CODEC);
         PayloadTypeRegistry.playS2C().register(net.shasankp000.network.HuntablesPayload.ID, net.shasankp000.network.HuntablesPayload.CODEC);
+
+        // Overhead companion dialogue (non-chat).
+        PayloadTypeRegistry.playS2C().register(net.shasankp000.network.CompanionOverheadLinePayload.ID, net.shasankp000.network.CompanionOverheadLinePayload.CODEC);
 
         // Survival recruitment (find village -> recruit bot) payloads.
         PayloadTypeRegistry.playS2C().register(RecruitmentPromptPayload.ID, RecruitmentPromptPayload.CODEC);
@@ -514,6 +530,8 @@ public class AIPlayer implements ModInitializer {
         ServerTickEvents.END_SERVER_TICK.register(BotQuestService::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(net.shasankp000.GameAI.services.RideSyncService::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(net.shasankp000.GameAI.services.BotCombatCalloutService::onServerTick);
+        ServerTickEvents.END_SERVER_TICK.register(net.shasankp000.GameAI.services.CompanionOverheadHologramService::onServerTick);
+        ServerTickEvents.END_SERVER_TICK.register(net.shasankp000.GameAI.services.SweetBerryBushReactionService::onServerTick);
 
         ServerMessageEvents.CHAT_MESSAGE.register((message, sender, params) -> {
             String raw = message.getContent().getString();

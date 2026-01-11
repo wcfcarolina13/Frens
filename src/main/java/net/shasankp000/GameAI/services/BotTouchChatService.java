@@ -4,7 +4,7 @@ import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
 import net.shasankp000.ChatUtils.BotMoodManager;
-import net.shasankp000.ChatUtils.ChatUtils;
+import net.shasankp000.ChatUtils.BotDialoguePlayer;
 import net.shasankp000.ChatUtils.EmotionalState;
 import net.shasankp000.GameAI.BotEventHandler;
 import java.util.Locale;
@@ -46,11 +46,11 @@ public final class BotTouchChatService {
             return false;
         }
 
-        ChatUtils.sendChatMessages(
-                bot.getCommandSource().withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS),
-                msg,
-                true
-        );
+        // Touch lines are flavor; keep them out of the chat box and show them overhead instead.
+        // (Audio/subtitles still play via BotDialoguePlayer.)
+        var botSource = bot.getCommandSource().withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS);
+        BotDialoguePlayer.tryPlayDialogue(botSource, msg);
+        CompanionOverheadDialogueService.showOverheadLine(bot, msg, 2_800, 24.0D, "touch", null);
         return true;
     }
 

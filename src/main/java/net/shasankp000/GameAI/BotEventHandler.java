@@ -1173,6 +1173,14 @@ public class BotEventHandler {
     }
 
     public static String setFollowMode(ServerPlayerEntity bot, ServerPlayerEntity target) {
+        return setFollowMode(bot, target, true);
+    }
+
+    /**
+     * @param announce Whether to send a bot-authored chat acknowledgement (use false for commands
+     *                 that already emit a system summary to avoid redundant messages).
+     */
+    public static String setFollowMode(ServerPlayerEntity bot, ServerPlayerEntity target, boolean announce) {
         if (isExternalOverrideActive()) {
             sendBotMessage(bot, "Busy with another task right now.");
             return "Bot is busy executing another task. Try again after it finishes.";
@@ -1202,7 +1210,9 @@ public class BotEventHandler {
         FollowStateService.clearPlanning(id);
         FollowDebugService.clear(id);
         requestFollowPathPlan(bot, target, true, "follow-start");
-        sendBotMessage(bot, "Following " + target.getName().getString() + ".");
+        if (announce) {
+            sendBotMessage(bot, "Following " + target.getName().getString() + ".");
+        }
         return "Now following " + target.getName().getString() + ".";
     }
 
@@ -1280,6 +1290,14 @@ public class BotEventHandler {
     }
 
     public static String stopFollowing(ServerPlayerEntity bot) {
+        return stopFollowing(bot, true);
+    }
+
+    /**
+     * @param announce Whether to send a bot-authored chat acknowledgement (use false for commands
+     *                 that already emit a system summary to avoid redundant messages).
+     */
+    public static String stopFollowing(ServerPlayerEntity bot, boolean announce) {
         if (bot != null) {
             registerBot(bot);
         }
@@ -1303,11 +1321,17 @@ public class BotEventHandler {
             state.comeNextSkillTick = 0L;
             state.comeAllowRecoverySkills = true;
         }
+
+        // IMPORTANT: return-to-base uses FOLLOW mode with baseTarget + followFixedGoal.
+        // Clearing followFixedGoal alone is not enough in some edge cases (UI/handlers may still
+        // treat baseTarget as a pending home intent). A stop/follow-stop should cancel BOTH.
+        clearBase(bot);
         if (bot != null) {
             BotActions.stop(bot);
         }
         setMode(bot, Mode.IDLE);
-        setAssistAllies(bot, true);        if (bot != null && wasFollowing) {
+        setAssistAllies(bot, true);
+        if (announce && bot != null && wasFollowing) {
             sendBotMessage(bot, "Stopping follow command.");
         }
         return wasFollowing ? "Bot stopped following." : "Bot is not currently following anyone.";

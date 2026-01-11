@@ -19,6 +19,7 @@ import net.minecraft.util.Identifier;
 import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.BlockPos;
 import net.shasankp000.AIPlayer;
+import net.shasankp000.items.ModItems;
 import net.shasankp000.FilingSystem.ManualConfig;
 import net.shasankp000.network.CompanionQuestStateRequestPayload;
 import net.shasankp000.network.CompanionQuestTopicPayload;
@@ -42,6 +43,14 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
     // Row height must comfortably fit the font + padding; 10px is too tight and causes visual overlap.
     private static final int TOPIC_ROW_HEIGHT = 12;
     private static final int TOPIC_CONTROL_GAP = 2;
+
+    // Collapsed (shared inventory) quick-actions grid.
+    private static final String TOPIC_PANEL_TITLE = "Actions";
+    private static final int QUICK_TOPIC_COLS = 3;
+    private static final int QUICK_TOPIC_MAX_ROWS = 2;
+    private static final int QUICK_TOPIC_GAP = 2;
+    private static final int QUICK_TOPIC_MIN_BUTTON_H = 12;
+    private static final float QUICK_TOPIC_TEXT_SCALE = 0.85f;
     private static final double FOLLOW_DISTANCE_STEP = 1.0D;
     private static final double FOLLOW_DISTANCE_MIN = 1.0D;
     private static final double FOLLOW_DISTANCE_MAX = 64.0D;
@@ -207,22 +216,33 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             TopicEntry.skill("TP during Skills", TopicAction.TELEPORT_SKILLS, true, 0),
             TopicEntry.skill("TP during Sweeps", TopicAction.TELEPORT_DROP_SWEEP, true, 0),
             TopicEntry.skill("Drop Sweep", TopicAction.DROP_SWEEP, false, 0),
-            TopicEntry.skill("Bases…", TopicAction.BASES, false, 0),
-            TopicEntry.skill("Crafting…", TopicAction.CRAFTING, false, 0),
-            TopicEntry.skill("Construction…", TopicAction.CONSTRUCTION, false, 0),
-            TopicEntry.skill("Cooking…", TopicAction.COOKING, false, 0),
-            TopicEntry.skill("Hunting…", TopicAction.HUNTING, false, 0),
+            TopicEntry.skill("Bases >", TopicAction.BASES, false, 0),
+            TopicEntry.skill("Crafting >", TopicAction.CRAFTING, false, 0),
+            TopicEntry.skill("Construction >", TopicAction.CONSTRUCTION, false, 0),
+            TopicEntry.skill("Cooking >", TopicAction.COOKING, false, 0),
+            TopicEntry.skill("Hunting >", TopicAction.HUNTING, false, 0),
             TopicEntry.skill("Fishing", TopicAction.SKILL_FISH, false, 0),
             TopicEntry.skill("Woodcut", TopicAction.SKILL_WOODCUT, false, 0),
             TopicEntry.skill("Woodcut Cleanup", TopicAction.SKILL_WOODCUT_CLEANUP, false, 1),
             TopicEntry.skill("Wool", TopicAction.SKILL_WOOL, false, 0),
-            TopicEntry.skill("Farming", TopicAction.SKILL_FARM, false, 1),
-            TopicEntry.skill("Collect Dirt", TopicAction.SKILL_COLLECT_DIRT, false, 2),
-            TopicEntry.skill("Mining", TopicAction.SKILL_MINING, false, 1),
-            TopicEntry.skill("Stripmine", TopicAction.SKILL_STRIPMINE, false, 2),
-            TopicEntry.skill("Ascent", TopicAction.SKILL_ASCENT, false, 2),
-            TopicEntry.skill("Descent", TopicAction.SKILL_DESCENT, false, 2)
+            TopicEntry.skill("Farming", TopicAction.SKILL_FARM, false, 0),
+            TopicEntry.skill("Collect Dirt", TopicAction.SKILL_COLLECT_DIRT, false, 1),
+            TopicEntry.skill("Mining", TopicAction.SKILL_MINING, false, 0),
+            TopicEntry.skill("Stripmine", TopicAction.SKILL_STRIPMINE, false, 1),
+            TopicEntry.skill("Ascent", TopicAction.SKILL_ASCENT, false, 1),
+            TopicEntry.skill("Descent", TopicAction.SKILL_DESCENT, false, 1)
     );
+
+            // Curated, non-scroll quick actions for the collapsed panel.
+            // (These are intentionally short labels; the expanded overlay still shows the full list.)
+            private static final List<TopicEntry> QUICK_TOPIC_ENTRIES = List.of(
+                TopicEntry.skill("Stop", TopicAction.STOP, false, 0),
+                TopicEntry.skill("Follow", TopicAction.FOLLOW, true, 0),
+                TopicEntry.skill("Home", TopicAction.RETURN_HOME, true, 0),
+                TopicEntry.skill("Sleep", TopicAction.SLEEP, false, 0),
+                TopicEntry.skill("Guard", TopicAction.GUARD, true, 0),
+                TopicEntry.skill("Resume", TopicAction.RESUME, false, 0)
+            );
 
     // Dialogue/quest topics are intentionally local/scripted: they feed the dialogue panel without
     // triggering bot skills or commands.
@@ -238,15 +258,15 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             TopicEntry.dialogue("Next projects", "village_projects"),
             TopicEntry.dialogue("Your past", "bot_past"),
             TopicEntry.dialogue("A promise", "promise"),
-            TopicEntry.dialogue("Goodbye", "goodbye"),
-            TopicEntry.dialogue("Admin tools", "open_admin")
+            TopicEntry.dialogue("Goodbye", "goodbye")
     );
 
             // Operator-only admin tools for survival recruitment mode.
             private static final List<TopicEntry> ADMIN_TOPIC_ENTRIES = List.of(
                 // Spell-like companion commands earned via questing.
-                // Access is gated (Enchanting Table nearby, or a later-stage Spellbook token).
-                new TopicEntry("Spells…", TopicCategory.ADMIN, TopicAction.OPEN_SPELLS, false, 0, null),
+                // Access is gated (Enchanting Table nearby, or a later-stage Wizard's Tome token).
+                new TopicEntry("Spells >", TopicCategory.ADMIN, TopicAction.OPEN_SPELLS, false, 0, null),
+                TopicEntry.admin("Give Wizard's Tome", "give_wizard_tome"),
                 TopicEntry.admin("Recruit status", "recruit_status"),
                 TopicEntry.admin("Reset recruit", "recruit_reset"),
                 TopicEntry.admin("Enable recruit", "recruit_enable"),
@@ -329,31 +349,101 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
 
         boolean headerHover = isMouseOverTopicsHeader(mouseX, mouseY);
         int headerColor = headerHover || topicsExpanded ? 0xFFFFE08A : 0xFFE6D7A3;
-        context.drawText(this.textRenderer, "Skills", panelX + TOPIC_PADDING, panelY + 2, headerColor, false);
-        String openLabel = topicsExpanded ? "Close" : "Open";
+        context.drawText(this.textRenderer, TOPIC_PANEL_TITLE, panelX + TOPIC_PADDING, panelY + 2, headerColor, false);
+        String openLabel = "Open";
         int openX = panelX + panelWidth - TOPIC_PADDING - this.textRenderer.getWidth(openLabel);
         context.drawText(this.textRenderer, openLabel, openX, panelY + 2, headerColor, false);
         int rowX = panelX + TOPIC_PADDING;
         int rowY = panelY + 2 + this.textRenderer.fontHeight + 1;
         int rowW = panelWidth - TOPIC_PADDING * 2;
         int listHeight = panelHeight - (rowY - panelY);
-        int visibleRows = Math.max(1, listHeight / TOPIC_ROW_HEIGHT);
-        clampSkillScroll(visibleRows);
+        drawQuickTopicGrid(context, rowX, rowY, rowW, listHeight, mouseX, mouseY);
+    }
 
-        for (int i = 0; i < visibleRows; i++) {
-            int entryIndex = skillScrollIndex + i;
-            if (entryIndex >= SKILL_TOPIC_ENTRIES.size()) {
-                break;
-            }
-            TopicEntry entry = SKILL_TOPIC_ENTRIES.get(entryIndex);
-            int currentY = rowY + i * TOPIC_ROW_HEIGHT;
-            if (entry.action == TopicAction.FOLLOW) {
-                drawFollowRow(context, rowX, currentY, rowW, mouseX, mouseY);
-            } else {
-                boolean active = isEntryActive(entry.action);
-                drawTopicRow(context, rowX, currentY, rowW, entry, active, mouseX, mouseY);
-            }
+    private record QuickGridLayout(int cols, int rows, int buttonW, int buttonH, int gap) {}
+
+    private QuickGridLayout computeQuickGridLayout(int w, int h) {
+        int cols = Math.max(1, QUICK_TOPIC_COLS);
+        int gap = Math.max(0, QUICK_TOPIC_GAP);
+        int maxRows = Math.max(1, (int) Math.ceil((double) QUICK_TOPIC_ENTRIES.size() / (double) cols));
+
+        int rows = Math.min(maxRows, Math.max(1, QUICK_TOPIC_MAX_ROWS));
+        int buttonW = (w - gap * (cols - 1)) / cols;
+        int buttonH = (h - gap * (rows - 1)) / rows;
+        if (rows > 1 && buttonH < QUICK_TOPIC_MIN_BUTTON_H) {
+            rows = 1;
+            buttonH = h;
         }
+        return new QuickGridLayout(cols, rows, Math.max(1, buttonW), Math.max(1, buttonH), gap);
+    }
+
+    private void drawQuickTopicGrid(DrawContext context, int x, int y, int w, int h, int mouseX, int mouseY) {
+        if (QUICK_TOPIC_ENTRIES == null || QUICK_TOPIC_ENTRIES.isEmpty() || w <= 0 || h <= 0) {
+            return;
+        }
+
+        QuickGridLayout layout = computeQuickGridLayout(w, h);
+        int cols = layout.cols;
+        int rows = layout.rows;
+        int bw = layout.buttonW;
+        int bh = layout.buttonH;
+        int gap = layout.gap;
+
+        int maxButtons = Math.min(QUICK_TOPIC_ENTRIES.size(), cols * rows);
+        for (int i = 0; i < maxButtons; i++) {
+            int r = i / cols;
+            int c = i % cols;
+            int bx = x + c * (bw + gap);
+            int by = y + r * (bh + gap);
+            TopicEntry entry = QUICK_TOPIC_ENTRIES.get(i);
+            boolean active = entry.action != null && isEntryActive(entry.action);
+            drawQuickTopicButton(context, bx, by, bw, bh, entry, active, mouseX, mouseY);
+        }
+    }
+
+    private void drawQuickTopicButton(DrawContext context, int x, int y, int w, int h, TopicEntry entry,
+                                      boolean active, int mouseX, int mouseY) {
+        if (entry == null) {
+            return;
+        }
+        boolean enabled = entry.action == null || isEntryEnabled(entry.action);
+        boolean hover = mouseX >= x && mouseX < x + w && mouseY >= y && mouseY < y + h;
+
+        int fillBase = active ? 0xFF3A2C14 : 0xFF1A1A1A;
+        int fill = hover ? (active ? 0xFF4A3720 : 0xFF2A2A2A) : fillBase;
+        if (!enabled) {
+            fill = 0xFF151515;
+        }
+
+        int border = 0xFF000000;
+        context.fill(x, y, x + w, y + h, fill);
+        context.fill(x, y, x + w, y + 1, border);
+        context.fill(x, y + h - 1, x + w, y + h, border);
+        context.fill(x, y, x + 1, y + h, border);
+        context.fill(x + w - 1, y, x + w, y + h, border);
+
+        String label = entry.label != null ? entry.label : "";
+        int maxTextW = Math.max(1, (int) ((w - 6) / QUICK_TOPIC_TEXT_SCALE));
+        String drawn = elideToWidth(label, maxTextW);
+        int textColor = enabled ? COLOR_TEXT_PARCHMENT : COLOR_TEXT_DISABLED;
+        int textW = this.textRenderer.getWidth(drawn);
+        int drawX = x + Math.max(2, (w - Math.round(textW * QUICK_TOPIC_TEXT_SCALE)) / 2);
+        int drawY = y + Math.max(1, (h - Math.round(this.textRenderer.fontHeight * QUICK_TOPIC_TEXT_SCALE)) / 2);
+        drawScaledText(context, drawn, drawX, drawY, textColor, false, QUICK_TOPIC_TEXT_SCALE);
+    }
+
+    private void drawScaledText(DrawContext context, String text, int x, int y, int color, boolean shadow, float scale) {
+        if (text == null || text.isBlank()) {
+            return;
+        }
+        float s = Math.max(0.1f, scale);
+        var matrices = context.getMatrices();
+        matrices.pushMatrix();
+        matrices.scale(s, s);
+        int sx = (int) Math.floor(x / (double) s);
+        int sy = (int) Math.floor(y / (double) s);
+        context.drawText(this.textRenderer, text, sx, sy, color, shadow);
+        matrices.popMatrix();
     }
 
     private Rect computeTopicsOverlayRect() {
@@ -462,11 +552,6 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         context.drawText(this.textRenderer, hint, r.x + TOPICS_OVERLAY_PADDING, footerY + TOPICS_OVERLAY_FOOTER_PAD, 0xFFB0B0B0, false);
 
         // Content region (two columns).
-        int contentX = r.x + TOPICS_OVERLAY_PADDING;
-        int contentY = r.y + headerH + 2;
-        int contentW = r.w - TOPICS_OVERLAY_PADDING * 2;
-        int contentH = (footerY - 2) - contentY;
-
         OverlayColumns cols = computeOverlayColumns(r);
 
         // Dialogue column.
@@ -498,7 +583,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         int skillsTabX = listX + 2;
         int dialogueTabX = skillsTabX + tabW + tabGap;
         int adminTabX = dialogueTabX + tabW + tabGap;
-        drawOverlayTab(context, skillsTabX, tabY, tabW, tabH, "Skills", overlayCategory == TopicCategory.SKILL, true);
+        drawOverlayTab(context, skillsTabX, tabY, tabW, tabH, TOPIC_PANEL_TITLE, overlayCategory == TopicCategory.SKILL, true);
         drawOverlayTab(context, dialogueTabX, tabY, tabW, tabH, "Dialogue", overlayCategory == TopicCategory.DIALOGUE, true);
         drawOverlayTab(context, adminTabX, tabY, tabW, tabH, "Admin", overlayCategory == TopicCategory.ADMIN, isAdminTabEnabled());
 
@@ -973,7 +1058,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
                 if (nearTable || hasBook) {
                     return java.util.List.of(
                             "Spells",
-                            "Full access: Enchanting Table (4 blocks) or Spellbook token.",
+                            "Full access: Enchanting Table (4 blocks) or Wizard's Tome.",
                             "Eye of Ender can also open (Summon-only; cooldown)."
                     );
                 }
@@ -982,18 +1067,25 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
                     return java.util.List.of(
                             "Spells",
                             "Eye of Ender: limited access (Summon-only; cooldown).",
-                            "Full access: Enchanting Table nearby (4 blocks) or Spellbook token."
+                        "Full access: Enchanting Table nearby (4 blocks) or Wizard's Tome."
                     );
                 }
                 return java.util.List.of(
                         "Spells",
                         "Requires: Enchanting Table nearby (4 blocks)",
-                        "or a Spellbook token (renamed Written/Enchanted Book containing 'Spellbook').",
+                    "or a Wizard's Tome.",
                         "(Also: Eye of Ender for limited Summon-only access; cooldown applies.)"
                 );
             }
 
             String k = entry.dialogueKey == null ? "" : entry.dialogueKey.trim().toLowerCase(Locale.ROOT);
+            if (k.equals("give_wizard_tome")) {
+                return java.util.List.of(
+                        "Give Wizard's Tome",
+                        "Operator-only: grants you the Wizard's Tome quest item.",
+                        "Equivalent to: /bot wizard_tome"
+                );
+            }
             if (k.equals("recruit_status")) {
                 return java.util.List.of("Recruitment status", "Shows current survival recruitment state.");
             }
@@ -1151,11 +1243,6 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             return true;
         }
 
-        // UI-only entry: opens operator tools.
-        if (k.equals("open_admin")) {
-            return isAdminUser();
-        }
-
         // Core quest topics are only meaningful after recruitment.
         if (k.equals("companion_status") || k.equals("companion_check") || k.equals("companion_anchor_set")
                 || k.equals("village_missing") || k.equals("village_projects")) {
@@ -1182,9 +1269,9 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
     private String formatFollowDistance() {
         double value = getFollowDistance();
         if (value <= 0.0D) {
-            return "D--";
+            return "Distance --";
         }
-        return "D" + String.format(Locale.ROOT, "%.1f", value);
+        return "Distance " + String.format(Locale.ROOT, "%.1f", value);
     }
 
     @Override
@@ -1202,11 +1289,6 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
 
         if (isMouseOverTopicsHeader(click.x(), click.y())) {
             toggleTopicsExpanded(true);
-            return true;
-        }
-        int adjust = getFollowAdjustDirection(click.x(), click.y());
-        if (adjust != 0) {
-            adjustFollowDistance(adjust);
             return true;
         }
         TopicEntry entry = getTopicEntryAt(click.x(), click.y());
@@ -1261,19 +1343,6 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             }
             return true;
         }
-        if (isMouseOverTopicPanel(mouseX, mouseY)) {
-            int listHeight = getTopicListHeight();
-            int visibleRows = Math.max(1, listHeight / TOPIC_ROW_HEIGHT);
-            int maxScroll = Math.max(0, SKILL_TOPIC_ENTRIES.size() - visibleRows);
-            if (maxScroll == 0) {
-                return false;
-            }
-            int delta = verticalAmount > 0 ? -1 : (verticalAmount < 0 ? 1 : 0);
-            if (delta != 0) {
-                skillScrollIndex = MathHelper.clamp(skillScrollIndex + delta, 0, maxScroll);
-                return true;
-            }
-        }
         return super.mouseScrolled(mouseX, mouseY, horizontalAmount, verticalAmount);
     }
 
@@ -1290,55 +1359,40 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         if (!isMouseOverTopicPanel(mouseX, mouseY)) {
             return null;
         }
-        int rowX = getTopicRowX();
-        int rowY = getTopicListTop();
-        int rowW = getTopicRowWidth();
-        int listHeight = getTopicListHeight();
-        int visibleRows = Math.max(1, listHeight / TOPIC_ROW_HEIGHT);
-        clampSkillScroll(visibleRows);
-        if (mouseX < rowX || mouseX >= rowX + rowW || mouseY < rowY || mouseY >= rowY + listHeight) {
+        int gridX = getTopicRowX();
+        int gridY = getTopicListTop();
+        int gridW = getTopicRowWidth();
+        int gridH = getTopicListHeight();
+        if (mouseX < gridX || mouseX >= gridX + gridW || mouseY < gridY || mouseY >= gridY + gridH) {
             return null;
         }
-        int rowIndex = (int) ((mouseY - rowY) / TOPIC_ROW_HEIGHT);
-        if (rowIndex < 0 || rowIndex >= visibleRows) {
+
+        QuickGridLayout layout = computeQuickGridLayout(gridW, gridH);
+        int cols = layout.cols;
+        int rows = layout.rows;
+        int bw = layout.buttonW;
+        int bh = layout.buttonH;
+        int gap = layout.gap;
+
+        int col = (int) ((mouseX - gridX) / (bw + gap));
+        int row = (int) ((mouseY - gridY) / (bh + gap));
+        if (col < 0 || col >= cols || row < 0 || row >= rows) {
             return null;
         }
-        int entryIndex = skillScrollIndex + rowIndex;
-        if (entryIndex < 0 || entryIndex >= SKILL_TOPIC_ENTRIES.size()) {
+        int cellX = gridX + col * (bw + gap);
+        int cellY = gridY + row * (bh + gap);
+        if (mouseX >= cellX + bw || mouseY >= cellY + bh) {
+            // Click landed in the gap between buttons.
             return null;
         }
-        return SKILL_TOPIC_ENTRIES.get(entryIndex);
+        int index = row * cols + col;
+        int maxButtons = Math.min(QUICK_TOPIC_ENTRIES.size(), cols * rows);
+        if (index < 0 || index >= maxButtons) {
+            return null;
+        }
+        return QUICK_TOPIC_ENTRIES.get(index);
     }
 
-    private int getFollowAdjustDirection(double mouseX, double mouseY) {
-        int followIndex = getFollowEntryIndex();
-        int listHeight = getTopicListHeight();
-        int visibleRows = Math.max(1, listHeight / TOPIC_ROW_HEIGHT);
-        clampSkillScroll(visibleRows);
-        int visibleStart = skillScrollIndex;
-        int visibleEnd = skillScrollIndex + visibleRows;
-        if (followIndex < visibleStart || followIndex >= visibleEnd) {
-            return 0;
-        }
-
-        int rowX = getTopicRowX();
-        int rowY = getTopicListTop() + (followIndex - visibleStart) * TOPIC_ROW_HEIGHT;
-        int rowW = getTopicRowWidth();
-        int controlSize = TOPIC_ROW_HEIGHT - 2;
-        int controlY = rowY + 1;
-        int plusX = rowX + rowW - controlSize;
-        int minusX = plusX - TOPIC_CONTROL_GAP - controlSize;
-
-        if (mouseY >= controlY && mouseY < controlY + controlSize) {
-            if (mouseX >= plusX && mouseX < plusX + controlSize) {
-                return 1;
-            }
-            if (mouseX >= minusX && mouseX < minusX + controlSize) {
-                return -1;
-            }
-        }
-        return 0;
-    }
 
     private int getFollowEntryIndex() {
         for (int i = 0; i < SKILL_TOPIC_ENTRIES.size(); i++) {
@@ -1453,7 +1507,6 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case "goodbye" -> "Goodbye.";
             case "recruit_contact" -> "Can we talk?";
             case "recruit_replay" -> "Let's start over.";
-            case "open_admin" -> "Show me the admin tools.";
             default -> fallbackLabel;
         };
     }
@@ -1482,17 +1535,6 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
                 net.shasankp000.AIPlayerClient.appendDialogue(botAlias, "You: Let's start over.");
             } else {
                 net.shasankp000.AIPlayerClient.appendDialogue(botAlias, "... (not connected)");
-            }
-            return;
-        }
-
-        // UI-only: open admin tools (no bot dialogue).
-        if (normalized.equals("open_admin")) {
-            overlayCategory = TopicCategory.ADMIN;
-            if (isAdminUser()) {
-                handleAdminTopic("recruit_status");
-            } else {
-                net.shasankp000.AIPlayerClient.appendDialogue(botAlias, "Admin: operator-only tools are locked.");
             }
             return;
         }
@@ -1573,7 +1615,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         if (client == null || client.player == null) {
             return false;
         }
-        // Spells are normally cast at an Enchanting Table. A later-stage quest reward (Spellbook)
+        // Spells are normally cast at an Enchanting Table. A later-stage quest reward (Wizard's Tome)
         // can allow access anywhere. An Eye of Ender can grant limited, cooldown-gated access.
         return isNearEnchantingTable(client, 4) || hasSpellbookToken(client) || hasEyeOfEnderToken(client);
     }
@@ -1622,8 +1664,8 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         if (client == null || client.player == null) {
             return false;
         }
-        // Minimal, no-new-item approach: a Written Book (or Enchanted Book) renamed to include "Spellbook".
-        // This can later be swapped to a dedicated mod item.
+        // Preferred token: the dedicated quest item Wizard's Tome.
+        // Back-compat: older builds used a renamed book token containing "spellbook".
         var inv = client.player.getInventory();
         int n = inv.size();
         for (int i = 0; i < n; i++) {
@@ -1631,11 +1673,18 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             if (stack == null || stack.isEmpty()) {
                 continue;
             }
+            if (stack.isOf(ModItems.WIZARD_TOME)) {
+                return true;
+            }
             if (!(stack.isOf(Items.WRITTEN_BOOK) || stack.isOf(Items.ENCHANTED_BOOK))) {
                 continue;
             }
             String name = stack.getName() != null ? stack.getName().getString() : "";
-            if (name != null && name.toLowerCase(Locale.ROOT).contains("spellbook")) {
+            String lower = name != null ? name.toLowerCase(Locale.ROOT) : "";
+            if (lower.contains("spellbook")) {
+                return true;
+            }
+            if (lower.contains("wizard") && lower.contains("tome")) {
                 return true;
             }
         }
@@ -1661,6 +1710,12 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         MinecraftClient client = MinecraftClient.getInstance();
         if (client == null || client.getNetworkHandler() == null) {
             net.shasankp000.AIPlayerClient.appendDialogue(botAlias, "Admin: not connected.");
+            return;
+        }
+
+        // Non-recruitment admin convenience actions.
+        if (k.equals("give_wizard_tome")) {
+            sendChatCommand("bot wizard_tome");
             return;
         }
 
@@ -1735,7 +1790,8 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
 
     private boolean isEntryEnabled(TopicAction action) {
         return switch (action) {
-            case STOP -> (this.handler != null && this.handler.isBotTaskActive() && !this.handler.isBotTaskPaused()) || net.shasankp000.AIPlayerClient.hasPendingShelter();
+            // Stop should always be available (e.g., cancel return-to-base, follow, guard/patrol, etc.).
+            case STOP -> true;
             case RESUME -> this.handler != null && this.handler.isBotTaskPaused();
             default -> true;
         };
@@ -1807,10 +1863,6 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         return getTopicPanelHeight() - (getTopicListTop() - getTopicPanelY());
     }
 
-    private void clampSkillScroll(int visibleRows) {
-        int maxScroll = Math.max(0, SKILL_TOPIC_ENTRIES.size() - visibleRows);
-        skillScrollIndex = MathHelper.clamp(skillScrollIndex, 0, maxScroll);
-    }
 
     private List<TopicEntry> getOverlayEntries() {
         return switch (overlayCategory) {

@@ -5,7 +5,6 @@ import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.World;
-import net.shasankp000.ChatUtils.ChatUtils;
 import net.shasankp000.GameAI.BotEventHandler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -145,11 +144,8 @@ public final class BotAmbientSocialChatService {
             return;
         }
         try {
-            ChatUtils.sendChatMessages(
-                    bot.getCommandSource().withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS),
-                    msg,
-                    true
-            );
+            // Overhead nameplate dialogue to avoid chat spam.
+            CompanionOverheadDialogueService.showOverheadLine(bot, msg, 2_800, 24.0D, "ambient-social", null);
         } catch (Throwable t) {
             LOGGER.debug("Failed to send social chat line: {}", t.getMessage());
         }

@@ -21,6 +21,32 @@ These were added after the previous “complete” pass. Code support is in plac
 | `bot.line.craft_recipe_unlocked_5` | `ai-player:dialogue/craft_recipe_unlocked_5__01` | "Another recipe for the book." | ✅ Integrated |
 | `bot.line.craft_recipe_unlocked_6` | `ai-player:dialogue/craft_recipe_unlocked_6__01` | "That might come in handy." | ✅ Integrated |
 
+### Foliage obstruction / "stuck in branches" (new)
+
+These are triggered as **overhead (in-world) companion dialogue** when the bot gets blocked by natural leaves/foliage. (Not currently chat-driven.)
+
+| Sound event id | sounds.json entry (suggested file) | Text | Status |
+|---|---|---|---|
+| `bot.line.foliage_stuck_1` | `ai-player:dialogue/foliage_stuck_these_branches_are_thick__01` | "These branches are thick!" | ❌ Needed |
+| `bot.line.foliage_stuck_2` | `ai-player:dialogue/foliage_stuck_hold_on_stuck_in_branches__01` | "Hold on — stuck in some branches." | ❌ Needed |
+| `bot.line.foliage_stuck_3` | `ai-player:dialogue/foliage_stuck_cant_get_through_these_leaves__01` | "Can't get through these leaves." | ❌ Needed |
+| `bot.line.foliage_stuck_4` | `ai-player:dialogue/foliage_stuck_foliage_got_me__01` | "Just a sec… foliage's got me." | ❌ Needed |
+| `bot.line.foliage_stuck_5` | `ai-player:dialogue/foliage_stuck_ugh_leaves_in_the_way__01` | "Ugh. Leaves in the way." | ❌ Needed |
+
+### Sweet Berry Bush reactions (new)
+
+Triggered as **overhead (in-world) companion dialogue**:
+
+- **Sting**: when the bot walks through/into a Sweet Berry Bush.
+- **Edible** (rare): when the bot is adjacent to Sweet Berry Bushes.
+
+| Sound event id | sounds.json entry (suggested file) | Text | Status |
+|---|---|---|---|
+| `bot.line.berry_bush_sting_1` | `ai-player:dialogue/berry_bush_ouch__01` | "Ouch!" | ❌ Needed |
+| `bot.line.berry_bush_sting_2` | `ai-player:dialogue/berry_bush_these_are_thorny__01` | "These are thorny!" | ❌ Needed |
+| `bot.line.berry_bush_sting_3` | `ai-player:dialogue/berry_bush_yowch__01` | "Yowch!" | ❌ Needed |
+| `bot.line.berry_bush_edible_1` | `ai-player:dialogue/berry_bush_these_are_edible_i_think__01` | "These are edible...I think." | ❌ Needed |
+
 ### Mining POI callouts (new)
 
 Mining-specific discoveries emitted by `MiningHazardDetector` now have dedicated voiced lines.

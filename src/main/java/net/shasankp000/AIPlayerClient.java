@@ -51,9 +51,13 @@ import net.shasankp000.network.RequestRecruitmentDialoguePayload;
 import net.shasankp000.network.ResumeDecisionPayload;
 import net.shasankp000.network.OpenConfigPayload;
 import net.shasankp000.network.RecruitmentAdminStatusPayload;
+import net.shasankp000.network.CompanionOverheadLinePayload;
+import net.shasankp000.items.ModItems;
 import org.lwjgl.glfw.GLFW;
 
 public class AIPlayerClient implements ClientModInitializer {
+
+    // Note: overhead dialogue is best-effort UX; keep logging light.
 
     private static KeyBinding KEY_FOLLOW_TOGGLE_LOOK;
     private static KeyBinding KEY_GO_TO_LOOK;
@@ -91,12 +95,30 @@ public class AIPlayerClient implements ClientModInitializer {
     // Client-side only (UX hint). Server remains authoritative.
     private static long eyeSpellCooldownUntilMs = 0L;
 
+    // One-shot (per acquisition) top-right hint shown when the player gains an item that enables spells.
+    private static long spellsAcquireHintUntilMs = 0L;
+    private static String spellsAcquireHintLine1 = null;
+    private static String spellsAcquireHintLine2 = null;
+    private static boolean lastHasEyeToken = false;
+    private static boolean lastHasHornToken = false;
+    private static boolean lastHasEnchantingTableToken = false;
+
     // Simple per-bot dialogue log used by the Topics overlay.
     private static final java.util.Map<String, java.util.ArrayDeque<String>> DIALOGUE_LOG = new java.util.HashMap<>();
 
     // Server-authoritative companion quest state snapshot (for stage-gated dialogue topics).
     private static final java.util.Map<String, Integer> COMPANION_STAGE = new java.util.HashMap<>();
     private static final java.util.Set<String> COMPANION_PERMANENT = new java.util.HashSet<>();
+
+    // ===== Companion overhead dialogue (non-chat) =====
+    private record OverheadLine(String line, long startedAtMs, long expiresAtMs, int durationMs) {
+    }
+    private static final java.util.Map<java.util.UUID, OverheadLine> OVERHEAD_LINES = new java.util.concurrent.ConcurrentHashMap<>();
+
+    // Client-only backup/restore of the bot player's nameplate while an overhead line is active.
+    private record OverheadNameBackup(Text customName, boolean customNameVisible) {
+    }
+    private static final java.util.Map<java.util.UUID, OverheadNameBackup> OVERHEAD_NAME_BACKUP = new java.util.concurrent.ConcurrentHashMap<>();
 
     // Expose recruitment UI state to other client UI surfaces (e.g., bot inventory overlay).
     public static boolean isSurvivalRecruitmentEnabled() {
@@ -323,7 +345,12 @@ public class AIPlayerClient implements ClientModInitializer {
             if (KEY_FOLLOW_TOGGLE_LOOK.wasPressed()) {
                 handleFollowToggleLookedAt(client);
             }
-            if (KEY_GO_TO_LOOK.wasPressed()) {
+            boolean goToPressed = false;
+            while (KEY_GO_TO_LOOK.wasPressed()) {
+                goToPressed = true;
+            }
+
+            if (goToPressed) {
                 // Contextual behavior: before recruitment is complete and no companion is present,
                 // reuse the user's go-to key to initiate recruitment dialogue (prevents keybind conflicts).
                 if (shouldUseGoToKeyForRecruitmentContact(client)) {
@@ -331,8 +358,11 @@ public class AIPlayerClient implements ClientModInitializer {
                 } else {
                     // After recruitment: if spells are available and the companion isn't currently present
                     // (far away / unloaded), override go-to with spells.
-                    if (!isCompanionNearPlayer(client, 32.0D) && handleSpellsContextKey(client)) {
-                        // Consumed.
+                    if (!isCompanionNearPlayer(client, 32.0D)) {
+                        // In the spells context, always consume the key. Falling back to go-to-look here
+                        // produces an unrelated server system message ("No bots are following you.").
+                        // If spells aren't available yet, we simply do nothing.
+                        handleSpellsContextKey(client);
                     } else {
                         handleGoToLook(client);
                     }
@@ -358,6 +388,9 @@ public class AIPlayerClient implements ClientModInitializer {
 
             // Update leash button visibility based on whether we're looking at a bot with leashed animals
             updateLeashButtonVisibility(client);
+
+            // Show a short, top-right hint when we *first* acquire a spell-enabling item.
+            tickSpellsAcquireHint(client);
         });
 
         ClientPlayNetworking.registerGlobalReceiver(OpenConfigPayload.ID, (payload, context) -> {
@@ -497,14 +530,36 @@ public class AIPlayerClient implements ClientModInitializer {
             });
         });
 
+        ClientPlayNetworking.registerGlobalReceiver(CompanionOverheadLinePayload.ID, (payload, context) -> {
+            context.client().execute(() -> {
+                if (payload == null || payload.botUuid() == null) {
+                    return;
+                }
+                String line = payload.line();
+                if (line == null || line.isBlank()) {
+                    return;
+                }
+                int durationMs = Math.max(250, payload.durationMs());
+                long now = System.currentTimeMillis();
+                OVERHEAD_LINES.put(payload.botUuid(), new OverheadLine(line, now, now + durationMs, durationMs));
+
+                // Helpful for debugging "no overhead text" reports without spamming per-tick logs.
+                AIPlayer.LOGGER.info("[Overhead] recv botUuid={} line='{}' durationMs={}", payload.botUuid(), line, durationMs);
+            });
+        });
+
         HudRenderCallback.EVENT.register((context, tickDelta) -> renderResumeDecisionHint(context));
         HudRenderCallback.EVENT.register((context, tickDelta) -> renderLeashButton(context));
         HudRenderCallback.EVENT.register((context, tickDelta) -> renderRecruitmentPrompt(context));
+        HudRenderCallback.EVENT.register((context, tickDelta) -> renderSpellsAcquireHint(context));
         HudRenderCallback.EVENT.register((context, tickDelta) -> renderSpellsPrompt(context));
         HudRenderCallback.EVENT.register((context, tickDelta) -> renderSchematicPreview(context));
         
         // Update schematic preview box every client tick
         ClientTickEvents.END_CLIENT_TICK.register(AIPlayerClient::updateSchematicPreviewBox);
+
+        // Apply/expire overhead dialogue each tick (client-only nameplate override).
+        ClientTickEvents.END_CLIENT_TICK.register(AIPlayerClient::tickOverheadDialogue);
     }
 
     private static void handleRecruitContactKey(MinecraftClient client) {
@@ -546,6 +601,87 @@ public class AIPlayerClient implements ClientModInitializer {
         int w2 = client.textRenderer.getWidth(line2);
         int maxW = Math.max(w1, w2);
         int x = 12;
+        int y = 10;
+        int boxH = client.textRenderer.fontHeight * 2 + 6;
+
+        context.fill(x - 6, y - 4, x + maxW + 6, y + boxH, 0xAA101010);
+        context.fill(x - 7, y - 5, x + maxW + 7, y - 4, 0xFF4A4A4A);
+        context.fill(x - 7, y + boxH, x + maxW + 7, y + boxH + 1, 0xFF4A4A4A);
+        context.fill(x - 7, y - 5, x - 6, y + boxH + 1, 0xFF4A4A4A);
+        context.fill(x + maxW + 6, y - 5, x + maxW + 7, y + boxH + 1, 0xFF4A4A4A);
+
+        context.drawTextWithShadow(client.textRenderer, line1, x, y, 0xFFE6D7A3);
+        context.drawTextWithShadow(client.textRenderer, line2, x, y + client.textRenderer.fontHeight + 2, 0xFFB8A76A);
+    }
+
+    private static void tickSpellsAcquireHint(MinecraftClient client) {
+        if (client == null || client.player == null) {
+            return;
+        }
+
+        // Only meaningful once a companion exists.
+        if (!survivalRecruitmentEnabled || !survivalRecruitmentCompleted) {
+            lastHasEyeToken = false;
+            lastHasHornToken = false;
+            lastHasEnchantingTableToken = false;
+            return;
+        }
+
+        boolean hasEye = hasEyeOfEnderToken(client);
+        boolean hasHorn = hasGoatHornToken(client);
+        boolean hasTable = hasEnchantingTableToken(client);
+
+        String newlyAcquired = null;
+        if (!lastHasEyeToken && hasEye) newlyAcquired = "Eye of Ender";
+        else if (!lastHasHornToken && hasHorn) newlyAcquired = "Goat Horn";
+        else if (!lastHasEnchantingTableToken && hasTable) newlyAcquired = "Enchanting Table";
+
+        lastHasEyeToken = hasEye;
+        lastHasHornToken = hasHorn;
+        lastHasEnchantingTableToken = hasTable;
+
+        if (newlyAcquired == null) {
+            return;
+        }
+
+        // Prefer the context key (default '-') since that's what actually opens spells in practice.
+        String keyName = keyNameOrNull(KEY_GO_TO_LOOK);
+        if (keyName == null) {
+            keyName = "-";
+        }
+
+        spellsAcquireHintLine1 = "Spells available: " + newlyAcquired;
+        spellsAcquireHintLine2 = "Press [" + keyName + "] to open spells";
+        spellsAcquireHintUntilMs = System.currentTimeMillis() + 8_000L;
+    }
+
+    private static void renderSpellsAcquireHint(DrawContext context) {
+        MinecraftClient client = MinecraftClient.getInstance();
+        if (client == null || client.player == null || client.currentScreen != null) {
+            return;
+        }
+
+        if (!survivalRecruitmentEnabled || !survivalRecruitmentCompleted) {
+            return;
+        }
+
+        long now = System.currentTimeMillis();
+        if (spellsAcquireHintUntilMs <= now) {
+            return;
+        }
+        if (spellsAcquireHintLine1 == null || spellsAcquireHintLine2 == null) {
+            return;
+        }
+
+        String line1 = spellsAcquireHintLine1;
+        String line2 = spellsAcquireHintLine2;
+
+        int w1 = client.textRenderer.getWidth(line1);
+        int w2 = client.textRenderer.getWidth(line2);
+        int maxW = Math.max(w1, w2);
+
+        int margin = 12;
+        int x = Math.max(margin, client.getWindow().getScaledWidth() - margin - maxW);
         int y = 10;
         int boxH = client.textRenderer.fontHeight * 2 + 6;
 
@@ -647,7 +783,7 @@ public class AIPlayerClient implements ClientModInitializer {
                 line2 = "Press [" + keyName + "] for spells (Eye: summon-only)";
             }
         } else if (hasBook) {
-            line2 = "Press [" + keyName + "] for spells (Spellbook)";
+            line2 = "Press [" + keyName + "] for spells (Wizard's Tome)";
         } else if (nearTable) {
             line2 = "Press [" + keyName + "] for spells (Enchanting Table)";
         } else {
@@ -714,11 +850,24 @@ public class AIPlayerClient implements ClientModInitializer {
             if (stack == null || stack.isEmpty()) {
                 continue;
             }
+            // Preferred: real quest item (not enchantable).
+            if (stack.isOf(ModItems.WIZARD_TOME)) {
+                return true;
+            }
             if (!(stack.isOf(Items.WRITTEN_BOOK) || stack.isOf(Items.ENCHANTED_BOOK))) {
                 continue;
             }
             String name = stack.getName() != null ? stack.getName().getString() : "";
-            if (name != null && name.toLowerCase(java.util.Locale.ROOT).contains("spellbook")) {
+            if (name == null) {
+                continue;
+            }
+            String lower = name.toLowerCase(java.util.Locale.ROOT);
+            // Back-compat: older builds used a renamed book token containing "spellbook".
+            if (lower.contains("spellbook")) {
+                return true;
+            }
+            // New: allow renamed-book variants containing "wizard" + "tome".
+            if (lower.contains("wizard") && lower.contains("tome")) {
                 return true;
             }
         }
@@ -755,6 +904,24 @@ public class AIPlayerClient implements ClientModInitializer {
                 continue;
             }
             if (stack.isOf(Items.GOAT_HORN)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean hasEnchantingTableToken(MinecraftClient client) {
+        if (client == null || client.player == null) {
+            return false;
+        }
+        var inv = client.player.getInventory();
+        int n = inv.size();
+        for (int i = 0; i < n; i++) {
+            var stack = inv.getStack(i);
+            if (stack == null || stack.isEmpty()) {
+                continue;
+            }
+            if (stack.isOf(Blocks.ENCHANTING_TABLE.asItem())) {
                 return true;
             }
         }
@@ -1449,5 +1616,49 @@ public class AIPlayerClient implements ClientModInitializer {
                 client.particleManager.addParticle(particle, x, y, z, 0.0, 0.0, 0.0);
             }
         }
+    }
+
+    // ===== Companion overhead dialogue (non-chat) =====
+    // Fabric API in this project version doesn't expose a world-render callback, so we render overhead
+    // lines by temporarily overriding the *client-side* nameplate (custom name) of the companion player.
+
+    private static void tickOverheadDialogue(MinecraftClient client) {
+        if (client == null || client.world == null) {
+            return;
+        }
+        long now = System.currentTimeMillis();
+
+        for (var entry : OVERHEAD_LINES.entrySet()) {
+            java.util.UUID uuid = entry.getKey();
+            OverheadLine line = entry.getValue();
+            if (uuid == null || line == null) {
+                OVERHEAD_LINES.remove(uuid);
+                OVERHEAD_NAME_BACKUP.remove(uuid);
+                continue;
+            }
+
+            PlayerEntity bot = client.world.getPlayerByUuid(uuid);
+
+            if (now >= line.expiresAtMs()) {
+                // Expired: restore prior nameplate (best-effort).
+                OverheadNameBackup backup = OVERHEAD_NAME_BACKUP.remove(uuid);
+                if (backup != null && bot != null) {
+                    bot.setCustomName(backup.customName());
+                    bot.setCustomNameVisible(backup.customNameVisible());
+                }
+                OVERHEAD_LINES.remove(uuid);
+                continue;
+            }
+
+            // Active: apply nameplate override if the entity is present.
+            if (bot != null) {
+                OVERHEAD_NAME_BACKUP.computeIfAbsent(uuid, ignored -> new OverheadNameBackup(bot.getCustomName(), bot.isCustomNameVisible()));
+                bot.setCustomName(Text.literal(line.line()));
+                bot.setCustomNameVisible(true);
+            }
+        }
+
+        // Safety: remove backups for bots that no longer have active overhead lines.
+        OVERHEAD_NAME_BACKUP.keySet().removeIf(uuid -> !OVERHEAD_LINES.containsKey(uuid));
     }
 }

@@ -9,6 +9,7 @@ import net.minecraft.item.Items;
 import net.minecraft.text.Text;
 import net.minecraft.util.math.BlockPos;
 import net.shasankp000.AIPlayerClient;
+import net.shasankp000.items.ModItems;
 
 import java.util.Locale;
 
@@ -16,7 +17,7 @@ import java.util.Locale;
  * Spell-like companion commands window.
  *
  * <p>Access is intended to be gated by proximity to an Enchanting Table. A later-stage quest reward
- * (a "Spellbook") can allow access anywhere.</p>
+ * (the "Wizard's Tome") can allow access anywhere.</p>
  */
 public class CompanionSpellsScreen extends Screen {
 
@@ -128,11 +129,18 @@ public class CompanionSpellsScreen extends Screen {
             if (stack == null || stack.isEmpty()) {
                 continue;
             }
+            if (stack.isOf(ModItems.WIZARD_TOME)) {
+                return true;
+            }
             if (!(stack.isOf(Items.WRITTEN_BOOK) || stack.isOf(Items.ENCHANTED_BOOK))) {
                 continue;
             }
             String name = stack.getName() != null ? stack.getName().getString() : "";
-            if (name != null && name.toLowerCase(Locale.ROOT).contains("spellbook")) {
+            String lower = name != null ? name.toLowerCase(Locale.ROOT) : "";
+            if (lower.contains("spellbook")) {
+                return true;
+            }
+            if (lower.contains("wizard") && lower.contains("tome")) {
                 return true;
             }
         }
@@ -223,7 +231,7 @@ public class CompanionSpellsScreen extends Screen {
         AccessState state = getAccessState();
         String hint;
         if (state.full) {
-            hint = "Full access: Enchanting Table or Spellbook.";
+            hint = "Full access: Enchanting Table or Wizard's Tome.";
         } else if (state.eye && state.horn) {
             if (AIPlayerClient.isEyeSpellOnCooldown()) {
                 long sec = Math.max(1L, AIPlayerClient.getEyeSpellCooldownRemainingMs() / 1000L);
@@ -241,7 +249,7 @@ public class CompanionSpellsScreen extends Screen {
                 hint = "Eye of Ender access: Summon only (cooldown after cast).";
             }
         } else {
-            hint = "Requires Enchanting Table, Spellbook, Goat Horn, or Eye of Ender.";
+            hint = "Requires Enchanting Table, Wizard's Tome, Goat Horn, or Eye of Ender.";
         }
         context.drawCenteredTextWithShadow(this.textRenderer, Text.literal(hint), cx, this.height - 28, 0xFFB0B0B0);
     }
