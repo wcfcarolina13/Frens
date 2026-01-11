@@ -673,6 +673,22 @@
       {
         "name": "ai-player:dialogue/discover_structure__02",
         "weight": 1
+      },
+      {
+        "name": "ai-player:dialogue/discover_mineshaft__01",
+        "weight": 1
+      },
+      {
+        "name": "ai-player:dialogue/discover_mineshaft__02",
+        "weight": 1
+      },
+      {
+        "name": "ai-player:dialogue/discover_spawner__01",
+        "weight": 1
+      },
+      {
+        "name": "ai-player:dialogue/discover_spawner__02",
+        "weight": 1
       }
     ]
   },
@@ -1129,6 +1145,14 @@
       {
         "name": "ai-player:dialogue/touch_hmm__01",
         "weight": 1
+      },
+      {
+        "name": "ai-player:dialogue/touch_hmm__02",
+        "weight": 1
+      },
+      {
+        "name": "ai-player:dialogue/touch_hmm__03",
+        "weight": 1
       }
     ]
   },
@@ -1286,6 +1310,74 @@
         "name": "ai-player:dialogue/idle_enjoying_calm__02",
         "weight": 1
       }
+    ]
+  },
+  "bot.line.weather_rain": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/weather_rain__01", "weight": 1 },
+      { "name": "ai-player:dialogue/weather_rain__02", "weight": 1 },
+      { "name": "ai-player:dialogue/weather_rain__03", "weight": 1 },
+      { "name": "ai-player:dialogue/weather_rain__04", "weight": 1 },
+      { "name": "ai-player:dialogue/weather_rain__05", "weight": 1 },
+      { "name": "ai-player:dialogue/weather_rain__06", "weight": 1 }
+    ]
+  },
+  "bot.line.weather_snow": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/weather_snow__01", "weight": 1 },
+      { "name": "ai-player:dialogue/weather_snow__02", "weight": 1 },
+      { "name": "ai-player:dialogue/weather_snow__03", "weight": 1 },
+      { "name": "ai-player:dialogue/weather_snow__04", "weight": 1 },
+      { "name": "ai-player:dialogue/weather_snow__05", "weight": 1 },
+      { "name": "ai-player:dialogue/weather_snow__06", "weight": 1 }
+    ]
+  },
+  "bot.line.weather_thunder": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/weather_thunder__01", "weight": 1 },
+      { "name": "ai-player:dialogue/weather_thunder__02", "weight": 1 },
+      { "name": "ai-player:dialogue/weather_thunder__03", "weight": 1 },
+      { "name": "ai-player:dialogue/weather_thunder__04", "weight": 1 },
+      { "name": "ai-player:dialogue/weather_thunder__05", "weight": 1 },
+      { "name": "ai-player:dialogue/weather_thunder__06", "weight": 1 }
+    ]
+  },
+  "bot.line.weather_sunny": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/weather_sunny__01", "weight": 1 },
+      { "name": "ai-player:dialogue/weather_sunny__02", "weight": 1 },
+      { "name": "ai-player:dialogue/weather_sunny__03", "weight": 1 },
+      { "name": "ai-player:dialogue/weather_sunny__04", "weight": 1 },
+      { "name": "ai-player:dialogue/weather_sunny__05", "weight": 1 },
+      { "name": "ai-player:dialogue/weather_sunny__06", "weight": 1 }
+    ]
+  },
+  "bot.line.time_sunset_soon": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/time_sunset_soon__01", "weight": 1 },
+      { "name": "ai-player:dialogue/time_sunset_soon__02", "weight": 1 },
+      { "name": "ai-player:dialogue/time_sunset_soon__03", "weight": 1 },
+      { "name": "ai-player:dialogue/time_sunset_soon__04", "weight": 1 },
+      { "name": "ai-player:dialogue/time_sunset_soon__05", "weight": 1 },
+      { "name": "ai-player:dialogue/time_sunset_soon__06", "weight": 1 }
+    ]
+  },
+  "bot.fx.hurt_grunt": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/hurt_grunt__01", "weight": 1 },
+      { "name": "ai-player:dialogue/hurt_grunt__02", "weight": 1 },
+      { "name": "ai-player:dialogue/hurt_grunt__03", "weight": 1 },
+      { "name": "ai-player:dialogue/hurt_grunt__04", "weight": 1 },
+      { "name": "ai-player:dialogue/hurt_grunt__05", "weight": 1 },
+      { "name": "ai-player:dialogue/hurt_grunt__06", "weight": 1 },
+      { "name": "ai-player:dialogue/hurt_grunt__07", "weight": 1 },
+      { "name": "ai-player:dialogue/hurt_grunt__08", "weight": 1 }
     ]
   },
   "bot.line.skill_fishing_watching": {
@@ -2081,6 +2173,32 @@
       }
     ]
   },
+  "bot.line.discover_mineshaft": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/discover_mineshaft__01",
+        "weight": 1
+      },
+      {
+        "name": "ai-player:dialogue/discover_mineshaft__02",
+        "weight": 1
+      }
+    ]
+  },
+  "bot.line.discover_spawner": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/discover_spawner__01",
+        "weight": 1
+      },
+      {
+        "name": "ai-player:dialogue/discover_spawner__02",
+        "weight": 1
+      }
+    ]
+  },
   "bot.line.hazard_lava": {
     "category": "voice",
     "sounds": [
@@ -2196,6 +2314,610 @@
         "name": "ai-player:dialogue/combat_evasive__02",
         "weight": 1
       }
+    ]
+  },
+  "bot.line.combat_threat_detected": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/combat_threat_headsup__01", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_threat_headsup__02", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_threat_headsup__03", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_threat_enemy_spotted__01", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_threat_enemy_spotted__02", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_threat_enemy_spotted__03", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_threat_hostile_incoming__01", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_threat_hostile_incoming__02", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_threat_hostile_incoming__03", "weight": 1 }
+    ]
+  },
+  "bot.line.combat_attacking": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/combat_engage_engaging__01", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_engage_engaging__02", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_engage_engaging__03", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_engage_taking_out__01", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_engage_taking_out__02", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_engage_taking_out__03", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_engage_on_it__01", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_engage_on_it__02", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_engage_on_it__03", "weight": 1 }
+    ]
+  },
+  "bot.line.combat_kill": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/combat_kill_got_it__01", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_kill_got_it__02", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_kill_target_down__01", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_kill_target_down__02", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_kill_target_down__03", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_kill_one_less__01", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_kill_one_less__02", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_kill_one_less__03", "weight": 1 }
+    ]
+  },
+  "bot.line.combat_kill_got_it": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/combat_kill_got_it__01", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_kill_got_it__02", "weight": 1 }
+    ]
+  },
+  "bot.line.combat_kill_target_down": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/combat_kill_target_down__01", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_kill_target_down__02", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_kill_target_down__03", "weight": 1 }
+    ]
+  },
+  "bot.line.combat_kill_one_less": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/combat_kill_one_less__01", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_kill_one_less__02", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_kill_one_less__03", "weight": 1 }
+    ]
+  },
+  "bot.line.combat_kill_creeper_1": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/combat_kill_creeper_down__01", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_kill_creeper_down__02", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_kill_creeper_down__03", "weight": 1 }
+    ]
+  },
+  "bot.line.combat_kill_creeper_2": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/combat_kill_creeper_no_boom__01", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_kill_creeper_no_boom__02", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_kill_creeper_no_boom__03", "weight": 1 }
+    ]
+  },
+  "bot.line.combat_kill_skeleton_1": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/combat_kill_skeleton_down__01", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_kill_skeleton_down__02", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_kill_skeleton_down__03", "weight": 1 }
+    ]
+  },
+  "bot.line.combat_kill_skeleton_2": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/combat_kill_skeleton_bones_scattered__01", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_kill_skeleton_bones_scattered__02", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_kill_skeleton_bones_scattered__03", "weight": 1 }
+    ]
+  },
+  "bot.line.combat_kill_zombie_1": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/combat_kill_zombie_down__01", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_kill_zombie_down__02", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_kill_zombie_down__03", "weight": 1 }
+    ]
+  },
+  "bot.line.combat_kill_zombie_2": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/combat_kill_zombie_back_in_ground__01", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_kill_zombie_back_in_ground__02", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_kill_zombie_back_in_ground__03", "weight": 1 }
+    ]
+  },
+  "bot.line.combat_kill_spider_1": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/combat_kill_spider_down__01", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_kill_spider_down__02", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_kill_spider_down__03", "weight": 1 }
+    ]
+  },
+  "bot.line.combat_kill_spider_2": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/combat_kill_spider_webs_wont_save_you__01", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_kill_spider_webs_wont_save_you__02", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_kill_spider_webs_wont_save_you__03", "weight": 1 }
+    ]
+  },
+  "bot.line.combat_kill_enderman_1": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/combat_kill_enderman_down__01", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_kill_enderman_down__02", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_kill_enderman_down__03", "weight": 1 }
+    ]
+  },
+  "bot.line.combat_kill_enderman_2": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/combat_kill_enderman_didnt_blink__01", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_kill_enderman_didnt_blink__02", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_kill_enderman_didnt_blink__03", "weight": 1 }
+    ]
+  },
+  "bot.line.combat_kill_witch_1": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/combat_kill_witch_down__01", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_kill_witch_down__02", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_kill_witch_down__03", "weight": 1 }
+    ]
+  },
+  "bot.line.combat_kill_witch_2": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/combat_kill_witch_potion_solved__01", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_kill_witch_potion_solved__02", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_kill_witch_potion_solved__03", "weight": 1 }
+    ]
+  },
+  "bot.line.combat_kill_slime_1": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/combat_kill_slime_down__01", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_kill_slime_down__02", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_kill_slime_down__03", "weight": 1 }
+    ]
+  },
+  "bot.line.combat_kill_slime_2": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/combat_kill_slime_back_to_goo__01", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_kill_slime_back_to_goo__02", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_kill_slime_back_to_goo__03", "weight": 1 }
+    ]
+  },
+  "bot.line.combat_kill_pillager_1": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/combat_kill_pillager_down__01", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_kill_pillager_down__02", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_kill_pillager_down__03", "weight": 1 }
+    ]
+  },
+  "bot.line.combat_kill_pillager_2": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/combat_kill_pillager_one_less_raider__01", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_kill_pillager_one_less_raider__02", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_kill_pillager_one_less_raider__03", "weight": 1 }
+    ]
+  },
+  "bot.line.combat_kill_vindicator_1": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/combat_kill_vindicator_down__01", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_kill_vindicator_down__02", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_kill_vindicator_down__03", "weight": 1 }
+    ]
+  },
+  "bot.line.combat_kill_vindicator_2": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/combat_kill_vindicator_axe_is_out__01", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_kill_vindicator_axe_is_out__02", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_kill_vindicator_axe_is_out__03", "weight": 1 }
+    ]
+  },
+  "bot.line.combat_kill_evoker_1": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/combat_kill_evoker_down__01", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_kill_evoker_down__02", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_kill_evoker_down__03", "weight": 1 }
+    ]
+  },
+  "bot.line.combat_kill_evoker_2": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/combat_kill_evoker_no_more_tricks__01", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_kill_evoker_no_more_tricks__02", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_kill_evoker_no_more_tricks__03", "weight": 1 }
+    ]
+  },
+  "bot.line.combat_kill_magma_cube_1": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/combat_kill_magma_cube_down__01", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_kill_magma_cube_down__02", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_kill_magma_cube_down__03", "weight": 1 }
+    ]
+  },
+  "bot.line.combat_kill_magma_cube_2": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/combat_kill_magma_cube_back_to_magma__01", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_kill_magma_cube_back_to_magma__02", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_kill_magma_cube_back_to_magma__03", "weight": 1 }
+    ]
+  },
+  "bot.line.combat_kill_ravager_1": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/combat_kill_ravager_down__01", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_kill_ravager_down__02", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_kill_ravager_down__03", "weight": 1 }
+    ]
+  },
+  "bot.line.combat_kill_ravager_2": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/combat_kill_ravager_beast_down__01", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_kill_ravager_beast_down__02", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_kill_ravager_beast_down__03", "weight": 1 }
+    ]
+  },
+  "bot.line.combat_kill_vex_1": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/combat_kill_vex_down__01", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_kill_vex_down__02", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_kill_vex_down__03", "weight": 1 }
+    ]
+  },
+  "bot.line.combat_kill_vex_2": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/combat_kill_vex_no_more_flying_blades__01", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_kill_vex_no_more_flying_blades__02", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_kill_vex_no_more_flying_blades__03", "weight": 1 }
+    ]
+  },
+  "bot.line.combat_clear": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/combat_clear_all_clear__01", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_clear_all_clear__02", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_clear_all_clear__03", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_clear_area_secure__01", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_clear_area_secure__02", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_clear_area_secure__03", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_clear_last_of_them__01", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_clear_last_of_them__02", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_clear_last_of_them__03", "weight": 1 }
+    ]
+  },
+  "bot.line.combat_player_hit": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/combat_player_hit_what_for__01", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_player_hit_what_for__02", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_player_hit_what_for__03", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_player_hit_watch_it__01", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_player_hit_watch_it__02", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_player_hit_watch_it__03", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_player_hit_did_you__01", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_player_hit_did_you__02", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_player_hit_did_you__03", "weight": 1 }
+    ]
+  },
+  "bot.line.combat_missed_1": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/combat_missed_i_missed__01", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_missed_i_missed__02", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_missed_i_missed__03", "weight": 1 }
+    ]
+  },
+  "bot.line.combat_missed_2": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/combat_missed_dang_missed__01", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_missed_dang_missed__02", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_missed_dang_missed__03", "weight": 1 }
+    ]
+  },
+  "bot.line.combat_missed_3": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/combat_missed_ugh_missed__01", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_missed_ugh_missed__02", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_missed_ugh_missed__03", "weight": 1 }
+    ]
+  },
+  "bot.line.combat_missed_4": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/combat_missed_went_wide__01", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_missed_went_wide__02", "weight": 1 },
+      { "name": "ai-player:dialogue/combat_missed_went_wide__03", "weight": 1 }
+    ]
+  },
+  "bot.line.banter_creeper_kidding": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/banter_creeper_kidding__01", "weight": 1 },
+      { "name": "ai-player:dialogue/banter_creeper_kidding__02", "weight": 1 },
+      { "name": "ai-player:dialogue/banter_creeper_kidding__03", "weight": 1 }
+    ]
+  },
+  "bot.line.banter_if_yell_run": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/banter_if_yell_run__01", "weight": 1 },
+      { "name": "ai-player:dialogue/banter_if_yell_run__02", "weight": 1 },
+      { "name": "ai-player:dialogue/banter_if_yell_run__03", "weight": 1 }
+    ]
+  },
+  "bot.line.banter_got_your_back": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/banter_got_your_back__01", "weight": 1 },
+      { "name": "ai-player:dialogue/banter_got_your_back__02", "weight": 1 },
+      { "name": "ai-player:dialogue/banter_got_your_back__03", "weight": 1 }
+    ]
+  },
+  "bot.line.banter_stay_sharp": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/banter_stay_sharp__01", "weight": 1 },
+      { "name": "ai-player:dialogue/banter_stay_sharp__02", "weight": 1 },
+      { "name": "ai-player:dialogue/banter_stay_sharp__03", "weight": 1 }
+    ]
+  },
+  "bot.line.mount_horse_hurt": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/mount_horse_hurt__01", "weight": 1 },
+      { "name": "ai-player:dialogue/mount_horse_hurt__02", "weight": 1 },
+      { "name": "ai-player:dialogue/mount_horse_hurt__03", "weight": 1 }
+    ]
+  },
+  "bot.line.mount_banged_up": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/mount_banged_up__01", "weight": 1 },
+      { "name": "ai-player:dialogue/mount_banged_up__02", "weight": 1 },
+      { "name": "ai-player:dialogue/mount_banged_up__03", "weight": 1 }
+    ]
+  },
+  "bot.line.mount_my_horse_hurt": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/mount_my_horse_hurt__01", "weight": 1 },
+      { "name": "ai-player:dialogue/mount_my_horse_hurt__02", "weight": 1 },
+      { "name": "ai-player:dialogue/mount_my_horse_hurt__03", "weight": 1 }
+    ]
+  },
+  "bot.line.mount_no_apples": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/mount_no_apples__01", "weight": 1 },
+      { "name": "ai-player:dialogue/mount_no_apples__02", "weight": 1 },
+      { "name": "ai-player:dialogue/mount_no_apples__03", "weight": 1 }
+    ]
+  },
+  "bot.line.mount_out_of_apples": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/mount_out_of_apples__01", "weight": 1 },
+      { "name": "ai-player:dialogue/mount_out_of_apples__02", "weight": 1 },
+      { "name": "ai-player:dialogue/mount_out_of_apples__03", "weight": 1 }
+    ]
+  },
+  "bot.line.mount_no_apples_on_me": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/mount_no_apples_on_me__01", "weight": 1 },
+      { "name": "ai-player:dialogue/mount_no_apples_on_me__02", "weight": 1 },
+      { "name": "ai-player:dialogue/mount_no_apples_on_me__03", "weight": 1 }
+    ]
+  },
+  "bot.line.mount_no_suitable_food": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/mount_no_suitable_food__01", "weight": 1 },
+      { "name": "ai-player:dialogue/mount_no_suitable_food__02", "weight": 1 },
+      { "name": "ai-player:dialogue/mount_no_suitable_food__03", "weight": 1 }
+    ]
+  },
+  "bot.line.mount_cant_find_food": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/mount_cant_find_food__01", "weight": 1 },
+      { "name": "ai-player:dialogue/mount_cant_find_food__02", "weight": 1 },
+      { "name": "ai-player:dialogue/mount_cant_find_food__03", "weight": 1 }
+    ]
+  },
+  "bot.line.mount_no_feed": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/mount_no_feed__01", "weight": 1 },
+      { "name": "ai-player:dialogue/mount_no_feed__02", "weight": 1 },
+      { "name": "ai-player:dialogue/mount_no_feed__03", "weight": 1 }
+    ]
+  },
+  "bot.line.mount_no_lead_secure": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/mount_no_lead_secure__01", "weight": 1 },
+      { "name": "ai-player:dialogue/mount_no_lead_secure__02", "weight": 1 },
+      { "name": "ai-player:dialogue/mount_no_lead_secure__03", "weight": 1 }
+    ]
+  },
+  "bot.line.mount_missing_lead": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/mount_missing_lead__01", "weight": 1 },
+      { "name": "ai-player:dialogue/mount_missing_lead__02", "weight": 1 },
+      { "name": "ai-player:dialogue/mount_missing_lead__03", "weight": 1 }
+    ]
+  },
+  "bot.line.mount_cant_secure": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/mount_cant_secure__01", "weight": 1 },
+      { "name": "ai-player:dialogue/mount_cant_secure__02", "weight": 1 },
+      { "name": "ai-player:dialogue/mount_cant_secure__03", "weight": 1 }
+    ]
+  },
+  "bot.line.mount_cant_grab_lead": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/mount_cant_grab_lead__01", "weight": 1 },
+      { "name": "ai-player:dialogue/mount_cant_grab_lead__02", "weight": 1 },
+      { "name": "ai-player:dialogue/mount_cant_grab_lead__03", "weight": 1 }
+    ]
+  },
+  "bot.line.mount_couldnt_get_lead": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/mount_couldnt_get_lead__01", "weight": 1 },
+      { "name": "ai-player:dialogue/mount_couldnt_get_lead__02", "weight": 1 },
+      { "name": "ai-player:dialogue/mount_couldnt_get_lead__03", "weight": 1 }
+    ]
+  },
+  "bot.line.mount_lead_not_accessible": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/mount_lead_not_accessible__01", "weight": 1 },
+      { "name": "ai-player:dialogue/mount_lead_not_accessible__02", "weight": 1 },
+      { "name": "ai-player:dialogue/mount_lead_not_accessible__03", "weight": 1 }
+    ]
+  },
+  "bot.line.mount_no_fence_keep_lead": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/mount_no_fence_keep_lead__01", "weight": 1 },
+      { "name": "ai-player:dialogue/mount_no_fence_keep_lead__02", "weight": 1 },
+      { "name": "ai-player:dialogue/mount_no_fence_keep_lead__03", "weight": 1 }
+    ]
+  },
+  "bot.line.mount_no_fence_nearby": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/mount_no_fence_nearby__01", "weight": 1 },
+      { "name": "ai-player:dialogue/mount_no_fence_nearby__02", "weight": 1 },
+      { "name": "ai-player:dialogue/mount_no_fence_nearby__03", "weight": 1 }
+    ]
+  },
+  "bot.line.mount_hold_lead_until_tie": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/mount_hold_lead_until_tie__01", "weight": 1 },
+      { "name": "ai-player:dialogue/mount_hold_lead_until_tie__02", "weight": 1 },
+      { "name": "ai-player:dialogue/mount_hold_lead_until_tie__03", "weight": 1 }
+    ]
+  },
+  "bot.line.mount_lost_track_holding": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/mount_lost_track_holding__01", "weight": 1 },
+      { "name": "ai-player:dialogue/mount_lost_track_holding__02", "weight": 1 },
+      { "name": "ai-player:dialogue/mount_lost_track_holding__03", "weight": 1 }
+    ]
+  },
+  "bot.line.mount_lost_horse_lead": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/mount_lost_horse_lead__01", "weight": 1 },
+      { "name": "ai-player:dialogue/mount_lost_horse_lead__02", "weight": 1 },
+      { "name": "ai-player:dialogue/mount_lost_horse_lead__03", "weight": 1 }
+    ]
+  },
+  "bot.line.mount_cant_find_horse": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/mount_cant_find_horse__01", "weight": 1 },
+      { "name": "ai-player:dialogue/mount_cant_find_horse__02", "weight": 1 },
+      { "name": "ai-player:dialogue/mount_cant_find_horse__03", "weight": 1 }
+    ]
+  },
+  "bot.line.mount_horse_gone": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/mount_horse_gone__01", "weight": 1 },
+      { "name": "ai-player:dialogue/mount_horse_gone__02", "weight": 1 },
+      { "name": "ai-player:dialogue/mount_horse_gone__03", "weight": 1 }
+    ]
+  },
+  "bot.line.mount_mount_gone": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/mount_mount_gone__01", "weight": 1 },
+      { "name": "ai-player:dialogue/mount_mount_gone__02", "weight": 1 },
+      { "name": "ai-player:dialogue/mount_mount_gone__03", "weight": 1 }
+    ]
+  },
+  "bot.line.mount_lost_leading": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/mount_lost_leading__01", "weight": 1 },
+      { "name": "ai-player:dialogue/mount_lost_leading__02", "weight": 1 },
+      { "name": "ai-player:dialogue/mount_lost_leading__03", "weight": 1 }
+    ]
+  },
+  "bot.line.mount_lead_snapped_drop": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/mount_lead_snapped_drop__01", "weight": 1 },
+      { "name": "ai-player:dialogue/mount_lead_snapped_drop__02", "weight": 1 },
+      { "name": "ai-player:dialogue/mount_lead_snapped_drop__03", "weight": 1 }
+    ]
+  },
+  "bot.line.mount_lead_broke_fall": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/mount_lead_broke_fall__01", "weight": 1 },
+      { "name": "ai-player:dialogue/mount_lead_broke_fall__02", "weight": 1 },
+      { "name": "ai-player:dialogue/mount_lead_broke_fall__03", "weight": 1 }
+    ]
+  },
+  "bot.line.mount_lead_snapped_on_drop": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/mount_lead_snapped_on_drop__01", "weight": 1 },
+      { "name": "ai-player:dialogue/mount_lead_snapped_on_drop__02", "weight": 1 },
+      { "name": "ai-player:dialogue/mount_lead_snapped_on_drop__03", "weight": 1 }
+    ]
+  },
+  "bot.line.mount_no_lead_reattach": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/mount_no_lead_reattach__01", "weight": 1 },
+      { "name": "ai-player:dialogue/mount_no_lead_reattach__02", "weight": 1 },
+      { "name": "ai-player:dialogue/mount_no_lead_reattach__03", "weight": 1 }
+    ]
+  },
+  "bot.line.mount_out_of_leads": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/mount_out_of_leads__01", "weight": 1 },
+      { "name": "ai-player:dialogue/mount_out_of_leads__02", "weight": 1 },
+      { "name": "ai-player:dialogue/mount_out_of_leads__03", "weight": 1 }
+    ]
+  },
+  "bot.line.mount_no_spare_leads": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/mount_no_spare_leads__01", "weight": 1 },
+      { "name": "ai-player:dialogue/mount_no_spare_leads__02", "weight": 1 },
+      { "name": "ai-player:dialogue/mount_no_spare_leads__03", "weight": 1 }
     ]
   },
   "bot.line.hunger_dying": {
@@ -2510,6 +3232,108 @@
       }
     ]
   },
+  "bot.line.craft_recipe_unlocked_1": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/craft_recipe_unlocked_1__01",
+        "weight": 1
+      },
+      {
+        "name": "ai-player:dialogue/craft_recipe_unlocked_1__02",
+        "weight": 1
+      },
+      {
+        "name": "ai-player:dialogue/craft_recipe_unlocked_1__03",
+        "weight": 1
+      }
+    ]
+  },
+  "bot.line.craft_recipe_unlocked_2": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/craft_recipe_unlocked_2__01",
+        "weight": 1
+      },
+      {
+        "name": "ai-player:dialogue/craft_recipe_unlocked_2__02",
+        "weight": 1
+      },
+      {
+        "name": "ai-player:dialogue/craft_recipe_unlocked_2__03",
+        "weight": 1
+      }
+    ]
+  },
+  "bot.line.craft_recipe_unlocked_3": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/craft_recipe_unlocked_3__01",
+        "weight": 1
+      },
+      {
+        "name": "ai-player:dialogue/craft_recipe_unlocked_3__02",
+        "weight": 1
+      },
+      {
+        "name": "ai-player:dialogue/craft_recipe_unlocked_3__03",
+        "weight": 1
+      }
+    ]
+  },
+  "bot.line.craft_recipe_unlocked_4": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/craft_recipe_unlocked_4__01",
+        "weight": 1
+      },
+      {
+        "name": "ai-player:dialogue/craft_recipe_unlocked_4__02",
+        "weight": 1
+      },
+      {
+        "name": "ai-player:dialogue/craft_recipe_unlocked_4__03",
+        "weight": 1
+      }
+    ]
+  },
+  "bot.line.craft_recipe_unlocked_5": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/craft_recipe_unlocked_5__01",
+        "weight": 1
+      },
+      {
+        "name": "ai-player:dialogue/craft_recipe_unlocked_5__02",
+        "weight": 1
+      },
+      {
+        "name": "ai-player:dialogue/craft_recipe_unlocked_5__03",
+        "weight": 1
+      }
+    ]
+  },
+  "bot.line.craft_recipe_unlocked_6": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/craft_recipe_unlocked_6__01",
+        "weight": 1
+      },
+      {
+        "name": "ai-player:dialogue/craft_recipe_unlocked_6__02",
+        "weight": 1
+      },
+      {
+        "name": "ai-player:dialogue/craft_recipe_unlocked_6__03",
+        "weight": 1
+      }
+    ]
+  },
   "bot.line.smelt_need_furnace": {
     "category": "voice",
     "sounds": [
@@ -2682,73 +3506,97 @@
   "bot.line.ambient_amethyst_beautiful": {
     "category": "voice",
     "sounds": [
-      { "name": "ai-player:dialogue/ambient_amethyst_beautiful__01", "weight": 1 }
+      { "name": "ai-player:dialogue/ambient_amethyst_beautiful__01", "weight": 1 },
+      { "name": "ai-player:dialogue/ambient_amethyst_beautiful__02", "weight": 1 },
+      { "name": "ai-player:dialogue/ambient_amethyst_beautiful__03", "weight": 1 }
     ]
   },
   "bot.line.ambient_amethyst_sparkly": {
     "category": "voice",
     "sounds": [
-      { "name": "ai-player:dialogue/ambient_amethyst_sparkly__01", "weight": 1 }
+      { "name": "ai-player:dialogue/ambient_amethyst_sparkly__01", "weight": 1 },
+      { "name": "ai-player:dialogue/ambient_amethyst_sparkly__02", "weight": 1 },
+      { "name": "ai-player:dialogue/ambient_amethyst_sparkly__03", "weight": 1 }
     ]
   },
   "bot.line.ambient_amethyst_geode": {
     "category": "voice",
     "sounds": [
-      { "name": "ai-player:dialogue/ambient_amethyst_geode__01", "weight": 1 }
+      { "name": "ai-player:dialogue/ambient_amethyst_geode__01", "weight": 1 },
+      { "name": "ai-player:dialogue/ambient_amethyst_geode__02", "weight": 1 },
+      { "name": "ai-player:dialogue/ambient_amethyst_geode__03", "weight": 1 }
     ]
   },
   "bot.line.ambient_bat_startled": {
     "category": "voice",
     "sounds": [
-      { "name": "ai-player:dialogue/ambient_bat_startled__01", "weight": 1 }
+      { "name": "ai-player:dialogue/ambient_bat_startled__01", "weight": 1 },
+      { "name": "ai-player:dialogue/ambient_bat_startled__02", "weight": 1 },
+      { "name": "ai-player:dialogue/ambient_bat_startled__03", "weight": 1 }
     ]
   },
   "bot.line.ambient_bat_wings": {
     "category": "voice",
     "sounds": [
-      { "name": "ai-player:dialogue/ambient_bat_wings__01", "weight": 1 }
+      { "name": "ai-player:dialogue/ambient_bat_wings__01", "weight": 1 },
+      { "name": "ai-player:dialogue/ambient_bat_wings__02", "weight": 1 },
+      { "name": "ai-player:dialogue/ambient_bat_wings__03", "weight": 1 }
     ]
   },
   "bot.line.ambient_bat_creepy": {
     "category": "voice",
     "sounds": [
-      { "name": "ai-player:dialogue/ambient_bat_creepy__01", "weight": 1 }
+      { "name": "ai-player:dialogue/ambient_bat_creepy__01", "weight": 1 },
+      { "name": "ai-player:dialogue/ambient_bat_creepy__02", "weight": 1 },
+      { "name": "ai-player:dialogue/ambient_bat_creepy__03", "weight": 1 }
     ]
   },
   "bot.line.ambient_dripstone_careful": {
     "category": "voice",
     "sounds": [
-      { "name": "ai-player:dialogue/ambient_dripstone_careful__01", "weight": 1 }
+      { "name": "ai-player:dialogue/ambient_dripstone_careful__01", "weight": 1 },
+      { "name": "ai-player:dialogue/ambient_dripstone_careful__02", "weight": 1 },
+      { "name": "ai-player:dialogue/ambient_dripstone_careful__03", "weight": 1 }
     ]
   },
   "bot.line.ambient_dripstone_sharp": {
     "category": "voice",
     "sounds": [
-      { "name": "ai-player:dialogue/ambient_dripstone_sharp__01", "weight": 1 }
+      { "name": "ai-player:dialogue/ambient_dripstone_sharp__01", "weight": 1 },
+      { "name": "ai-player:dialogue/ambient_dripstone_sharp__02", "weight": 1 },
+      { "name": "ai-player:dialogue/ambient_dripstone_sharp__03", "weight": 1 }
     ]
   },
   "bot.line.ambient_dripstone_dripping": {
     "category": "voice",
     "sounds": [
-      { "name": "ai-player:dialogue/ambient_dripstone_dripping__01", "weight": 1 }
+      { "name": "ai-player:dialogue/ambient_dripstone_dripping__01", "weight": 1 },
+      { "name": "ai-player:dialogue/ambient_dripstone_dripping__02", "weight": 1 },
+      { "name": "ai-player:dialogue/ambient_dripstone_dripping__03", "weight": 1 }
     ]
   },
   "bot.line.ambient_deepslate_cold": {
     "category": "voice",
     "sounds": [
-      { "name": "ai-player:dialogue/ambient_deepslate_cold__01", "weight": 1 }
+      { "name": "ai-player:dialogue/ambient_deepslate_cold__01", "weight": 1 },
+      { "name": "ai-player:dialogue/ambient_deepslate_cold__02", "weight": 1 },
+      { "name": "ai-player:dialogue/ambient_deepslate_cold__03", "weight": 1 }
     ]
   },
   "bot.line.ambient_deepslate_deep": {
     "category": "voice",
     "sounds": [
-      { "name": "ai-player:dialogue/ambient_deepslate_deep__01", "weight": 1 }
+      { "name": "ai-player:dialogue/ambient_deepslate_deep__01", "weight": 1 },
+      { "name": "ai-player:dialogue/ambient_deepslate_deep__02", "weight": 1 },
+      { "name": "ai-player:dialogue/ambient_deepslate_deep__03", "weight": 1 }
     ]
   },
   "bot.line.ambient_deepslate_ancient": {
     "category": "voice",
     "sounds": [
-      { "name": "ai-player:dialogue/ambient_deepslate_ancient__01", "weight": 1 }
+      { "name": "ai-player:dialogue/ambient_deepslate_ancient__01", "weight": 1 },
+      { "name": "ai-player:dialogue/ambient_deepslate_ancient__02", "weight": 1 },
+      { "name": "ai-player:dialogue/ambient_deepslate_ancient__03", "weight": 1 }
     ]
   },
   "bot.line.dark_cant_see": {
@@ -2894,6 +3742,256 @@
       }
     ]
   },
+  "bot.line.wildlife_heard_wolf": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "ai-player:dialogue/wildlife_heard_wolf__01",
+        "weight": 1
+      },
+      {
+        "name": "ai-player:dialogue/wildlife_heard_wolf__02",
+        "weight": 1
+      }
+    ]
+  },
+
+  "bot.line.nether_enter_1": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/nether_enter_stay_close__01", "weight": 1 },
+      { "name": "ai-player:dialogue/nether_enter_stay_close__02", "weight": 1 },
+      { "name": "ai-player:dialogue/nether_enter_stay_close__03", "weight": 1 }
+    ]
+  },
+  "bot.line.nether_enter_2": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/nether_enter_watch_your_step__01", "weight": 1 },
+      { "name": "ai-player:dialogue/nether_enter_watch_your_step__02", "weight": 1 },
+      { "name": "ai-player:dialogue/nether_enter_watch_your_step__03", "weight": 1 }
+    ]
+  },
+  "bot.line.nether_hot": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/nether_hot_real_hot__01", "weight": 1 },
+      { "name": "ai-player:dialogue/nether_hot_real_hot__02", "weight": 1 },
+      { "name": "ai-player:dialogue/nether_hot_real_hot__03", "weight": 1 }
+    ]
+  },
+  "bot.line.nether_lava": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/nether_lava_everywhere__01", "weight": 1 },
+      { "name": "ai-player:dialogue/nether_lava_everywhere__02", "weight": 1 },
+      { "name": "ai-player:dialogue/nether_lava_everywhere__03", "weight": 1 }
+    ]
+  },
+  "bot.line.nether_ghasts": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/nether_ghasts_keep_an_eye_out__01", "weight": 1 },
+      { "name": "ai-player:dialogue/nether_ghasts_keep_an_eye_out__02", "weight": 1 },
+      { "name": "ai-player:dialogue/nether_ghasts_keep_an_eye_out__03", "weight": 1 }
+    ]
+  },
+  "bot.line.nether_piglins": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/nether_piglins_watching__01", "weight": 1 },
+      { "name": "ai-player:dialogue/nether_piglins_watching__02", "weight": 1 },
+      { "name": "ai-player:dialogue/nether_piglins_watching__03", "weight": 1 }
+    ]
+  },
+  "bot.line.nether_soul_sand": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/nether_soul_sand_hate_it__01", "weight": 1 },
+      { "name": "ai-player:dialogue/nether_soul_sand_hate_it__02", "weight": 1 },
+      { "name": "ai-player:dialogue/nether_soul_sand_hate_it__03", "weight": 1 }
+    ]
+  },
+  "bot.line.nether_fortress": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/nether_fortress_spotted__01", "weight": 1 },
+      { "name": "ai-player:dialogue/nether_fortress_spotted__02", "weight": 1 },
+      { "name": "ai-player:dialogue/nether_fortress_spotted__03", "weight": 1 }
+    ]
+  },
+  "bot.line.nether_bastion": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/nether_blackstone_bastion_nearby__01", "weight": 1 },
+      { "name": "ai-player:dialogue/nether_blackstone_bastion_nearby__02", "weight": 1 },
+      { "name": "ai-player:dialogue/nether_blackstone_bastion_nearby__03", "weight": 1 }
+    ]
+  },
+
+  "bot.line.nether_biome_crimson_forest": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/nether_biome_crimson_forest__01", "weight": 1 },
+      { "name": "ai-player:dialogue/nether_biome_crimson_forest__02", "weight": 1 },
+      { "name": "ai-player:dialogue/nether_biome_crimson_forest__03", "weight": 1 }
+    ]
+  },
+  "bot.line.nether_biome_warped_forest": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/nether_biome_warped_forest__01", "weight": 1 },
+      { "name": "ai-player:dialogue/nether_biome_warped_forest__02", "weight": 1 },
+      { "name": "ai-player:dialogue/nether_biome_warped_forest__03", "weight": 1 }
+    ]
+  },
+  "bot.line.nether_biome_soul_sand_valley": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/nether_biome_soul_sand_valley__01", "weight": 1 },
+      { "name": "ai-player:dialogue/nether_biome_soul_sand_valley__02", "weight": 1 },
+      { "name": "ai-player:dialogue/nether_biome_soul_sand_valley__03", "weight": 1 }
+    ]
+  },
+  "bot.line.nether_biome_basalt_deltas": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/nether_biome_basalt_deltas__01", "weight": 1 },
+      { "name": "ai-player:dialogue/nether_biome_basalt_deltas__02", "weight": 1 },
+      { "name": "ai-player:dialogue/nether_biome_basalt_deltas__03", "weight": 1 }
+    ]
+  },
+  "bot.line.nether_biome_wastes": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/nether_biome_wastes__01", "weight": 1 },
+      { "name": "ai-player:dialogue/nether_biome_wastes__02", "weight": 1 },
+      { "name": "ai-player:dialogue/nether_biome_wastes__03", "weight": 1 }
+    ]
+  },
+
+  "bot.line.end_enter_1": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/end_enter_this_is_the_end__01", "weight": 1 },
+      { "name": "ai-player:dialogue/end_enter_this_is_the_end__02", "weight": 1 },
+      { "name": "ai-player:dialogue/end_enter_this_is_the_end__03", "weight": 1 }
+    ]
+  },
+  "bot.line.end_enter_2": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/end_enter_dont_look_down__01", "weight": 1 },
+      { "name": "ai-player:dialogue/end_enter_dont_look_down__02", "weight": 1 },
+      { "name": "ai-player:dialogue/end_enter_dont_look_down__03", "weight": 1 }
+    ]
+  },
+  "bot.line.end_eerie": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/end_eerie_this_place_feels_wrong__01", "weight": 1 },
+      { "name": "ai-player:dialogue/end_eerie_this_place_feels_wrong__02", "weight": 1 },
+      { "name": "ai-player:dialogue/end_eerie_this_place_feels_wrong__03", "weight": 1 }
+    ]
+  },
+  "bot.line.end_void": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/end_void_one_step_and_its_over__01", "weight": 1 },
+      { "name": "ai-player:dialogue/end_void_one_step_and_its_over__02", "weight": 1 },
+      { "name": "ai-player:dialogue/end_void_one_step_and_its_over__03", "weight": 1 }
+    ]
+  },
+  "bot.line.end_islands": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/end_islands_floating_in_void__01", "weight": 1 },
+      { "name": "ai-player:dialogue/end_islands_floating_in_void__02", "weight": 1 },
+      { "name": "ai-player:dialogue/end_islands_floating_in_void__03", "weight": 1 }
+    ]
+  },
+  "bot.line.end_chorus": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/end_chorus_fruit_nearby__01", "weight": 1 },
+      { "name": "ai-player:dialogue/end_chorus_fruit_nearby__02", "weight": 1 },
+      { "name": "ai-player:dialogue/end_chorus_fruit_nearby__03", "weight": 1 }
+    ]
+  },
+  "bot.line.end_endermen": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/end_endermen_everywhere__01", "weight": 1 },
+      { "name": "ai-player:dialogue/end_endermen_everywhere__02", "weight": 1 },
+      { "name": "ai-player:dialogue/end_endermen_everywhere__03", "weight": 1 }
+    ]
+  },
+  "bot.line.end_keep_eyes_up": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/end_keep_your_eyes_up__01", "weight": 1 },
+      { "name": "ai-player:dialogue/end_keep_your_eyes_up__02", "weight": 1 },
+      { "name": "ai-player:dialogue/end_keep_your_eyes_up__03", "weight": 1 }
+    ]
+  },
+  "bot.line.end_city": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/end_city_nearby__01", "weight": 1 },
+      { "name": "ai-player:dialogue/end_city_nearby__02", "weight": 1 },
+      { "name": "ai-player:dialogue/end_city_nearby__03", "weight": 1 }
+    ]
+  },
+  "bot.line.end_gateway": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/end_gateway_spotted__01", "weight": 1 },
+      { "name": "ai-player:dialogue/end_gateway_spotted__02", "weight": 1 },
+      { "name": "ai-player:dialogue/end_gateway_spotted__03", "weight": 1 }
+    ]
+  },
+
+  "bot.line.end_biome_main_island": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/end_biome_main_island__01", "weight": 1 },
+      { "name": "ai-player:dialogue/end_biome_main_island__02", "weight": 1 },
+      { "name": "ai-player:dialogue/end_biome_main_island__03", "weight": 1 }
+    ]
+  },
+  "bot.line.end_biome_highlands": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/end_biome_highlands__01", "weight": 1 },
+      { "name": "ai-player:dialogue/end_biome_highlands__02", "weight": 1 },
+      { "name": "ai-player:dialogue/end_biome_highlands__03", "weight": 1 }
+    ]
+  },
+  "bot.line.end_biome_midlands": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/end_biome_midlands__01", "weight": 1 },
+      { "name": "ai-player:dialogue/end_biome_midlands__02", "weight": 1 },
+      { "name": "ai-player:dialogue/end_biome_midlands__03", "weight": 1 }
+    ]
+  },
+  "bot.line.end_biome_barrens": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/end_biome_barrens__01", "weight": 1 },
+      { "name": "ai-player:dialogue/end_biome_barrens__02", "weight": 1 },
+      { "name": "ai-player:dialogue/end_biome_barrens__03", "weight": 1 }
+    ]
+  },
+  "bot.line.end_biome_small_islands": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/end_biome_small_islands__01", "weight": 1 },
+      { "name": "ai-player:dialogue/end_biome_small_islands__02", "weight": 1 },
+      { "name": "ai-player:dialogue/end_biome_small_islands__03", "weight": 1 }
+    ]
+  },
+
   "bot.line.lost_over_here": {
     "category": "voice",
     "sounds": [
