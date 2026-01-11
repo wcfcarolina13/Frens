@@ -99,10 +99,18 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
     // Palette (Skyrim/Morrowind-ish: warmer parchment, less harsh whites).
     private static final int COLOR_TEXT_PARCHMENT = 0xFFD8C7A0;
     private static final int COLOR_TEXT_PLAYER = 0xFFFFE08A;
-    private static final int COLOR_TEXT_COMPANION = 0xFFBBD2D8;
     private static final int COLOR_TEXT_SYSTEM = 0xFFB0B0B0;
     private static final int COLOR_TEXT_DISABLED = 0xFF6F6F6F;
     private static final int COLOR_TEXT_SUBTLE = 0xFF8E8E8E;
+    // Morrowind-inspired accents.
+    private static final int COLOR_TEXT_TOPIC = 0xFF5BA6FF;
+    private static final int COLOR_TEXT_RESPONSE = 0xFFCC4B4B;
+
+    // Last selected dialogue topic (for a topic-header style dialogue column).
+    private String lastDialogueTopicLabel = "";
+
+    private record DialogueResponseHitbox(Rect rect, TopicEntry entry) {}
+    private final java.util.List<DialogueResponseHitbox> dialogueResponseHitboxes = new java.util.ArrayList<>();
 
     private record Rect(int x, int y, int w, int h) {
         int right() { return x + w; }
@@ -656,6 +664,9 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
     }
 
     private void drawDialogueColumn(DrawContext context, int x, int y, int w, int h) {
+        // Updated each frame while the overlay is open; used for click hit-testing.
+        dialogueResponseHitboxes.clear();
+
         // Background.
         context.fill(x, y, x + w, y + h, 0x55101010);
         context.fill(x, y, x + w, y + 1, 0xFF000000);
@@ -663,19 +674,37 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         context.fill(x, y, x + 1, y + h, 0xFF000000);
         context.fill(x + w - 1, y, x + w, y + h, 0xFF000000);
 
-        context.drawText(this.textRenderer, "Dialogue", x + 4, y + 2, 0xFFE6D7A3, false);
+        // Topic header (Morrowind-style).
+        String topicHeader = (lastDialogueTopicLabel != null && !lastDialogueTopicLabel.isBlank())
+            ? lastDialogueTopicLabel
+            : "Select a topic";
+        context.drawText(this.textRenderer, topicHeader, x + 4, y + 2, COLOR_TEXT_TOPIC, false);
 
         int textX = x + 4;
-        int textY = y + 14;
+        int textY = y + 2 + this.textRenderer.fontHeight + 4;
         int textW = Math.max(40, w - 8);
-        int textH = Math.max(20, h - 16);
+
+        // Player response prompts (in red), pinned to the bottom of the dialogue column.
+        java.util.List<TopicEntry> responses = (overlayCategory == TopicCategory.DIALOGUE)
+            ? getDialogueResponseEntries(6)
+            : java.util.List.of();
+        int respLineH = this.textRenderer.fontHeight;
+        int respCount = responses.size();
+        int respPad = 4;
+        int respAreaH = respCount > 0 ? (respCount * respLineH + respPad) : 0;
+        int respStartY = y + h - respAreaH;
+
+        // Leave room for the response area.
+        int textH = Math.max(20, (respAreaH > 0 ? (respStartY - 2) : (y + h)) - textY);
 
         java.util.List<String> lines = net.shasankp000.AIPlayerClient.getDialogueLines(botAlias, 18);
         java.util.List<StyledLine> wrapped = new java.util.ArrayList<>();
         for (String line : lines) {
             if (line == null || line.isBlank()) continue;
             int color = getDialogueLineColor(line);
-            var segments = this.textRenderer.wrapLines(net.minecraft.text.Text.literal(line), textW);
+            String display = formatDialogueLineForDisplay(line);
+            if (display == null || display.isBlank()) continue;
+            var segments = this.textRenderer.wrapLines(net.minecraft.text.Text.literal(display), textW);
             for (var seg : segments) {
                 wrapped.add(new StyledLine(seg, color));
             }
@@ -689,6 +718,27 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             context.drawText(this.textRenderer, line.text(), textX, rowY, line.color(), false);
             rowY += this.textRenderer.fontHeight;
             if (rowY >= textY + textH) break;
+        }
+
+        // Draw response prompts at the bottom (red) and record hitboxes.
+        if (respCount > 0) {
+            // subtle divider
+            int divY = respStartY - 2;
+            if (divY > y + 2) {
+                context.fill(x + 2, divY, x + w - 2, divY + 1, 0xFF222222);
+            }
+
+            int ry = respStartY + 2;
+            for (TopicEntry e : responses) {
+                if (e == null) continue;
+                String prompt = getDialoguePrompt(e.dialogueKey, e.label);
+                String text = prompt != null ? prompt : (e.label != null ? e.label : "");
+                text = elideToWidth(text, textW);
+                context.drawText(this.textRenderer, text, textX, ry, COLOR_TEXT_RESPONSE, false);
+                int tw = this.textRenderer.getWidth(text);
+                dialogueResponseHitboxes.add(new DialogueResponseHitbox(new Rect(textX, ry, Math.max(1, tw), respLineH), e));
+                ry += respLineH;
+            }
         }
     }
 
@@ -704,7 +754,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         }
         String botPrefix = (botAlias != null && !botAlias.isBlank()) ? (botAlias + ":") : null;
         if (s.startsWith("You:")) {
-            return COLOR_TEXT_PLAYER;
+            return COLOR_TEXT_RESPONSE;
         }
         if (s.startsWith("You (")) {
             return COLOR_TEXT_SYSTEM;
@@ -713,7 +763,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             return COLOR_TEXT_SYSTEM;
         }
         if (botPrefix != null && s.startsWith(botPrefix)) {
-            return COLOR_TEXT_COMPANION;
+            return COLOR_TEXT_PARCHMENT;
         }
         if (s.startsWith("...")) {
             return COLOR_TEXT_SUBTLE;
@@ -814,6 +864,15 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             int adjust = getFollowAdjustDirectionInOverlay(mouseX, mouseY);
             if (adjust != 0) {
                 adjustFollowDistance(adjust);
+                return true;
+            }
+        }
+
+        // Dialogue response prompts (left column). Only active when the Dialogue tab is selected.
+        if (overlayCategory == TopicCategory.DIALOGUE) {
+            TopicEntry response = getDialogueResponseEntryAtOverlay(mouseX, mouseY);
+            if (response != null) {
+                handleTopicEntry(response);
                 return true;
             }
         }
@@ -1431,6 +1490,17 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             if (!isDialogueEntryEnabled(entry)) {
                 return;
             }
+
+            // Morrowind-style: Goodbye simply closes the dialogue overlay.
+            String key = entry.dialogueKey != null ? entry.dialogueKey.trim().toLowerCase(Locale.ROOT) : "";
+            if (key.equals("goodbye")) {
+                toggleTopicsExpanded(false);
+                return;
+            }
+
+            // Remember selected topic for the topic-header style dialogue column.
+            lastDialogueTopicLabel = entry.label != null ? entry.label : "";
+
             String prompt = getDialoguePrompt(entry.dialogueKey, entry.label);
             if (prompt != null && !prompt.isBlank()) {
                 net.shasankp000.AIPlayerClient.appendDialogue(botAlias, "You: " + prompt);
@@ -1515,6 +1585,12 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         String k = key == null ? "" : key;
         String normalized = k.trim().toLowerCase(Locale.ROOT);
 
+        // Morrowind-style: Goodbye just closes the dialogue.
+        if (normalized.equals("goodbye")) {
+            toggleTopicsExpanded(false);
+            return;
+        }
+
         // Recruitment: ask the server to open the recruitment dialogue (server validates village proximity).
         if (normalized.equals("recruit_contact")) {
             MinecraftClient client = MinecraftClient.getInstance();
@@ -1579,12 +1655,54 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
                 bot.accept("Words are cheap.");
                 bot.accept("Bring me results. Then we'll see what you get in return.");
             }
-            case "goodbye" -> {
-                bot.accept("Stay alive.");
-                bot.accept("If you improve this place… I'll notice.");
-            }
             default -> bot.accept("...");
         }
+    }
+
+    private TopicEntry getDialogueResponseEntryAtOverlay(double mouseX, double mouseY) {
+        if (dialogueResponseHitboxes.isEmpty()) {
+            return null;
+        }
+        for (int i = 0; i < dialogueResponseHitboxes.size(); i++) {
+            DialogueResponseHitbox h = dialogueResponseHitboxes.get(i);
+            if (h == null) continue;
+            Rect r = h.rect;
+            if (r != null && r.contains(mouseX, mouseY)) {
+                return h.entry;
+            }
+        }
+        return null;
+    }
+
+    private java.util.List<TopicEntry> getDialogueResponseEntries(int max) {
+        int limit = Math.max(0, max);
+        java.util.ArrayList<TopicEntry> out = new java.util.ArrayList<>();
+        for (TopicEntry e : DIALOGUE_TOPIC_ENTRIES) {
+            if (e == null) continue;
+            String k = e.dialogueKey != null ? e.dialogueKey.trim().toLowerCase(Locale.ROOT) : "";
+            if (k.equals("goodbye")) continue;
+            if (!isDialogueEntryEnabled(e)) continue;
+            out.add(e);
+            if (out.size() >= limit) break;
+        }
+        return out;
+    }
+
+    private String formatDialogueLineForDisplay(String line) {
+        if (line == null) return "";
+        String s = line.trim();
+        if (s.isEmpty()) return "";
+
+        String botPrefix = (botAlias != null && !botAlias.isBlank()) ? (botAlias + ":") : null;
+        if (botPrefix != null && s.startsWith(botPrefix)) {
+            s = s.substring(botPrefix.length()).trim();
+            return s;
+        }
+        if (s.startsWith("You:")) {
+            return s.substring("You:".length()).trim();
+        }
+        // Keep system/admin prefixes for clarity.
+        return s;
     }
 
     private boolean isAdminEntryEnabled(TopicEntry entry) {
