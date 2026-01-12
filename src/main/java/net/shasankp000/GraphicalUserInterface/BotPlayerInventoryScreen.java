@@ -108,6 +108,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
 
     // Last selected dialogue topic (for a topic-header style dialogue column).
     private String lastDialogueTopicLabel = "";
+    private String lastDialogueTopicKey = "";
 
     private record DialogueResponseHitbox(Rect rect, TopicEntry entry) {}
     private final java.util.List<DialogueResponseHitbox> dialogueResponseHitboxes = new java.util.ArrayList<>();
@@ -685,7 +686,11 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         int textW = Math.max(40, w - 8);
 
         // Player response prompts (in red), pinned to the bottom of the dialogue column.
-        java.util.List<TopicEntry> responses = (overlayCategory == TopicCategory.DIALOGUE)
+        // Only show responses once a dialogue topic is active; selecting a topic itself is not a player line.
+        boolean topicActive = lastDialogueTopicKey != null
+            && !lastDialogueTopicKey.isBlank()
+            && !lastDialogueTopicKey.trim().equalsIgnoreCase("goodbye");
+        java.util.List<TopicEntry> responses = (overlayCategory == TopicCategory.DIALOGUE && topicActive)
             ? getDialogueResponseEntries(6)
             : java.util.List.of();
         int respLineH = this.textRenderer.fontHeight;
@@ -872,7 +877,8 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         if (overlayCategory == TopicCategory.DIALOGUE) {
             TopicEntry response = getDialogueResponseEntryAtOverlay(mouseX, mouseY);
             if (response != null) {
-                handleTopicEntry(response);
+                // Red responses are explicit player dialogue lines.
+                handleDialogueTopicEntry(response, true);
                 return true;
             }
         }
@@ -1487,25 +1493,9 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
 
         // Dialogue topics are lore/quest conversation and should not trigger bot skills.
         if (entry.category == TopicCategory.DIALOGUE) {
-            if (!isDialogueEntryEnabled(entry)) {
-                return;
-            }
-
-            // Morrowind-style: Goodbye simply closes the dialogue overlay.
-            String key = entry.dialogueKey != null ? entry.dialogueKey.trim().toLowerCase(Locale.ROOT) : "";
-            if (key.equals("goodbye")) {
-                toggleTopicsExpanded(false);
-                return;
-            }
-
-            // Remember selected topic for the topic-header style dialogue column.
-            lastDialogueTopicLabel = entry.label != null ? entry.label : "";
-
-            String prompt = getDialoguePrompt(entry.dialogueKey, entry.label);
-            if (prompt != null && !prompt.isBlank()) {
-                net.shasankp000.AIPlayerClient.appendDialogue(botAlias, "You: " + prompt);
-            }
-            handleDialogueTopic(entry.dialogueKey);
+            // Selecting a topic from the list should NOT auto-append a player line.
+            // Player lines are reserved for explicit red responses.
+            handleDialogueTopicEntry(entry, false);
             return;
         }
 
@@ -1514,6 +1504,39 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         }
 
         handleTopicAction(entry.action);
+    }
+
+    private void handleDialogueTopicEntry(TopicEntry entry, boolean appendPlayerResponse) {
+        if (entry == null) {
+            return;
+        }
+        if (entry.category != TopicCategory.DIALOGUE) {
+            return;
+        }
+        if (!isDialogueEntryEnabled(entry)) {
+            return;
+        }
+
+        // Morrowind-style: Goodbye simply closes the dialogue overlay.
+        String key = entry.dialogueKey != null ? entry.dialogueKey.trim().toLowerCase(Locale.ROOT) : "";
+        if (key.equals("goodbye")) {
+            toggleTopicsExpanded(false);
+            return;
+        }
+
+        // Remember selected topic for the topic-header style dialogue column.
+        lastDialogueTopicLabel = entry.label != null ? entry.label : "";
+        lastDialogueTopicKey = entry.dialogueKey != null ? entry.dialogueKey : "";
+
+        // Only append player dialogue when the player explicitly clicks a red response.
+        if (appendPlayerResponse) {
+            String prompt = getDialoguePrompt(entry.dialogueKey, entry.label);
+            if (prompt != null && !prompt.isBlank()) {
+                net.shasankp000.AIPlayerClient.appendDialogue(botAlias, "You: " + prompt);
+            }
+        }
+
+        handleDialogueTopic(entry.dialogueKey);
     }
 
     private void handleTopicAction(TopicAction action) {
@@ -1608,7 +1631,6 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             if (client != null && client.getNetworkHandler() != null) {
                 String alias = net.shasankp000.AIPlayerClient.getRecruitmentBotAlias();
                 ClientPlayNetworking.send(new RequestRecruitmentReplayPayload(alias));
-                net.shasankp000.AIPlayerClient.appendDialogue(botAlias, "You: Let's start over.");
             } else {
                 net.shasankp000.AIPlayerClient.appendDialogue(botAlias, "... (not connected)");
             }
@@ -1676,11 +1698,13 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
 
     private java.util.List<TopicEntry> getDialogueResponseEntries(int max) {
         int limit = Math.max(0, max);
+        String current = lastDialogueTopicKey != null ? lastDialogueTopicKey.trim().toLowerCase(Locale.ROOT) : "";
         java.util.ArrayList<TopicEntry> out = new java.util.ArrayList<>();
         for (TopicEntry e : DIALOGUE_TOPIC_ENTRIES) {
             if (e == null) continue;
             String k = e.dialogueKey != null ? e.dialogueKey.trim().toLowerCase(Locale.ROOT) : "";
             if (k.equals("goodbye")) continue;
+            if (!current.isEmpty() && k.equals(current)) continue;
             if (!isDialogueEntryEnabled(e)) continue;
             out.add(e);
             if (out.size() >= limit) break;
