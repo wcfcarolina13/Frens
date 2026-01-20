@@ -32,6 +32,8 @@ import org.slf4j.LoggerFactory;
 import net.shasankp000.GameAI.services.MovementService;
 import net.shasankp000.GameAI.services.SneakLockService;
 import net.shasankp000.GameAI.services.BotArrowRecoveryService;
+import net.shasankp000.GameAI.services.FoodConsumptionConfirmationService;
+import net.shasankp000.GameAI.services.HotbarLockService;
 
 
 
@@ -213,8 +215,31 @@ public final class BotActions {
             if (!SneakLockService.isLocked(bot.getUuid())) {
                 bot.setSneaking(false);
             }
+            // If a bow/trident is currently being "used" (drawn), calling stopUsingItem() will RELEASE a shot.
+            // During FOLLOW/idle transitions we want to cancel safely to avoid friendly-fire.
+            cancelRangedUseSafely(bot);
             resetRangedState(bot);
         }, 900L);
+    }
+
+    /**
+     * Cancels active ranged item use without triggering a release shot.
+     *
+     * <p>In vanilla, {@code stopUsingItem()} for bows/tridents calls the item's "stopped using" handler,
+     * which fires the projectile. {@code clearActiveItem()} cancels the use state without firing.</p>
+     */
+    private static void cancelRangedUseSafely(ServerPlayerEntity bot) {
+        if (bot == null || !bot.isUsingItem()) {
+            return;
+        }
+        ItemStack active = bot.getActiveItem();
+        if (active == null || active.isEmpty()) {
+            return;
+        }
+        if (!isRangedWeapon(active)) {
+            return;
+        }
+        bot.clearActiveItem();
     }
 
     public static void turnLeft(ServerPlayerEntity bot) {
@@ -241,6 +266,9 @@ public final class BotActions {
     }
 
     public static void sneak(ServerPlayerEntity bot, boolean value) {
+        if (bot == null) {
+            return;
+        }
         if (!value && bot != null && SneakLockService.isLocked(bot.getUuid())) {
             return;
         }
@@ -389,6 +417,19 @@ public final class BotActions {
             if (stack.isEmpty()) {
                 return;
             }
+
+            // Global safeguard: prevent wasting rare consumables (e.g., Golden Apples / potions)
+            // even when some other system (like RL actions) decides to "use item".
+            if (FoodConsumptionConfirmationService.isConsumable(stack)
+                    && FoodConsumptionConfirmationService.isRareOrExpensiveConsumable(stack)) {
+                int foodLevel = bot.getHungerManager() != null ? bot.getHungerManager().getFoodLevel() : 20;
+                boolean extremeEmergency = bot.getHealth() <= 6.0F || foodLevel <= 2;
+                if (!extremeEmergency
+                        && !FoodConsumptionConfirmationService.allowConsumptionOrRequest(bot, stack, "manual use")) {
+                    return;
+                }
+            }
+
             ActionResult result = stack.use(bot.getEntityWorld(), bot, Hand.MAIN_HAND);
             if (result.isAccepted()) {
                 bot.swingHand(Hand.MAIN_HAND, true);
@@ -397,7 +438,18 @@ public final class BotActions {
     }
 
     public static void selectHotbarSlot(ServerPlayerEntity bot, int index) {
-        runOnServerThread(bot, () -> bot.getInventory().setSelectedSlot(MathHelper.clamp(index, 0, 8)), 900L);
+        if (bot == null) {
+            return;
+        }
+        int clamped = MathHelper.clamp(index, 0, 8);
+        Integer lockedSlot = HotbarLockService.getLockedSlot(bot);
+        if (lockedSlot != null && lockedSlot != clamped) {
+            HotbarLockService.maybeLogBlocked(bot, "select-hotbar");
+            return;
+        }
+        // Immediate change; placement code may need the slot this tick.
+        bot.getInventory().setSelectedSlot(clamped);
+        bot.getInventory().markDirty();
     }
 
     public static boolean ensureHotbarItem(ServerPlayerEntity bot, Item desired) {
@@ -1194,6 +1246,10 @@ public final class BotActions {
     }
 
     private static int ensureHotbarAccess(ServerPlayerEntity bot, PlayerInventory inventory, int slot) {
+        if (HotbarLockService.isLocked(bot)) {
+            HotbarLockService.maybeLogBlocked(bot, "ensure-hotbar");
+            return slot;
+        }
         if (slot < 9) {
             return slot;
         }
@@ -1386,7 +1442,8 @@ public final class BotActions {
         }
         RangedAttackState state = RANGED_STATE.remove(bot.getUuid());
         if (state != null) {
-            bot.stopUsingItem();
+            // Never use stopUsingItem() here: if the bot is holding a drawn bow/trident, that would fire.
+            cancelRangedUseSafely(bot);
             state.forceMelee = false;
         }
     }

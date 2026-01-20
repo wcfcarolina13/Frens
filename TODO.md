@@ -70,6 +70,9 @@ Pending work only. Completed items and rationale live in `changelog.md`.
 - [ ] Swimming parity (surface and underwater)
 - [ ] Verify swimming behavior matches survival movement (no “snap”/teleport, proper buoyancy, safe ascent)
 - [ ] Boat support (enter, exit, navigate)
+- [ ] Boat follow paddling verification: ensure ride-sync uses paddle input (no forced boat position moves).
+- [ ] Boat: verify placement from inventory + boat-break retrieval after commander destroys their boat.
+- [x] Boat placement: add drowned alerts + better threat logs.
 - [ ] Test fishing from a boat; define behavior (stay seated vs dismount to shore)
 - [ ] Portal following (Nether, End)
 - [ ] Cross-realm teleport command

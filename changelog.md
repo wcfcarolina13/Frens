@@ -60,6 +60,27 @@ Historical record and reasoning. `TODO.md` is the source of truth for what’s n
 - Hunting: run a drop-sweep after each kill and before stopping on depopulation safeguards.
 - Hunting: run a final wider-radius drop-sweep after hunts to catch nearby leftovers.
 - Mining safety: on lava detection, bots try water buckets first, then plug with rock/gravel/dirt, back off to a 2-block buffer, and retreat again if lava closes in (alerts preserved).
+- Riding: steer boat follow with paddle-animated velocity nudges (no direct position snaps) so rowing is visible and movement stays responsive.
+- Riding: drive all boats via AbstractBoatEntity inputs so chest boats move in sync with paddling.
+- Riding: increase boat-follow speed targets and stuck-assist step to better match natural player pace.
+- Riding: scale boat-follow speed by distance so far targets allow max speed catch-up.
+- Riding: switch boat-follow speed scaling to an exponential curve for faster catch-up at long range.
+- Riding: match boat-follow target speed to commander velocity (with a small catch-up boost).
+- Riding: avoid joining commander boats already carrying another passenger and allow mounting boats with mob-only passengers.
+- Riding: prefer empty nearby boats and fall back to mob-occupied boats to prevent stuck re-approach loops.
+- Riding: skip joining the commander boat when another usable boat is nearby.
+- Riding: ignore submerged boats as mount candidates to avoid chasing sunken boats.
+- Riding: if the commander destroys their boat on landfall, bots dismount and break their own boat to collect it.
+- Riding: queue boat-breaks for dismounted bots after the commander's boat is destroyed; fallback boat placement uses interactBlock on water.
+- Combat: ignore underwater hostiles unless they have an active player target.
+- Riding: widen bot boat-break detection radius and track last bot boat continuously; add interactItem fallback for boat placement.
+- Riding: require bots to surface before placing boats when submerged.
+- Riding: track pending boat placements and retry mounting a newly placed boat instead of re-placing every tick.
+- Riding: avoid force-mounting boats with existing passengers to prevent seat overlap.
+- Riding: add boat placement diagnostics and allow placing from offhand; log no-boat/no-water/failed cases.
+- Riding: honor hotbar locks when selecting slots so combat loops don't override boat placement items.
+- Riding: tighten boat item detection to avoid treating bows as boats when selecting placement items.
+- Riding: nudge toward the water target after failed boat placement attempts to improve follow-up retries.
 - Git: ignore local status/audio-need markdown notes.
 - Hunt UX: announce hunt start target/count so manual requests give immediate feedback.
 - Smelting: when the furnace already has input, auto-cook or matching cook requests now top it up from inventory and refill matching fuel (direct inventory scan, item-only match); auto fuel selection now prefers leaf litter/leaves/saplings and ranks logs/planks/sticks/charcoal/coal blocks above coal.
