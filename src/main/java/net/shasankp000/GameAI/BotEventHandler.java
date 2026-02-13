@@ -1711,12 +1711,24 @@ public class BotEventHandler {
             boolean verticalProblem = absDeltaY >= 6.0D && !canSee;
             int triggerTicks = verticalProblem ? 25 : 60;
 
-            if (state.comeAllowRecoverySkills
-                    && state.comeTicksSinceBest >= triggerTicks
-                    && srv.getTicks() >= state.comeNextSkillTick) {
-                if (triggerComeRecoverySkill(bot, target, fixedGoal, targetPos, deltaY, horizDistSq, srv, state)) {
+            if (state.comeAllowRecoverySkills && state.comeTicksSinceBest >= triggerTicks) {
+                if (srv.getTicks() < state.comeNextSkillTick) {
+                    if (state.comeTicksSinceBest % 20 == 0) {
+                        LOGGER.info("[FollowAssert] recovery-cooldown bot={} goal={} ticksSinceBest={} nowTick={} nextSkillTick={}",
+                                bot.getName().getString(),
+                                fixedGoal.toShortString(),
+                                state.comeTicksSinceBest,
+                                srv.getTicks(),
+                                state.comeNextSkillTick);
+                    }
+                } else if (triggerComeRecoverySkill(bot, target, fixedGoal, targetPos, deltaY, horizDistSq, srv, state)) {
                     return true;
                 }
+            } else if (!state.comeAllowRecoverySkills && state.comeTicksSinceBest == triggerTicks) {
+                LOGGER.info("[FollowAssert] recovery-suppressed bot={} goal={} reason=safe-regroup ticksSinceBest={}",
+                        bot.getName().getString(),
+                        fixedGoal.toShortString(),
+                        state.comeTicksSinceBest);
             }
         }
         if (target != null && bot.getEntityWorld() != target.getEntityWorld() && srv != null) {
