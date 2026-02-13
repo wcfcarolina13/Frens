@@ -3,38 +3,25 @@
 Pending work only. Completed items and rationale live in `changelog.md`.
 
 ## P0 — Critical
-- [x] **ReturnBaseStuckService build fix**: Reorder debug logging to use initialized variables (post-revert).
 - [ ] **Verify launch after permission predicate fix**: Ensure bots can start without the LeveledPermissionPredicate OWNERS crash on 1.21.11.
-- [ ] **Persist bot stats on respawn**: Health/XP/hunger restored with the same alias, logged on save/load, happens before spawn completes.
-- [x] **Upward stairs (ascent) simplification**: Walk-and-jump staircase that keeps controller-facing direction, mines only 3 blocks above each tread, climbs exactly one block per step, aborts with a clear message if Y does not increase.
-- [x] **Escape when spawned in walls**: Suffocation escape checks all four corners from head to feet, uses tool-based mining only, and throttles alerts to avoid spam.
-- [x] **Task lifecycle reset & busy-loop prevention**: `/bot stop`/respawn instantly clear the active ticket, release movement overrides, and prevent “Bot is busy” spam in idle RL loops.
-- [x] **Drop collection in tricky terrain**: Drop sweeps handle shallow water by wading/bridging, hop safely into 1-block holes to vacuum items, and keep cooldown/backoff logic so navigation is not spammed.
-- [x] **COME/Follow precipice handling**: If walking without teleport hits a large drop/cave, plan a bridge or alternate heading, or edge-scale ascent/descent instead of stalling.
+- [ ] **Persist bot stats on respawn (verification)**: Save/load path exists; verify health/XP/hunger restore timing is visible before spawn flow completes in live runtime.
 
 ## P1 — High
-- [ ] **Protected zones persistence**: JSON-backed zones (position, radius, creator, timestamp, dimension) saved on create/update and loaded on server start.
-- [x] **Woodcut chest workflow**: Ensure woodcut uses ChestStoreService to deposit/place chests before prompting resume; avoid duplicate resume prompts when storage succeeds.
-- [x] **Crafting history UI**: Add popout window for crafting topics; gate list by per-world crafting history.
 - [ ] **Bot config UI refactor**: Single-bot view with alias dropdown, grouped/scrollable settings, and save/cancel affecting only the selected bot.
 - [ ] **Bot identity separation**: Per-alias inventory/hunger/sleep/XP isolation across sessions (Jake vs Bob) with validation.
-- [ ] **Job resume prompts on death/leave**: Pause current job; on rejoin/respawn, ask whether to continue and resume when confirmed.
-- [ ] **Per-bot chat addressing & broadcasts**: Direct questions route to the named bot; `allbots` commands fan out once without cross-talk.
-- [x] **New skill: fishing**: Cast/reel loop with safe footing, inventory checks (rod, bait if needed), avoid water teleport, auto-store catch when inventory nears full.
+- [ ] **Job resume prompts on death/leave (verification)**: Death prompt flow exists; verify leave/rejoin prompt and resume behavior in-game.
+- [ ] **Per-bot chat addressing & broadcasts (verification)**: Named/allbots routing exists; verify no duplicate replies or cross-talk in runtime scenarios.
 
 ## P2 — Medium
 
 ### Post-Refactor Follow-Up (From Testing Notes)
 - [ ] **Guard verification**: Run in-game tests for `/bot guard` (basic start/stop, radius handling, and interaction with other tasks).
-- [x] **Woodcut pillar escape/recover verification**: Confirm the bot can pillar to reach targets and reliably tear down temporary supports without leaving stray columns.
-- [x] **Come verification**: Confirm `/bot come` reaches in one run (no “direct walk blocked” stall) and does not grief player-placed doors.
-- [x] **Combat verification**: Confirm close-range combat switches from bow/crossbow to a melee weapon when available.
 
 ### Follow / Come
 - [ ] **Follow stability**: Confirm follow continues after other tasks; verify advanced pathfinding stays reliable across dimensions/terrain.
-- [ ] **Come survival movement**: Remove nudge/snap behavior; prefer strict survival-style walking unless explicitly configured.
-- [ ] **Come better rerouting before mining tasks**: Try tighter-corner/vertical reroutes more confidently before suggesting descent/ascent/stripmine.
-- [ ] **Come tool crafting**: Hook `ToolProvisionService` into `/bot come` so movement can auto-craft torches/shovels/pickaxes when needed.
+- [ ] **Come survival movement (verification)**: `/bot come` now routes through fixed-goal follow pathing; verify no snap/direct movement regressions in live terrain tests.
+- [ ] **Come better rerouting before mining tasks (verification)**: Pre-recovery reroute attempts were added; verify cave/corner/vertical escapes prefer reroute before `collect_dirt`/`stripmine`.
+- [ ] **Come tool crafting (verification)**: `ToolProvisionService` is now called by `/bot come` and recovery paths; verify torches/shovels/pickaxes are provisioned in-world when recipes/materials permit.
 
 ### Shelter (Redo Needed)
 - [ ] **ShelterSkill refactor**: Split `ShelterSkill.java` into smaller hovel/burrow builder classes and tighten shared primitives/logging.
@@ -45,15 +32,9 @@ Pending work only. Completed items and rationale live in `changelog.md`.
 - [ ] **Shelter chest workflow**: While building, withdraw/deposit resources and place new chests to manage inventory; place new chests inside planned interior when possible.
 - [ ] **Burrow “descend-stripmine-descend”**: Restore intended method; compare with proven descent behavior from `come`.
 ### Mining (Verification)
-- [x] **Descent reliability**: Ensure slow pickaxes don’t cause early pauses (no premature mining-cancel), burial-rescue doesn’t fight the stairwell, and lava hazards always announce clearly.
-- [x] **Descent headroom reach**: Verify descent no longer pauses on out-of-reach stairwell headroom blocks; confirm it continues to step down safely.
 
 ### Commands / UX
-- [x] **Open command admin mode**: Make “open” distance-independent for admins.
 - [ ] **Command pruning review**: Evaluate whether `look_player` and `direction reset` are still needed; deprecate/remove if redundant.
-- [x] **Topics menu updates**: Add drop-sweep, stop, and resume topics; disable stop/resume when not applicable.
-- [x] **Stop keybind default**: Bind stop action to `\\` by default and require looking at the bot.
-- [ ] **New command: `/bot follow-distance`**: Configure follow standoff distance so the bot idles or trails a few extra blocks away, but will pursue/path-plan when it loses line-of-sight (e.g., you turn a corner or drop into a hole).
 - [ ] **Elder Scrolls-style dialogue menu** Conversation topics, commands, quests
 - [ ] **Elder Scrolls-style Journal** Conversation topics, quests, important information with simple filter search
 
@@ -72,7 +53,6 @@ Pending work only. Completed items and rationale live in `changelog.md`.
 - [ ] Boat support (enter, exit, navigate)
 - [ ] Boat follow paddling verification: ensure ride-sync uses paddle input (no forced boat position moves).
 - [ ] Boat: verify placement from inventory + boat-break retrieval after commander destroys their boat.
-- [x] Boat placement: add drowned alerts + better threat logs.
 - [ ] Test fishing from a boat; define behavior (stay seated vs dismount to shore)
 - [ ] Portal following (Nether, End)
 - [ ] Cross-realm teleport command
@@ -93,11 +73,7 @@ Pending work only. Completed items and rationale live in `changelog.md`.
 - [ ] Fight with teammates
 - [ ] Ride sync verification: commander mount/dismount mirroring across horse-like/boats/minecarts/pigs/striders with saddles/controls.
 - [ ] Ride sync leashed persistence: leashed (not mounted) horse remains tethered after disconnect/rejoin.
-- [x] Ride sync lead handling: verify lead is removed/picked up before mounting when tethered to fences.
-- [x] Ride sync rejoin handling: verify bot secures last mount with a lead/fence after rejoin when it was mounted before logout.
-- [x] Mount persistence check: log out/in while mounted and ensure the same animal remains without duplication.
 - [ ] **Water-bucket clutch on deadly falls (low priority)**: If bot has a water bucket and detects a lethal fall, attempt to place water under itself just before impact to avoid death.
-- [x] **Hunting verification**: validate hunt targets, auto-hunt (idle/starving), hunt menu layout, manual hunt feedback, and idle-hobby interruption in-game.
 
 ### Crafting & Building
 - [ ] Place and use crafting table, furnace, chest
@@ -112,7 +88,6 @@ Pending work only. Completed items and rationale live in `changelog.md`.
 - [ ] Animal husbandry (shear, collect meat, pen animals)
 - [ ] Furnace usage with various fuels
 - [ ] Hunger persistence and smart eating
-- [x] Sleep integration: `/bot sleep <alias|all|default>` finds/places/crafts a bed and sleeps.
 - [ ] **Farm underground recovery**: Handle cases where bot is underground and can’t pillar upward due to overhead dirt; improve escape logic and add test coverage.
 - [ ] **Farm chest workflow**: Ensure the farm skill can place/store/use chests proactively for inventory/resource management.
 - [ ] **Farm irrigation leak patching**: If irrigation isn’t fillable, detect leakage cause and patch the leak (enclosure improvements).
@@ -149,8 +124,6 @@ Pending work only. Completed items and rationale live in `changelog.md`.
 - [ ] Recipe awareness: if commander lacks recipe (non-creative), bot refuses and explains. 
 
 ### Quality of Life
-- [ ] Debug toggle (reduce terminal spam)
-- [ ] Test kit command (`/equip` for testing loadout)
 - [ ] Command queuing (multi-step instructions)
 - [ ] Voiced banter variants for follow-adventure lines (creeper joke, "run" warning).
 

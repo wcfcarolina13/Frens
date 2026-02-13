@@ -12,6 +12,7 @@ Historical record and reasoning. `TODO.md` is the source of truth for what’s n
 - Follow rework: bots now chase with WASD-style input, timeboxed path steps (no tick stalls), sensible teleport catch-up, and chill when adjacent; hill walking and vertical catch-up improved.
 
 ## Unreleased
+- Backlog hygiene: archived 23 completed checklist items out of `TODO.md` so it now tracks pending work only. Completed references include return-base build fix, ascent/suffocation/task-lifecycle/drop handling fixes, protected-zone persistence, fishing skill + sleep integration, follow-distance command, follow/come/combat/mining verification passes, and debug/equip quality-of-life commands.
 - Dialogue: add missing `bot.line.*` sound entries for ambient/dark/wildlife/lost/found lines so code-triggered events play.
 - Dialogue: add follow-adventure banter when following far from base/recent bed; track last-sleep timestamps for "recent bed" checks.
 - Drop sweep: treat inventory full only when there are zero empty slots; attempt bundle packing before terminating.
