@@ -82,6 +82,7 @@ import net.shasankp000.GameAI.services.ProtectedZoneService;
 import net.shasankp000.GameAI.services.SkillResumeService;
 import net.shasankp000.GameAI.services.SleepService;
 import net.shasankp000.GameAI.services.TaskService;
+import net.shasankp000.GameAI.services.ToolProvisionService;
 import net.shasankp000.GameAI.services.WorkDirectionService;
 import net.shasankp000.GameAI.skills.SkillContext;
 import net.shasankp000.GameAI.skills.SkillExecutionResult;
@@ -139,6 +140,42 @@ public class modCommandRegistry {
     // Eye-of-Ender access is intentionally limited: it has a cooldown and does NOT represent a full Wizard's Tome unlock.
     private static final long COMPANION_EYE_SPELL_COOLDOWN_TICKS = 20L * 60L; // 60s
     private static final Map<UUID, Long> COMPANION_EYE_SPELL_LAST_TICK = new ConcurrentHashMap<>();
+    private static final Set<String> DIALOGUE_TEST_SUPPORTED_TRIGGERS = Set.of(
+            "fighting_multiple_dangerous", "combat_multi",
+            "combat_ended", "post_combat",
+            "combat_ended_explosion", "post_explosion",
+            "combat_ended_multiple_dangerous", "post_combat_multi",
+            "combat_ended_single_weak", "post_combat_single",
+            "player_hit_bot", "ff_received",
+            "bot_hit_player", "ff_dealt",
+            "villager_noise_nearby", "villager",
+            "player_opens_villager_trade", "villager_negotiate",
+            "tamed_wolf_nearby", "wolf_nearby",
+            "wolf_takes_damage", "wolf_hurt",
+            "tamed_animal_nearby", "animal_nearby",
+            "random_idle_not_combat", "ambient",
+            "in_high_threat_location", "high_threat",
+            "scary_sound_nearby", "scary",
+            "in_boat_not_combat", "boat",
+            "in_boat_deep_water", "boat_deep",
+            "in_boat_dolphin_nearby", "boat_dolphin",
+            "boat_breaks", "boat_break",
+            "standing_on_edge", "precipice",
+            "safe_vista", "vista",
+            "falling_or_elytra", "freefall",
+            "random_ambient", "meta",
+            "baby_zombie_on_chicken", "meme_chicken",
+            "creeper_hiss", "meme_creeper",
+            "world_start_or_milestone", "meme_steve",
+            "survive_near_death_or_totem", "meme_technoblade",
+            "lightning_at_night", "meme_herobrine",
+            "shelter_completion", "shelter",
+            "batch3_biomes", "topic_biomes",
+            "batch3_structures", "topic_structures",
+            "batch3_dimensions", "topic_dimensions",
+            "batch3_traders_mounts", "topic_mounts",
+            "batch3_travel", "topic_travel"
+    );
 
 
     public record BotStopTask(MinecraftServer server, ServerCommandSource botSource,
@@ -298,9 +335,11 @@ public class modCommandRegistry {
 	                        .then(BotUtilityCommands.buildZone())
 	                        .then(BotUtilityCommands.buildLookPlayer())
 	                        .then(BotUtilityCommands.buildFollow())
-                            .then(BotUtilityCommands.buildFollowDistance())
-                            .then(BotUtilityCommands.buildSoundTest())
-                            .then(BotUtilityCommands.buildTestChatter())
+	                            .then(BotUtilityCommands.buildFollowDistance())
+                            .then(BotUtilityCommands.buildFollowCheck())
+	                            .then(BotUtilityCommands.buildSoundTest())
+	                            .then(BotUtilityCommands.buildTestChatter())
+	                            .then(BotUtilityCommands.buildDialogueTest())
                             .then(BotHomeCommands.buildAutoReturnSunset())
                             .then(BotHomeCommands.buildAutoReturnSunsetGuardPatrolEligible())
                             .then(BotHomeCommands.buildAutoReturnSunsetPreferLastBed())
@@ -574,25 +613,30 @@ public class modCommandRegistry {
                         )
                         .then(literal("go_to")
                                 .then(CommandManager.argument("bot", EntityArgumentType.player())
-                                        .then(CommandManager.argument("pos", BlockPosArgumentType.blockPos())
-                                                .then(CommandManager.argument("sprint", StringArgumentType.string())
-                                                        .executes(context -> { botGo(context); return 1; })
-                                                )
-                                        )
-                                )
-                        )
-                        .then(literal("send_message_to")
-                                .then(CommandManager.argument("bot", EntityArgumentType.player())
-                                        .then(CommandManager.argument("message", StringArgumentType.greedyString())
+                                .then(CommandManager.argument("pos", BlockPosArgumentType.blockPos())
                                                 .executes(context -> {
-
-                                                    ollamaClient.execute(context);
-
-                                                     return 1;
-
+                                                    botGo(context);
+                                                    return 1;
                                                 })
-                                        )
+                                    .then(CommandManager.argument("sprint", StringArgumentType.string())
+                                        .executes(context -> {
+                                            botGo(context);
+                                            return 1;
+                                        })
+                                    )
                                 )
+                            )
+                        )
+
+                        // Operator helper: quickly give yourself the Wizard's Tome quest item.
+                        .then(literal("wizard_tome")
+                            .executes(context -> executeGiveWizardTome(context.getSource(), 1))
+                            .then(CommandManager.argument("amount", IntegerArgumentType.integer(1, 64))
+                                .executes(context -> executeGiveWizardTome(
+                                        context.getSource(),
+                                        IntegerArgumentType.getInteger(context, "amount")
+                                ))
+                            )
                         )
                         .then(literal("detect_entities")
                                 .then(CommandManager.argument("bot", EntityArgumentType.player())
@@ -2045,7 +2089,16 @@ public class modCommandRegistry {
     private static void botGo(CommandContext<ServerCommandSource> context) {
         MinecraftServer server = context.getSource().getServer();
         BlockPos position = BlockPosArgumentType.getBlockPos(context, "pos");
-        String sprintFlag = StringArgumentType.getString(context, "sprint");
+
+        // Backward-compatible: sprint argument is optional.
+        String sprintFlag;
+        try {
+            sprintFlag = StringArgumentType.getString(context, "sprint");
+        } catch (IllegalArgumentException ignored) {
+            sprintFlag = "false";
+        } catch (Throwable ignored) {
+            sprintFlag = "false";
+        }
 
         boolean sprint;
 
@@ -2636,6 +2689,203 @@ public class modCommandRegistry {
         return successes;
     }
 
+    static int executeFollowCheck(CommandContext<ServerCommandSource> context,
+                                  ServerPlayerEntity bot,
+                                  String expectedModeRaw) {
+        if (bot == null) {
+            ChatUtils.sendSystemMessage(context.getSource(), "§cBot not found.");
+            return 0;
+        }
+        BotCommandStateService.State state = BotCommandStateService.stateFor(bot);
+        BotEventHandler.Mode mode = BotEventHandler.getCurrentMode(bot);
+        UUID followTarget = BotEventHandler.getFollowTargetUuid(bot);
+        BlockPos fixedGoal = state != null ? state.followFixedGoal : null;
+        double stopRange = state != null ? state.followStopRange : 0.0D;
+        double standoffRange = state != null ? Math.max(0.0D, state.followStandoffRange) : 0.0D;
+        boolean noTeleport = state != null && state.followNoTeleport;
+        boolean allowRecovery = state == null || state.comeAllowRecoverySkills;
+        int rerouteAttempts = state != null ? Math.max(0, state.comeRerouteAttempts) : 0;
+        int ticksSinceBest = state != null ? Math.max(0, state.comeTicksSinceBest) : 0;
+        long nextRerouteTick = state != null ? state.comeNextRerouteTick : 0L;
+        long nextSkillTick = state != null ? state.comeNextSkillTick : 0L;
+        int waypoints = net.shasankp000.GameAI.services.FollowStateService.FOLLOW_WAYPOINTS
+                .getOrDefault(bot.getUuid(), new ArrayDeque<>())
+                .size();
+        boolean planningInflight = net.shasankp000.GameAI.services.FollowStateService.FOLLOW_PATH_INFLIGHT.containsKey(bot.getUuid());
+
+        String summary = String.format(Locale.ROOT,
+                "FollowCheck bot=%s mode=%s target=%s fixedGoal=%s forceWalk=%s stopRange=%.2f standoff=%.2f allowRecovery=%s reroutes=%d ticksSinceBest=%d nextReroute=%d nextSkill=%d waypoints=%d inflight=%s",
+                bot.getName().getString(),
+                mode,
+                followTarget != null ? followTarget.toString() : "none",
+                fixedGoal != null ? fixedGoal.toShortString() : "none",
+                noTeleport,
+                stopRange,
+                standoffRange,
+                allowRecovery,
+                rerouteAttempts,
+                ticksSinceBest,
+                nextRerouteTick,
+                nextSkillTick,
+                waypoints,
+                planningInflight);
+        LOGGER.info("[FollowAssert] {}", summary);
+        ChatUtils.sendSystemMessage(context.getSource(), summary);
+
+        if (expectedModeRaw == null || expectedModeRaw.isBlank()) {
+            return 1;
+        }
+        List<String> tokens = Arrays.stream(expectedModeRaw.trim().toLowerCase(Locale.ROOT).split("[+,]"))
+                .map(String::trim)
+                .filter(s -> !s.isBlank())
+                .toList();
+        if (tokens.isEmpty()) {
+            ChatUtils.sendSystemMessage(context.getSource(),
+                    "§cFollowCheck expected is empty. Use follow|come|idle or token combos (e.g. come+recovery_off+force_walk).");
+            return 0;
+        }
+
+        List<String> failures = new ArrayList<>();
+        for (String token : tokens) {
+            switch (token) {
+                case "follow" -> assertFollowInvariant(failures, mode, fixedGoal, followTarget);
+                case "come" -> assertComeInvariant(failures, mode, fixedGoal);
+                case "idle" -> assertIdleInvariant(failures, mode, followTarget, fixedGoal);
+                case "come_safe", "come_norecovery", "recovery_off" -> {
+                    assertComeInvariant(failures, mode, fixedGoal);
+                    if (allowRecovery) {
+                        failures.add("expected allowRecovery=false");
+                    }
+                }
+                case "come_recovery", "recovery_on" -> {
+                    assertComeInvariant(failures, mode, fixedGoal);
+                    if (!allowRecovery) {
+                        failures.add("expected allowRecovery=true");
+                    }
+                }
+                case "fixed_goal" -> {
+                    if (fixedGoal == null) {
+                        failures.add("expected fixedGoal present");
+                    }
+                }
+                case "no_fixed_goal" -> {
+                    if (fixedGoal != null) {
+                        failures.add("expected fixedGoal absent");
+                    }
+                }
+                case "has_target" -> {
+                    if (followTarget == null) {
+                        failures.add("expected follow target present");
+                    }
+                }
+                case "no_target" -> {
+                    if (followTarget != null) {
+                        failures.add("expected follow target absent");
+                    }
+                }
+                case "force_walk" -> {
+                    if (!noTeleport) {
+                        failures.add("expected forceWalk=true");
+                    }
+                }
+                case "can_teleport" -> {
+                    if (noTeleport) {
+                        failures.add("expected forceWalk=false");
+                    }
+                }
+                case "standoff" -> {
+                    if (standoffRange <= 0.0D) {
+                        failures.add("expected standoff>0");
+                    }
+                }
+                case "no_standoff" -> {
+                    if (standoffRange > 0.0D) {
+                        failures.add("expected standoff=0");
+                    }
+                }
+                case "has_waypoints" -> {
+                    if (waypoints <= 0) {
+                        failures.add("expected waypoints>0");
+                    }
+                }
+                case "no_waypoints" -> {
+                    if (waypoints > 0) {
+                        failures.add("expected waypoints=0");
+                    }
+                }
+                case "planner_inflight" -> {
+                    if (!planningInflight) {
+                        failures.add("expected planner inflight");
+                    }
+                }
+                case "planner_idle" -> {
+                    if (planningInflight) {
+                        failures.add("expected planner idle");
+                    }
+                }
+                case "rerouted" -> {
+                    if (rerouteAttempts <= 0) {
+                        failures.add("expected rerouteAttempts>0");
+                    }
+                }
+                case "no_reroute" -> {
+                    if (rerouteAttempts > 0) {
+                        failures.add("expected rerouteAttempts=0");
+                    }
+                }
+                default -> {
+                    ChatUtils.sendSystemMessage(context.getSource(),
+                            "§cUnknown follow_check token '" + token + "'.");
+                    return 0;
+                }
+            }
+        }
+
+        if (!failures.isEmpty()) {
+            String fail = "§cFollowCheck assert failed: " + String.join("; ", failures);
+            LOGGER.info("[FollowAssert] assert-fail bot={} expected={} mode={} target={} fixedGoal={} reasons={}",
+                    bot.getName().getString(),
+                    String.join("+", tokens),
+                    mode,
+                    followTarget != null ? followTarget : "none",
+                    fixedGoal != null ? fixedGoal.toShortString() : "none",
+                    String.join("|", failures));
+            ChatUtils.sendSystemMessage(context.getSource(), fail);
+            return 0;
+        }
+
+        String expected = String.join("+", tokens);
+        LOGGER.info("[FollowAssert] assert-ok bot={} expected={} mode={}", bot.getName().getString(), expected, mode);
+        ChatUtils.sendSystemMessage(context.getSource(), "§aFollowCheck assert passed (" + expected + ").");
+        return 1;
+    }
+
+    private static void assertFollowInvariant(List<String> failures,
+                                              BotEventHandler.Mode mode,
+                                              BlockPos fixedGoal,
+                                              UUID followTarget) {
+        if (!(mode == BotEventHandler.Mode.FOLLOW && fixedGoal == null && followTarget != null)) {
+            failures.add("expected mode=FOLLOW with player target and no fixed goal");
+        }
+    }
+
+    private static void assertComeInvariant(List<String> failures,
+                                            BotEventHandler.Mode mode,
+                                            BlockPos fixedGoal) {
+        if (!(mode == BotEventHandler.Mode.FOLLOW && fixedGoal != null)) {
+            failures.add("expected mode=FOLLOW with fixed goal");
+        }
+    }
+
+    private static void assertIdleInvariant(List<String> failures,
+                                            BotEventHandler.Mode mode,
+                                            UUID followTarget,
+                                            BlockPos fixedGoal) {
+        if (!(mode == BotEventHandler.Mode.IDLE && followTarget == null && fixedGoal == null)) {
+            failures.add("expected mode=IDLE with no follow target and no fixed goal");
+        }
+    }
+
     static int executeSoundTestTargets(CommandContext<ServerCommandSource> context,
                                        String targetArg) throws CommandSyntaxException {
         List<ServerPlayerEntity> bots = BotTargetingService.resolve(context.getSource(), targetArg);
@@ -2699,6 +2949,95 @@ public class modCommandRegistry {
             ChatUtils.sendSystemMessage(context.getSource(), "§cNo bots found to test chatter.");
         }
         return successes;
+    }
+
+    static int executeDialogueTest(CommandContext<ServerCommandSource> context,
+                                   ServerPlayerEntity bot,
+                                   String triggerKeyRaw,
+                                   String lineIdRaw) {
+        if (bot == null) {
+            ChatUtils.sendSystemMessage(context.getSource(), "§cBot not found.");
+            return 0;
+        }
+        if (!BotEventHandler.isRegisteredBot(bot)) {
+            ChatUtils.sendSystemMessage(context.getSource(),
+                    "§c" + bot.getName().getString() + " is not a registered bot.");
+            return 0;
+        }
+
+        String triggerKey = triggerKeyRaw == null ? "" : triggerKeyRaw.trim().toLowerCase(Locale.ROOT);
+        if (triggerKey.isEmpty()) {
+            ChatUtils.sendSystemMessage(context.getSource(), "§cTrigger key is required.");
+            return 0;
+        }
+        if (!DIALOGUE_TEST_SUPPORTED_TRIGGERS.contains(triggerKey)) {
+            ChatUtils.sendSystemMessage(context.getSource(),
+                    "§cUnknown trigger key '" + triggerKey + "'.");
+            return 0;
+        }
+
+        String lineId = (lineIdRaw == null || lineIdRaw.isBlank()) ? null : lineIdRaw.trim().toLowerCase(Locale.ROOT);
+        boolean played = routeDialogueTestTrigger(bot, triggerKey, lineId);
+        if (played) {
+            String lineSuffix = lineId == null ? "" : " line_id=" + lineId;
+            ChatUtils.sendSystemMessage(context.getSource(),
+                    "§aDialogue test played for " + bot.getName().getString()
+                            + " trigger=" + triggerKey + lineSuffix);
+            return 1;
+        }
+
+        ChatUtils.sendSystemMessage(context.getSource(),
+                "§eNo dialogue played for " + bot.getName().getString()
+                        + " (cooldown active or invalid line_id for trigger '" + triggerKey + "').");
+        return 0;
+    }
+
+    private static boolean routeDialogueTestTrigger(ServerPlayerEntity bot, String triggerKey, String lineId) {
+        return switch (triggerKey) {
+            case "fighting_multiple_dangerous", "combat_multi",
+                 "combat_ended", "post_combat",
+                 "combat_ended_explosion", "post_explosion",
+                 "combat_ended_multiple_dangerous", "post_combat_multi",
+                 "combat_ended_single_weak", "post_combat_single",
+                 "player_hit_bot", "ff_received",
+                 "bot_hit_player", "ff_dealt" ->
+                    net.shasankp000.GameAI.services.BotCombatCalloutService.debugTrigger(bot, triggerKey, lineId);
+
+            case "villager_noise_nearby", "villager",
+                 "player_opens_villager_trade", "villager_negotiate" ->
+                    net.shasankp000.GameAI.services.VillageProximityReactionService.debugTrigger(bot, triggerKey, lineId);
+
+            case "tamed_wolf_nearby", "wolf_nearby",
+                 "wolf_takes_damage", "wolf_hurt",
+                 "tamed_animal_nearby", "animal_nearby" ->
+                    net.shasankp000.GameAI.services.PetProximityReactionService.debugTrigger(bot, triggerKey, lineId);
+
+            case "random_idle_not_combat", "ambient",
+                 "in_high_threat_location", "high_threat",
+                 "scary_sound_nearby", "scary",
+                 "in_boat_not_combat", "boat",
+                 "in_boat_deep_water", "boat_deep",
+                 "in_boat_dolphin_nearby", "boat_dolphin",
+                 "boat_breaks", "boat_break",
+                 "standing_on_edge", "precipice",
+                 "safe_vista", "vista",
+                 "falling_or_elytra", "freefall",
+                 "random_ambient", "meta",
+                 "baby_zombie_on_chicken", "meme_chicken",
+                 "creeper_hiss", "meme_creeper",
+                 "world_start_or_milestone", "meme_steve",
+                 "survive_near_death_or_totem", "meme_technoblade",
+                 "lightning_at_night", "meme_herobrine",
+                 "shelter_completion", "shelter" ->
+                    net.shasankp000.GameAI.services.CompanionContextReactionService.debugTrigger(bot, triggerKey, lineId);
+            case "batch3_biomes", "topic_biomes",
+                 "batch3_structures", "topic_structures",
+                 "batch3_dimensions", "topic_dimensions",
+                 "batch3_traders_mounts", "topic_mounts",
+                 "batch3_travel", "topic_travel" ->
+                    net.shasankp000.GameAI.services.Batch3TopicDialogueService.debugTrigger(bot, triggerKey, lineId);
+            default -> false;
+        };
     }
 
     static int executeComeTargets(CommandContext<ServerCommandSource> context, String targetArg) throws CommandSyntaxException {
@@ -3055,78 +3394,44 @@ public class modCommandRegistry {
         // Commander-issued override: always preempt idle hobbies.
         interruptAmbientHobbyIfAny(bot, "§cInterrupted by /bot come.");
         boolean teleportAllowed = SkillPreferences.teleportDuringSkills(bot);
-        if (!teleportAllowed && !bot.canSee(commander) && !hasNavigationTool(bot)) {
-            ChatUtils.sendSystemMessage(context.getSource(),
-                    "I don't have any navigation tools to find you.");
-            return 0;
-        }
-
-        // Come should be "self-healing": keep replanning like follow-walk does, instead of relying on a single
-        // direct-path attempt that can be blocked by doorway/fence/corner geometry.
-        if (!teleportAllowed) {
-            // Come is a player-issued override; abort any running skill so follow-walk can take over immediately.
-            TaskService.forceAbort(bot.getUuid(), "§cInterrupted by /bot come.");
-            BotIdleHobbiesService.snoozeFor(bot, 3_600L);
-            BlockPos goal = commander.getBlockPos().toImmutable();
-            // Use a nearby 2-block-headroom goal when possible; even in walk-only mode this helps avoid
-            // targeting positions right on a cliff lip / cave mouth where pathing tends to oscillate.
-            net.minecraft.server.world.ServerWorld commanderWorld = commander.getEntityWorld() instanceof net.minecraft.server.world.ServerWorld sw ? sw : null;
-            if (commanderWorld != null) {
-                BlockPos safe = net.shasankp000.GameAI.services.SafePositionService.findForwardSafeSpot(commanderWorld, commander);
-                if (safe == null) {
-                    safe = net.shasankp000.GameAI.services.SafePositionService.findSafeNear(commanderWorld, goal, 8);
-                }
-                if (safe != null) {
-                    goal = safe;
-                }
-            }
-            BotEventHandler.setComeModeWalk(bot, commander, goal, 3.2D, allowRecoverySkills);
-            return 1;
-        }
-
-        BlockPos rawGoal = commander.getBlockPos().toImmutable();
-        BlockPos safeGoal = null;
+        // Come should be pathing-first (survival movement). We now always route through fixed-goal follow
+        // so doorway/corner reroutes and stuck handling are shared with FOLLOW mode.
+        BlockPos goal = commander.getBlockPos().toImmutable();
         net.minecraft.server.world.ServerWorld commanderWorld = commander.getEntityWorld() instanceof net.minecraft.server.world.ServerWorld sw ? sw : null;
         if (commanderWorld != null) {
-            safeGoal = net.shasankp000.GameAI.services.SafePositionService.findForwardSafeSpot(commanderWorld, commander);
+            BlockPos safeGoal = net.shasankp000.GameAI.services.SafePositionService.findForwardSafeSpot(commanderWorld, commander);
             if (safeGoal == null) {
-                safeGoal = net.shasankp000.GameAI.services.SafePositionService.findSafeNear(commanderWorld, rawGoal, 8);
+                safeGoal = net.shasankp000.GameAI.services.SafePositionService.findSafeNear(commanderWorld, goal, 8);
+            }
+            if (safeGoal != null) {
+                goal = safeGoal;
             }
         }
-        BlockPos goal = safeGoal != null ? safeGoal : rawGoal;
 
+        // Player-issued override: interrupt active skills so follow-walk can take over immediately.
+        TaskService.forceAbort(bot.getUuid(), "§cInterrupted by /bot come.");
         BotIdleHobbiesService.snoozeFor(bot, 3_600L);
 
-        MovementService.MovementPlan plan = new MovementService.MovementPlan(
-            MovementService.Mode.DIRECT,
-            goal,
-            goal,
-            null,
-            null,
-            bot.getHorizontalFacing());
-        MovementService.MovementResult result = MovementService.execute(bot.getCommandSource(), bot, plan, Boolean.TRUE);
-        if (result.success()) {
-            return 1;
-        }
-
-        ChatUtils.sendSystemMessage(context.getSource(),
-                bot.getName().getString() + " could not reach you: " + result.detail());
-        return 0;
-    }
-
-    private static boolean hasNavigationTool(ServerPlayerEntity bot) {
-        if (bot == null) {
-            return false;
-        }
-        for (int slot = 0; slot < bot.getInventory().size(); slot++) {
-            if (bot.getInventory().getStack(slot).isOf(Items.COMPASS)
-                    || bot.getInventory().getStack(slot).isOf(Items.RECOVERY_COMPASS)
-                    || bot.getInventory().getStack(slot).isOf(Items.FILLED_MAP)
-                    || bot.getInventory().getStack(slot).isOf(Items.MAP)) {
-                return true;
+        if (allowRecoverySkills) {
+            // Best-effort provisioning to support auto-recovery routing if we get terrain-locked later.
+            try {
+                ServerCommandSource source = bot.getCommandSource().withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS);
+                ToolProvisionService.ensurePickaxe(bot, source, commander);
+                ToolProvisionService.ensureShovel(bot, source, commander);
+                ToolProvisionService.ensureTorches(bot, source, commander, 8);
+            } catch (Throwable ignored) {
             }
         }
-        return false;
+
+        // Keep explicit teleport preference available as catch-up policy, but avoid immediate direct/snap movement.
+        BotEventHandler.setComeModeWalk(bot, commander, goal, 3.2D, allowRecoverySkills, teleportAllowed);
+        LOGGER.info("[FollowAssert] come-command bot={} commander={} goal={} teleportPref={} allowRecovery={}",
+                bot.getName().getString(),
+                commander.getName().getString(),
+                goal.toShortString(),
+                teleportAllowed,
+                allowRecoverySkills);
+        return 1;
     }
 
     static int executeCompanionComeTargets(CommandContext<ServerCommandSource> context, String targetArg) {

@@ -5,6 +5,7 @@ import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
 import net.minecraft.block.DoorBlock;
 import net.minecraft.block.FenceGateBlock;
+import net.minecraft.fluid.Fluids;
 import net.minecraft.state.property.Properties;
 import net.minecraft.component.DataComponentTypes;
 import net.minecraft.entity.Entity;
@@ -75,6 +76,7 @@ import net.shasankp000.GameAI.services.FollowPlannerService;
 import net.shasankp000.GameAI.services.FollowStateService.FollowDoorPlan;
 import net.shasankp000.GameAI.services.FollowStateService.FollowDoorRecovery;
 import net.shasankp000.GameAI.services.FollowMovementService;
+import net.shasankp000.GameAI.services.ToolProvisionService;
 import net.shasankp000.GameAI.skills.SkillContext;
 import net.shasankp000.GameAI.skills.SkillExecutionResult;
 import net.shasankp000.GameAI.skills.SkillManager;
@@ -124,6 +126,26 @@ public class BotEventHandler {
     private static final int FOLLOW_TELEPORT_STUCK_TICKS = 60; // ~3 seconds @20tps
     private static final int FOLLOW_TELEPORT_COOLDOWN_TICKS = 40; // 2 seconds @20tps
     private static final long FOLLOW_POST_DOOR_AVOID_MS = 6_000L;
+    private static final int FOLLOW_WAYPOINT_HEAD_STUCK_TICKS = 20;
+    private static final int FOLLOW_WAYPOINT_HEAD_HARD_RESET_TICKS = 40;
+    private static final int FOLLOW_WAYPOINT_REPOSITION_MAX_ATTEMPTS = 2;
+    private static final long FOLLOW_WAYPOINT_REPOSITION_COOLDOWN_MS = 1_500L;
+    private static final long FOLLOW_WAYPOINT_REPOSITION_VERIFY_TICKS = 8L;
+    private static final long FOLLOW_WAYPOINT_REACH_LOG_INTERVAL_MS = 1_500L;
+    private static final long FOLLOW_WAYPOINT_REPOSITION_LOG_INTERVAL_MS = 1_500L;
+    private static final long FOLLOW_CLOSE_FLANK_COOLDOWN_MS = 750L;
+    private static final long FOLLOW_CLOSE_FLANK_LOG_INTERVAL_MS = 1_500L;
+    private static final long FOLLOW_WATER_ESCAPE_VERIFY_TICKS = 8L;
+    private static final long FOLLOW_WATER_ESCAPE_COOLDOWN_MS = 750L;
+    private static final int FOLLOW_WATER_ESCAPE_MAX_ATTEMPTS = 3;
+    private static final long FOLLOW_WATER_ESCAPE_LOG_INTERVAL_MS = 1_500L;
+    private static final long FOLLOW_DIMENSION_WARN_INTERVAL_MS = 12_000L;
+    private static final int COME_REROUTE_ATTEMPTS_BEFORE_SKILL = 2;
+    private static final long COME_REROUTE_COOLDOWN_TICKS = 30L;
+    private static final long COME_RECOVERY_MIN_TICKS_AFTER_REROUTE = 35L;
+    private static final Map<UUID, Long> FOLLOW_LAST_DIMENSION_WARN_MS = new ConcurrentHashMap<>();
+    private static final Map<UUID, Long> FOLLOW_LAST_CLOSE_FLANK_MS = new ConcurrentHashMap<>();
+    private static final Map<UUID, Long> FOLLOW_LAST_CLOSE_FLANK_LOG_MS = new ConcurrentHashMap<>();
 
     private static BlockPos currentAvoidDoor(UUID botId) {
         return FollowStateService.currentAvoidDoor(botId);
@@ -1093,6 +1115,7 @@ public class BotEventHandler {
         // Combat callout bookkeeping: treat "hostiles present" as ongoing combat activity.
         // Without this, long skeleton fights can go quiet for >5s and trigger a premature "standing down".
         try {
+            net.shasankp000.GameAI.services.BotCombatCalloutService.noteCombatSituation(bot, augmentedHostiles);
             net.shasankp000.GameAI.services.BotCombatCalloutService.noteCombatOngoing(bot, !augmentedHostiles.isEmpty());
         } catch (Throwable ignored) {
         }
@@ -1196,10 +1219,7 @@ public class BotEventHandler {
             state.followStopRange = 0.0D;
             state.followStandoffRange = 0.0D;
             state.followFixedGoal = null;
-            state.comeBestGoalDistSq = Double.NaN;
-            state.comeTicksSinceBest = 0;
-            state.comeNextSkillTick = 0L;
-            state.comeAllowRecoverySkills = true;
+            resetComeTrackingState(state, true);
         }
         setMode(bot, Mode.FOLLOW);
         clearGuard(bot);
@@ -1213,6 +1233,11 @@ public class BotEventHandler {
         if (announce) {
             sendBotMessage(bot, "Following " + target.getName().getString() + ".");
         }
+        LOGGER.info("[FollowAssert] entered-follow bot={} target={} forceWalk={} fixedGoal={}",
+                bot.getName().getString(),
+                target.getName().getString(),
+                false,
+                false);
         return "Now following " + target.getName().getString() + ".";
     }
 
@@ -1228,10 +1253,7 @@ public class BotEventHandler {
             state.followStopRange = Math.max(1.5D, stopRange);
             state.followStandoffRange = 0.0D;
             state.followFixedGoal = null;
-            state.comeBestGoalDistSq = Double.NaN;
-            state.comeTicksSinceBest = 0;
-            state.comeNextSkillTick = 0L;
-            state.comeAllowRecoverySkills = true;
+            resetComeTrackingState(state, true);
         }
         setMode(bot, Mode.FOLLOW);
         clearGuard(bot);
@@ -1241,6 +1263,11 @@ public class BotEventHandler {
         FollowDebugService.clear(id);
         requestFollowPathPlan(bot, target, true, "follow-start-walk");
         sendBotMessage(bot, "Walking to you.");
+        LOGGER.info("[FollowAssert] entered-follow bot={} target={} forceWalk={} fixedGoal={}",
+                bot.getName().getString(),
+                target.getName().getString(),
+                true,
+                false);
         return "Walking to " + target.getName().getString() + ".";
     }
 
@@ -1260,6 +1287,21 @@ public class BotEventHandler {
                                         BlockPos fixedGoal,
                                         double stopRange,
                                         boolean allowRecoverySkills) {
+        return setComeModeWalk(bot, commander, fixedGoal, stopRange, allowRecoverySkills, false);
+    }
+
+    /**
+     * Fixed-goal /come runner.
+     * <p>
+     * When {@code allowTeleportCatchup} is false, this is strict survival walking.
+     * When true, this still uses pathing-first behavior but allows follow-level teleport catch-up if available.
+     */
+    public static String setComeModeWalk(ServerPlayerEntity bot,
+                                         ServerPlayerEntity commander,
+                                         BlockPos fixedGoal,
+                                         double stopRange,
+                                         boolean allowRecoverySkills,
+                                         boolean allowTeleportCatchup) {
         if (bot == null || fixedGoal == null) {
             return "Unable to come — destination not found.";
         }
@@ -1267,14 +1309,11 @@ public class BotEventHandler {
         setFollowTarget(bot, commander != null ? commander.getUuid() : null);
         BotCommandStateService.State state = stateFor(bot);
         if (state != null) {
-            state.followNoTeleport = true;
+            state.followNoTeleport = !allowTeleportCatchup;
             state.followStopRange = Math.max(1.5D, stopRange);
             state.followStandoffRange = 0.0D;
             state.followFixedGoal = fixedGoal.toImmutable();
-            state.comeBestGoalDistSq = Double.NaN;
-            state.comeTicksSinceBest = 0;
-            state.comeNextSkillTick = 0L;
-            state.comeAllowRecoverySkills = allowRecoverySkills;
+            resetComeTrackingState(state, allowRecoverySkills);
         }
         setMode(bot, Mode.FOLLOW);
         clearGuard(bot);
@@ -1285,8 +1324,14 @@ public class BotEventHandler {
         FollowDebugService.clear(id);
 
         requestFollowPathPlanToGoal(bot, fixedGoal, true, "come-start");
-        sendBotMessage(bot, "Walking to your last location.");
-        return "Walking to your last location.";
+        sendBotMessage(bot, allowTeleportCatchup ? "Heading to your last location." : "Walking to your last location.");
+        LOGGER.info("[FollowAssert] entered-come bot={} commander={} goal={} forceWalk={} allowRecovery={}",
+                bot.getName().getString(),
+                commander != null ? commander.getName().getString() : "none",
+                fixedGoal.toShortString(),
+                !allowTeleportCatchup,
+                allowRecoverySkills);
+        return allowTeleportCatchup ? "Heading to your last location." : "Walking to your last location.";
     }
 
     public static String stopFollowing(ServerPlayerEntity bot) {
@@ -1309,6 +1354,9 @@ public class BotEventHandler {
             UUID id = bot.getUuid();
             FollowStateService.clearAll(id);
             FollowDebugService.clear(id);
+            FOLLOW_LAST_CLOSE_FLANK_MS.remove(id);
+            FOLLOW_LAST_CLOSE_FLANK_LOG_MS.remove(id);
+            FOLLOW_LAST_DIMENSION_WARN_MS.remove(id);
         }
         BotCommandStateService.State state = stateFor(bot);
         if (state != null) {
@@ -1316,10 +1364,7 @@ public class BotEventHandler {
             state.followStopRange = 0.0D;
             state.followStandoffRange = 0.0D;
             state.followFixedGoal = null;
-            state.comeBestGoalDistSq = Double.NaN;
-            state.comeTicksSinceBest = 0;
-            state.comeNextSkillTick = 0L;
-            state.comeAllowRecoverySkills = true;
+            resetComeTrackingState(state, true);
         }
 
         // IMPORTANT: return-to-base uses FOLLOW mode with baseTarget + followFixedGoal.
@@ -1357,10 +1402,7 @@ public class BotEventHandler {
             state.followStopRange = 0.0D;
             state.followStandoffRange = Math.max(0.0D, standoffRange);
             state.followFixedGoal = null;
-            state.comeBestGoalDistSq = Double.NaN;
-            state.comeTicksSinceBest = 0;
-            state.comeNextSkillTick = 0L;
-            state.comeAllowRecoverySkills = true;
+            resetComeTrackingState(state, true);
         }
         setMode(bot, Mode.FOLLOW);
         clearGuard(bot);
@@ -1371,6 +1413,12 @@ public class BotEventHandler {
         FollowDebugService.clear(id);
         requestFollowPathPlan(bot, target, true, "follow-distance-start");
         sendBotMessage(bot, "Following " + target.getName().getString() + " at a distance.");
+        LOGGER.info("[FollowAssert] entered-follow bot={} target={} forceWalk={} fixedGoal={} standoff={}",
+                bot.getName().getString(),
+                target.getName().getString(),
+                false,
+                false,
+                String.format(Locale.ROOT, "%.1f", Math.max(0.0D, standoffRange)));
         return "Now following " + target.getName().getString() + " at a distance.";
     }
 
@@ -1458,11 +1506,8 @@ public class BotEventHandler {
             state.followStopRange = 0.0D;
             state.followStandoffRange = 0.0D;
             state.followFixedGoal = goal;
-            state.comeBestGoalDistSq = Double.NaN;
-            state.comeTicksSinceBest = 0;
-            state.comeNextSkillTick = 0L;
             // For "head home", prefer safe walking/pathing over digging recovery skills.
-            state.comeAllowRecoverySkills = false;
+            resetComeTrackingState(state, false);
         }
         setMode(bot, Mode.FOLLOW);
         clearGuard(bot);
@@ -1674,6 +1719,17 @@ public class BotEventHandler {
             }
         }
 
+        // RideSync boat-follow: if the commander is boating and RideSync has selected a nearby free boat
+        // (or a placement spot) for the bot to approach, steer toward that first. Without this, the normal
+        // follow movement overwrites RideSync's movement input later in the tick, and the bot will just swim
+        // behind the commander instead of ever reaching the boat.
+        if (target != null && fixedGoal == null && server != null && !bot.hasVehicle()) {
+            Vec3d rideOverride = net.shasankp000.GameAI.services.RideSyncService.getBoatFollowOverrideTarget(bot, target, server);
+            if (rideOverride != null) {
+                targetPos = rideOverride;
+            }
+        }
+
     double distanceSq = bot.squaredDistanceTo(targetPos);
     double horizDistSq = horizontalDistanceSq(bot, targetPos);
 	        if (target != null) {
@@ -1697,11 +1753,14 @@ public class BotEventHandler {
             if (!Double.isFinite(state.comeBestGoalDistSq)) {
                 state.comeBestGoalDistSq = goalDistSq;
                 state.comeTicksSinceBest = 0;
+                state.comeRerouteAttempts = 0;
             } else {
                 // Only count progress if we beat the previous best by a meaningful amount.
                 if (goalDistSq <= state.comeBestGoalDistSq - 1.0D) {
                     state.comeBestGoalDistSq = goalDistSq;
                     state.comeTicksSinceBest = 0;
+                    state.comeRerouteAttempts = 0;
+                    state.comeNextRerouteTick = 0L;
                 } else {
                     state.comeTicksSinceBest++;
                 }
@@ -1711,19 +1770,57 @@ public class BotEventHandler {
             boolean verticalProblem = absDeltaY >= 6.0D && !canSee;
             int triggerTicks = verticalProblem ? 25 : 60;
 
-            if (state.comeAllowRecoverySkills
-                    && state.comeTicksSinceBest >= triggerTicks
-                    && srv.getTicks() >= state.comeNextSkillTick) {
-                if (triggerComeRecoverySkill(bot, target, fixedGoal, targetPos, deltaY, horizDistSq, srv, state)) {
+            if (state.comeAllowRecoverySkills && state.comeTicksSinceBest >= triggerTicks) {
+                if (tryComeRerouteBeforeRecovery(bot, target, fixedGoal, targetPos, absDeltaY, horizDistSq, canSee, srv, state)) {
                     return true;
                 }
+                boolean rerouteWarmupSatisfied = state.comeRerouteAttempts >= COME_REROUTE_ATTEMPTS_BEFORE_SKILL
+                        || state.comeTicksSinceBest >= triggerTicks + (int) COME_RECOVERY_MIN_TICKS_AFTER_REROUTE;
+                if (!rerouteWarmupSatisfied && (state.comeTicksSinceBest == triggerTicks || state.comeTicksSinceBest % 20 == 0)) {
+                    LOGGER.info("[FollowAssert] recovery-warmup bot={} goal={} ticksSinceBest={} reroutes={} requiredReroutes={} minAfterReroute={}",
+                            bot.getName().getString(),
+                            fixedGoal.toShortString(),
+                            state.comeTicksSinceBest,
+                            state.comeRerouteAttempts,
+                            COME_REROUTE_ATTEMPTS_BEFORE_SKILL,
+                            COME_RECOVERY_MIN_TICKS_AFTER_REROUTE);
+                }
+                if (rerouteWarmupSatisfied && srv.getTicks() < state.comeNextSkillTick) {
+                    if (state.comeTicksSinceBest % 20 == 0) {
+                        LOGGER.info("[FollowAssert] recovery-cooldown bot={} goal={} nowTick={} nextSkillTick={}",
+                                bot.getName().getString(),
+                                fixedGoal.toShortString(),
+                                srv.getTicks(),
+                                state.comeNextSkillTick);
+                    }
+                }
+                if (rerouteWarmupSatisfied
+                        && srv.getTicks() >= state.comeNextSkillTick
+                        && triggerComeRecoverySkill(bot, target, fixedGoal, targetPos, deltaY, horizDistSq, srv, state)) {
+                    return true;
+                }
+            } else if (!state.comeAllowRecoverySkills && state.comeTicksSinceBest == triggerTicks) {
+                LOGGER.info("[FollowAssert] recovery-suppressed bot={} goal={} reason=safe-regroup ticksSinceBest={}",
+                        bot.getName().getString(),
+                        fixedGoal.toShortString(),
+                        state.comeTicksSinceBest);
             }
         }
         if (target != null && bot.getEntityWorld() != target.getEntityWorld() && srv != null) {
             ServerWorld targetWorld = srv.getWorld(target.getEntityWorld().getRegistryKey());
             if (targetWorld != null) {
-                LOGGER.info("Follow dimension handoff: moving {} from {} to {} (target dim {})", bot.getName().getString(), bot.getEntityWorld().getRegistryKey().getValue(), targetWorld.getRegistryKey().getValue(), target.getEntityWorld().getRegistryKey().getValue());
-                ChatUtils.sendSystemMessage(bot.getCommandSource(), bot.getName().getString() + " is in a different world. Spawn or move the bot into this world to continue following.");
+                long nowMs = System.currentTimeMillis();
+                UUID botId = bot.getUuid();
+                long lastWarn = FOLLOW_LAST_DIMENSION_WARN_MS.getOrDefault(botId, -1L);
+                if (lastWarn < 0 || (nowMs - lastWarn) >= FOLLOW_DIMENSION_WARN_INTERVAL_MS) {
+                    FOLLOW_LAST_DIMENSION_WARN_MS.put(botId, nowMs);
+                    LOGGER.info("Follow dimension handoff: bot={} botWorld={} targetWorld={}",
+                            bot.getName().getString(),
+                            bot.getEntityWorld().getRegistryKey().getValue(),
+                            targetWorld.getRegistryKey().getValue());
+                    ChatUtils.sendSystemMessage(bot.getCommandSource(),
+                            bot.getName().getString() + " is in a different world. Spawn or move the bot into this world to continue following.");
+                }
                 return false;
             } else {
                 LOGGER.warn("Follow dimension handoff: unable to resolve target world {} for {}", target.getEntityWorld().getRegistryKey().getValue(), bot.getName().getString());
@@ -1766,10 +1863,7 @@ public class BotEventHandler {
                 state.followStopRange = 0.0D;
                 state.followStandoffRange = 0.0D;
                 state.followFixedGoal = null;
-                state.comeBestGoalDistSq = Double.NaN;
-                state.comeTicksSinceBest = 0;
-                state.comeNextSkillTick = 0L;
-                state.comeAllowRecoverySkills = true;
+                resetComeTrackingState(state, true);
                 BotActions.stop(bot);
                 setMode(bot, Mode.IDLE);
                 setBaseTarget(bot, null);
@@ -1820,7 +1914,7 @@ public class BotEventHandler {
 	                        }
 	                    }
 	                }
-	                if (bot.getBlockPos().getSquaredDistance(peek) <= FollowPathService.WAYPOINT_REACH_SQ) {
+	                if (isWaypointReached(bot, peek)) {
 	                    waypoints.pollFirst();
 	                    FollowStateService.FOLLOW_LAST_DISTANCE_SQ.remove(botId);
 	                    FollowStateService.FOLLOW_STAGNANT_TICKS.remove(botId);
@@ -1835,6 +1929,7 @@ public class BotEventHandler {
             }
             if (waypoints.isEmpty()) {
                 FollowStateService.FOLLOW_WAYPOINTS.remove(botId);
+                clearFollowWaypointDeadlockState(botId);
                 usingWaypoints = false;
                 navGoalBlock = fixedGoal != null ? fixedGoal : target.getBlockPos();
                 navGoalPos = targetPos;
@@ -1851,6 +1946,7 @@ public class BotEventHandler {
 		                FollowStateService.FOLLOW_DOOR_LAST_BLOCK.remove(botId);
 	                FollowStateService.FOLLOW_DOOR_STUCK_TICKS.remove(botId);
 	                FollowStateService.FOLLOW_DOOR_RECOVERY.remove(botId);
+                    clearFollowWaypointDeadlockState(botId);
 	                usingWaypoints = false;
 	                navGoalBlock = fixedGoal != null ? fixedGoal : target.getBlockPos();
 	                navGoalPos = targetPos;
@@ -1858,6 +1954,9 @@ public class BotEventHandler {
 	                        + String.format(Locale.ROOT, "%.2f", Math.sqrt(distanceSq)));
 	            }
 	        }
+        if (!usingWaypoints) {
+            clearFollowWaypointDeadlockState(botId);
+        }
 
         double progressDistSq = bot.getBlockPos().getSquaredDistance(navGoalBlock);
         boolean directBlocked = progressDistSq <= 36.0D && isDirectRouteBlocked(bot, navGoalPos, navGoalBlock);
@@ -1880,14 +1979,17 @@ public class BotEventHandler {
         if (target != null && canSee && horizDistSq <= personalSpaceSq) {
             FOLLOW_WAYPOINTS.remove(botId);
             FOLLOW_DOOR_PLAN.remove(botId);
+            clearFollowWaypointDeadlockState(botId);
             BotActions.stop(bot);
             LookController.faceBlock(bot, BlockPos.ofFloored(targetPos));
             return true;
         }
         if (usingWaypoints) {
-            double sprintDistanceSq = Math.max(distanceSq, progressDistSq);
-            boolean sprint = sprintDistanceSq > FOLLOW_SPRINT_DISTANCE_SQ;
-            moveToward(bot, navGoalPos, 1.0D, sprint);
+            if (handleFollowWaypointDeadlock(bot, target, botId, navGoalBlock, fixedGoal != null)) {
+                return true;
+            }
+            double waypointDistSq = bot.squaredDistanceTo(Vec3d.ofCenter(navGoalBlock));
+            followWaypointStep(bot, navGoalBlock, waypointDistSq);
         } else {
             // If we're physically blocked (glass/fence/door), don't "settle" just because we're close in Euclidean distance.
             boolean allowCloseStop = canSee && !directBlocked;
@@ -2272,6 +2374,208 @@ public class BotEventHandler {
         FollowMovementService.followInputStep(bot, targetPos, distanceSq, allowCloseStop, followPersonalSpace, FOLLOW_SPRINT_DISTANCE_SQ);
     }
 
+    private static void followWaypointStep(ServerPlayerEntity bot, BlockPos waypoint, double distanceSq) {
+        FollowMovementService.followWaypointStep(bot, waypoint, distanceSq, FOLLOW_SPRINT_DISTANCE_SQ, () -> lowerShieldTracking(bot));
+    }
+
+    private static boolean isWaypointReached(ServerPlayerEntity bot, BlockPos waypoint) {
+        if (bot == null || waypoint == null) {
+            return false;
+        }
+        BlockPos botBlock = bot.getBlockPos();
+        if (botBlock.equals(waypoint)) {
+            maybeLogWaypointReachCheck(bot, "exact", waypoint, 0.0D, 0.0D);
+            return true;
+        }
+        Vec3d botPos = new Vec3d(bot.getX(), bot.getY(), bot.getZ());
+        Vec3d waypointCenter = Vec3d.ofCenter(waypoint);
+        double dx = waypointCenter.x - botPos.x;
+        double dz = waypointCenter.z - botPos.z;
+        double horizDist = Math.sqrt(dx * dx + dz * dz);
+        if (horizDist > 0.75D) {
+            return false;
+        }
+        double yDelta = Math.abs(waypointCenter.y - botPos.y);
+        if (yDelta > 0.6D) {
+            maybeLogWaypointReachCheck(bot, "rejected-vertical", waypoint, horizDist, yDelta);
+            return false;
+        }
+        if (isDirectRouteBlocked(bot, waypointCenter, waypoint)) {
+            maybeLogWaypointReachCheck(bot, "rejected-blocked", waypoint, horizDist, yDelta);
+            return false;
+        }
+        maybeLogWaypointReachCheck(bot, "near-clear", waypoint, horizDist, yDelta);
+        return true;
+    }
+
+    private static void maybeLogWaypointReachCheck(ServerPlayerEntity bot, String reason, BlockPos waypoint, double horizDist, double yDelta) {
+        if (bot == null || reason == null || waypoint == null) {
+            return;
+        }
+        UUID id = bot.getUuid();
+        long now = System.currentTimeMillis();
+        long last = FOLLOW_LAST_WAYPOINT_REACH_LOG_MS.getOrDefault(id, -1L);
+        if (last >= 0 && (now - last) < FOLLOW_WAYPOINT_REACH_LOG_INTERVAL_MS) {
+            return;
+        }
+        FOLLOW_LAST_WAYPOINT_REACH_LOG_MS.put(id, now);
+        LOGGER.info("Follow waypoint reach-check: bot={} reason={} botPos={} waypoint={} horiz={} yDelta={}",
+                bot.getName().getString(),
+                reason,
+                bot.getBlockPos().toShortString(),
+                waypoint.toShortString(),
+                String.format(Locale.ROOT, "%.2f", horizDist),
+                String.format(Locale.ROOT, "%.2f", yDelta));
+    }
+
+    private static void clearFollowWaypointDeadlockState(UUID botId) {
+        if (botId == null) {
+            return;
+        }
+        FOLLOW_WAYPOINT_LAST_HEAD.remove(botId);
+        FOLLOW_WAYPOINT_LAST_BOT_BLOCK.remove(botId);
+        FOLLOW_WAYPOINT_HEAD_STAGNANT_TICKS.remove(botId);
+        FOLLOW_WAYPOINT_REPOSITION_ATTEMPTS.remove(botId);
+        FOLLOW_WAYPOINT_REPOSITION_COOLDOWN_UNTIL_MS.remove(botId);
+        FOLLOW_WAYPOINT_REPOSITION_ORIGIN_BLOCK.remove(botId);
+        FOLLOW_WAYPOINT_REPOSITION_VERIFY_UNTIL_TICK.remove(botId);
+        FOLLOW_LAST_WAYPOINT_REPOSITION_LOG_MS.remove(botId);
+    }
+
+    private static void clearFollowWaterEscapeState(UUID botId) {
+        if (botId == null) {
+            return;
+        }
+        FOLLOW_WATER_ESCAPE_ORIGIN_BLOCK.remove(botId);
+        FOLLOW_WATER_ESCAPE_VERIFY_UNTIL_TICK.remove(botId);
+        FOLLOW_WATER_ESCAPE_ATTEMPTS.remove(botId);
+        FOLLOW_WATER_ESCAPE_COOLDOWN_UNTIL_MS.remove(botId);
+    }
+
+    private static boolean handleFollowWaypointDeadlock(ServerPlayerEntity bot,
+                                                        ServerPlayerEntity target,
+                                                        UUID botId,
+                                                        BlockPos navGoalBlock,
+                                                        boolean fixedGoalActive) {
+        if (bot == null || botId == null || navGoalBlock == null) {
+            return false;
+        }
+        BlockPos curBotBlock = bot.getBlockPos().toImmutable();
+        BlockPos navHead = navGoalBlock.toImmutable();
+        BlockPos prevHead = FOLLOW_WAYPOINT_LAST_HEAD.get(botId);
+        BlockPos prevBot = FOLLOW_WAYPOINT_LAST_BOT_BLOCK.get(botId);
+
+        int stuckTicks = FOLLOW_WAYPOINT_HEAD_STAGNANT_TICKS.getOrDefault(botId, 0);
+        if (prevHead != null && prevBot != null && prevHead.equals(navHead) && prevBot.equals(curBotBlock)) {
+            stuckTicks++;
+        } else {
+            stuckTicks = 0;
+            FOLLOW_WAYPOINT_REPOSITION_ATTEMPTS.remove(botId);
+        }
+        FOLLOW_WAYPOINT_LAST_HEAD.put(botId, navHead);
+        FOLLOW_WAYPOINT_LAST_BOT_BLOCK.put(botId, curBotBlock);
+        FOLLOW_WAYPOINT_HEAD_STAGNANT_TICKS.put(botId, stuckTicks);
+
+        long nowTick = bot.getCommandSource() != null && bot.getCommandSource().getServer() != null
+                ? bot.getCommandSource().getServer().getTicks()
+                : -1L;
+        BlockPos pendingOrigin = FOLLOW_WAYPOINT_REPOSITION_ORIGIN_BLOCK.get(botId);
+        long verifyUntilTick = FOLLOW_WAYPOINT_REPOSITION_VERIFY_UNTIL_TICK.getOrDefault(botId, -1L);
+        if (pendingOrigin != null) {
+            if (!curBotBlock.equals(pendingOrigin)) {
+                FOLLOW_WAYPOINT_REPOSITION_ORIGIN_BLOCK.remove(botId);
+                FOLLOW_WAYPOINT_REPOSITION_VERIFY_UNTIL_TICK.remove(botId);
+                maybeLogWaypointRepositionOutcome(bot, navHead, "DISPLACED", pendingOrigin, curBotBlock, stuckTicks, FOLLOW_WAYPOINT_REPOSITION_ATTEMPTS.getOrDefault(botId, 0));
+                return true;
+            }
+            if (nowTick >= 0 && verifyUntilTick >= 0 && nowTick > verifyUntilTick) {
+                FOLLOW_WAYPOINT_REPOSITION_ORIGIN_BLOCK.remove(botId);
+                FOLLOW_WAYPOINT_REPOSITION_VERIFY_UNTIL_TICK.remove(botId);
+            }
+        }
+
+        if (stuckTicks < FOLLOW_WAYPOINT_HEAD_STUCK_TICKS) {
+            return false;
+        }
+
+        long now = System.currentTimeMillis();
+        long lastLog = FOLLOW_LAST_WAYPOINT_STUCK_LOG_MS.getOrDefault(botId, -1L);
+        if (lastLog < 0 || (now - lastLog) >= 2_000L) {
+            FOLLOW_LAST_WAYPOINT_STUCK_LOG_MS.put(botId, now);
+            LOGGER.info("Follow waypoint deadlock: bot={} botPos={} head={} stuckTicks={} attempts={}",
+                    bot.getName().getString(),
+                    curBotBlock.toShortString(),
+                    navHead.toShortString(),
+                    stuckTicks,
+                    FOLLOW_WAYPOINT_REPOSITION_ATTEMPTS.getOrDefault(botId, 0));
+        }
+
+        long cooldownUntil = FOLLOW_WAYPOINT_REPOSITION_COOLDOWN_UNTIL_MS.getOrDefault(botId, 0L);
+        if (now < cooldownUntil) {
+            return false;
+        }
+
+        int attempts = FOLLOW_WAYPOINT_REPOSITION_ATTEMPTS.getOrDefault(botId, 0);
+        FollowMovementService.WaypointRepositionResult repositionResult = FollowMovementService.tryWaypointLocalRepositionDetailed(bot, navGoalBlock);
+        String outcome = repositionResult != null ? repositionResult.outcome().name() : FollowMovementService.WaypointRepositionOutcome.NO_CANDIDATE.name();
+        BlockPos origin = repositionResult != null && repositionResult.origin() != null ? repositionResult.origin() : curBotBlock;
+        BlockPos current = bot.getBlockPos().toImmutable();
+
+        FOLLOW_WAYPOINT_REPOSITION_ATTEMPTS.put(botId, attempts + 1);
+        FOLLOW_WAYPOINT_REPOSITION_COOLDOWN_UNTIL_MS.put(botId, now + FOLLOW_WAYPOINT_REPOSITION_COOLDOWN_MS);
+
+        if (repositionResult != null && repositionResult.outcome() == FollowMovementService.WaypointRepositionOutcome.INPUT_APPLIED && nowTick >= 0) {
+            FOLLOW_WAYPOINT_REPOSITION_ORIGIN_BLOCK.put(botId, origin.toImmutable());
+            FOLLOW_WAYPOINT_REPOSITION_VERIFY_UNTIL_TICK.put(botId, nowTick + FOLLOW_WAYPOINT_REPOSITION_VERIFY_TICKS);
+        } else if (repositionResult != null && repositionResult.outcome() == FollowMovementService.WaypointRepositionOutcome.DISPLACED) {
+            FOLLOW_WAYPOINT_REPOSITION_ORIGIN_BLOCK.remove(botId);
+            FOLLOW_WAYPOINT_REPOSITION_VERIFY_UNTIL_TICK.remove(botId);
+        }
+
+        maybeLogWaypointRepositionOutcome(bot, navHead, outcome, origin, current, stuckTicks, attempts + 1);
+        if (repositionResult != null && repositionResult.outcome() == FollowMovementService.WaypointRepositionOutcome.DISPLACED) {
+            return true;
+        }
+
+        if (stuckTicks >= FOLLOW_WAYPOINT_HEAD_HARD_RESET_TICKS || attempts + 1 >= FOLLOW_WAYPOINT_REPOSITION_MAX_ATTEMPTS) {
+            FOLLOW_WAYPOINTS.remove(botId);
+            clearFollowWaypointDeadlockState(botId);
+            maybeLogFollowDecision(bot, "waypoint-reset: head-stuck ticks=" + stuckTicks + " attempts=" + (attempts + 1));
+            if (fixedGoalActive && navGoalBlock != null) {
+                requestFollowPathPlanToGoal(bot, navGoalBlock, true, "waypoint-head-stuck");
+            } else if (target != null) {
+                requestFollowPathPlan(bot, target, true, "waypoint-head-stuck");
+            }
+            return true;
+        }
+        return false;
+    }
+
+    private static void maybeLogWaypointRepositionOutcome(ServerPlayerEntity bot,
+                                                          BlockPos navHead,
+                                                          String outcome,
+                                                          BlockPos origin,
+                                                          BlockPos current,
+                                                          int stuckTicks,
+                                                          int attempts) {
+        if (bot == null || navHead == null || outcome == null) {
+            return;
+        }
+        UUID id = bot.getUuid();
+        long now = System.currentTimeMillis();
+        long last = FOLLOW_LAST_WAYPOINT_REPOSITION_LOG_MS.getOrDefault(id, -1L);
+        if (last >= 0 && (now - last) < FOLLOW_WAYPOINT_REPOSITION_LOG_INTERVAL_MS) {
+            return;
+        }
+        FOLLOW_LAST_WAYPOINT_REPOSITION_LOG_MS.put(id, now);
+        maybeLogFollowDecision(bot, "waypoint-reposition: outcome=" + outcome
+                + " stuckTicks=" + stuckTicks
+                + " attempts=" + attempts
+                + " head=" + navHead.toShortString()
+                + " origin=" + (origin != null ? origin.toShortString() : "-")
+                + " current=" + (current != null ? current.toShortString() : "-"));
+    }
+
     private static boolean handleFollowObstacles(ServerPlayerEntity bot,
                                                  ServerPlayerEntity target,
                                                  Vec3d navGoalPos,
@@ -2304,6 +2608,7 @@ public class BotEventHandler {
             FOLLOW_STAGNANT_TICKS.remove(id);
             FOLLOW_LAST_BLOCK_POS.remove(id);
             FOLLOW_POS_STAGNANT_TICKS.remove(id);
+            clearFollowWaterEscapeState(id);
             return false;
         }
 
@@ -2343,11 +2648,128 @@ public class BotEventHandler {
             Direction towardAction = directionGoal != null
                     ? approximateToward(bot.getBlockPos(), directionGoal)
                     : bot.getHorizontalFacing();
-            if (MovementService.hasLeafObstruction(bot, towardAction)
-                    && MovementService.clearLeafObstruction(bot, towardAction)) {
-                maybeLogFollowDecision(bot, "leaf-cleared: toward=" + towardAction + " stagnant=" + effectiveStagnant);
+            if (MovementService.hasLeafObstruction(bot, towardAction)) {
+                MovementService.LeafClearResult leafResult = MovementService.clearLeafObstructionDetailed(bot, towardAction);
+                if (leafResult != null) {
+                    long now = System.currentTimeMillis();
+                    long lastFoliageLog = FOLLOW_LAST_FOLIAGE_LOG_MS.getOrDefault(id, -1L);
+                    if (lastFoliageLog < 0 || (now - lastFoliageLog) >= 1_500L) {
+                        FOLLOW_LAST_FOLIAGE_LOG_MS.put(id, now);
+                        LOGGER.info("Follow foliage action: bot={} action={} toward={} stagnant={} bypassFailures={} detail={} target={}",
+                                bot.getName().getString(),
+                                leafResult.action(),
+                                towardAction,
+                                effectiveStagnant,
+                                leafResult.bypassFailures(),
+                                leafResult.detail(),
+                                leafResult.leafTarget() != null ? leafResult.leafTarget().toShortString() : "-");
+                    }
+                    if (leafResult.countsAsCleared()) {
+                        maybeLogFollowDecision(bot, "leaf-cleared: action=" + leafResult.action()
+                                + " toward=" + towardAction
+                                + " stagnant=" + effectiveStagnant);
+                    }
+                    if (leafResult.shouldShortCircuitFollowTick()) {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        long nowTick = server != null ? server.getTicks() : -1L;
+        BlockPos pendingWaterOrigin = FOLLOW_WATER_ESCAPE_ORIGIN_BLOCK.get(id);
+        long waterVerifyUntilTick = FOLLOW_WATER_ESCAPE_VERIFY_UNTIL_TICK.getOrDefault(id, -1L);
+        if (pendingWaterOrigin != null) {
+            if (!curBlock.equals(pendingWaterOrigin)) {
+                int attempts = FOLLOW_WATER_ESCAPE_ATTEMPTS.getOrDefault(id, 0);
+                clearFollowWaterEscapeState(id);
+                maybeLogFollowWaterEscape(bot, "DISPLACED", effectiveStagnant, attempts, pendingWaterOrigin, curBlock, null, "verified-displacement");
                 return true;
             }
+            if (nowTick >= 0 && waterVerifyUntilTick >= 0 && nowTick > waterVerifyUntilTick) {
+                FOLLOW_WATER_ESCAPE_ORIGIN_BLOCK.remove(id);
+                FOLLOW_WATER_ESCAPE_VERIFY_UNTIL_TICK.remove(id);
+                int attempts = FOLLOW_WATER_ESCAPE_ATTEMPTS.getOrDefault(id, 0);
+                maybeLogFollowWaterEscape(bot, "INPUT_APPLIED", effectiveStagnant, attempts, pendingWaterOrigin, curBlock, null, "verify-timeout");
+                maybeLogFollowDecision(bot, "Follow water-escape verify timeout: origin="
+                        + pendingWaterOrigin.toShortString() + " current=" + curBlock.toShortString()
+                        + " attempts=" + attempts);
+            }
+        }
+
+        boolean botInWaterContext = isInWaterFollowContext(bot);
+        if (target != null
+                && botInWaterContext
+                && (directBlocked || effectiveStagnant >= 8)
+                && targetDistSq <= 196.0D) {
+            long nowMsWater = System.currentTimeMillis();
+            long waterCooldownUntil = FOLLOW_WATER_ESCAPE_COOLDOWN_UNTIL_MS.getOrDefault(id, 0L);
+            if (nowMsWater >= waterCooldownUntil) {
+                BlockPos waterGoal = navGoalBlock != null ? navGoalBlock : target.getBlockPos();
+                FollowMovementService.FollowWaterEscapeResult waterEscape = FollowMovementService.tryFollowWaterLedgeEscapeDetailed(bot, waterGoal);
+                if (waterEscape != null) {
+                    String outcome = waterEscape.outcome().name();
+                    BlockPos origin = waterEscape.origin() != null ? waterEscape.origin() : curBlock;
+                    BlockPos current = bot.getBlockPos().toImmutable();
+                    BlockPos candidate = waterEscape.candidate();
+                    int attempts = FOLLOW_WATER_ESCAPE_ATTEMPTS.getOrDefault(id, 0);
+                    if (waterEscape.outcome() == FollowMovementService.FollowWaterEscapeOutcome.DISPLACED) {
+                        clearFollowWaterEscapeState(id);
+                        FOLLOW_WATER_ESCAPE_COOLDOWN_UNTIL_MS.put(id, nowMsWater + FOLLOW_WATER_ESCAPE_COOLDOWN_MS);
+                        maybeLogFollowWaterEscape(bot, outcome, effectiveStagnant, attempts, origin, current, candidate, waterEscape.detail());
+                        return true;
+                    }
+                    if (waterEscape.outcome() == FollowMovementService.FollowWaterEscapeOutcome.INPUT_APPLIED) {
+                        attempts++;
+                        FOLLOW_WATER_ESCAPE_ATTEMPTS.put(id, attempts);
+                        FOLLOW_WATER_ESCAPE_ORIGIN_BLOCK.put(id, origin.toImmutable());
+                        if (nowTick >= 0) {
+                            FOLLOW_WATER_ESCAPE_VERIFY_UNTIL_TICK.put(id, nowTick + FOLLOW_WATER_ESCAPE_VERIFY_TICKS);
+                        }
+                        FOLLOW_WATER_ESCAPE_COOLDOWN_UNTIL_MS.put(id, nowMsWater + FOLLOW_WATER_ESCAPE_COOLDOWN_MS);
+                        maybeLogFollowWaterEscape(bot, outcome, effectiveStagnant, attempts, origin, current, candidate, waterEscape.detail());
+                        return true;
+                    }
+                    maybeLogFollowWaterEscape(bot, outcome, effectiveStagnant, attempts, origin, current, candidate, waterEscape.detail());
+                }
+            }
+
+            int attempts = FOLLOW_WATER_ESCAPE_ATTEMPTS.getOrDefault(id, 0);
+            BlockPos verifyOrigin = FOLLOW_WATER_ESCAPE_ORIGIN_BLOCK.get(id);
+            boolean unchangedOrigin = verifyOrigin != null && verifyOrigin.equals(curBlock);
+            if (attempts >= FOLLOW_WATER_ESCAPE_MAX_ATTEMPTS && (unchangedOrigin || posStagnant >= 8)) {
+                String reason = (directBlocked && targetDistSq <= 16.0D) ? "water-ledge-stuck" : "water-stuck";
+                maybeLogFollowDecision(bot, "Follow decision: water-stuck replan requested attempts=" + attempts
+                        + " stagnant=" + effectiveStagnant
+                        + " origin=" + (verifyOrigin != null ? verifyOrigin.toShortString() : "-")
+                        + " current=" + curBlock.toShortString()
+                        + " reason=" + reason);
+                clearFollowWaterEscapeState(id);
+                FOLLOW_WATER_ESCAPE_COOLDOWN_UNTIL_MS.put(id, nowMsWater + FOLLOW_WATER_ESCAPE_COOLDOWN_MS);
+                if (fixedGoalActive && navGoalBlock != null) {
+                    requestFollowPathPlanToGoal(bot, navGoalBlock, true, reason);
+                } else if (target != null) {
+                    requestFollowPathPlan(bot, target, true, reason);
+                }
+                return true;
+            }
+        }
+
+        if (target != null
+                && directBlocked
+                && canSee
+                && targetDistSq <= 16.0D
+                && botInWaterContext
+                && tryFollowWaterEdgeStepUp(bot, navGoalBlock != null ? navGoalBlock : target.getBlockPos(), effectiveStagnant)) {
+            return true;
+        }
+
+        if (target != null
+                && directBlocked
+                && canSee
+                && targetDistSq <= 16.0D
+                && tryCloseRangeFollowFlank(bot, navGoalBlock != null ? navGoalBlock : target.getBlockPos(), effectiveStagnant)) {
+            return true;
         }
 
         Vec3d commanderGoal = fixedGoalActive ? navGoalPos : positionOf(target);
@@ -2367,6 +2789,8 @@ public class BotEventHandler {
                 FOLLOW_DOOR_STUCK_TICKS.remove(id);
                 FOLLOW_DOOR_RECOVERY.remove(id);
                 FOLLOW_WAYPOINTS.remove(id);
+                clearFollowWaypointDeadlockState(id);
+                clearFollowWaterEscapeState(id);
                 maybeLogFollowDecision(bot, "commander-route clear: dist="
                         + String.format(Locale.ROOT, "%.2f", Math.sqrt(targetDistSq)));
                 return false;
@@ -2403,6 +2827,8 @@ public class BotEventHandler {
             FOLLOW_DOOR_STUCK_TICKS.remove(id);
             FOLLOW_DOOR_RECOVERY.remove(id);
             FOLLOW_WAYPOINTS.remove(id);
+            clearFollowWaypointDeadlockState(id);
+            clearFollowWaterEscapeState(id);
             maybeLogFollowDecision(bot, "skip-door-magnet: forcing direct follow dist="
                     + String.format(Locale.ROOT, "%.2f", Math.sqrt(targetDistSq))
                     + " sealed=" + botSealed + "/" + commanderSealed);
@@ -2626,6 +3052,7 @@ public class BotEventHandler {
             // This prevents “door magnet” behavior when the bot is already in the right area.
             if (target != null && canSee && !directBlocked && targetDistSq <= 64.0D) {
                 FOLLOW_WAYPOINTS.remove(id);
+                clearFollowWaypointDeadlockState(id);
                 return false;
             }
             // Only treat doors as a sub-goal when we have reason to think we need to change rooms (blocked or no LoS).
@@ -2721,10 +3148,199 @@ public class BotEventHandler {
 
         if (effectiveStagnant == 0) {
             FOLLOW_STAGNANT_TICKS.remove(id);
+            clearFollowWaterEscapeState(id);
         } else {
             FOLLOW_STAGNANT_TICKS.put(id, effectiveStagnant);
         }
         return false;
+    }
+
+    private static boolean isInWaterFollowContext(ServerPlayerEntity bot) {
+        if (bot == null) {
+            return false;
+        }
+        if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
+            return false;
+        }
+        if (bot.isTouchingWater()) {
+            return true;
+        }
+        BlockPos feet = bot.getBlockPos();
+        return world.getFluidState(feet).isOf(Fluids.WATER)
+                || world.getFluidState(feet.up()).isOf(Fluids.WATER);
+    }
+
+    private static boolean tryFollowWaterEdgeStepUp(ServerPlayerEntity bot, BlockPos goalBlock, int stagnantTicks) {
+        if (bot == null || goalBlock == null) {
+            return false;
+        }
+        if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
+            return false;
+        }
+        if (bot.hasVehicle() || bot.isUsingItem() || !isInWaterFollowContext(bot)) {
+            return false;
+        }
+
+        BlockPos cur = bot.getBlockPos();
+        Direction toward = approximateToward(cur, goalBlock);
+        Direction left = toward.rotateYCounterclockwise();
+        Direction right = toward.rotateYClockwise();
+        List<BlockPos> candidates = List.of(
+                cur.offset(toward).up(),
+                cur.offset(left).up(),
+                cur.offset(right).up(),
+                cur.offset(toward).offset(left).up(),
+                cur.offset(toward).offset(right).up(),
+                cur.offset(toward),
+                cur.offset(left),
+                cur.offset(right)
+        );
+
+        BlockPos best = null;
+        double bestScore = Double.MAX_VALUE;
+        for (int i = 0; i < candidates.size(); i++) {
+            BlockPos cand = candidates.get(i);
+            if (!isStandable(world, cand)) {
+                continue;
+            }
+            double dx = cand.getX() - goalBlock.getX();
+            double dz = cand.getZ() - goalBlock.getZ();
+            double horizSq = dx * dx + dz * dz;
+            double yDelta = Math.abs(cand.getY() - goalBlock.getY());
+            double lanePenalty = i <= 2 ? -0.15D : 0.0D;
+            double score = horizSq + (1.2D * yDelta) + lanePenalty;
+            if (score < bestScore) {
+                bestScore = score;
+                best = cand.toImmutable();
+            }
+        }
+        if (best == null) {
+            maybeLogCloseFlank(bot, "water-edge-step: no-candidate stagnant=" + stagnantTicks
+                    + " goal=" + goalBlock.toShortString());
+            return false;
+        }
+
+        LookController.faceBlock(bot, best);
+        BotActions.sprint(bot, false);
+        BotActions.jump(bot);
+        BotActions.applyMovementInput(bot, Vec3d.ofCenter(best), 0.18D);
+        maybeLogCloseFlank(bot, "water-edge-step: target=" + best.toShortString()
+                + " stagnant=" + stagnantTicks
+                + " goal=" + goalBlock.toShortString());
+        return true;
+    }
+
+    private static void maybeLogFollowWaterEscape(ServerPlayerEntity bot,
+                                                  String outcome,
+                                                  int stagnantTicks,
+                                                  int attempts,
+                                                  BlockPos origin,
+                                                  BlockPos current,
+                                                  BlockPos candidate,
+                                                  String detail) {
+        if (bot == null || outcome == null) {
+            return;
+        }
+        UUID id = bot.getUuid();
+        long now = System.currentTimeMillis();
+        long last = FOLLOW_LAST_WATER_ESCAPE_LOG_MS.getOrDefault(id, -1L);
+        if (last >= 0 && (now - last) < FOLLOW_WATER_ESCAPE_LOG_INTERVAL_MS) {
+            return;
+        }
+        FOLLOW_LAST_WATER_ESCAPE_LOG_MS.put(id, now);
+        maybeLogFollowDecision(bot, "Follow water-escape: outcome=" + outcome
+                + " stagnant=" + stagnantTicks
+                + " attempts=" + attempts
+                + " origin=" + (origin != null ? origin.toShortString() : "-")
+                + " current=" + (current != null ? current.toShortString() : "-")
+                + " candidate=" + (candidate != null ? candidate.toShortString() : "-")
+                + " detail=" + (detail == null ? "" : detail));
+    }
+
+    private static boolean tryCloseRangeFollowFlank(ServerPlayerEntity bot, BlockPos goalBlock, int stagnantTicks) {
+        if (bot == null || goalBlock == null) {
+            return false;
+        }
+        if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
+            return false;
+        }
+        if (bot.hasVehicle() || bot.isUsingItem()) {
+            return false;
+        }
+
+        UUID id = bot.getUuid();
+        long now = System.currentTimeMillis();
+        long lastAttempt = FOLLOW_LAST_CLOSE_FLANK_MS.getOrDefault(id, -1L);
+        if (lastAttempt >= 0 && (now - lastAttempt) < FOLLOW_CLOSE_FLANK_COOLDOWN_MS) {
+            return false;
+        }
+
+        BlockPos cur = bot.getBlockPos();
+        Direction toward = approximateToward(cur, goalBlock);
+        Direction left = toward.rotateYCounterclockwise();
+        Direction right = toward.rotateYClockwise();
+        List<BlockPos> baseCandidates = List.of(
+                cur.offset(left),
+                cur.offset(right),
+                cur.offset(toward).offset(left),
+                cur.offset(toward).offset(right)
+        );
+        int[] yOffsets = new int[] { 0, 1, -1 };
+
+        BlockPos best = null;
+        double bestScore = Double.MAX_VALUE;
+        for (int i = 0; i < baseCandidates.size(); i++) {
+            BlockPos base = baseCandidates.get(i);
+            if (base == null) {
+                continue;
+            }
+            double lanePenalty = i < 2 ? 0.0D : 0.2D; // favor pure side lanes before forward-diagonal probes
+            for (int dY : yOffsets) {
+                BlockPos cand = base.add(0, dY, 0);
+                if (!isStandable(world, cand)) {
+                    continue;
+                }
+                double dx = cand.getX() - goalBlock.getX();
+                double dz = cand.getZ() - goalBlock.getZ();
+                double horizDistSq = dx * dx + dz * dz;
+                double yDelta = Math.abs(cand.getY() - goalBlock.getY());
+                double score = horizDistSq + (yDelta * 1.35D) + lanePenalty;
+                if (score < bestScore) {
+                    bestScore = score;
+                    best = cand.toImmutable();
+                }
+            }
+        }
+
+        FOLLOW_LAST_CLOSE_FLANK_MS.put(id, now);
+        if (best == null) {
+            maybeLogCloseFlank(bot, "close-flank: no-candidate stagnant=" + stagnantTicks
+                    + " goal=" + goalBlock.toShortString());
+            return false;
+        }
+
+        LookController.faceBlock(bot, best);
+        BotActions.sprint(bot, false);
+        BotActions.autoJumpIfNeeded(bot);
+        BotActions.applyMovementInput(bot, Vec3d.ofCenter(best), 0.18D);
+        maybeLogCloseFlank(bot, "close-flank: target=" + best.toShortString()
+                + " stagnant=" + stagnantTicks
+                + " goal=" + goalBlock.toShortString());
+        return true;
+    }
+
+    private static void maybeLogCloseFlank(ServerPlayerEntity bot, String message) {
+        if (bot == null || message == null) {
+            return;
+        }
+        UUID id = bot.getUuid();
+        long now = System.currentTimeMillis();
+        long last = FOLLOW_LAST_CLOSE_FLANK_LOG_MS.getOrDefault(id, -1L);
+        if (last >= 0 && (now - last) < FOLLOW_CLOSE_FLANK_LOG_INTERVAL_MS) {
+            return;
+        }
+        FOLLOW_LAST_CLOSE_FLANK_LOG_MS.put(id, now);
+        maybeLogFollowDecision(bot, message);
     }
 
     private static boolean shouldPrioritizeCommanderOverDoors(ServerPlayerEntity bot,
@@ -2762,8 +3378,10 @@ public class BotEventHandler {
         if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
             return false;
         }
+        double nearGoalHorizSq = horizontalDistanceSq(bot, goalPos);
         double[] heights = new double[] { 0.12D, 1.10D };
         boolean anyRayHit = false;
+        boolean onlyGoalHits = goalBlock != null;
         for (double h : heights) {
             Vec3d from = new Vec3d(bot.getX(), bot.getY() + h, bot.getZ());
             Vec3d to = new Vec3d(goalPos.x, goalPos.y + h, goalPos.z);
@@ -2789,6 +3407,7 @@ public class BotEventHandler {
                 // If we hit any block before reaching the goal, consider the direct route blocked.
                 // goalBlock may be null (Vec3 goal), so treat any hit as blocked in that case.
                 if (goalBlock == null || !bhr.getBlockPos().equals(goalBlock)) {
+                    onlyGoalHits = false;
                     return true;
                 }
             }
@@ -2796,6 +3415,11 @@ public class BotEventHandler {
         // If raycasts show a clear line, do NOT let the wide collision probe force a door plan. This prevents
         // false positives when the bot is close to walls/fences but still has a clear approach to the commander.
         if (!anyRayHit) {
+            return false;
+        }
+        // Very near the goal, ray hits that only touch the goal block itself are expected and should not trigger
+        // broad collision probes. This avoids close-range false positives in foliage/uneven terrain.
+        if (onlyGoalHits && (nearGoalHorizSq <= 9.0D || (isInWaterFollowContext(bot) && nearGoalHorizSq <= 16.0D))) {
             return false;
         }
         // Otherwise, fall back to a conservative collision-based probe (catches fence "gap raycast" cases).
@@ -3176,6 +3800,7 @@ public class BotEventHandler {
             // drop stale door-centric waypoints so the bot doesn't “stick” to an old door plan.
             if (movedSq >= 256.0D || (!canSee && distSq >= 900.0D)) {
                 FOLLOW_WAYPOINTS.remove(botId);
+                clearFollowWaypointDeadlockState(botId);
             } else {
                 return;
             }
@@ -3206,6 +3831,61 @@ public class BotEventHandler {
         FollowPlannerService.requestPlanToGoal(LOGGER, bot, goal, force, reason);
     }
 
+    private static void resetComeTrackingState(BotCommandStateService.State state, boolean allowRecoverySkills) {
+        if (state == null) {
+            return;
+        }
+        state.comeBestGoalDistSq = Double.NaN;
+        state.comeTicksSinceBest = 0;
+        state.comeRerouteAttempts = 0;
+        state.comeNextRerouteTick = 0L;
+        state.comeNextSkillTick = 0L;
+        state.comeAllowRecoverySkills = allowRecoverySkills;
+    }
+
+    private static boolean tryComeRerouteBeforeRecovery(ServerPlayerEntity bot,
+                                                        ServerPlayerEntity commander,
+                                                        BlockPos fixedGoal,
+                                                        Vec3d goalPos,
+                                                        double absDeltaY,
+                                                        double horizDistSq,
+                                                        boolean canSeeGoal,
+                                                        MinecraftServer server,
+                                                        BotCommandStateService.State state) {
+        if (bot == null || fixedGoal == null || goalPos == null || server == null || state == null) {
+            return false;
+        }
+        if (state.comeRerouteAttempts >= COME_REROUTE_ATTEMPTS_BEFORE_SKILL) {
+            return false;
+        }
+        long nowTick = server.getTicks();
+        if (nowTick < state.comeNextRerouteTick) {
+            return false;
+        }
+
+        boolean verticalProblem = absDeltaY >= 6.0D && !canSeeGoal;
+        String reason = verticalProblem ? "come-reroute-vertical" : "come-reroute-tight";
+        requestFollowPathPlanToGoal(bot, fixedGoal, true, reason);
+        state.comeRerouteAttempts++;
+        state.comeNextRerouteTick = nowTick + COME_REROUTE_COOLDOWN_TICKS;
+        state.comeNextSkillTick = Math.max(state.comeNextSkillTick, nowTick + COME_RECOVERY_MIN_TICKS_AFTER_REROUTE);
+
+        String commanderName = commander != null ? commander.getName().getString() : "none";
+        LOGGER.info("[FollowAssert] reroute-attempt bot={} commander={} goal={} attempt={} reason={} horizDist={} absDy={}",
+                bot.getName().getString(),
+                commanderName,
+                fixedGoal.toShortString(),
+                state.comeRerouteAttempts,
+                reason,
+                String.format(Locale.ROOT, "%.2f", Math.sqrt(Math.max(0.0D, horizDistSq))),
+                String.format(Locale.ROOT, "%.2f", absDeltaY));
+        maybeLogFollowDecision(bot, "come-reroute: attempt=" + state.comeRerouteAttempts
+                + " reason=" + reason
+                + " goal=" + fixedGoal.toShortString()
+                + " nextSkillTick=" + state.comeNextSkillTick);
+        return true;
+    }
+
     private static boolean triggerComeRecoverySkill(ServerPlayerEntity bot,
                                                    ServerPlayerEntity commander,
                                                    BlockPos goal,
@@ -3223,6 +3903,16 @@ public class BotEventHandler {
 
         int dyBlocks = (int) Math.round(deltaY);
         double horizDist = Math.sqrt(Math.max(0.0D, horizDistSq));
+
+        // Best-effort provisioning before destructive recovery attempts.
+        // This keeps /come self-healing without requiring manual tool babysitting.
+        try {
+            ServerCommandSource source = bot.getCommandSource().withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS);
+            ToolProvisionService.ensurePickaxe(bot, source, commander);
+            ToolProvisionService.ensureShovel(bot, source, commander);
+            ToolProvisionService.ensureTorches(bot, source, commander, 8);
+        } catch (Throwable ignored) {
+        }
 
         Direction towardGoal = approximateToward(bot.getBlockPos(), goal);
         if (towardGoal == null || !towardGoal.getAxis().isHorizontal()) {
@@ -3268,6 +3958,16 @@ public class BotEventHandler {
         state.comeNextSkillTick = server.getTicks() + 120L;
         state.comeTicksSinceBest = 0;
         state.comeBestGoalDistSq = Double.NaN;
+        state.comeRerouteAttempts = 0;
+        state.comeNextRerouteTick = server.getTicks() + COME_REROUTE_COOLDOWN_TICKS;
+
+        LOGGER.info("[FollowAssert] recovery-trigger bot={} skill={} args={} goal={} horizDist={} dy={}",
+                bot.getName().getString(),
+                skillName,
+                rawArgs,
+                goal.toShortString(),
+                String.format(Locale.ROOT, "%.2f", horizDist),
+                dyBlocks);
 
         // Interrupt any active skill, then run the recovery skill asynchronously.
         final String finalSkillName = skillName;
@@ -3386,6 +4086,7 @@ public class BotEventHandler {
         FOLLOW_AVOID_DOOR_BASE.remove(botId);
         FOLLOW_AVOID_DOOR_UNTIL_MS.remove(botId);
         FOLLOW_WAYPOINTS.remove(botId);
+        clearFollowWaypointDeadlockState(botId);
         FOLLOW_LAST_DISTANCE_SQ.remove(botId);
         FOLLOW_STAGNANT_TICKS.remove(botId);
         FOLLOW_DIRECT_BLOCKED_TICKS.remove(botId);
@@ -4018,6 +4719,8 @@ public class BotEventHandler {
 		            FollowStateService.reset();
 		            FollowDebugService.reset();
 		            DropSweepService.reset();
+                    FOLLOW_LAST_CLOSE_FLANK_MS.clear();
+                    FOLLOW_LAST_CLOSE_FLANK_LOG_MS.clear();
             
             isExecuting = false;
             externalOverrideActive = false;
