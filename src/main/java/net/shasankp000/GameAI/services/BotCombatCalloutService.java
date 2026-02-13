@@ -2,6 +2,9 @@ package net.shasankp000.GameAI.services;
 
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityType;
+import net.minecraft.entity.damage.DamageSource;
+import net.minecraft.entity.mob.HostileEntity;
+import net.minecraft.registry.tag.DamageTypeTags;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.sound.SoundEvent;
 import net.shasankp000.ChatUtils.BotDialoguePlayer;
@@ -13,6 +16,7 @@ import org.slf4j.LoggerFactory;
 
 import java.util.Random;
 import java.util.UUID;
+import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -40,8 +44,10 @@ public final class BotCombatCalloutService {
     private static final long ENGAGEMENT_COOLDOWN_MS = 20_000L;     // 20 seconds
     private static final long DAMAGE_COOLDOWN_MS = 15_000L;         // 15 seconds
     private static final long KILL_COOLDOWN_MS = 10_000L;           // 10 seconds
-    private static final long COMBAT_END_COOLDOWN_MS = 30_000L;     // 30 seconds
-    private static final long PLAYER_HIT_COOLDOWN_MS = 5_000L;      // 5 seconds
+    private static final long COMBAT_END_COOLDOWN_MS = 25_000L;     // 25 seconds
+    private static final long PLAYER_HIT_COOLDOWN_MS = 6_000L;      // 6 seconds
+    private static final long FF_DEALT_COOLDOWN_MS = 6_000L;        // 6 seconds
+    private static final long COMBAT_MULTI_COOLDOWN_MS = 25_000L;   // 20-30s target
 
     // Nonverbal hurt grunts should be frequent but not spammy.
     private static final long HURT_GRUNT_COOLDOWN_MS = 900L;         // ~1 second
@@ -53,12 +59,80 @@ public final class BotCombatCalloutService {
     private static final ConcurrentHashMap<UUID, Long> LAST_KILL_MS = new ConcurrentHashMap<>();
     private static final ConcurrentHashMap<UUID, Long> LAST_COMBAT_END_MS = new ConcurrentHashMap<>();
     private static final ConcurrentHashMap<UUID, Long> LAST_PLAYER_HIT_MS = new ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<UUID, Long> LAST_FF_DEALT_MS = new ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<UUID, Long> LAST_COMBAT_MULTI_MS = new ConcurrentHashMap<>();
 
     private static final ConcurrentHashMap<UUID, Long> LAST_HURT_GRUNT_MS = new ConcurrentHashMap<>();
     
     // Track if bot is in combat (for combat end detection)
     private static final ConcurrentHashMap<UUID, Boolean> IN_COMBAT = new ConcurrentHashMap<>();
     private static final ConcurrentHashMap<UUID, Long> LAST_COMBAT_ACTIVITY_MS = new ConcurrentHashMap<>();
+
+    private static final ConcurrentHashMap<UUID, CombatMetadata> COMBAT_META = new ConcurrentHashMap<>();
+
+    private static final class CombatMetadata {
+        int maxDangerousMobCount = 0;
+        boolean explosionSeen = false;
+        boolean sawAnyHostile = false;
+        boolean sawNonWeakHostile = false;
+    }
+
+    private static final class WeightedLine {
+        final String id;
+        final String text;
+        final SoundEvent sound;
+        final int weight;
+
+        WeightedLine(String id, String text, SoundEvent sound, int weight) {
+            this.id = id;
+            this.text = text;
+            this.sound = sound;
+            this.weight = Math.max(1, weight);
+        }
+    }
+
+    // Rarity weights: COMMON=10, UNCOMMON=5, RARE=2, VERY_RARE=1
+    private static final int WEIGHT_COMMON = 10;
+    private static final int WEIGHT_UNCOMMON = 5;
+    private static final int WEIGHT_RARE = 2;
+
+    private static final WeightedLine[] COMBAT_MULTI_LINES = new WeightedLine[] {
+            new WeightedLine("combat_multi_not_fair", "Not a fair fight.", BotDialogueSounds.LINE_COMBAT_MULTI_NOT_FAIR, WEIGHT_COMMON),
+            new WeightedLine("combat_multi_relax", "Alright, everybody relax.", BotDialogueSounds.LINE_COMBAT_MULTI_RELAX, WEIGHT_UNCOMMON),
+            new WeightedLine("combat_multi_excessive", "This is excessive.", BotDialogueSounds.LINE_COMBAT_MULTI_EXCESSIVE, WEIGHT_UNCOMMON)
+    };
+
+    private static final WeightedLine[] POST_COMBAT_GENERAL_LINES = new WeightedLine[] {
+            new WeightedLine("post_combat_still_alive", "We're still alive. Good.", BotDialogueSounds.LINE_POST_COMBAT_STILL_ALIVE, WEIGHT_COMMON),
+            new WeightedLine("post_combat_adequate", "That was... adequate.", BotDialogueSounds.LINE_POST_COMBAT_ADEQUATE, WEIGHT_COMMON)
+    };
+
+    private static final WeightedLine[] POST_COMBAT_MULTI_LINES = new WeightedLine[] {
+            new WeightedLine("post_combat_multi_not_easy", "That wasn't easy.", BotDialogueSounds.LINE_POST_COMBAT_MULTI_NOT_EASY, WEIGHT_COMMON),
+            new WeightedLine("post_combat_multi_need_minute", "I need a minute.", BotDialogueSounds.LINE_POST_COMBAT_MULTI_NEED_MINUTE, WEIGHT_UNCOMMON)
+    };
+
+    private static final WeightedLine[] POST_COMBAT_SINGLE_LINES = new WeightedLine[] {
+            new WeightedLine("post_combat_single_easy", "That was easy.", BotDialogueSounds.LINE_POST_COMBAT_SINGLE_EASY, WEIGHT_COMMON),
+            new WeightedLine("post_combat_single_feel_bad", "I almost feel bad for it. Almost.", BotDialogueSounds.LINE_POST_COMBAT_SINGLE_FEEL_BAD, WEIGHT_COMMON),
+            new WeightedLine("post_combat_single_must_hurt", "That must have hurt.", BotDialogueSounds.LINE_POST_COMBAT_SINGLE_MUST_HURT, WEIGHT_COMMON),
+            new WeightedLine("post_combat_single_inconvenience", "Barely an inconvenience.", BotDialogueSounds.LINE_POST_COMBAT_SINGLE_INCONVENIENCE, WEIGHT_RARE)
+    };
+
+    private static final WeightedLine[] POST_EXPLOSION_LINES = new WeightedLine[] {
+            new WeightedLine("post_explosion_bones", "I felt that in my bones.", BotDialogueSounds.LINE_POST_EXPLOSION_BONES, WEIGHT_COMMON),
+            new WeightedLine("post_explosion_less_boom", "Next time, less 'boom,' yeah?", BotDialogueSounds.LINE_POST_EXPLOSION_LESS_BOOM, WEIGHT_COMMON)
+    };
+
+    private static final WeightedLine[] FF_RECEIVED_LINES = new WeightedLine[] {
+            new WeightedLine("ff_received_ow_that_was_you", "Ow. That was you.", BotDialogueSounds.LINE_FF_RECEIVED_OW_THAT_WAS_YOU, WEIGHT_UNCOMMON),
+            new WeightedLine("ff_received_on_your_team", "I'm on your team!", BotDialogueSounds.LINE_FF_RECEIVED_ON_YOUR_TEAM, WEIGHT_UNCOMMON)
+    };
+
+    private static final WeightedLine[] FF_DEALT_LINES = new WeightedLine[] {
+            new WeightedLine("ff_dealt_panicked", "I panicked!", BotDialogueSounds.LINE_FF_DEALT_PANICKED, WEIGHT_UNCOMMON),
+            new WeightedLine("ff_dealt_didnt_mean", "I didn't mean to do that!", BotDialogueSounds.LINE_FF_DEALT_DIDNT_MEAN, WEIGHT_UNCOMMON)
+    };
     
     private BotCombatCalloutService() {}
 
@@ -81,12 +155,65 @@ public final class BotCombatCalloutService {
         long now = System.currentTimeMillis();
         IN_COMBAT.put(botId, true);
         LAST_COMBAT_ACTIVITY_MS.put(botId, now);
+        CombatMetadata meta = COMBAT_META.computeIfAbsent(botId, ignored -> new CombatMetadata());
+        meta.sawAnyHostile = true;
+        if (meta.maxDangerousMobCount < 1) {
+            meta.maxDangerousMobCount = 1;
+        }
+    }
+
+    /**
+     * Detailed combat metadata hook used for post-combat bucket selection.
+     */
+    public static void noteCombatSituation(ServerPlayerEntity bot, List<Entity> hostiles) {
+        if (!canCallout(bot) || hostiles == null) {
+            return;
+        }
+        int active = 0;
+        int nonWeak = 0;
+        boolean explosionSourceSeen = false;
+        for (Entity hostile : hostiles) {
+            if (!(hostile instanceof HostileEntity) || hostile.isRemoved() || !hostile.isAlive()) {
+                continue;
+            }
+            active++;
+            if (!isWeakSingleMob(hostile.getType())) {
+                nonWeak++;
+            }
+            if (isExplosionProneMob(hostile.getType())) {
+                explosionSourceSeen = true;
+            }
+        }
+        if (active <= 0) {
+            return;
+        }
+
+        UUID botId = bot.getUuid();
+        long now = System.currentTimeMillis();
+        IN_COMBAT.put(botId, true);
+        LAST_COMBAT_ACTIVITY_MS.put(botId, now);
+
+        CombatMetadata meta = COMBAT_META.computeIfAbsent(botId, ignored -> new CombatMetadata());
+        meta.sawAnyHostile = true;
+        if (nonWeak > 0) {
+            meta.sawNonWeakHostile = true;
+        }
+        if (explosionSourceSeen) {
+            meta.explosionSeen = true;
+        }
+        if (active > meta.maxDangerousMobCount) {
+            meta.maxDangerousMobCount = active;
+        }
+
+        if (active >= 3 && checkCooldown(botId, LAST_COMBAT_MULTI_MS, COMBAT_MULTI_COOLDOWN_MS, now)) {
+            maybePlayWeightedLine(bot, COMBAT_MULTI_LINES, null);
+        }
     }
     
     /**
      * Called when the bot detects a hostile entity nearby.
      * Only triggers if the bot wasn't already in combat recently.
-     * Uses existing "Something moved." audio which fits well for threat detection.
+     * Uses dedicated combat threat audio.
      */
     public static void onThreatDetected(ServerPlayerEntity bot, Entity threat) {
         if (!canCallout(bot)) return;
@@ -102,10 +229,40 @@ public final class BotCombatCalloutService {
         // Enter combat state
         IN_COMBAT.put(botId, true);
         LAST_COMBAT_ACTIVITY_MS.put(botId, now);
-        
-        // Use existing voiced audio that fits threat detection
-        String line = "Something moved.";
-        sayWithSound(bot, line, BotDialogueSounds.LINE_AMBIENT_SOMETHING_MOVED);
+        CombatMetadata meta = COMBAT_META.computeIfAbsent(botId, ignored -> new CombatMetadata());
+        meta.sawAnyHostile = true;
+        if (threat != null) {
+            if (!isWeakSingleMob(threat.getType())) {
+                meta.sawNonWeakHostile = true;
+            }
+            if (isExplosionProneMob(threat.getType())) {
+                meta.explosionSeen = true;
+            }
+        }
+        if (meta.maxDangerousMobCount < 1) {
+            meta.maxDangerousMobCount = 1;
+        }
+
+        // If this is a phantom, also surface a short overhead warning (no chat spam).
+        try {
+            if (threat != null && threat.getType() == EntityType.PHANTOM) {
+                CompanionOverheadDialogueService.showOverheadLine(
+                        bot,
+                        "Phantom!",
+                        2_800,
+                        48.0,
+                        "phantom",
+                        "threat-detected"
+                );
+            }
+        } catch (Throwable ignored) {
+            // Best-effort only.
+        }
+
+        // Prefer voiced threat callout with subtitle support.
+        // (If voiced dialogue is disabled, we fall back to chat in sayWithSound.)
+        String line = "Hostile spotted!";
+        sayWithSound(bot, line, BotDialogueSounds.LINE_COMBAT_THREAT_DETECTED);
         LOGGER.debug("Bot {} detected threat: {}", bot.getName().getString(), getEntityName(threat));
     }
     
@@ -123,6 +280,19 @@ public final class BotCombatCalloutService {
         
         LAST_COMBAT_ACTIVITY_MS.put(botId, now);
         IN_COMBAT.put(botId, true);
+        CombatMetadata meta = COMBAT_META.computeIfAbsent(botId, ignored -> new CombatMetadata());
+        meta.sawAnyHostile = true;
+        if (target != null) {
+            if (!isWeakSingleMob(target.getType())) {
+                meta.sawNonWeakHostile = true;
+            }
+            if (isExplosionProneMob(target.getType())) {
+                meta.explosionSeen = true;
+            }
+        }
+        if (meta.maxDangerousMobCount < 1) {
+            meta.maxDangerousMobCount = 1;
+        }
         
         // Use existing voiced audio
         String line = "Engaging threats against allies.";
@@ -134,6 +304,10 @@ public final class BotCombatCalloutService {
      * Uses existing health/warning sounds that already have audio.
      */
     public static void onDamageTaken(ServerPlayerEntity bot, Entity attacker, float amount) {
+        onDamageTaken(bot, attacker, amount, null);
+    }
+
+    public static void onDamageTaken(ServerPlayerEntity bot, Entity attacker, float amount, DamageSource source) {
         if (!canCallout(bot)) return;
 
         long now = System.currentTimeMillis();
@@ -143,30 +317,46 @@ public final class BotCombatCalloutService {
         tryPlayHurtGrunt(bot, botId, now, amount);
         
         if (!checkCooldown(botId, LAST_DAMAGE_MS, DAMAGE_COOLDOWN_MS, now)) return;
-        
+
         LAST_COMBAT_ACTIVITY_MS.put(botId, now);
         IN_COMBAT.put(botId, true);
+        CombatMetadata meta = COMBAT_META.computeIfAbsent(botId, ignored -> new CombatMetadata());
+        meta.sawAnyHostile = true;
+        if (attacker != null) {
+            if (!isWeakSingleMob(attacker.getType())) {
+                meta.sawNonWeakHostile = true;
+            }
+            if (isExplosionProneMob(attacker.getType())) {
+                meta.explosionSeen = true;
+            }
+        }
+        if (source != null && source.isIn(DamageTypeTags.IS_EXPLOSION)) {
+            meta.explosionSeen = true;
+        }
+        if (meta.maxDangerousMobCount < 1) {
+            meta.maxDangerousMobCount = 1;
+        }
         
-        // Use existing voiced sounds for taking damage, with some variety.
+        // Prefer dedicated combat damage callouts (uses previously-unreferenced audio variants).
+        // Keep low-health warnings as-is.
         SoundEvent sound;
         String line;
 
         if (bot.getHealth() <= bot.getMaxHealth() * 0.3f) {
-            // Low health - more urgent (use existing audio)
+            // Low health - more urgent.
             line = "I'm a bit banged up. Maybe we should take it easy.";
             sound = BotDialogueSounds.LINE_WARNING_BANGED_UP;
         } else {
-            // Normal damage: rotate among existing "status" lines so we don't overuse one clip.
             int pick = RNG.nextInt(3);
             if (pick == 0) {
-                line = "I've taken a few too many hits today.";
-                sound = BotDialogueSounds.LINE_STATUS_TOO_MANY_HITS;
+                line = "Ow!";
+                sound = BotDialogueSounds.LINE_COMBAT_DAMAGE_OW;
             } else if (pick == 1) {
-                line = "I could use a breather.";
-                sound = BotDialogueSounds.LINE_STATUS_NEED_BREATHER;
+                line = "Taking damage!";
+                sound = BotDialogueSounds.LINE_COMBAT_DAMAGE_TAKING_DAMAGE;
             } else {
-                line = "Not feeling my best right now.";
-                sound = BotDialogueSounds.LINE_STATUS_NOT_BEST;
+                line = "Getting hit here!";
+                sound = BotDialogueSounds.LINE_COMBAT_DAMAGE_GETTING_HIT;
             }
         }
 
@@ -183,9 +373,23 @@ public final class BotCombatCalloutService {
         UUID botId = bot.getUuid();
         
         if (!checkCooldown(botId, LAST_KILL_MS, KILL_COOLDOWN_MS, now)) return;
-        
+
         LAST_COMBAT_ACTIVITY_MS.put(botId, now);
-        
+        IN_COMBAT.put(botId, true);
+        CombatMetadata meta = COMBAT_META.computeIfAbsent(botId, ignored -> new CombatMetadata());
+        meta.sawAnyHostile = true;
+        if (killed != null) {
+            if (!isWeakSingleMob(killed.getType())) {
+                meta.sawNonWeakHostile = true;
+            }
+            if (isExplosionProneMob(killed.getType())) {
+                meta.explosionSeen = true;
+            }
+        }
+        if (meta.maxDangerousMobCount < 1) {
+            meta.maxDangerousMobCount = 1;
+        }
+
         KillCallout callout = pickKillCallout(killed);
         sayWithSound(bot, callout.line, callout.sound);
     }
@@ -195,6 +399,16 @@ public final class BotCombatCalloutService {
         final SoundEvent sound;
 
         KillCallout(String line, SoundEvent sound) {
+            this.line = line;
+            this.sound = sound;
+        }
+    }
+
+    private static final class PlayerHitCallout {
+        final String line;
+        final SoundEvent sound;
+
+        PlayerHitCallout(String line, SoundEvent sound) {
             this.line = line;
             this.sound = sound;
         }
@@ -218,14 +432,27 @@ public final class BotCombatCalloutService {
         
         if (!checkCooldown(botId, LAST_COMBAT_END_MS, COMBAT_END_COOLDOWN_MS, now)) {
             IN_COMBAT.put(botId, false);
+            COMBAT_META.remove(botId);
             return;
         }
-        
+
         IN_COMBAT.put(botId, false);
-        
-        // Use existing voiced audio
-        String line = "Standing down unless attacked.";
-        sayWithSound(bot, line, BotDialogueSounds.LINE_COMBAT_STANDING_DOWN);
+        CombatMetadata meta = COMBAT_META.remove(botId);
+
+        WeightedLine line;
+        if (meta != null && meta.explosionSeen) {
+            line = pickWeightedLine(POST_EXPLOSION_LINES, null);
+        } else if (meta != null && meta.maxDangerousMobCount >= 3) {
+            line = pickWeightedLine(POST_COMBAT_MULTI_LINES, null);
+        } else if (meta != null && meta.sawAnyHostile && meta.maxDangerousMobCount <= 1 && !meta.sawNonWeakHostile) {
+            line = pickWeightedLine(POST_COMBAT_SINGLE_LINES, null);
+        } else {
+            line = pickWeightedLine(POST_COMBAT_GENERAL_LINES, null);
+        }
+
+        if (line != null) {
+            sayWithSound(bot, line.text, line.sound);
+        }
         LOGGER.debug("Bot {} combat ended", bot.getName().getString());
     }
     
@@ -245,10 +472,28 @@ public final class BotCombatCalloutService {
             return;
         }
         
-        String attackerName = attacker.getName().getString();
-        String line = pickPlayerHitLine(attackerName, damage);
-        
-        sayWithSound(bot, line, BotDialogueSounds.LINE_COMBAT_PLAYER_HIT);
+        WeightedLine line = pickWeightedLine(FF_RECEIVED_LINES, null);
+        if (line != null) {
+            sayWithSound(bot, line.text, line.sound);
+        }
+    }
+
+    /**
+     * Called when a bot accidentally damages a player.
+     */
+    public static void onBotHitPlayer(ServerPlayerEntity bot, ServerPlayerEntity player, float damage) {
+        if (!canCallout(bot) || player == null || player.isRemoved()) {
+            return;
+        }
+        long now = System.currentTimeMillis();
+        UUID botId = bot.getUuid();
+        if (!checkCooldown(botId, LAST_FF_DEALT_MS, FF_DEALT_COOLDOWN_MS, now)) {
+            return;
+        }
+        WeightedLine line = pickWeightedLine(FF_DEALT_LINES, null);
+        if (line != null) {
+            sayWithSound(bot, line.text, line.sound);
+        }
     }
     
     // ========== Helper methods ==========
@@ -530,31 +775,96 @@ public final class BotCombatCalloutService {
         );
     }
     
-    private static String pickPlayerHitLine(String playerName, float damage) {
-        if (damage >= 4.0f) {
-            // Heavy hit
-            return choose(
-                "Hey! What was that for, " + playerName + "?!",
-                "Ow! That actually hurt!",
-                "Whoa, easy there!",
-                "I'm on your side, " + playerName + "!",
-                "Friendly fire, " + playerName + "!"
-            );
-        } else {
-            // Light hit
-            return choose(
-                "Hey! Watch it, " + playerName + ".",
-                "What's the big idea?",
-                "Was that necessary?",
-                "Ow. Thanks for that.",
-                "Really, " + playerName + "?"
-            );
+    private static boolean maybePlayWeightedLine(ServerPlayerEntity bot, WeightedLine[] pool, String forcedId) {
+        WeightedLine line = pickWeightedLine(pool, forcedId);
+        if (line == null) {
+            return false;
         }
+        sayWithSound(bot, line.text, line.sound);
+        return true;
+    }
+
+    private static WeightedLine pickWeightedLine(WeightedLine[] pool, String forcedId) {
+        if (pool == null || pool.length == 0) {
+            return null;
+        }
+        if (forcedId != null && !forcedId.isBlank()) {
+            for (WeightedLine line : pool) {
+                if (line != null && forcedId.equalsIgnoreCase(line.id)) {
+                    return line;
+                }
+            }
+            return null;
+        }
+        int total = 0;
+        for (WeightedLine line : pool) {
+            if (line != null) {
+                total += Math.max(1, line.weight);
+            }
+        }
+        if (total <= 0) {
+            return null;
+        }
+        int pick = RNG.nextInt(total);
+        int running = 0;
+        for (WeightedLine line : pool) {
+            if (line == null) {
+                continue;
+            }
+            running += Math.max(1, line.weight);
+            if (pick < running) {
+                return line;
+            }
+        }
+        return pool[pool.length - 1];
+    }
+
+    private static boolean isWeakSingleMob(EntityType<?> type) {
+        return type == EntityType.ZOMBIE
+                || type == EntityType.DROWNED
+                || type == EntityType.HUSK
+                || type == EntityType.ZOMBIE_VILLAGER
+                || type == EntityType.SKELETON
+                || type == EntityType.STRAY
+                || type == EntityType.WITHER_SKELETON
+                || type == EntityType.SPIDER
+                || type == EntityType.CAVE_SPIDER;
+    }
+
+    private static boolean isExplosionProneMob(EntityType<?> type) {
+        return type == EntityType.CREEPER
+                || type == EntityType.GHAST
+                || type == EntityType.TNT
+                || type == EntityType.TNT_MINECART
+                || type == EntityType.FIREBALL
+                || type == EntityType.SMALL_FIREBALL
+                || type == EntityType.WITHER_SKULL;
     }
     
     private static String choose(String... options) {
         if (options == null || options.length == 0) return "";
         return options[RNG.nextInt(options.length)];
+    }
+
+    /**
+     * Debug trigger entrypoint for `/bot dialogue_test`.
+     * Returns true if the trigger key is handled by this service.
+     */
+    public static boolean debugTrigger(ServerPlayerEntity bot, String triggerKey, String lineId) {
+        if (!canCallout(bot) || triggerKey == null || triggerKey.isBlank()) {
+            return false;
+        }
+        String key = triggerKey.trim().toLowerCase(java.util.Locale.ROOT);
+        return switch (key) {
+            case "fighting_multiple_dangerous", "combat_multi" -> maybePlayWeightedLine(bot, COMBAT_MULTI_LINES, lineId);
+            case "combat_ended", "post_combat" -> maybePlayWeightedLine(bot, POST_COMBAT_GENERAL_LINES, lineId);
+            case "combat_ended_explosion", "post_explosion" -> maybePlayWeightedLine(bot, POST_EXPLOSION_LINES, lineId);
+            case "combat_ended_multiple_dangerous", "post_combat_multi" -> maybePlayWeightedLine(bot, POST_COMBAT_MULTI_LINES, lineId);
+            case "combat_ended_single_weak", "post_combat_single" -> maybePlayWeightedLine(bot, POST_COMBAT_SINGLE_LINES, lineId);
+            case "player_hit_bot", "ff_received" -> maybePlayWeightedLine(bot, FF_RECEIVED_LINES, lineId);
+            case "bot_hit_player", "ff_dealt" -> maybePlayWeightedLine(bot, FF_DEALT_LINES, lineId);
+            default -> false;
+        };
     }
     
     /**
@@ -569,6 +879,9 @@ public final class BotCombatCalloutService {
         LAST_KILL_MS.remove(botId);
         LAST_COMBAT_END_MS.remove(botId);
         LAST_PLAYER_HIT_MS.remove(botId);
+        LAST_FF_DEALT_MS.remove(botId);
+        LAST_COMBAT_MULTI_MS.remove(botId);
+        COMBAT_META.remove(botId);
     }
     
     /**

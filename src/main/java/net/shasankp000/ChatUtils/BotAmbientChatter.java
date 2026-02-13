@@ -99,6 +99,12 @@ public final class BotAmbientChatter {
     // How often we do heavier environment scanning for event triggers.
     private static final long ENV_SCAN_INTERVAL_TICKS = 80L; // ~4 seconds
 
+    // Darkness should require both low block light and low sky light for a sustained period.
+    // This avoids false positives under daytime tree canopies.
+    private static final int DARK_BLOCK_LIGHT_MAX = 2;
+    private static final int DARK_SKY_LIGHT_MAX = 3;
+    private static final long DARK_SUSTAIN_TICKS = 160L; // ~8 seconds
+
     private static final Map<UUID, BotAmbientState> BOT_STATE = new ConcurrentHashMap<>();
 
     // Idle chatter sounds - things the bot might say when standing around (NEUTRAL mood)
@@ -333,6 +339,7 @@ public final class BotAmbientChatter {
         long lastAnyAmbientTick;
         long lastEnterCaveTick;
         long lastEnterDarkTick;
+        long darkSinceTick = -1L;
         long lastAmethystEventTick;
         long lastBatEventTick;
         long lastDripstoneEventTick;
@@ -527,7 +534,7 @@ public final class BotAmbientChatter {
                 continue;
             }
 
-            SoundEvent sound = pickChatterSound(bot);
+            SoundEvent sound = pickChatterSound(bot, state, nowTick);
 
             // Avoid repeating the exact same scheduled clip back-to-back.
             if (sound != null && state.lastScheduledSoundId != null) {
@@ -535,7 +542,7 @@ public final class BotAmbientChatter {
                 if (soundId.equals(state.lastScheduledSoundId)) {
                     // Re-roll a few times to find a different line.
                     for (int i = 0; i < 4; i++) {
-                        SoundEvent reroll = pickChatterSound(bot);
+                        SoundEvent reroll = pickChatterSound(bot, state, nowTick);
                         if (reroll != null && !reroll.id().toString().equals(state.lastScheduledSoundId)) {
                             sound = reroll;
                             break;
@@ -577,13 +584,13 @@ public final class BotAmbientChatter {
 
         String currentBiomePath = biomePath(world, pos);
 
-        int blockLight = 15;
-        try {
-            blockLight = world.getLightLevel(LightType.BLOCK, pos);
-        } catch (Exception ignored) {}
+        int blockLight = safeLightLevel(world, LightType.BLOCK, pos, 15);
+        int skyLight = safeLightLevel(world, LightType.SKY, pos, 15);
 
         boolean isUnderground = y < 60;
-        boolean isDark = blockLight <= 4;
+        boolean isLowLight = blockLight <= 4;
+        boolean isDarkNow = blockLight <= DARK_BLOCK_LIGHT_MAX && skyLight <= DARK_SKY_LIGHT_MAX;
+        boolean darkForEvents = updateAndCheckSustainedDarkness(state, nowTick, isDarkNow);
         boolean isDeepUnderground = y < 0;
 
         var worldKey = world.getRegistryKey();
@@ -602,7 +609,7 @@ public final class BotAmbientChatter {
 
             // Reset baseline so the next tick doesn't immediately think we "entered" darkness/caves.
             state.wasUnderground = isUnderground;
-            state.wasDark = isDark;
+            state.wasDark = darkForEvents;
             state.hadAmethyst = false;
             state.hadBats = false;
             state.hadDripstone = false;
@@ -668,9 +675,9 @@ public final class BotAmbientChatter {
             // Overworld-only cave features
             if (isOverworld) {
             hasAmethyst = isUnderground && hasNearbyAmethyst(world, pos);
-            hasBats = (isUnderground || isDark) && hasNearbyBats(world, pos);
-            hasDripstone = isUnderground && isDark && hasNearbyDripstone(world, pos);
-            hasDeepslate = isDeepUnderground && isDark && hasNearbyDeepslate(world, pos);
+            hasBats = (isUnderground || isLowLight) && hasNearbyBats(world, pos);
+            hasDripstone = isUnderground && isLowLight && hasNearbyDripstone(world, pos);
+            hasDeepslate = isDeepUnderground && isLowLight && hasNearbyDeepslate(world, pos);
             } else {
             hasAmethyst = false;
             hasBats = false;
@@ -749,7 +756,7 @@ public final class BotAmbientChatter {
             state.lastWorldId = world.getRegistryKey().getValue().toString();
             state.lastBiomePath = currentBiomePath;
             state.wasUnderground = isUnderground;
-            state.wasDark = isDark;
+            state.wasDark = darkForEvents;
             state.hadAmethyst = hasAmethyst;
             state.hadBats = hasBats;
             state.hadDripstone = hasDripstone;
@@ -777,7 +784,7 @@ public final class BotAmbientChatter {
 
         // ================== OVERWORLD: weather + time reminders ==================
         // Only comment on weather/time when above ground and sky-exposed.
-        boolean skyExposed = isOverworld && !isUnderground && !isDark && isSkyVisible(world, pos);
+        boolean skyExposed = isOverworld && !isUnderground && !isLowLight && isSkyVisible(world, pos);
 
         if (isOverworld && skyExposed) {
             // --- Weather transitions ---
@@ -809,7 +816,7 @@ public final class BotAmbientChatter {
                     state.lastAnyAmbientTick = nowTick;
                     state.lastWeatherEventTick = nowTick;
                     state.wasUnderground = isUnderground;
-                    state.wasDark = isDark;
+                    state.wasDark = darkForEvents;
                     return true;
                 }
             } else {
@@ -836,7 +843,7 @@ public final class BotAmbientChatter {
                         state.lastSunsetSoonEventTick = nowTick;
                         state.lastSunsetSoonDay = day;
                         state.wasUnderground = isUnderground;
-                        state.wasDark = isDark;
+                        state.wasDark = darkForEvents;
                         return true;
                     }
                 }
@@ -856,7 +863,7 @@ public final class BotAmbientChatter {
                         state.lastBiomeFlavorTick = nowTick;
                         state.lastBiomePath = currentBiomePath;
                         state.wasUnderground = isUnderground;
-                        state.wasDark = isDark;
+                        state.wasDark = darkForEvents;
                         // Keep other baselines updated via the normal end-of-method baseline update.
                         return true;
                     }
@@ -884,7 +891,7 @@ public final class BotAmbientChatter {
                         state.hadNetherGhast = hasNetherGhast;
                         state.hadNetherPiglins = hasNetherPiglins;
                         state.wasUnderground = isUnderground;
-                        state.wasDark = isDark;
+                        state.wasDark = darkForEvents;
                         return true;
                     }
                 }
@@ -900,7 +907,7 @@ public final class BotAmbientChatter {
                         state.hadNetherGhast = hasNetherGhast;
                         state.hadNetherPiglins = hasNetherPiglins;
                         state.wasUnderground = isUnderground;
-                        state.wasDark = isDark;
+                        state.wasDark = darkForEvents;
                         return true;
                     }
                 }
@@ -916,7 +923,7 @@ public final class BotAmbientChatter {
                         state.hadNetherGhast = hasNetherGhast;
                         state.hadNetherPiglins = hasNetherPiglins;
                         state.wasUnderground = isUnderground;
-                        state.wasDark = isDark;
+                        state.wasDark = darkForEvents;
                         return true;
                     }
                 }
@@ -932,7 +939,7 @@ public final class BotAmbientChatter {
                         state.hadNetherGhast = hasNetherGhast;
                         state.hadNetherPiglins = hasNetherPiglins;
                         state.wasUnderground = isUnderground;
-                        state.wasDark = isDark;
+                        state.wasDark = darkForEvents;
                         return true;
                     }
                 }
@@ -948,7 +955,7 @@ public final class BotAmbientChatter {
                         state.hadNetherNetherBricks = hasNetherNetherBricks;
                         state.hadNetherBlackstone = hasNetherBlackstone;
                         state.wasUnderground = isUnderground;
-                        state.wasDark = isDark;
+                        state.wasDark = darkForEvents;
                         return true;
                     }
                 }
@@ -964,7 +971,7 @@ public final class BotAmbientChatter {
                         state.hadNetherNetherBricks = hasNetherNetherBricks;
                         state.hadNetherBlackstone = hasNetherBlackstone;
                         state.wasUnderground = isUnderground;
-                        state.wasDark = isDark;
+                        state.wasDark = darkForEvents;
                         return true;
                     }
                 }
@@ -980,7 +987,7 @@ public final class BotAmbientChatter {
                         state.hadEndChorus = hasEndChorus;
                         state.hadEndermen = hasEndermen;
                         state.wasUnderground = isUnderground;
-                        state.wasDark = isDark;
+                        state.wasDark = darkForEvents;
                         return true;
                     }
                 }
@@ -994,7 +1001,7 @@ public final class BotAmbientChatter {
                         state.hadEndChorus = hasEndChorus;
                         state.hadEndermen = hasEndermen;
                         state.wasUnderground = isUnderground;
-                        state.wasDark = isDark;
+                        state.wasDark = darkForEvents;
                         return true;
                     }
                 }
@@ -1008,7 +1015,7 @@ public final class BotAmbientChatter {
                         state.hadEndGateway = hasEndGateway;
                         state.hadEndermen = hasEndermen;
                         state.wasUnderground = isUnderground;
-                        state.wasDark = isDark;
+                        state.wasDark = darkForEvents;
                         return true;
                     }
                 }
@@ -1022,7 +1029,7 @@ public final class BotAmbientChatter {
                         state.hadEndGateway = hasEndGateway;
                         state.hadEndChorus = hasEndChorus;
                         state.wasUnderground = isUnderground;
-                        state.wasDark = isDark;
+                        state.wasDark = darkForEvents;
                         return true;
                     }
                 }
@@ -1037,7 +1044,7 @@ public final class BotAmbientChatter {
                     state.hadDripstone = hasDripstone;
                     state.hadDeepslate = hasDeepslate;
                     state.wasUnderground = isUnderground;
-                    state.wasDark = isDark;
+                    state.wasDark = darkForEvents;
                     return true;
                 }
             }
@@ -1051,7 +1058,7 @@ public final class BotAmbientChatter {
                     state.hadDripstone = hasDripstone;
                     state.hadDeepslate = hasDeepslate;
                     state.wasUnderground = isUnderground;
-                    state.wasDark = isDark;
+                    state.wasDark = darkForEvents;
                     return true;
                 }
             }
@@ -1065,7 +1072,7 @@ public final class BotAmbientChatter {
                     state.hadDripstone = hasDripstone;
                     state.hadDeepslate = hasDeepslate;
                     state.wasUnderground = isUnderground;
-                    state.wasDark = isDark;
+                    state.wasDark = darkForEvents;
                     return true;
                 }
             }
@@ -1079,7 +1086,7 @@ public final class BotAmbientChatter {
                     state.hadDripstone = hasDripstone;
                     state.hadDeepslate = hasDeepslate;
                     state.wasUnderground = isUnderground;
-                    state.wasDark = isDark;
+                    state.wasDark = darkForEvents;
                     return true;
                 }
             }
@@ -1091,7 +1098,7 @@ public final class BotAmbientChatter {
                 state.lastAnyAmbientTick = nowTick;
                 state.lastEnterCaveTick = nowTick;
                 state.wasUnderground = isUnderground;
-                state.wasDark = isDark;
+                state.wasDark = darkForEvents;
                 if (doScan) {
                     state.hadAmethyst = hasAmethyst;
                     state.hadBats = hasBats;
@@ -1102,12 +1109,16 @@ public final class BotAmbientChatter {
             }
         }
 
-        if (isOverworld && !state.wasDark && isDark && (nowTick - state.lastEnterDarkTick) >= EVENT_COOLDOWN_MINOR_TICKS && RNG.nextFloat() < 0.50f) {
+        if (isOverworld
+                && !state.wasDark
+                && darkForEvents
+                && (nowTick - state.lastEnterDarkTick) >= EVENT_COOLDOWN_MINOR_TICKS
+                && RNG.nextFloat() < 0.35f) {
             if (playEvent(bot, DARK_CHATTER[RNG.nextInt(DARK_CHATTER.length)])) {
                 state.lastAnyAmbientTick = nowTick;
                 state.lastEnterDarkTick = nowTick;
                 state.wasUnderground = isUnderground;
-                state.wasDark = isDark;
+                state.wasDark = darkForEvents;
                 if (doScan) {
                     state.hadAmethyst = hasAmethyst;
                     state.hadBats = hasBats;
@@ -1120,7 +1131,7 @@ public final class BotAmbientChatter {
 
         // Update baseline.
         state.wasUnderground = isUnderground;
-        state.wasDark = isDark;
+        state.wasDark = darkForEvents;
         if (doScan) {
             state.hadAmethyst = hasAmethyst;
             state.hadBats = hasBats;
@@ -1211,9 +1222,9 @@ public final class BotAmbientChatter {
      * @param bot The bot to pick a sound for
      * @return The selected SoundEvent
      */
-    private static SoundEvent pickChatterSound(ServerPlayerEntity bot) {
+    private static SoundEvent pickChatterSound(ServerPlayerEntity bot, BotAmbientState state, long nowTick) {
         // Environment-aware chatter first (cave/dark/wildlife)
-        SoundEvent env = pickEnvironmentSound(bot);
+        SoundEvent env = pickEnvironmentSound(bot, state, nowTick);
         if (env != null) return env;
 
         // Rare banter while following a player (kept separate from mood-based chatter)
@@ -1265,7 +1276,7 @@ public final class BotAmbientChatter {
      * Pick an environment-specific chatter sound (cave ambient, darkness, wildlife, special blocks).
      * Returns null if no environment-specific sound should be played.
      */
-    private static SoundEvent pickEnvironmentSound(ServerPlayerEntity bot) {
+    private static SoundEvent pickEnvironmentSound(ServerPlayerEntity bot, BotAmbientState state, long nowTick) {
         if (bot == null || bot.getEntityWorld() == null) return null;
         if (!(bot.getEntityWorld() instanceof ServerWorld world)) return null;
 
@@ -1283,13 +1294,13 @@ public final class BotAmbientChatter {
         BlockPos pos = bot.getBlockPos();
         int y = pos.getY();
         
-        int blockLight = 15;
-        try {
-            blockLight = world.getLightLevel(LightType.BLOCK, pos);
-        } catch (Exception ignored) {}
-        
+        int blockLight = safeLightLevel(world, LightType.BLOCK, pos, 15);
+        int skyLight = safeLightLevel(world, LightType.SKY, pos, 15);
+
         boolean isUnderground = y < 60;
-        boolean isDark = blockLight <= 4;
+        boolean isLowLight = blockLight <= 4;
+        boolean isDarkNow = blockLight <= DARK_BLOCK_LIGHT_MAX && skyLight <= DARK_SKY_LIGHT_MAX;
+        boolean darkLongEnough = updateAndCheckSustainedDarkness(state, nowTick, isDarkNow);
         boolean isDeepUnderground = y < 0; // Below Y=0 (deepslate layer)
 
         // Check for special environment blocks nearby (higher priority, lower chance)
@@ -1300,17 +1311,17 @@ public final class BotAmbientChatter {
         }
         
         // Bat detection - creepy flapping in caves
-        if ((isUnderground || isDark) && RNG.nextFloat() < 0.30f && hasNearbyBats(world, pos)) {
+        if ((isUnderground || isLowLight) && RNG.nextFloat() < 0.30f && hasNearbyBats(world, pos)) {
             return BAT_CHATTER[RNG.nextInt(BAT_CHATTER.length)];
         }
         
         // Dripstone detection - pointy stalactites/stalagmites
-        if (isUnderground && isDark && RNG.nextFloat() < 0.25f && hasNearbyDripstone(world, pos)) {
+        if (isUnderground && isLowLight && RNG.nextFloat() < 0.25f && hasNearbyDripstone(world, pos)) {
             return DRIPSTONE_CHATTER[RNG.nextInt(DRIPSTONE_CHATTER.length)];
         }
         
         // Deepslate detection - ancient cold stone in the depths
-        if (isDeepUnderground && isDark && RNG.nextFloat() < 0.30f && hasNearbyDeepslate(world, pos)) {
+        if (isDeepUnderground && isLowLight && RNG.nextFloat() < 0.30f && hasNearbyDeepslate(world, pos)) {
             return DEEPSLATE_CHATTER[RNG.nextInt(DEEPSLATE_CHATTER.length)];
         }
 
@@ -1320,7 +1331,7 @@ public final class BotAmbientChatter {
         }
 
         // Dark-room chatter when light is low
-        if (isDark && RNG.nextFloat() < 0.35f) {
+        if (darkLongEnough && RNG.nextFloat() < 0.18f) {
             return DARK_CHATTER[RNG.nextInt(DARK_CHATTER.length)];
         }
 
@@ -1480,7 +1491,37 @@ public final class BotAmbientChatter {
         if (bot == null) {
             return false;
         }
-        SoundEvent sound = pickChatterSound(bot);
+        BotAmbientState state = BOT_STATE.computeIfAbsent(bot.getUuid(), id -> new BotAmbientState());
+        long nowTick = bot.getCommandSource().getServer() != null
+                ? bot.getCommandSource().getServer().getTicks()
+                : 0L;
+        SoundEvent sound = pickChatterSound(bot, state, nowTick);
         return BotDialoguePlayer.playSoundForBot(bot, sound);
+    }
+
+    private static int safeLightLevel(ServerWorld world, LightType type, BlockPos pos, int fallback) {
+        if (world == null || type == null || pos == null) {
+            return fallback;
+        }
+        try {
+            return world.getLightLevel(type, pos);
+        } catch (Exception ignored) {
+            return fallback;
+        }
+    }
+
+    private static boolean updateAndCheckSustainedDarkness(BotAmbientState state, long nowTick, boolean darkNow) {
+        if (state == null) {
+            return darkNow;
+        }
+        if (!darkNow) {
+            state.darkSinceTick = -1L;
+            return false;
+        }
+        if (state.darkSinceTick < 0L) {
+            state.darkSinceTick = nowTick;
+            return false;
+        }
+        return (nowTick - state.darkSinceTick) >= DARK_SUSTAIN_TICKS;
     }
 }

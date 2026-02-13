@@ -260,6 +260,11 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             TopicEntry.dialogue("Replay intro", "recruit_replay"),
             TopicEntry.dialogue("How are we?", "companion_status"),
             TopicEntry.dialogue("Check progress", "companion_check"),
+            TopicEntry.dialogue("Ask: Biomes", "batch3_biomes"),
+            TopicEntry.dialogue("Ask: Structures", "batch3_structures"),
+            TopicEntry.dialogue("Ask: Dimensions", "batch3_dimensions"),
+            TopicEntry.dialogue("Ask: Traders & Mounts", "batch3_traders_mounts"),
+            TopicEntry.dialogue("Ask: Travel", "batch3_travel"),
             TopicEntry.dialogue("Make this home", "companion_anchor_set"),
             TopicEntry.dialogue("About the village", "village_about"),
             TopicEntry.dialogue("Why stay?", "stay_conditions"),
@@ -1050,31 +1055,24 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         int labelX = rowX + 4 + entry.indent * 8;
         String label = entry.indent > 0 ? "- " + entry.label : entry.label;
 
-        String status;
-        if (entry.category == TopicCategory.DIALOGUE) {
-            status = enabled ? "TALK" : "N/A";
-        } else if (entry.category == TopicCategory.ADMIN) {
-            if (entry.action == TopicAction.OPEN_SPELLS) {
-                status = enabled ? "OPEN" : "LOCK";
-            } else {
-                status = enabled ? "RUN" : "N/A";
-            }
-        } else {
-            status = entry.toggle ? (active ? "ON" : "OFF") : (enabled ? "RUN" : "N/A");
-        }
-        int statusX = rowX + rowW - 4 - this.textRenderer.getWidth(status);
-        int statusColor = entry.toggle ? (active ? 0xFFE6D7A3 : 0xFFB0B0B0)
-                : (hover ? 0xFFE6D7A3 : 0xFFB0B0B0);
+        // UI declutter: only show state for toggles; actions are implicit via clicking the row.
+        String status = entry.toggle ? (active ? "ON" : "OFF") : null;
+        int statusX = status == null ? -1 : (rowX + rowW - 4 - this.textRenderer.getWidth(status));
+        int statusColor = active ? 0xFFE6D7A3 : 0xFFB0B0B0;
         if (!enabled) {
             statusColor = 0xFF6F6F6F;
         }
 
-        int labelMaxW = Math.max(0, (statusX - TOPIC_CONTROL_GAP) - labelX);
+        int labelMaxW = status == null
+                ? Math.max(0, (rowX + rowW - 4) - labelX)
+                : Math.max(0, (statusX - TOPIC_CONTROL_GAP) - labelX);
         String drawnLabel = elideToWidth(label, labelMaxW);
         int labelColor = enabled ? COLOR_TEXT_PARCHMENT : COLOR_TEXT_DISABLED;
         context.drawText(this.textRenderer, drawnLabel, labelX, textY, labelColor, false);
 
-        context.drawText(this.textRenderer, status, statusX, textY, statusColor, false);
+        if (status != null) {
+            context.drawText(this.textRenderer, status, statusX, textY, statusColor, false);
+        }
     }
 
     private void drawOverlayHoverTooltip(DrawContext context, int mouseX, int mouseY) {
@@ -1310,7 +1308,10 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
 
         // Core quest topics are only meaningful after recruitment.
         if (k.equals("companion_status") || k.equals("companion_check") || k.equals("companion_anchor_set")
-                || k.equals("village_missing") || k.equals("village_projects")) {
+                || k.equals("village_missing") || k.equals("village_projects")
+                || k.equals("batch3_biomes") || k.equals("batch3_structures")
+                || k.equals("batch3_dimensions") || k.equals("batch3_traders_mounts")
+                || k.equals("batch3_travel")) {
             return net.shasankp000.AIPlayerClient.isSurvivalRecruitmentCompleted();
         }
 
@@ -1595,6 +1596,11 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case "companion_check" -> "Check our progress.";
             case "companion_anchor_set" -> "Let's make this our home.";
             case "village_about" -> "Tell me about the village.";
+            case "batch3_biomes" -> "Tell me about these biomes.";
+            case "batch3_structures" -> "Tell me about the structures we've seen.";
+            case "batch3_dimensions" -> "Tell me about the dimensions.";
+            case "batch3_traders_mounts" -> "Tell me about traders and mounts.";
+            case "batch3_travel" -> "Tell me about travel.";
             case "bot_past" -> "Tell me about your past.";
             case "promise" -> "I have a promise to make.";
             case "goodbye" -> "Goodbye.";
@@ -1647,7 +1653,12 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
                 || normalized.equals("companion_check")
                 || normalized.equals("companion_anchor_set")
                 || normalized.equals("village_missing")
-                || normalized.equals("village_projects")) {
+                || normalized.equals("village_projects")
+                || normalized.equals("batch3_biomes")
+                || normalized.equals("batch3_structures")
+                || normalized.equals("batch3_dimensions")
+                || normalized.equals("batch3_traders_mounts")
+                || normalized.equals("batch3_travel")) {
             MinecraftClient client = MinecraftClient.getInstance();
             if (client != null && client.getNetworkHandler() != null) {
                 ClientPlayNetworking.send(new CompanionQuestTopicPayload(botAlias, normalized));

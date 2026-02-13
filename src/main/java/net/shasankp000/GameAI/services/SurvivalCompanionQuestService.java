@@ -188,6 +188,20 @@ public final class SurvivalCompanionQuestService {
                 }
                 yield Response.ofLines(out, st.getCompanionQuestStage(), nowPermanent);
             }
+            case Batch3TopicDialogueService.KEY_BIOMES,
+                 Batch3TopicDialogueService.KEY_STRUCTURES,
+                 Batch3TopicDialogueService.KEY_DIMENSIONS,
+                 Batch3TopicDialogueService.KEY_TRADERS_MOUNTS,
+                 Batch3TopicDialogueService.KEY_TRAVEL -> {
+                String memoryAlias = (recruitedAlias != null && !recruitedAlias.isBlank())
+                        ? recruitedAlias
+                        : (botAlias == null ? "" : botAlias.trim());
+                String line = Batch3TopicDialogueService.pickLineForTopic(memoryAlias, k);
+                if (line == null || line.isBlank()) {
+                    line = "...";
+                }
+                yield Response.ofLines(List.of(line), stage, permanent);
+            }
             default -> Response.ofLines(List.of("..."), stage, permanent);
         };
     }

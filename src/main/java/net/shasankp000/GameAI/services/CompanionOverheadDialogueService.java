@@ -3,6 +3,9 @@ package net.shasankp000.GameAI.services;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
+import net.minecraft.sound.SoundEvent;
+import net.shasankp000.ChatUtils.BotDialoguePlayer;
+import net.shasankp000.ChatUtils.DialogueTextMapper;
 import net.shasankp000.network.CompanionOverheadLinePayload;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -98,6 +101,9 @@ public final class CompanionOverheadDialogueService {
         // Server-side fallback: a short-lived hologram above the bot. This is more reliable for
         // fakeplayer bots than client-only nameplate overrides.
         CompanionOverheadHologramService.show(bot, line, durationMs);
+
+        // If we have an audio mapping for this overhead line, play it.
+        tryPlayVoicedOverheadLine(bot, line);
 
         if (reason != null && !reason.isBlank()) {
             LOGGER.debug("Overhead line (leaf-stuck) bot={} reason={} line={}", bot.getName().getString(), reason, line);
@@ -219,10 +225,32 @@ public final class CompanionOverheadDialogueService {
         // Server-side fallback.
         CompanionOverheadHologramService.show(bot, line, durationMs);
 
+        // If we have an audio mapping for this overhead line, play it.
+        tryPlayVoicedOverheadLine(bot, line);
+
         if (reason != null && !reason.isBlank()) {
             LOGGER.debug("Overhead line ({}) bot={} reason={} line={}", tag, bot.getName().getString(), reason, line);
         } else {
             LOGGER.debug("Overhead line ({}) bot={} line={}", tag, bot.getName().getString(), line);
+        }
+    }
+
+    private static void tryPlayVoicedOverheadLine(ServerPlayerEntity bot, String line) {
+        if (bot == null || bot.isRemoved()) {
+            return;
+        }
+        if (line == null || line.isBlank()) {
+            return;
+        }
+        try {
+            SoundEvent sound = DialogueTextMapper.lookup(line);
+            if (sound == null) {
+                return;
+            }
+            // Respect per-bot voiced dialogue config + global anti-spam.
+            BotDialoguePlayer.playSoundForBotDetailed(bot, sound);
+        } catch (Throwable ignored) {
+            // Best-effort only.
         }
     }
 }

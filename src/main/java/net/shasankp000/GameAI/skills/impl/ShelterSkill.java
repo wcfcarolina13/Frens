@@ -99,6 +99,7 @@ public final class ShelterSkill implements Skill {
                 LOGGER.warn("Burrow: inventory still full after deposit; skipping drop sweep.");
             }
             ChatUtils.sendSystemMessage(source, "Emergency burrow built.");
+            net.shasankp000.GameAI.services.CompanionContextReactionService.playShelterCompletion(bot, null);
             return SkillExecutionResult.success("Shelter (burrow) built.");
         }
 
@@ -163,7 +164,12 @@ public final class ShelterSkill implements Skill {
             }
         }
 
-        return new HovelPerimeterBuilder().build(context, source, bot, world, origin, radius, wallHeight, preferredDoorSide, resumeRequested);
+        SkillExecutionResult hovelResult = new HovelPerimeterBuilder()
+                .build(context, source, bot, world, origin, radius, wallHeight, preferredDoorSide, resumeRequested);
+        if (hovelResult.success()) {
+            net.shasankp000.GameAI.services.CompanionContextReactionService.playShelterCompletion(bot, null);
+        }
+        return hovelResult;
     }
 
     private boolean isOpenFootprint(ServerWorld world, BlockPos center, int radius) {
