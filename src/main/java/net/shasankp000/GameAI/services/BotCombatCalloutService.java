@@ -350,13 +350,13 @@ public final class BotCombatCalloutService {
             int pick = RNG.nextInt(3);
             if (pick == 0) {
                 line = "Ow!";
-                sound = BotDialogueSounds.LINE_COMBAT_DAMAGE_OW;
+                sound = BotDialogueSounds.LINE_STATUS_TOO_MANY_HITS;
             } else if (pick == 1) {
                 line = "Taking damage!";
-                sound = BotDialogueSounds.LINE_COMBAT_DAMAGE_TAKING_DAMAGE;
+                sound = BotDialogueSounds.LINE_STATUS_NEED_BREATHER;
             } else {
                 line = "Getting hit here!";
-                sound = BotDialogueSounds.LINE_COMBAT_DAMAGE_GETTING_HIT;
+                sound = BotDialogueSounds.LINE_STATUS_NOT_BEST;
             }
         }
 
