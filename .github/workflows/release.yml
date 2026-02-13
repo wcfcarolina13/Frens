@@ -1,0 +1,47 @@
+name: Release Jar
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+
+      - name: Make Gradle executable
+        run: chmod +x gradlew
+
+      - name: Build release jar
+        run: ./gradlew build -x test
+
+      - name: Locate distributable jar
+        id: jar
+        shell: bash
+        run: |
+          set -euo pipefail
+          JAR_PATH=$(find build/libs -maxdepth 1 -type f -name "*.jar" | grep -Ev '(-sources|-dev|-shadow)' | sort | head -n 1 || true)
+          if [[ -z "${JAR_PATH}" ]]; then
+            echo "No distributable jar found in build/libs"
+            exit 1
+          fi
+          echo "jar_path=${JAR_PATH}" >> "$GITHUB_OUTPUT"
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ steps.jar.outputs.jar_path }}
+          generate_release_notes: true

@@ -63,6 +63,7 @@ dependencies {
 	if (aiEnabled) {
 		runtimeOnly "ai.djl.pytorch:pytorch-native-cpu:2.5.1:linux-x86_64"
 		runtimeOnly "ai.djl.pytorch:pytorch-native-cpu:2.5.1:win-x86_64"
+		runtimeOnly "ai.djl.pytorch:pytorch-native-cpu:2.5.1:osx-x86_64"
 		runtimeOnly "ai.djl.pytorch:pytorch-native-cpu:2.5.1:osx-aarch64"
 	}
 	compileOnly "ai.djl.pytorch:pytorch-model-zoo:0.33.0"
@@ -87,6 +88,7 @@ dependencies {
 		include "ai.djl.pytorch:pytorch-engine:0.33.0"
 		include "ai.djl.pytorch:pytorch-native-cpu:2.5.1:linux-x86_64"
 		include "ai.djl.pytorch:pytorch-native-cpu:2.5.1:win-x86_64"
+		include "ai.djl.pytorch:pytorch-native-cpu:2.5.1:osx-x86_64"
 		include "ai.djl.pytorch:pytorch-native-cpu:2.5.1:osx-aarch64"
 		include "ai.djl.pytorch:pytorch-model-zoo:0.33.0"
 	}

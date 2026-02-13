@@ -130,6 +130,20 @@ final class BotUtilityCommands {
                 );
     }
 
+    static ArgumentBuilder<ServerCommandSource, ?> buildFollowCheck() {
+        return CommandManager.literal("follow_check")
+                .then(CommandManager.argument("bot", EntityArgumentType.player())
+                        .executes(context -> modCommandRegistry.executeFollowCheck(
+                                context,
+                                EntityArgumentType.getPlayer(context, "bot"),
+                                null))
+                        .then(CommandManager.argument("expected", StringArgumentType.word())
+                                .executes(context -> modCommandRegistry.executeFollowCheck(
+                                        context,
+                                        EntityArgumentType.getPlayer(context, "bot"),
+                                        StringArgumentType.getString(context, "expected")))));
+    }
+
     static ArgumentBuilder<ServerCommandSource, ?> buildSoundTest() {
         return CommandManager.literal("sound_test")
                 .executes(context -> modCommandRegistry.executeSoundTestTargets(context, null))
@@ -147,5 +161,38 @@ final class BotUtilityCommands {
                                 context,
                                 StringArgumentType.getString(context, "bots"))));
     }
-}
 
+    static ArgumentBuilder<ServerCommandSource, ?> buildDialogueTest() {
+        return CommandManager.literal("dialogue_test")
+                .then(CommandManager.argument("bot", EntityArgumentType.player())
+                        .then(CommandManager.argument("trigger_key", StringArgumentType.word())
+                                .executes(context -> modCommandRegistry.executeDialogueTest(
+                                        context,
+                                        EntityArgumentType.getPlayer(context, "bot"),
+                                        StringArgumentType.getString(context, "trigger_key"),
+                                        null))
+                                .then(CommandManager.argument("line_id", StringArgumentType.word())
+                                        .executes(context -> modCommandRegistry.executeDialogueTest(
+                                                context,
+                                                EntityArgumentType.getPlayer(context, "bot"),
+                                                StringArgumentType.getString(context, "trigger_key"),
+                                                StringArgumentType.getString(context, "line_id"))))));
+    }
+
+    static ArgumentBuilder<ServerCommandSource, ?> buildChatCheck() {
+        return CommandManager.literal("chat_check")
+                .then(CommandManager.literal("inspect")
+                        .then(CommandManager.argument("raw_message", StringArgumentType.greedyString())
+                                .executes(context -> modCommandRegistry.executeChatCheck(
+                                        context,
+                                        StringArgumentType.getString(context, "raw_message"),
+                                        null))))
+                .then(CommandManager.literal("assert")
+                        .then(CommandManager.argument("expected", StringArgumentType.word())
+                                .then(CommandManager.argument("raw_message", StringArgumentType.greedyString())
+                                        .executes(context -> modCommandRegistry.executeChatCheck(
+                                                context,
+                                                StringArgumentType.getString(context, "raw_message"),
+                                                StringArgumentType.getString(context, "expected"))))));
+    }
+}

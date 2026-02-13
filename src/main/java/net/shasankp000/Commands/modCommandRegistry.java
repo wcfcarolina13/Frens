@@ -335,8 +335,11 @@ public class modCommandRegistry {
 	                        .then(BotUtilityCommands.buildLookPlayer())
 	                        .then(BotUtilityCommands.buildFollow())
                             .then(BotUtilityCommands.buildFollowDistance())
+                            .then(BotUtilityCommands.buildFollowCheck())
                             .then(BotUtilityCommands.buildSoundTest())
                             .then(BotUtilityCommands.buildTestChatter())
+                            .then(BotUtilityCommands.buildDialogueTest())
+                            .then(BotUtilityCommands.buildChatCheck())
                             .then(BotHomeCommands.buildAutoReturnSunset())
                             .then(BotHomeCommands.buildAutoReturnSunsetGuardPatrolEligible())
                             .then(BotHomeCommands.buildAutoReturnSunsetPreferLastBed())
@@ -2842,6 +2845,204 @@ public class modCommandRegistry {
         ChatUtils.sendSystemMessage(context.getSource(), "§aFollowCheck assert passed (" + expected + ").");
         return 1;
     }
+
+    static int executeChatCheck(CommandContext<ServerCommandSource> context,
+                                String rawMessage,
+                                String expectedRaw) {
+        if (rawMessage == null || rawMessage.isBlank()) {
+            ChatUtils.sendSystemMessage(context.getSource(), "§craw_message is required.");
+            return 0;
+        }
+        ChatRoutingCheckResult debug = resolveChatRoutingCheck(context.getSource().getServer(), rawMessage);
+        String aliases = debug.aliases().isEmpty() ? "none" : String.join(",", debug.aliases());
+        String summary = String.format(Locale.ROOT,
+                "ChatCheck raw='%s' aliases=%s prompt='%s' broadcast=%s rawTargets=%d uniqueTargets=%d",
+                rawMessage,
+                aliases,
+                debug.prompt,
+                debug.broadcast,
+                debug.rawTargetCount,
+                debug.aliases().size());
+        LOGGER.info("[ChatAssert] {}", summary);
+        ChatUtils.sendSystemMessage(context.getSource(), summary);
+
+        if (expectedRaw == null || expectedRaw.isBlank()) {
+            return 1;
+        }
+
+        List<String> tokens = Arrays.stream(expectedRaw.trim().toLowerCase(Locale.ROOT).split("[+,]"))
+                .map(String::trim)
+                .filter(s -> !s.isBlank())
+                .toList();
+        if (tokens.isEmpty()) {
+            ChatUtils.sendSystemMessage(context.getSource(),
+                    "§cchat_check expected is empty. Use tokens like none|single|multi|broadcast|named|prompt|empty_prompt|deduped|no_dedupe|bot:<alias>.");
+            return 0;
+        }
+
+        List<String> failures = new ArrayList<>();
+        for (String token : tokens) {
+            switch (token) {
+                case "none" -> {
+                    if (debug.aliases().isEmpty()) {
+                        // ok
+                    } else {
+                        failures.add("expected no routed bots");
+                    }
+                }
+                case "single" -> {
+                    if (debug.aliases().size() != 1) {
+                        failures.add("expected exactly one routed bot");
+                    }
+                }
+                case "multi" -> {
+                    if (debug.aliases().size() < 2) {
+                        failures.add("expected multiple routed bots");
+                    }
+                }
+                case "broadcast" -> {
+                    if (!debug.broadcast) {
+                        failures.add("expected broadcast=true");
+                    }
+                }
+                case "named" -> {
+                    if (debug.broadcast) {
+                        failures.add("expected named route, not broadcast");
+                    }
+                    if (debug.aliases().size() != 1) {
+                        failures.add("expected exactly one named routed bot");
+                    }
+                }
+                case "prompt" -> {
+                    if (debug.prompt == null || debug.prompt.isBlank()) {
+                        failures.add("expected non-empty prompt");
+                    }
+                }
+                case "empty_prompt" -> {
+                    if (debug.prompt != null && !debug.prompt.isBlank()) {
+                        failures.add("expected empty prompt");
+                    }
+                }
+                case "deduped" -> {
+                    if (!(debug.rawTargetCount > debug.aliases().size())) {
+                        failures.add("expected duplicate targets to be deduped");
+                    }
+                }
+                case "no_dedupe" -> {
+                    if (debug.rawTargetCount != debug.aliases().size()) {
+                        failures.add("expected no duplicate targets");
+                    }
+                }
+                default -> {
+                    if (token.startsWith("bot:")) {
+                        String expectedAlias = normalizeChatCheckAlias(token.substring(4));
+                        boolean matched = debug.aliases().stream()
+                                .map(modCommandRegistry::normalizeChatCheckAlias)
+                                .anyMatch(expectedAlias::equals);
+                        if (!matched) {
+                            failures.add("expected bot alias '" + token.substring(4) + "'");
+                        }
+                    } else {
+                        ChatUtils.sendSystemMessage(context.getSource(),
+                                "§cUnknown chat_check token '" + token + "'.");
+                        return 0;
+                    }
+                }
+            }
+        }
+
+        if (!failures.isEmpty()) {
+            String fail = "§cChatCheck assert failed: " + String.join("; ", failures);
+            LOGGER.info("[ChatAssert] assert-fail expected={} reasons={}", String.join("+", tokens), String.join("|", failures));
+            ChatUtils.sendSystemMessage(context.getSource(), fail);
+            return 0;
+        }
+
+        String expected = String.join("+", tokens);
+        LOGGER.info("[ChatAssert] assert-ok expected={}", expected);
+        ChatUtils.sendSystemMessage(context.getSource(), "§aChatCheck assert passed (" + expected + ").");
+        return 1;
+    }
+
+    private static String normalizeChatCheckAlias(String token) {
+        if (token == null) {
+            return "";
+        }
+        return token.replaceAll("[^a-zA-Z0-9]", "").toLowerCase(Locale.ROOT);
+    }
+
+    private static ChatRoutingCheckResult resolveChatRoutingCheck(MinecraftServer server, String raw) {
+        if (server == null || raw == null) {
+            return new ChatRoutingCheckResult(List.of(), "", false, 0);
+        }
+        String trimmed = raw.trim();
+        if (trimmed.isEmpty()) {
+            return new ChatRoutingCheckResult(List.of(), "", false, 0);
+        }
+        String[] tokens = trimmed.split("\\s+");
+        if (tokens.length == 0) {
+            return new ChatRoutingCheckResult(List.of(), "", false, 0);
+        }
+
+        List<ServerPlayerEntity> bots = BotEventHandler.getRegisteredBots(server);
+        if (bots.isEmpty()) {
+            return new ChatRoutingCheckResult(List.of(), "", false, 0);
+        }
+
+        int consumed = -1;
+        boolean broadcast = false;
+        List<ServerPlayerEntity> targets = new ArrayList<>();
+        for (int i = 0; i < tokens.length; i++) {
+            String current = normalizeChatCheckAlias(tokens[i]);
+            if (current.isEmpty()) {
+                continue;
+            }
+            if (current.equals("allbots") || current.equals("bots")) {
+                targets.addAll(bots);
+                broadcast = true;
+                consumed = i + 1;
+                break;
+            }
+            if (current.equals("all") && i + 1 < tokens.length) {
+                String next = normalizeChatCheckAlias(tokens[i + 1]);
+                if (next.equals("bots")) {
+                    targets.addAll(bots);
+                    broadcast = true;
+                    consumed = i + 2;
+                    break;
+                }
+            }
+            for (ServerPlayerEntity bot : bots) {
+                if (normalizeChatCheckAlias(bot.getName().getString()).equals(current)) {
+                    targets.add(bot);
+                    consumed = i + 1;
+                    break;
+                }
+            }
+            if (!targets.isEmpty()) {
+                break;
+            }
+        }
+        if (targets.isEmpty() || consumed < 0) {
+            return new ChatRoutingCheckResult(List.of(), "", false, 0);
+        }
+
+        int rawTargetCount = targets.size();
+        Map<UUID, String> deduped = new LinkedHashMap<>();
+        for (ServerPlayerEntity bot : targets) {
+            if (bot == null || bot.isRemoved()) {
+                continue;
+            }
+            deduped.putIfAbsent(bot.getUuid(), bot.getName().getString());
+        }
+        List<String> aliases = new ArrayList<>(deduped.values());
+        String prompt = consumed >= tokens.length
+                ? ""
+                : String.join(" ", Arrays.copyOfRange(tokens, consumed, tokens.length)).trim();
+        return new ChatRoutingCheckResult(aliases, prompt, broadcast, rawTargetCount);
+    }
+
+    private record ChatRoutingCheckResult(List<String> aliases, String prompt, boolean broadcast, int rawTargetCount) {}
 
     private static void assertFollowInvariant(List<String> failures,
                                               BotEventHandler.Mode mode,
