@@ -38,6 +38,7 @@ import net.shasankp000.GameAI.llm.LLMOrchestrator;
 import net.shasankp000.GameAI.services.HuntCatalog;
 import net.shasankp000.GameAI.services.HuntHistoryService;
 import net.shasankp000.GameAI.services.BotQuestService;
+import net.shasankp000.GameAI.services.FoodConsumptionConfirmationService;
 
 import net.shasankp000.Database.QTableStorage;
 import net.shasankp000.Entity.AutoFaceEntity;
@@ -59,8 +60,10 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
@@ -154,6 +157,7 @@ public class AIPlayer implements ModInitializer {
             if (player instanceof net.minecraft.server.network.ServerPlayerEntity serverPlayer
                     && entity instanceof net.minecraft.entity.passive.VillagerEntity) {
                 net.shasankp000.GameAI.services.SurvivalRecruitmentService.notePlayerInteraction(serverPlayer, "villager");
+                net.shasankp000.GameAI.services.VillageProximityReactionService.onPlayerInteractedVillager(serverPlayer, (net.minecraft.entity.passive.VillagerEntity) entity);
                 return net.minecraft.util.ActionResult.PASS;
             }
 
@@ -431,7 +435,7 @@ public class AIPlayer implements ModInitializer {
                         net.shasankp000.GameAI.services.BotCombatCalloutService.onPlayerHit(serverPlayer, playerAttacker, amount);
                     } else if (attacker instanceof net.minecraft.entity.mob.HostileEntity) {
                         // Mob hit the bot - use damage taken callout
-                        net.shasankp000.GameAI.services.BotCombatCalloutService.onDamageTaken(serverPlayer, attacker, amount);
+                        net.shasankp000.GameAI.services.BotCombatCalloutService.onDamageTaken(serverPlayer, attacker, amount, source);
                     }
                 }
 
@@ -470,6 +474,14 @@ public class AIPlayer implements ModInitializer {
                         }
                     }
                 }
+            }
+            // Friendly fire dealt: a registered bot hit a real player.
+            if (entity instanceof ServerPlayerEntity hurtPlayer
+                    && !BotEventHandler.isRegisteredBot(hurtPlayer)
+                    && source != null
+                    && source.getAttacker() instanceof ServerPlayerEntity botAttacker
+                    && BotEventHandler.isRegisteredBot(botAttacker)) {
+                net.shasankp000.GameAI.services.BotCombatCalloutService.onBotHitPlayer(botAttacker, hurtPlayer, amount);
             }
             return true; // Allow the damage
         });
@@ -532,6 +544,9 @@ public class AIPlayer implements ModInitializer {
         ServerTickEvents.END_SERVER_TICK.register(net.shasankp000.GameAI.services.BotCombatCalloutService::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(net.shasankp000.GameAI.services.CompanionOverheadHologramService::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(net.shasankp000.GameAI.services.SweetBerryBushReactionService::onServerTick);
+        ServerTickEvents.END_SERVER_TICK.register(net.shasankp000.GameAI.services.VillageProximityReactionService::onServerTick);
+        ServerTickEvents.END_SERVER_TICK.register(net.shasankp000.GameAI.services.PetProximityReactionService::onServerTick);
+        ServerTickEvents.END_SERVER_TICK.register(net.shasankp000.GameAI.services.CompanionContextReactionService::onServerTick);
 
         ServerMessageEvents.CHAT_MESSAGE.register((message, sender, params) -> {
             String raw = message.getContent().getString();
@@ -539,6 +554,11 @@ public class AIPlayer implements ModInitializer {
             // Quest usability: allow a bare "quest"/"mission" ask to target the nearest bot.
             // This keeps the feature discoverable without requiring "<botname> quest".
             tryHandleNearbyQuestAsk(sender, raw);
+
+            // Expensive consumable gating: allow the controller to answer yes/no prompts.
+            if (FoodConsumptionConfirmationService.tryHandleConfirmation(sender, raw)) {
+                return;
+            }
 
             boolean consumed = false;
             if (OLLAMA4J_AVAILABLE) {
@@ -559,10 +579,11 @@ public class AIPlayer implements ModInitializer {
 
             ChatTarget target = resolveChatTargets(raw);
             if (!target.bots().isEmpty()) {
+                List<ServerPlayerEntity> routedBots = dedupeTargetBots(target.bots());
                 // Fast-path: local quest system (no LLM).
                 if (!target.prompt().isEmpty()) {
                     boolean questHandled = false;
-                    for (ServerPlayerEntity bot : target.bots()) {
+                    for (ServerPlayerEntity bot : routedBots) {
                         if (bot == null) {
                             continue;
                         }
@@ -574,7 +595,7 @@ public class AIPlayer implements ModInitializer {
                 }
 
                 boolean handled = false;
-                for (ServerPlayerEntity bot : target.bots()) {
+                for (ServerPlayerEntity bot : routedBots) {
                     if (target.prompt().isEmpty()) {
                         continue;
                     }
@@ -589,49 +610,16 @@ public class AIPlayer implements ModInitializer {
                 if (handled) {
                     return;
                 }
-            }
 
-            // New logic starts here
-            String[] parts = raw.split(" ");
-            if (parts.length < 2) {
+                // Compatibility fallback for targeted single-bot action prompts.
+                // Keep this inside explicit-target routing so the raw parser doesn't process the same line again.
+                if (routedBots.size() == 1 && !target.prompt().isEmpty()) {
+                    handleLegacyInlineActionPrompt(routedBots.get(0), sender, target.prompt());
+                }
                 return;
             }
-            String botName = parts[0];
-            // A very simple check to see if the first word is a bot name.
-            // A better approach would be to get a list of all bots.
-            if (BotEventHandler.isRegisteredBot(serverInstance.getPlayerManager().getPlayer(botName))) {
-                ServerPlayerEntity bot = serverInstance.getPlayerManager().getPlayer(botName);
-                if (bot == null) {
-                    return;
-                }
-                
-                String userPrompt = String.join(" ", java.util.Arrays.copyOfRange(parts, 1, parts.length));
 
-                NLPProcessor.Intent intent = NLPProcessor.getIntention(userPrompt);
-
-                if (intent == NLPProcessor.Intent.REQUEST_ACTION) {
-                    if (!OLLAMA4J_AVAILABLE) {
-                        if (WARNED_MISSING_OLLAMA4J.compareAndSet(false, true)) {
-                            LOGGER.warn("AI action handling requested but ollama4j is not available; ignoring inline action prompt.");
-                        }
-                        return;
-                    }
-                    try {
-                        // Constructor sets thread-local context used by the static run(..) entrypoint.
-                        new FunctionCallerV2(bot.getCommandSource(), sender.getUuid());
-                        FunctionCallerV2.run(userPrompt);
-                    } catch (Throwable t) {
-                        if (WARNED_MISSING_OLLAMA4J.compareAndSet(false, true)) {
-                            LOGGER.warn("AI action handling failed ({}: {})", t.getClass().getSimpleName(), t.getMessage());
-                        }
-                    } finally {
-                        try {
-                            FunctionCallerV2.clearContext();
-                        } catch (Throwable ignored) {
-                        }
-                    }
-                }
-            }
+            handleLegacyInlineActionFromRaw(raw, sender);
         });
     }
 
@@ -776,11 +764,76 @@ public class AIPlayer implements ModInitializer {
         if (targets.isEmpty() || consumed < 0) {
             return new ChatTarget(List.of(), "");
         }
+        targets = dedupeTargetBots(targets);
+        if (targets.isEmpty()) {
+            return new ChatTarget(List.of(), "");
+        }
         if (consumed >= tokens.length) {
             return new ChatTarget(targets, "");
         }
         String prompt = String.join(" ", Arrays.copyOfRange(tokens, consumed, tokens.length)).trim();
         return new ChatTarget(targets, prompt);
+    }
+
+    private static List<ServerPlayerEntity> dedupeTargetBots(List<ServerPlayerEntity> bots) {
+        if (bots == null || bots.isEmpty()) {
+            return List.of();
+        }
+        Map<UUID, ServerPlayerEntity> deduped = new LinkedHashMap<>();
+        for (ServerPlayerEntity bot : bots) {
+            if (bot == null || bot.isRemoved()) {
+                continue;
+            }
+            deduped.putIfAbsent(bot.getUuid(), bot);
+        }
+        return new ArrayList<>(deduped.values());
+    }
+
+    private static void handleLegacyInlineActionFromRaw(String raw, ServerPlayerEntity sender) {
+        if (raw == null || raw.isBlank() || sender == null || serverInstance == null) {
+            return;
+        }
+        String[] parts = raw.split(" ");
+        if (parts.length < 2) {
+            return;
+        }
+        String botName = parts[0];
+        ServerPlayerEntity bot = serverInstance.getPlayerManager().getPlayer(botName);
+        if (!BotEventHandler.isRegisteredBot(bot) || bot == null) {
+            return;
+        }
+        String userPrompt = String.join(" ", Arrays.copyOfRange(parts, 1, parts.length));
+        handleLegacyInlineActionPrompt(bot, sender, userPrompt);
+    }
+
+    private static void handleLegacyInlineActionPrompt(ServerPlayerEntity bot, ServerPlayerEntity sender, String userPrompt) {
+        if (bot == null || sender == null || userPrompt == null || userPrompt.isBlank()) {
+            return;
+        }
+        NLPProcessor.Intent intent = NLPProcessor.getIntention(userPrompt);
+        if (intent != NLPProcessor.Intent.REQUEST_ACTION) {
+            return;
+        }
+        if (!OLLAMA4J_AVAILABLE) {
+            if (WARNED_MISSING_OLLAMA4J.compareAndSet(false, true)) {
+                LOGGER.warn("AI action handling requested but ollama4j is not available; ignoring inline action prompt.");
+            }
+            return;
+        }
+        try {
+            // Constructor sets thread-local context used by the static run(..) entrypoint.
+            new FunctionCallerV2(bot.getCommandSource(), sender.getUuid());
+            FunctionCallerV2.run(userPrompt);
+        } catch (Throwable t) {
+            if (WARNED_MISSING_OLLAMA4J.compareAndSet(false, true)) {
+                LOGGER.warn("AI action handling failed ({}: {})", t.getClass().getSimpleName(), t.getMessage());
+            }
+        } finally {
+            try {
+                FunctionCallerV2.clearContext();
+            } catch (Throwable ignored) {
+            }
+        }
     }
 
     public static boolean isDjlAvailable() {
