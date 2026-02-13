@@ -4,9 +4,25 @@
 
 This document tracks dialogue audio for the AI Player mod.
 
+## Batch 3 Phase 1 Status (January 22, 2026 source)
+
+- Source of truth: `../gemini_projects/ai-player-dialogue/january_2026_batch3/AUDIO_INDEX.md`
+- Phase 1 scope integrated: **87 non-topic IDs** and **261 `.ogg` clips** (3 variants each)
+- Phase 2A integrated: **105 `topic_*` IDs** and **315 `.ogg` clips**
+- Overlap refresh integrated: remaining overlap filepaths mapped to source canonical names
+- Batch 3 source coverage: **618 / 618** clips mapped from `output_ogg`
+- Deferred by design: side-quest dialogue audio (will be generated/mapped with side-quest overhaul)
+- Overlap IDs intentionally preserved as-is (no trigger/mapping replacement in Phase 1):
+  - `bot.line.discover_mineshaft`, `bot.line.discover_spawner`
+  - `bot.line.weather_rain`, `bot.line.weather_snow`, `bot.line.weather_sunny`, `bot.line.weather_thunder`
+  - `bot.line.time_sunset_soon`
+  - `bot.fx.hurt_grunt`
+
+Additional implementation details and trigger matrix are tracked in `docs/audio/BATCH3_STATUS.md`.
+
 ## New Audio Needed (January 2026 additions)
 
-These were added after the previous “complete” pass. Code support is in place (sound events registered, chat→sound mapping added, subtitles added). The **Status** column reflects whether the corresponding `.ogg` assets are present and wired up via `sounds.json`.
+These were added after the previous “complete” pass. **Code support is in place** (sound events registered, chat→sound mapping added, subtitles added). The **Status** column reflects whether the corresponding `.ogg` assets are present under `src/main/resources/assets/ai-player/sounds/dialogue/` and referenced by `sounds.json`.
 
 | Sound event id | sounds.json entry (suggested file) | Chat text | Status |
 |---|---|---|---|
@@ -27,11 +43,11 @@ These are triggered as **overhead (in-world) companion dialogue** when the bot g
 
 | Sound event id | sounds.json entry (suggested file) | Text | Status |
 |---|---|---|---|
-| `bot.line.foliage_stuck_1` | `ai-player:dialogue/foliage_stuck_these_branches_are_thick__01` | "These branches are thick!" | ❌ Needed |
-| `bot.line.foliage_stuck_2` | `ai-player:dialogue/foliage_stuck_hold_on_stuck_in_branches__01` | "Hold on — stuck in some branches." | ❌ Needed |
-| `bot.line.foliage_stuck_3` | `ai-player:dialogue/foliage_stuck_cant_get_through_these_leaves__01` | "Can't get through these leaves." | ❌ Needed |
-| `bot.line.foliage_stuck_4` | `ai-player:dialogue/foliage_stuck_foliage_got_me__01` | "Just a sec… foliage's got me." | ❌ Needed |
-| `bot.line.foliage_stuck_5` | `ai-player:dialogue/foliage_stuck_ugh_leaves_in_the_way__01` | "Ugh. Leaves in the way." | ❌ Needed |
+| `bot.line.foliage_stuck_1` | `ai-player:dialogue/foliage_stuck_these_branches_are_thick__01` | "These branches are thick!" | ✅ Integrated |
+| `bot.line.foliage_stuck_2` | `ai-player:dialogue/foliage_stuck_hold_on_stuck_in_branches__01` | "Hold on — stuck in some branches." | ✅ Integrated |
+| `bot.line.foliage_stuck_3` | `ai-player:dialogue/foliage_stuck_cant_get_through_these_leaves__01` | "Can't get through these leaves." | ✅ Integrated |
+| `bot.line.foliage_stuck_4` | `ai-player:dialogue/foliage_stuck_foliage_got_me__01` | "Just a sec… foliage's got me." | ✅ Integrated |
+| `bot.line.foliage_stuck_5` | `ai-player:dialogue/foliage_stuck_ugh_leaves_in_the_way__01` | "Ugh. Leaves in the way." | ✅ Integrated |
 
 ### Sweet Berry Bush reactions (new)
 
@@ -42,10 +58,10 @@ Triggered as **overhead (in-world) companion dialogue**:
 
 | Sound event id | sounds.json entry (suggested file) | Text | Status |
 |---|---|---|---|
-| `bot.line.berry_bush_sting_1` | `ai-player:dialogue/berry_bush_ouch__01` | "Ouch!" | ❌ Needed |
-| `bot.line.berry_bush_sting_2` | `ai-player:dialogue/berry_bush_these_are_thorny__01` | "These are thorny!" | ❌ Needed |
-| `bot.line.berry_bush_sting_3` | `ai-player:dialogue/berry_bush_yowch__01` | "Yowch!" | ❌ Needed |
-| `bot.line.berry_bush_edible_1` | `ai-player:dialogue/berry_bush_these_are_edible_i_think__01` | "These are edible...I think." | ❌ Needed |
+| `bot.line.berry_bush_sting_1` | `ai-player:dialogue/berry_bush_ouch__01` | "Ouch!" | ✅ Integrated |
+| `bot.line.berry_bush_sting_2` | `ai-player:dialogue/berry_bush_these_are_thorny__01` | "These are thorny!" | ✅ Integrated |
+| `bot.line.berry_bush_sting_3` | `ai-player:dialogue/berry_bush_yowch__01` | "Yowch!" | ✅ Integrated |
+| `bot.line.berry_bush_edible_1` | `ai-player:dialogue/berry_bush_these_are_edible_i_think__01` | "These are edible...I think." | ✅ Integrated |
 
 ### Mining POI callouts (new)
 
@@ -53,8 +69,8 @@ Mining-specific discoveries emitted by `MiningHazardDetector` now have dedicated
 
 | Sound event id | sounds.json entry (suggested file) | Chat text | Status |
 |---|---|---|---|
-| `bot.line.discover_mineshaft` | `ai-player:dialogue/discover_mineshaft__01` (+ `__02`) | "I found a mineshaft!" | ❌ Needed |
-| `bot.line.discover_spawner` | `ai-player:dialogue/discover_spawner__01` (+ `__02`) | "I found a mob spawner!" | ❌ Needed |
+| `bot.line.discover_mineshaft` | `ai-player:dialogue/discover_mineshaft__01` (+ `__02`) | "I found a mineshaft!" | ✅ Integrated |
+| `bot.line.discover_spawner` | `ai-player:dialogue/discover_spawner__01` (+ `__02`) | "I found a mob spawner!" | ✅ Integrated |
 
 ### Weather chatter + time-of-day reminders (new)
 
@@ -62,11 +78,11 @@ Overworld ambient callouts triggered when the bot is above ground (sky visible).
 
 | Sound event id | sounds.json entry (suggested file) | Trigger | Status |
 |---|---|---|---|
-| `bot.line.weather_rain` | `ai-player:dialogue/weather_rain__01` (+ `__02`…`__06`) | Weather changed to rain | ❌ Needed |
-| `bot.line.weather_snow` | `ai-player:dialogue/weather_snow__01` (+ `__02`…`__06`) | Weather changed to snow (cold biome) | ❌ Needed |
-| `bot.line.weather_thunder` | `ai-player:dialogue/weather_thunder__01` (+ `__02`…`__06`) | Weather changed to thunderstorm | ❌ Needed |
-| `bot.line.weather_sunny` | `ai-player:dialogue/weather_sunny__01` (+ `__02`…`__06`) | Weather cleared (sometimes) | ❌ Needed |
-| `bot.line.time_sunset_soon` | `ai-player:dialogue/time_sunset_soon__01` (+ `__02`…`__06`) | After noon, if not near base or recent bed | ❌ Needed |
+| `bot.line.weather_rain` | `ai-player:dialogue/weather_rain_01__01` (+ `_02__01`…`_06__01`) | Weather changed to rain | ✅ Integrated |
+| `bot.line.weather_snow` | `ai-player:dialogue/weather_snow_01__01` (+ `_02__01`…`_06__01`) | Weather changed to snow (cold biome) | ✅ Integrated |
+| `bot.line.weather_thunder` | `ai-player:dialogue/weather_thunder_01__01` (+ `_02__01`…`_06__01`) | Weather changed to thunderstorm | ✅ Integrated |
+| `bot.line.weather_sunny` | `ai-player:dialogue/weather_sunny_01__01` (+ `_02__01`…`_06__01`) | Weather cleared (sometimes) | ✅ Integrated |
+| `bot.line.time_sunset_soon` | `ai-player:dialogue/time_sunset_soon_01__01` (+ `_02__01`…`_06__01`) | After noon, if not near base or recent bed | ✅ Integrated |
 
 ### Nonverbal hurt grunts (new)
 
@@ -74,7 +90,7 @@ Short nonverbal reactions when the bot is hit. Should be **wordless** (grunt/bre
 
 | Sound event id | sounds.json entry (suggested file) | Trigger | Status |
 |---|---|---|---|
-| `bot.fx.hurt_grunt` | `ai-player:dialogue/hurt_grunt__01` (+ `__02`…`__08`) | On damage taken | ❌ Needed |
+| `bot.fx.hurt_grunt` | `ai-player:dialogue/hurt_grunt_01__01` (+ `_02__01`…`_08__01`) | On damage taken | ✅ Integrated |
 
 ### The Nether & The End ambience (new)
 
@@ -252,4 +268,37 @@ The January 2026 audio batch has been fully integrated:
 
 ---
 
-*Last updated: January 10, 2026*
+## Phantom / Village audio status (January 2026)
+
+We currently do **not** ship any dedicated phantom/village/villager/golem voice clips.
+
+- **Phantoms:** implemented using existing combat threat voice (`bot.line.combat_threat_detected`) plus overhead text (“Phantom!”).
+- **Village proximity:** implemented using overhead text (“Village nearby.”) plus an existing generic discovery voice (`bot.line.discover_structure`) as a placeholder.
+
+If we want bespoke audio, we should add new sound events (e.g. `bot.line.phantom_spotted`, `bot.line.village_entered`) and record corresponding `.ogg` files.
+
+## Asset audit (sounds.json vs sounds/dialogue)
+
+Automated check results:
+
+- **Missing referenced `.ogg` clips:** 42
+- **Unused `.ogg` clips present but not referenced:** 1
+
+### Missing referenced clips (currently referenced by `sounds.json` but not present as `.ogg`)
+
+- `dialogue/discover_mineshaft__01`
+- `dialogue/discover_mineshaft__02`
+- `dialogue/discover_spawner__01`
+- `dialogue/discover_spawner__02`
+- `dialogue/hurt_grunt__01` … `dialogue/hurt_grunt__08`
+- `dialogue/time_sunset_soon__01` … `dialogue/time_sunset_soon__06`
+- `dialogue/weather_rain__01` … `dialogue/weather_rain__06`
+- `dialogue/weather_snow__01` … `dialogue/weather_snow__06`
+- `dialogue/weather_sunny__01` … `dialogue/weather_sunny__06`
+- `dialogue/weather_thunder__01` … `dialogue/weather_thunder__06`
+
+### Unused dialogue clips (present as `.ogg` but not referenced by `sounds.json`)
+
+- `dialogue/test_line__01`
+
+*Last updated: January 12, 2026*
