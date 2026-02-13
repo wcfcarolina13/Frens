@@ -30,6 +30,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.Locale;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
@@ -61,19 +62,43 @@ public final class BotPersistenceService {
             return;
         }
 
-        if (restoreViaPlayerManager(server, bot)) {
+        final long joinTick = server.getTicks();
+        LOGGER.info("[PersistCheck] join-start bot={} tick={} alive={} removed={} vitals={}",
+                bot.getName().getString(),
+                joinTick,
+                bot.isAlive(),
+                bot.isRemoved(),
+                vitalsSnapshot(bot));
+
+        boolean managerRestored = restoreViaPlayerManager(server, bot);
+        if (managerRestored) {
             LOGGER.info("Restored fakeplayer '{}' using PlayerManager.", bot.getName().getString());
         } else {
             LOGGER.info("No persisted state for fakeplayer '{}'; starting fresh.", bot.getName().getString());
         }
+        LOGGER.info("[PersistCheck] manager-restore bot={} restored={} tick={} vitals={}",
+                bot.getName().getString(),
+                managerRestored,
+                server.getTicks(),
+                vitalsSnapshot(bot));
 
         // Schedule inventory load for next tick to ensure vanilla restoration completes first
         server.execute(() -> {
+            long nowTick = server.getTicks();
+            LOGGER.info("[PersistCheck] join-restore-run bot={} joinTick={} nowTick={} deltaTicks={} removedBefore={} vitalsBeforeLoad={}",
+                    bot.getName().getString(),
+                    joinTick,
+                    nowTick,
+                    Math.max(0L, nowTick - joinTick),
+                    bot.isRemoved(),
+                    vitalsSnapshot(bot));
             if (!bot.isRemoved()) {
                 boolean loaded = BotInventoryStorageService.load(bot);
-                if (loaded) {
-                    LOGGER.info("Loaded persisted inventory for fakeplayer '{}'", bot.getName().getString());
-                }
+                LOGGER.info("[PersistCheck] inventory-load bot={} loaded={} tick={} vitalsAfterLoad={}",
+                        bot.getName().getString(),
+                        loaded,
+                        server.getTicks(),
+                        vitalsSnapshot(bot));
                 BotWorldStateService.loadState(server, bot.getName().getString()).ifPresentOrElse(state -> {
                     LOGGER.info("Restoring {} to last position in world {}: {},{},{}, yaw={}, pitch={}",
                             bot.getName().getString(),
@@ -82,6 +107,15 @@ public final class BotPersistenceService {
                     bot.refreshPositionAndAngles(state.x(), state.y(), state.z(), state.yaw(), state.pitch());
                 }, () -> LOGGER.info("No prior world-state for {} in world {}", bot.getName().getString(), BotWorldStateService.currentWorldKey(server)));
                 MountPersistenceService.onBotJoin(bot);
+                LOGGER.info("[PersistCheck] join-restore-complete bot={} tick={} pos={} vitals={}",
+                        bot.getName().getString(),
+                        server.getTicks(),
+                        bot.getBlockPos().toShortString(),
+                        vitalsSnapshot(bot));
+            } else {
+                LOGGER.info("[PersistCheck] join-restore-skipped bot={} reason=removed tick={}",
+                        bot.getName().getString(),
+                        server.getTicks());
             }
         });
         
@@ -145,6 +179,16 @@ public final class BotPersistenceService {
     }
 
     public static void onBotRespawn(ServerPlayerEntity oldPlayer, ServerPlayerEntity newPlayer, boolean alive) {
+        if (newPlayer instanceof createFakePlayer) {
+            LOGGER.info("[PersistCheck] respawn-event bot={} oldUuid={} newUuid={} aliveFlag={} tick={} oldVitals={} newVitals={}",
+                    newPlayer.getName().getString(),
+                    oldPlayer != null ? oldPlayer.getUuidAsString() : "none",
+                    newPlayer.getUuidAsString(),
+                    alive,
+                    extractServer(newPlayer) != null ? extractServer(newPlayer).getTicks() : -1,
+                    vitalsSnapshot(oldPlayer),
+                    vitalsSnapshot(newPlayer));
+        }
         if (!alive) {
             onBotJoin(newPlayer);
         }
@@ -245,6 +289,19 @@ public final class BotPersistenceService {
         }
         ServerCommandSource source = bot.getCommandSource();
         return source != null ? source.getServer() : null;
+    }
+
+    private static String vitalsSnapshot(ServerPlayerEntity bot) {
+        if (bot == null) {
+            return "n/a";
+        }
+        return String.format(Locale.ROOT, "hp=%.1f food=%d sat=%.2f xp=%d prog=%.3f total=%d",
+                bot.getHealth(),
+                bot.getHungerManager().getFoodLevel(),
+                bot.getHungerManager().getSaturationLevel(),
+                bot.experienceLevel,
+                bot.experienceProgress,
+                bot.totalExperience);
     }
 
     private static boolean restoreViaPlayerManager(MinecraftServer server, ServerPlayerEntity bot) {

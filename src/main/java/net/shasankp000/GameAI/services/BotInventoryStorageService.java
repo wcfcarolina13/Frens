@@ -20,6 +20,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.text.Normalizer;
+import java.util.Locale;
 import java.util.regex.Pattern;
 
 public final class BotInventoryStorageService {
@@ -102,7 +103,10 @@ public final class BotInventoryStorageService {
 
         try {
             net.minecraft.nbt.NbtIo.writeCompressed(root, path);
-            LOGGER.info("Saved inventory for fakeplayer '{}' to {}", bot.getName().getString(), path.getFileName());
+            LOGGER.info("Saved inventory for fakeplayer '{}' to {} stats={}",
+                    bot.getName().getString(),
+                    path.getFileName(),
+                    statsSnapshot(bot));
             return true;
         } catch (IOException e) {
             LOGGER.error("Failed to save inventory for fakeplayer '{}': {}", bot.getName().getString(), e.getMessage());
@@ -159,7 +163,8 @@ public final class BotInventoryStorageService {
         });
 
         inventory.markDirty();
-        
+        String before = statsSnapshot(bot);
+
         // Restore player stats (health, hunger, XP)
         root.getFloat(KEY_HEALTH).ifPresent(bot::setHealth);
         root.getInt(KEY_FOOD).ifPresent(bot.getHungerManager()::setFoodLevel);
@@ -167,8 +172,12 @@ public final class BotInventoryStorageService {
         root.getInt(KEY_XP).ifPresent(xp -> bot.experienceLevel = xp);
         root.getFloat(KEY_XP_PROGRESS).ifPresent(progress -> bot.experienceProgress = progress);
         root.getInt(KEY_TOTAL_XP).ifPresent(total -> bot.totalExperience = total);
-        
-        LOGGER.info("Loaded inventory and stats for fakeplayer '{}' from {}", bot.getName().getString(), path.getFileName());
+
+        LOGGER.info("Loaded inventory and stats for fakeplayer '{}' from {} before={} after={}",
+                bot.getName().getString(),
+                path.getFileName(),
+                before,
+                statsSnapshot(bot));
         return true;
     }
 
@@ -204,5 +213,18 @@ public final class BotInventoryStorageService {
                 .replaceAll("\\p{M}", "")
                 .toLowerCase();
         return SAFE_NAME.matcher(normalized).replaceAll("_");
+    }
+
+    private static String statsSnapshot(ServerPlayerEntity bot) {
+        if (bot == null) {
+            return "n/a";
+        }
+        return String.format(Locale.ROOT, "hp=%.1f food=%d sat=%.2f xp=%d prog=%.3f total=%d",
+                bot.getHealth(),
+                bot.getHungerManager().getFoodLevel(),
+                bot.getHungerManager().getSaturationLevel(),
+                bot.experienceLevel,
+                bot.experienceProgress,
+                bot.totalExperience);
     }
 }
