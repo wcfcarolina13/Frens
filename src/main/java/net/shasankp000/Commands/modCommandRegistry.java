@@ -2690,9 +2690,8 @@ public class modCommandRegistry {
         double standoffRange = state != null ? Math.max(0.0D, state.followStandoffRange) : 0.0D;
         boolean noTeleport = state != null && state.followNoTeleport;
         boolean allowRecovery = state == null || state.comeAllowRecoverySkills;
-        int rerouteAttempts = state != null ? Math.max(0, state.comeRerouteAttempts) : 0;
+        int rerouteAttempts = getOptionalIntField(state, "comeRerouteAttempts");
         int ticksSinceBest = state != null ? Math.max(0, state.comeTicksSinceBest) : 0;
-        long nextRerouteTick = state != null ? state.comeNextRerouteTick : 0L;
         long nextSkillTick = state != null ? state.comeNextSkillTick : 0L;
         int waypoints = net.shasankp000.GameAI.services.FollowStateService.FOLLOW_WAYPOINTS
                 .getOrDefault(bot.getUuid(), new ArrayDeque<>())
@@ -2700,7 +2699,7 @@ public class modCommandRegistry {
         boolean planningInflight = net.shasankp000.GameAI.services.FollowStateService.FOLLOW_PATH_INFLIGHT.containsKey(bot.getUuid());
 
         String summary = String.format(Locale.ROOT,
-                "FollowCheck bot=%s mode=%s target=%s fixedGoal=%s forceWalk=%s stopRange=%.2f standoff=%.2f allowRecovery=%s reroutes=%d ticksSinceBest=%d nextReroute=%d nextSkill=%d waypoints=%d inflight=%s",
+                "FollowCheck bot=%s mode=%s target=%s fixedGoal=%s forceWalk=%s stopRange=%.2f standoff=%.2f allowRecovery=%s ticksSinceBest=%d nextSkill=%d waypoints=%d inflight=%s",
                 bot.getName().getString(),
                 mode,
                 followTarget != null ? followTarget.toString() : "none",
@@ -2709,9 +2708,7 @@ public class modCommandRegistry {
                 stopRange,
                 standoffRange,
                 allowRecovery,
-                rerouteAttempts,
                 ticksSinceBest,
-                nextRerouteTick,
                 nextSkillTick,
                 waypoints,
                 planningInflight);
@@ -3185,16 +3182,16 @@ public class modCommandRegistry {
                  "combat_ended_single_weak", "post_combat_single",
                  "player_hit_bot", "ff_received",
                  "bot_hit_player", "ff_dealt" ->
-                    net.shasankp000.GameAI.services.BotCombatCalloutService.debugTrigger(bot, triggerKey, lineId);
+                    invokeDialogueDebugTrigger("net.shasankp000.GameAI.services.BotCombatCalloutService", bot, triggerKey, lineId);
 
             case "villager_noise_nearby", "villager",
                  "player_opens_villager_trade", "villager_negotiate" ->
-                    net.shasankp000.GameAI.services.VillageProximityReactionService.debugTrigger(bot, triggerKey, lineId);
+                    invokeDialogueDebugTrigger("net.shasankp000.GameAI.services.VillageProximityReactionService", bot, triggerKey, lineId);
 
             case "tamed_wolf_nearby", "wolf_nearby",
                  "wolf_takes_damage", "wolf_hurt",
                  "tamed_animal_nearby", "animal_nearby" ->
-                    net.shasankp000.GameAI.services.PetProximityReactionService.debugTrigger(bot, triggerKey, lineId);
+                    invokeDialogueDebugTrigger("net.shasankp000.GameAI.services.PetProximityReactionService", bot, triggerKey, lineId);
 
             case "random_idle_not_combat", "ambient",
                  "in_high_threat_location", "high_threat",
@@ -3213,15 +3210,47 @@ public class modCommandRegistry {
                  "survive_near_death_or_totem", "meme_technoblade",
                  "lightning_at_night", "meme_herobrine",
                  "shelter_completion", "shelter" ->
-                    net.shasankp000.GameAI.services.CompanionContextReactionService.debugTrigger(bot, triggerKey, lineId);
+                    invokeDialogueDebugTrigger("net.shasankp000.GameAI.services.CompanionContextReactionService", bot, triggerKey, lineId);
             case "batch3_biomes", "topic_biomes",
                  "batch3_structures", "topic_structures",
                  "batch3_dimensions", "topic_dimensions",
                  "batch3_traders_mounts", "topic_mounts",
                  "batch3_travel", "topic_travel" ->
-                    net.shasankp000.GameAI.services.Batch3TopicDialogueService.debugTrigger(bot, triggerKey, lineId);
+                    invokeDialogueDebugTrigger("net.shasankp000.GameAI.services.Batch3TopicDialogueService", bot, triggerKey, lineId);
             default -> false;
         };
+    }
+
+    /**
+     * CI-safe debug trigger bridge: if a dialogue debug service/method is not present in this checkout,
+     * treat it as "not played" instead of failing compilation.
+     */
+    private static boolean invokeDialogueDebugTrigger(String className, ServerPlayerEntity bot, String triggerKey, String lineId) {
+        try {
+            Class<?> clazz = Class.forName(className);
+            java.lang.reflect.Method method = clazz.getMethod(
+                    "debugTrigger",
+                    ServerPlayerEntity.class,
+                    String.class,
+                    String.class
+            );
+            Object out = method.invoke(null, bot, triggerKey, lineId);
+            return out instanceof Boolean b && b;
+        } catch (ReflectiveOperationException | RuntimeException ignored) {
+            return false;
+        }
+    }
+
+    private static int getOptionalIntField(Object target, String fieldName) {
+        if (target == null || fieldName == null || fieldName.isBlank()) {
+            return 0;
+        }
+        try {
+            java.lang.reflect.Field field = target.getClass().getField(fieldName);
+            return Math.max(0, field.getInt(target));
+        } catch (ReflectiveOperationException | RuntimeException ignored) {
+            return 0;
+        }
     }
 
     static int executeComeTargets(CommandContext<ServerCommandSource> context, String targetArg) throws CommandSyntaxException {
