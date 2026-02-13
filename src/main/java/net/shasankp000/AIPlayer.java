@@ -38,7 +38,6 @@ import net.shasankp000.GameAI.llm.LLMOrchestrator;
 import net.shasankp000.GameAI.services.HuntCatalog;
 import net.shasankp000.GameAI.services.HuntHistoryService;
 import net.shasankp000.GameAI.services.BotQuestService;
-import net.shasankp000.GameAI.services.FoodConsumptionConfirmationService;
 
 import net.shasankp000.Database.QTableStorage;
 import net.shasankp000.Entity.AutoFaceEntity;
@@ -157,7 +156,6 @@ public class AIPlayer implements ModInitializer {
             if (player instanceof net.minecraft.server.network.ServerPlayerEntity serverPlayer
                     && entity instanceof net.minecraft.entity.passive.VillagerEntity) {
                 net.shasankp000.GameAI.services.SurvivalRecruitmentService.notePlayerInteraction(serverPlayer, "villager");
-                net.shasankp000.GameAI.services.VillageProximityReactionService.onPlayerInteractedVillager(serverPlayer, (net.minecraft.entity.passive.VillagerEntity) entity);
                 return net.minecraft.util.ActionResult.PASS;
             }
 
@@ -435,7 +433,7 @@ public class AIPlayer implements ModInitializer {
                         net.shasankp000.GameAI.services.BotCombatCalloutService.onPlayerHit(serverPlayer, playerAttacker, amount);
                     } else if (attacker instanceof net.minecraft.entity.mob.HostileEntity) {
                         // Mob hit the bot - use damage taken callout
-                        net.shasankp000.GameAI.services.BotCombatCalloutService.onDamageTaken(serverPlayer, attacker, amount, source);
+                        net.shasankp000.GameAI.services.BotCombatCalloutService.onDamageTaken(serverPlayer, attacker, amount);
                     }
                 }
 
@@ -474,14 +472,6 @@ public class AIPlayer implements ModInitializer {
                         }
                     }
                 }
-            }
-            // Friendly fire dealt: a registered bot hit a real player.
-            if (entity instanceof ServerPlayerEntity hurtPlayer
-                    && !BotEventHandler.isRegisteredBot(hurtPlayer)
-                    && source != null
-                    && source.getAttacker() instanceof ServerPlayerEntity botAttacker
-                    && BotEventHandler.isRegisteredBot(botAttacker)) {
-                net.shasankp000.GameAI.services.BotCombatCalloutService.onBotHitPlayer(botAttacker, hurtPlayer, amount);
             }
             return true; // Allow the damage
         });
@@ -544,9 +534,6 @@ public class AIPlayer implements ModInitializer {
         ServerTickEvents.END_SERVER_TICK.register(net.shasankp000.GameAI.services.BotCombatCalloutService::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(net.shasankp000.GameAI.services.CompanionOverheadHologramService::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(net.shasankp000.GameAI.services.SweetBerryBushReactionService::onServerTick);
-        ServerTickEvents.END_SERVER_TICK.register(net.shasankp000.GameAI.services.VillageProximityReactionService::onServerTick);
-        ServerTickEvents.END_SERVER_TICK.register(net.shasankp000.GameAI.services.PetProximityReactionService::onServerTick);
-        ServerTickEvents.END_SERVER_TICK.register(net.shasankp000.GameAI.services.CompanionContextReactionService::onServerTick);
 
         ServerMessageEvents.CHAT_MESSAGE.register((message, sender, params) -> {
             String raw = message.getContent().getString();
@@ -554,11 +541,6 @@ public class AIPlayer implements ModInitializer {
             // Quest usability: allow a bare "quest"/"mission" ask to target the nearest bot.
             // This keeps the feature discoverable without requiring "<botname> quest".
             tryHandleNearbyQuestAsk(sender, raw);
-
-            // Expensive consumable gating: allow the controller to answer yes/no prompts.
-            if (FoodConsumptionConfirmationService.tryHandleConfirmation(sender, raw)) {
-                return;
-            }
 
             boolean consumed = false;
             if (OLLAMA4J_AVAILABLE) {
