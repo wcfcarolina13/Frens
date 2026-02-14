@@ -4,6 +4,15 @@ on:
   push:
     tags:
       - 'v*'
+  release:
+    types:
+      - published
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: "Release tag to publish (example: v1.0.7)"
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -28,6 +37,27 @@ jobs:
       - name: Build release jar
         run: ./gradlew build -x test
 
+      - name: Resolve release tag
+        id: tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            TAG="${{ github.event.inputs.tag_name }}"
+          elif [[ "${{ github.event_name }}" == "release" ]]; then
+            TAG="${{ github.event.release.tag_name }}"
+          else
+            TAG="${GITHUB_REF_NAME}"
+          fi
+
+          TAG="${TAG#"${TAG%%[![:space:]]*}"}"
+          TAG="${TAG%"${TAG##*[![:space:]]}"}"
+          if [[ -z "${TAG}" ]]; then
+            echo "Unable to determine release tag."
+            exit 1
+          fi
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+
       - name: Locate distributable jar
         id: jar
         shell: bash
@@ -43,5 +73,7 @@ jobs:
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          target_commitish: ${{ github.sha }}
           files: ${{ steps.jar.outputs.jar_path }}
           generate_release_notes: true

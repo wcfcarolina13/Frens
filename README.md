@@ -81,6 +81,19 @@ If you do not bundle the AI runtime, you'll still need to provide a compatible L
 4. Drop the Frens JAR into your `mods/` folder
 5. (Optional) Install an LLM provider only if you plan to enable future conversational features (not required for current functionality)
 
+### Creating Downloadable GitHub Releases
+
+GitHub Releases only get a jar asset when a release workflow runs against a tag.
+
+- Create and push a version tag:
+```bash
+git tag v1.0.7
+git push origin v1.0.7
+```
+- Or run `Actions -> Release Jar -> Run workflow` and provide `tag_name` (for example `v1.0.7`).
+
+After the workflow completes, the jar is attached to the matching release page.
+
 ---
 
 ## Quick Start
