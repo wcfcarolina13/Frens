@@ -2,7 +2,14 @@ package net.shasankp000.GameAI.services;
 
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
+import net.minecraft.block.CarpetBlock;
 import net.minecraft.block.DoorBlock;
+import net.minecraft.block.FenceGateBlock;
+import net.minecraft.block.SlabBlock;
+import net.minecraft.block.SnowBlock;
+import net.minecraft.block.StairsBlock;
+import net.minecraft.block.TrapdoorBlock;
+import net.minecraft.fluid.Fluids;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
@@ -35,10 +42,14 @@ public final class FollowPathService {
     public static final int MIN_REGION_MARGIN = 8;
     public static final int MAX_Y_SPAN = 6; // +/- 3
     public static final double WAYPOINT_REACH_SQ = 2.25D;
+    private static final ThreadLocal<Integer> LAST_TRANSITION_REJECT_COUNT = ThreadLocal.withInitial(() -> 0);
+    private static final ThreadLocal<Integer> LAST_SWIM_TRANSITION_REJECT_COUNT = ThreadLocal.withInitial(() -> 0);
 
     public record FollowSnapshot(int minX, int minY, int minZ,
                                  int sizeX, int sizeY, int sizeZ,
                                  boolean[] standable,
+                                 boolean[] passable,
+                                 boolean[] swimmable,
                                  byte[] doorType,
                                  BlockPos start,
                                  BlockPos goal) {
@@ -68,6 +79,16 @@ public final class FollowPathService {
         public boolean isStandable(BlockPos pos) {
             if (!inBounds(pos)) return false;
             return standable[index(pos.getX(), pos.getY(), pos.getZ())];
+        }
+
+        public boolean isPassable(BlockPos pos) {
+            if (!inBounds(pos)) return false;
+            return passable[index(pos.getX(), pos.getY(), pos.getZ())];
+        }
+
+        public boolean isSwimmable(BlockPos pos) {
+            if (!inBounds(pos)) return false;
+            return swimmable[index(pos.getX(), pos.getY(), pos.getZ())];
         }
 
         public boolean isDoorCell(BlockPos pos) {
@@ -155,6 +176,8 @@ public final class FollowPathService {
 
         int total = sizeX * sizeY * sizeZ;
         boolean[] standable = new boolean[total];
+        boolean[] passable = new boolean[total];
+        boolean[] swimmable = new boolean[total];
         byte[] doorType = new byte[total]; // 0=none, 1=wood, 2=iron
 
         for (int y = minY; y < minY + sizeY; y++) {
@@ -175,24 +198,46 @@ public final class FollowPathService {
                     boolean solidBelow = !belowState.getCollisionShape(world, below).isEmpty();
                     boolean footPassable = isPassableForPlan(world, foot, footState);
                     boolean headPassable = isPassableForPlan(world, head, headState);
+                    boolean footWater = world.getFluidState(foot).isOf(Fluids.WATER);
+                    boolean headWater = world.getFluidState(head).isOf(Fluids.WATER);
                     
                     // Campfire avoidance: mark cells near exposed campfires as non-standable
                     boolean nearCampfire = isNearExposedCampfire(world, foot, 2);
 
                     int idx = ((y - minY) * sizeX + (x - minX)) * sizeZ + (z - minZ);
+                    passable[idx] = footPassable && !nearCampfire;
                     standable[idx] = solidBelow && footPassable && headPassable && !nearCampfire;
+                    swimmable[idx] = (footWater || headWater) && footPassable && headPassable && !nearCampfire;
                     if (footState.getBlock() instanceof DoorBlock) {
                         doorType[idx] = footState.isOf(Blocks.IRON_DOOR) ? (byte) 2 : (byte) 1;
+                    } else if (footState.getBlock() instanceof FenceGateBlock) {
+                        // Gates behave like doors for our purposes (openable barriers between spaces).
+                        doorType[idx] = (byte) 1;
                     }
                 }
             }
         }
 
-        return new FollowSnapshot(minX, minY, minZ, sizeX, sizeY, sizeZ, standable, doorType, startPos.toImmutable(), goalPos.toImmutable());
+        return new FollowSnapshot(minX, minY, minZ, sizeX, sizeY, sizeZ, standable, passable, swimmable, doorType, startPos.toImmutable(), goalPos.toImmutable());
+    }
+
+    public static int consumeLastTransitionRejectCount() {
+        int value = LAST_TRANSITION_REJECT_COUNT.get();
+        LAST_TRANSITION_REJECT_COUNT.set(0);
+        return value;
+    }
+
+    public static int consumeLastSwimTransitionRejectCount() {
+        int value = LAST_SWIM_TRANSITION_REJECT_COUNT.get();
+        LAST_SWIM_TRANSITION_REJECT_COUNT.set(0);
+        return value;
     }
 
     private static boolean isPassableForPlan(ServerWorld world, BlockPos pos, BlockState state) {
         if (state == null) {
+            return true;
+        }
+        if (state.isAir()) {
             return true;
         }
         if (state.getBlock() instanceof DoorBlock) {
@@ -202,54 +247,93 @@ public final class FollowPathService {
             }
             return true;
         }
+        if (state.getBlock() instanceof FenceGateBlock) {
+            // Plan through gates; follow logic can open them when approached.
+            return true;
+        }
+        if (state.getBlock() instanceof TrapdoorBlock) {
+            // Treat open trapdoors as passable; closed trapdoors can be walls/floors.
+            return state.getCollisionShape(world, pos).isEmpty();
+        }
         if (state.isOf(Blocks.WATER)) {
             return true;
         }
+
+        // Important: our bounded planner operates in a simplified “standable tile” grid based on
+        // block positions (i.e., {@link net.minecraft.entity.Entity#getBlockPos()}). In that coordinate
+        // system, common walkable partial blocks (carpet, slabs, stairs, snow layers) may appear in the
+        // bot's current block position even though the entity is standing on top of their collision shape.
+        //
+        // If we treat these as non-passable, the snapshot can end up with *no standable tiles* in
+        // carpeted/interior areas, producing repeated “no path found” and follow stalls.
+        if (state.getBlock() instanceof CarpetBlock
+                || state.getBlock() instanceof SlabBlock
+                || state.getBlock() instanceof StairsBlock
+                || state.getBlock() instanceof SnowBlock) {
+            return true;
+        }
+
         return state.getCollisionShape(world, pos).isEmpty();
     }
 
     public static List<BlockPos> planWaypoints(FollowSnapshot snapshot, BlockPos avoidDoorBase) {
-        if (snapshot == null) {
-            return List.of();
-        }
-        BlockPos start = snapshot.start();
-        BlockPos goal = snapshot.goal();
-        if (!snapshot.inBounds(start)) {
-            return List.of();
-        }
+        return planWaypoints(snapshot, avoidDoorBase, false, false);
+    }
 
-        BlockPos startStand = findNearestStandable(snapshot, start, 2);
-        if (startStand == null) {
-            return List.of();
-        }
+    public static List<BlockPos> planWaypoints(FollowSnapshot snapshot, BlockPos avoidDoorBase, boolean stuckMode) {
+        return planWaypoints(snapshot, avoidDoorBase, stuckMode, false);
+    }
 
-        // If the goal isn't in the captured window, we can still produce an "exit the nearest door" plan.
-        // This mirrors the common dweller/stalker behavior: first escape the local enclosure, then replan.
-        if (!snapshot.inBounds(goal)) {
-            return planEscapeDoorWaypoints(snapshot, startStand, avoidDoorBase);
-        }
-
-        List<BlockPos> goalCandidates = findGoalCandidates(snapshot, goal, 2);
-        if (goalCandidates.isEmpty()) {
-            BlockPos nearGoal = findNearestStandable(snapshot, goal, 3);
-            if (nearGoal != null) {
-                goalCandidates = List.of(nearGoal);
+    public static List<BlockPos> planWaypoints(FollowSnapshot snapshot, BlockPos avoidDoorBase, boolean stuckMode, boolean waterStuckMode) {
+        int[] transitionRejects = new int[] { 0 };
+        LAST_SWIM_TRANSITION_REJECT_COUNT.set(0);
+        try {
+            if (snapshot == null) {
+                return List.of();
             }
-        }
-        if (goalCandidates.isEmpty()) {
-            return List.of();
-        }
+            BlockPos start = snapshot.start();
+            BlockPos goal = snapshot.goal();
+            if (!snapshot.inBounds(start)) {
+                return List.of();
+            }
 
-        List<BlockPos> raw = aStar(snapshot, startStand, new HashSet<>(goalCandidates));
-        // If we're already at (or immediately adjacent to) the goal, A* may return a single node.
-        // Treat that as "no navigation plan needed" and allow callers to fall back to door-escape plans.
-        if (raw.size() > 1) {
-            return compressWaypoints(snapshot, raw, 7);
-        }
+            BlockPos startStand = findNearestStandable(snapshot, start, 2);
+            if (startStand == null) {
+                return List.of();
+            }
 
-        // Fallback: if the commander is "around the corner" such that reaching them requires initially moving away,
-        // exit the nearest reachable wooden door first, then follow will replan toward the commander.
-        return planEscapeDoorWaypoints(snapshot, startStand, avoidDoorBase);
+            // If the goal isn't in the captured window, we can still produce an "exit the nearest door" plan.
+            // This mirrors the common dweller/stalker behavior: first escape the local enclosure, then replan.
+            if (!snapshot.inBounds(goal)) {
+                return planEscapeDoorWaypoints(snapshot, startStand, avoidDoorBase, stuckMode, waterStuckMode, transitionRejects);
+            }
+
+            List<BlockPos> goalCandidates = findGoalCandidates(snapshot, goal, 2);
+            if (goalCandidates.isEmpty()) {
+                BlockPos nearGoal = findNearestStandable(snapshot, goal, 3);
+                if (nearGoal != null) {
+                    goalCandidates = List.of(nearGoal);
+                }
+            }
+            if (goalCandidates.isEmpty()) {
+                return List.of();
+            }
+
+            List<BlockPos> raw = aStar(snapshot, startStand, new HashSet<>(goalCandidates), transitionRejects);
+            // If we're already at (or immediately adjacent to) the goal, A* may return a single node.
+            // Treat that as "no navigation plan needed" and allow callers to fall back to door-escape plans.
+            if (raw.size() > 1) {
+                int maxWaypoints = waterStuckMode ? 16 : (stuckMode ? 14 : 7);
+                int preserveLeadIn = waterStuckMode ? 5 : (stuckMode ? 4 : 0);
+                return compressWaypoints(snapshot, raw, maxWaypoints, preserveLeadIn);
+            }
+
+            // Fallback: if the commander is "around the corner" such that reaching them requires initially moving away,
+            // exit the nearest reachable wooden door first, then follow will replan toward the commander.
+            return planEscapeDoorWaypoints(snapshot, startStand, avoidDoorBase, stuckMode, waterStuckMode, transitionRejects);
+        } finally {
+            LAST_TRANSITION_REJECT_COUNT.set(transitionRejects[0]);
+        }
     }
 
     /**
@@ -258,21 +342,48 @@ public final class FollowPathService {
      * path requires an initial move away from the commander to escape an enclosure.
      */
     public static List<BlockPos> planEscapeWaypoints(FollowSnapshot snapshot, BlockPos avoidDoorBase) {
-        if (snapshot == null) {
-            return List.of();
+        return planEscapeWaypoints(snapshot, avoidDoorBase, false, false);
+    }
+
+    public static List<BlockPos> planEscapeWaypoints(FollowSnapshot snapshot, BlockPos avoidDoorBase, boolean stuckMode) {
+        return planEscapeWaypoints(snapshot, avoidDoorBase, stuckMode, false);
+    }
+
+    public static List<BlockPos> planEscapeWaypoints(FollowSnapshot snapshot, BlockPos avoidDoorBase, boolean stuckMode, boolean waterStuckMode) {
+        int[] transitionRejects = new int[] { 0 };
+        LAST_SWIM_TRANSITION_REJECT_COUNT.set(0);
+        try {
+            if (snapshot == null) {
+                return List.of();
+            }
+            BlockPos start = snapshot.start();
+            if (!snapshot.inBounds(start)) {
+                return List.of();
+            }
+            BlockPos startStand = findNearestStandable(snapshot, start, 2);
+            if (startStand == null) {
+                return List.of();
+            }
+            return planEscapeDoorWaypoints(snapshot, startStand, avoidDoorBase, stuckMode, waterStuckMode, transitionRejects);
+        } finally {
+            LAST_TRANSITION_REJECT_COUNT.set(transitionRejects[0]);
         }
-        BlockPos start = snapshot.start();
-        if (!snapshot.inBounds(start)) {
-            return List.of();
-        }
-        BlockPos startStand = findNearestStandable(snapshot, start, 2);
-        if (startStand == null) {
-            return List.of();
-        }
-        return planEscapeDoorWaypoints(snapshot, startStand, avoidDoorBase);
     }
 
     private static List<BlockPos> planEscapeDoorWaypoints(FollowSnapshot snapshot, BlockPos startStand, BlockPos avoidDoorBase) {
+        return planEscapeDoorWaypoints(snapshot, startStand, avoidDoorBase, false, false, new int[] { 0 });
+    }
+
+    private static List<BlockPos> planEscapeDoorWaypoints(FollowSnapshot snapshot, BlockPos startStand, BlockPos avoidDoorBase, boolean stuckMode) {
+        return planEscapeDoorWaypoints(snapshot, startStand, avoidDoorBase, stuckMode, false, new int[] { 0 });
+    }
+
+    private static List<BlockPos> planEscapeDoorWaypoints(FollowSnapshot snapshot,
+                                                          BlockPos startStand,
+                                                          BlockPos avoidDoorBase,
+                                                          boolean stuckMode,
+                                                          boolean waterStuckMode,
+                                                          int[] transitionRejects) {
         if (snapshot == null || startStand == null) {
             return List.of();
         }
@@ -360,11 +471,14 @@ public final class FollowPathService {
                 int nx = cx + dir.getOffsetX();
                 int nz = cz + dir.getOffsetZ();
 
-                int[] dyOrder = new int[] { 0, 1, -1 };
+                int[] dyOrder = snapshot.isSwimmable(curPos) ? new int[] { 1, 0, -1 } : new int[] { 0, 1, -1 };
                 for (int dY : dyOrder) {
                     int ny = cy + dY;
                     BlockPos nPos = new BlockPos(nx, ny, nz);
-                    if (!snapshot.inBounds(nPos) || !snapshot.isStandable(nPos)) {
+                    if (!snapshot.inBounds(nPos)) {
+                        continue;
+                    }
+                    if (!isTransitionTraversable(snapshot, curPos, nPos, dY, transitionRejects)) {
                         continue;
                     }
                     int nIdx = snapshot.index(nx, ny, nz);
@@ -427,10 +541,12 @@ public final class FollowPathService {
                 if (step != null) break;
             }
         }
+        int maxWaypoints = waterStuckMode ? 16 : (stuckMode ? 14 : 6);
+        int preserveLeadIn = waterStuckMode ? 5 : (stuckMode ? 4 : 0);
         if (step == null) {
-            return compressWaypoints(snapshot, raw, 6);
+            return compressWaypoints(snapshot, raw, maxWaypoints, preserveLeadIn);
         }
-        List<BlockPos> compressed = new ArrayList<>(compressWaypoints(snapshot, raw, 6));
+        List<BlockPos> compressed = new ArrayList<>(compressWaypoints(snapshot, raw, maxWaypoints, preserveLeadIn));
         if (compressed.isEmpty() || !compressed.get(compressed.size() - 1).equals(finalApproach)) {
             compressed.add(finalApproach.toImmutable());
         }
@@ -481,7 +597,7 @@ public final class FollowPathService {
 
     private record Node(int idx, int fScore) {}
 
-    private static List<BlockPos> aStar(FollowSnapshot snapshot, BlockPos start, Set<BlockPos> goals) {
+    private static List<BlockPos> aStar(FollowSnapshot snapshot, BlockPos start, Set<BlockPos> goals, int[] transitionRejects) {
         int total = snapshot.standable().length;
         int[] cameFrom = new int[total];
         int[] gScore = new int[total];
@@ -518,11 +634,14 @@ public final class FollowPathService {
                 int nz = cz + dir.getOffsetZ();
 
                 // Prefer same-level movement, then step up, then step down.
-                int[] dyOrder = new int[] { 0, 1, -1 };
+                int[] dyOrder = snapshot.isSwimmable(curPos) ? new int[] { 1, 0, -1 } : new int[] { 0, 1, -1 };
                 for (int dY : dyOrder) {
                     int ny = cy + dY;
                     BlockPos nPos = new BlockPos(nx, ny, nz);
-                    if (!snapshot.inBounds(nPos) || !snapshot.isStandable(nPos)) {
+                    if (!snapshot.inBounds(nPos)) {
+                        continue;
+                    }
+                    if (!isTransitionTraversable(snapshot, curPos, nPos, dY, transitionRejects)) {
                         continue;
                     }
                     int nIdx = snapshot.index(nx, ny, nz);
@@ -546,6 +665,93 @@ public final class FollowPathService {
         return List.of();
     }
 
+    private static boolean isTransitionTraversable(FollowSnapshot snapshot,
+                                                   BlockPos from,
+                                                   BlockPos to,
+                                                   int dY,
+                                                   int[] transitionRejects) {
+        if (snapshot == null || from == null || to == null) {
+            return false;
+        }
+        if (!snapshot.inBounds(from) || !snapshot.inBounds(to)) {
+            return false;
+        }
+        boolean fromStandable = snapshot.isStandable(from);
+        boolean fromSwimmable = snapshot.isSwimmable(from);
+        boolean toStandable = snapshot.isStandable(to);
+        boolean toSwimmable = snapshot.isSwimmable(to);
+
+        if (!fromStandable && !fromSwimmable) {
+            return false;
+        }
+        if (Math.abs(dY) > 1) {
+            if (transitionRejects != null && transitionRejects.length > 0) {
+                transitionRejects[0]++;
+            }
+            return false;
+        }
+
+        // Allow water lane movement in caves where standable tiles are sparse.
+        if (toSwimmable) {
+            if (!snapshot.isPassable(to)) {
+                if (transitionRejects != null && transitionRejects.length > 0) {
+                    transitionRejects[0]++;
+                }
+                LAST_SWIM_TRANSITION_REJECT_COUNT.set(LAST_SWIM_TRANSITION_REJECT_COUNT.get() + 1);
+                return false;
+            }
+            return fromStandable || fromSwimmable;
+        }
+
+        if (!toStandable) {
+            if (fromSwimmable) {
+                if (transitionRejects != null && transitionRejects.length > 0) {
+                    transitionRejects[0]++;
+                }
+                LAST_SWIM_TRANSITION_REJECT_COUNT.set(LAST_SWIM_TRANSITION_REJECT_COUNT.get() + 1);
+            }
+            return false;
+        }
+
+        // Swimming -> standable requires a clean shore/exit corridor.
+        if (fromSwimmable) {
+            BlockPos exitHead = to.up();
+            if (!snapshot.inBounds(exitHead) || !snapshot.isPassable(exitHead)) {
+                if (transitionRejects != null && transitionRejects.length > 0) {
+                    transitionRejects[0]++;
+                }
+                LAST_SWIM_TRANSITION_REJECT_COUNT.set(LAST_SWIM_TRANSITION_REJECT_COUNT.get() + 1);
+                return false;
+            }
+            if (dY > 0) {
+                BlockPos jumpClearance = from.up(2);
+                if (!snapshot.inBounds(jumpClearance) || !snapshot.isPassable(jumpClearance)) {
+                    if (transitionRejects != null && transitionRejects.length > 0) {
+                        transitionRejects[0]++;
+                    }
+                    LAST_SWIM_TRANSITION_REJECT_COUNT.set(LAST_SWIM_TRANSITION_REJECT_COUNT.get() + 1);
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        if (dY <= 0) {
+            return true;
+        }
+
+        // Upward steps require extra headroom at the launch block. Without this, A* can propose
+        // "standable" y+1 nodes that are practically unjumpable under low canopy leaves.
+        BlockPos jumpClearance = from.up(2);
+        if (!snapshot.inBounds(jumpClearance) || !snapshot.isPassable(jumpClearance)) {
+            if (transitionRejects != null && transitionRejects.length > 0) {
+                transitionRejects[0]++;
+            }
+            return false;
+        }
+        return true;
+    }
+
     private static int heuristic(BlockPos from, BlockPos to) {
         return manhattan(from, to) * 10;
     }
@@ -566,14 +772,26 @@ public final class FollowPathService {
     }
 
     private static List<BlockPos> compressWaypoints(FollowSnapshot snapshot, List<BlockPos> raw, int maxWaypoints) {
+        return compressWaypoints(snapshot, raw, maxWaypoints, 0);
+    }
+
+    private static List<BlockPos> compressWaypoints(FollowSnapshot snapshot, List<BlockPos> raw, int maxWaypoints, int preserveLeadIn) {
         if (raw == null || raw.size() <= 1) {
             return List.of();
         }
         ArrayList<BlockPos> points = new ArrayList<>();
+        int pinned = Math.max(0, Math.min(preserveLeadIn, raw.size() - 1));
+        for (int i = 1; i <= pinned; i++) {
+            points.add(raw.get(i).toImmutable());
+        }
 
         BlockPos lastKept = raw.get(0);
         Direction lastDir = null;
         for (int i = 1; i < raw.size(); i++) {
+            if (i <= pinned) {
+                lastKept = raw.get(i);
+                continue;
+            }
             BlockPos p = raw.get(i);
             Direction dir = Direction.getFacing(p.getX() - lastKept.getX(), 0, p.getZ() - lastKept.getZ());
             boolean dirChanged = lastDir != null && dir != lastDir;
@@ -592,13 +810,25 @@ public final class FollowPathService {
 
         // Downsample if too many.
         if (points.size() > maxWaypoints) {
+            int locked = Math.max(0, Math.min(pinned, maxWaypoints - 1));
             ArrayList<BlockPos> sampled = new ArrayList<>(maxWaypoints);
-            sampled.add(points.get(0));
-            for (int i = 1; i < maxWaypoints - 1; i++) {
-                int idx = (int) Math.round((i / (double) (maxWaypoints - 1)) * (points.size() - 1));
-                sampled.add(points.get(Math.min(points.size() - 1, Math.max(0, idx))));
+            for (int i = 0; i < locked; i++) {
+                sampled.add(points.get(i));
             }
-            sampled.add(points.get(points.size() - 1));
+
+            int remainingSlots = maxWaypoints - locked;
+            if (remainingSlots <= 1) {
+                sampled.add(points.get(points.size() - 1));
+            } else {
+                int startIdx = locked;
+                int endIdx = points.size() - 1;
+                sampled.add(points.get(startIdx));
+                for (int i = 1; i < remainingSlots - 1; i++) {
+                    int idx = startIdx + (int) Math.round((i / (double) (remainingSlots - 1)) * (endIdx - startIdx));
+                    sampled.add(points.get(Math.min(endIdx, Math.max(startIdx, idx))));
+                }
+                sampled.add(points.get(endIdx));
+            }
             points = sampled;
         }
         return points;
@@ -659,7 +889,7 @@ public final class FollowPathService {
             return false;
         }
 
-        List<BlockPos> path = aStar(snapshot, startStand, new HashSet<>(goalCandidates));
+        List<BlockPos> path = aStar(snapshot, startStand, new HashSet<>(goalCandidates), new int[] { 0 });
         return !path.isEmpty();
     }
 }

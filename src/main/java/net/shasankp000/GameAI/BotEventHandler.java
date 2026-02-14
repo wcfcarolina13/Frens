@@ -1198,6 +1198,8 @@ public class BotEventHandler {
             state.followFixedGoal = null;
             state.comeBestGoalDistSq = Double.NaN;
             state.comeTicksSinceBest = 0;
+            state.comeRerouteAttempts = 0;
+            state.comeNextRerouteTick = 0L;
             state.comeNextSkillTick = 0L;
             state.comeAllowRecoverySkills = true;
         }
@@ -1230,6 +1232,8 @@ public class BotEventHandler {
             state.followFixedGoal = null;
             state.comeBestGoalDistSq = Double.NaN;
             state.comeTicksSinceBest = 0;
+            state.comeRerouteAttempts = 0;
+            state.comeNextRerouteTick = 0L;
             state.comeNextSkillTick = 0L;
             state.comeAllowRecoverySkills = true;
         }
@@ -1273,6 +1277,8 @@ public class BotEventHandler {
             state.followFixedGoal = fixedGoal.toImmutable();
             state.comeBestGoalDistSq = Double.NaN;
             state.comeTicksSinceBest = 0;
+            state.comeRerouteAttempts = 0;
+            state.comeNextRerouteTick = 0L;
             state.comeNextSkillTick = 0L;
             state.comeAllowRecoverySkills = allowRecoverySkills;
         }
@@ -1318,6 +1324,8 @@ public class BotEventHandler {
             state.followFixedGoal = null;
             state.comeBestGoalDistSq = Double.NaN;
             state.comeTicksSinceBest = 0;
+            state.comeRerouteAttempts = 0;
+            state.comeNextRerouteTick = 0L;
             state.comeNextSkillTick = 0L;
             state.comeAllowRecoverySkills = true;
         }
@@ -1359,6 +1367,8 @@ public class BotEventHandler {
             state.followFixedGoal = null;
             state.comeBestGoalDistSq = Double.NaN;
             state.comeTicksSinceBest = 0;
+            state.comeRerouteAttempts = 0;
+            state.comeNextRerouteTick = 0L;
             state.comeNextSkillTick = 0L;
             state.comeAllowRecoverySkills = true;
         }
@@ -1460,6 +1470,8 @@ public class BotEventHandler {
             state.followFixedGoal = goal;
             state.comeBestGoalDistSq = Double.NaN;
             state.comeTicksSinceBest = 0;
+            state.comeRerouteAttempts = 0;
+            state.comeNextRerouteTick = 0L;
             state.comeNextSkillTick = 0L;
             // For "head home", prefer safe walking/pathing over digging recovery skills.
             state.comeAllowRecoverySkills = false;
@@ -1702,6 +1714,8 @@ public class BotEventHandler {
                 if (goalDistSq <= state.comeBestGoalDistSq - 1.0D) {
                     state.comeBestGoalDistSq = goalDistSq;
                     state.comeTicksSinceBest = 0;
+                    state.comeRerouteAttempts = 0;
+                    state.comeNextRerouteTick = 0L;
                 } else {
                     state.comeTicksSinceBest++;
                 }
@@ -1780,6 +1794,8 @@ public class BotEventHandler {
                 state.followFixedGoal = null;
                 state.comeBestGoalDistSq = Double.NaN;
                 state.comeTicksSinceBest = 0;
+                state.comeRerouteAttempts = 0;
+                state.comeNextRerouteTick = 0L;
                 state.comeNextSkillTick = 0L;
                 state.comeAllowRecoverySkills = true;
                 BotActions.stop(bot);
@@ -3215,7 +3231,57 @@ public class BotEventHandler {
     }
 
     private static void requestFollowPathPlanToGoal(ServerPlayerEntity bot, BlockPos goal, boolean force, String reason) {
+        noteComeRerouteAttempt(bot, goal, force, reason);
         FollowPlannerService.requestPlanToGoal(LOGGER, bot, goal, force, reason);
+    }
+
+    private static void noteComeRerouteAttempt(ServerPlayerEntity bot, BlockPos goal, boolean force, String reason) {
+        if (bot == null || goal == null) {
+            return;
+        }
+        BotCommandStateService.State st = stateFor(bot);
+        if (st == null || st.followFixedGoal == null || !st.followFixedGoal.equals(goal)) {
+            return;
+        }
+        if (!force && !isStuckDrivenPlanReason(reason)) {
+            return;
+        }
+        MinecraftServer srv = bot.getCommandSource() != null ? bot.getCommandSource().getServer() : null;
+        if (srv == null) {
+            return;
+        }
+        long nowTick = srv.getTicks();
+        if (st.comeNextRerouteTick > nowTick) {
+            if ((nowTick % 40L) == 0L) {
+                LOGGER.info("[FollowAssert] planner-backoff bot={} goal={} reason={} nowTick={} nextRerouteTick={} attempts={}",
+                        bot.getName().getString(),
+                        goal.toShortString(),
+                        reason == null ? "" : reason,
+                        nowTick,
+                        st.comeNextRerouteTick,
+                        st.comeRerouteAttempts);
+            }
+            return;
+        }
+        st.comeRerouteAttempts = Math.max(0, st.comeRerouteAttempts) + 1;
+        st.comeNextRerouteTick = nowTick + (force ? 30L : 20L);
+        LOGGER.info("[FollowAssert] planner-backoff bot={} goal={} reason={} attempts={} nextRerouteTick={}",
+                bot.getName().getString(),
+                goal.toShortString(),
+                reason == null ? "" : reason,
+                st.comeRerouteAttempts,
+                st.comeNextRerouteTick);
+    }
+
+    private static boolean isStuckDrivenPlanReason(String reason) {
+        if (reason == null || reason.isBlank()) {
+            return false;
+        }
+        return reason.startsWith("stagnant-")
+                || reason.equals("direct-blocked-stuck")
+                || reason.equals("water-stuck")
+                || reason.equals("water-ledge-stuck")
+                || reason.startsWith("direct-blocked");
     }
 
     private static boolean triggerComeRecoverySkill(ServerPlayerEntity bot,
@@ -3277,6 +3343,8 @@ public class BotEventHandler {
         }
 
         // Avoid spamming skill launches.
+        state.comeRerouteAttempts = 0;
+        state.comeNextRerouteTick = 0L;
         state.comeNextSkillTick = server.getTicks() + 120L;
         state.comeTicksSinceBest = 0;
         state.comeBestGoalDistSq = Double.NaN;
