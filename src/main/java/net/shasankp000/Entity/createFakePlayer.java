@@ -64,34 +64,28 @@ public class createFakePlayer extends ServerPlayerEntity {
         GameProfileResolver resolver = server.getApiServices().profileResolver();
         GameProfile gameProfile = useMojangAuth ? resolver.getProfileByName(username).orElse(null) : null;
 
-        Map<String, String> existingBotProfile = AIPlayer.CONFIG.getBotGameProfile();
-        if (existingBotProfile == null) {
-            existingBotProfile = new HashMap<>();
-        }
-
         if (gameProfile == null) {
-
-            System.out.println("Existing Bot Profiles: " + existingBotProfile);
-
-            if (!existingBotProfile.containsKey(username)) {
+            String configuredUuid = AIPlayer.CONFIG.getBotProfileUuid(username);
+            if (configuredUuid == null || configuredUuid.isBlank()) {
                 gameProfile = new GameProfile(UUID.randomUUID(), username);
-                Map<String, String> updatedProfiles = new HashMap<>(existingBotProfile);
-                updatedProfiles.put(gameProfile.name(), gameProfile.id().toString());
-
-                System.out.println("New GameProfile: " + gameProfile);
-
                 try {
-                    AIPlayer.CONFIG.setBotGameProfile(updatedProfiles);
+                    AIPlayer.CONFIG.setBotProfile(gameProfile.name(), gameProfile.id().toString());
                     AIPlayer.CONFIG.save();
                     System.out.println("Saved data to config");
-
                 } catch (Exception e) {
                     LOGGER.error("Could not save data to config: {}", e.getMessage());
                 }
             } else {
-                UUID existingUUID = UUID.fromString(existingBotProfile.get(username));
-                gameProfile = new GameProfile(existingUUID, username);
-                System.out.println("Using existing GameProfile: " + gameProfile);
+                try {
+                    UUID existingUUID = UUID.fromString(configuredUuid.trim());
+                    gameProfile = new GameProfile(existingUUID, username);
+                    System.out.println("Using existing GameProfile: " + gameProfile);
+                } catch (IllegalArgumentException ex) {
+                    LOGGER.warn("Invalid configured UUID '{}' for alias '{}'; generating a new one.", configuredUuid, username);
+                    gameProfile = new GameProfile(UUID.randomUUID(), username);
+                    AIPlayer.CONFIG.setBotProfile(gameProfile.name(), gameProfile.id().toString());
+                    AIPlayer.CONFIG.save();
+                }
             }
         }
 

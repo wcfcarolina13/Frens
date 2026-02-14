@@ -178,6 +178,18 @@ public final class SkillResumeService {
         return RESUME_INTENT.remove(botUuid);
     }
 
+    public static DebugSnapshot debugForBot(UUID botUuid) {
+        if (botUuid == null) {
+            return new DebugSnapshot(false, false, false, false);
+        }
+        return new DebugSnapshot(
+                LAST_SKILL_BY_BOT.containsKey(botUuid),
+                isAwaiting(botUuid),
+                AUTO_RESUME_PENDING.contains(botUuid),
+                RESUME_INTENT.contains(botUuid)
+        );
+    }
+
     private static void resume(PendingSkill pending, boolean autoTriggered, ServerCommandSource commandSource) {
         ServerCommandSource source = commandSource != null ? commandSource : pending.source();
         MinecraftServer server = source.getServer();
@@ -240,5 +252,13 @@ public final class SkillResumeService {
             Objects.requireNonNull(skillName, "skillName");
             Objects.requireNonNull(source, "source");
         }
+    }
+
+    public record DebugSnapshot(
+            boolean hasPendingSkill,
+            boolean awaitingDecision,
+            boolean autoResumePending,
+            boolean resumeIntent
+    ) {
     }
 }

@@ -133,6 +133,22 @@ public final class BotInventoryStorageService {
             return false;
         }
 
+        String savedAlias = root.getString(KEY_ALIAS).orElse("");
+        String savedUuid = root.getString(KEY_UUID).orElse("");
+        if (!savedUuid.isBlank() && !savedUuid.equalsIgnoreCase(bot.getUuidAsString())) {
+            LOGGER.warn("Inventory snapshot UUID mismatch for '{}': file={} bot={}",
+                    bot.getName().getString(),
+                    savedUuid,
+                    bot.getUuidAsString());
+        }
+        if (!savedAlias.isBlank()
+                && !sanitizeAliasForStorage(savedAlias).equals(sanitizeAliasForStorage(bot.getGameProfile().name()))) {
+            LOGGER.warn("Inventory snapshot alias mismatch for '{}': fileAlias='{}' botAlias='{}'",
+                    bot.getName().getString(),
+                    savedAlias,
+                    bot.getGameProfile().name());
+        }
+
         DynamicRegistryManager registries = server.getRegistryManager();
         RegistryOps<NbtElement> ops = RegistryOps.of(NbtOps.INSTANCE, registries);
         PlayerInventory inventory = bot.getInventory();
@@ -186,8 +202,21 @@ public final class BotInventoryStorageService {
         if (base == null) {
             return null;
         }
-        String alias = sanitize(bot.getGameProfile().name());
+        String alias = sanitizeAliasForStorage(bot.getGameProfile().name());
         String fileName = alias + "_" + bot.getUuidAsString() + ".nbt";
+        return base.resolve("ai-player").resolve("inventories").resolve(fileName);
+    }
+
+    public static Path resolveInventoryPathForAliasUuid(MinecraftServer server, String alias, String uuidRaw) {
+        if (server == null || alias == null || alias.isBlank() || uuidRaw == null || uuidRaw.isBlank()) {
+            return null;
+        }
+        Path base = server.getSavePath(WorldSavePath.PLAYERDATA);
+        if (base == null) {
+            return null;
+        }
+        String safeAlias = sanitizeAliasForStorage(alias);
+        String fileName = safeAlias + "_" + uuidRaw.trim() + ".nbt";
         return base.resolve("ai-player").resolve("inventories").resolve(fileName);
     }
 
@@ -208,11 +237,16 @@ public final class BotInventoryStorageService {
         }
     }
 
-    private static String sanitize(String value) {
+    public static String sanitizeAliasForStorage(String value) {
+        if (value == null) {
+            return "unknown";
+        }
         String normalized = Normalizer.normalize(value, Normalizer.Form.NFD)
                 .replaceAll("\\p{M}", "")
+                .trim()
                 .toLowerCase();
-        return SAFE_NAME.matcher(normalized).replaceAll("_");
+        String sanitized = SAFE_NAME.matcher(normalized).replaceAll("_");
+        return sanitized.isBlank() ? "unknown" : sanitized;
     }
 
     private static String statsSnapshot(ServerPlayerEntity bot) {

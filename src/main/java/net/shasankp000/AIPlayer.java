@@ -309,6 +309,10 @@ public class AIPlayer implements ModInitializer {
             if (player instanceof net.minecraft.server.network.ServerPlayerEntity serverPlayer
                     && entity instanceof net.minecraft.entity.passive.VillagerEntity) {
                 net.shasankp000.GameAI.services.SurvivalRecruitmentService.notePlayerInteraction(serverPlayer, "villager");
+                net.shasankp000.GameAI.services.VillageProximityReactionService.onPlayerInteractedVillager(
+                        serverPlayer,
+                        (net.minecraft.entity.passive.VillagerEntity) entity
+                );
                 return net.minecraft.util.ActionResult.PASS;
             }
 
@@ -685,6 +689,9 @@ public class AIPlayer implements ModInitializer {
         ServerTickEvents.END_SERVER_TICK.register(BotQuestService::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(net.shasankp000.GameAI.services.RideSyncService::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(net.shasankp000.GameAI.services.BotCombatCalloutService::onServerTick);
+        ServerTickEvents.END_SERVER_TICK.register(net.shasankp000.GameAI.services.VillageProximityReactionService::onServerTick);
+        ServerTickEvents.END_SERVER_TICK.register(net.shasankp000.GameAI.services.PetProximityReactionService::onServerTick);
+        ServerTickEvents.END_SERVER_TICK.register(net.shasankp000.GameAI.services.CompanionContextReactionService::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(net.shasankp000.GameAI.services.CompanionOverheadHologramService::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(net.shasankp000.GameAI.services.SweetBerryBushReactionService::onServerTick);
 

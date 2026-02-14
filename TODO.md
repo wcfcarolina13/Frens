@@ -13,7 +13,7 @@ Canonical in-game verification checklist: `docs/testing/IN_GAME_AUDIT_MASTER.md`
 
 ## P1 — High
 - [ ] **Bot config UI refactor**: Single-bot view with alias dropdown, grouped/scrollable settings, and save/cancel affecting only the selected bot.
-- [ ] **Bot identity separation**: Per-alias inventory/hunger/sleep/XP isolation across sessions (Jake vs Bob) with validation.
+- [ ] **Bot identity separation (verification)**: Alias canonicalization + consistency guards are implemented (`/bot identity_check <alias>` + config/persistence normalization); complete runtime verification across restart/respawn with multi-alias scenarios.
 - [ ] **Job resume prompts on death/leave (verification)**: Death prompt flow exists; verify leave/rejoin prompt and resume behavior in-game.
 - [ ] **Per-bot chat addressing & broadcasts (verification)**: Named/allbots routing exists; verify no duplicate replies or cross-talk in runtime scenarios.
 

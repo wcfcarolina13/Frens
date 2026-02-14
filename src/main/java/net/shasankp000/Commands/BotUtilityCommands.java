@@ -195,4 +195,12 @@ final class BotUtilityCommands {
                                                 StringArgumentType.getString(context, "raw_message"),
                                                 StringArgumentType.getString(context, "expected"))))));
     }
+
+    static ArgumentBuilder<ServerCommandSource, ?> buildIdentityCheck() {
+        return CommandManager.literal("identity_check")
+                .then(CommandManager.argument("alias", StringArgumentType.string())
+                        .executes(context -> modCommandRegistry.executeIdentityCheck(
+                                context,
+                                StringArgumentType.getString(context, "alias"))));
+    }
 }

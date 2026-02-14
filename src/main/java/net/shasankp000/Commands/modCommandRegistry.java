@@ -63,6 +63,7 @@ import net.shasankp000.GameAI.State;
 import net.shasankp000.GameAI.StateActions;
 import java.io.ByteArrayOutputStream;
 import java.io.ObjectOutputStream;
+import java.nio.file.Path;
 import net.shasankp000.OllamaClient.ollamaClient;
 import net.shasankp000.PathFinding.ChartPathToBlock;
 import net.shasankp000.PathFinding.PathFinder;
@@ -338,11 +339,12 @@ public class modCommandRegistry {
                             .then(BotUtilityCommands.buildFollowDistance())
                             .then(BotUtilityCommands.buildFollowCheck())
                             .then(BotUtilityCommands.buildSoundTest())
-                            .then(BotUtilityCommands.buildTestChatter())
-                            .then(BotUtilityCommands.buildDialogueTest())
-                            .then(BotUtilityCommands.buildChatCheck())
-                            .then(BotHomeCommands.buildAutoReturnSunset())
-                            .then(BotHomeCommands.buildAutoReturnSunsetGuardPatrolEligible())
+	                            .then(BotUtilityCommands.buildTestChatter())
+	                            .then(BotUtilityCommands.buildDialogueTest())
+	                            .then(BotUtilityCommands.buildChatCheck())
+	                            .then(BotUtilityCommands.buildIdentityCheck())
+	                            .then(BotHomeCommands.buildAutoReturnSunset())
+	                            .then(BotHomeCommands.buildAutoReturnSunsetGuardPatrolEligible())
                             .then(BotHomeCommands.buildAutoReturnSunsetPreferLastBed())
                             .then(BotHomeCommands.buildIdleHobbies())
                             .then(BotHomeCommands.buildAutoHuntStarving())
@@ -3012,6 +3014,98 @@ public class modCommandRegistry {
         LOGGER.info("[ChatAssert] assert-ok expected={}", expected);
         ChatUtils.sendSystemMessage(context.getSource(), "§aChatCheck assert passed (" + expected + ").");
         return 1;
+    }
+
+    static int executeIdentityCheck(CommandContext<ServerCommandSource> context,
+                                    String alias) {
+        if (alias == null || alias.isBlank()) {
+            ChatUtils.sendSystemMessage(context.getSource(), "§cAlias is required: /bot identity_check <alias>");
+            return 0;
+        }
+        MinecraftServer server = context.getSource().getServer();
+        net.shasankp000.GameAI.services.BotIdentityService.IdentityDebugSnapshot snapshot =
+                net.shasankp000.GameAI.services.BotIdentityService.inspect(server, alias);
+
+        List<String> lines = new ArrayList<>();
+        lines.add("Requested alias: " + snapshot.requestedAlias());
+        lines.add("Normalized alias: " + snapshot.normalizedAlias());
+        lines.add("Related alias keys: " + joinOrNone(snapshot.relatedAliasKeys()));
+        lines.add("Profile alias keys: " + joinOrNone(snapshot.profileAliasKeys()));
+        lines.add("Owner alias keys: " + joinOrNone(snapshot.ownerAliasKeys()));
+        lines.add("Spawn alias keys: " + joinOrNone(snapshot.spawnAliasKeys()));
+        lines.add("Control alias keys: " + joinOrNone(snapshot.controlAliasKeys()));
+        lines.add("Quest alias keys: " + joinOrNone(snapshot.questAliasKeys()));
+        lines.add("World-state alias keys: " + joinOrNone(snapshot.worldStateAliasKeys()));
+        lines.add("Config profile key: " + safeString(snapshot.configAliasKey()));
+        lines.add("Config UUID raw: " + safeString(snapshot.configUuidRaw()));
+        lines.add("Config UUID parsed: " + safeString(snapshot.configUuid()));
+        lines.add("Online alias: " + safeString(snapshot.onlineAlias()));
+        lines.add("Online UUID: " + safeString(snapshot.onlineUuid()));
+        boolean uuidMatch = snapshot.configUuid() != null
+                && snapshot.onlineUuid() != null
+                && snapshot.configUuid().equals(snapshot.onlineUuid());
+        lines.add("UUID match (config vs online): " + uuidMatch);
+        lines.add("World-state present (current world): " + snapshot.worldStatePresentCurrentWorld());
+        lines.add("Inventory snapshots: " + joinOrNone(snapshot.inventoryFiles()));
+        lines.add("Task active: " + snapshot.taskActive());
+        lines.add("Resume pending skill: " + snapshot.resumeDebug().hasPendingSkill());
+        lines.add("Resume awaiting decision: " + snapshot.resumeDebug().awaitingDecision());
+        lines.add("Resume auto-pending: " + snapshot.resumeDebug().autoResumePending());
+        lines.add("Resume intent: " + snapshot.resumeDebug().resumeIntent());
+        if (server != null) {
+            if (snapshot.configUuid() != null) {
+                Path expected = net.shasankp000.GameAI.services.BotInventoryStorageService.resolveInventoryPathForAliasUuid(
+                        server,
+                        snapshot.normalizedAlias(),
+                        snapshot.configUuid().toString()
+                );
+                lines.add("Expected inventory path (config UUID): " + safeString(expected));
+            }
+            if (snapshot.onlineUuid() != null) {
+                Path expected = net.shasankp000.GameAI.services.BotInventoryStorageService.resolveInventoryPathForAliasUuid(
+                        server,
+                        snapshot.normalizedAlias(),
+                        snapshot.onlineUuid().toString()
+                );
+                lines.add("Expected inventory path (online UUID): " + safeString(expected));
+            }
+        }
+
+        if (!snapshot.warnings().isEmpty()) {
+            lines.add("Warnings:");
+            for (String warning : snapshot.warnings()) {
+                lines.add(" - " + warning);
+            }
+        } else {
+            lines.add("Warnings: none");
+        }
+
+        sendPaged(context.getSource(),
+                "IdentityCheck alias='" + snapshot.requestedAlias() + "'",
+                lines);
+
+        LOGGER.info("[IdentityCheck] alias={} normalized={} configUuid={} onlineUuid={} warnings={} relatedAliases={}",
+                snapshot.requestedAlias(),
+                snapshot.normalizedAlias(),
+                safeString(snapshot.configUuid()),
+                safeString(snapshot.onlineUuid()),
+                snapshot.warnings().size(),
+                String.join(",", snapshot.relatedAliasKeys()));
+        if (!snapshot.warnings().isEmpty()) {
+            LOGGER.info("[IdentityCheck] warnings alias={} -> {}", snapshot.requestedAlias(), String.join(" | ", snapshot.warnings()));
+        }
+        return snapshot.warnings().isEmpty() ? 1 : 0;
+    }
+
+    private static String joinOrNone(List<String> values) {
+        if (values == null || values.isEmpty()) {
+            return "none";
+        }
+        return String.join(", ", values);
+    }
+
+    private static String safeString(Object value) {
+        return value == null ? "none" : value.toString();
     }
 
     private static String normalizeChatCheckAlias(String token) {

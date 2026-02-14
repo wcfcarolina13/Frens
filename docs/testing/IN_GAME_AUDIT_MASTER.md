@@ -52,6 +52,7 @@ Required log marker families:
 | AUD-012 | Op account | `/bot follow <bot>` | Command accepted | [ ] |
 | AUD-013 | Console | run `/bot list` or `/bot recruit status` | Console accepted (no player context required) | [ ] |
 | AUD-014 | Dedicated + integrated worlds | startup both modes | No permission predicate startup crash | [ ] |
+| AUD-015 | Op account + known alias | `/bot identity_check <alias>` | Identity summary prints with `[IdentityCheck]` log marker | [ ] |
 
 ### B. Follow/Come Deterministic Assertions
 
@@ -95,6 +96,14 @@ Required log marker families:
 | AUD-053 | After respawn tick | none | `[PersistCheck] join-restore-order ... stage=inventory-load` then `post-respawn-restore` | [ ] |
 | AUD-054 | Stress duplicate handling by repeated respawn/rejoin | cycle respawn quickly | no duplicate restore state corruption; stale/duplicate skips are explicit if triggered | [ ] |
 | AUD-055 | Verify restored stats in-game | `/bot inventory <bot>` | health/food/xp align with expected restore behavior | [ ] |
+
+### F. Identity Consistency Diagnostics
+
+| ID | Setup | Command(s) | Expected token/log/audio | Pass |
+|---|---|---|---|---|
+| AUD-060 | Alias with known config profile | `/bot identity_check <alias>` | Config alias/UUID shown; no false warning for healthy state | [ ] |
+| AUD-061 | Bot online for alias | `/bot identity_check <alias>` | Online UUID visible; UUID match field reflects config parity | [ ] |
+| AUD-062 | Alias with old/stale data files | `/bot identity_check <alias>` | Warning list highlights variant keys / multi snapshots | [ ] |
 
 ## Rare/Slow Trigger Audit via Forced Commands
 Use deterministic forcing to bypass low-frequency cadence triggers:

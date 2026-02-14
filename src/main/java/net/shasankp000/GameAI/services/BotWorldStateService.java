@@ -14,9 +14,11 @@ import java.io.Reader;
 import java.io.Writer;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Locale;
 
 /**
  * Persists per-alias, per-world location state so bots resume where they were
@@ -49,7 +51,10 @@ public final class BotWorldStateService {
                 Map<?, ?> raw = GSON.fromJson(reader, Map.class);
                 if (raw != null) {
                     for (Map.Entry<?, ?> entry : raw.entrySet()) {
-                        String alias = entry.getKey().toString();
+                        String alias = normalizeAlias(entry.getKey().toString());
+                        if (alias.isBlank()) {
+                            continue;
+                        }
                         Map<String, BotState> worldMap = new HashMap<>();
                         Object val = entry.getValue();
                         if (val instanceof Map<?, ?> rawWorlds) {
@@ -59,7 +64,7 @@ public final class BotWorldStateService {
                                 worldMap.put(wk, st);
                             }
                         }
-                        STATE.put(alias, worldMap);
+                        STATE.computeIfAbsent(alias, ignored -> new HashMap<>()).putAll(worldMap);
                     }
                 }
             } catch (Exception e) {
@@ -84,7 +89,7 @@ public final class BotWorldStateService {
     public static Optional<BotState> loadState(MinecraftServer server, String alias) {
         ensureLoaded();
         String key = worldKey(server);
-        Map<String, BotState> worldMap = STATE.get(alias.toLowerCase());
+        Map<String, BotState> worldMap = STATE.get(normalizeAlias(alias));
         if (worldMap == null) return Optional.empty();
         return Optional.ofNullable(worldMap.get(key));
     }
@@ -92,7 +97,10 @@ public final class BotWorldStateService {
     public static void saveState(ServerPlayerEntity bot) {
         if (bot == null || bot.getCommandSource().getServer() == null) return;
         ensureLoaded();
-        String alias = bot.getName().getString().toLowerCase();
+        String alias = normalizeAlias(bot.getName().getString());
+        if (alias.isBlank()) {
+            return;
+        }
         String key = worldKey(bot.getCommandSource().getServer());
         Map<String, BotState> worldMap = STATE.computeIfAbsent(alias, k -> new HashMap<>());
         worldMap.put(key, BotState.from(bot));
@@ -112,20 +120,37 @@ public final class BotWorldStateService {
         }
         ensureLoaded();
         String key = worldKey(server);
-        Map<String, BotState> worldMap = STATE.get(alias.toLowerCase());
+        String normalizedAlias = normalizeAlias(alias);
+        Map<String, BotState> worldMap = STATE.get(normalizedAlias);
         if (worldMap == null) {
             return;
         }
         if (worldMap.remove(key) != null) {
             if (worldMap.isEmpty()) {
-                STATE.remove(alias.toLowerCase());
+                STATE.remove(normalizedAlias);
             }
             flush();
         }
     }
 
+    private static String normalizeAlias(String alias) {
+        return alias == null ? "" : alias.trim().toLowerCase(Locale.ROOT);
+    }
+
     public static String currentWorldKey(MinecraftServer server) {
         return worldKey(server);
+    }
+
+    /**
+     * Debug helper for identity audits: alias -> world-count snapshot.
+     */
+    public static Map<String, Integer> debugAliasWorldCounts() {
+        ensureLoaded();
+        Map<String, Integer> out = new HashMap<>();
+        for (Map.Entry<String, Map<String, BotState>> entry : STATE.entrySet()) {
+            out.put(entry.getKey(), entry.getValue() != null ? entry.getValue().size() : 0);
+        }
+        return Collections.unmodifiableMap(out);
     }
 
     public static record BotState(double x, double y, double z, float yaw, float pitch) {

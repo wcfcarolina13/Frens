@@ -13,11 +13,13 @@ import org.slf4j.LoggerFactory;
 import java.io.*;
 import java.lang.reflect.Type;
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.Locale;
 
 /**
  * Handles all mod configuration settings using a plain JSON file.
@@ -219,6 +221,7 @@ public class ManualConfig {
             if (loadedConfig.survivalRecruitment == null) {
                 loadedConfig.survivalRecruitment = new HashMap<>();
             }
+            loadedConfig.normalizeAliasBackedMaps();
             return loadedConfig;
         } catch (IOException e) {
             LOGGER.error("Failed to load config file. Using default config.", e);
@@ -328,11 +331,26 @@ public class ManualConfig {
     }
 
     public Map<String, String> getBotGameProfile() {
+        if (botGameProfile == null) {
+            botGameProfile = new HashMap<>();
+        }
         return botGameProfile;
     }
 
     public void setBotGameProfile(Map<String, String> botGameProfile) {
-        this.botGameProfile = botGameProfile;
+        this.botGameProfile = normalizeAliasMap(botGameProfile);
+    }
+
+    public String getBotProfileUuid(String alias) {
+        String key = resolveAliasKey(getBotGameProfile(), alias);
+        return key != null ? getBotGameProfile().get(key) : null;
+    }
+
+    public void setBotProfile(String alias, String uuid) {
+        if (alias == null || alias.isBlank() || uuid == null || uuid.isBlank()) {
+            return;
+        }
+        putAliasValue(getBotGameProfile(), alias, uuid.trim());
     }
 
     public Map<String, BotOwnership> getBotOwnership() {
@@ -343,21 +361,19 @@ public class ManualConfig {
     }
 
     public void setBotOwnership(Map<String, BotOwnership> botOwnership) {
-        this.botOwnership = botOwnership != null ? new HashMap<>(botOwnership) : new HashMap<>();
+        this.botOwnership = normalizeAliasMap(botOwnership);
     }
 
     public void setOwner(String alias, BotOwnership owner) {
         if (alias == null || alias.isBlank()) {
             return;
         }
-        getBotOwnership().put(alias.trim(), owner);
+        putAliasValue(getBotOwnership(), alias, owner);
     }
 
     public BotOwnership getOwner(String alias) {
-        if (alias == null) {
-            return null;
-        }
-        return getBotOwnership().get(alias.trim());
+        String key = resolveAliasKey(getBotOwnership(), alias);
+        return key != null ? getBotOwnership().get(key) : null;
     }
 
     public Map<String, BotSpawn> getBotSpawnPoints() {
@@ -368,21 +384,19 @@ public class ManualConfig {
     }
 
     public void setBotSpawnPoints(Map<String, BotSpawn> botSpawnPoints) {
-        this.botSpawnPoints = botSpawnPoints != null ? new HashMap<>(botSpawnPoints) : new HashMap<>();
+        this.botSpawnPoints = normalizeAliasMap(botSpawnPoints);
     }
 
     public void setBotSpawn(String alias, BotSpawn spawn) {
         if (alias == null || alias.isBlank() || spawn == null) {
             return;
         }
-        getBotSpawnPoints().put(alias.trim(), spawn);
+        putAliasValue(getBotSpawnPoints(), alias, spawn);
     }
 
     public BotSpawn getBotSpawn(String alias) {
-        if (alias == null) {
-            return null;
-        }
-        return getBotSpawnPoints().get(alias.trim());
+        String key = resolveAliasKey(getBotSpawnPoints(), alias);
+        return key != null ? getBotSpawnPoints().get(key) : null;
     }
 
     public boolean isDefaultLlmWorldEnabled() {
@@ -444,32 +458,40 @@ public class ManualConfig {
         if (alias == null || alias.isBlank()) {
             alias = "default";
         }
-        String key = alias.trim();
+        String key = resolveAliasKey(getBotQuestMemory(), alias);
+        if (key == null) {
+            key = alias.trim();
+        }
         botQuestMemory = getBotQuestMemory();
         return botQuestMemory.computeIfAbsent(key, ignored -> new BotQuestMemory());
     }
 
     public void setBotControls(Map<String, BotControlSettings> botControls) {
-        this.botControls = botControls != null ? new HashMap<>(botControls) : new HashMap<>();
+        this.botControls = normalizeAliasMap(botControls);
     }
 
     public BotControlSettings getOrCreateBotControl(String alias) {
         if (alias == null || alias.isBlank()) {
             alias = "default";
         }
-        String key = alias.trim();
+        String key = resolveAliasKey(getBotControls(), alias);
+        if (key == null) {
+            key = alias.trim();
+        }
         botControls = getBotControls();
         return botControls.computeIfAbsent(key, ignored -> new BotControlSettings());
     }
 
     public BotControlSettings getEffectiveBotControl(String alias) {
         if (alias != null) {
-            BotControlSettings specific = getBotControls().get(alias.trim());
+            String key = resolveAliasKey(getBotControls(), alias);
+            BotControlSettings specific = key != null ? getBotControls().get(key) : null;
             if (specific != null) {
                 return specific;
             }
         }
-        return getBotControls().get("default");
+        String defaultKey = resolveAliasKey(getBotControls(), "default");
+        return defaultKey != null ? getBotControls().get(defaultKey) : null;
     }
 
     public void ensureOwner(String alias, UUID ownerUuid, String ownerName) {
@@ -489,21 +511,97 @@ public class ManualConfig {
         if (alias == null || alias.isBlank()) {
             return;
         }
-        String trimmedAlias = alias.trim();
-        if (botGameProfile != null) {
-            botGameProfile.remove(trimmedAlias);
+        removeAliasVariants(botGameProfile, alias);
+        removeAliasVariants(botOwnership, alias);
+        removeAliasVariants(botSpawnPoints, alias);
+        removeAliasVariants(botControls, alias);
+        removeAliasVariants(botQuestMemory, alias);
+    }
+
+    private void normalizeAliasBackedMaps() {
+        botGameProfile = normalizeAliasMap(botGameProfile);
+        botOwnership = normalizeAliasMap(botOwnership);
+        botSpawnPoints = normalizeAliasMap(botSpawnPoints);
+        botControls = normalizeAliasMap(botControls);
+        botQuestMemory = normalizeAliasMap(botQuestMemory);
+    }
+
+    private static String normalizeAlias(String alias) {
+        return alias == null ? "" : alias.trim().toLowerCase(Locale.ROOT);
+    }
+
+    private static <T> String resolveAliasKey(Map<String, T> map, String alias) {
+        if (map == null || map.isEmpty() || alias == null || alias.isBlank()) {
+            return null;
         }
-        if (botOwnership != null) {
-            botOwnership.remove(trimmedAlias);
+        String trimmed = alias.trim();
+        if (map.containsKey(trimmed)) {
+            return trimmed;
         }
-        if (botSpawnPoints != null) {
-            botSpawnPoints.remove(trimmedAlias);
+        String normalized = normalizeAlias(trimmed);
+        for (String key : map.keySet()) {
+            if (normalizeAlias(key).equals(normalized)) {
+                return key;
+            }
         }
-        if (botControls != null) {
-            botControls.remove(trimmedAlias);
+        return null;
+    }
+
+    private static <T> Map<String, T> normalizeAliasMap(Map<String, T> source) {
+        Map<String, T> out = new HashMap<>();
+        if (source == null || source.isEmpty()) {
+            return out;
         }
-        if (botQuestMemory != null) {
-            botQuestMemory.remove(trimmedAlias);
+        Map<String, String> canonicalByNormalized = new HashMap<>();
+        for (Map.Entry<String, T> entry : source.entrySet()) {
+            String rawKey = entry.getKey();
+            if (rawKey == null || rawKey.isBlank()) {
+                continue;
+            }
+            String trimmed = rawKey.trim();
+            String normalized = normalizeAlias(trimmed);
+            String canonical = canonicalByNormalized.computeIfAbsent(normalized, ignored -> trimmed);
+            out.putIfAbsent(canonical, entry.getValue());
+        }
+        return out;
+    }
+
+    private static <T> void putAliasValue(Map<String, T> map, String alias, T value) {
+        if (map == null || alias == null || alias.isBlank()) {
+            return;
+        }
+        String key = resolveAliasKey(map, alias);
+        if (key == null) {
+            key = alias.trim();
+        }
+        map.put(key, value);
+        removeAliasVariantsExcept(map, key);
+    }
+
+    private static <T> void removeAliasVariants(Map<String, T> map, String alias) {
+        if (map == null || map.isEmpty() || alias == null || alias.isBlank()) {
+            return;
+        }
+        String normalized = normalizeAlias(alias);
+        Iterator<String> it = map.keySet().iterator();
+        while (it.hasNext()) {
+            if (normalizeAlias(it.next()).equals(normalized)) {
+                it.remove();
+            }
+        }
+    }
+
+    private static <T> void removeAliasVariantsExcept(Map<String, T> map, String canonicalAlias) {
+        if (map == null || map.isEmpty() || canonicalAlias == null || canonicalAlias.isBlank()) {
+            return;
+        }
+        String normalized = normalizeAlias(canonicalAlias);
+        Iterator<String> it = map.keySet().iterator();
+        while (it.hasNext()) {
+            String key = it.next();
+            if (!key.equals(canonicalAlias) && normalizeAlias(key).equals(normalized)) {
+                it.remove();
+            }
         }
     }
 
