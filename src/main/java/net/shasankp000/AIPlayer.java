@@ -144,12 +144,34 @@ public class AIPlayer implements ModInitializer {
             LOGGER.warn("[PermCheck] leveled permission predicate lookup failed: {}", t.toString());
         }
 
-        PermissionPredicate fallback = constructPermissionPredicate(PermissionPredicate.class);
+        for (String fieldName : new String[]{"ALL", "NONE"}) {
+            PermissionPredicate candidate = readStaticPermissionPredicate(PermissionPredicate.class, fieldName);
+            if (candidate != null) {
+                return new PermissionResolution(candidate, "permission-static-fallback", PermissionPredicate.class.getName(), fieldName);
+            }
+        }
+
+        PermissionPredicate fallback = findAnyStaticPermissionPredicate(PermissionPredicate.class);
+        if (fallback != null) {
+            return new PermissionResolution(fallback, "permission-any-static-fallback", PermissionPredicate.class.getName(), "first-static");
+        }
+
+        fallback = constructPermissionPredicate(PermissionPredicate.class);
         if (fallback != null) {
             return new PermissionResolution(fallback, "permission-ctor-fallback", PermissionPredicate.class.getName(), "ctor");
         }
 
-        throw new IllegalStateException("Unable to resolve any PermissionPredicate for operator bot commands.");
+        PermissionPredicate proxyFallback = (PermissionPredicate) java.lang.reflect.Proxy.newProxyInstance(
+                PermissionPredicate.class.getClassLoader(),
+                new Class<?>[]{PermissionPredicate.class},
+                (proxy, method, args) -> {
+                    if (method.getReturnType() == boolean.class || method.getReturnType() == Boolean.class) {
+                        return Boolean.TRUE;
+                    }
+                    return null;
+                }
+        );
+        return new PermissionResolution(proxyFallback, "permission-proxy-last-resort", PermissionPredicate.class.getName(), "proxy-allow-all");
     }
 
     private static PermissionPredicate readStaticPermissionPredicate(Class<?> clazz, String fieldName) {
