@@ -37,6 +37,14 @@ public final class BotCommandStateService {
         public BlockPos followFixedGoal;
         public double comeBestGoalDistSq = Double.NaN;
         public int comeTicksSinceBest = 0;
+        /**
+         * Number of replan/reroute attempts made before launching mining recovery skills for /come.
+         */
+        public int comeRerouteAttempts = 0;
+        /**
+         * Tick gate for the next reroute attempt (keeps planner churn bounded when stuck).
+         */
+        public long comeNextRerouteTick = 0L;
         public long comeNextSkillTick = 0L;
         /**
          * When true, the bot may launch short "recovery" skills (e.g., collect_dirt ascent / stripmine)
