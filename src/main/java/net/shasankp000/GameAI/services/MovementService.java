@@ -94,6 +94,9 @@ public final class MovementService {
     private static final Map<UUID, Long> LEAF_MINE_LAST_MS = new ConcurrentHashMap<>();
     private static final Map<UUID, CompletableFuture<String>> LEAF_MINE_INFLIGHT = new ConcurrentHashMap<>();
     private static final Map<UUID, BlockPos> LEAF_MINE_TARGET = new ConcurrentHashMap<>();
+    private static final Map<UUID, Integer> LEAF_BYPASS_FAILURE_STREAK = new ConcurrentHashMap<>();
+    private static final Map<UUID, BlockPos> LEAF_LAST_BYPASS_ORIGIN = new ConcurrentHashMap<>();
+    private static final int LEAF_BYPASS_FORCE_MINE_THRESHOLD = 3;
 
     private MovementService() {
     }
@@ -133,6 +136,37 @@ public final class MovementService {
         DIRECT,
         WADE,
         BRIDGE
+    }
+
+    public enum LeafClearAction {
+        NO_OBSTRUCTION,
+        BYPASS_STEP,
+        BYPASS_PROGRESS,
+        MINING_STARTED,
+        MINING_IN_PROGRESS,
+        NO_CLEAR
+    }
+
+    public record LeafClearResult(LeafClearAction action,
+                                  boolean leafInPath,
+                                  int bypassFailures,
+                                  BlockPos leafTarget,
+                                  String detail) {
+        public boolean shouldShortCircuitFollowTick() {
+            return action == LeafClearAction.MINING_STARTED || action == LeafClearAction.MINING_IN_PROGRESS;
+        }
+
+        public boolean countsAsCleared() {
+            return action == LeafClearAction.MINING_STARTED
+                    || action == LeafClearAction.MINING_IN_PROGRESS
+                    || action == LeafClearAction.BYPASS_PROGRESS;
+        }
+    }
+
+    private enum LeafMineResult {
+        NONE,
+        STARTED,
+        IN_PROGRESS
     }
 
     public record MovementOptions(boolean allowWade,
@@ -1602,13 +1636,13 @@ public final class MovementService {
         });
     }
 
-    private static boolean startLeafMining(ServerPlayerEntity bot, BlockPos leafPos, String label) {
+    private static LeafMineResult startLeafMiningDetailed(ServerPlayerEntity bot, BlockPos leafPos, String label) {
         if (bot == null || leafPos == null) {
-            return false;
+            return LeafMineResult.NONE;
         }
         UUID id = bot.getUuid();
         if (id == null) {
-            return false;
+            return LeafMineResult.NONE;
         }
 
         CompletableFuture<String> inflight = LEAF_MINE_INFLIGHT.get(id);
@@ -1616,16 +1650,16 @@ public final class MovementService {
             BlockPos target = LEAF_MINE_TARGET.get(id);
             // If we're already mining this leaf, treat it as "handled".
             if (target != null && target.equals(leafPos)) {
-                return true;
+                return LeafMineResult.IN_PROGRESS;
             }
             // Only mine one leaf at a time per bot.
-            return false;
+            return LeafMineResult.NONE;
         }
 
         long now = System.currentTimeMillis();
         long last = LEAF_MINE_LAST_MS.getOrDefault(id, 0L);
         if (now - last < LEAF_MINE_GLOBAL_COOLDOWN_MS) {
-            return false;
+            return LeafMineResult.NONE;
         }
 
         LEAF_MINE_LAST_MS.put(id, now);
@@ -1646,7 +1680,12 @@ public final class MovementService {
             LEAF_MINE_INFLIGHT.remove(id, future);
             LEAF_MINE_TARGET.remove(id);
         });
-        return true;
+        return LeafMineResult.STARTED;
+    }
+
+    private static boolean startLeafMining(ServerPlayerEntity bot, BlockPos leafPos, String label) {
+        LeafMineResult result = startLeafMiningDetailed(bot, leafPos, label);
+        return result == LeafMineResult.STARTED || result == LeafMineResult.IN_PROGRESS;
     }
 
     private static boolean isBreakableLeaf(ServerWorld world, BlockPos pos) {
@@ -1715,20 +1754,49 @@ public final class MovementService {
         );
     }
 
-    public static boolean clearLeafObstruction(ServerPlayerEntity player, Direction toward) {
+    public static LeafClearResult clearLeafObstructionDetailed(ServerPlayerEntity player, Direction toward) {
         if (player == null || toward == null) {
-            return false;
+            return new LeafClearResult(LeafClearAction.NO_CLEAR, false, 0, null, "invalid-input");
         }
         ServerWorld world = getWorld(player);
         if (world == null) {
-            return false;
+            return new LeafClearResult(LeafClearAction.NO_CLEAR, false, 0, null, "no-world");
         }
 
+        UUID id = player.getUuid();
+        int bypassFailures = id != null ? LEAF_BYPASS_FAILURE_STREAK.getOrDefault(id, 0) : 0;
         boolean leafInPath = hasLeafInImmediatePath(world, player.getBlockPos(), toward);
+        if (!leafInPath) {
+            if (id != null) {
+                LEAF_BYPASS_FAILURE_STREAK.remove(id);
+                LEAF_LAST_BYPASS_ORIGIN.remove(id);
+            }
+            return new LeafClearResult(LeafClearAction.NO_OBSTRUCTION, false, 0, null, "no-leaf-in-path");
+        }
+
+        if (id != null) {
+            BlockPos previousBypassOrigin = LEAF_LAST_BYPASS_ORIGIN.get(id);
+            if (previousBypassOrigin != null && !previousBypassOrigin.equals(player.getBlockPos())) {
+                LEAF_BYPASS_FAILURE_STREAK.remove(id);
+                LEAF_LAST_BYPASS_ORIGIN.remove(id);
+                return new LeafClearResult(LeafClearAction.BYPASS_PROGRESS, true, 0, null, "bypass-progress");
+            }
+            CompletableFuture<String> inflight = LEAF_MINE_INFLIGHT.get(id);
+            if (inflight != null && !inflight.isDone()) {
+                BlockPos target = LEAF_MINE_TARGET.get(id);
+                return new LeafClearResult(LeafClearAction.MINING_IN_PROGRESS, true, bypassFailures, target, "inflight");
+            }
+        }
 
         // First try a non-destructive "route around" nudge. This is safe to run even on the server thread.
-        if (leafInPath && tryLeafBypassInputStep(player, toward)) {
-            return true;
+        boolean forceMineOnly = bypassFailures >= LEAF_BYPASS_FORCE_MINE_THRESHOLD;
+        if (!forceMineOnly && tryLeafBypassInputStep(player, toward)) {
+            int nextFailures = bypassFailures + 1;
+            if (id != null) {
+                LEAF_BYPASS_FAILURE_STREAK.put(id, nextFailures);
+                LEAF_LAST_BYPASS_ORIGIN.put(id, player.getBlockPos().toImmutable());
+            }
+            return new LeafClearResult(LeafClearAction.BYPASS_STEP, true, nextFailures, null, "bypass-step");
         }
 
         // If bypass isn't possible, start mining a single natural leaf asynchronously (no blocking waits).
@@ -1737,15 +1805,37 @@ public final class MovementService {
             if (!isBreakableLeaf(world, leaf) || !isWithinReach(player, leaf)) {
                 continue;
             }
-            return startLeafMining(player, leaf, "clearLeafObstruction");
+            LeafMineResult mineResult = startLeafMiningDetailed(player, leaf, "clearLeafObstruction");
+            if (mineResult == LeafMineResult.STARTED || mineResult == LeafMineResult.IN_PROGRESS) {
+                if (id != null) {
+                    LEAF_BYPASS_FAILURE_STREAK.remove(id);
+                    LEAF_LAST_BYPASS_ORIGIN.remove(id);
+                }
+                return new LeafClearResult(
+                        mineResult == LeafMineResult.STARTED ? LeafClearAction.MINING_STARTED : LeafClearAction.MINING_IN_PROGRESS,
+                        true,
+                        0,
+                        leaf.toImmutable(),
+                        mineResult == LeafMineResult.STARTED ? "mine-started" : "mine-in-progress");
+            }
         }
 
         // Leaves are present in the immediate collision space, but we couldn't clear them (persistent/unreachable).
         // Emit an overhead hint so it doesn't feel like silent failure.
-        if (leafInPath) {
-            CompanionOverheadDialogueService.tryShowLeafStuck(player, "clearLeafObstruction-noClear");
+        if (id != null) {
+            LEAF_BYPASS_FAILURE_STREAK.put(id, Math.min(10, bypassFailures + 1));
+            LEAF_LAST_BYPASS_ORIGIN.put(id, player.getBlockPos().toImmutable());
         }
-        return false;
+        CompanionOverheadDialogueService.tryShowLeafStuck(player, "clearLeafObstruction-noClear");
+        return new LeafClearResult(LeafClearAction.NO_CLEAR, true, id != null ? LEAF_BYPASS_FAILURE_STREAK.getOrDefault(id, 0) : bypassFailures + 1, null, "no-clear");
+    }
+
+    public static boolean clearLeafObstruction(ServerPlayerEntity player, Direction toward) {
+        LeafClearResult result = clearLeafObstructionDetailed(player, toward);
+        if (result == null) {
+            return false;
+        }
+        return result.countsAsCleared() || result.action() == LeafClearAction.BYPASS_STEP;
     }
 
     public static boolean hasLeafObstruction(ServerPlayerEntity player, Direction toward) {
