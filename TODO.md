@@ -2,6 +2,8 @@
 
 Pending work only. Completed items and rationale live in `changelog.md`.
 
+Canonical in-game verification checklist: `docs/testing/IN_GAME_AUDIT_MASTER.md`.
+
 ## Active Split
 - [ ] **Reliability split in progress**: Track A (follow/come/rescue hardening) is being stabilized for cherry-pick to `main`; Track B (combat/threat/healing/ridesync tuning) is intentionally deferred on WIP.
 

@@ -3,6 +3,7 @@ package net.shasankp000.Commands;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.minecraft.server.command.CommandManager;
 import net.minecraft.server.network.ServerPlayerEntity;
+import net.shasankp000.AIPlayer;
 import net.shasankp000.network.configNetworkManager;
 import net.fabricmc.loader.api.FabricLoader;
 import net.fabricmc.api.EnvType;
@@ -12,6 +13,7 @@ public class configCommand {
     public static void register() {
         CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> {
             dispatcher.register(CommandManager.literal("configMan")
+                    .requires(AIPlayer::hasBotCommandPermission)
                     .executes(context -> {
                         // Get the player who executed the command.
                         ServerPlayerEntity player = context.getSource().getPlayer();

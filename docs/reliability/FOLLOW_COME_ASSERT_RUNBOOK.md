@@ -3,6 +3,8 @@
 ## Purpose
 This runbook validates follow/come reliability behavior with deterministic `/bot follow_check` assertions when live playtesting time is limited.
 
+Canonical unified audit entrypoint: `docs/testing/IN_GAME_AUDIT_MASTER.md`
+
 ## Prerequisites
 - Server running a build from this branch.
 - At least one bot online and controllable.

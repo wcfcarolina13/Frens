@@ -14,6 +14,7 @@
 - Assets copied in scope: 261 files (`87 * 3`)
 - Audio audit script: `tools/audio/audit_batch3_phase1.sh`
 - Playtest runbook: `docs/audio/BATCH3_PHASE1_PLAYTEST.md`
+- Unified audit runbook: `docs/testing/IN_GAME_AUDIT_MASTER.md`
 
 ## Phase 1 code integration matrix
 

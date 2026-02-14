@@ -13,6 +13,7 @@ This runbook is for validating:
 4. Regression safety for preserved overlap IDs.
 
 Use this with `docs/audio/BATCH3_STATUS.md`.
+Canonical unified audit entrypoint: `docs/testing/IN_GAME_AUDIT_MASTER.md`
 
 ## Preflight
 

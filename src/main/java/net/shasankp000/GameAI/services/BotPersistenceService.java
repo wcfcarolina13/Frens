@@ -6,6 +6,8 @@ import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.entity.Entity;
+import net.minecraft.entity.player.PlayerInventory;
+import net.minecraft.item.ItemStack;
 import net.minecraft.text.Text;
 import net.minecraft.util.WorldSavePath;
 import net.shasankp000.AIPlayer;
@@ -53,6 +55,8 @@ public final class BotPersistenceService {
     private static final Method REMOVE_PLAYER = resolveManagerHook("remove", "removePlayer", "method_2984", "method_14576"); // Common obfuscated name for PlayerManager#remove
 
     private static final ConcurrentMap<UUID, Integer> LAST_SAVE_TICK = new ConcurrentHashMap<>();
+    private static final ConcurrentMap<UUID, Long> RESTORE_SEQUENCE = new ConcurrentHashMap<>();
+    private static final ConcurrentMap<UUID, Long> LAST_APPLIED_RESTORE_SEQUENCE = new ConcurrentHashMap<>();
 
     private BotPersistenceService() {}
 
@@ -63,12 +67,17 @@ public final class BotPersistenceService {
         }
 
         final long joinTick = server.getTicks();
+        final long restoreSeq = RESTORE_SEQUENCE.merge(bot.getUuid(), 1L, Long::sum);
         LOGGER.info("[PersistCheck] join-start bot={} tick={} alive={} removed={} vitals={}",
                 bot.getName().getString(),
                 joinTick,
                 bot.isAlive(),
                 bot.isRemoved(),
                 vitalsSnapshot(bot));
+        LOGGER.info("[PersistCheck] join-restore-scheduled bot={} seq={} tick={}",
+                bot.getName().getString(),
+                restoreSeq,
+                joinTick);
 
         boolean managerRestored = restoreViaPlayerManager(server, bot);
         if (managerRestored) {
@@ -84,7 +93,26 @@ public final class BotPersistenceService {
 
         // Schedule inventory load for next tick to ensure vanilla restoration completes first
         server.execute(() -> {
+            long latestSeq = RESTORE_SEQUENCE.getOrDefault(bot.getUuid(), restoreSeq);
+            if (latestSeq != restoreSeq) {
+                LOGGER.info("[PersistCheck] join-restore-skipped bot={} reason=stale-seq scheduledSeq={} latestSeq={} tick={}",
+                        bot.getName().getString(),
+                        restoreSeq,
+                        latestSeq,
+                        server.getTicks());
+                return;
+            }
+            long lastAppliedSeq = LAST_APPLIED_RESTORE_SEQUENCE.getOrDefault(bot.getUuid(), 0L);
+            if (lastAppliedSeq >= restoreSeq) {
+                LOGGER.info("[PersistCheck] join-restore-skipped bot={} reason=duplicate-restore seq={} lastAppliedSeq={} tick={}",
+                        bot.getName().getString(),
+                        restoreSeq,
+                        lastAppliedSeq,
+                        server.getTicks());
+                return;
+            }
             long nowTick = server.getTicks();
+            boolean entityReady = !bot.isRemoved() && bot.getCommandSource() != null;
             LOGGER.info("[PersistCheck] join-restore-run bot={} joinTick={} nowTick={} deltaTicks={} removedBefore={} vitalsBeforeLoad={}",
                     bot.getName().getString(),
                     joinTick,
@@ -92,6 +120,10 @@ public final class BotPersistenceService {
                     Math.max(0L, nowTick - joinTick),
                     bot.isRemoved(),
                     vitalsSnapshot(bot));
+            LOGGER.info("[PersistCheck] join-restore-order bot={} seq={} stage=inventory-load entityReady={}",
+                    bot.getName().getString(),
+                    restoreSeq,
+                    entityReady);
             if (!bot.isRemoved()) {
                 boolean loaded = BotInventoryStorageService.load(bot);
                 LOGGER.info("[PersistCheck] inventory-load bot={} loaded={} tick={} vitalsAfterLoad={}",
@@ -107,11 +139,19 @@ public final class BotPersistenceService {
                     bot.refreshPositionAndAngles(state.x(), state.y(), state.z(), state.yaw(), state.pitch());
                 }, () -> LOGGER.info("No prior world-state for {} in world {}", bot.getName().getString(), BotWorldStateService.currentWorldKey(server)));
                 MountPersistenceService.onBotJoin(bot);
+                LAST_APPLIED_RESTORE_SEQUENCE.put(bot.getUuid(), restoreSeq);
                 LOGGER.info("[PersistCheck] join-restore-complete bot={} tick={} pos={} vitals={}",
                         bot.getName().getString(),
                         server.getTicks(),
                         bot.getBlockPos().toShortString(),
                         vitalsSnapshot(bot));
+                LOGGER.info("[PersistCheck] post-respawn-restore bot={} seq={} tick={} pos={} vitals={} inv={}",
+                        bot.getName().getString(),
+                        restoreSeq,
+                        server.getTicks(),
+                        bot.getBlockPos().toShortString(),
+                        vitalsSnapshot(bot),
+                        inventorySnapshot(bot));
             } else {
                 LOGGER.info("[PersistCheck] join-restore-skipped bot={} reason=removed tick={}",
                         bot.getName().getString(),
@@ -148,6 +188,13 @@ public final class BotPersistenceService {
         if (!(bot instanceof createFakePlayer) || server == null) {
             return;
         }
+
+        LOGGER.info("[PersistCheck] death-pre-snapshot bot={} tick={} pos={} vitals={} inv={}",
+                bot.getName().getString(),
+                server.getTicks(),
+                bot.getBlockPos().toShortString(),
+                vitalsSnapshot(bot),
+                inventorySnapshot(bot));
         
         // ALWAYS WIPE INVENTORY ON DEATH (vanilla behavior)
         // Both aliased and temporary bots lose inventory when they die
@@ -176,10 +223,13 @@ public final class BotPersistenceService {
         
         SkillResumeService.handleDeath(bot);
         LAST_SAVE_TICK.remove(bot.getUuid());
+        RESTORE_SEQUENCE.remove(bot.getUuid());
+        LAST_APPLIED_RESTORE_SEQUENCE.remove(bot.getUuid());
     }
 
     public static void onBotRespawn(ServerPlayerEntity oldPlayer, ServerPlayerEntity newPlayer, boolean alive) {
         if (newPlayer instanceof createFakePlayer) {
+            long expectedRestoreSeq = RESTORE_SEQUENCE.getOrDefault(newPlayer.getUuid(), 0L) + 1L;
             LOGGER.info("[PersistCheck] respawn-event bot={} oldUuid={} newUuid={} aliveFlag={} tick={} oldVitals={} newVitals={}",
                     newPlayer.getName().getString(),
                     oldPlayer != null ? oldPlayer.getUuidAsString() : "none",
@@ -188,6 +238,11 @@ public final class BotPersistenceService {
                     extractServer(newPlayer) != null ? extractServer(newPlayer).getTicks() : -1,
                     vitalsSnapshot(oldPlayer),
                     vitalsSnapshot(newPlayer));
+            LOGGER.info("[PersistCheck] respawn-restore-expected bot={} expectedSeq={} tick={} aliveFlag={}",
+                    newPlayer.getName().getString(),
+                    expectedRestoreSeq,
+                    extractServer(newPlayer) != null ? extractServer(newPlayer).getTicks() : -1,
+                    alive);
         }
         if (!alive) {
             onBotJoin(newPlayer);
@@ -302,6 +357,28 @@ public final class BotPersistenceService {
                 bot.experienceLevel,
                 bot.experienceProgress,
                 bot.totalExperience);
+    }
+
+    private static String inventorySnapshot(ServerPlayerEntity bot) {
+        if (bot == null) {
+            return "n/a";
+        }
+        PlayerInventory inventory = bot.getInventory();
+        int nonEmptySlots = 0;
+        int totalItems = 0;
+        for (int slot = 0; slot < inventory.size(); slot++) {
+            ItemStack stack = inventory.getStack(slot);
+            if (stack == null || stack.isEmpty()) {
+                continue;
+            }
+            nonEmptySlots++;
+            totalItems += stack.getCount();
+        }
+        return String.format(Locale.ROOT, "slots=%d/%d items=%d selected=%d",
+                nonEmptySlots,
+                inventory.size(),
+                totalItems,
+                inventory.getSelectedSlot());
     }
 
     private static boolean restoreViaPlayerManager(MinecraftServer server, ServerPlayerEntity bot) {

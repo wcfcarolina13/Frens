@@ -195,6 +195,7 @@ public class modCommandRegistry {
         CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> {
             dispatcher.register(
                         literal("bot")
+                            .requires(AIPlayer::hasBotCommandPermission)
                             .then(literal("spawn")
                                 .then(CommandManager.argument("bot_name", StringArgumentType.string())
                                         .then(CommandManager.argument("mode", StringArgumentType.string())
@@ -1275,11 +1276,12 @@ public class modCommandRegistry {
                                 .executes(context -> executeInlineBotCommand(context, StringArgumentType.getString(context, "inline"))))
             );
 
-            dispatcher.register(
-                    literal("equip")
-                            .executes(context -> {
-                                ServerPlayerEntity player = context.getSource().getPlayer();
-                                if (player == null) {
+	            dispatcher.register(
+	                    literal("equip")
+                            .requires(AIPlayer::hasBotCommandPermission)
+	                            .executes(context -> {
+	                                ServerPlayerEntity player = context.getSource().getPlayer();
+	                                if (player == null) {
                                     throw new SimpleCommandExceptionType(Text.literal("Specify a player when running from console or command blocks.")).create();
                                 }
                                 return executeEquip(context, player);
@@ -1291,11 +1293,12 @@ public class modCommandRegistry {
 
                 // Register admin tooling for survival recruitment mode as a separate command tree.
                 // This avoids accidental nesting under other subcommands in the huge /bot tree above.
-                dispatcher.register(
-                    literal("bot")
-                        .then(literal("recruit")
-                            .then(literal("status")
-                                .executes(context -> executeRecruitStatus(context))
+	                dispatcher.register(
+	                    literal("bot")
+                            .requires(AIPlayer::hasBotCommandPermission)
+	                        .then(literal("recruit")
+	                            .then(literal("status")
+	                                .executes(context -> executeRecruitStatus(context))
                             )
                             .then(literal("reset")
                                 .executes(context -> executeRecruitReset(context))
@@ -1338,12 +1341,7 @@ public class modCommandRegistry {
     }
 
     private static boolean hasOperatorPermissions(CommandContext<ServerCommandSource> context) {
-        ServerPlayerEntity issuer = getIssuerOrNull(context);
-        if (issuer != null) {
-            return AIPlayer.isOperator(issuer);
-        }
-        // Console/command blocks: allow by default.
-        return true;
+        return AIPlayer.hasBotCommandPermission(context.getSource());
     }
 
     private static int executeRecruitStatus(CommandContext<ServerCommandSource> context) {

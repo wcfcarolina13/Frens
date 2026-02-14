@@ -13,7 +13,6 @@ import net.minecraft.entity.Entity;
 import net.minecraft.entity.damage.DamageTypes;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.PlayerConfigEntry;
-import net.minecraft.command.permission.LeveledPermissionPredicate;
 import net.minecraft.command.permission.PermissionPredicate;
 import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.network.ServerPlayerEntity;
@@ -57,6 +56,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.lang.reflect.Field;
+import java.lang.reflect.Modifier;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
@@ -83,7 +84,10 @@ public class AIPlayer implements ModInitializer {
 
     public static final Logger LOGGER = LoggerFactory.getLogger("ai-player");
     public static final String MOD_ID = "ai-player";
-    public static final PermissionPredicate OPERATOR_PERMISSIONS = LeveledPermissionPredicate.OWNERS;
+    private record PermissionResolution(PermissionPredicate predicate, String mode, String className, String fieldName) {}
+    private static final PermissionResolution OPERATOR_PERMISSION_RESOLUTION = resolveOperatorPermissions();
+    public static final PermissionPredicate OPERATOR_PERMISSIONS = OPERATOR_PERMISSION_RESOLUTION.predicate();
+
     public static boolean isOperator(ServerPlayerEntity player) {
         if (player == null || serverInstance == null) {
             return false;
@@ -101,6 +105,129 @@ public class AIPlayer implements ModInitializer {
         }
         return true;
     }
+
+    public static boolean hasBotCommandPermission(ServerCommandSource source) {
+        if (source == null) {
+            return false;
+        }
+        ServerPlayerEntity player = source.getPlayer();
+        if (player == null) {
+            return true; // console / command block
+        }
+        if (hasPermissionLevelCompat(source, 2) || hasPermissionLevelCompat(player, 2)) {
+            return true;
+        }
+        return isOperator(player);
+    }
+
+    private static PermissionResolution resolveOperatorPermissions() {
+        ClassLoader loader = AIPlayer.class.getClassLoader();
+        String className = "net.minecraft.command.permission.LeveledPermissionPredicate";
+        String[] preferredFields = {"OWNERS", "ADMINS", "GAMEMASTERS", "MODERATORS", "ALL"};
+        try {
+            Class<?> clazz = Class.forName(className, false, loader);
+            for (String fieldName : preferredFields) {
+                PermissionPredicate candidate = readStaticPermissionPredicate(clazz, fieldName);
+                if (candidate != null) {
+                    return new PermissionResolution(candidate, "leveled-field", clazz.getName(), fieldName);
+                }
+            }
+            PermissionPredicate any = findAnyStaticPermissionPredicate(clazz);
+            if (any != null) {
+                return new PermissionResolution(any, "leveled-any-static", clazz.getName(), "first-static");
+            }
+            PermissionPredicate constructed = constructPermissionPredicate(clazz);
+            if (constructed != null) {
+                return new PermissionResolution(constructed, "leveled-constructor", clazz.getName(), "ctor");
+            }
+        } catch (Throwable t) {
+            LOGGER.warn("[PermCheck] leveled permission predicate lookup failed: {}", t.toString());
+        }
+
+        PermissionPredicate fallback = constructPermissionPredicate(PermissionPredicate.class);
+        if (fallback != null) {
+            return new PermissionResolution(fallback, "permission-ctor-fallback", PermissionPredicate.class.getName(), "ctor");
+        }
+
+        throw new IllegalStateException("Unable to resolve any PermissionPredicate for operator bot commands.");
+    }
+
+    private static PermissionPredicate readStaticPermissionPredicate(Class<?> clazz, String fieldName) {
+        try {
+            Field field = clazz.getDeclaredField(fieldName);
+            if (!Modifier.isStatic(field.getModifiers())) {
+                return null;
+            }
+            field.setAccessible(true);
+            Object value = field.get(null);
+            if (value instanceof PermissionPredicate predicate) {
+                return predicate;
+            }
+        } catch (Throwable ignored) {
+        }
+        try {
+            Field field = clazz.getField(fieldName);
+            Object value = field.get(null);
+            if (value instanceof PermissionPredicate predicate) {
+                return predicate;
+            }
+        } catch (Throwable ignored) {
+        }
+        return null;
+    }
+
+    private static PermissionPredicate findAnyStaticPermissionPredicate(Class<?> clazz) {
+        for (Field field : clazz.getDeclaredFields()) {
+            if (!Modifier.isStatic(field.getModifiers())) {
+                continue;
+            }
+            if (!PermissionPredicate.class.isAssignableFrom(field.getType())) {
+                continue;
+            }
+            try {
+                field.setAccessible(true);
+                Object value = field.get(null);
+                if (value instanceof PermissionPredicate predicate) {
+                    return predicate;
+                }
+            } catch (Throwable ignored) {
+            }
+        }
+        return null;
+    }
+
+    private static PermissionPredicate constructPermissionPredicate(Class<?> clazz) {
+        try {
+            var ctor = clazz.getDeclaredConstructor();
+            ctor.setAccessible(true);
+            Object value = ctor.newInstance();
+            if (value instanceof PermissionPredicate predicate) {
+                return predicate;
+            }
+        } catch (Throwable ignored) {
+        }
+        return null;
+    }
+
+    private static boolean hasPermissionLevelCompat(Object target, int level) {
+        if (target == null) {
+            return false;
+        }
+        try {
+            var m = target.getClass().getMethod("hasPermissionLevel", int.class);
+            Object out = m.invoke(target, level);
+            return out instanceof Boolean b && b;
+        } catch (Throwable ignored) {
+        }
+        try {
+            var m = target.getClass().getMethod("hasPermission", int.class);
+            Object out = m.invoke(target, level);
+            return out instanceof Boolean b && b;
+        } catch (Throwable ignored) {
+        }
+        return false;
+    }
+
     public static ScreenHandlerType<net.shasankp000.ui.BotPlayerInventoryScreenHandler> BOT_PLAYER_INV_HANDLER;
     public static final ManualConfig CONFIG = ManualConfig.load();
     public static MinecraftServer serverInstance = null; // default for now
@@ -133,6 +260,10 @@ public class AIPlayer implements ModInitializer {
 
     @Override
     public void onInitialize() {
+        LOGGER.info("[PermCheck] operator-permission mode={} class={} field={}",
+                OPERATOR_PERMISSION_RESOLUTION.mode(),
+                OPERATOR_PERMISSION_RESOLUTION.className(),
+                OPERATOR_PERMISSION_RESOLUTION.fieldName());
 
         // ScreenHandler registration for bot/player UI
         BOT_PLAYER_INV_HANDLER = Registry.register(
