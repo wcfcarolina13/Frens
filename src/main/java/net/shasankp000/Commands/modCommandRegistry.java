@@ -2691,15 +2691,24 @@ public class modCommandRegistry {
         boolean noTeleport = state != null && state.followNoTeleport;
         boolean allowRecovery = state == null || state.comeAllowRecoverySkills;
         int rerouteAttempts = getOptionalIntField(state, "comeRerouteAttempts");
+        long nextRerouteTick = getOptionalLongField(state, "comeNextRerouteTick");
         int ticksSinceBest = state != null ? Math.max(0, state.comeTicksSinceBest) : 0;
         long nextSkillTick = state != null ? state.comeNextSkillTick : 0L;
+        long nowTick = context.getSource() != null && context.getSource().getServer() != null
+                ? context.getSource().getServer().getTicks()
+                : 0L;
+        Map<String, Long> diag = net.shasankp000.GameAI.services.FollowStateService.diagnosticSnapshot(bot.getUuid());
+        int repeatWpStreak = diag.getOrDefault("repeat_wp_streak", 0L).intValue();
+        int verticalTrapStreak = diag.getOrDefault("vertical_trap_streak", 0L).intValue();
+        int waterEscapeAttempts = diag.getOrDefault("water_escape_attempts", 0L).intValue();
+        long waterEscapeVerifyUntilTick = diag.getOrDefault("water_escape_verify_until_tick", 0L);
         int waypoints = net.shasankp000.GameAI.services.FollowStateService.FOLLOW_WAYPOINTS
                 .getOrDefault(bot.getUuid(), new ArrayDeque<>())
                 .size();
         boolean planningInflight = net.shasankp000.GameAI.services.FollowStateService.FOLLOW_PATH_INFLIGHT.containsKey(bot.getUuid());
 
         String summary = String.format(Locale.ROOT,
-                "FollowCheck bot=%s mode=%s target=%s fixedGoal=%s forceWalk=%s stopRange=%.2f standoff=%.2f allowRecovery=%s ticksSinceBest=%d nextSkill=%d waypoints=%d inflight=%s",
+                "FollowCheck bot=%s mode=%s target=%s fixedGoal=%s forceWalk=%s stopRange=%.2f standoff=%.2f allowRecovery=%s ticksSinceBest=%d rerouteAttempts=%d nextRerouteTick=%d nextSkill=%d repeatWp=%d verticalTrap=%d waterEscapeAttempts=%d waterEscapeVerifyUntil=%d waypoints=%d inflight=%s",
                 bot.getName().getString(),
                 mode,
                 followTarget != null ? followTarget.toString() : "none",
@@ -2709,7 +2718,13 @@ public class modCommandRegistry {
                 standoffRange,
                 allowRecovery,
                 ticksSinceBest,
+                rerouteAttempts,
+                nextRerouteTick,
                 nextSkillTick,
+                repeatWpStreak,
+                verticalTrapStreak,
+                waterEscapeAttempts,
+                waterEscapeVerifyUntilTick,
                 waypoints,
                 planningInflight);
         LOGGER.info("[FollowAssert] {}", summary);
@@ -2814,6 +2829,46 @@ public class modCommandRegistry {
                 case "no_reroute" -> {
                     if (rerouteAttempts > 0) {
                         failures.add("expected rerouteAttempts=0");
+                    }
+                }
+                case "reroute_scheduled" -> {
+                    if (!(nextRerouteTick > nowTick)) {
+                        failures.add("expected nextRerouteTick>nowTick");
+                    }
+                }
+                case "no_reroute_scheduled" -> {
+                    if (nextRerouteTick > nowTick) {
+                        failures.add("expected nextRerouteTick<=nowTick");
+                    }
+                }
+                case "repeat_wp" -> {
+                    if (repeatWpStreak <= 0) {
+                        failures.add("expected repeatWpStreak>0");
+                    }
+                }
+                case "no_repeat_wp" -> {
+                    if (repeatWpStreak > 0) {
+                        failures.add("expected repeatWpStreak=0");
+                    }
+                }
+                case "vertical_trap" -> {
+                    if (verticalTrapStreak <= 0) {
+                        failures.add("expected verticalTrapStreak>0");
+                    }
+                }
+                case "no_vertical_trap" -> {
+                    if (verticalTrapStreak > 0) {
+                        failures.add("expected verticalTrapStreak=0");
+                    }
+                }
+                case "water_escape_active" -> {
+                    if (!(waterEscapeAttempts > 0 || waterEscapeVerifyUntilTick > nowTick)) {
+                        failures.add("expected water escape active");
+                    }
+                }
+                case "water_escape_idle" -> {
+                    if (waterEscapeAttempts > 0 || waterEscapeVerifyUntilTick > nowTick) {
+                        failures.add("expected water escape idle");
                     }
                 }
                 default -> {
@@ -3250,6 +3305,18 @@ public class modCommandRegistry {
             return Math.max(0, field.getInt(target));
         } catch (ReflectiveOperationException | RuntimeException ignored) {
             return 0;
+        }
+    }
+
+    private static long getOptionalLongField(Object target, String fieldName) {
+        if (target == null || fieldName == null || fieldName.isBlank()) {
+            return 0L;
+        }
+        try {
+            java.lang.reflect.Field field = target.getClass().getField(fieldName);
+            return Math.max(0L, field.getLong(target));
+        } catch (ReflectiveOperationException | RuntimeException ignored) {
+            return 0L;
         }
     }
 

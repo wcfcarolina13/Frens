@@ -193,10 +193,17 @@ public final class SkillManager {
                             : null;
                     double stopRange = resumeStopRange > 0.0D ? resumeStopRange : 3.2D;
                     BotEventHandler.setComeModeWalk(botPlayer, target, resumeFixedGoal, stopRange, resumeAllowRecoverySkills);
+                    LOGGER.info("[FollowAssert] task-resume bot={} mode=come goal={} allowRecovery={}",
+                            botPlayer.getName().getString(),
+                            resumeFixedGoal.toShortString(),
+                            resumeAllowRecoverySkills);
                 } else if (resumeFollowUuid != null) {
                     ServerPlayerEntity target = context.botSource().getServer().getPlayerManager().getPlayer(resumeFollowUuid);
                     if (target != null) {
                         BotEventHandler.setFollowMode(botPlayer, target);
+                        LOGGER.info("[FollowAssert] task-resume bot={} mode=follow target={}",
+                                botPlayer.getName().getString(),
+                                target.getName().getString());
                     }
                 }
             }

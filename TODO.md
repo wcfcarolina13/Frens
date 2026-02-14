@@ -2,6 +2,9 @@
 
 Pending work only. Completed items and rationale live in `changelog.md`.
 
+## Active Split
+- [ ] **Reliability split in progress**: Track A (follow/come/rescue hardening) is being stabilized for cherry-pick to `main`; Track B (combat/threat/healing/ridesync tuning) is intentionally deferred on WIP.
+
 ## P0 — Critical
 - [ ] **Verify launch after permission predicate fix**: Ensure bots can start without the LeveledPermissionPredicate OWNERS crash on 1.21.11.
 - [ ] **Persist bot stats on respawn (verification)**: Save/load path exists; verify health/XP/hunger restore timing is visible before spawn flow completes in live runtime.
@@ -18,10 +21,11 @@ Pending work only. Completed items and rationale live in `changelog.md`.
 - [ ] **Guard verification**: Run in-game tests for `/bot guard` (basic start/stop, radius handling, and interaction with other tasks).
 
 ### Follow / Come
-- [ ] **Follow stability**: Confirm follow continues after other tasks; verify advanced pathfinding stays reliable across dimensions/terrain.
-- [ ] **Come survival movement (verification)**: `/bot come` now routes through fixed-goal follow pathing; verify no snap/direct movement regressions in live terrain tests.
-- [ ] **Come better rerouting before mining tasks (verification)**: Pre-recovery reroute attempts were added; verify cave/corner/vertical escapes prefer reroute before `collect_dirt`/`stripmine`.
-- [ ] **Come tool crafting (verification)**: `ToolProvisionService` is now called by `/bot come` and recovery paths; verify torches/shovels/pickaxes are provisioned in-world when recipes/materials permit.
+- [ ] **Follow stability (verification)**: Core planner/backoff/waypoint recovery is implemented; complete runtime verification across dimensions/terrain with `follow_check` asserts.
+- [ ] **Come survival movement (verification)**: `/bot come` routes through fixed-goal follow pathing; verify no snap/direct movement regressions in live terrain tests.
+- [ ] **Come reroute scheduling (verification)**: Reroute attempt/cooldown state and planner backoff markers are implemented; verify cave/corner/vertical escapes reroute before recovery skills.
+- [ ] **Come tool crafting (verification)**: `ToolProvisionService` is called by `/bot come` and recovery paths; verify torches/shovels/pickaxes are provisioned in-world when recipes/materials permit.
+- [ ] **Deterministic follow/come assertions (verification)**: Run `docs/reliability/FOLLOW_COME_ASSERT_RUNBOOK.md` and record pass/fail outcomes for `follow_check` tokens.
 
 ### Shelter (Redo Needed)
 - [ ] **ShelterSkill refactor**: Split `ShelterSkill.java` into smaller hovel/burrow builder classes and tighten shared primitives/logging.
