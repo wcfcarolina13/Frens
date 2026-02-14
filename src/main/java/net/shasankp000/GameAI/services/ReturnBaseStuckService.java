@@ -206,6 +206,17 @@ public final class ReturnBaseStuckService {
         }
 
         UUID botId = bot.getUuid();
+
+        // Stuck mining / escape logic is not safe while mounted (especially in boats), and the
+        // position sampling in this system assumes a walking player.
+        if (bot.hasVehicle()) {
+            var vehicle = bot.getVehicle();
+            DebugToggleService.debug(LOGGER, "ReturnBaseStuck: bot={} mounted on {} - skipping stuck tick",
+                    bot.getName().getString(),
+                vehicle == null ? "<null>" : vehicle.getType().toString());
+            clear(botId);
+            return false;
+        }
         BlockPos curBlock = bot.getBlockPos();
         Vec3d curPos = new Vec3d(bot.getX(), bot.getY(), bot.getZ());
         int currentStagnant = STAGNANT_TICKS.getOrDefault(botId, 0);
@@ -1215,6 +1226,8 @@ public final class ReturnBaseStuckService {
                     state.followStandoffRange = 0.0D;
                     state.comeBestGoalDistSq = Double.NaN;
                     state.comeTicksSinceBest = 0;
+                    state.comeRerouteAttempts = 0;
+                    state.comeNextRerouteTick = 0L;
                     state.comeNextSkillTick = 0L;
                     state.comeAllowRecoverySkills = true;
                 }

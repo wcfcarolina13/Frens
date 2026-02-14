@@ -125,6 +125,31 @@ public final class BotRescueService {
 
         // Check both damage AND physical block presence to catch suffocation early
         boolean takingSuffocationDamage = tookRecentSuffocation(bot);
+
+        // Vehicles (especially boats) frequently cause false "feet in block" signals due to how
+        // the passenger's block position is quantized near shore / terrain edges.
+        // Never start burial-mining while mounted unless we are actually taking suffocation damage.
+        if (bot.hasVehicle()) {
+            if (!takingSuffocationDamage) {
+                var vehicle = bot.getVehicle();
+                LOGGER.info("[FollowAssert] mounted-rescue-skip bot={} vehicle={} reason=not-suffocating",
+                        bot.getName().getString(),
+                        vehicle == null ? "<null>" : vehicle.getType().toString());
+                DebugToggleService.debug(LOGGER, "rescueFromBurial: bot={} mounted on {} and not suffocating - skipping burial rescue",
+                        bot.getName().getString(),
+                        vehicle == null ? "<null>" : vehicle.getType().toString());
+                LAST_SUFFOCATION_ALERT_TICK.remove(bot.getUuid());
+                LAST_STUCK_LOG_MS.remove(bot.getUuid());
+                return false;
+            }
+
+            // If we are suffocating while mounted, dismount first; otherwise mining can destabilize
+            // the vehicle state and grief terrain around docks/shore.
+            try {
+                bot.stopRiding();
+            } catch (Exception ignored) {
+            }
+        }
         BlockPos feet = bot.getBlockPos();
         BlockPos head = feet.up();
 
@@ -340,6 +365,16 @@ public final class BotRescueService {
         }
         ServerWorld world = bot.getEntityWorld() instanceof ServerWorld serverWorld ? serverWorld : null;
         if (world == null) {
+            return false;
+        }
+
+        // Do not perform proactive mining escapes while mounted.
+        // Vehicle passengers can look "embedded" due to quantized block positions.
+        if (bot.hasVehicle()) {
+            var vehicle = bot.getVehicle();
+            LOGGER.info("[FollowAssert] mounted-rescue-skip bot={} vehicle={} reason=proactive-escape-disabled",
+                    bot.getName().getString(),
+                    vehicle == null ? "<null>" : vehicle.getType().toString());
             return false;
         }
 
@@ -619,6 +654,9 @@ public final class BotRescueService {
             return;
         }
         ServerCommandSource source = bot.getCommandSource();
+        if (source == null) {
+            return;
+        }
         MinecraftServer srv = source != null ? source.getServer() : null;
         if (srv == null) {
             return;
@@ -681,6 +719,9 @@ public final class BotRescueService {
             return;
         }
         ServerCommandSource source = bot.getCommandSource();
+        if (source == null) {
+            return;
+        }
         MinecraftServer srv = source != null ? source.getServer() : null;
         if (srv == null) {
             return;
@@ -774,6 +815,12 @@ public final class BotRescueService {
      */
     private static boolean isBotCurrentlyStuck(ServerPlayerEntity bot, ServerWorld world) {
         if (bot == null || world == null) return false;
+
+        // While mounted (especially in boats), head/feet block samples are unreliable.
+        // Only treat mounted bots as stuck when we have a strong damage signal.
+        if (bot.hasVehicle()) {
+            return tookRecentSuffocation(bot);
+        }
 
         BlockPos feet = bot.getBlockPos();
         BlockPos head = feet.up();
