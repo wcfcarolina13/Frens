@@ -24,6 +24,7 @@ import net.shasankp000.GameAI.BotActions;
 import net.shasankp000.GameAI.DropSweeper;
 import net.shasankp000.GameAI.services.ChestStoreService;
 import net.shasankp000.GameAI.services.BlockInteractionService;
+import net.shasankp000.GameAI.services.BotWaterEscapeService;
 import net.shasankp000.GameAI.services.ToolProvisionService;
 import net.shasankp000.GameAI.services.SmeltingService;
 import net.shasankp000.GameAI.services.FollowPathService;
@@ -100,6 +101,20 @@ public final class FishingSkill implements Skill {
         boolean hobby = isHobby(context);
         if (bot == null) {
             return SkillExecutionResult.failure("Bot not available.");
+        }
+
+        if (BotWaterEscapeService.isInWater(bot)) {
+            ChatUtils.sendSystemMessage(source, "I'm in the water. Moving to shore before fishing.");
+            BlockPos shoreStand = BotWaterEscapeService.findNearestShoreStand(bot, WATER_SEARCH_RADIUS + 6);
+            if (shoreStand == null) {
+                return SkillExecutionResult.failure("I'm swimming and cannot find safe shore to fish from.");
+            }
+            if (bot.getBlockPos().getSquaredDistance(shoreStand) > 1.44D && !navigateToSpot(source, bot, shoreStand)) {
+                return SkillExecutionResult.failure("I'm swimming and couldn't reach shore for fishing.");
+            }
+            if (BotWaterEscapeService.isInWater(bot)) {
+                return SkillExecutionResult.failure("Still in water after shore move. Try again from land.");
+            }
         }
 
         if (!ensureFishingRod(source, bot)) {

@@ -3,13 +3,14 @@ package net.shasankp000.Entity;
 import net.minecraft.entity.Entity;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.util.math.Vec3d;
+import net.shasankp000.GameAI.services.EndermanSafetyService;
 
 import java.util.List;
 
 public class FaceClosestEntity {
 
     public static void faceClosestEntity(ServerPlayerEntity bot, List<Entity> entities) {
-        if (entities.isEmpty()) {
+        if (bot == null || entities == null || entities.isEmpty()) {
             return;
         }
 
@@ -18,6 +19,12 @@ public class FaceClosestEntity {
 
         // Find the closest entity
         for (Entity entity : entities) {
+            if (entity == null || entity.isRemoved() || !entity.isAlive()) {
+                continue;
+            }
+            if (!EndermanSafetyService.isSafeLookTarget(entity)) {
+                continue;
+            }
             double distance = bot.squaredDistanceTo(entity);
             if (distance < closestDistance) {
                 closestDistance = distance;

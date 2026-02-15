@@ -4,6 +4,7 @@ import net.minecraft.entity.Entity;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
+import net.shasankp000.GameAI.services.EndermanSafetyService;
 
 public class LookController {
 
@@ -31,6 +32,12 @@ public class LookController {
     }
 
     public static void faceEntity(ServerPlayerEntity bot, Entity target) {
+        if (bot == null || target == null) {
+            return;
+        }
+        if (!EndermanSafetyService.isSafeLookTarget(target)) {
+            return;
+        }
         Vec3d botPos = bot.getEntityPos();
         Vec3d targetPos = target.getEntityPos();
         Vec3d direction = targetPos.subtract(botPos).normalize();

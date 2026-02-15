@@ -680,6 +680,7 @@ public class AIPlayer implements ModInitializer {
         ServerTickEvents.END_SERVER_TICK.register(BotEventHandler::tickHunger);
         ServerTickEvents.END_SERVER_TICK.register(AIPlayer::processSpawnEscapeChecks);
         ServerTickEvents.END_SERVER_TICK.register(BotCampfireAvoidanceService::onServerTick);
+        ServerTickEvents.END_SERVER_TICK.register(net.shasankp000.GameAI.services.BotFallSafetyService::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(net.shasankp000.GameAI.services.BotAutoHuntService::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(BotAutoReturnSunsetService::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(BotIdleHobbiesService::onServerTick);

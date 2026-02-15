@@ -45,10 +45,10 @@ Canonical in-game verification checklist: `docs/testing/IN_GAME_AUDIT_MASTER.md`
 - [ ] **Elder Scrolls-style Journal** Conversation topics, quests, important information with simple filter search
 
 ### Inventory & Items
-- [ ] Bot item inventory view (chest-like interface)
-- [ ] Equipped section visible (armor, main hand, offhand)
-- [ ] Backpack grid (27-slot)
-- [ ] Hotbar row (9-slot)
+- [x] Bot item inventory view (chest-like interface)
+- [x] Equipped section visible (armor, main hand, offhand)
+- [x] Backpack grid (27-slot)
+- [x] Hotbar row (9-slot)
 - [ ] Shift-click, double-click, drag support
 - [ ] Quick-action buttons (Sort, Equip Best, Take All, Give All)
 - [ ] Bundle packing verification: drop_sweep crafts/uses bundles when inventory is truly full.
@@ -57,8 +57,8 @@ Canonical in-game verification checklist: `docs/testing/IN_GAME_AUDIT_MASTER.md`
 - [ ] Swimming parity (surface and underwater)
 - [ ] Verify swimming behavior matches survival movement (no “snap”/teleport, proper buoyancy, safe ascent)
 - [ ] Boat support (enter, exit, navigate)
-- [ ] Boat follow paddling verification: ensure ride-sync uses paddle input (no forced boat position moves).
-- [ ] Boat: verify placement from inventory + boat-break retrieval after commander destroys their boat.
+- [x] Boat follow paddling verification: ensure ride-sync uses paddle input (no forced boat position moves).
+- [x] Boat: verify placement from inventory + boat-break retrieval after commander destroys their boat.
 - [ ] Test fishing from a boat; define behavior (stay seated vs dismount to shore)
 - [ ] Portal following (Nether, End)
 - [ ] Cross-realm teleport command
@@ -69,17 +69,20 @@ Canonical in-game verification checklist: `docs/testing/IN_GAME_AUDIT_MASTER.md`
 ### Fishing (Verification)
 - [ ] Verify leaf-block clearing when fishing requires navigating far from shoreline
 - [ ] Verify fishing works from higher vertical positions (cliffs/piers) without mis-casting
-- [ ] Handle being asked to fish while swimming (refuse, relocate to shore, or swim-to-shore logic)
+- [x] Handle being asked to fish while swimming (refuse, relocate to shore, or swim-to-shore logic)
+- [ ] In-game check: trigger `/bot fish` while bot is swimming/submerged and verify it relocates to dry shore before first cast (or returns a clear no-shore failure).
 
 ### Combat & Safety
 - [ ] Creeper evasion (sprint away when unarmed)
-- [ ] Enderman gaze safety: avoid looking at endermen unless already hostile (don’t aggro passive endermen)
+- [x] Enderman gaze safety: avoid looking at endermen unless already hostile (don’t aggro passive endermen)
+- [ ] In-game check: stand near passive endermen and confirm bot does not face/aggro them; then provoke one and confirm bot can still target it once hostile.
 - [ ] Protected build zones (no-grief areas)
-- [ ] Follow/defend modes
+- [x] Follow/defend modes
 - [ ] Fight with teammates
 - [ ] Ride sync verification: commander mount/dismount mirroring across horse-like/boats/minecarts/pigs/striders with saddles/controls.
 - [ ] Ride sync leashed persistence: leashed (not mounted) horse remains tethered after disconnect/rejoin.
-- [ ] **Water-bucket clutch on deadly falls (low priority)**: If bot has a water bucket and detects a lethal fall, attempt to place water under itself just before impact to avoid death.
+- [x] **Water-bucket clutch on deadly falls (low priority)**: If bot has a water bucket and detects a lethal fall, attempt to place water under itself just before impact to avoid death.
+- [ ] In-game check: drop bot from lethal height with/without a water bucket (Overworld), verify clutch attempts near impact and verify no attempts in ultrawarm dimensions.
 
 ### Crafting & Building
 - [ ] Place and use crafting table, furnace, chest
@@ -93,7 +96,7 @@ Canonical in-game verification checklist: `docs/testing/IN_GAME_AUDIT_MASTER.md`
 - [ ] Create infinite water source
 - [ ] Animal husbandry (shear, collect meat, pen animals)
 - [ ] Furnace usage with various fuels
-- [ ] Hunger persistence and smart eating
+- [x] Hunger persistence and smart eating
 - [ ] **Farm underground recovery**: Handle cases where bot is underground and can’t pillar upward due to overhead dirt; improve escape logic and add test coverage.
 - [ ] **Farm chest workflow**: Ensure the farm skill can place/store/use chests proactively for inventory/resource management.
 - [ ] **Farm irrigation leak patching**: If irrigation isn’t fillable, detect leakage cause and patch the leak (enclosure improvements).
