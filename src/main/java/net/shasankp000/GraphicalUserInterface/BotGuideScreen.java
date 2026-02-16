@@ -855,11 +855,12 @@ public final class BotGuideScreen extends Screen {
                         "Quick reference for the most-used controls.",
                         List.of(
                                 "Follow -> ` -> bot follow toggle <bot>",
-                                "Go To Look -> - -> bot go_to_look",
+                                "Sleep -> (hold \\ then 5) -> bot sleep <bot>",
+                                "- key -> spells / go_to_look / direction confirm (contextual)",
                                 "Stop -> \\\\ -> bot stop <bot>",
                                 "Resume -> (bind key.ai-player.resume) -> bot resume <bot>",
                                 "Open Spells -> (bind key.ai-player.open_spells) -> opens spells menu when unlocked",
-                                "Tip: hold Stop for the 1-0 hotkey overlay menu."
+                                "Tip: hold Stop (\\\\) for the 1-0 hotkey overlay menu."
                         ),
                         "bot follow toggle <bot> | bot go_to_look | bot stop <bot> | bot resume <bot>",
                         "Minecraft Controls: Follow, Go To Look, Stop, Resume, Open Spells",

@@ -2,7 +2,6 @@ package net.shasankp000.GameAI.services;
 
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
-import net.minecraft.block.entity.ChestBlockEntity;
 import net.minecraft.inventory.Inventory;
 import net.minecraft.item.BlockItem;
 import net.minecraft.item.Item;
@@ -274,7 +273,7 @@ public final class ChestStoreService {
         }
         if (source.getWorld().isChunkLoaded(pos)) {
             BlockState state = source.getWorld().getBlockState(pos);
-            if (state.isOf(Blocks.CHEST) || state.isOf(Blocks.TRAPPED_CHEST)) {
+            if (state.isOf(Blocks.CHEST) || state.isOf(Blocks.TRAPPED_CHEST) || state.isOf(Blocks.BARREL)) {
                 return pos.toImmutable();
             }
         }
@@ -330,7 +329,7 @@ public final class ChestStoreService {
                     continue;
                 }
                 BlockState state = world.getBlockState(pos);
-                if (!state.isOf(Blocks.CHEST) && !state.isOf(Blocks.TRAPPED_CHEST)) {
+                if (!state.isOf(Blocks.CHEST) && !state.isOf(Blocks.TRAPPED_CHEST) && !state.isOf(Blocks.BARREL)) {
                     continue;
                 }
                 double d = origin.getSquaredDistance(pos);
@@ -521,7 +520,7 @@ public final class ChestStoreService {
                 + " serverThread=" + server.isOnThread()
                 + " sourceWorld=" + worldKeyName(source.getWorld())
                 + " botWorld=" + worldKeyName(bot.getEntityWorld()));
-        Boolean chestOk = callOnServer(server, () -> source.getWorld().getBlockEntity(chestPos) instanceof ChestBlockEntity, 800, Boolean.FALSE);
+        Boolean chestOk = callOnServer(server, () -> source.getWorld().getBlockEntity(chestPos) instanceof Inventory, 800, Boolean.FALSE);
         if (!Boolean.TRUE.equals(chestOk)) {
             debugChest("Store transfer abort: chest missing at " + chestPos.toShortString());
             return 0;
@@ -600,13 +599,13 @@ public final class ChestStoreService {
 
         Integer moved = callOnServer(server, () -> {
             var be2 = source.getWorld().getBlockEntity(chestPos);
-            if (!(be2 instanceof ChestBlockEntity chest)) {
+            if (!(be2 instanceof Inventory storage)) {
                 return 0;
             }
             if (deposit) {
-                return moveItems(bot.getInventory(), chest, filter, amount);
+                return moveItems(bot.getInventory(), storage, filter, amount);
             }
-            return moveItems(chest, bot.getInventory(), filter, amount);
+            return moveItems(storage, bot.getInventory(), filter, amount);
         }, 2500, 0);
         int movedCount = moved != null ? moved : 0;
         debugChest("Store transfer done: moved=" + movedCount + " chest=" + chestPos.toShortString());
@@ -635,7 +634,7 @@ public final class ChestStoreService {
         }
         BlockPos pos = bhr.getBlockPos();
         var state = source.getWorld().getBlockState(pos);
-        if (state.isOf(Blocks.CHEST) || state.isOf(Blocks.TRAPPED_CHEST)) {
+        if (state.isOf(Blocks.CHEST) || state.isOf(Blocks.TRAPPED_CHEST) || state.isOf(Blocks.BARREL)) {
             return pos.toImmutable();
         }
         return null;
@@ -660,7 +659,7 @@ public final class ChestStoreService {
         if (bot == null || bot.isRemoved()) {
             return 0;
         }
-        Boolean chestOk = callOnServer(server, () -> source.getWorld().getBlockEntity(chestPos) instanceof ChestBlockEntity, 800, Boolean.FALSE);
+        Boolean chestOk = callOnServer(server, () -> source.getWorld().getBlockEntity(chestPos) instanceof Inventory, 800, Boolean.FALSE);
         if (!Boolean.TRUE.equals(chestOk)) {
             return 0;
         }

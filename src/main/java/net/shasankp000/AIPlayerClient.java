@@ -23,6 +23,7 @@ import net.minecraft.entity.mob.MobEntity;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.item.Items;
 import net.minecraft.block.Blocks;
+import net.minecraft.sound.SoundEvents;
 import net.minecraft.text.Text;
 import net.shasankp000.GraphicalUserInterface.BaseManagerScreen;
 import net.shasankp000.GraphicalUserInterface.BotPlayerInventoryScreen;
@@ -115,6 +116,7 @@ public class AIPlayerClient implements ClientModInitializer {
     private static boolean lastHasEyeToken = false;
     private static boolean lastHasHornToken = false;
     private static boolean lastHasEnchantingTableToken = false;
+    private static boolean lastHasWizardTomeToken = false;
 
     // Simple per-bot dialogue log used by the Topics overlay.
     private static final java.util.Map<String, java.util.ArrayDeque<String>> DIALOGUE_LOG = new java.util.HashMap<>();
@@ -138,6 +140,10 @@ public class AIPlayerClient implements ClientModInitializer {
     private static long lookedAtBotPeekLastRequestMs = 0L;
     private static BotTaskPeekStatusPayload lookedAtBotStatus = null;
     private static long lookedAtBotStatusAtMs = 0L;
+
+    // While the hotkey overlay is visible, keep the player's selected slot locked so number-key
+    // selections do not leak through to vanilla hotbar switching.
+    private static int overlayHotbarLockedSlot = -1;
 
     // Expose recruitment UI state to other client UI surfaces (e.g., bot inventory overlay).
     public static boolean isSurvivalRecruitmentEnabled() {
@@ -168,6 +174,26 @@ public class AIPlayerClient implements ClientModInitializer {
     public static void armEyeSpellCooldown() {
         // Keep aligned with server default (currently 60s). This is just a UX hint.
         eyeSpellCooldownUntilMs = System.currentTimeMillis() + 60_000L;
+    }
+
+    private static boolean isGameplayTipsEnabled() {
+        return AIPlayer.CONFIG == null || AIPlayer.CONFIG.isGameplayTipsEnabled();
+    }
+
+    private static void playMagicUiSound(MinecraftClient client) {
+        if (client == null || client.player == null) {
+            return;
+        }
+        client.player.playSound(SoundEvents.BLOCK_AMETHYST_CLUSTER_BREAK, 0.28f, 1.8f);
+        client.player.playSound(SoundEvents.BLOCK_ENCHANTMENT_TABLE_USE, 0.42f, 1.25f);
+    }
+
+    private static void playMagicPickupSound(MinecraftClient client) {
+        if (client == null || client.player == null) {
+            return;
+        }
+        client.player.playSound(SoundEvents.ENTITY_EXPERIENCE_ORB_PICKUP, 0.42f, 1.6f);
+        client.player.playSound(SoundEvents.BLOCK_AMETHYST_BLOCK_CHIME, 0.36f, 1.35f);
     }
 
     public static int getCompanionQuestStage(String botAlias) {
@@ -440,7 +466,24 @@ public class AIPlayerClient implements ClientModInitializer {
                     handleRecruitContactKey(client);
                 }
             }
+
+            if (CompanionHotkeyOverlayHud.isVisible() && client.player != null) {
+                int selected = client.player.getInventory().getSelectedSlot();
+                if (overlayHotbarLockedSlot < 0) {
+                    overlayHotbarLockedSlot = selected;
+                } else if (selected != overlayHotbarLockedSlot) {
+                    client.player.getInventory().setSelectedSlot(overlayHotbarLockedSlot);
+                }
+            } else {
+                overlayHotbarLockedSlot = -1;
+            }
             tickHotkeyOverlaySelection(client);
+
+            // If the overlay was closed by a key selection this tick, restore the locked slot once.
+            if (!CompanionHotkeyOverlayHud.isVisible() && overlayHotbarLockedSlot >= 0 && client.player != null) {
+                client.player.getInventory().setSelectedSlot(overlayHotbarLockedSlot);
+                overlayHotbarLockedSlot = -1;
+            }
 
             // Update leash button visibility based on whether we're looking at a bot with leashed animals
             updateLeashButtonVisibility(client);
@@ -669,6 +712,9 @@ public class AIPlayerClient implements ClientModInitializer {
         if (client == null || client.player == null || client.currentScreen != null) {
             return;
         }
+        if (!isGameplayTipsEnabled()) {
+            return;
+        }
         if (!survivalRecruitmentEnabled || survivalRecruitmentCompleted || !recruitmentPromptVisible) {
             return;
         }
@@ -707,23 +753,35 @@ public class AIPlayerClient implements ClientModInitializer {
             lastHasEyeToken = false;
             lastHasHornToken = false;
             lastHasEnchantingTableToken = false;
+            lastHasWizardTomeToken = false;
             return;
         }
 
         boolean hasEye = hasEyeOfEnderToken(client);
         boolean hasHorn = hasGoatHornToken(client);
         boolean hasTable = hasEnchantingTableToken(client);
+        boolean hasWizardTome = hasWizardTomeToken(client);
 
         String newlyAcquired = null;
-        if (!lastHasEyeToken && hasEye) newlyAcquired = "Eye of Ender";
+        if (!lastHasWizardTomeToken && hasWizardTome) newlyAcquired = "Wizard's Tome";
+        else if (!lastHasEyeToken && hasEye) newlyAcquired = "Eye of Ender";
         else if (!lastHasHornToken && hasHorn) newlyAcquired = "Goat Horn";
         else if (!lastHasEnchantingTableToken && hasTable) newlyAcquired = "Enchanting Table";
 
+        lastHasWizardTomeToken = hasWizardTome;
         lastHasEyeToken = hasEye;
         lastHasHornToken = hasHorn;
         lastHasEnchantingTableToken = hasTable;
 
         if (newlyAcquired == null) {
+            return;
+        }
+
+        if ("Wizard's Tome".equals(newlyAcquired)) {
+            playMagicPickupSound(client);
+        }
+
+        if (!isGameplayTipsEnabled()) {
             return;
         }
 
@@ -741,6 +799,9 @@ public class AIPlayerClient implements ClientModInitializer {
     private static void renderSpellsAcquireHint(DrawContext context) {
         MinecraftClient client = MinecraftClient.getInstance();
         if (client == null || client.player == null || client.currentScreen != null) {
+            return;
+        }
+        if (!isGameplayTipsEnabled()) {
             return;
         }
 
@@ -809,6 +870,7 @@ public class AIPlayerClient implements ClientModInitializer {
         }
 
         String alias = getRecruitmentBotAlias();
+        playMagicUiSound(client);
         client.setScreen(new CompanionSpellsScreen(null, alias));
         return true;
     }
@@ -816,6 +878,9 @@ public class AIPlayerClient implements ClientModInitializer {
     private static void renderSpellsPrompt(DrawContext context) {
         MinecraftClient client = MinecraftClient.getInstance();
         if (client == null || client.player == null || client.currentScreen != null) {
+            return;
+        }
+        if (!isGameplayTipsEnabled()) {
             return;
         }
         if (!survivalRecruitmentEnabled || !survivalRecruitmentCompleted) {
@@ -957,6 +1022,32 @@ public class AIPlayerClient implements ClientModInitializer {
                 return true;
             }
             // New: allow renamed-book variants containing "wizard" + "tome".
+            if (lower.contains("wizard") && lower.contains("tome")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean hasWizardTomeToken(MinecraftClient client) {
+        if (client == null || client.player == null) {
+            return false;
+        }
+        var inv = client.player.getInventory();
+        int n = inv.size();
+        for (int i = 0; i < n; i++) {
+            var stack = inv.getStack(i);
+            if (stack == null || stack.isEmpty()) {
+                continue;
+            }
+            if (stack.isOf(ModItems.WIZARD_TOME)) {
+                return true;
+            }
+            if (!(stack.isOf(Items.WRITTEN_BOOK) || stack.isOf(Items.ENCHANTED_BOOK))) {
+                continue;
+            }
+            String name = stack.getName() != null ? stack.getName().getString() : "";
+            String lower = name != null ? name.toLowerCase(java.util.Locale.ROOT) : "";
             if (lower.contains("wizard") && lower.contains("tome")) {
                 return true;
             }
@@ -1182,7 +1273,7 @@ public class AIPlayerClient implements ClientModInitializer {
             }
             case 3 -> handleSpellsContextKey(client);
             case 4 -> handleFollowToggleLookedAt(client);
-            case 5 -> handleGoToLook(client);
+            case 5 -> handleSleepLook(client);
             case 6 -> {
                 if (formattedTarget != null) {
                     sendChatCommand(client, "bot come " + formattedTarget);
@@ -1243,6 +1334,9 @@ public class AIPlayerClient implements ClientModInitializer {
 
     private static void renderDirectionalMiningHint(DrawContext context) {
         if (!hasPendingDirectionalMining()) {
+            return;
+        }
+        if (!isGameplayTipsEnabled()) {
             return;
         }
         MinecraftClient client = MinecraftClient.getInstance();
@@ -1323,6 +1417,9 @@ public class AIPlayerClient implements ClientModInitializer {
         if (lookedAtBotStatus == null || lookedAtBotUuid == null) {
             return;
         }
+        if (!isGameplayTipsEnabled()) {
+            return;
+        }
         MinecraftClient client = MinecraftClient.getInstance();
         if (client == null || client.player == null || client.currentScreen != null) {
             return;
@@ -1349,6 +1446,8 @@ public class AIPlayerClient implements ClientModInitializer {
         String line;
         if (lookedAtBotStatus.paused()) {
             line = alias + " is paused. Press [" + resumeKey + "] to resume or [" + stopKey + "] to stop.";
+        } else if (lookedAtBotStatus.returningHome()) {
+            line = alias + " is returning home. Press [" + stopKey + "] to stop.";
         } else if (lookedAtBotStatus.active()) {
             String task = lookedAtBotStatus.taskLabel() != null && !lookedAtBotStatus.taskLabel().isBlank()
                     ? lookedAtBotStatus.taskLabel()
@@ -1418,6 +1517,18 @@ public class AIPlayerClient implements ClientModInitializer {
         }
     }
 
+    private static void handleSleepLook(MinecraftClient client) {
+        if (client == null || client.player == null) {
+            return;
+        }
+        String target = resolveQuickBotTarget(client);
+        if (target != null && !target.isBlank()) {
+            sendChatCommand(client, "bot sleep " + formatBotTarget(target));
+        } else {
+            sendChatCommand(client, "bot sleep");
+        }
+    }
+
     private static void handleFollowToggleLookedAt(MinecraftClient client) {
         if (client == null || client.player == null || client.world == null) {
             return;
@@ -1428,7 +1539,9 @@ public class AIPlayerClient implements ClientModInitializer {
         }
         String name = findLookedAtBotName(client);
         if (name == null || name.isBlank()) {
-            client.player.sendMessage(Text.literal("Look at a bot to toggle follow (within 16 blocks)."), true);
+            if (isGameplayTipsEnabled()) {
+                client.player.sendMessage(Text.literal("Look at a bot to toggle follow (within 16 blocks)."), true);
+            }
             return;
         }
         sendChatCommand(client, "bot follow toggle " + formatBotTarget(name));
@@ -1477,7 +1590,9 @@ public class AIPlayerClient implements ClientModInitializer {
         
         String name = findLookedAtBotName(client);
         if (name == null || name.isBlank()) {
-            client.player.sendMessage(Text.literal("Look at a bot to stop it (within 16 blocks)."), true);
+            if (isGameplayTipsEnabled()) {
+                client.player.sendMessage(Text.literal("Look at a bot to stop it (within 16 blocks)."), true);
+            }
             return;
         }
         sendChatCommand(client, "bot stop " + formatBotTarget(name));
@@ -1548,6 +1663,9 @@ public class AIPlayerClient implements ClientModInitializer {
 
     private static void renderResumeDecisionHint(DrawContext context) {
         if (!resumeDecisionActive) {
+            return;
+        }
+        if (!isGameplayTipsEnabled()) {
             return;
         }
         MinecraftClient client = MinecraftClient.getInstance();
@@ -1677,17 +1795,23 @@ public class AIPlayerClient implements ClientModInitializer {
                 sendChatCommand(client, "bot stop " + mountedBotName);
                 // Small delay before leash command - we send it immediately, the server will handle sequencing.
                 sendChatCommand(client, "bot leash " + mountedBotName);
-                client.player.sendMessage(Text.literal("Telling " + mountedBotName + " to dismount and tether."), true);
+                if (isGameplayTipsEnabled()) {
+                    client.player.sendMessage(Text.literal("Telling " + mountedBotName + " to dismount and tether."), true);
+                }
                 return;
             } else {
-                client.player.sendMessage(Text.literal("No nearby mounted bot found."), true);
+                if (isGameplayTipsEnabled()) {
+                    client.player.sendMessage(Text.literal("No nearby mounted bot found."), true);
+                }
                 return;
             }
         }
 
         // Case 3: Not looking at a bot with leashed animals, not mounted.
         System.out.println("[AI-Player] handleLeashKey: Case 3 - showing hint message");
-        client.player.sendMessage(Text.literal("Look at a bot with leashed animals, or be mounted near a mounted bot."), true);
+        if (isGameplayTipsEnabled()) {
+            client.player.sendMessage(Text.literal("Look at a bot with leashed animals, or be mounted near a mounted bot."), true);
+        }
     }
 
     /**
@@ -1729,6 +1853,9 @@ public class AIPlayerClient implements ClientModInitializer {
      * or when mounted near a mounted bot.
      */
     private static void renderLeashButton(DrawContext context) {
+        if (!isGameplayTipsEnabled()) {
+            return;
+        }
         MinecraftClient client = MinecraftClient.getInstance();
         if (client == null || client.player == null || client.currentScreen != null) {
             return;

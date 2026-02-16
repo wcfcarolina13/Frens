@@ -14,6 +14,7 @@ import net.minecraft.block.Blocks;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.item.Items;
+import net.minecraft.sound.SoundEvents;
 import net.minecraft.text.Text;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.math.MathHelper;
@@ -179,6 +180,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         IDLE_HOBBIES,
         AUTO_HUNT_STARVING,
         VOICED_DIALOGUE,
+        GAMEPLAY_TIPS,
         UNLEASH_TETHERED,
         LEASH_ON_DISMOUNT,
         TELEPORT_SKILLS,
@@ -316,6 +318,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
                 // Spell-like companion commands earned via questing.
                 // Access is gated (Enchanting Table nearby, or a later-stage Wizard's Tome token).
                 new TopicEntry("Spells >", TopicCategory.ADMIN, TopicAction.OPEN_SPELLS, false, 0, null),
+                new TopicEntry("Gameplay Tips", TopicCategory.ADMIN, TopicAction.GAMEPLAY_TIPS, true, 0, null),
                 TopicEntry.admin("Give Wizard's Tome", "give_wizard_tome"),
                 TopicEntry.admin("Recruit status", "recruit_status"),
                 TopicEntry.admin("Reset recruit", "recruit_reset"),
@@ -2042,6 +2045,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case IDLE_HOBBIES -> toggleIdleHobbies();
             case AUTO_HUNT_STARVING -> toggleAutoHuntStarving();
             case VOICED_DIALOGUE -> toggleVoicedDialogue();
+            case GAMEPLAY_TIPS -> toggleGameplayTips();
             case UNLEASH_TETHERED -> toggleUnleashTethered();
             case LEASH_ON_DISMOUNT -> toggleLeashOnDismount();
             case TELEPORT_SKILLS -> toggleTeleportSkills();
@@ -2414,6 +2418,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case IDLE_HOBBIES -> isIdleHobbiesActive();
             case AUTO_HUNT_STARVING -> isAutoHuntStarvingActive();
             case VOICED_DIALOGUE -> isVoicedDialogueActive();
+            case GAMEPLAY_TIPS -> isGameplayTipsActive();
             case UNLEASH_TETHERED -> isUnleashTetheredActive();
             case LEASH_ON_DISMOUNT -> isLeashOnDismountActive();
             case TELEPORT_SKILLS -> isTeleportSkillsActive();
@@ -2812,6 +2817,18 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         AIPlayer.CONFIG.save();
     }
 
+    private boolean isGameplayTipsActive() {
+        return AIPlayer.CONFIG == null || AIPlayer.CONFIG.isGameplayTipsEnabled();
+    }
+
+    private void toggleGameplayTips() {
+        if (AIPlayer.CONFIG == null) {
+            return;
+        }
+        AIPlayer.CONFIG.setGameplayTipsEnabled(!AIPlayer.CONFIG.isGameplayTipsEnabled());
+        AIPlayer.CONFIG.save();
+    }
+
     private boolean isTeleportSkillsActive() {
         ManualConfig.BotControlSettings settings = AIPlayer.CONFIG.getEffectiveBotControl(botAlias);
         return settings != null && settings.isTeleportDuringSkills();
@@ -2892,6 +2909,10 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
     private void openSpellsMenu() {
         if (this.client == null) {
             return;
+        }
+        if (this.client.player != null) {
+            this.client.player.playSound(SoundEvents.BLOCK_AMETHYST_CLUSTER_BREAK, 0.28f, 1.8f);
+            this.client.player.playSound(SoundEvents.BLOCK_ENCHANTMENT_TABLE_USE, 0.42f, 1.25f);
         }
         this.client.setScreen(new CompanionSpellsScreen(this, this.botAlias));
     }

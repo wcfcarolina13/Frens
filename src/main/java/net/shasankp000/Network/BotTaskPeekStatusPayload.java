@@ -10,6 +10,7 @@ public record BotTaskPeekStatusPayload(String botUuid,
                                        String botAlias,
                                        boolean active,
                                        boolean paused,
+                                       boolean returningHome,
                                        String taskLabel) implements CustomPayload {
     public static final Identifier ID_IDENTIFIER = Identifier.of("ai-player", "bot_task_peek_status");
     public static final CustomPayload.Id<BotTaskPeekStatusPayload> ID = new CustomPayload.Id<>(ID_IDENTIFIER);
@@ -34,6 +35,7 @@ public record BotTaskPeekStatusPayload(String botUuid,
                     STRING_CODEC, BotTaskPeekStatusPayload::botAlias,
                     BOOL_CODEC, BotTaskPeekStatusPayload::active,
                     BOOL_CODEC, BotTaskPeekStatusPayload::paused,
+                    BOOL_CODEC, BotTaskPeekStatusPayload::returningHome,
                     STRING_CODEC, BotTaskPeekStatusPayload::taskLabel,
                     BotTaskPeekStatusPayload::new
             );

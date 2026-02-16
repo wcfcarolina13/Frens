@@ -121,6 +121,7 @@ public final class ReturnBaseStuckService {
      */
     private static final int QUICK_NUDGE_AFTER_TICKS = 30;
     private static final long QUICK_NUDGE_COOLDOWN_MS = 900L;
+    private static final long LEAF_CLEAR_COOLDOWN_MS = 900L;
 
     /** Only count progress when distance-to-base improves by at least this many blocks. */
     private static final double MIN_BASE_PROGRESS_BLOCKS = 0.35D;
@@ -149,6 +150,7 @@ public final class ReturnBaseStuckService {
     private static final Map<UUID, Integer> STAGNANT_TICKS = new ConcurrentHashMap<>();
     private static final Map<UUID, Double> BEST_BASE_DIST = new ConcurrentHashMap<>();
     private static final Map<UUID, Long> LAST_FLARE_MS = new ConcurrentHashMap<>();
+    private static final Map<UUID, Long> LAST_LEAF_CLEAR_MS = new ConcurrentHashMap<>();
     private static final Map<UUID, Long> LAST_QUICK_NUDGE_MS = new ConcurrentHashMap<>();
     private static final Map<UUID, Long> LAST_MINE_ESCAPE_MS = new ConcurrentHashMap<>();
     private static final Map<UUID, Long> LAST_MINE_SURFACE_MS = new ConcurrentHashMap<>();
@@ -348,6 +350,13 @@ public final class ReturnBaseStuckService {
         // First line of defense: quick nudge into adjacent open space.
         // This resolves most "stuck under a cliff" / "just turn and step out" cases quickly.
         if (stagnant >= quickNudgeTicks) {
+            long lastLeafClear = LAST_LEAF_CLEAR_MS.getOrDefault(botId, -1L);
+            if (lastLeafClear < 0 || (nowMs - lastLeafClear) >= LEAF_CLEAR_COOLDOWN_MS) {
+                if (tryClearLeafObstructionTowardBase(bot, baseTarget, stagnant)) {
+                    LAST_LEAF_CLEAR_MS.put(botId, nowMs);
+                    return false;
+                }
+            }
             long lastNudge = LAST_QUICK_NUDGE_MS.getOrDefault(botId, -1L);
             if (lastNudge < 0 || (nowMs - lastNudge) >= QUICK_NUDGE_COOLDOWN_MS) {
                 boolean nudged = tryQuickNudge(bot, baseTarget, stagnant);
@@ -518,6 +527,7 @@ public final class ReturnBaseStuckService {
             LAST_POS.remove(botId);
             STAGNANT_TICKS.remove(botId);
             BEST_BASE_DIST.remove(botId);
+            LAST_LEAF_CLEAR_MS.remove(botId);
             LAST_QUICK_NUDGE_MS.remove(botId);
             LAST_MINE_ESCAPE_MS.remove(botId);
             LAST_MINE_SURFACE_MS.remove(botId);
@@ -1062,6 +1072,37 @@ public final class ReturnBaseStuckService {
 
         LOGGER.info("ReturnBaseStuck: quick-nudge to {} (stagnant={}, score={}, failedMem={})",
                 best.toShortString(), stagnant, String.format("%.2f", bestScore), failedDirs.size());
+        return true;
+    }
+
+    private static boolean tryClearLeafObstructionTowardBase(ServerPlayerEntity bot, Vec3d baseTarget, int stagnant) {
+        if (bot == null || baseTarget == null) {
+            return false;
+        }
+        if (!(bot.getEntityWorld() instanceof ServerWorld)) {
+            return false;
+        }
+
+        double dx = baseTarget.x - bot.getX();
+        double dz = baseTarget.z - bot.getZ();
+        Direction toward;
+        if (Math.abs(dx) >= Math.abs(dz)) {
+            toward = dx >= 0.0D ? Direction.EAST : Direction.WEST;
+        } else {
+            toward = dz >= 0.0D ? Direction.SOUTH : Direction.NORTH;
+        }
+        if (!toward.getAxis().isHorizontal()) {
+            toward = bot.getHorizontalFacing();
+        }
+
+        if (!MovementService.hasLeafObstruction(bot, toward)) {
+            return false;
+        }
+        if (!MovementService.clearLeafObstruction(bot, toward)) {
+            return false;
+        }
+        LOGGER.info("ReturnBaseStuck: leaf-clear toward base succeeded for {} (toward={}, stagnant={})",
+                bot.getName().getString(), toward, stagnant);
         return true;
     }
 

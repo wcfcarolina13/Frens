@@ -9,6 +9,7 @@ import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import com.mojang.brigadier.exceptions.SimpleCommandExceptionType;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.minecraft.block.BlockState;
+import net.minecraft.block.Blocks;
 import net.minecraft.command.argument.BlockPosArgumentType;
 import net.minecraft.command.argument.EntityArgumentType;
 import net.minecraft.entity.attribute.EntityAttributes;
@@ -58,6 +59,7 @@ import net.shasankp000.GameAI.services.BotPersistenceService;
 import net.shasankp000.GameAI.services.BotCommandStateService;
 import net.shasankp000.GameAI.services.BotHomeService;
 import net.shasankp000.GameAI.services.BotIdleHobbiesService;
+import net.shasankp000.GameAI.services.BotInventoryFullDialogueService;
 import net.shasankp000.GameAI.services.SafePositionService;
 import net.shasankp000.GameAI.State;
 import net.shasankp000.GameAI.StateActions;
@@ -176,6 +178,17 @@ public class modCommandRegistry {
             "batch3_dimensions", "topic_dimensions",
             "batch3_traders_mounts", "topic_mounts",
             "batch3_travel", "topic_travel"
+    );
+    private static final Set<Item> GO_TO_LOOK_STORAGE_UTILITY_EXCLUSIONS = Set.of(
+            ModItems.WIZARD_TOME,
+            Items.GOAT_HORN,
+            Items.ENDER_EYE,
+            Items.CHEST,
+            Items.BARREL,
+            Items.CRAFTING_TABLE,
+            Items.FURNACE,
+            Items.BLAST_FURNACE,
+            Items.SMOKER
     );
 
 
@@ -3470,15 +3483,21 @@ public class modCommandRegistry {
             return 0;
         }
 
-        BlockPos raw = bhr.getBlockPos().offset(bhr.getSide()).toImmutable();
-        BlockPos goal = SafePositionService.findSafeNear(commanderWorld, raw, 8);
-        if (goal == null) {
-            // Fall back to trying the clicked block column.
-            goal = SafePositionService.findSafeNear(commanderWorld, bhr.getBlockPos().toImmutable(), 8);
-        }
-        if (goal == null) {
-            ChatUtils.sendSystemMessage(source, "that's too far");
-            return 0;
+        BlockPos lookedPos = bhr.getBlockPos().toImmutable();
+        boolean storageTarget = isStorageLookTarget(commanderWorld.getBlockState(lookedPos));
+
+        BlockPos goal = null;
+        if (!storageTarget) {
+            BlockPos raw = lookedPos.offset(bhr.getSide()).toImmutable();
+            goal = SafePositionService.findSafeNear(commanderWorld, raw, 8);
+            if (goal == null) {
+                // Fall back to trying the clicked block column.
+                goal = SafePositionService.findSafeNear(commanderWorld, lookedPos, 8);
+            }
+            if (goal == null) {
+                ChatUtils.sendSystemMessage(source, "that's too far");
+                return 0;
+            }
         }
 
         List<ServerPlayerEntity> bots;
@@ -3522,21 +3541,74 @@ public class modCommandRegistry {
                 continue;
             }
 
-            // Player-issued override: interrupt any running skill so follow-walk can take over.
-            TaskService.forceAbort(bot.getUuid(), "§cInterrupted by /bot go_to_look.");
-            // After a commander-directed move, wait longer before starting idle hobbies.
-            BotIdleHobbiesService.snoozeFor(bot, 3_600L);
-            // Non-destructive move: do not trigger come-recovery digging skills while repositioning.
-            BotEventHandler.setComeModeWalk(bot, commander, goal, 3.2D, false);
-            successes++;
+            if (storageTarget) {
+                // Player-issued override: interrupt any running skill so storage offload can take over.
+                TaskService.forceAbort(bot.getUuid(), "§cInterrupted by /bot go_to_look (storage offload).");
+                BotIdleHobbiesService.snoozeFor(bot, 3_600L);
+                final ServerPlayerEntity offloadBot = bot;
+                final BlockPos storagePos = lookedPos;
+                CompletableFuture.runAsync(() -> {
+                    int moved = ChestStoreService.depositMatchingWalkOnly(source, offloadBot, storagePos, modCommandRegistry::isGoToLookStorageOffloadItem);
+                    source.getServer().execute(() -> {
+                        if (moved > 0) {
+                            ChatUtils.sendSystemMessage(source, offloadBot.getName().getString() + " dropped off " + moved + " item"
+                                    + (moved == 1 ? "" : "s") + ".");
+                            BotInventoryFullDialogueService.tryShowChestRelief(offloadBot, "go-to-look-storage");
+                        } else {
+                            ChatUtils.sendSystemMessage(source, offloadBot.getName().getString()
+                                    + " couldn't drop off anything (no matching junk or storage unreachable).");
+                        }
+                    });
+                });
+                successes++;
+            } else {
+                // Player-issued override: interrupt any running skill so follow-walk can take over.
+                TaskService.forceAbort(bot.getUuid(), "§cInterrupted by /bot go_to_look.");
+                // After a commander-directed move, wait longer before starting idle hobbies.
+                BotIdleHobbiesService.snoozeFor(bot, 3_600L);
+                // Non-destructive move: do not trigger come-recovery digging skills while repositioning.
+                BotEventHandler.setComeModeWalk(bot, commander, goal, 3.2D, false);
+                successes++;
+            }
         }
 
         if (successes > 0) {
             String summary = formatBotList(bots, isAll);
             String verb = (isAll || bots.size() > 1) ? "are" : "is";
-            ChatUtils.sendSystemMessage(source, summary + " " + verb + " heading to where you're looking.");
+            if (storageTarget) {
+                ChatUtils.sendSystemMessage(source, summary + " " + verb + " heading to storage to drop off junk.");
+            } else {
+                ChatUtils.sendSystemMessage(source, summary + " " + verb + " heading to where you're looking.");
+            }
         }
         return successes;
+    }
+
+    private static boolean isStorageLookTarget(BlockState state) {
+        if (state == null) {
+            return false;
+        }
+        return state.isOf(Blocks.CHEST) || state.isOf(Blocks.TRAPPED_CHEST) || state.isOf(Blocks.BARREL);
+    }
+
+    private static boolean isGoToLookStorageOffloadItem(ItemStack stack) {
+        if (stack == null || stack.isEmpty()) {
+            return false;
+        }
+        if (ChestStoreService.isOffloadProtected(stack)) {
+            return false;
+        }
+        if (isFoodItem.checkFoodItem(stack)) {
+            return false;
+        }
+        if (GO_TO_LOOK_STORAGE_UTILITY_EXCLUSIONS.contains(stack.getItem())) {
+            return false;
+        }
+        String lowerName = stack.getName() != null ? stack.getName().getString().toLowerCase(Locale.ROOT) : "";
+        if (lowerName.contains("spell") || (lowerName.contains("wizard") && lowerName.contains("tome"))) {
+            return false;
+        }
+        return true;
     }
 
     /**

@@ -45,6 +45,9 @@ public final class BotIdleHobbiesService {
     private static final int DONT_START_AFTER_TOD = 11_000;
 
     private static final Map<UUID, Long> NEXT_DECISION_TICK = new ConcurrentHashMap<>();
+    private static final long BLOCKED_REASON_LOG_INTERVAL_TICKS = 20L * 45L;
+    private static final Map<UUID, String> LAST_BLOCKED_REASON = new ConcurrentHashMap<>();
+    private static final Map<UUID, Long> LAST_BLOCKED_REASON_LOG_TICK = new ConcurrentHashMap<>();
 
     // When a bot first appears in the current server session, delay idle-hobby starts briefly.
     // Why: during join/restore, bots may be at a transient spawn position (or chunks around them
@@ -68,6 +71,8 @@ public final class BotIdleHobbiesService {
         LAST_HOBBY.clear();
         LAST_HOBBY_END_MS.clear();
         FIRST_SEEN_TICK.clear();
+        LAST_BLOCKED_REASON.clear();
+        LAST_BLOCKED_REASON_LOG_TICK.clear();
     }
 
     /** Returns the last idle-hobby skill name (e.g. "fish"/"hangout"), or null if unknown. */
@@ -163,30 +168,36 @@ public final class BotIdleHobbiesService {
                 continue;
             }
             if (world.getRegistryKey() != World.OVERWORLD) {
+                noteBlocked(bot, nowTick, "not-overworld");
                 continue;
             }
             if (bot.isSleeping()) {
+                noteBlocked(bot, nowTick, "sleeping");
                 continue;
             }
 
             // Only start hobbies when truly idle (not following, not guard/patrol, not returning).
             if (BotEventHandler.getCurrentMode(bot) != BotEventHandler.Mode.IDLE) {
+                noteBlocked(bot, nowTick, "mode-not-idle:" + BotEventHandler.getCurrentMode(bot));
                 continue;
             }
 
             // Extra safety: if follow/base intent is set but mode is momentarily IDLE, don't start a hobby.
             // This prevents hobbies from stealing control while a follow is active.
             if (BotEventHandler.getFollowTargetUuid(bot) != null || BotEventHandler.getBaseTarget(bot) != null) {
+                noteBlocked(bot, nowTick, "follow-or-base-intent");
                 continue;
             }
 
             // Never compete with a task.
             if (TaskService.hasActiveTask(bot.getUuid())) {
+                noteBlocked(bot, nowTick, "active-task");
                 continue;
             }
 
             int tod = (int) (world.getTimeOfDay() % 24_000L);
             if (tod >= DONT_START_AFTER_TOD) {
+                noteBlocked(bot, nowTick, "late-day");
                 continue;
             }
 
@@ -195,9 +206,11 @@ public final class BotIdleHobbiesService {
             // First-seen grace window: let persistence restoration and chunk ticketing settle.
             Long firstSeen = FIRST_SEEN_TICK.putIfAbsent(botUuid, nowTick);
             if (firstSeen == null) {
+                noteBlocked(bot, nowTick, "first-seen-grace");
                 continue;
             }
             if (nowTick - firstSeen < JOIN_GRACE_TICKS) {
+                noteBlocked(bot, nowTick, "join-grace");
                 continue;
             }
 
@@ -212,6 +225,7 @@ public final class BotIdleHobbiesService {
             }
 
             if (nowTick < next) {
+                noteBlocked(bot, nowTick, "backoff:" + (next - nowTick) + "t");
                 continue;
             }
 
@@ -219,24 +233,32 @@ public final class BotIdleHobbiesService {
             Vec3d home = resolveHomeAnchor(world, bot);
             if (home == null) {
                 NEXT_DECISION_TICK.put(bot.getUuid(), nowTick + 200L);
+                noteBlocked(bot, nowTick, "no-home-anchor");
                 continue;
             }
             double distHome = new Vec3d(bot.getX(), bot.getY(), bot.getZ()).distanceTo(home);
             if (distHome > 24.0D) {
                 NEXT_DECISION_TICK.put(bot.getUuid(), nowTick + 200L);
+                noteBlocked(bot, nowTick, "too-far-from-home:" + String.format(Locale.ROOT, "%.1f", distHome));
                 continue;
             }
 
             String hobby = pickHobby(bot, world);
             if (hobby == null) {
-                // No suitable hobby for current inventory/terrain; try again later.
-                NEXT_DECISION_TICK.put(bot.getUuid(), nowTick + 400L + RNG.nextInt(400));
-                continue;
+                hobby = pickFallbackHobby(bot, world);
+                if (hobby == null) {
+                    // No suitable hobby for current inventory/terrain; try again later.
+                    NEXT_DECISION_TICK.put(bot.getUuid(), nowTick + 400L + RNG.nextInt(400));
+                    noteBlocked(bot, nowTick, "no-hobby-candidates");
+                    continue;
+                }
+                LOGGER.debug("Idle hobbies fallback '{}' for {}", hobby, bot.getName().getString());
             }
 
             // Minimal backoff: the running task will block additional hobby starts via TaskService.
             // We schedule the true “cooldown” when the hobby finishes (success/failure).
             NEXT_DECISION_TICK.put(bot.getUuid(), nowTick + 80L + RNG.nextInt(80));
+            clearBlockedNote(bot.getUuid());
 
             LOGGER.info("Starting idle hobby '{}' for {}", hobby, bot.getName().getString());
             LAST_HOBBY.put(bot.getUuid(), hobby.toLowerCase(Locale.ROOT));
@@ -319,6 +341,14 @@ public final class BotIdleHobbiesService {
         }
 
         return null;
+    }
+
+    private static String pickFallbackHobby(ServerPlayerEntity bot, ServerWorld world) {
+        if (bot == null || world == null) {
+            return null;
+        }
+        // Low-intensity fallback so "idle hobbies enabled" does not appear inert in sparse environments.
+        return "hangout";
     }
 
     private static boolean hasItem(ServerPlayerEntity bot, net.minecraft.item.Item item) {
@@ -470,5 +500,29 @@ public final class BotIdleHobbiesService {
                 LAST_HOBBY_END_MS.put(botUuid, System.currentTimeMillis());
             }
         });
+    }
+
+    private static void noteBlocked(ServerPlayerEntity bot, long nowTick, String reason) {
+        if (bot == null || reason == null || reason.isBlank()) {
+            return;
+        }
+        UUID id = bot.getUuid();
+        String previous = LAST_BLOCKED_REASON.get(id);
+        long lastTick = LAST_BLOCKED_REASON_LOG_TICK.getOrDefault(id, Long.MIN_VALUE);
+        boolean reasonChanged = !reason.equals(previous);
+        if (!reasonChanged && nowTick - lastTick < BLOCKED_REASON_LOG_INTERVAL_TICKS) {
+            return;
+        }
+        LAST_BLOCKED_REASON.put(id, reason);
+        LAST_BLOCKED_REASON_LOG_TICK.put(id, nowTick);
+        LOGGER.info("Idle hobbies blocked for {}: {}", bot.getName().getString(), reason);
+    }
+
+    private static void clearBlockedNote(UUID botUuid) {
+        if (botUuid == null) {
+            return;
+        }
+        LAST_BLOCKED_REASON.remove(botUuid);
+        LAST_BLOCKED_REASON_LOG_TICK.remove(botUuid);
     }
 }

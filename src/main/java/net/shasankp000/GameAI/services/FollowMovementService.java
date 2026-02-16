@@ -5,6 +5,7 @@ import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.fluid.Fluids;
+import net.minecraft.registry.tag.FluidTags;
 import net.shasankp000.Entity.LookController;
 import net.shasankp000.GameAI.BotActions;
 
@@ -90,13 +91,7 @@ public final class FollowMovementService {
         if (lowerShield != null) {
             lowerShield.run();
         }
-        BotActions.sprint(bot, sprint);
-        if (target.y - pos.y > 0.6D) {
-            BotActions.jump(bot);
-        } else {
-            BotActions.autoJumpIfNeeded(bot);
-        }
-        BotActions.applyMovementInput(bot, target, sprint ? 0.18 : 0.14);
+        applyHumanLikeForwardInput(bot, target, sprint, sprint ? 0.18D : 0.14D, 0.11D);
     }
 
     public static void followInputStep(ServerPlayerEntity bot,
@@ -135,14 +130,7 @@ public final class FollowMovementService {
             lowerShield.run();
         }
         boolean sprint = distanceSq > followSprintDistanceSq;
-        BotActions.sprint(bot, sprint);
-        double dy = waypointCenter.y - bot.getY();
-        if (dy > 0.6D) {
-            BotActions.jump(bot);
-        } else {
-            BotActions.autoJumpIfNeeded(bot);
-        }
-        BotActions.applyMovementInput(bot, waypointCenter, sprint ? 0.2D : 0.16D);
+        applyHumanLikeForwardInput(bot, waypointCenter, sprint, sprint ? 0.20D : 0.16D, 0.12D);
     }
 
     public static WaypointRepositionResult tryWaypointLocalRepositionDetailed(ServerPlayerEntity bot, BlockPos waypoint) {
@@ -282,15 +270,8 @@ public final class FollowMovementService {
         }
 
         boolean sprint = distanceSq > followSprintDistanceSq;
-        BotActions.sprint(bot, sprint);
-        double dy = targetPos.y - bot.getY();
-        if (dy > 0.6D) {
-            BotActions.jump(bot);
-        } else if (distanceSq > 2.25D) {
-            BotActions.autoJumpIfNeeded(bot);
-        }
-        double impulse = sprint ? 0.22 : 0.16;
-        BotActions.applyMovementInput(bot, targetPos, impulse);
+        double impulse = sprint ? 0.22D : 0.16D;
+        applyHumanLikeForwardInput(bot, targetPos, sprint, impulse, 0.12D);
     }
 
     private static boolean tryLocalObstacleNudge(ServerPlayerEntity bot, Vec3d targetPos) {
@@ -654,5 +635,49 @@ public final class FollowMovementService {
         }
         LAST_DROP_WARNING_MS.put(id, now);
         CompanionOverheadDialogueService.showOverheadLine(bot, DROP_WARNING_LINE, 2_800, 32.0D, "follow-drop-guard", "dropoff");
+    }
+
+    private static void applyHumanLikeForwardInput(ServerPlayerEntity bot,
+                                                   Vec3d targetPos,
+                                                   boolean sprint,
+                                                   double groundImpulse,
+                                                   double waterImpulse) {
+        if (bot == null || targetPos == null) {
+            return;
+        }
+        boolean inWater = isWaterLikeContext(bot);
+        if (inWater) {
+            // Avoid "ice-skating" across water during follow/return-home; keep movement buoyant and moderate.
+            BotActions.sprint(bot, false);
+            if (targetPos.y >= bot.getY() - 0.15D) {
+                BotActions.jump(bot);
+            }
+            BotActions.applyMovementInput(bot, targetPos, Math.max(0.08D, waterImpulse));
+            return;
+        }
+
+        BotActions.sprint(bot, sprint);
+        double dy = targetPos.y - bot.getY();
+        if (dy > 0.6D) {
+            BotActions.jump(bot);
+        } else {
+            BotActions.autoJumpIfNeeded(bot);
+        }
+        BotActions.applyMovementInput(bot, targetPos, Math.max(0.10D, groundImpulse));
+    }
+
+    private static boolean isWaterLikeContext(ServerPlayerEntity bot) {
+        if (bot == null) {
+            return false;
+        }
+        if (bot.isTouchingWater() || bot.isSwimming()) {
+            return true;
+        }
+        if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
+            return false;
+        }
+        BlockPos feet = bot.getBlockPos();
+        return world.getFluidState(feet).isIn(FluidTags.WATER)
+                || world.getFluidState(feet.up()).isIn(FluidTags.WATER);
     }
 }

@@ -30,12 +30,19 @@ public final class CompanionHotkeyOverlayHud {
             "2 ▶ Resume",
             "3 ✨ Spells",
             "4 👣 Follow Toggle",
-            "5 🎯 Go To Look",
+            "5 🛌 Sleep",
             "6 📣 Come",
             "7 ⛏ Stripmine",
             "8 🪜 Ascent",
             "9 🕳 Descent",
             "0 🧹 Cleanup"
+    };
+
+    private static final String[] FOOTER_LINES = {
+            "[`] Toggle Follow",
+            "[-] Open spells / Go To Look / confirm direction",
+            "[\\] Stop",
+            "[Hold \\] Open hotkey menu"
     };
 
     private static final boolean[] LAST_DOWN = new boolean[10];
@@ -91,9 +98,12 @@ public final class CompanionHotkeyOverlayHud {
         for (String label : LABELS) {
             maxW = Math.max(maxW, client.textRenderer.getWidth(label));
         }
+        for (String footer : FOOTER_LINES) {
+            maxW = Math.max(maxW, client.textRenderer.getWidth(footer));
+        }
 
         int boxW = maxW + 16;
-        int boxH = 14 + LABELS.length * lineH + 8;
+        int boxH = 14 + LABELS.length * lineH + 6 + FOOTER_LINES.length * lineH + 8;
         int x = Math.max(8, context.getScaledWindowWidth() - boxW - 8);
         int y = 12;
 
@@ -107,6 +117,11 @@ public final class CompanionHotkeyOverlayHud {
         int rowY = y + 14;
         for (String label : LABELS) {
             context.drawTextWithShadow(client.textRenderer, label, x + 8, rowY, 0xFFE6D7A3);
+            rowY += lineH;
+        }
+        rowY += 2;
+        for (String footer : FOOTER_LINES) {
+            context.drawTextWithShadow(client.textRenderer, footer, x + 8, rowY, 0xFFB8A76A);
             rowY += lineH;
         }
     }

@@ -48,13 +48,14 @@ public final class BotTaskPeekNetworkManager {
         ServerPlayerEntity bot = server.getPlayerManager() != null ? server.getPlayerManager().getPlayer(botUuid) : null;
         if (bot == null || bot.isRemoved() || !BotEventHandler.isRegisteredBot(bot)) {
             ServerPlayNetworking.send(requester,
-                    new BotTaskPeekStatusPayload(botUuid.toString(), "bot", false, false, ""));
+                    new BotTaskPeekStatusPayload(botUuid.toString(), "bot", false, false, false, ""));
             return;
         }
 
         Optional<TaskService.ActiveTaskInfo> infoOpt = TaskService.getActiveTaskInfo(botUuid);
         boolean active = false;
         boolean paused = false;
+        boolean returningHome = BotEventHandler.isReturningToBase(bot);
         String taskLabel = "";
 
         if (infoOpt.isPresent()) {
@@ -69,7 +70,7 @@ public final class BotTaskPeekNetworkManager {
 
         String alias = bot.getName() != null ? bot.getName().getString() : "bot";
         ServerPlayNetworking.send(requester,
-                new BotTaskPeekStatusPayload(botUuid.toString(), alias, active, paused, taskLabel));
+                new BotTaskPeekStatusPayload(botUuid.toString(), alias, active, paused, returningHome, taskLabel));
     }
 
     private static String humanizeTaskName(String taskName) {

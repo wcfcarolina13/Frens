@@ -33,6 +33,7 @@ import net.shasankp000.GameAI.services.BotAutoReturnSunsetService;
 import net.shasankp000.GameAI.services.BotAmbientSocialChatService;
 import net.shasankp000.GameAI.services.BotCampfireAvoidanceService;
 import net.shasankp000.GameAI.services.BotIdleHobbiesService;
+import net.shasankp000.GameAI.services.BotInventoryFullDialogueService;
 import net.shasankp000.GameAI.llm.LLMOrchestrator;
 import net.shasankp000.GameAI.services.HuntCatalog;
 import net.shasankp000.GameAI.services.HuntHistoryService;
@@ -688,6 +689,7 @@ public class AIPlayer implements ModInitializer {
         ServerTickEvents.END_SERVER_TICK.register(net.shasankp000.GameAI.services.BotAutoHuntService::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(BotAutoReturnSunsetService::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(BotIdleHobbiesService::onServerTick);
+        ServerTickEvents.END_SERVER_TICK.register(BotInventoryFullDialogueService::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(BotAmbientSocialChatService::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(BotMoodManager::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(BotAmbientChatter::onServerTick);

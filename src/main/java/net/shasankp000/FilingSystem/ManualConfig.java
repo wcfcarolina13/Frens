@@ -49,6 +49,7 @@ public class ManualConfig {
     private Map<String, BotOwnership> botOwnership = new HashMap<>();
     private Map<String, BotSpawn> botSpawnPoints = new HashMap<>();
     private boolean defaultLlmWorldEnabled = true;
+    private boolean gameplayTipsEnabled = true;
     private Map<String, BotControlSettings> botControls = new HashMap<>();
     // Seed-agnostic, bot-persistent quest continuity (non-power progression).
     private Map<String, BotQuestMemory> botQuestMemory = new HashMap<>();
@@ -405,6 +406,14 @@ public class ManualConfig {
 
     public void setDefaultLlmWorldEnabled(boolean defaultLlmWorldEnabled) {
         this.defaultLlmWorldEnabled = defaultLlmWorldEnabled;
+    }
+
+    public boolean isGameplayTipsEnabled() {
+        return gameplayTipsEnabled;
+    }
+
+    public void setGameplayTipsEnabled(boolean gameplayTipsEnabled) {
+        this.gameplayTipsEnabled = gameplayTipsEnabled;
     }
 
     public Map<String, BotControlSettings> getBotControls() {

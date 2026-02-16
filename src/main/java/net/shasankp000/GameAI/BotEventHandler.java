@@ -2421,7 +2421,9 @@ public class BotEventHandler {
             blockedTicks = 0;
         }
         int effectiveStagnant = Math.max(Math.max(stagnant, posStagnant), blockedTicks);
-        if (directBlocked && posStagnant >= 5 && effectiveStagnant >= 10) {
+        int leafPosThreshold = returningToBase ? 3 : 5;
+        int leafStagnantThreshold = returningToBase ? 6 : 10;
+        if (directBlocked && posStagnant >= leafPosThreshold && effectiveStagnant >= leafStagnantThreshold) {
             BlockPos directionGoal = navGoalBlock != null ? navGoalBlock : (target != null ? target.getBlockPos() : null);
             Direction towardAction = directionGoal != null
                     ? approximateToward(bot.getBlockPos(), directionGoal)
@@ -2429,6 +2431,17 @@ public class BotEventHandler {
             if (MovementService.hasLeafObstruction(bot, towardAction)
                     && MovementService.clearLeafObstruction(bot, towardAction)) {
                 maybeLogFollowDecision(bot, "leaf-cleared: toward=" + towardAction + " stagnant=" + effectiveStagnant);
+                return true;
+            }
+        }
+
+        if (returningToBase && navGoalBlock != null && effectiveStagnant >= 8) {
+            FollowMovementService.FollowWaterEscapeResult waterEscape =
+                    FollowMovementService.tryFollowWaterLedgeEscapeDetailed(bot, navGoalBlock);
+            if (waterEscape != null && (waterEscape.outcome() == FollowMovementService.FollowWaterEscapeOutcome.INPUT_APPLIED
+                    || waterEscape.outcome() == FollowMovementService.FollowWaterEscapeOutcome.DISPLACED)) {
+                maybeLogFollowDecision(bot, "water-ledge-escape: outcome=" + waterEscape.outcome()
+                        + " detail=" + waterEscape.detail());
                 return true;
             }
         }
