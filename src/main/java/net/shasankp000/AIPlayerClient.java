@@ -385,8 +385,9 @@ public class AIPlayerClient implements ClientModInitializer {
             }
 
             if (goToPressed) {
-                if (confirmPendingDirectionalMining(client)) {
-                    // Consumed by pending directional mining confirm flow.
+                if (hasPendingDirectionalMining() || hasPendingShelter()) {
+                    // Pending look-confirm commands must consume '-' before contextual spells.
+                    handleGoToLook(client);
                 } else {
                     // Contextual behavior: before recruitment is complete and no companion is present,
                     // reuse the user's go-to key to initiate recruitment dialogue (prevents keybind conflicts).
@@ -749,6 +750,11 @@ public class AIPlayerClient implements ClientModInitializer {
 
     private static boolean handleSpellsContextKey(MinecraftClient client) {
         if (client == null || client.player == null || client.currentScreen != null) {
+            return false;
+        }
+        // If '-' is currently reserved for a pending directional/shelter confirm flow,
+        // never open spells from contextual shortcuts.
+        if (hasPendingDirectionalMining() || hasPendingShelter()) {
             return false;
         }
 
@@ -1129,14 +1135,15 @@ public class AIPlayerClient implements ClientModInitializer {
             return;
         }
         String target = resolveQuickBotTarget(client);
+        String formattedTarget = target != null ? formatBotTarget(target) : null;
 
         switch (slot) {
             case 1 -> handleStopLook(client);
             case 2 -> {
                 if (resumeDecisionActive) {
                     sendResumeDecision(client, true);
-                } else if (target != null) {
-                    sendChatCommand(client, "bot resume " + formatBotTarget(target));
+                } else if (formattedTarget != null) {
+                    sendChatCommand(client, "bot resume " + formattedTarget);
                 } else {
                     sendChatCommand(client, "bot resume");
                 }
@@ -1144,27 +1151,37 @@ public class AIPlayerClient implements ClientModInitializer {
             case 3 -> handleSpellsContextKey(client);
             case 4 -> handleFollowToggleLookedAt(client);
             case 5 -> handleGoToLook(client);
-            case 6 -> sendChatCommand(client, "bot companion come");
-            case 7 -> {
-                if (target != null) {
-                    sendChatCommand(client, "bot return " + formatBotTarget(target));
+            case 6 -> {
+                if (formattedTarget != null) {
+                    sendChatCommand(client, "bot come " + formattedTarget);
                 } else {
-                    sendChatCommand(client, "bot return");
+                    sendChatCommand(client, "bot come");
+                }
+            }
+            case 7 -> {
+                if (formattedTarget != null) {
+                    setPendingDirectionalMining("stripmine", "bot skill stripmine " + formattedTarget);
+                } else {
+                    setPendingDirectionalMining("stripmine", "bot skill stripmine");
                 }
             }
             case 8 -> {
-                if (target != null) {
-                    sendChatCommand(client, "bot guard " + formatBotTarget(target));
+                if (formattedTarget != null) {
+                    setPendingDirectionalMining("ascent", "bot skill mining ascent " + formattedTarget);
+                } else {
+                    setPendingDirectionalMining("ascent", "bot skill mining ascent");
                 }
             }
             case 9 -> {
-                if (target != null) {
-                    sendChatCommand(client, "bot patrol " + formatBotTarget(target));
+                if (formattedTarget != null) {
+                    setPendingDirectionalMining("descent", "bot skill mining descent " + formattedTarget);
+                } else {
+                    setPendingDirectionalMining("descent", "bot skill mining descent");
                 }
             }
             case 0 -> {
-                if (target != null) {
-                    sendChatCommand(client, "bot skill drop_sweep " + formatBotTarget(target));
+                if (formattedTarget != null) {
+                    sendChatCommand(client, "bot skill drop_sweep " + formattedTarget);
                 } else {
                     sendChatCommand(client, "bot skill drop_sweep");
                 }
@@ -1190,15 +1207,6 @@ public class AIPlayerClient implements ClientModInitializer {
             return "";
         }
         return botName.contains(" ") ? "\"" + botName + "\"" : botName;
-    }
-
-    private static boolean confirmPendingDirectionalMining(MinecraftClient client) {
-        if (!hasPendingDirectionalMining()) {
-            return false;
-        }
-        sendChatCommand(client, pendingDirectionalCommand);
-        clearPendingDirectionalMining();
-        return true;
     }
 
     private static void renderDirectionalMiningHint(DrawContext context) {
@@ -1346,6 +1354,11 @@ public class AIPlayerClient implements ClientModInitializer {
         }
         if (resumeDecisionActive) {
             sendResumeDecision(client, false);
+            return;
+        }
+        if (hasPendingDirectionalMining()) {
+            sendChatCommand(client, pendingDirectionalCommand);
+            clearPendingDirectionalMining();
             return;
         }
         // Check if there's a pending shelter command from the Topics menu

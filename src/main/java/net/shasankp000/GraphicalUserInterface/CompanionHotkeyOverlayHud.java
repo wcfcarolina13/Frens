@@ -31,10 +31,10 @@ public final class CompanionHotkeyOverlayHud {
             "3 Spells",
             "4 Follow Toggle",
             "5 Go To Look",
-            "6 Companion Come",
-            "7 Return Home",
-            "8 Guard Toggle",
-            "9 Patrol Toggle",
+            "6 Come",
+            "7 Stripmine",
+            "8 Ascent",
+            "9 Descent",
             "0 Cleanup"
     };
 
