@@ -181,6 +181,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         AUTO_HUNT_STARVING,
         VOICED_DIALOGUE,
         GAMEPLAY_TIPS,
+        IDLE_HOBBIES_ANYWHERE,
         UNLEASH_TETHERED,
         LEASH_ON_DISMOUNT,
         TELEPORT_SKILLS,
@@ -319,6 +320,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
                 // Access is gated (Enchanting Table nearby, or a later-stage Wizard's Tome token).
                 new TopicEntry("Spells >", TopicCategory.ADMIN, TopicAction.OPEN_SPELLS, false, 0, null),
                 new TopicEntry("Gameplay Tips", TopicCategory.ADMIN, TopicAction.GAMEPLAY_TIPS, true, 0, null),
+                new TopicEntry("Idle Hobbies Anywhere", TopicCategory.ADMIN, TopicAction.IDLE_HOBBIES_ANYWHERE, true, 0, null),
                 TopicEntry.admin("Give Wizard's Tome", "give_wizard_tome"),
                 TopicEntry.admin("Recruit status", "recruit_status"),
                 TopicEntry.admin("Reset recruit", "recruit_reset"),
@@ -2046,6 +2048,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case AUTO_HUNT_STARVING -> toggleAutoHuntStarving();
             case VOICED_DIALOGUE -> toggleVoicedDialogue();
             case GAMEPLAY_TIPS -> toggleGameplayTips();
+            case IDLE_HOBBIES_ANYWHERE -> toggleIdleHobbiesAnywhere();
             case UNLEASH_TETHERED -> toggleUnleashTethered();
             case LEASH_ON_DISMOUNT -> toggleLeashOnDismount();
             case TELEPORT_SKILLS -> toggleTeleportSkills();
@@ -2419,6 +2422,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case AUTO_HUNT_STARVING -> isAutoHuntStarvingActive();
             case VOICED_DIALOGUE -> isVoicedDialogueActive();
             case GAMEPLAY_TIPS -> isGameplayTipsActive();
+            case IDLE_HOBBIES_ANYWHERE -> isIdleHobbiesAnywhereActive();
             case UNLEASH_TETHERED -> isUnleashTetheredActive();
             case LEASH_ON_DISMOUNT -> isLeashOnDismountActive();
             case TELEPORT_SKILLS -> isTeleportSkillsActive();
@@ -2826,6 +2830,18 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             return;
         }
         AIPlayer.CONFIG.setGameplayTipsEnabled(!AIPlayer.CONFIG.isGameplayTipsEnabled());
+        AIPlayer.CONFIG.save();
+    }
+
+    private boolean isIdleHobbiesAnywhereActive() {
+        return AIPlayer.CONFIG != null && AIPlayer.CONFIG.isIdleHobbiesAnywhereEnabled();
+    }
+
+    private void toggleIdleHobbiesAnywhere() {
+        if (AIPlayer.CONFIG == null) {
+            return;
+        }
+        AIPlayer.CONFIG.setIdleHobbiesAnywhereEnabled(!AIPlayer.CONFIG.isIdleHobbiesAnywhereEnabled());
         AIPlayer.CONFIG.save();
     }
 

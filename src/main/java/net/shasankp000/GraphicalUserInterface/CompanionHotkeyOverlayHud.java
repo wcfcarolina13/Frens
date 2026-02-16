@@ -29,7 +29,7 @@ public final class CompanionHotkeyOverlayHud {
             "1 🛑 Stop",
             "2 ▶ Resume",
             "3 ✨ Spells",
-            "4 👣 Follow Toggle",
+            "4 🏠 Home",
             "5 🛌 Sleep",
             "6 📣 Come",
             "7 ⛏ Stripmine",

@@ -7,6 +7,7 @@ import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
 import net.minecraft.registry.tag.BlockTags;
+import net.minecraft.registry.tag.FluidTags;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
@@ -1053,7 +1054,8 @@ public final class ReturnBaseStuckService {
             }
         }
 
-        // Apply a small horizontal velocity toward the chosen tile.
+        // Apply movement toward the chosen tile.
+        // In water, avoid direct velocity writes that can look like surface skating.
         Vec3d cur = new Vec3d(bot.getX(), bot.getY(), bot.getZ());
         Vec3d tgt = Vec3d.ofCenter(best);
         Vec3d dir = tgt.subtract(cur);
@@ -1061,11 +1063,18 @@ public final class ReturnBaseStuckService {
         if (lenSq < 1.0e-6) {
             return false;
         }
-        double len = Math.sqrt(lenSq);
-        Vec3d horiz = new Vec3d(dir.x / len, 0.0, dir.z / len);
-        Vec3d curVel = bot.getVelocity();
-        bot.setVelocity(horiz.x * 0.32, curVel.y, horiz.z * 0.32);
-        bot.velocityDirty = true;
+        if (isWaterLikeContext(bot, world)) {
+            LookController.faceBlock(bot, best);
+            BotActions.sprint(bot, false);
+            BotActions.jump(bot);
+            BotActions.applyMovementInput(bot, tgt, 0.14D);
+        } else {
+            double len = Math.sqrt(lenSq);
+            Vec3d horiz = new Vec3d(dir.x / len, 0.0, dir.z / len);
+            Vec3d curVel = bot.getVelocity();
+            bot.setVelocity(horiz.x * 0.32, curVel.y, horiz.z * 0.32);
+            bot.velocityDirty = true;
+        }
 
         // Face the direction as well (helps if the movement controller expects facing).
         LookController.faceBlock(bot, best);
@@ -1073,6 +1082,18 @@ public final class ReturnBaseStuckService {
         LOGGER.info("ReturnBaseStuck: quick-nudge to {} (stagnant={}, score={}, failedMem={})",
                 best.toShortString(), stagnant, String.format("%.2f", bestScore), failedDirs.size());
         return true;
+    }
+
+    private static boolean isWaterLikeContext(ServerPlayerEntity bot, ServerWorld world) {
+        if (bot == null || world == null) {
+            return false;
+        }
+        if (bot.isTouchingWater() || bot.isSwimming()) {
+            return true;
+        }
+        BlockPos feet = bot.getBlockPos();
+        return world.getFluidState(feet).isIn(FluidTags.WATER)
+                || world.getFluidState(feet.up()).isIn(FluidTags.WATER);
     }
 
     private static boolean tryClearLeafObstructionTowardBase(ServerPlayerEntity bot, Vec3d baseTarget, int stagnant) {

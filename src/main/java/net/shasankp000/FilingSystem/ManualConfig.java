@@ -50,6 +50,7 @@ public class ManualConfig {
     private Map<String, BotSpawn> botSpawnPoints = new HashMap<>();
     private boolean defaultLlmWorldEnabled = true;
     private boolean gameplayTipsEnabled = true;
+    private boolean idleHobbiesAnywhereEnabled = false;
     private Map<String, BotControlSettings> botControls = new HashMap<>();
     // Seed-agnostic, bot-persistent quest continuity (non-power progression).
     private Map<String, BotQuestMemory> botQuestMemory = new HashMap<>();
@@ -414,6 +415,14 @@ public class ManualConfig {
 
     public void setGameplayTipsEnabled(boolean gameplayTipsEnabled) {
         this.gameplayTipsEnabled = gameplayTipsEnabled;
+    }
+
+    public boolean isIdleHobbiesAnywhereEnabled() {
+        return idleHobbiesAnywhereEnabled;
+    }
+
+    public void setIdleHobbiesAnywhereEnabled(boolean idleHobbiesAnywhereEnabled) {
+        this.idleHobbiesAnywhereEnabled = idleHobbiesAnywhereEnabled;
     }
 
     public Map<String, BotControlSettings> getBotControls() {

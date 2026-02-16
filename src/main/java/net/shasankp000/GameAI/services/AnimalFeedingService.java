@@ -3,9 +3,12 @@ package net.shasankp000.GameAI.services;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityType;
 import net.minecraft.entity.LivingEntity;
+import net.minecraft.entity.passive.AbstractHorseEntity;
+import net.minecraft.entity.passive.TameableEntity;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
+import net.minecraft.registry.tag.BlockTags;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.Hand;
@@ -35,14 +38,31 @@ public final class AnimalFeedingService {
     private static final List<Item> STRIDER_FOODS = List.of(
             Items.WARPED_FUNGUS
     );
+    private static final List<Item> WOLF_FOODS = List.of(
+            Items.BEEF,
+            Items.COOKED_BEEF,
+            Items.CHICKEN,
+            Items.COOKED_CHICKEN,
+            Items.PORKCHOP,
+            Items.COOKED_PORKCHOP,
+            Items.MUTTON,
+            Items.COOKED_MUTTON,
+            Items.RABBIT,
+            Items.COOKED_RABBIT,
+            Items.ROTTEN_FLESH
+    );
 
     private AnimalFeedingService() {}
 
     public static boolean feedIfNeeded(ServerPlayerEntity bot, LivingEntity animal) {
+        return feedIfPossible(bot, animal, true);
+    }
+
+    public static boolean feedIfPossible(ServerPlayerEntity bot, LivingEntity animal, boolean requireLowHealth) {
         if (bot == null || animal == null || animal.isRemoved()) {
             return false;
         }
-        if (!isLowHealth(animal)) {
+        if (requireLowHealth && !isLowHealth(animal)) {
             return false;
         }
         List<Item> foods = allowedFoods(animal.getType());
@@ -51,7 +71,11 @@ public final class AnimalFeedingService {
         }
         int attempts = 0;
         boolean fed = false;
-        while (isLowHealth(animal) && attempts < 6) {
+        int maxAttempts = requireLowHealth ? 6 : 2;
+        while (attempts < maxAttempts) {
+            if (requireLowHealth && !isLowHealth(animal)) {
+                break;
+            }
             Item food = findFoodItem(bot, foods);
             if (food == null) {
                 break;
@@ -64,6 +88,9 @@ public final class AnimalFeedingService {
             }
             fed = true;
             attempts++;
+            if (!requireLowHealth) {
+                break;
+            }
             try {
                 Thread.sleep(160L);
             } catch (InterruptedException e) {
@@ -94,6 +121,40 @@ public final class AnimalFeedingService {
             matches.add(living);
         }
         matches.sort(Comparator.comparingDouble(e -> e.squaredDistanceTo(origin.getX() + 0.5, origin.getY() + 0.5, origin.getZ() + 0.5)));
+        return matches;
+    }
+
+    /**
+     * Ambient hobby target scan:
+     * low-health animals are always valid, and tamed/fenced animals are allowed if food is available.
+     */
+    public static List<LivingEntity> findAmbientFeedTargets(ServerWorld world, ServerPlayerEntity bot, double radius) {
+        if (world == null || bot == null) {
+            return List.of();
+        }
+        BlockPos origin = bot.getBlockPos();
+        double r = Math.max(6.0D, radius);
+        Box box = new Box(origin).expand(r);
+        List<LivingEntity> matches = new ArrayList<>();
+        for (Entity entity : world.getOtherEntities(null, box)) {
+            if (!(entity instanceof LivingEntity living) || living.isRemoved() || !living.isAlive()) {
+                continue;
+            }
+            if (!isFeedableType(living.getType())) {
+                continue;
+            }
+            if (!hasFoodFor(bot, living)) {
+                continue;
+            }
+            boolean lowHealth = isLowHealth(living);
+            boolean tamed = isTamedCompanion(living);
+            boolean nearFence = isNearFence(world, living.getBlockPos(), 2);
+            if (!lowHealth && !tamed && !nearFence) {
+                continue;
+            }
+            matches.add(living);
+        }
+        matches.sort(Comparator.comparingDouble(e -> e.squaredDistanceTo(origin.getX() + 0.5D, origin.getY() + 0.5D, origin.getZ() + 0.5D)));
         return matches;
     }
 
@@ -137,7 +198,39 @@ public final class AnimalFeedingService {
         if (type == EntityType.STRIDER) {
             return STRIDER_FOODS;
         }
+        if (type == EntityType.WOLF) {
+            return WOLF_FOODS;
+        }
         return List.of();
+    }
+
+    private static boolean isTamedCompanion(LivingEntity animal) {
+        if (animal == null) {
+            return false;
+        }
+        if (animal instanceof TameableEntity tameable) {
+            return tameable.isTamed();
+        }
+        if (animal instanceof AbstractHorseEntity horse) {
+            return horse.isTame();
+        }
+        return false;
+    }
+
+    private static boolean isNearFence(ServerWorld world, BlockPos origin, int radius) {
+        if (world == null || origin == null) {
+            return false;
+        }
+        int r = Math.max(1, radius);
+        for (BlockPos pos : BlockPos.iterate(origin.add(-r, -1, -r), origin.add(r, 1, r))) {
+            if (!world.isChunkLoaded(pos)) {
+                continue;
+            }
+            if (world.getBlockState(pos).isIn(BlockTags.FENCES)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static boolean isHorseLike(EntityType<?> type) {

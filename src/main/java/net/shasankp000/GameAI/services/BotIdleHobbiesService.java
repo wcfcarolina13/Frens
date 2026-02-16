@@ -2,16 +2,20 @@ package net.shasankp000.GameAI.services;
 
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
+import net.minecraft.entity.Entity;
+import net.minecraft.entity.LivingEntity;
+import net.minecraft.entity.passive.PassiveEntity;
 import net.minecraft.registry.tag.BlockTags;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.World;
+import net.shasankp000.AIPlayer;
 import net.shasankp000.GameAI.BotEventHandler;
-import net.shasankp000.GameAI.services.AnimalFeedingService;
 import net.shasankp000.GameAI.skills.SkillContext;
 import net.shasankp000.GameAI.skills.SkillExecutionResult;
 import net.shasankp000.GameAI.skills.SkillManager;
@@ -19,6 +23,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.HashMap;
+import java.util.ArrayList;
 import java.util.Map;
 import java.util.Locale;
 import java.util.Random;
@@ -229,18 +234,21 @@ public final class BotIdleHobbiesService {
                 continue;
             }
 
-            // Require being near home; keeps hobbies "local".
-            Vec3d home = resolveHomeAnchor(world, bot);
-            if (home == null) {
-                NEXT_DECISION_TICK.put(bot.getUuid(), nowTick + 200L);
-                noteBlocked(bot, nowTick, "no-home-anchor");
-                continue;
-            }
-            double distHome = new Vec3d(bot.getX(), bot.getY(), bot.getZ()).distanceTo(home);
-            if (distHome > 24.0D) {
-                NEXT_DECISION_TICK.put(bot.getUuid(), nowTick + 200L);
-                noteBlocked(bot, nowTick, "too-far-from-home:" + String.format(Locale.ROOT, "%.1f", distHome));
-                continue;
+            boolean hobbiesAnywhere = AIPlayer.CONFIG != null && AIPlayer.CONFIG.isIdleHobbiesAnywhereEnabled();
+            if (!hobbiesAnywhere) {
+                // Default behavior: keep hobbies local to home/base.
+                Vec3d home = resolveHomeAnchor(world, bot);
+                if (home == null) {
+                    NEXT_DECISION_TICK.put(bot.getUuid(), nowTick + 200L);
+                    noteBlocked(bot, nowTick, "no-home-anchor");
+                    continue;
+                }
+                double distHome = new Vec3d(bot.getX(), bot.getY(), bot.getZ()).distanceTo(home);
+                if (distHome > 24.0D) {
+                    NEXT_DECISION_TICK.put(bot.getUuid(), nowTick + 200L);
+                    noteBlocked(bot, nowTick, "too-far-from-home:" + String.format(Locale.ROOT, "%.1f", distHome));
+                    continue;
+                }
             }
 
             String hobby = pickHobby(bot, world);
@@ -307,6 +315,9 @@ public final class BotIdleHobbiesService {
     }
 
     private static String pickHobby(ServerPlayerEntity bot, ServerWorld world) {
+        if (bot == null || world == null) {
+            return null;
+        }
         boolean hasRod = hasItem(bot, Items.FISHING_ROD);
         boolean hasWaterNearby = hasRod && hasNearbyBlock(world, bot.getBlockPos(), 12, net.minecraft.block.Blocks.WATER);
         // Campfire can be a bit further away; it still "feels" local but avoids being too finicky.
@@ -316,39 +327,74 @@ public final class BotIdleHobbiesService {
 
         boolean huntUnlocked = HuntHistoryService.hasAnyFoodKill(world);
         boolean healthy = bot.getHealth() >= 18.0F && bot.getHungerManager().getFoodLevel() >= 16;
-        boolean canHunt = huntUnlocked && healthy && !world.isThundering();
+        boolean canHunt = huntUnlocked
+                && healthy
+                && !world.isThundering()
+                && hasNearbyHuntableTarget(world, bot.getBlockPos(), 28.0D);
         boolean canFeedAnimals = hasFeedTargets(bot, world);
         boolean canPickFlowers = hasNearbyFlowers(world, bot.getBlockPos(), 18);
 
-        // Weighted-ish selection: prefer fishing if possible.
-        if (canFeedAnimals && RNG.nextDouble() < 0.20D) {
-            return "feed_animals";
-        }
-        if (canPickFlowers && RNG.nextDouble() < 0.25D) {
-            return "flowers";
-        }
-        if (canHunt && RNG.nextDouble() < 0.18D) {
-            return "hunt";
-        }
-        if (hasWaterNearby && RNG.nextDouble() < 0.70D) {
-            return "fish";
-        }
-        if (hasCampfireNearby) {
-            return "hangout";
-        }
+        // Build weighted options so available hobbies actually trigger instead of idling on random misses.
+        ArrayList<String> weighted = new ArrayList<>();
         if (hasWaterNearby) {
-            return "fish";
+            weighted.add("fish");
+            weighted.add("fish");
+            weighted.add("fish");
         }
-
-        return null;
+        if (canFeedAnimals) {
+            weighted.add("feed_animals");
+            weighted.add("feed_animals");
+        }
+        if (canPickFlowers) {
+            weighted.add("flowers");
+            weighted.add("flowers");
+        }
+        if (canHunt) {
+            weighted.add("hunt");
+        }
+        // Hangout is only valid when a campfire is actually nearby.
+        if (hasCampfireNearby) {
+            weighted.add("hangout");
+        }
+        if (weighted.isEmpty()) {
+            return null;
+        }
+        return weighted.get(RNG.nextInt(weighted.size()));
     }
 
     private static String pickFallbackHobby(ServerPlayerEntity bot, ServerWorld world) {
         if (bot == null || world == null) {
             return null;
         }
-        // Low-intensity fallback so "idle hobbies enabled" does not appear inert in sparse environments.
-        return "hangout";
+        boolean hasRod = hasItem(bot, Items.FISHING_ROD);
+        boolean hasWaterNearby = hasRod && hasNearbyBlock(world, bot.getBlockPos(), 12, net.minecraft.block.Blocks.WATER);
+        boolean hasCampfireNearby = hasNearbyBlock(world, bot.getBlockPos(), 24, net.minecraft.block.Blocks.CAMPFIRE)
+                || hasNearbyBlock(world, bot.getBlockPos(), 24, net.minecraft.block.Blocks.SOUL_CAMPFIRE);
+        boolean canFeedAnimals = hasFeedTargets(bot, world);
+        boolean canPickFlowers = hasNearbyFlowers(world, bot.getBlockPos(), 18);
+        boolean canHunt = HuntHistoryService.hasAnyFoodKill(world)
+                && bot.getHealth() >= 18.0F
+                && bot.getHungerManager().getFoodLevel() >= 16
+                && !world.isThundering()
+                && hasNearbyHuntableTarget(world, bot.getBlockPos(), 28.0D);
+
+        if (canFeedAnimals) {
+            return "feed_animals";
+        }
+        if (hasWaterNearby) {
+            return "fish";
+        }
+        if (canPickFlowers) {
+            return "flowers";
+        }
+        if (canHunt) {
+            return "hunt";
+        }
+        // Never force hangout unless a campfire exists nearby.
+        if (hasCampfireNearby) {
+            return "hangout";
+        }
+        return null;
     }
 
     private static boolean hasItem(ServerPlayerEntity bot, net.minecraft.item.Item item) {
@@ -403,7 +449,30 @@ public final class BotIdleHobbiesService {
         if (!hasAnyFeedItem(bot)) {
             return false;
         }
-        return !AnimalFeedingService.findLowHealthAnimals(world, bot.getBlockPos(), 12).isEmpty();
+        return !AnimalFeedingService.findAmbientFeedTargets(world, bot, 12).isEmpty();
+    }
+
+    private static boolean hasNearbyHuntableTarget(ServerWorld world, BlockPos origin, double radius) {
+        if (world == null || origin == null) {
+            return false;
+        }
+        double r = Math.max(8.0D, radius);
+        Box box = new Box(origin).expand(r);
+        for (Entity entity : world.getOtherEntities(null, box)) {
+            if (!(entity instanceof LivingEntity living) || !living.isAlive()) {
+                continue;
+            }
+            if (!HuntCatalog.isFoodMob(living.getType())) {
+                continue;
+            }
+            if (living instanceof PassiveEntity passive && passive.isBaby()) {
+                continue;
+            }
+            if (living.squaredDistanceTo(origin.getX() + 0.5D, origin.getY() + 0.5D, origin.getZ() + 0.5D) <= r * r) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static boolean hasAnyFeedItem(ServerPlayerEntity bot) {

@@ -16,6 +16,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.List;
+import java.util.Locale;
 
 public final class FeedAnimalsSkill implements Skill {
     private static final Logger LOGGER = LoggerFactory.getLogger("skill-feed-animals");
@@ -39,10 +40,15 @@ public final class FeedAnimalsSkill implements Skill {
         }
 
         int radius = getIntParameter(context, "radius", DEFAULT_RADIUS);
+        boolean ambientMode = isAmbientMode(context);
         List<net.minecraft.entity.LivingEntity> targets =
-                AnimalFeedingService.findLowHealthAnimals(world, bot.getBlockPos(), radius);
+                ambientMode
+                        ? AnimalFeedingService.findAmbientFeedTargets(world, bot, radius)
+                        : AnimalFeedingService.findLowHealthAnimals(world, bot.getBlockPos(), radius);
         if (targets.isEmpty()) {
-            return SkillExecutionResult.failure("No low-health animals nearby.");
+            return SkillExecutionResult.failure(ambientMode
+                    ? "No feedable animals nearby."
+                    : "No low-health animals nearby.");
         }
 
         int fed = 0;
@@ -74,7 +80,7 @@ public final class FeedAnimalsSkill implements Skill {
                     continue;
                 }
             }
-            if (AnimalFeedingService.feedIfNeeded(bot, target)) {
+            if (AnimalFeedingService.feedIfPossible(bot, target, !ambientMode)) {
                 fed++;
             }
         }
@@ -84,6 +90,17 @@ public final class FeedAnimalsSkill implements Skill {
             return SkillExecutionResult.failure("No animals fed.");
         }
         return SkillExecutionResult.success("Fed " + fed + " animal" + (fed == 1 ? "" : "s") + ".");
+    }
+
+    private static boolean isAmbientMode(SkillContext context) {
+        if (context == null || context.parameters() == null) {
+            return false;
+        }
+        Object origin = context.parameters().get("_origin");
+        if (origin == null) {
+            return false;
+        }
+        return origin.toString().toLowerCase(Locale.ROOT).contains("ambient");
     }
 
     private static int getIntParameter(SkillContext context, String key, int def) {

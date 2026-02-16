@@ -96,6 +96,16 @@ public final class BotTaskPeekNetworkManager {
                 return "woodcutting";
             case "stripmine":
                 return "strip mining";
+            case "hangout":
+                return "hanging out";
+            case "hunt":
+                return "hunting";
+            case "fish":
+                return "fishing";
+            case "flowers":
+                return "collecting flowers";
+            case "feed animals":
+                return "feeding animals";
             default:
                 return raw;
         }

@@ -438,9 +438,10 @@ public class AIPlayerClient implements ClientModInitializer {
                     if (shouldUseGoToKeyForRecruitmentContact(client)) {
                         handleRecruitContactKey(client);
                     } else {
+                        boolean forceGoToStorage = shouldForceGoToLookStorageContext(client);
                         // '-' is only temporarily rebound to spells while holding a spell trigger
                         // item (tome/horn/eye) or when near an enchanting table.
-                        if (isTemporaryGoToSpellsOverrideActive(client)) {
+                        if (!forceGoToStorage && isTemporaryGoToSpellsOverrideActive(client)) {
                             handleSpellsContextKey(client);
                         } else {
                             handleGoToLook(client);
@@ -944,6 +945,57 @@ public class AIPlayerClient implements ClientModInitializer {
         return isHoldingSpellTriggerItem(client) || isNearEnchantingTable(client, 4);
     }
 
+    /**
+     * Keep '-' on go_to_look when the player is targeting storage and has a nearby bot.
+     * This prevents accidental spellbook opens while trying to offload into chests/barrels.
+     */
+    private static boolean shouldForceGoToLookStorageContext(MinecraftClient client) {
+        if (client == null || client.player == null || client.world == null) {
+            return false;
+        }
+        return isLookingAtChestLikeStorage(client, 64.0D) && hasNearbyBotCandidate(client, 24.0D);
+    }
+
+    private static boolean isLookingAtChestLikeStorage(MinecraftClient client, double maxDistance) {
+        if (client == null || client.player == null || client.world == null) {
+            return false;
+        }
+        HitResult hit = client.player.raycast(Math.max(4.0D, maxDistance), 1.0F, false);
+        if (!(hit instanceof BlockHitResult bhr) || hit.getType() == HitResult.Type.MISS) {
+            return false;
+        }
+        BlockPos pos = bhr.getBlockPos();
+        if (pos == null || !client.world.isChunkLoaded(pos)) {
+            return false;
+        }
+        var state = client.world.getBlockState(pos);
+        return state != null
+                && (state.isOf(Blocks.CHEST)
+                || state.isOf(Blocks.TRAPPED_CHEST)
+                || state.isOf(Blocks.BARREL)
+                || state.isOf(Blocks.ENDER_CHEST));
+    }
+
+    private static boolean hasNearbyBotCandidate(MinecraftClient client, double radius) {
+        if (client == null || client.player == null || client.world == null) {
+            return false;
+        }
+        double r = Math.max(8.0D, radius);
+        double r2 = r * r;
+        for (Entity entity : client.world.getEntities()) {
+            if (!(entity instanceof PlayerEntity other) || other == client.player) {
+                continue;
+            }
+            if (other.isRemoved() || !other.isAlive()) {
+                continue;
+            }
+            if (other.squaredDistanceTo(client.player) <= r2) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private static boolean isHoldingSpellTriggerItem(MinecraftClient client) {
         if (client == null || client.player == null) {
             return false;
@@ -1272,7 +1324,7 @@ public class AIPlayerClient implements ClientModInitializer {
                 }
             }
             case 3 -> handleSpellsContextKey(client);
-            case 4 -> handleFollowToggleLookedAt(client);
+            case 4 -> handleReturnHomeLook(client);
             case 5 -> handleSleepLook(client);
             case 6 -> {
                 if (formattedTarget != null) {
@@ -1526,6 +1578,18 @@ public class AIPlayerClient implements ClientModInitializer {
             sendChatCommand(client, "bot sleep " + formatBotTarget(target));
         } else {
             sendChatCommand(client, "bot sleep");
+        }
+    }
+
+    private static void handleReturnHomeLook(MinecraftClient client) {
+        if (client == null || client.player == null) {
+            return;
+        }
+        String target = resolveQuickBotTarget(client);
+        if (target != null && !target.isBlank()) {
+            sendChatCommand(client, "bot return " + formatBotTarget(target));
+        } else {
+            sendChatCommand(client, "bot return");
         }
     }
 
