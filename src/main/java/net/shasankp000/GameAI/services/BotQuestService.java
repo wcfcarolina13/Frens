@@ -61,6 +61,16 @@ public final class BotQuestService {
 
     private static final Map<UUID, ActiveQuestRuntime> ACTIVE = new ConcurrentHashMap<>();
     private static final Map<UUID, Long> NEXT_PROPOSE_TICK = new ConcurrentHashMap<>();
+    private static final Set<String> DISABLED_QUEST_IDS = Set.of(
+            // Disabled for current questing overhaul pass: ambient/exploration/curiosity templates.
+            "bonding_stay_with_me",
+            "bonding_stay_close_under_cover",
+            "explore_somewhere_new",
+            "curiosity_step_into_the_light",
+            "exploration_find_something_built",
+            "curiosity_take_a_look_around_here",
+            "curiosity_check_the_lighting_here"
+    );
 
     // Cached environment scan for structure-like clusters (cheap + avoids repeated block scans).
     private static final long STRUCTURE_CACHE_TTL_TICKS = 20L * 30L; // 30 seconds
@@ -793,6 +803,9 @@ public final class BotQuestService {
             if (q == null || !q.isValid()) {
                 continue;
             }
+            if (DISABLED_QUEST_IDS.contains(q.idOrEmpty())) {
+                continue;
+            }
             // Avoid repeating the exact same quest too frequently.
             if (completed.contains(q.idOrEmpty())) {
                 continue;
@@ -806,7 +819,10 @@ public final class BotQuestService {
         // If everything is "completed", allow repeats (seed-agnostic templates are meant to recur).
         if (eligible.isEmpty()) {
             for (QuestDefinition q : all) {
-                if (q != null && q.isValid() && constraintsMatch(q, bot, commander, world)) {
+                if (q != null
+                        && q.isValid()
+                        && !DISABLED_QUEST_IDS.contains(q.idOrEmpty())
+                        && constraintsMatch(q, bot, commander, world)) {
                     eligible.add(q);
                 }
             }

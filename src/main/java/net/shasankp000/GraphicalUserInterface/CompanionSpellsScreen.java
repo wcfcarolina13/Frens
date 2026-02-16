@@ -55,7 +55,7 @@ public class CompanionSpellsScreen extends Screen {
         int h = 20;
         int gap = 6;
 
-        comeBtn = this.addDrawableChild(ButtonWidget.builder(Text.literal("Come"), (btn) -> sendSpell("bot companion come"))
+        comeBtn = this.addDrawableChild(ButtonWidget.builder(Text.literal("Come"), (btn) -> sendSpell(withBotAlias("bot companion come")))
                 .dimensions(cx - w / 2, top, w, h)
                 .build());
 
@@ -63,7 +63,7 @@ public class CompanionSpellsScreen extends Screen {
                 .dimensions(cx - w / 2, top + (h + gap), w, h)
                 .build());
 
-        homeBtn = this.addDrawableChild(ButtonWidget.builder(Text.literal("Home"), (btn) -> sendSpell("bot companion home"))
+        homeBtn = this.addDrawableChild(ButtonWidget.builder(Text.literal("Home"), (btn) -> sendSpell(withBotAlias("bot companion home")))
                 .dimensions(cx - w / 2, top + 2 * (h + gap), w, h)
                 .build());
 
@@ -198,7 +198,7 @@ public class CompanionSpellsScreen extends Screen {
             // Arm local cooldown for UX; server remains authoritative.
             AIPlayerClient.armEyeSpellCooldown();
         }
-        sendSpell("bot companion summon");
+        sendSpell(withBotAlias("bot companion summon"));
     }
 
     private void sendSpell(String command) {
@@ -208,6 +208,21 @@ public class CompanionSpellsScreen extends Screen {
         }
         String raw = command.startsWith("/") ? command.substring(1) : command;
         client.getNetworkHandler().sendChatCommand(raw);
+    }
+
+    private String withBotAlias(String base) {
+        String b = base == null ? "" : base.trim();
+        if (b.isBlank()) {
+            return b;
+        }
+        String alias = (botAlias == null) ? "" : botAlias.trim();
+        if (alias.isBlank()) {
+            return b;
+        }
+        if (alias.contains(" ")) {
+            return b + " \"" + alias + "\"";
+        }
+        return b + " " + alias;
     }
 
     @Override

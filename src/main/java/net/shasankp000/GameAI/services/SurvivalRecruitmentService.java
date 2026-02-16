@@ -84,7 +84,16 @@ public final class SurvivalRecruitmentService {
     private SurvivalRecruitmentService() {}
 
     public static boolean isEnabled(MinecraftServer server) {
-        return AIPlayer.CONFIG != null && AIPlayer.CONFIG.isSurvivalRecruitmentMode();
+        if (server == null || AIPlayer.CONFIG == null) {
+            return false;
+        }
+        ManualConfig.SurvivalRecruitmentState st = getState(server);
+        if (st == null) {
+            return false;
+        }
+        migrateLegacyQuestingModeIfNeeded(server, st);
+        String mode = st.getSelectedWorldMode();
+        return mode != null && mode.equalsIgnoreCase("questing");
     }
 
     private static String worldKey(MinecraftServer server) {
@@ -116,9 +125,79 @@ public final class SurvivalRecruitmentService {
         MinecraftServer server = player.getCommandSource().getServer();
         boolean enabled = isEnabled(server);
         ManualConfig.SurvivalRecruitmentState st = getState(server);
+        if (server != null && st != null) {
+            migrateLegacyQuestingModeIfNeeded(server, st);
+        }
         boolean recruited = st != null && st.isRecruited();
         String alias = st != null ? st.getBotAlias() : "Jake";
-        ServerPlayNetworking.send(player, new RecruitmentStatePayload(enabled, recruited, alias));
+        boolean canChooseMode = AIPlayer.hasBotCommandPermission(player.getCommandSource());
+        boolean modeSelectionRequired = canChooseMode && (st == null || !st.isModeSelectionDone() || st.getSelectedWorldMode() == null);
+        ServerPlayNetworking.send(player, new RecruitmentStatePayload(
+                enabled,
+                recruited,
+                alias,
+                modeSelectionRequired,
+                canChooseMode,
+                worldKey(server)));
+    }
+
+    public static void noteModeSelectionConfigured(MinecraftServer server, boolean questingMode, String actorName) {
+        if (server == null || AIPlayer.CONFIG == null) {
+            return;
+        }
+        ManualConfig.SurvivalRecruitmentState st = getState(server);
+        if (st == null) {
+            return;
+        }
+        st.setModeSelectionDone(true);
+        st.setSelectedWorldMode(questingMode ? "questing" : "admin");
+        st.setModeSelectedAtEpochMs(System.currentTimeMillis());
+        st.setModeSelectedByName(actorName);
+    }
+
+    public static void setWorldMode(MinecraftServer server, boolean questingMode, String actorName) {
+        if (server == null || AIPlayer.CONFIG == null) {
+            return;
+        }
+        noteModeSelectionConfigured(server, questingMode, actorName);
+        AIPlayer.CONFIG.save();
+    }
+
+    public static void handleModeSelectionChoice(ServerPlayerEntity player, boolean questingMode) {
+        if (player == null || player.isRemoved()) {
+            return;
+        }
+        MinecraftServer server = player.getCommandSource().getServer();
+        if (server == null || AIPlayer.CONFIG == null) {
+            return;
+        }
+        if (!AIPlayer.hasBotCommandPermission(player.getCommandSource())) {
+            ChatUtils.sendSystemMessage(player.getCommandSource(), "You are not allowed to change world mode.");
+            sendRecruitmentState(player);
+            return;
+        }
+
+        setWorldMode(server, questingMode, player.getName().getString());
+
+        if (questingMode) {
+            ChatUtils.sendSystemMessage(player.getCommandSource(), "World mode set to Questing.");
+            ChatUtils.sendSystemMessage(player.getCommandSource(), "To begin: go to a village, interact with villager/bell/bed, then initiate contact.");
+        } else {
+            ChatUtils.sendSystemMessage(player.getCommandSource(), "World mode set to Admin.");
+            ChatUtils.sendSystemMessage(player.getCommandSource(), "Spawn a bot with /bot spawn <name> play.");
+        }
+
+        ManualConfig.SurvivalRecruitmentState st = getState(server);
+        String alias = st != null ? st.getBotAlias() : "Jake";
+        for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
+            if (p == null || p.isRemoved() || (p instanceof createFakePlayer)) {
+                continue;
+            }
+            sendRecruitmentState(p);
+            if (!questingMode) {
+                ServerPlayNetworking.send(p, new RecruitmentPromptPayload(false, alias));
+            }
+        }
     }
 
     public static void onServerTick(MinecraftServer server) {
@@ -201,6 +280,32 @@ public final class SurvivalRecruitmentService {
         LAST_INTERACTION_TICK.clear();
         LAST_INTERACTION_KIND.clear();
         LAST_DIALOGUE_GRANTED_TICK.clear();
+    }
+
+    private static void migrateLegacyQuestingModeIfNeeded(MinecraftServer server, ManualConfig.SurvivalRecruitmentState st) {
+        if (server == null || st == null || AIPlayer.CONFIG == null) {
+            return;
+        }
+        String selected = st.getSelectedWorldMode();
+        if (selected != null && !selected.isBlank()) {
+            return;
+        }
+        if (st.isModeSelectionDone()) {
+            return;
+        }
+        boolean legacyQuesting = st.isRecruited()
+                || st.getRecruitedAtEpochMs() > 0L
+                || st.getCompanionQuestStage() > 0
+                || st.isCompanionAnchorSet()
+                || st.isPermanentCompanion();
+        if (!legacyQuesting) {
+            return;
+        }
+        st.setModeSelectionDone(true);
+        st.setSelectedWorldMode("questing");
+        st.setModeSelectedAtEpochMs(System.currentTimeMillis());
+        st.setModeSelectedByName("legacy-migration");
+        AIPlayer.CONFIG.save();
     }
 
     /**
@@ -578,6 +683,12 @@ public final class SurvivalRecruitmentService {
             updated.setCompanionDiedAtEpochMs(0L);
             updated.setCompanionDiedDimension(null);
             updated.setCompanionDiedPos(0L);
+
+            // Completing recruitment implicitly means this world is using questing mode.
+            updated.setModeSelectionDone(true);
+            updated.setSelectedWorldMode("questing");
+            updated.setModeSelectedAtEpochMs(System.currentTimeMillis());
+            updated.setModeSelectedByName(player.getName().getString());
             AIPlayer.CONFIG.save();
         }
 

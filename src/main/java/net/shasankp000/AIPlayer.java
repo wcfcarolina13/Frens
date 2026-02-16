@@ -436,6 +436,7 @@ public class AIPlayer implements ModInitializer {
         PayloadTypeRegistry.playC2S().register(RequestRecruitmentDialoguePayload.ID, RequestRecruitmentDialoguePayload.CODEC);
         PayloadTypeRegistry.playC2S().register(ConfirmRecruitmentPayload.ID, ConfirmRecruitmentPayload.CODEC);
         PayloadTypeRegistry.playC2S().register(net.shasankp000.network.RequestRecruitmentReplayPayload.ID, net.shasankp000.network.RequestRecruitmentReplayPayload.CODEC);
+        PayloadTypeRegistry.playC2S().register(net.shasankp000.network.ModeSelectionChoicePayload.ID, net.shasankp000.network.ModeSelectionChoicePayload.CODEC);
 
         // Companion questline (server-authoritative dialogue checks)
         PayloadTypeRegistry.playC2S().register(net.shasankp000.network.CompanionQuestTopicPayload.ID, net.shasankp000.network.CompanionQuestTopicPayload.CODEC);

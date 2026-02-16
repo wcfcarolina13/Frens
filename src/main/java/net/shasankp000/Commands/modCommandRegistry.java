@@ -1360,10 +1360,12 @@ public class modCommandRegistry {
 
         String worldKey = server.getSaveProperties().getLevelName();
         ManualConfig.SurvivalRecruitmentState st = AIPlayer.CONFIG.getOrCreateSurvivalRecruitmentState(worldKey);
-        boolean enabled = AIPlayer.CONFIG.isSurvivalRecruitmentMode();
+        boolean enabled = SurvivalRecruitmentService.isEnabled(server);
 
         ChatUtils.sendSystemMessage(context.getSource(), "Survival recruitment mode: " + enabled);
         ChatUtils.sendSystemMessage(context.getSource(), "World key: " + (worldKey == null ? "default" : worldKey));
+        ChatUtils.sendSystemMessage(context.getSource(), "Mode selection done: " + st.isModeSelectionDone()
+                + " (selected=" + (st.getSelectedWorldMode() == null ? "unset" : st.getSelectedWorldMode()) + ")");
         ChatUtils.sendSystemMessage(context.getSource(), "Recruited: " + st.isRecruited() + " (botAlias=" + st.getBotAlias() + ")");
         if (st.isRecruited()) {
             String by = (st.getRecruitedByName() == null || st.getRecruitedByName().isBlank()) ? "unknown" : st.getRecruitedByName();
@@ -1395,12 +1397,10 @@ public class modCommandRegistry {
             return 0;
         }
 
-        AIPlayer.CONFIG.setSurvivalRecruitmentMode(enabled);
-        AIPlayer.CONFIG.save();
-
         MinecraftServer server = context.getSource().getServer();
         String botAlias = "Jake";
         if (server != null) {
+            SurvivalRecruitmentService.setWorldMode(server, enabled, context.getSource().getName());
             ManualConfig.SurvivalRecruitmentState st = SurvivalRecruitmentService.getState(server);
             botAlias = st != null ? st.getBotAlias() : botAlias;
             for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
@@ -1413,7 +1413,7 @@ public class modCommandRegistry {
             }
         }
 
-        ChatUtils.sendSystemMessage(context.getSource(), "Survival recruitment mode set to " + enabled + ".");
+        ChatUtils.sendSystemMessage(context.getSource(), "Survival recruitment mode for this world set to " + enabled + ".");
         return 1;
     }
 
@@ -3854,31 +3854,36 @@ public class modCommandRegistry {
             ChatUtils.sendSystemMessage(source, "Only players can call a companion.");
             return 0;
         }
-        if (!SurvivalRecruitmentService.isEnabled(server)) {
-            ChatUtils.sendSystemMessage(source, "Companion controls are only available in survival recruitment worlds.");
-            return 0;
-        }
+        boolean recruitmentMode = SurvivalRecruitmentService.isEnabled(server);
         ManualConfig.SurvivalRecruitmentState st = SurvivalRecruitmentService.getState(server);
-        if (st == null || !st.isRecruited()) {
-            ChatUtils.sendSystemMessage(source, "This world hasn't recruited a companion yet. Go to a village and recruit first (HUD prompt / Dialogue → Make contact (Recruit)).");
-            return 0;
-        }
-        if (!st.isPermanentCompanion()) {
-            ChatUtils.sendSystemMessage(source, "They're not a permanent companion yet.");
-            return 0;
-        }
-        if (!isAuthorizedCompanionCommander(commander, st)) {
-            ChatUtils.sendSystemMessage(source, "You aren't the one they pledged to.");
-            return 0;
-        }
-        String alias = st.getBotAlias();
-        if (targetArg != null && !targetArg.isBlank() && !alias.equalsIgnoreCase(targetArg.trim())) {
-            ChatUtils.sendSystemMessage(source, "This companion command only applies to '" + alias + "'.");
-            return 0;
+        String alias = resolveCompanionAlias(st, targetArg);
+
+        if (recruitmentMode) {
+            if (st == null || !st.isRecruited()) {
+                ChatUtils.sendSystemMessage(source, "This world hasn't recruited a companion yet. Go to a village and recruit first (HUD prompt / Dialogue → Make contact (Recruit)).");
+                return 0;
+            }
+            if (!st.isPermanentCompanion()) {
+                ChatUtils.sendSystemMessage(source, "They're not a permanent companion yet.");
+                return 0;
+            }
+            if (!isAuthorizedCompanionCommander(commander, st)) {
+                ChatUtils.sendSystemMessage(source, "You aren't the one they pledged to.");
+                return 0;
+            }
+            String recruitedAlias = st.getBotAlias();
+            if (targetArg != null && !targetArg.isBlank() && !recruitedAlias.equalsIgnoreCase(targetArg.trim())) {
+                ChatUtils.sendSystemMessage(source, "This companion command only applies to '" + recruitedAlias + "'.");
+                return 0;
+            }
         }
 
         if (!canUseCompanionCome(server, commander, st)) {
-            ChatUtils.sendSystemMessage(source, "To call your companion, cast the spell at an Enchanting Table (or use your Wizard's Tome / Goat Horn)." );
+            if (recruitmentMode) {
+                ChatUtils.sendSystemMessage(source, "To call your companion, cast the spell at an Enchanting Table (or use your Wizard's Tome / Goat Horn)." );
+            } else {
+                ChatUtils.sendSystemMessage(source, "To call the bot, cast at an Enchanting Table (or use your Wizard's Tome / Goat Horn).");
+            }
             return 0;
         }
 
@@ -3931,37 +3936,42 @@ public class modCommandRegistry {
             ChatUtils.sendSystemMessage(source, "Only players can summon a companion.");
             return 0;
         }
-        if (!SurvivalRecruitmentService.isEnabled(server)) {
-            ChatUtils.sendSystemMessage(source, "Companion controls are only available in survival recruitment worlds.");
-            return 0;
-        }
+        boolean recruitmentMode = SurvivalRecruitmentService.isEnabled(server);
         ManualConfig.SurvivalRecruitmentState st = SurvivalRecruitmentService.getState(server);
-        if (st == null || !st.isRecruited()) {
-            ChatUtils.sendSystemMessage(source, "This world hasn't recruited a companion yet. Go to a village and recruit first (HUD prompt / Dialogue → Make contact (Recruit)).");
-            return 0;
-        }
-        if (!st.isPermanentCompanion()) {
-            ChatUtils.sendSystemMessage(source, "They're not a permanent companion yet.");
-            return 0;
-        }
-        if (!isAuthorizedCompanionCommander(commander, st)) {
-            ChatUtils.sendSystemMessage(source, "You aren't the one they pledged to.");
-            return 0;
-        }
-        String alias = st.getBotAlias();
-        if (targetArg != null && !targetArg.isBlank() && !alias.equalsIgnoreCase(targetArg.trim())) {
-            ChatUtils.sendSystemMessage(source, "This companion command only applies to '" + alias + "'.");
-            return 0;
+        String alias = resolveCompanionAlias(st, targetArg);
+
+        if (recruitmentMode) {
+            if (st == null || !st.isRecruited()) {
+                ChatUtils.sendSystemMessage(source, "This world hasn't recruited a companion yet. Go to a village and recruit first (HUD prompt / Dialogue → Make contact (Recruit)).");
+                return 0;
+            }
+            if (!st.isPermanentCompanion()) {
+                ChatUtils.sendSystemMessage(source, "They're not a permanent companion yet.");
+                return 0;
+            }
+            if (!isAuthorizedCompanionCommander(commander, st)) {
+                ChatUtils.sendSystemMessage(source, "You aren't the one they pledged to.");
+                return 0;
+            }
+            String recruitedAlias = st.getBotAlias();
+            if (targetArg != null && !targetArg.isBlank() && !recruitedAlias.equalsIgnoreCase(targetArg.trim())) {
+                ChatUtils.sendSystemMessage(source, "This companion command only applies to '" + recruitedAlias + "'.");
+                return 0;
+            }
         }
 
         if (!canUseCompanionSummon(server, commander, st)) {
-            ChatUtils.sendSystemMessage(source, "To summon your companion, cast the spell at an Enchanting Table (or use your Wizard's Tome), or carry an Eye of Ender (cooldown)." );
+            if (recruitmentMode) {
+                ChatUtils.sendSystemMessage(source, "To summon your companion, cast the spell at an Enchanting Table (or use your Wizard's Tome), or carry an Eye of Ender (cooldown)." );
+            } else {
+                ChatUtils.sendSystemMessage(source, "To summon the bot, cast at an Enchanting Table (or use your Wizard's Tome), or carry an Eye of Ender (cooldown).");
+            }
             return 0;
         }
 
         boolean hasBook = hasSpellbookToken(commander);
         boolean nearTable = isNearEnchantingTable(commander, 4);
-        boolean nearAnchor = isNearCompanionAnchor(server, commander, st, 12.0D);
+        boolean nearAnchor = recruitmentMode && isNearCompanionAnchor(server, commander, st, 12.0D);
         boolean hasEye = hasEyeOfEnderToken(commander);
         boolean usingEye = !hasBook && !nearTable && !nearAnchor && hasEye;
 
@@ -4044,31 +4054,36 @@ public class modCommandRegistry {
             ChatUtils.sendSystemMessage(source, "Only players can send a companion home.");
             return 0;
         }
-        if (!SurvivalRecruitmentService.isEnabled(server)) {
-            ChatUtils.sendSystemMessage(source, "Companion controls are only available in survival recruitment worlds.");
-            return 0;
-        }
+        boolean recruitmentMode = SurvivalRecruitmentService.isEnabled(server);
         ManualConfig.SurvivalRecruitmentState st = SurvivalRecruitmentService.getState(server);
-        if (st == null || !st.isRecruited()) {
-            ChatUtils.sendSystemMessage(source, "This world hasn't recruited a companion yet. Go to a village and recruit first (HUD prompt / Dialogue → Make contact (Recruit)).");
-            return 0;
-        }
-        if (!st.isPermanentCompanion()) {
-            ChatUtils.sendSystemMessage(source, "They're not a permanent companion yet.");
-            return 0;
-        }
-        if (!isAuthorizedCompanionCommander(commander, st)) {
-            ChatUtils.sendSystemMessage(source, "You aren't the one they pledged to.");
-            return 0;
-        }
-        String alias = st.getBotAlias();
-        if (targetArg != null && !targetArg.isBlank() && !alias.equalsIgnoreCase(targetArg.trim())) {
-            ChatUtils.sendSystemMessage(source, "This companion command only applies to '" + alias + "'.");
-            return 0;
+        String alias = resolveCompanionAlias(st, targetArg);
+
+        if (recruitmentMode) {
+            if (st == null || !st.isRecruited()) {
+                ChatUtils.sendSystemMessage(source, "This world hasn't recruited a companion yet. Go to a village and recruit first (HUD prompt / Dialogue → Make contact (Recruit)).");
+                return 0;
+            }
+            if (!st.isPermanentCompanion()) {
+                ChatUtils.sendSystemMessage(source, "They're not a permanent companion yet.");
+                return 0;
+            }
+            if (!isAuthorizedCompanionCommander(commander, st)) {
+                ChatUtils.sendSystemMessage(source, "You aren't the one they pledged to.");
+                return 0;
+            }
+            String recruitedAlias = st.getBotAlias();
+            if (targetArg != null && !targetArg.isBlank() && !recruitedAlias.equalsIgnoreCase(targetArg.trim())) {
+                ChatUtils.sendSystemMessage(source, "This companion command only applies to '" + recruitedAlias + "'.");
+                return 0;
+            }
         }
 
         if (!canUseCompanionHome(server, commander, st)) {
-            ChatUtils.sendSystemMessage(source, "To send your companion home, cast the spell at an Enchanting Table (or use your Wizard's Tome)." );
+            if (recruitmentMode) {
+                ChatUtils.sendSystemMessage(source, "To send your companion home, cast the spell at an Enchanting Table (or use your Wizard's Tome)." );
+            } else {
+                ChatUtils.sendSystemMessage(source, "To send the bot home, cast at an Enchanting Table (or use your Wizard's Tome).");
+            }
             return 0;
         }
 
@@ -4082,24 +4097,39 @@ public class modCommandRegistry {
             return 0;
         }
 
-        ResolvedCompanionAnchor anchor = resolveCompanionAnchor(server, st);
-        if (anchor == null || anchor.world == null || anchor.pos == null) {
-            ChatUtils.sendSystemMessage(source, "No village anchor set. Use the Dialogue topic 'Set this as our home'.");
-            return 0;
-        }
-        if (!(bot.getEntityWorld() instanceof ServerWorld botWorld)
-                || botWorld.getRegistryKey() != anchor.world.getRegistryKey()) {
-            ChatUtils.sendSystemMessage(source, alias + " can't go home across dimensions.");
-            return 0;
-        }
+        String result;
+        if (recruitmentMode) {
+            ResolvedCompanionAnchor anchor = resolveCompanionAnchor(server, st);
+            if (anchor == null || anchor.world == null || anchor.pos == null) {
+                ChatUtils.sendSystemMessage(source, "No village anchor set. Use the Dialogue topic 'Set this as our home'.");
+                return 0;
+            }
+            if (!(bot.getEntityWorld() instanceof ServerWorld botWorld)
+                    || botWorld.getRegistryKey() != anchor.world.getRegistryKey()) {
+                ChatUtils.sendSystemMessage(source, alias + " can't go home across dimensions.");
+                return 0;
+            }
 
-        BlockPos home = net.shasankp000.GameAI.services.SafePositionService.findSafeNear(anchor.world, anchor.pos, 8);
-        if (home == null) {
-            home = anchor.pos;
+            BlockPos home = net.shasankp000.GameAI.services.SafePositionService.findSafeNear(anchor.world, anchor.pos, 8);
+            if (home == null) {
+                home = anchor.pos;
+            }
+            result = BotEventHandler.setReturnToBase(bot, Vec3d.ofCenter(home));
+        } else {
+            result = BotEventHandler.setReturnToBase(bot);
         }
-        String result = BotEventHandler.setReturnToBase(bot, Vec3d.ofCenter(home));
         ChatUtils.sendSystemMessage(source, result);
         return 1;
+    }
+
+    private static String resolveCompanionAlias(ManualConfig.SurvivalRecruitmentState st, String targetArg) {
+        if (targetArg != null && !targetArg.isBlank()) {
+            return targetArg.trim();
+        }
+        if (st != null && st.getBotAlias() != null && !st.getBotAlias().isBlank()) {
+            return st.getBotAlias();
+        }
+        return "Jake";
     }
 
     private static boolean isAuthorizedCompanionCommander(ServerPlayerEntity player, ManualConfig.SurvivalRecruitmentState st) {
@@ -4114,7 +4144,7 @@ public class modCommandRegistry {
     }
 
     private static boolean canUseCompanionCome(MinecraftServer server, ServerPlayerEntity commander, ManualConfig.SurvivalRecruitmentState st) {
-        if (commander == null || server == null || st == null) {
+        if (commander == null || server == null) {
             return false;
         }
         if (hasSpellbookToken(commander)) {
@@ -4127,11 +4157,11 @@ public class modCommandRegistry {
         if (hasGoatHornToken(commander)) {
             return true;
         }
-        return isNearCompanionAnchor(server, commander, st, 12.0D);
+        return st != null && isNearCompanionAnchor(server, commander, st, 12.0D);
     }
 
     private static boolean canUseCompanionSummon(MinecraftServer server, ServerPlayerEntity commander, ManualConfig.SurvivalRecruitmentState st) {
-        if (commander == null || server == null || st == null) {
+        if (commander == null || server == null) {
             return false;
         }
         if (hasSpellbookToken(commander)) {
@@ -4144,7 +4174,7 @@ public class modCommandRegistry {
         if (hasEyeOfEnderToken(commander)) {
             return true;
         }
-        return isNearCompanionAnchor(server, commander, st, 12.0D);
+        return st != null && isNearCompanionAnchor(server, commander, st, 12.0D);
     }
 
     private static boolean hasEyeOfEnderToken(ServerPlayerEntity commander) {
@@ -4182,7 +4212,7 @@ public class modCommandRegistry {
     }
 
     private static boolean canUseCompanionHome(MinecraftServer server, ServerPlayerEntity commander, ManualConfig.SurvivalRecruitmentState st) {
-        if (commander == null || server == null || st == null) {
+        if (commander == null || server == null) {
             return false;
         }
         if (hasSpellbookToken(commander)) {
@@ -4191,7 +4221,7 @@ public class modCommandRegistry {
         if (isNearEnchantingTable(commander, 4)) {
             return true;
         }
-        return isNearCompanionAnchor(server, commander, st, 16.0D);
+        return st != null && isNearCompanionAnchor(server, commander, st, 16.0D);
     }
 
     private static boolean isNearEnchantingTable(ServerPlayerEntity commander, int radius) {

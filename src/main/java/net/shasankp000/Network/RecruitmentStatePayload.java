@@ -6,7 +6,12 @@ import net.minecraft.network.packet.CustomPayload;
 import net.minecraft.util.Identifier;
 
 /** Server -> Client: current survival recruitment mode state for this world. */
-public record RecruitmentStatePayload(boolean enabled, boolean recruited, String botAlias) implements CustomPayload {
+public record RecruitmentStatePayload(boolean enabled,
+                                      boolean recruited,
+                                      String botAlias,
+                                      boolean modeSelectionRequired,
+                                      boolean modeSelectionCanChoose,
+                                      String worldKey) implements CustomPayload {
     public static final Identifier ID_IDENTIFIER = Identifier.of("ai-player", "recruitment_state");
     public static final CustomPayload.Id<RecruitmentStatePayload> ID = new CustomPayload.Id<>(ID_IDENTIFIER);
 
@@ -27,6 +32,9 @@ public record RecruitmentStatePayload(boolean enabled, boolean recruited, String
             PacketCodec.tuple(BOOL_CODEC, RecruitmentStatePayload::enabled,
                     BOOL_CODEC, RecruitmentStatePayload::recruited,
                     STRING_CODEC, RecruitmentStatePayload::botAlias,
+                    BOOL_CODEC, RecruitmentStatePayload::modeSelectionRequired,
+                    BOOL_CODEC, RecruitmentStatePayload::modeSelectionCanChoose,
+                    STRING_CODEC, RecruitmentStatePayload::worldKey,
                     RecruitmentStatePayload::new);
 
     @Override

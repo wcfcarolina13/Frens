@@ -33,6 +33,7 @@ import net.shasankp000.GraphicalUserInterface.CompanionHotkeyOverlayHud;
 import net.shasankp000.GraphicalUserInterface.HuntablesScreen;
 import net.shasankp000.GraphicalUserInterface.CompanionSpellsScreen;
 import net.shasankp000.GraphicalUserInterface.RecruitmentDialogueScreen;
+import net.shasankp000.GraphicalUserInterface.WorldModeSelectionScreen;
 import net.shasankp000.network.CookablesPayload;
 import net.shasankp000.network.CraftingHistoryPayload;
 import net.shasankp000.network.BasesListPayload;
@@ -93,6 +94,11 @@ public class AIPlayerClient implements ClientModInitializer {
     private static boolean survivalRecruitmentCompleted = false;
     private static boolean recruitmentPromptVisible = false;
     private static String recruitmentBotAlias = "Jake";
+    private static boolean modeSelectionRequired = false;
+    private static boolean modeSelectionCanChoose = false;
+    private static String modeSelectionWorldKey = "default";
+    private static boolean modeSelectionAutoOpenPending = false;
+    private static boolean modeSelectionOpenedThisConnection = false;
 
     // Auto-open recruitment dialogue once when entering a village (prompt transitions hidden -> visible).
     private static boolean recruitmentAutoOpenPending = false;
@@ -358,9 +364,21 @@ public class AIPlayerClient implements ClientModInitializer {
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             if (client == null || client.player == null || client.getNetworkHandler() == null) {
+                modeSelectionRequired = false;
+                modeSelectionCanChoose = false;
+                modeSelectionWorldKey = "default";
+                modeSelectionAutoOpenPending = false;
+                modeSelectionOpenedThisConnection = false;
                 return;
             }
             if (client.currentScreen != null) {
+                return;
+            }
+
+            if (modeSelectionAutoOpenPending && modeSelectionRequired && modeSelectionCanChoose) {
+                client.setScreen(new WorldModeSelectionScreen(modeSelectionWorldKey, true));
+                modeSelectionAutoOpenPending = false;
+                modeSelectionOpenedThisConnection = true;
                 return;
             }
 
@@ -473,6 +491,21 @@ public class AIPlayerClient implements ClientModInitializer {
             context.client().execute(() -> {
                 survivalRecruitmentEnabled = payload.enabled();
                 survivalRecruitmentCompleted = payload.recruited();
+                modeSelectionRequired = payload.modeSelectionRequired();
+                modeSelectionCanChoose = payload.modeSelectionCanChoose();
+                modeSelectionWorldKey = (payload.worldKey() == null || payload.worldKey().isBlank())
+                        ? "default"
+                        : payload.worldKey();
+                if (modeSelectionRequired && modeSelectionCanChoose && !modeSelectionOpenedThisConnection) {
+                    modeSelectionAutoOpenPending = true;
+                }
+                if (!modeSelectionRequired) {
+                    modeSelectionAutoOpenPending = false;
+                    MinecraftClient client = MinecraftClient.getInstance();
+                    if (client != null && client.currentScreen instanceof WorldModeSelectionScreen) {
+                        client.setScreen(null);
+                    }
+                }
                 if (payload.botAlias() != null && !payload.botAlias().isBlank()) {
                     recruitmentBotAlias = payload.botAlias();
                 }

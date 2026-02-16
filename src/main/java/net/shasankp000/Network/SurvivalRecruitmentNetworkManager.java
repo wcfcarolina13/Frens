@@ -32,6 +32,9 @@ public final class SurvivalRecruitmentNetworkManager {
 
         ServerPlayNetworking.registerGlobalReceiver(RequestRecruitmentReplayPayload.ID, (payload, context) ->
             context.server().execute(() -> SurvivalRecruitmentService.handleRequestReplayRecruitment(context.player(), payload.botAlias())));
+
+        ServerPlayNetworking.registerGlobalReceiver(ModeSelectionChoicePayload.ID, (payload, context) ->
+                context.server().execute(() -> SurvivalRecruitmentService.handleModeSelectionChoice(context.player(), payload.questingMode())));
     }
 
     public static void sendRecruitmentState(ServerPlayerEntity player) {

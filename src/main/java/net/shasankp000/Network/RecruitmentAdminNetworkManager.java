@@ -127,8 +127,7 @@ public final class RecruitmentAdminNetworkManager {
                 out.add("Recruited=false; stage=0; permanent=false; anchor cleared.");
             }
             case "enable" -> {
-                AIPlayer.CONFIG.setSurvivalRecruitmentMode(true);
-                AIPlayer.CONFIG.save();
+                SurvivalRecruitmentService.setWorldMode(server, true, player.getName().getString());
                 for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
                     if (p == null || p.isRemoved() || (p instanceof createFakePlayer)) {
                         continue;
@@ -138,8 +137,7 @@ public final class RecruitmentAdminNetworkManager {
                 out.add("Survival recruitment mode: enabled");
             }
             case "disable" -> {
-                AIPlayer.CONFIG.setSurvivalRecruitmentMode(false);
-                AIPlayer.CONFIG.save();
+                SurvivalRecruitmentService.setWorldMode(server, false, player.getName().getString());
                 for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
                     if (p == null || p.isRemoved() || (p instanceof createFakePlayer)) {
                         continue;
@@ -208,13 +206,15 @@ public final class RecruitmentAdminNetworkManager {
 
     private static List<String> buildStatusLines(MinecraftServer server, String worldKey, ManualConfig.SurvivalRecruitmentState st) {
         List<String> out = new ArrayList<>();
-        boolean enabled = AIPlayer.CONFIG != null && AIPlayer.CONFIG.isSurvivalRecruitmentMode();
+        boolean enabled = SurvivalRecruitmentService.isEnabled(server);
         out.add("Survival recruitment mode: " + enabled);
         out.add("World key: " + (worldKey == null ? "default" : worldKey));
         if (st == null) {
             out.add("State: <null>");
             return out;
         }
+        out.add("Mode selection done: " + st.isModeSelectionDone()
+                + " (selected=" + (st.getSelectedWorldMode() == null ? "unset" : st.getSelectedWorldMode()) + ")");
 
         out.add("Recruited: " + st.isRecruited() + " (botAlias=" + st.getBotAlias() + ")");
         if (st.isRecruited()) {

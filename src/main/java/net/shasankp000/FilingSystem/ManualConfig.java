@@ -825,6 +825,12 @@ public class ManualConfig {
         private String recruitedByName;
         private String botAlias = "Jake";
         private long recruitedAtEpochMs;
+        // Whether this world has gone through the first-time mode selection prompt.
+        private boolean modeSelectionDone;
+        // Last selected world mode ("questing" or "admin") for UI/status transparency.
+        private String selectedWorldMode;
+        private long modeSelectedAtEpochMs;
+        private String modeSelectedByName;
 
         // ===== Companion questline (per-world, survival recruitment mode) =====
         // Anchor location for village improvement checks.
@@ -883,6 +889,49 @@ public class ManualConfig {
 
         public void setRecruitedAtEpochMs(long recruitedAtEpochMs) {
             this.recruitedAtEpochMs = recruitedAtEpochMs;
+        }
+
+        public boolean isModeSelectionDone() {
+            return modeSelectionDone;
+        }
+
+        public void setModeSelectionDone(boolean modeSelectionDone) {
+            this.modeSelectionDone = modeSelectionDone;
+        }
+
+        public String getSelectedWorldMode() {
+            return selectedWorldMode;
+        }
+
+        public void setSelectedWorldMode(String selectedWorldMode) {
+            if (selectedWorldMode == null || selectedWorldMode.isBlank()) {
+                this.selectedWorldMode = null;
+                return;
+            }
+            String normalized = selectedWorldMode.trim().toLowerCase(Locale.ROOT);
+            if (!"questing".equals(normalized) && !"admin".equals(normalized)) {
+                this.selectedWorldMode = null;
+                return;
+            }
+            this.selectedWorldMode = normalized;
+        }
+
+        public long getModeSelectedAtEpochMs() {
+            return modeSelectedAtEpochMs;
+        }
+
+        public void setModeSelectedAtEpochMs(long modeSelectedAtEpochMs) {
+            this.modeSelectedAtEpochMs = Math.max(0L, modeSelectedAtEpochMs);
+        }
+
+        public String getModeSelectedByName() {
+            return modeSelectedByName;
+        }
+
+        public void setModeSelectedByName(String modeSelectedByName) {
+            this.modeSelectedByName = (modeSelectedByName == null || modeSelectedByName.isBlank())
+                    ? null
+                    : modeSelectedByName.trim();
         }
 
         public boolean isCompanionAnchorSet() {
