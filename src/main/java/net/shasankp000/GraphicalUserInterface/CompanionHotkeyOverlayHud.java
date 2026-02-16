@@ -26,16 +26,16 @@ public final class CompanionHotkeyOverlayHud {
     };
 
     private static final String[] LABELS = {
-            "1 Stop",
-            "2 Resume",
-            "3 Spells",
-            "4 Follow Toggle",
-            "5 Go To Look",
-            "6 Come",
-            "7 Stripmine",
-            "8 Ascent",
-            "9 Descent",
-            "0 Cleanup"
+            "1 🛑 Stop",
+            "2 ▶ Resume",
+            "3 ✨ Spells",
+            "4 👣 Follow Toggle",
+            "5 🎯 Go To Look",
+            "6 📣 Come",
+            "7 ⛏ Stripmine",
+            "8 🪜 Ascent",
+            "9 🕳 Descent",
+            "0 🧹 Cleanup"
     };
 
     private static final boolean[] LAST_DOWN = new boolean[10];

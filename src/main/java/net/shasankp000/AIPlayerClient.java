@@ -394,12 +394,9 @@ public class AIPlayerClient implements ClientModInitializer {
                     if (shouldUseGoToKeyForRecruitmentContact(client)) {
                         handleRecruitContactKey(client);
                     } else {
-                        // After recruitment: if spells are available and the companion isn't currently present
-                        // (far away / unloaded), override go-to with spells.
-                        if (!isCompanionNearPlayer(client, 32.0D)) {
-                            // In the spells context, always consume the key. Falling back to go-to-look here
-                            // produces an unrelated server system message ("No bots are following you.").
-                            // If spells aren't available yet, we simply do nothing.
+                        // '-' is only temporarily rebound to spells while holding a spell trigger
+                        // item (tome/horn/eye) or when near an enchanting table.
+                        if (isTemporaryGoToSpellsOverrideActive(client)) {
                             handleSpellsContextKey(client);
                         } else {
                             handleGoToLook(client);
@@ -792,60 +789,30 @@ public class AIPlayerClient implements ClientModInitializer {
             return;
         }
 
-        boolean anyAccess = isNearEnchantingTable(client, 4)
-            || hasSpellbookToken(client)
-            || hasEyeOfEnderToken(client)
-            || hasGoatHornToken(client);
-        if (!anyAccess) {
+        if (hasPendingDirectionalMining() || hasPendingShelter()) {
+            return;
+        }
+        if (!isTemporaryGoToSpellsOverrideActive(client)) {
             return;
         }
 
-        // If companion is already nearby, these remote spells are usually redundant.
-        if (isCompanionNearPlayer(client, 32.0D)) {
-            return;
-        }
-
-        // Prefer the go-to key (the one that actually overrides behavior), fall back to dedicated binding.
         String keyName = keyNameOrNull(KEY_GO_TO_LOOK);
-        if (keyName == null) {
-            keyName = keyNameOrNull(KEY_RECRUIT_CONTACT);
-        }
         if (keyName == null) {
             keyName = "-";
         }
 
-        String line1 = "You feel the tether pull...";
+        String line1 = "Spells are bound to [" + keyName + "] right now.";
         String line2;
-        boolean hasBook = hasSpellbookToken(client);
+        boolean holdingTrigger = isHoldingSpellTriggerItem(client);
         boolean nearTable = isNearEnchantingTable(client, 4);
-        boolean hasEye = hasEyeOfEnderToken(client);
-        boolean hasHorn = hasGoatHornToken(client);
-        boolean full = hasBook || nearTable;
-        boolean eyePartial = hasEye && !full;
-        boolean hornPartial = hasHorn && !full;
-
-        if (eyePartial && hornPartial) {
-            if (isEyeSpellOnCooldown()) {
-                long sec = Math.max(1L, getEyeSpellCooldownRemainingMs() / 1000L);
-                line2 = "Press [" + keyName + "] for spells (Horn: come, Eye cooldown " + sec + "s)";
-            } else {
-                line2 = "Press [" + keyName + "] for spells (Horn: come, Eye: summon-only)";
-            }
-        } else if (hornPartial) {
-            line2 = "Press [" + keyName + "] for spells (Goat Horn: come-only)";
-        } else if (eyePartial) {
-            if (isEyeSpellOnCooldown()) {
-                long sec = Math.max(1L, getEyeSpellCooldownRemainingMs() / 1000L);
-                line2 = "Press [" + keyName + "] for spells (Eye cooldown " + sec + "s)";
-            } else {
-                line2 = "Press [" + keyName + "] for spells (Eye: summon-only)";
-            }
-        } else if (hasBook) {
-            line2 = "Press [" + keyName + "] for spells (Wizard's Tome)";
+        if (holdingTrigger && nearTable) {
+            line2 = "Holding spell item + near enchanting table. Switch item to restore Go To Look.";
+        } else if (holdingTrigger) {
+            line2 = "Holding spell item. Switch hotbar item to restore Go To Look.";
         } else if (nearTable) {
-            line2 = "Press [" + keyName + "] for spells (Enchanting Table)";
+            line2 = "Near enchanting table. Walk away to restore Go To Look.";
         } else {
-            line2 = "Press [" + keyName + "] for spells";
+            line2 = "Switch item or location to restore Go To Look.";
         }
 
         int w1 = client.textRenderer.getWidth(line1);
@@ -864,6 +831,38 @@ public class AIPlayerClient implements ClientModInitializer {
 
         context.drawTextWithShadow(client.textRenderer, line1, x, y, 0xFFE6D7A3);
         context.drawTextWithShadow(client.textRenderer, line2, x, y + client.textRenderer.fontHeight + 2, 0xFFB8A76A);
+    }
+
+    private static boolean isTemporaryGoToSpellsOverrideActive(MinecraftClient client) {
+        if (client == null || client.player == null || client.currentScreen != null) {
+            return false;
+        }
+        if (survivalRecruitmentEnabled && !survivalRecruitmentCompleted) {
+            return false;
+        }
+        if (!survivalRecruitmentEnabled || !survivalRecruitmentCompleted) {
+            return false;
+        }
+        return isHoldingSpellTriggerItem(client) || isNearEnchantingTable(client, 4);
+    }
+
+    private static boolean isHoldingSpellTriggerItem(MinecraftClient client) {
+        if (client == null || client.player == null) {
+            return false;
+        }
+        var main = client.player.getMainHandStack();
+        if (main == null || main.isEmpty()) {
+            return false;
+        }
+        if (main.isOf(ModItems.WIZARD_TOME) || main.isOf(Items.GOAT_HORN) || main.isOf(Items.ENDER_EYE)) {
+            return true;
+        }
+        if (main.isOf(Items.WRITTEN_BOOK) || main.isOf(Items.ENCHANTED_BOOK)) {
+            String name = main.getName() != null ? main.getName().getString() : "";
+            String lower = name != null ? name.toLowerCase(java.util.Locale.ROOT) : "";
+            return lower.contains("spellbook") || (lower.contains("wizard") && lower.contains("tome"));
+        }
+        return false;
     }
 
     private static boolean canAccessCompanionSpells(MinecraftClient client) {
