@@ -58,7 +58,7 @@ public final class WoodcutCleanupSkill implements Skill {
     private static final int DEFAULT_RADIUS = 18;
     private static final int DEFAULT_VERTICAL_RANGE = 12;
     private static final int DEFAULT_MAX_LOGS = 64;
-    private static final int DEFAULT_MAX_SCAFFOLD = 48;
+    private static final int DEFAULT_MAX_SCAFFOLD = 96;
     private static final long DEFAULT_DURATION_MS = 45_000L;
 
     private static final double REACH_DISTANCE_SQ = 20.25D; // ~4.5 blocks
@@ -789,6 +789,31 @@ public final class WoodcutCleanupSkill implements Skill {
         if (BotActions.selectBestTool(bot, "shears", "")) {
             return true;
         }
+        return selectHandsOrHarmlessItem(bot);
+    }
+
+    private boolean hasToolKeyword(ServerPlayerEntity bot, String keyword) {
+        if (bot == null || keyword == null || keyword.isBlank()) {
+            return false;
+        }
+        String needle = keyword.toLowerCase(Locale.ROOT);
+        for (int i = 0; i < bot.getInventory().size(); i++) {
+            ItemStack stack = bot.getInventory().getStack(i);
+            if (stack.isEmpty()) {
+                continue;
+            }
+            String key = stack.getItem().getTranslationKey().toLowerCase(Locale.ROOT);
+            if (key.contains(needle)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean selectHandsOrHarmlessItem(ServerPlayerEntity bot) {
+        if (bot == null) {
+            return false;
+        }
         for (int i = 0; i < 9; i++) {
             ItemStack stack = bot.getInventory().getStack(i);
             if (stack.isEmpty()) {
@@ -802,7 +827,16 @@ public final class WoodcutCleanupSkill implements Skill {
             BotActions.selectHotbarSlot(bot, i);
             return true;
         }
+        BotActions.selectHotbarSlot(bot, 0);
         return true;
+    }
+
+    private void selectScaffoldToolOrHands(ServerPlayerEntity bot) {
+        if (hasToolKeyword(bot, "shovel")) {
+            BotActions.selectBestTool(bot, "shovel", "axe");
+            return;
+        }
+        selectHandsOrHarmlessItem(bot);
     }
 
     private void breakLeaf(ServerPlayerEntity bot, BlockPos pos) {
@@ -856,8 +890,8 @@ public final class WoodcutCleanupSkill implements Skill {
         if (preferAxe) {
             ensureAxeEquipped(bot);
         } else {
-            // Avoid axes for scaffold; prefer shovel if possible.
-            BotActions.selectBestTool(bot, "shovel", "axe");
+            // For scaffold removal, prefer shovel; otherwise use hands/non-tool.
+            selectScaffoldToolOrHands(bot);
         }
 
         CompletableFuture<String> miningFuture = MiningTool.mineBlock(bot, pos);

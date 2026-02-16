@@ -11,30 +11,25 @@ import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.option.KeyBinding;
 import net.minecraft.client.gui.screen.ingame.HandledScreens;
 import net.minecraft.client.render.*;
-import net.minecraft.client.util.math.MatrixStack;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.hit.HitResult;
-import net.minecraft.particle.ParticleTypes;
 import net.minecraft.particle.DustParticleEffect;
-import com.mojang.blaze3d.systems.RenderSystem;
-import org.joml.Matrix4f;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.mob.MobEntity;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.item.Items;
 import net.minecraft.block.Blocks;
 import net.minecraft.text.Text;
-import net.minecraft.util.hit.EntityHitResult;
-import net.minecraft.util.hit.HitResult;
 import net.shasankp000.GraphicalUserInterface.BaseManagerScreen;
 import net.shasankp000.GraphicalUserInterface.BotPlayerInventoryScreen;
 import net.shasankp000.GraphicalUserInterface.CookablesScreen;
 import net.shasankp000.GraphicalUserInterface.CraftingHistoryScreen;
 import net.shasankp000.GraphicalUserInterface.ConfigManager;
+import net.shasankp000.GraphicalUserInterface.CompanionHotkeyOverlayHud;
 import net.shasankp000.GraphicalUserInterface.HuntablesScreen;
 import net.shasankp000.GraphicalUserInterface.CompanionSpellsScreen;
 import net.shasankp000.GraphicalUserInterface.RecruitmentDialogueScreen;
@@ -52,6 +47,8 @@ import net.shasankp000.network.ResumeDecisionPayload;
 import net.shasankp000.network.OpenConfigPayload;
 import net.shasankp000.network.RecruitmentAdminStatusPayload;
 import net.shasankp000.network.CompanionOverheadLinePayload;
+import net.shasankp000.network.BotTaskPeekRequestPayload;
+import net.shasankp000.network.BotTaskPeekStatusPayload;
 import net.shasankp000.items.ModItems;
 import org.lwjgl.glfw.GLFW;
 
@@ -61,15 +58,25 @@ public class AIPlayerClient implements ClientModInitializer {
 
     private static KeyBinding KEY_FOLLOW_TOGGLE_LOOK;
     private static KeyBinding KEY_GO_TO_LOOK;
+    private static KeyBinding KEY_OPEN_SPELLS;
     private static KeyBinding KEY_RESUME;
     private static KeyBinding KEY_STOP_LOOK;
     private static KeyBinding KEY_LEASH;
     private static KeyBinding KEY_RECRUIT_CONTACT;
 
+    private static final long STOP_HOLD_THRESHOLD_MS = 350L;
+    private static final long HOTKEY_OVERLAY_DURATION_MS = 4500L;
+    private static boolean stopKeyDown = false;
+    private static long stopKeyDownAtMs = 0L;
+    private static boolean stopKeyHoldConsumed = false;
+
     // Pending shelter type from the Topics menu (null = no pending shelter, use go_to_look as normal)
     private static String pendingShelterType = null;
     private static String pendingShelterBotTarget = null;
     private static net.shasankp000.GameAI.schematic.SchematicData pendingSchematicData = null;
+    private static String pendingDirectionalActionLabel = null;
+    private static String pendingDirectionalCommand = null;
+    private static int directionalPreviewTick = 0;
 
     private static boolean resumeDecisionActive = false;
     private static String resumeDecisionBotName = null;
@@ -119,6 +126,12 @@ public class AIPlayerClient implements ClientModInitializer {
     private record OverheadNameBackup(Text customName, boolean customNameVisible) {
     }
     private static final java.util.Map<java.util.UUID, OverheadNameBackup> OVERHEAD_NAME_BACKUP = new java.util.concurrent.ConcurrentHashMap<>();
+
+    // Hovered bot task hint state (debounced peek requests).
+    private static java.util.UUID lookedAtBotUuid = null;
+    private static long lookedAtBotPeekLastRequestMs = 0L;
+    private static BotTaskPeekStatusPayload lookedAtBotStatus = null;
+    private static long lookedAtBotStatusAtMs = 0L;
 
     // Expose recruitment UI state to other client UI surfaces (e.g., bot inventory overlay).
     public static boolean isSurvivalRecruitmentEnabled() {
@@ -271,6 +284,22 @@ public class AIPlayerClient implements ClientModInitializer {
         return pendingShelterType != null;
     }
 
+    public static void setPendingDirectionalMining(String actionLabel, String command) {
+        pendingDirectionalActionLabel = actionLabel;
+        pendingDirectionalCommand = command;
+        directionalPreviewTick = 0;
+    }
+
+    public static void clearPendingDirectionalMining() {
+        pendingDirectionalActionLabel = null;
+        pendingDirectionalCommand = null;
+        directionalPreviewTick = 0;
+    }
+
+    private static boolean hasPendingDirectionalMining() {
+        return pendingDirectionalCommand != null && !pendingDirectionalCommand.isBlank();
+    }
+
     @Override
     public void onInitializeClient() {
         HandledScreens.register(AIPlayer.BOT_PLAYER_INV_HANDLER, BotPlayerInventoryScreen::new);
@@ -281,10 +310,10 @@ public class AIPlayerClient implements ClientModInitializer {
         // - These are regular keybinds (no modifier support), intended as a reliable, rebindable alternative
         //   especially on macOS where F-keys may be captured by the OS unless the user holds Fn or enables
         //   "Use F1, F2, etc. keys as standard function keys".
-        // - Default: unbound, to avoid colliding with vanilla bindings.
+        // - Defaults: [`] follow-toggle, [-] go-to-look, [\] stop-look.
         KEY_FOLLOW_TOGGLE_LOOK = KeyBindingHelper.registerKeyBinding(new KeyBinding(
             "key.ai-player.follow_toggle_look",
-            GLFW.GLFW_KEY_UNKNOWN,
+            GLFW.GLFW_KEY_GRAVE_ACCENT,
             KeyBinding.Category.MISC
         ));
         KEY_GO_TO_LOOK = KeyBindingHelper.registerKeyBinding(new KeyBinding(
@@ -294,6 +323,11 @@ public class AIPlayerClient implements ClientModInitializer {
             // - after recruitment (when spells are available and companion is far away): opens spells
             // - otherwise: go-to-look
             GLFW.GLFW_KEY_MINUS,
+            KeyBinding.Category.MISC
+        ));
+        KEY_OPEN_SPELLS = KeyBindingHelper.registerKeyBinding(new KeyBinding(
+            "key.ai-player.open_spells",
+            GLFW.GLFW_KEY_UNKNOWN,
             KeyBinding.Category.MISC
         ));
 
@@ -351,29 +385,34 @@ public class AIPlayerClient implements ClientModInitializer {
             }
 
             if (goToPressed) {
-                // Contextual behavior: before recruitment is complete and no companion is present,
-                // reuse the user's go-to key to initiate recruitment dialogue (prevents keybind conflicts).
-                if (shouldUseGoToKeyForRecruitmentContact(client)) {
-                    handleRecruitContactKey(client);
+                if (confirmPendingDirectionalMining(client)) {
+                    // Consumed by pending directional mining confirm flow.
                 } else {
-                    // After recruitment: if spells are available and the companion isn't currently present
-                    // (far away / unloaded), override go-to with spells.
-                    if (!isCompanionNearPlayer(client, 32.0D)) {
-                        // In the spells context, always consume the key. Falling back to go-to-look here
-                        // produces an unrelated server system message ("No bots are following you.").
-                        // If spells aren't available yet, we simply do nothing.
-                        handleSpellsContextKey(client);
+                    // Contextual behavior: before recruitment is complete and no companion is present,
+                    // reuse the user's go-to key to initiate recruitment dialogue (prevents keybind conflicts).
+                    if (shouldUseGoToKeyForRecruitmentContact(client)) {
+                        handleRecruitContactKey(client);
                     } else {
-                        handleGoToLook(client);
+                        // After recruitment: if spells are available and the companion isn't currently present
+                        // (far away / unloaded), override go-to with spells.
+                        if (!isCompanionNearPlayer(client, 32.0D)) {
+                            // In the spells context, always consume the key. Falling back to go-to-look here
+                            // produces an unrelated server system message ("No bots are following you.").
+                            // If spells aren't available yet, we simply do nothing.
+                            handleSpellsContextKey(client);
+                        } else {
+                            handleGoToLook(client);
+                        }
                     }
                 }
+            }
+            if (KEY_OPEN_SPELLS.wasPressed()) {
+                handleSpellsContextKey(client);
             }
             if (KEY_RESUME.wasPressed()) {
                 handleResumeKey(client);
             }
-            if (KEY_STOP_LOOK.wasPressed()) {
-                handleStopLook(client);
-            }
+            tickStopHoldBehavior(client);
             if (KEY_LEASH.wasPressed()) {
                 handleLeashKey(client);
             }
@@ -385,12 +424,15 @@ public class AIPlayerClient implements ClientModInitializer {
                     handleRecruitContactKey(client);
                 }
             }
+            tickHotkeyOverlaySelection(client);
 
             // Update leash button visibility based on whether we're looking at a bot with leashed animals
             updateLeashButtonVisibility(client);
 
             // Show a short, top-right hint when we *first* acquire a spell-enabling item.
             tickSpellsAcquireHint(client);
+            tickDirectionalMiningPreview(client);
+            tickLookedAtBotStatusPeek(client);
         });
 
         ClientPlayNetworking.registerGlobalReceiver(OpenConfigPayload.ID, (payload, context) -> {
@@ -548,12 +590,22 @@ public class AIPlayerClient implements ClientModInitializer {
             });
         });
 
+        ClientPlayNetworking.registerGlobalReceiver(BotTaskPeekStatusPayload.ID, (payload, context) -> {
+            context.client().execute(() -> {
+                lookedAtBotStatus = payload;
+                lookedAtBotStatusAtMs = System.currentTimeMillis();
+            });
+        });
+
         HudRenderCallback.EVENT.register((context, tickDelta) -> renderResumeDecisionHint(context));
         HudRenderCallback.EVENT.register((context, tickDelta) -> renderLeashButton(context));
         HudRenderCallback.EVENT.register((context, tickDelta) -> renderRecruitmentPrompt(context));
         HudRenderCallback.EVENT.register((context, tickDelta) -> renderSpellsAcquireHint(context));
         HudRenderCallback.EVENT.register((context, tickDelta) -> renderSpellsPrompt(context));
         HudRenderCallback.EVENT.register((context, tickDelta) -> renderSchematicPreview(context));
+        HudRenderCallback.EVENT.register((context, tickDelta) -> renderDirectionalMiningHint(context));
+        HudRenderCallback.EVENT.register((context, tickDelta) -> CompanionHotkeyOverlayHud.render(context));
+        HudRenderCallback.EVENT.register((context, tickDelta) -> renderLookedAtBotStatusHint(context));
         
         // Update schematic preview box every client tick
         ClientTickEvents.END_CLIENT_TICK.register(AIPlayerClient::updateSchematicPreviewBox);
@@ -1030,6 +1082,249 @@ public class AIPlayerClient implements ClientModInitializer {
             return null;
         }
     }
+
+    private static void tickStopHoldBehavior(MinecraftClient client) {
+        if (KEY_STOP_LOOK == null) {
+            return;
+        }
+        boolean down = KEY_STOP_LOOK.isPressed();
+        long now = System.currentTimeMillis();
+
+        if (down) {
+            if (!stopKeyDown) {
+                stopKeyDown = true;
+                stopKeyDownAtMs = now;
+                stopKeyHoldConsumed = false;
+            } else if (!stopKeyHoldConsumed && now - stopKeyDownAtMs >= STOP_HOLD_THRESHOLD_MS) {
+                stopKeyHoldConsumed = true;
+                CompanionHotkeyOverlayHud.show(HOTKEY_OVERLAY_DURATION_MS);
+            }
+            return;
+        }
+
+        if (!stopKeyDown) {
+            return;
+        }
+
+        // Tap = legacy stop behavior. Hold = open overlay and consume stop tap.
+        if (!stopKeyHoldConsumed) {
+            handleStopLook(client);
+        }
+        stopKeyDown = false;
+        stopKeyDownAtMs = 0L;
+        stopKeyHoldConsumed = false;
+    }
+
+    private static void tickHotkeyOverlaySelection(MinecraftClient client) {
+        Integer selected = CompanionHotkeyOverlayHud.pollSelection(client);
+        if (selected == null) {
+            return;
+        }
+        executeOverlayHotkeySelection(client, selected);
+        CompanionHotkeyOverlayHud.hide();
+    }
+
+    private static void executeOverlayHotkeySelection(MinecraftClient client, int slot) {
+        if (client == null || client.player == null) {
+            return;
+        }
+        String target = resolveQuickBotTarget(client);
+
+        switch (slot) {
+            case 1 -> handleStopLook(client);
+            case 2 -> {
+                if (resumeDecisionActive) {
+                    sendResumeDecision(client, true);
+                } else if (target != null) {
+                    sendChatCommand(client, "bot resume " + formatBotTarget(target));
+                } else {
+                    sendChatCommand(client, "bot resume");
+                }
+            }
+            case 3 -> handleSpellsContextKey(client);
+            case 4 -> handleFollowToggleLookedAt(client);
+            case 5 -> handleGoToLook(client);
+            case 6 -> sendChatCommand(client, "bot companion come");
+            case 7 -> {
+                if (target != null) {
+                    sendChatCommand(client, "bot return " + formatBotTarget(target));
+                } else {
+                    sendChatCommand(client, "bot return");
+                }
+            }
+            case 8 -> {
+                if (target != null) {
+                    sendChatCommand(client, "bot guard " + formatBotTarget(target));
+                }
+            }
+            case 9 -> {
+                if (target != null) {
+                    sendChatCommand(client, "bot patrol " + formatBotTarget(target));
+                }
+            }
+            case 0 -> {
+                if (target != null) {
+                    sendChatCommand(client, "bot skill drop_sweep " + formatBotTarget(target));
+                } else {
+                    sendChatCommand(client, "bot skill drop_sweep");
+                }
+            }
+            default -> {
+            }
+        }
+    }
+
+    private static String resolveQuickBotTarget(MinecraftClient client) {
+        String looked = findLookedAtBotName(client);
+        if (looked != null && !looked.isBlank()) {
+            return looked;
+        }
+        if (recruitmentBotAlias != null && !recruitmentBotAlias.isBlank()) {
+            return recruitmentBotAlias.trim();
+        }
+        return null;
+    }
+
+    private static String formatBotTarget(String botName) {
+        if (botName == null || botName.isBlank()) {
+            return "";
+        }
+        return botName.contains(" ") ? "\"" + botName + "\"" : botName;
+    }
+
+    private static boolean confirmPendingDirectionalMining(MinecraftClient client) {
+        if (!hasPendingDirectionalMining()) {
+            return false;
+        }
+        sendChatCommand(client, pendingDirectionalCommand);
+        clearPendingDirectionalMining();
+        return true;
+    }
+
+    private static void renderDirectionalMiningHint(DrawContext context) {
+        if (!hasPendingDirectionalMining()) {
+            return;
+        }
+        MinecraftClient client = MinecraftClient.getInstance();
+        if (client == null || client.player == null || client.currentScreen != null) {
+            return;
+        }
+
+        String action = pendingDirectionalActionLabel != null ? pendingDirectionalActionLabel : "task";
+        String goToKey = keyNameOrNull(KEY_GO_TO_LOOK);
+        if (goToKey == null) {
+            goToKey = "-";
+        }
+        String stopKey = keyNameOrNull(KEY_STOP_LOOK);
+        if (stopKey == null) {
+            stopKey = "\\\\";
+        }
+
+        String line = "Select direction to " + action + ". Press [" + goToKey + "] to confirm or [" + stopKey + "] to cancel.";
+        int w = client.textRenderer.getWidth(line);
+        int x = (context.getScaledWindowWidth() - w) / 2;
+        int y = 34;
+
+        context.fill(x - 6, y - 4, x + w + 6, y + client.textRenderer.fontHeight + 4, 0xAA101010);
+        context.drawTextWithShadow(client.textRenderer, line, x, y, 0xFFE6D7A3);
+    }
+
+    private static void tickDirectionalMiningPreview(MinecraftClient client) {
+        if (!hasPendingDirectionalMining() || client == null || client.player == null || client.world == null || client.currentScreen != null) {
+            return;
+        }
+        directionalPreviewTick++;
+        if (directionalPreviewTick < 4) {
+            return;
+        }
+        directionalPreviewTick = 0;
+
+        HitResult hit = client.player.raycast(20.0, 1.0F, false);
+        Vec3d point;
+        if (hit != null && hit.getType() == HitResult.Type.BLOCK) {
+            point = hit.getPos();
+        } else {
+            Vec3d eye = client.player.getEyePos();
+            Vec3d look = client.player.getRotationVec(1.0F);
+            point = eye.add(look.multiply(6.0));
+        }
+        DustParticleEffect marker = new DustParticleEffect(0x4CB7FF, 1.1f);
+        client.particleManager.addParticle(marker, point.x, point.y + 0.05, point.z, 0.0, 0.0, 0.0);
+    }
+
+    private static void tickLookedAtBotStatusPeek(MinecraftClient client) {
+        if (client == null || client.player == null || client.world == null || client.getNetworkHandler() == null || client.currentScreen != null) {
+            lookedAtBotUuid = null;
+            return;
+        }
+        PlayerEntity looked = findLookedAtBotEntity(client);
+        if (looked == null || looked == client.player) {
+            lookedAtBotUuid = null;
+            return;
+        }
+        java.util.UUID uuid = looked.getUuid();
+        if (uuid == null) {
+            lookedAtBotUuid = null;
+            return;
+        }
+        lookedAtBotUuid = uuid;
+
+        long now = System.currentTimeMillis();
+        boolean botChanged = lookedAtBotStatus == null
+                || lookedAtBotStatus.botUuid() == null
+                || !uuid.toString().equalsIgnoreCase(lookedAtBotStatus.botUuid());
+        if (botChanged || now - lookedAtBotPeekLastRequestMs >= 500L) {
+            lookedAtBotPeekLastRequestMs = now;
+            ClientPlayNetworking.send(new BotTaskPeekRequestPayload(uuid.toString()));
+        }
+    }
+
+    private static void renderLookedAtBotStatusHint(DrawContext context) {
+        if (lookedAtBotStatus == null || lookedAtBotUuid == null) {
+            return;
+        }
+        MinecraftClient client = MinecraftClient.getInstance();
+        if (client == null || client.player == null || client.currentScreen != null) {
+            return;
+        }
+        if (System.currentTimeMillis() - lookedAtBotStatusAtMs > 1500L) {
+            return;
+        }
+        if (lookedAtBotStatus.botUuid() == null
+                || !lookedAtBotUuid.toString().equalsIgnoreCase(lookedAtBotStatus.botUuid())) {
+            return;
+        }
+
+        String alias = (lookedAtBotStatus.botAlias() == null || lookedAtBotStatus.botAlias().isBlank())
+                ? "Bot" : lookedAtBotStatus.botAlias();
+        String stopKey = keyNameOrNull(KEY_STOP_LOOK);
+        if (stopKey == null) {
+            stopKey = "\\\\";
+        }
+        String resumeKey = keyNameOrNull(KEY_RESUME);
+        if (resumeKey == null) {
+            resumeKey = "Resume";
+        }
+
+        String line;
+        if (lookedAtBotStatus.paused()) {
+            line = alias + " is paused. Press [" + resumeKey + "] to resume or [" + stopKey + "] to stop.";
+        } else if (lookedAtBotStatus.active()) {
+            String task = lookedAtBotStatus.taskLabel() != null && !lookedAtBotStatus.taskLabel().isBlank()
+                    ? lookedAtBotStatus.taskLabel()
+                    : "working";
+            line = alias + " is " + task + ". Press [" + stopKey + "] to stop.";
+        } else {
+            return;
+        }
+
+        int w = client.textRenderer.getWidth(line);
+        int x = (context.getScaledWindowWidth() - w) / 2;
+        int y = hasPendingDirectionalMining() ? 50 : 34;
+
+        context.fill(x - 6, y - 4, x + w + 6, y + client.textRenderer.fontHeight + 4, 0xAA101010);
+        context.drawTextWithShadow(client.textRenderer, line, x, y, 0xFFE6D7A3);
+    }
     
     /**
      * Called every client tick to render the schematic preview overlay.
@@ -1091,7 +1386,7 @@ public class AIPlayerClient implements ClientModInitializer {
             client.player.sendMessage(Text.literal("Look at a bot to toggle follow (within 16 blocks)."), true);
             return;
         }
-        sendChatCommand(client, "bot follow toggle " + name);
+        sendChatCommand(client, "bot follow toggle " + formatBotTarget(name));
     }
 
     private static void sendChatCommand(MinecraftClient client, String command) {
@@ -1116,6 +1411,17 @@ public class AIPlayerClient implements ClientModInitializer {
         if (client == null || client.player == null) {
             return;
         }
+        CompanionHotkeyOverlayHud.hide();
+        if (resumeDecisionActive) {
+            sendResumeDecision(client, false);
+            return;
+        }
+
+        if (hasPendingDirectionalMining()) {
+            clearPendingDirectionalMining();
+            client.player.sendMessage(Text.literal("Canceled directional mining placement."), true);
+            return;
+        }
         
         // If there's a pending shelter placement, cancel it first
         if (pendingShelterType != null) {
@@ -1129,10 +1435,10 @@ public class AIPlayerClient implements ClientModInitializer {
             client.player.sendMessage(Text.literal("Look at a bot to stop it (within 16 blocks)."), true);
             return;
         }
-        sendChatCommand(client, "bot stop " + name);
+        sendChatCommand(client, "bot stop " + formatBotTarget(name));
     }
 
-    private static String findLookedAtBotName(MinecraftClient client) {
+    private static PlayerEntity findLookedAtBotEntity(MinecraftClient client) {
         if (client == null || client.player == null || client.world == null) {
             return null;
         }
@@ -1162,6 +1468,11 @@ public class AIPlayerClient implements ClientModInitializer {
             }
         }
 
+        return foundBot;
+    }
+
+    private static String findLookedAtBotName(MinecraftClient client) {
+        PlayerEntity foundBot = findLookedAtBotEntity(client);
         if (foundBot == null) {
             return null;
         }
@@ -1180,7 +1491,8 @@ public class AIPlayerClient implements ClientModInitializer {
         String botName = resolveDecisionBotName(client);
         String command;
         if (botName != null && !botName.isBlank()) {
-            command = resume ? ("bot resume " + botName) : ("bot stop " + botName);
+            String target = formatBotTarget(botName);
+            command = resume ? ("bot resume " + target) : ("bot stop " + target);
         } else {
             command = resume ? "bot resume" : "bot stop";
         }
@@ -1200,15 +1512,35 @@ public class AIPlayerClient implements ClientModInitializer {
         String target = resumeDecisionBotName != null && !resumeDecisionBotName.isBlank()
                 ? resumeDecisionBotName
                 : "bot";
-        String line1 = "Resume/Stop pending for " + target;
-        String line2 = "Follow key: Resume  |  Go-To-Look key: Stop";
+        String resumeKey = keyNameOrNull(KEY_FOLLOW_TOGGLE_LOOK);
+        if (resumeKey == null) {
+            resumeKey = keyNameOrNull(KEY_RESUME);
+        }
+        if (resumeKey == null) {
+            resumeKey = "?";
+        }
+        String goToKey = keyNameOrNull(KEY_GO_TO_LOOK);
+        if (goToKey == null) {
+            goToKey = "?";
+        }
+        String stopKey = keyNameOrNull(KEY_STOP_LOOK);
+        if (stopKey == null) {
+            stopKey = "?";
+        }
+
+        String line1 = target + " is paused and waiting for your decision.";
+        String line2 = resumeKey + " = Resume last task";
+        String line3 = goToKey + " or " + stopKey + " = Stop and clear it";
         int w1 = client.textRenderer.getWidth(line1);
         int w2 = client.textRenderer.getWidth(line2);
-        int x = (context.getScaledWindowWidth() - Math.max(w1, w2)) / 2;
+        int w3 = client.textRenderer.getWidth(line3);
+        int maxWidth = Math.max(w1, Math.max(w2, w3));
+        int x = (context.getScaledWindowWidth() - maxWidth) / 2;
         int y = 10;
-        context.fill(x - 6, y - 4, x + Math.max(w1, w2) + 6, y + client.textRenderer.fontHeight * 2 + 6, 0xAA101010);
+        context.fill(x - 6, y - 4, x + maxWidth + 6, y + client.textRenderer.fontHeight * 3 + 8, 0xAA101010);
         context.drawTextWithShadow(client.textRenderer, line1, x, y, 0xFFE6D7A3);
         context.drawTextWithShadow(client.textRenderer, line2, x, y + client.textRenderer.fontHeight + 2, 0xFFB8A76A);
+        context.drawTextWithShadow(client.textRenderer, line3, x, y + (client.textRenderer.fontHeight + 2) * 2, 0xFFB8A76A);
     }
 
     // ===== Leash Button Feature =====
@@ -1373,7 +1705,7 @@ public class AIPlayerClient implements ClientModInitializer {
         }
 
         // Don't overlap with resume decision hint
-        int yOffset = resumeDecisionActive ? 45 : 10;
+        int yOffset = resumeDecisionActive ? 60 : 10;
 
         int w1 = client.textRenderer.getWidth(line1);
         int w2 = client.textRenderer.getWidth(line2);

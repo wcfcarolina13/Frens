@@ -75,11 +75,11 @@ import net.shasankp000.GameAI.services.FollowPlannerService;
 import net.shasankp000.GameAI.services.FollowStateService.FollowDoorPlan;
 import net.shasankp000.GameAI.services.FollowStateService.FollowDoorRecovery;
 import net.shasankp000.GameAI.services.FollowMovementService;
+import net.shasankp000.GameAI.services.SharedStateService;
 import net.shasankp000.GameAI.skills.SkillContext;
 import net.shasankp000.GameAI.skills.SkillExecutionResult;
 import net.shasankp000.GameAI.skills.SkillManager;
 import net.shasankp000.Entity.createFakePlayer;
-import net.shasankp000.FunctionCaller.FunctionCallerV2;
 import net.shasankp000.WorldUitls.isBlockItem;
 import net.shasankp000.GameAI.skills.SkillPreferences;
 import org.slf4j.Logger;
@@ -90,7 +90,11 @@ import java.lang.reflect.Field;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static net.shasankp000.GameAI.State.isStateConsistent;
 import static net.shasankp000.GameAI.services.FollowStateService.*;
@@ -124,6 +128,16 @@ public class BotEventHandler {
     private static final int FOLLOW_TELEPORT_STUCK_TICKS = 60; // ~3 seconds @20tps
     private static final int FOLLOW_TELEPORT_COOLDOWN_TICKS = 40; // 2 seconds @20tps
     private static final long FOLLOW_POST_DOOR_AVOID_MS = 6_000L;
+    private static final long COME_RECOVERY_STALE_TICKS = 200L; // 10s @20tps
+    private static final AtomicInteger COME_RECOVERY_THREAD_ID = new AtomicInteger(0);
+    private static final ExecutorService COME_RECOVERY_EXECUTOR = Executors.newCachedThreadPool(new ThreadFactory() {
+        @Override
+        public Thread newThread(Runnable r) {
+            Thread t = new Thread(r, "come-recovery-" + COME_RECOVERY_THREAD_ID.incrementAndGet());
+            t.setDaemon(true);
+            return t;
+        }
+    });
 
     private static BlockPos currentAvoidDoor(UUID botId) {
         return FollowStateService.currentAvoidDoor(botId);
@@ -1201,6 +1215,8 @@ public class BotEventHandler {
             state.comeRerouteAttempts = 0;
             state.comeNextRerouteTick = 0L;
             state.comeNextSkillTick = 0L;
+            state.comeRecoverySkillInFlight = false;
+            state.comeRecoverySkillStartTick = 0L;
             state.comeAllowRecoverySkills = true;
         }
         setMode(bot, Mode.FOLLOW);
@@ -1235,6 +1251,8 @@ public class BotEventHandler {
             state.comeRerouteAttempts = 0;
             state.comeNextRerouteTick = 0L;
             state.comeNextSkillTick = 0L;
+            state.comeRecoverySkillInFlight = false;
+            state.comeRecoverySkillStartTick = 0L;
             state.comeAllowRecoverySkills = true;
         }
         setMode(bot, Mode.FOLLOW);
@@ -1280,6 +1298,8 @@ public class BotEventHandler {
             state.comeRerouteAttempts = 0;
             state.comeNextRerouteTick = 0L;
             state.comeNextSkillTick = 0L;
+            state.comeRecoverySkillInFlight = false;
+            state.comeRecoverySkillStartTick = 0L;
             state.comeAllowRecoverySkills = allowRecoverySkills;
         }
         setMode(bot, Mode.FOLLOW);
@@ -1327,6 +1347,8 @@ public class BotEventHandler {
             state.comeRerouteAttempts = 0;
             state.comeNextRerouteTick = 0L;
             state.comeNextSkillTick = 0L;
+            state.comeRecoverySkillInFlight = false;
+            state.comeRecoverySkillStartTick = 0L;
             state.comeAllowRecoverySkills = true;
         }
 
@@ -1370,6 +1392,8 @@ public class BotEventHandler {
             state.comeRerouteAttempts = 0;
             state.comeNextRerouteTick = 0L;
             state.comeNextSkillTick = 0L;
+            state.comeRecoverySkillInFlight = false;
+            state.comeRecoverySkillStartTick = 0L;
             state.comeAllowRecoverySkills = true;
         }
         setMode(bot, Mode.FOLLOW);
@@ -1473,6 +1497,8 @@ public class BotEventHandler {
             state.comeRerouteAttempts = 0;
             state.comeNextRerouteTick = 0L;
             state.comeNextSkillTick = 0L;
+            state.comeRecoverySkillInFlight = false;
+            state.comeRecoverySkillStartTick = 0L;
             // For "head home", prefer safe walking/pathing over digging recovery skills.
             state.comeAllowRecoverySkills = false;
         }
@@ -1705,6 +1731,23 @@ public class BotEventHandler {
         MinecraftServer srv = bot.getCommandSource().getServer();
 
         if (fixedGoal != null && state != null && srv != null) {
+            long nowTick = srv.getTicks();
+            if (state.comeRecoverySkillInFlight) {
+                boolean hasTask = TaskService.hasActiveTask(bot.getUuid());
+                long startedTick = state.comeRecoverySkillStartTick;
+                long ageTicks = startedTick > 0L ? Math.max(0L, nowTick - startedTick) : 0L;
+                if (!hasTask && startedTick > 0L && ageTicks >= COME_RECOVERY_STALE_TICKS) {
+                    LOGGER.warn("[ComeRecovery] stale-inflight-cleared bot={} goal={} ageTicks={} hasTask={}",
+                            bot.getName().getString(),
+                            fixedGoal.toShortString(),
+                            ageTicks,
+                            hasTask);
+                    state.comeRecoverySkillInFlight = false;
+                    state.comeRecoverySkillStartTick = 0L;
+                    state.comeNextSkillTick = Math.max(state.comeNextSkillTick, nowTick + 40L);
+                }
+            }
+
             double goalDistSq = bot.getBlockPos().getSquaredDistance(fixedGoal);
             if (!Double.isFinite(state.comeBestGoalDistSq)) {
                 state.comeBestGoalDistSq = goalDistSq;
@@ -1726,13 +1769,23 @@ public class BotEventHandler {
             int triggerTicks = verticalProblem ? 25 : 60;
 
             if (state.comeAllowRecoverySkills && state.comeTicksSinceBest >= triggerTicks) {
-                if (srv.getTicks() < state.comeNextSkillTick) {
+                if (state.comeRecoverySkillInFlight) {
+                    if ((state.comeTicksSinceBest % 20) == 0) {
+                        LOGGER.info("[ComeRecovery] launch-wait bot={} goal={} ticksSinceBest={} startedTick={} nowTick={} hasTask={}",
+                                bot.getName().getString(),
+                                fixedGoal.toShortString(),
+                                state.comeTicksSinceBest,
+                                state.comeRecoverySkillStartTick,
+                                nowTick,
+                                TaskService.hasActiveTask(bot.getUuid()));
+                    }
+                } else if (nowTick < state.comeNextSkillTick) {
                     if (state.comeTicksSinceBest % 20 == 0) {
                         LOGGER.info("[FollowAssert] recovery-cooldown bot={} goal={} ticksSinceBest={} nowTick={} nextSkillTick={}",
                                 bot.getName().getString(),
                                 fixedGoal.toShortString(),
                                 state.comeTicksSinceBest,
-                                srv.getTicks(),
+                                nowTick,
                                 state.comeNextSkillTick);
                     }
                 } else if (triggerComeRecoverySkill(bot, target, fixedGoal, targetPos, deltaY, horizDistSq, srv, state)) {
@@ -1797,6 +1850,8 @@ public class BotEventHandler {
                 state.comeRerouteAttempts = 0;
                 state.comeNextRerouteTick = 0L;
                 state.comeNextSkillTick = 0L;
+                state.comeRecoverySkillInFlight = false;
+                state.comeRecoverySkillStartTick = 0L;
                 state.comeAllowRecoverySkills = true;
                 BotActions.stop(bot);
                 setMode(bot, Mode.IDLE);
@@ -3298,6 +3353,12 @@ public class BotEventHandler {
         if (bot.isDead() || bot.isRemoved()) {
             return false;
         }
+        if (state.comeRecoverySkillInFlight) {
+            LOGGER.info("[ComeRecovery] launch-skip bot={} goal={} reason=inflight",
+                    bot.getName().getString(),
+                    goal.toShortString());
+            return false;
+        }
 
         int dyBlocks = (int) Math.round(deltaY);
         double horizDist = Math.sqrt(Math.max(0.0D, horizDistSq));
@@ -3336,11 +3397,6 @@ public class BotEventHandler {
 
         String announce = bot.getName().getString()
                 + " is blocked getting to your last location; attempting " + skillName + " (" + rawArgs + ").";
-        if (commander != null) {
-            ChatUtils.sendSystemMessage(commander.getCommandSource(), announce);
-        } else {
-            ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS), announce);
-        }
 
         // Avoid spamming skill launches.
         state.comeRerouteAttempts = 0;
@@ -3348,33 +3404,99 @@ public class BotEventHandler {
         state.comeNextSkillTick = server.getTicks() + 120L;
         state.comeTicksSinceBest = 0;
         state.comeBestGoalDistSq = Double.NaN;
+        state.comeRecoverySkillInFlight = true;
+        state.comeRecoverySkillStartTick = server.getTicks();
+
+        LOGGER.info("[ComeRecovery] launch-queued bot={} goal={} skill={} args={} dyBlocks={} horizDist={}",
+                bot.getName().getString(),
+                goal.toShortString(),
+                skillName,
+                rawArgs,
+                dyBlocks,
+                String.format(Locale.ROOT, "%.2f", horizDist));
 
         // Interrupt any active skill, then run the recovery skill asynchronously.
         final String finalSkillName = skillName;
+        final String finalRawArgs = rawArgs;
         final Map<String, Object> finalParams = Map.copyOf(params);
         TaskService.forceAbort(bot.getUuid(), "§cInterrupted by /bot come recovery.");
-        CompletableFuture.runAsync(() -> {
-            try {
-                SkillContext ctx = new SkillContext(bot.getCommandSource(), FunctionCallerV2.getSharedState(), finalParams);
-                SkillExecutionResult result = SkillManager.runSkill(finalSkillName, ctx);
-                server.execute(() -> {
-                    if (commander != null) {
-                        ChatUtils.sendSystemMessage(commander.getCommandSource(), result.message());
-                    } else {
-                        ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS), result.message());
-                    }
-                });
-            } catch (Exception e) {
-                server.execute(() -> {
-                    String msg = "Come recovery failed: " + (e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName());
-                    if (commander != null) {
-                        ChatUtils.sendSystemMessage(commander.getCommandSource(), msg);
-                    } else {
-                        ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS), msg);
-                    }
-                });
+        try {
+            CompletableFuture.runAsync(() -> {
+                try {
+                    SkillContext ctx = new SkillContext(
+                            bot.getCommandSource(),
+                            SharedStateService.safeSharedState("come-recovery"),
+                            finalParams
+                    );
+                    LOGGER.info("[ComeRecovery] launch-confirmed bot={} goal={} skill={} args={}",
+                            bot.getName().getString(),
+                            goal.toShortString(),
+                            finalSkillName,
+                            finalRawArgs);
+                    server.execute(() -> {
+                        if (commander != null) {
+                            ChatUtils.sendSystemMessage(commander.getCommandSource(), announce);
+                        } else {
+                            ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS), announce);
+                        }
+                    });
+                    SkillExecutionResult result = SkillManager.runSkill(finalSkillName, ctx);
+                    String resultMessage = (result != null && result.message() != null)
+                            ? result.message()
+                            : "Come recovery completed.";
+                    LOGGER.info("[ComeRecovery] skill-result bot={} goal={} skill={} success={} msg='{}'",
+                            bot.getName().getString(),
+                            goal.toShortString(),
+                            finalSkillName,
+                            result != null && result.success(),
+                            resultMessage);
+                    server.execute(() -> {
+                        state.comeRecoverySkillInFlight = false;
+                        state.comeRecoverySkillStartTick = 0L;
+                        if (commander != null) {
+                            ChatUtils.sendSystemMessage(commander.getCommandSource(), resultMessage);
+                        } else {
+                            ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS), resultMessage);
+                        }
+                    });
+                } catch (Throwable t) {
+                    LOGGER.warn("[ComeRecovery] launch-failed bot={} goal={} skill={} args={} err={}",
+                            bot.getName().getString(),
+                            goal.toShortString(),
+                            finalSkillName,
+                            finalRawArgs,
+                            t.getClass().getSimpleName(),
+                            t);
+                    server.execute(() -> {
+                        state.comeRecoverySkillInFlight = false;
+                        state.comeRecoverySkillStartTick = 0L;
+                        String msg = "Come recovery failed: " + (t.getMessage() != null ? t.getMessage() : t.getClass().getSimpleName());
+                        if (commander != null) {
+                            ChatUtils.sendSystemMessage(commander.getCommandSource(), msg);
+                        } else {
+                            ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS), msg);
+                        }
+                    });
+                }
+            }, COME_RECOVERY_EXECUTOR);
+        } catch (Throwable t) {
+            LOGGER.warn("[ComeRecovery] launch-queue-failed bot={} goal={} skill={} args={} err={}",
+                    bot.getName().getString(),
+                    goal.toShortString(),
+                    finalSkillName,
+                    finalRawArgs,
+                    t.getClass().getSimpleName(),
+                    t);
+            state.comeRecoverySkillInFlight = false;
+            state.comeRecoverySkillStartTick = 0L;
+            String msg = "Come recovery failed: " + (t.getMessage() != null ? t.getMessage() : t.getClass().getSimpleName());
+            if (commander != null) {
+                ChatUtils.sendSystemMessage(commander.getCommandSource(), msg);
+            } else {
+                ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS), msg);
             }
-        });
+            return false;
+        }
         return true;
     }
 

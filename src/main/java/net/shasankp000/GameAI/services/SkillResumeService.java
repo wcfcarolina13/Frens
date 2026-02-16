@@ -28,10 +28,17 @@ public final class SkillResumeService {
     private SkillResumeService() {}
 
     public static void recordExecution(ServerPlayerEntity bot, String skillName, String rawArgs, ServerCommandSource source) {
-        PendingSkill pending = new PendingSkill(bot.getUuid(), bot.getGameProfile().name(), skillName, rawArgs, source);
-        LAST_SKILL_BY_BOT.put(bot.getUuid(), pending);
-        AWAITING_DECISION.remove(bot.getUuid());
-        PENDING_BY_RESPONDER.values().removeIf(ps -> ps.botUuid().equals(bot.getUuid()));
+        UUID botUuid = bot.getUuid();
+        PendingSkill prior = LAST_SKILL_BY_BOT.get(botUuid);
+        if (prior != null) {
+            notifyDecision(prior, false);
+        }
+
+        PendingSkill pending = new PendingSkill(botUuid, bot.getGameProfile().name(), skillName, rawArgs, source);
+        LAST_SKILL_BY_BOT.put(botUuid, pending);
+        AWAITING_DECISION.remove(botUuid);
+        AUTO_RESUME_PENDING.remove(botUuid);
+        PENDING_BY_RESPONDER.values().removeIf(ps -> ps.botUuid().equals(botUuid));
     }
 
     public static void handleCompletion(UUID botUuid, boolean success) {

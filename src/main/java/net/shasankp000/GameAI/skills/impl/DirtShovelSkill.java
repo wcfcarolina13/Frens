@@ -4,6 +4,7 @@ import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
 import net.minecraft.block.BlockEntityProvider;
+import net.minecraft.item.ItemStack;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.network.ServerPlayerEntity;
@@ -167,7 +168,7 @@ public final class DirtShovelSkill implements Skill {
                 DirtNavigationPolicy.record(originBeforeMove, detectedPos, true);
 
                 ToolProvisionService.ensureToolForKeyword(player, source, commander, preferredTool);
-                BotActions.selectBestTool(player, preferredTool, "sword");
+                selectPreferredToolOrHands(player, preferredTool);
 
                 if (!isWithinMiningReach(player, detectedPos)) {
                     LOGGER.warn("Blocked from mining {} because it is outside vanilla reach.", detectedPos);
@@ -968,6 +969,66 @@ public final class DirtShovelSkill implements Skill {
             return true;
         }
         return id != null && id.getPath().contains("dirt");
+    }
+
+    private boolean hasToolKeyword(ServerPlayerEntity player, String keyword) {
+        if (player == null || keyword == null || keyword.isBlank()) {
+            return false;
+        }
+        String needle = keyword.toLowerCase(Locale.ROOT);
+        for (int i = 0; i < player.getInventory().size(); i++) {
+            ItemStack stack = player.getInventory().getStack(i);
+            if (stack.isEmpty()) {
+                continue;
+            }
+            String key = stack.getItem().getTranslationKey().toLowerCase(Locale.ROOT);
+            if (key.contains(needle)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean selectHandsOrHarmlessItem(ServerPlayerEntity player) {
+        if (player == null) {
+            return false;
+        }
+        for (int i = 0; i < 9; i++) {
+            if (player.getInventory().getStack(i).isEmpty()) {
+                BotActions.selectHotbarSlot(player, i);
+                return true;
+            }
+        }
+        for (int i = 0; i < 9; i++) {
+            ItemStack stack = player.getInventory().getStack(i);
+            if (stack.isEmpty()) {
+                continue;
+            }
+            String key = stack.getItem().getTranslationKey().toLowerCase(Locale.ROOT);
+            if (key.contains("sword")
+                    || key.contains("axe")
+                    || key.contains("pickaxe")
+                    || key.contains("shovel")
+                    || key.contains("hoe")) {
+                continue;
+            }
+            BotActions.selectHotbarSlot(player, i);
+            return true;
+        }
+        BotActions.selectHotbarSlot(player, 0);
+        return true;
+    }
+
+    private void selectPreferredToolOrHands(ServerPlayerEntity player, String preferredTool) {
+        if (player == null || preferredTool == null || preferredTool.isBlank()) {
+            selectHandsOrHarmlessItem(player);
+            return;
+        }
+        if (hasToolKeyword(player, preferredTool)) {
+            BotActions.selectBestTool(player, preferredTool, "sword");
+            return;
+        }
+        selectHandsOrHarmlessItem(player);
     }
 
     public SkillExecutionResult perform(ServerCommandSource source,

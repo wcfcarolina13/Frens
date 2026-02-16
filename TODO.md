@@ -24,10 +24,14 @@ Canonical in-game verification checklist: `docs/testing/IN_GAME_AUDIT_MASTER.md`
 
 ### Follow / Come
 - [ ] **Follow stability (verification)**: Core planner/backoff/waypoint recovery is implemented; complete runtime verification across dimensions/terrain with `follow_check` asserts.
-- [ ] **Come survival movement (verification)**: `/bot come` routes through fixed-goal follow pathing; verify no snap/direct movement regressions in live terrain tests.
-- [ ] **Come reroute scheduling (verification)**: Reroute attempt/cooldown state and planner backoff markers are implemented; verify cave/corner/vertical escapes reroute before recovery skills.
+- [x] **Come survival movement (verification)**: `/bot come` routes through fixed-goal follow pathing; verify no snap/direct movement regressions in live terrain tests.
+- [x] **Come reroute scheduling (verification)**: Reroute attempt/cooldown state and planner backoff markers are implemented; verify cave/corner/vertical escapes reroute before recovery skills.
 - [ ] **Come tool crafting (verification)**: `ToolProvisionService` is called by `/bot come` and recovery paths; verify torches/shovels/pickaxes are provisioned in-world when recipes/materials permit.
 - [ ] **Deterministic follow/come assertions (verification)**: Run `docs/reliability/FOLLOW_COME_ASSERT_RUNBOOK.md` and record pass/fail outcomes for `follow_check` tokens.
+- [ ] **Follow vertical recovery (verification)**: On vertical no-path follow cases, bot should attempt a nearby projected anchor reroute first, then prompt regroup if still blocked.
+- [ ] In-game check: have commander drop into a shaft with a nearby reachable staircase and verify follow reroutes to descend; if unresolved after retries, verify regroup hint appears.
+- [x] **Follow drop-off guard**: Add immediate drop/hole guard while following so the bot avoids stepping into narrow/deep shafts.
+- [ ] In-game check: while following, place a 1x1 deep shaft in the movement lane; verify bot sidesteps/stops and shows "woah, I almost fell into that hole".
 
 ### Shelter (Redo Needed)
 - [ ] **ShelterSkill refactor**: Split `ShelterSkill.java` into smaller hovel/burrow builder classes and tighten shared primitives/logging.
@@ -43,6 +47,10 @@ Canonical in-game verification checklist: `docs/testing/IN_GAME_AUDIT_MASTER.md`
 - [ ] **Command pruning review**: Evaluate whether `look_player` and `direction reset` are still needed; deprecate/remove if redundant.
 - [ ] **Elder Scrolls-style dialogue menu** Conversation topics, commands, quests
 - [ ] **Elder Scrolls-style Journal** Conversation topics, quests, important information with simple filter search
+- [x] **Actions menu count controls**: Add integer controls for fishing, wool, stripmine, ascent, and descent; include ascent `surface` mode.
+- [x] **Topics search bar**: Add search/filter input to topics/actions overlay.
+- [x] **Actions guide screen**: Add searchable layman guide with capabilities + command equivalents and quest mode vs direct mode explanation.
+- [ ] In-game check: verify guide/search usability and that actions launched from adjusted counts run with the expected arguments.
 
 ### Inventory & Items
 - [x] Bot item inventory view (chest-like interface)
@@ -135,6 +143,8 @@ Canonical in-game verification checklist: `docs/testing/IN_GAME_AUDIT_MASTER.md`
 ### Quality of Life
 - [ ] Command queuing (multi-step instructions)
 - [ ] Voiced banter variants for follow-adventure lines (creeper joke, "run" warning).
+- [x] Startup cleanup for lingering overhead hologram armorstands.
+- [x] In-game check: restart/reload after overhead dialogue and verify old invisible text armorstands are cleaned up.
 
 ## LLM Integration (Future)
 

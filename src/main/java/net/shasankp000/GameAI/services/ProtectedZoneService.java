@@ -15,6 +15,7 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -29,13 +30,51 @@ public class ProtectedZoneService {
     
     // Map of worldId -> Map of label -> ProtectedZone
     private static final Map<String, Map<String, ProtectedZone>> zones = new ConcurrentHashMap<>();
+
+    private static final String ZONE_ROOT_DIR = "bot_zones";
+    private static final String ZONE_FILE_NAME = "protected_zones.json";
     
     private static Path getZoneDirectory(MinecraftServer server, String worldId) {
-        return server.getRunDirectory().resolve("bot_zones").resolve(worldId);
+        return server.getRunDirectory()
+                .resolve(ZONE_ROOT_DIR)
+                .resolve(worldStorageKey(worldId));
     }
     
     private static Path getZoneFile(MinecraftServer server, String worldId) {
-        return getZoneDirectory(server, worldId).resolve("protected_zones.json");
+        return getZoneDirectory(server, worldId).resolve(ZONE_FILE_NAME);
+    }
+
+    private static String worldStorageKey(String worldId) {
+        if (worldId == null || worldId.isBlank()) {
+            return "unknown_world__0";
+        }
+        String sanitized = worldId
+                .replaceAll("[^A-Za-z0-9._-]", "_")
+                .replaceAll("_+", "_")
+                .replaceAll("^_+|_+$", "");
+        if (sanitized.isBlank()) {
+            sanitized = "world";
+        }
+        // Include a stable hash so different IDs that sanitize similarly do not collide.
+        return sanitized + "__" + Integer.toHexString(worldId.hashCode());
+    }
+
+    /**
+     * Legacy file path used by older builds that wrote world IDs directly as path segments.
+     * This is unsafe on Windows when IDs include ':', but kept for migration on Unix/macOS.
+     */
+    private static Path getLegacyZoneFile(MinecraftServer server, String worldId) {
+        if (server == null || worldId == null || worldId.isBlank()) {
+            return null;
+        }
+        try {
+            return server.getRunDirectory()
+                    .resolve(ZONE_ROOT_DIR)
+                    .resolve(worldId)
+                    .resolve(ZONE_FILE_NAME);
+        } catch (InvalidPathException ex) {
+            return null;
+        }
     }
     
     /**
@@ -260,12 +299,22 @@ public class ProtectedZoneService {
      */
     public static void loadZones(MinecraftServer server, String worldId) {
         Path zoneFile = getZoneFile(server, worldId);
-        if (!Files.exists(zoneFile)) {
+        Path legacyFile = getLegacyZoneFile(server, worldId);
+
+        Path fileToRead = null;
+        if (Files.exists(zoneFile)) {
+            fileToRead = zoneFile;
+        } else if (legacyFile != null && Files.exists(legacyFile)) {
+            fileToRead = legacyFile;
+            LOGGER.info("Loading protected zones for world {} from legacy path {}", worldId, legacyFile);
+        }
+
+        if (fileToRead == null) {
             return;
         }
         
         try {
-            String json = Files.readString(zoneFile);
+            String json = Files.readString(fileToRead);
             List<ZoneData> zoneDataList = GSON.fromJson(json, new TypeToken<List<ZoneData>>(){}.getType());
             
             if (zoneDataList == null || zoneDataList.isEmpty()) {

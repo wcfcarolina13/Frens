@@ -47,6 +47,16 @@ public final class BotCommandStateService {
         public long comeNextRerouteTick = 0L;
         public long comeNextSkillTick = 0L;
         /**
+         * True while a /come recovery skill launch is in flight (queued/running).
+         * Used to prevent duplicate launch spam while stuck.
+         */
+        public boolean comeRecoverySkillInFlight = false;
+        /**
+         * Server tick when the current /come recovery launch was queued.
+         * Used for stale in-flight timeout cleanup.
+         */
+        public long comeRecoverySkillStartTick = 0L;
+        /**
          * When true, the bot may launch short "recovery" skills (e.g., collect_dirt ascent / stripmine)
          * while trying to reach a fixed /come goal. When false ("safe regroup"), it will only path/walk
          * and will NOT start digging itself out, avoiding the common "ascend then get lost" failure.

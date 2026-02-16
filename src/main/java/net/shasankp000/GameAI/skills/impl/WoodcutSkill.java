@@ -27,6 +27,7 @@ import net.shasankp000.GameAI.services.ToolProvisionService;
 import net.shasankp000.GameAI.services.MovementService;
 import net.shasankp000.GameAI.services.ReturnBaseStuckService;
 import net.shasankp000.GameAI.services.SkillResumeService;
+import net.shasankp000.GameAI.services.TaskService;
 import net.shasankp000.GameAI.skills.Skill;
 import net.shasankp000.GameAI.skills.SkillContext;
 import net.shasankp000.GameAI.skills.SkillExecutionResult;
@@ -65,7 +66,7 @@ public final class WoodcutSkill implements Skill {
     private static final int MAX_CONSECUTIVE_FAILURES = 6;
     private static final int SUNSET_TIME_OF_DAY = 12000;
     private static final double REACH_DISTANCE_SQ = 20.25D; // ~4.5 blocks (survival reach)
-    private static final long PILLAR_STEP_DELAY_MS = 160L;
+    private static final long PILLAR_STEP_DELAY_MS = 100L;
     private static final long MINING_TIMEOUT_MS = 12_000L;
     private static final int MAX_RETRY_MINING = 5;
     private static final int MAX_LOS_CLEAR_ATTEMPTS = 3;
@@ -73,6 +74,7 @@ public final class WoodcutSkill implements Skill {
             Items.DIRT,
             Items.COARSE_DIRT,
             Items.ROOTED_DIRT,
+            Items.SCAFFOLDING,
             Items.GRAVEL,
             Items.SAND,
             Items.RED_SAND,
@@ -131,9 +133,8 @@ public final class WoodcutSkill implements Skill {
         Map<String, Object> sharedState = context.sharedState();
 
         boolean internal = getBooleanParameter(context.parameters(), "internal", false);
-        boolean explicitCount = context.parameters() != null && context.parameters().containsKey("count");
-        // Default standalone invocation with no explicit count => open-ended until sunset.
-        boolean openEnded = isOpenEnded(context.parameters()) || (!explicitCount && !internal);
+        boolean replantSaplings = getBooleanParameter(context.parameters(), "replantSaplings", !internal);
+        boolean openEnded = isOpenEnded(context.parameters());
         int targetTrees;
         if (openEnded) {
             targetTrees = Integer.MAX_VALUE;
@@ -148,9 +149,7 @@ public final class WoodcutSkill implements Skill {
             return SkillExecutionResult.failure("It's getting late; I'll cut trees tomorrow.");
         }
 
-        if (!ensureAxeAvailable(source, bot)) {
-            return SkillExecutionResult.failure("Out of axes and missing materials to craft one.");
-        }
+        prepareWoodcutTooling(source, bot);
 
         Set<BlockPos> visitedBases = new HashSet<>();
         int felled = 0;
@@ -169,7 +168,7 @@ public final class WoodcutSkill implements Skill {
         SkillExecutionResult finalResult;
         try {
             while (felled < targetTrees && consecutiveFailures < MAX_CONSECUTIVE_FAILURES) {
-                if (SkillManager.shouldAbortSkill(bot)) {
+                if (isAbortRequested(bot)) {
                     abortRequested = true;
                     break;
                 }
@@ -232,7 +231,7 @@ public final class WoodcutSkill implements Skill {
                     consecutiveFailures++;
                     continue;
                 }
-                if (!fellTree(source, bot, target, sharedState)) {
+                if (!fellTree(source, bot, target, sharedState, replantSaplings)) {
                     totalFailures++;
                     consecutiveFailures++;
                     continue;
@@ -241,7 +240,11 @@ public final class WoodcutSkill implements Skill {
                 felled++;
                 consecutiveFailures = 0;
                 sinceCleanup++;
-                ChatUtils.sendSystemMessage(source, "Tree cut (" + felled + "/" + targetTrees + ")");
+                if (openEnded) {
+                    ChatUtils.sendSystemMessage(source, "Tree cut (" + felled + ")");
+                } else {
+                    ChatUtils.sendSystemMessage(source, "Tree cut (" + felled + "/" + targetTrees + ")");
+                }
 
                 if (openEnded && sinceCleanup >= 5) {
                     runWoodcutCleanup(context, source, bot, startPos, minX, maxX, minY, maxY, minZ, maxZ,
@@ -349,7 +352,7 @@ public final class WoodcutSkill implements Skill {
         if (bot == null || source == null) {
             return;
         }
-        if (SkillManager.shouldAbortSkill(bot)) {
+        if (isAbortRequested(bot)) {
             return;
         }
         try {
@@ -357,7 +360,7 @@ public final class WoodcutSkill implements Skill {
             params.put("radius", Math.max(8, radius));
             params.put("verticalRange", Math.max(6, verticalRange));
             params.put("maxLogs", 64);
-            params.put("maxScaffold", 48);
+            params.put("maxScaffold", 96);
             params.put("durationMs", 35_000L);
             params.put("sweep", sweepDrops);
             params.put("scaffold", true);
@@ -426,7 +429,8 @@ public final class WoodcutSkill implements Skill {
     private boolean fellTree(ServerCommandSource source,
                              ServerPlayerEntity bot,
                              TreeDetector.TreeTarget target,
-                             Map<String, Object> sharedState) {
+                             Map<String, Object> sharedState,
+                             boolean replantSaplings) {
         if (!(source.getWorld() instanceof ServerWorld world)) {
             return false;
         }
@@ -451,7 +455,7 @@ public final class WoodcutSkill implements Skill {
             remaining.removeAll(broken);
 
             while (!remaining.isEmpty()) {
-                if (SkillManager.shouldAbortSkill(bot)) {
+                if (isAbortRequested(bot)) {
                     return false;
                 }
                 BlockPos next = remaining.stream()
@@ -484,7 +488,7 @@ public final class WoodcutSkill implements Skill {
             success = true;
             return true;
         } finally {
-            if (success) {
+            if (success && replantSaplings) {
                 plantSaplings(bot, source, target.base());
             }
             if (!placedPillar.isEmpty()) {
@@ -732,7 +736,7 @@ public final class WoodcutSkill implements Skill {
         LOGGER.info("Woodcut pillar: starting {} steps from {} with {} scaffold blocks",
                 steps, bot.getBlockPos().toShortString(), countPillarBlocks(bot));
         for (int i = 0; i < steps; i++) {
-            if (SkillManager.shouldAbortSkill(bot)) {
+            if (isAbortRequested(bot)) {
                 bot.setSneaking(wasSneaking);
                 return false;
             }
@@ -878,7 +882,7 @@ public final class WoodcutSkill implements Skill {
         if (!(bot.getEntityWorld() instanceof ServerWorld)) {
             return;
         }
-        if (SkillManager.shouldAbortSkill(bot)) {
+        if (isAbortRequested(bot)) {
             return;
         }
         Vec3d center = Vec3d.ofCenter(pos);
@@ -985,7 +989,7 @@ public final class WoodcutSkill implements Skill {
     }
 
     private boolean mineBlock(ServerPlayerEntity bot, BlockPos pos, boolean preferAxe) {
-        if (SkillManager.shouldAbortSkill(bot)) {
+        if (isAbortRequested(bot)) {
             return false;
         }
         Vec3d center = Vec3d.ofCenter(pos);
@@ -1007,6 +1011,8 @@ public final class WoodcutSkill implements Skill {
         LookController.faceBlock(bot, pos);
         if (preferAxe) {
             ensureAxeEquipped(bot);
+        } else {
+            selectScaffoldToolOrHands(bot);
         }
         CompletableFuture<String> miningFuture = MiningTool.mineBlock(bot, pos);
         try {
@@ -1035,7 +1041,7 @@ public final class WoodcutSkill implements Skill {
         LOGGER.info("Woodcut pillar: descending, blocks placed={}", placedPillar.size());
         Collections.reverse(placedPillar);
         for (BlockPos placed : placedPillar) {
-            if (SkillManager.shouldAbortSkill(bot)) {
+            if (isAbortRequested(bot)) {
                 bot.setSneaking(wasSneaking);
                 return;
             }
@@ -1049,16 +1055,19 @@ public final class WoodcutSkill implements Skill {
         bot.setSneaking(wasSneaking);
     }
 
-    private boolean ensureAxeAvailable(ServerCommandSource source, ServerPlayerEntity bot) {
+    private void prepareWoodcutTooling(ServerCommandSource source, ServerPlayerEntity bot) {
         if (selectAxe(bot)) {
-            return true;
+            return;
         }
         boolean crafted = ToolProvisionService.ensureAxe(bot, source, source.getPlayer());
         if (crafted) {
-            return selectAxe(bot);
+            if (selectAxe(bot)) {
+                return;
+            }
         }
-        ChatUtils.sendSystemMessage(source, "I'm out of axes and can't craft one (missing sticks/planks/stone/ingots).");
-        return false;
+        // Continue with hands/non-tools so woodcut still works when no axe is available.
+        selectHandsOrHarmlessItem(bot);
+        ChatUtils.sendSystemMessage(source, "No axe available; I'll chop with my hands for now.");
     }
 
     private boolean selectAxe(ServerPlayerEntity bot) {
@@ -1070,12 +1079,39 @@ public final class WoodcutSkill implements Skill {
         if (BotActions.selectBestTool(bot, "shears", "")) {
             return true;
         }
-        for (int i = 0; i < 9; i++) {
-            var stack = bot.getInventory().getStack(i);
+        return selectHandsOrHarmlessItem(bot);
+    }
+
+    private boolean hasToolKeyword(ServerPlayerEntity bot, String keyword) {
+        if (bot == null || keyword == null || keyword.isBlank()) {
+            return false;
+        }
+        String needle = keyword.toLowerCase();
+        for (int i = 0; i < bot.getInventory().size(); i++) {
+            ItemStack stack = bot.getInventory().getStack(i);
             if (stack.isEmpty()) {
+                continue;
+            }
+            String key = stack.getItem().getTranslationKey().toLowerCase();
+            if (key.contains(needle)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean selectHandsOrHarmlessItem(ServerPlayerEntity bot) {
+        if (bot == null) {
+            return false;
+        }
+        for (int i = 0; i < 9; i++) {
+            if (bot.getInventory().getStack(i).isEmpty()) {
                 BotActions.selectHotbarSlot(bot, i);
                 return true;
             }
+        }
+        for (int i = 0; i < 9; i++) {
+            var stack = bot.getInventory().getStack(i);
             String key = stack.getItem().getTranslationKey().toLowerCase();
             if (key.contains("sword") || key.contains("axe") || key.contains("pickaxe") || key.contains("shovel") || key.contains("hoe")) {
                 continue;
@@ -1083,14 +1119,17 @@ public final class WoodcutSkill implements Skill {
             BotActions.selectHotbarSlot(bot, i);
             return true;
         }
-        // Fallback: use the first empty slot if any; otherwise leave current hand (but we skipped axes).
-        for (int i = 0; i < 9; i++) {
-            if (bot.getInventory().getStack(i).isEmpty()) {
-                BotActions.selectHotbarSlot(bot, i);
-                break;
-            }
-        }
+        // Last resort: reset to slot 0 to avoid sticking on a previously selected tool.
+        BotActions.selectHotbarSlot(bot, 0);
         return true;
+    }
+
+    private void selectScaffoldToolOrHands(ServerPlayerEntity bot) {
+        if (hasToolKeyword(bot, "shovel")) {
+            BotActions.selectBestTool(bot, "shovel", "axe");
+            return;
+        }
+        selectHandsOrHarmlessItem(bot);
     }
 
     private boolean ensurePillarStock(ServerPlayerEntity bot, int needed, ServerCommandSource source) {
@@ -1129,7 +1168,7 @@ public final class WoodcutSkill implements Skill {
                 continue;
             }
             LookController.faceBlock(bot, pos);
-            BotActions.selectBestTool(bot, "shovel", "axe");
+            selectScaffoldToolOrHands(bot);
             if (mineBlock(bot, pos, false)) {
                 toGather--;
                 LOGGER.debug("Woodcut scaffold collected at {}", pos.toShortString());
@@ -1626,6 +1665,10 @@ public final class WoodcutSkill implements Skill {
             }
         }
         return defaultValue;
+    }
+
+    private boolean isAbortRequested(ServerPlayerEntity bot) {
+        return bot != null && (SkillManager.shouldAbortSkill(bot) || !TaskService.hasActiveTask(bot.getUuid()));
     }
 
     private void sleepQuiet(long millis) {

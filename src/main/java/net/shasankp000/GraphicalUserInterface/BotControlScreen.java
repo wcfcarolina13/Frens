@@ -148,7 +148,7 @@ public class BotControlScreen extends Screen {
         this.addDrawableChild(pause);
         
         CyclingButtonWidget<Boolean> dropTeleport = CyclingButtonWidget.onOffBuilder(settings.isTeleportDuringDropSweep())
-                .build(0, 0, buttonWidth, 20, Text.of("Drop TP"), (button, value) -> {});
+                .build(0, 0, buttonWidth, 20, Text.of("Drop Teleport"), (button, value) -> {});
         dropTeleport.setTooltip(Tooltip.of(Text.of("Allow teleports when collecting drops after mining.")));
         this.addDrawableChild(dropTeleport);
 
@@ -195,7 +195,7 @@ public class BotControlScreen extends Screen {
             tipY += this.textRenderer.fontHeight;
         }
         int headerY = worldToggle != null ? worldToggle.getY() + 18 : 50;
-        String[] headers = {"Auto Spawn", "Mode", "Game", "Teleport", "Pause Inv", "Drop TP", "LLM Bot"};
+        String[] headers = {"Auto Spawn", "Mode", "Game", "Teleport", "Pause Inv", "Drop Teleport", "LLM Bot"};
         int columnWidth = layout.buttonWidth();
         int startX = layout.startX();
         int spacing = layout.spacing();

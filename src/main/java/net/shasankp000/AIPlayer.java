@@ -446,6 +446,8 @@ public class AIPlayer implements ModInitializer {
         // Operator-only admin actions for survival recruitment mode.
         PayloadTypeRegistry.playC2S().register(net.shasankp000.network.RecruitmentAdminActionPayload.ID, net.shasankp000.network.RecruitmentAdminActionPayload.CODEC);
         PayloadTypeRegistry.playS2C().register(net.shasankp000.network.RecruitmentAdminStatusPayload.ID, net.shasankp000.network.RecruitmentAdminStatusPayload.CODEC);
+        PayloadTypeRegistry.playC2S().register(net.shasankp000.network.BotTaskPeekRequestPayload.ID, net.shasankp000.network.BotTaskPeekRequestPayload.CODEC);
+        PayloadTypeRegistry.playS2C().register(net.shasankp000.network.BotTaskPeekStatusPayload.ID, net.shasankp000.network.BotTaskPeekStatusPayload.CODEC);
 
         net.shasankp000.network.BaseNetworkManager.registerReceiversOnce();
         net.shasankp000.network.CraftingHistoryNetworkManager.registerReceiversOnce();
@@ -454,6 +456,7 @@ public class AIPlayer implements ModInitializer {
         SurvivalRecruitmentNetworkManager.registerReceiversOnce();
         net.shasankp000.network.CompanionQuestNetworkManager.registerReceiversOnce();
         net.shasankp000.network.RecruitmentAdminNetworkManager.registerReceiversOnce();
+        net.shasankp000.network.BotTaskPeekNetworkManager.registerReceiversOnce();
 
         modCommandRegistry.register();
         configCommand.register();

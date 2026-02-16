@@ -231,13 +231,13 @@ public final class DialogueTextMapper {
 
         // General context
         EXACT_MAP.put("If you need me, I'm listening.", BotDialogueSounds.LINE_CONTEXT_LISTENING);
-        // Dynamic touch/social weather-time lines
-        PATTERN_MAP.put(Pattern.compile("It's (early morning|morning|daytime|sunset|night|late night)\\.\\.\\. and the sky looks clear\\.", Pattern.CASE_INSENSITIVE), BotDialogueSounds.LINE_WEATHER_SUNNY);
-        PATTERN_MAP.put(Pattern.compile("It's (early morning|morning|daytime|sunset|night|late night)\\.\\.\\. and the sky looks raining\\.", Pattern.CASE_INSENSITIVE), BotDialogueSounds.LINE_WEATHER_RAIN);
-        PATTERN_MAP.put(Pattern.compile("It's (early morning|morning|daytime|sunset|night|late night)\\.\\.\\. and the sky looks thundering\\.", Pattern.CASE_INSENSITIVE), BotDialogueSounds.LINE_WEATHER_THUNDER);
-        PATTERN_MAP.put(Pattern.compile("It's (early morning|morning|daytime|sunset|night|late night)\\.\\.\\. sky's clear\\.", Pattern.CASE_INSENSITIVE), BotDialogueSounds.LINE_WEATHER_SUNNY);
-        PATTERN_MAP.put(Pattern.compile("It's (early morning|morning|daytime|sunset|night|late night)\\.\\.\\. sky's raining\\.", Pattern.CASE_INSENSITIVE), BotDialogueSounds.LINE_WEATHER_RAIN);
-        PATTERN_MAP.put(Pattern.compile("It's (early morning|morning|daytime|sunset|night|late night)\\.\\.\\. sky's thundering\\.", Pattern.CASE_INSENSITIVE), BotDialogueSounds.LINE_WEATHER_THUNDER);
+        // Dynamic touch/social weather-time lines (accept ellipsis/comma/plain variants).
+        PATTERN_MAP.put(Pattern.compile("It's (early morning|morning|daytime|sunset|night|late night)(\\.\\.\\.|,)?\\s*(and the )?sky( looks)? clear\\.", Pattern.CASE_INSENSITIVE), BotDialogueSounds.LINE_WEATHER_SUNNY);
+        PATTERN_MAP.put(Pattern.compile("It's (early morning|morning|daytime|sunset|night|late night)(\\.\\.\\.|,)?\\s*(and the )?sky( looks)? raining\\.", Pattern.CASE_INSENSITIVE), BotDialogueSounds.LINE_WEATHER_RAIN);
+        PATTERN_MAP.put(Pattern.compile("It's (early morning|morning|daytime|sunset|night|late night)(\\.\\.\\.|,)?\\s*(and the )?sky( looks)? thundering\\.", Pattern.CASE_INSENSITIVE), BotDialogueSounds.LINE_WEATHER_THUNDER);
+        PATTERN_MAP.put(Pattern.compile("It's (early morning|morning|daytime|sunset|night|late night)(\\.\\.\\.|,)?\\s*sky's clear\\.", Pattern.CASE_INSENSITIVE), BotDialogueSounds.LINE_WEATHER_SUNNY);
+        PATTERN_MAP.put(Pattern.compile("It's (early morning|morning|daytime|sunset|night|late night)(\\.\\.\\.|,)?\\s*sky's raining\\.", Pattern.CASE_INSENSITIVE), BotDialogueSounds.LINE_WEATHER_RAIN);
+        PATTERN_MAP.put(Pattern.compile("It's (early morning|morning|daytime|sunset|night|late night)(\\.\\.\\.|,)?\\s*sky's thundering\\.", Pattern.CASE_INSENSITIVE), BotDialogueSounds.LINE_WEATHER_THUNDER);
 
         // ============ CONFIRM ============
         EXACT_MAP.put("On it.", BotDialogueSounds.LINE_CONFIRM_ON_IT);

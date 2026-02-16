@@ -1,5 +1,6 @@
 package net.shasankp000.GameAI.services;
 
+import net.shasankp000.ChatUtils.ChatUtils;
 import net.minecraft.registry.RegistryKey;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
@@ -10,6 +11,8 @@ import net.shasankp000.GameAI.BotEventHandler;
 import org.slf4j.Logger;
 
 import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -205,6 +208,23 @@ public final class FollowPlannerService {
                         swimTransitionRejects += FollowPathService.consumeLastSwimTransitionRejectCount();
                     }
                 }
+                if (waypoints.isEmpty()) {
+                    int[] fallbackTransitionRejects = new int[] { 0 };
+                    int[] fallbackSwimTransitionRejects = new int[] { 0 };
+                    waypoints = tryVerticalSeparationFallbackPlan(
+                            logger,
+                            server,
+                            worldKey,
+                            botId,
+                            targetId,
+                            avoidDoor,
+                            waterStuckReason,
+                            fallbackTransitionRejects,
+                            fallbackSwimTransitionRejects
+                    );
+                    transitionRejects += fallbackTransitionRejects[0];
+                    swimTransitionRejects += fallbackSwimTransitionRejects[0];
+                }
 
                 maybeLogTransitionRejects(logger, botId, transitionRejects, swimTransitionRejects, reason);
 
@@ -219,6 +239,7 @@ public final class FollowPlannerService {
                                 targetId);
                         logger.info("Follow path planning: no path found (bot={} target={})", botId, targetId);
                     }
+                    noteFollowNoPathAndMaybePrompt(logger, server, worldKey, botId, targetId, reason);
                     return;
                 }
 
@@ -237,6 +258,7 @@ public final class FollowPlannerService {
                     FOLLOW_DOOR_PLAN.remove(botId);
                     FOLLOW_LAST_DISTANCE_SQ.remove(botId);
                     FOLLOW_STAGNANT_TICKS.remove(botId);
+                    clearFollowNoPathState(botId);
                     updateRepeatedPlanState(logger, botId, liveBot.getBlockPos(), plannedWaypoints);
                     if (logger != null && plannedWaypoints.size() > 0) {
                         logger.info("Follow planned {} waypoint(s): bot={} target={} first={}",
@@ -450,6 +472,7 @@ public final class FollowPlannerService {
                     FOLLOW_DOOR_PLAN.remove(botId);
                     FOLLOW_LAST_DISTANCE_SQ.remove(botId);
                     FOLLOW_STAGNANT_TICKS.remove(botId);
+                    clearFollowNoPathState(botId);
                     updateRepeatedPlanState(logger, botId, liveBot.getBlockPos(), plannedWaypoints);
                     if (logger != null && plannedWaypoints.size() > 0) {
                         logger.info("Follow planned {} waypoint(s): bot={} goal={} first={}",
@@ -469,6 +492,206 @@ public final class FollowPlannerService {
         FOLLOW_PATH_INFLIGHT.put(botId, task);
         task.whenComplete((ignored, err) -> server.execute(() -> FOLLOW_PATH_INFLIGHT.remove(botId)));
     }
+
+    private static void clearFollowNoPathState(UUID botId) {
+        if (botId == null) {
+            return;
+        }
+        FOLLOW_NO_PATH_STREAK.remove(botId);
+        FOLLOW_LAST_NO_PATH_TICK.remove(botId);
+        FOLLOW_NEXT_REGROUP_PROMPT_TICK.remove(botId);
+    }
+
+    private static List<BlockPos> tryVerticalSeparationFallbackPlan(Logger logger,
+                                                                    MinecraftServer server,
+                                                                    RegistryKey<World> worldKey,
+                                                                    UUID botId,
+                                                                    UUID targetId,
+                                                                    BlockPos avoidDoor,
+                                                                    boolean waterStuckReason,
+                                                                    int[] transitionRejectsOut,
+                                                                    int[] swimTransitionRejectsOut) {
+        FollowPositions pos = captureFollowPositions(server, worldKey, botId, targetId);
+        if (pos == null) {
+            return List.of();
+        }
+        int absDeltaY = Math.abs(pos.botPos().getY() - pos.targetPos().getY());
+        if (absDeltaY < 6) {
+            return List.of();
+        }
+        for (BlockPos fallbackGoal : buildVerticalFallbackGoals(pos.botPos(), pos.targetPos())) {
+            FollowPathService.FollowSnapshot snapshot = captureSnapshotForGoal(server, worldKey, botId, fallbackGoal, false);
+            if (snapshot == null) {
+                continue;
+            }
+            List<BlockPos> waypoints = FollowPathService.planWaypoints(snapshot, avoidDoor, true, waterStuckReason);
+            transitionRejectsOut[0] += FollowPathService.consumeLastTransitionRejectCount();
+            swimTransitionRejectsOut[0] += FollowPathService.consumeLastSwimTransitionRejectCount();
+            if (waypoints.isEmpty()) {
+                snapshot = captureSnapshotForGoal(server, worldKey, botId, fallbackGoal, true);
+                if (snapshot == null) {
+                    continue;
+                }
+                waypoints = FollowPathService.planWaypoints(snapshot, avoidDoor, true, waterStuckReason);
+                transitionRejectsOut[0] += FollowPathService.consumeLastTransitionRejectCount();
+                swimTransitionRejectsOut[0] += FollowPathService.consumeLastSwimTransitionRejectCount();
+            }
+            if (!waypoints.isEmpty()) {
+                if (logger != null) {
+                    logger.info("[FollowAssert] planner-fallback bot={} target={} fallbackGoal={} dy={}",
+                            botId,
+                            targetId,
+                            fallbackGoal.toShortString(),
+                            absDeltaY);
+                }
+                return waypoints;
+            }
+        }
+        return List.of();
+    }
+
+    private static FollowPositions captureFollowPositions(MinecraftServer server,
+                                                          RegistryKey<World> worldKey,
+                                                          UUID botId,
+                                                          UUID targetId) {
+        if (server == null || worldKey == null || botId == null || targetId == null) {
+            return null;
+        }
+        CompletableFuture<FollowPositions> future = new CompletableFuture<>();
+        server.execute(() -> {
+            try {
+                ServerPlayerEntity liveBot = server.getPlayerManager().getPlayer(botId);
+                ServerPlayerEntity liveTarget = server.getPlayerManager().getPlayer(targetId);
+                ServerWorld world = server.getWorld(worldKey);
+                if (liveBot == null || liveTarget == null || world == null
+                        || liveBot.getEntityWorld() != world || liveTarget.getEntityWorld() != world) {
+                    future.complete(null);
+                    return;
+                }
+                future.complete(new FollowPositions(liveBot.getBlockPos().toImmutable(), liveTarget.getBlockPos().toImmutable()));
+            } catch (Throwable t) {
+                future.complete(null);
+            }
+        });
+        try {
+            return future.get(750, TimeUnit.MILLISECONDS);
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private static FollowPathService.FollowSnapshot captureSnapshotForGoal(MinecraftServer server,
+                                                                           RegistryKey<World> worldKey,
+                                                                           UUID botId,
+                                                                           BlockPos goal,
+                                                                           boolean centerOnStart) {
+        if (server == null || worldKey == null || botId == null || goal == null) {
+            return null;
+        }
+        CompletableFuture<FollowPathService.FollowSnapshot> future = new CompletableFuture<>();
+        server.execute(() -> {
+            try {
+                ServerPlayerEntity liveBot = server.getPlayerManager().getPlayer(botId);
+                ServerWorld world = server.getWorld(worldKey);
+                if (liveBot == null || world == null || liveBot.getEntityWorld() != world) {
+                    future.complete(null);
+                    return;
+                }
+                future.complete(FollowPathService.capture(world, liveBot.getBlockPos(), goal, centerOnStart));
+            } catch (Throwable t) {
+                future.complete(null);
+            }
+        });
+        try {
+            return future.get(750, TimeUnit.MILLISECONDS);
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private static List<BlockPos> buildVerticalFallbackGoals(BlockPos botPos, BlockPos targetPos) {
+        if (botPos == null || targetPos == null) {
+            return List.of();
+        }
+        int targetY = botPos.getY();
+        LinkedHashSet<BlockPos> out = new LinkedHashSet<>();
+        out.add(new BlockPos(targetPos.getX(), targetY, targetPos.getZ()));
+        int[] rings = new int[] { 1, 2, 3 };
+        for (int ring : rings) {
+            out.add(new BlockPos(targetPos.getX() + ring, targetY, targetPos.getZ()));
+            out.add(new BlockPos(targetPos.getX() - ring, targetY, targetPos.getZ()));
+            out.add(new BlockPos(targetPos.getX(), targetY, targetPos.getZ() + ring));
+            out.add(new BlockPos(targetPos.getX(), targetY, targetPos.getZ() - ring));
+            if (ring == 2) {
+                out.add(new BlockPos(targetPos.getX() + ring, targetY, targetPos.getZ() + ring));
+                out.add(new BlockPos(targetPos.getX() + ring, targetY, targetPos.getZ() - ring));
+                out.add(new BlockPos(targetPos.getX() - ring, targetY, targetPos.getZ() + ring));
+                out.add(new BlockPos(targetPos.getX() - ring, targetY, targetPos.getZ() - ring));
+            }
+        }
+        int towardX = Integer.compare(targetPos.getX(), botPos.getX());
+        int towardZ = Integer.compare(targetPos.getZ(), botPos.getZ());
+        out.add(new BlockPos(botPos.getX() + towardX * 6, targetY, botPos.getZ() + towardZ * 6));
+        out.add(new BlockPos(botPos.getX() + towardX * 10, targetY, botPos.getZ() + towardZ * 10));
+        return new ArrayList<>(out);
+    }
+
+    private static void noteFollowNoPathAndMaybePrompt(Logger logger,
+                                                       MinecraftServer server,
+                                                       RegistryKey<World> worldKey,
+                                                       UUID botId,
+                                                       UUID targetId,
+                                                       String reason) {
+        if (server == null || worldKey == null || botId == null || targetId == null) {
+            return;
+        }
+        server.execute(() -> {
+            ServerPlayerEntity liveBot = server.getPlayerManager().getPlayer(botId);
+            ServerPlayerEntity liveTarget = server.getPlayerManager().getPlayer(targetId);
+            ServerWorld world = server.getWorld(worldKey);
+            if (liveBot == null || liveTarget == null || world == null
+                    || liveBot.getEntityWorld() != world || liveTarget.getEntityWorld() != world) {
+                return;
+            }
+            BotCommandStateService.State st = BotCommandStateService.stateFor(liveBot);
+            if (st == null || st.mode != BotEventHandler.Mode.FOLLOW || st.followFixedGoal != null
+                    || st.followTargetUuid == null || !st.followTargetUuid.equals(targetId)) {
+                return;
+            }
+            long nowTick = server.getTicks();
+            long lastTick = FOLLOW_LAST_NO_PATH_TICK.getOrDefault(botId, 0L);
+            int streak = (lastTick > 0L && (nowTick - lastTick) <= 120L)
+                    ? FOLLOW_NO_PATH_STREAK.getOrDefault(botId, 0) + 1
+                    : 1;
+            FOLLOW_LAST_NO_PATH_TICK.put(botId, nowTick);
+            FOLLOW_NO_PATH_STREAK.put(botId, streak);
+
+            boolean verticalGap = Math.abs(liveBot.getBlockY() - liveTarget.getBlockY()) >= 6;
+            if (!verticalGap) {
+                clearFollowNoPathState(botId);
+                return;
+            }
+            long nextPromptTick = FOLLOW_NEXT_REGROUP_PROMPT_TICK.getOrDefault(botId, 0L);
+            if (streak < 3 || nowTick < nextPromptTick) {
+                return;
+            }
+            FOLLOW_NEXT_REGROUP_PROMPT_TICK.put(botId, nowTick + 300L);
+            ChatUtils.sendSystemMessage(liveTarget.getCommandSource(),
+                    liveBot.getName().getString()
+                            + " can't find a safe path to you here. Should I regroup? Use /bot regroup (safe),"
+                            + " or /bot come if you want digging recovery.");
+            if (logger != null) {
+                logger.info("[FollowAssert] regroup-prompt bot={} target={} reason={} streak={} dy={}",
+                        botId,
+                        targetId,
+                        reason == null ? "" : reason,
+                        streak,
+                        Math.abs(liveBot.getBlockY() - liveTarget.getBlockY()));
+            }
+        });
+    }
+
+    private record FollowPositions(BlockPos botPos, BlockPos targetPos) {}
 
     private static boolean isStuckDrivenReason(String reason) {
         if (reason == null || reason.isBlank()) {

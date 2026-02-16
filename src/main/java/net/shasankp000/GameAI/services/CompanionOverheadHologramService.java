@@ -1,14 +1,21 @@
 package net.shasankp000.GameAI.services;
 
 import net.minecraft.entity.EntityType;
+import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.entity.SpawnReason;
 import net.minecraft.entity.decoration.ArmorStandEntity;
+import net.minecraft.item.ItemStack;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.text.Text;
+import net.minecraft.text.TextColor;
 import net.minecraft.util.Formatting;
 
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -27,9 +34,16 @@ public final class CompanionOverheadHologramService {
 
     // Small vertical nudge so the hologram doesn't overlap the bot nameplate.
     private static final double NAMEPLATE_EXTRA_Y = 0.25D;
+    private static final String HOLOGRAM_TAG = "aiplayer.overhead_hologram";
+    private static final long STALE_SWEEP_INTERVAL_MS = 30_000L;
+    private static final long LEGACY_SWEEP_WINDOW_MS = 10 * 60_000L;
+    private static final TextColor GOLD_TEXT_COLOR = TextColor.fromFormatting(Formatting.GOLD);
 
     // One hologram per bot.
     private static final ConcurrentHashMap<UUID, ActiveHologram> ACTIVE = new ConcurrentHashMap<>();
+    private static volatile boolean startupSweepDone = false;
+    private static volatile long lastStaleSweepAtMs = 0L;
+    private static volatile long startupSweepStartedAtMs = 0L;
 
     private record ActiveHologram(UUID botUuid, ArmorStandEntity stand, String line, long expiresAtMs) {
     }
@@ -81,6 +95,16 @@ public final class CompanionOverheadHologramService {
         }
 
         long now = System.currentTimeMillis();
+        if (startupSweepStartedAtMs <= 0L) {
+            startupSweepStartedAtMs = now;
+        }
+        boolean includeLegacyUntyped = (now - startupSweepStartedAtMs) <= LEGACY_SWEEP_WINDOW_MS;
+        if (!startupSweepDone || now - lastStaleSweepAtMs >= STALE_SWEEP_INTERVAL_MS) {
+            sweepLingeringHolograms(server, includeLegacyUntyped);
+            startupSweepDone = true;
+            lastStaleSweepAtMs = now;
+        }
+
         for (var entry : ACTIVE.entrySet()) {
             UUID botId = entry.getKey();
             ActiveHologram holo = entry.getValue();
@@ -139,15 +163,105 @@ public final class CompanionOverheadHologramService {
         }
 
         stand.setInvisible(true);
+        stand.setHideBasePlate(true);
         stand.setNoGravity(true);
         stand.setInvulnerable(true);
         stand.setSilent(true);
         stand.setCustomName(styled(line));
         stand.setCustomNameVisible(true);
+        stand.addCommandTag(HOLOGRAM_TAG);
 
         double standY = desiredStandY(bot, stand);
         stand.refreshPositionAndAngles(bot.getX(), standY, bot.getZ(), 0.0f, 0.0f);
         world.spawnEntity(stand);
         return stand;
+    }
+
+    private static void sweepLingeringHolograms(MinecraftServer server, boolean includeLegacyUntyped) {
+        if (server == null) {
+            return;
+        }
+        Set<UUID> activeStandIds = new HashSet<>();
+        for (ActiveHologram holo : ACTIVE.values()) {
+            if (holo != null && holo.stand() != null && !holo.stand().isRemoved()) {
+                activeStandIds.add(holo.stand().getUuid());
+            }
+        }
+
+        for (ServerWorld world : server.getWorlds()) {
+            if (world == null) {
+                continue;
+            }
+            List<ArmorStandEntity> stale = new ArrayList<>();
+            for (var entity : world.iterateEntities()) {
+                if (!(entity instanceof ArmorStandEntity stand) || stand.isRemoved()) {
+                    continue;
+                }
+                if (activeStandIds.contains(stand.getUuid())) {
+                    if (!stand.getCommandTags().contains(HOLOGRAM_TAG)) {
+                        stand.addCommandTag(HOLOGRAM_TAG);
+                    }
+                    continue;
+                }
+                if (isManagedHologram(stand) || (includeLegacyUntyped && isLegacyCompanionHologram(stand))) {
+                    stale.add(stand);
+                }
+            }
+            for (ArmorStandEntity stand : stale) {
+                stand.discard();
+            }
+        }
+    }
+
+    private static boolean isManagedHologram(ArmorStandEntity stand) {
+        return stand != null && stand.getCommandTags().contains(HOLOGRAM_TAG);
+    }
+
+    private static boolean isLegacyCompanionHologram(ArmorStandEntity stand) {
+        if (stand == null || stand.getCommandTags().contains(HOLOGRAM_TAG)) {
+            return false;
+        }
+        if (!stand.isInvisible() || !stand.hasNoGravity() || !stand.isInvulnerable() || !stand.isSilent()) {
+            return false;
+        }
+        if (!stand.isCustomNameVisible() || !stand.hasCustomName()) {
+            return false;
+        }
+        if (!isUnarmed(stand)) {
+            return false;
+        }
+        Text customName = stand.getCustomName();
+        if (customName == null) {
+            return false;
+        }
+        String raw = customName.getString();
+        if (raw == null || raw.isBlank() || raw.length() > 96) {
+            return false;
+        }
+        var style = customName.getStyle();
+        if (style != null && style.isBold()) {
+            TextColor color = style.getColor();
+            if (color != null && GOLD_TEXT_COLOR != null && color.equals(GOLD_TEXT_COLOR)) {
+                return true;
+            }
+        }
+        // Legacy fallback: old builds did not consistently preserve style metadata.
+        return raw.contains(" ")
+                && raw.length() <= 72
+                && !raw.contains("\n")
+                && stand.getCommandTags().isEmpty();
+    }
+
+    private static boolean isUnarmed(ArmorStandEntity stand) {
+        if (stand == null) {
+            return false;
+        }
+        for (EquipmentSlot slot : EquipmentSlot.values()) {
+            ItemStack stack = stand.getEquippedStack(slot);
+            if (stack != null && !stack.isEmpty()) {
+                return false;
+            }
+        }
+        return true;
     }
 }

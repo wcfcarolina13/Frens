@@ -434,7 +434,7 @@ public final class BotIdleHobbiesService {
 
         AMBIENT_EXECUTOR.submit(() -> {
             try {
-                SkillContext skillContext = new SkillContext(botSource, net.shasankp000.FunctionCaller.FunctionCallerV2.getSharedState(), params, botSource);
+                SkillContext skillContext = new SkillContext(botSource, SharedStateService.safeSharedState("idle-hobbies"), params, botSource);
                 SkillExecutionResult result = SkillManager.runSkill(skillName, skillContext);
                 // We intentionally do not echo result here; many skills already speak during execution.
                 LOGGER.info("Idle hobby '{}' finished for {}: success={} msg='{}'",
@@ -461,8 +461,12 @@ public final class BotIdleHobbiesService {
                             : 200L;                       // 10s
                     NEXT_DECISION_TICK.put(botUuid, now + delay);
                 });
-            } catch (Exception e) {
-                LOGGER.warn("Idle hobby '{}' crashed for {}: {}", skillName, bot.getName().getString(), e.getMessage(), e);
+            } catch (Throwable t) {
+                LOGGER.warn("Idle hobby '{}' crashed for {}: {}",
+                        skillName,
+                        bot.getName().getString(),
+                        t.getClass().getSimpleName(),
+                        t);
                 LAST_HOBBY_END_MS.put(botUuid, System.currentTimeMillis());
             }
         });

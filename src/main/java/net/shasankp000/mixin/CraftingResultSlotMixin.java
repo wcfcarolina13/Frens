@@ -8,7 +8,7 @@ import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.util.Identifier;
 import net.minecraft.screen.slot.CraftingResultSlot;
 import org.spongepowered.asm.mixin.Final;
-import net.shasankp000.GameAI.BotEventHandler;
+import net.shasankp000.GameAI.services.BotRegistry;
 import net.shasankp000.GameAI.services.CraftingHistoryService;
 import net.shasankp000.GameAI.services.RecipeUnlockReactionService;
 import org.spongepowered.asm.mixin.Mixin;
@@ -41,7 +41,7 @@ public class CraftingResultSlotMixin {
         if (!(player instanceof ServerPlayerEntity serverPlayer)) {
             return;
         }
-        if (BotEventHandler.isRegisteredBot(serverPlayer)) {
+        if (BotRegistry.isRegistered(serverPlayer.getUuid())) {
             return;
         }
         ItemStack result = stack;

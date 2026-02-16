@@ -73,6 +73,7 @@ public final class CompanionContextReactionService {
 
     private static final class TriggerState {
         final Map<String, Long> lastTriggerMs = new HashMap<>();
+        final Map<String, String> lastLineByTrigger = new HashMap<>();
         boolean wasInBoat = false;
         boolean wasLowHealth = false;
     }
@@ -82,7 +83,7 @@ public final class CompanionContextReactionService {
     private static final WeightedLine[] AMBIENT_LINES = new WeightedLine[] {
             new WeightedLine("ambient_bad_feeling", "I have a bad feeling about this.", BotDialogueSounds.LINE_AMBIENT_BAD_FEELING, WEIGHT_RARE),
             new WeightedLine("ambient_my_job", "I can't believe this is my job.", BotDialogueSounds.LINE_AMBIENT_MY_JOB, WEIGHT_COMMON),
-            new WeightedLine("ambient_blame_terrain", "If we die, I'm blaming the terrain.", BotDialogueSounds.LINE_AMBIENT_BLAME_TERRAIN, WEIGHT_COMMON),
+            new WeightedLine("ambient_blame_terrain", "If we die, I'm blaming the terrain.", BotDialogueSounds.LINE_AMBIENT_BLAME_TERRAIN, WEIGHT_UNCOMMON),
             new WeightedLine("ambient_thinking", "I'm thinking. Don't rush me.", BotDialogueSounds.LINE_AMBIENT_THINKING, WEIGHT_COMMON)
     };
 
@@ -465,12 +466,14 @@ public final class CompanionContextReactionService {
             return false;
         }
 
-        WeightedLine line = pickWeightedLine(pool, forcedLineId);
+        String lastLineId = state.lastLineByTrigger.get(triggerKey);
+        WeightedLine line = pickWeightedLine(pool, forcedLineId, lastLineId);
         if (line == null) {
             return false;
         }
 
         state.lastTriggerMs.put(triggerKey, now);
+        state.lastLineByTrigger.put(triggerKey, line.id);
         CompanionOverheadDialogueService.showOverheadLine(bot, line.text, 3_000, 48.0, "context", triggerKey);
 
         BotDialoguePlayer.PlayResult result = BotDialoguePlayer.playSoundForBotDetailed(bot, line.sound);
@@ -486,7 +489,7 @@ public final class CompanionContextReactionService {
         return true;
     }
 
-    private static WeightedLine pickWeightedLine(WeightedLine[] pool, String forcedLineId) {
+    private static WeightedLine pickWeightedLine(WeightedLine[] pool, String forcedLineId, String lastLineId) {
         if (pool == null || pool.length == 0) {
             return null;
         }
@@ -499,11 +502,27 @@ public final class CompanionContextReactionService {
             return null;
         }
 
-        int total = 0;
+        List<WeightedLine> candidates = new ArrayList<>();
         for (WeightedLine line : pool) {
-            if (line != null) {
-                total += line.weight;
+            if (line == null) {
+                continue;
             }
+            if (lastLineId != null && !lastLineId.isBlank() && lastLineId.equalsIgnoreCase(line.id)) {
+                continue;
+            }
+            candidates.add(line);
+        }
+        if (candidates.isEmpty()) {
+            for (WeightedLine line : pool) {
+                if (line != null) {
+                    candidates.add(line);
+                }
+            }
+        }
+
+        int total = 0;
+        for (WeightedLine line : candidates) {
+            total += line.weight;
         }
         if (total <= 0) {
             return null;
@@ -511,16 +530,13 @@ public final class CompanionContextReactionService {
 
         int r = RNG.nextInt(total);
         int run = 0;
-        for (WeightedLine line : pool) {
-            if (line == null) {
-                continue;
-            }
+        for (WeightedLine line : candidates) {
             run += line.weight;
             if (r < run) {
                 return line;
             }
         }
-        return pool[pool.length - 1];
+        return candidates.getLast();
     }
 
     private static boolean isHighThreatLocation(ServerPlayerEntity bot, ServerWorld world, List<Entity> hostiles) {

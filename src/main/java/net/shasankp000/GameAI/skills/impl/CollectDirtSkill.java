@@ -19,6 +19,7 @@ import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.registry.Registries;
+import net.minecraft.world.Heightmap;
 import net.shasankp000.GameAI.skills.ExplorationMovePolicy;
 import net.shasankp000.GameAI.skills.BlockDropRegistry;
 import net.shasankp000.GameAI.skills.Skill;
@@ -189,19 +190,32 @@ public class CollectDirtSkill implements Skill {
 
         Set<Item> effectiveTrackedItems = resolveTrackedItems();
 
+        if (playerForAbortCheck != null && requiresProperTool()) {
+            boolean hasRequiredTool = hasToolKeyword(playerForAbortCheck, preferredTool);
+            if (!hasRequiredTool) {
+                hasRequiredTool = ToolProvisionService.ensureToolForKeyword(playerForAbortCheck, source, commander, preferredTool);
+            }
+            if (!hasRequiredTool) {
+                return SkillExecutionResult.failure("I need a pickaxe to mine " + harvestLabel + ". I won't punch stone by hand.");
+            }
+        }
+
         List<String> optionTokens = getOptionTokens(context.parameters());
         
         // New ascent/descent parameters
         Integer ascentBlocks = getOptionalIntParameter(context, "ascentBlocks");
         Integer ascentTargetY = getOptionalIntParameter(context, "ascentTargetY");
+        boolean ascentToSurface = getBooleanParameter(context, "ascentToSurface", false);
         Integer descentBlocks = getOptionalIntParameter(context, "descentBlocks");
         Integer descentTargetY = getOptionalIntParameter(context, "descentTargetY");
         
-        boolean ascentMode = (ascentBlocks != null || ascentTargetY != null);
+        boolean ascentMode = (ascentBlocks != null || ascentTargetY != null || ascentToSurface);
         boolean descentMode = (descentBlocks != null || descentTargetY != null);
         
         // Calculate target Y for ascent/descent
         if (ascentMode && ascentBlocks != null) {
+            targetCount = Integer.MAX_VALUE;
+        } else if (ascentMode && ascentToSurface) {
             targetCount = Integer.MAX_VALUE;
         } else if (descentMode && descentBlocks != null) {
             targetCount = Integer.MAX_VALUE;
@@ -222,7 +236,11 @@ public class CollectDirtSkill implements Skill {
         // Handle ascent mode
         if (ascentMode && playerForAbortCheck != null) {
             int targetY;
-            if (ascentBlocks != null) {
+            if (ascentToSurface) {
+                targetY = resolveSurfaceTargetY(playerForAbortCheck);
+                LOGGER.info("Ascent surface mode: climbing from Y={} toward sky visibility (target floor Y={})",
+                        playerForAbortCheck.getBlockY(), targetY);
+            } else if (ascentBlocks != null) {
                 targetY = playerForAbortCheck.getBlockY() + ascentBlocks;
                 LOGGER.info("Ascent mode: climbing from Y={} to Y={} (+{} blocks)", 
                            playerForAbortCheck.getBlockY(), targetY, ascentBlocks);
@@ -231,7 +249,7 @@ public class CollectDirtSkill implements Skill {
                 LOGGER.info("Ascent mode: climbing from Y={} to Y={}", 
                            playerForAbortCheck.getBlockY(), targetY);
             }
-            return runAscent(context, source, commander, playerForAbortCheck, targetY, resumeRequested, allowChestStore);
+            return runAscent(context, source, commander, playerForAbortCheck, targetY, ascentToSurface, resumeRequested, allowChestStore);
         }
 
         // Handle descent mode
@@ -391,7 +409,7 @@ public class CollectDirtSkill implements Skill {
 
             if (result.success()) {
                 if (loopPlayer != null) {
-                    BotActions.selectBestTool(loopPlayer, preferredTool, "sword");
+                    selectPreferredToolOrHands(loopPlayer, preferredTool);
                     int currentCount = countInventoryItems(loopPlayer, effectiveTrackedItems);
                     int effectiveCollected = untilMode ? currentCount : Math.max(0, currentCount - baselineHarvestCount);
                     if (effectiveCollected > inventoryCollected) {
@@ -531,6 +549,80 @@ public class CollectDirtSkill implements Skill {
                         "I'm out of inventory space, so I'll leave the remaining drops where they fell.");
             }
         }
+    }
+
+    private boolean requiresProperTool() {
+        return preferredTool != null && preferredTool.toLowerCase(Locale.ROOT).contains("pickaxe");
+    }
+
+    private boolean hasToolKeyword(ServerPlayerEntity player, String keyword) {
+        if (player == null || keyword == null || keyword.isBlank()) {
+            return false;
+        }
+        String needle = keyword.toLowerCase(Locale.ROOT);
+        for (int i = 0; i < player.getInventory().size(); i++) {
+            ItemStack stack = player.getInventory().getStack(i);
+            if (stack.isEmpty()) {
+                continue;
+            }
+            String key = stack.getItem().getTranslationKey().toLowerCase(Locale.ROOT);
+            if (key.contains(needle)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean selectHandsOrHarmlessItem(ServerPlayerEntity player) {
+        if (player == null) {
+            return false;
+        }
+        for (int i = 0; i < 9; i++) {
+            if (player.getInventory().getStack(i).isEmpty()) {
+                BotActions.selectHotbarSlot(player, i);
+                return true;
+            }
+        }
+        for (int i = 0; i < 9; i++) {
+            ItemStack stack = player.getInventory().getStack(i);
+            if (stack.isEmpty()) {
+                continue;
+            }
+            String key = stack.getItem().getTranslationKey().toLowerCase(Locale.ROOT);
+            if (key.contains("sword")
+                    || key.contains("axe")
+                    || key.contains("pickaxe")
+                    || key.contains("shovel")
+                    || key.contains("hoe")) {
+                continue;
+            }
+            BotActions.selectHotbarSlot(player, i);
+            return true;
+        }
+        BotActions.selectHotbarSlot(player, 0);
+        return true;
+    }
+
+    private void selectPreferredToolOrHands(ServerPlayerEntity player, String requestedKeyword) {
+        if (player == null) {
+            return;
+        }
+        String keyword = requestedKeyword;
+        if (keyword == null || keyword.isBlank()) {
+            keyword = preferredTool;
+        }
+        if (keyword == null || keyword.isBlank()) {
+            selectHandsOrHarmlessItem(player);
+            return;
+        }
+
+        if (hasToolKeyword(player, keyword)) {
+            BotActions.selectBestTool(player, keyword, "sword");
+            return;
+        }
+
+        // Soft-material tasks can proceed by hand when no proper tool is available.
+        selectHandsOrHarmlessItem(player);
     }
 
     private boolean shouldExpandSearch(String message) {
@@ -931,7 +1023,7 @@ public class CollectDirtSkill implements Skill {
         if (referencePos != null) {
             targetY = Math.max(targetY, referencePos.getY());
         }
-        SkillExecutionResult ascent = runAscent(new SkillContext(source, new HashMap<>(), new HashMap<>()), source, null, player, targetY, false, false);
+        SkillExecutionResult ascent = runAscent(new SkillContext(source, new HashMap<>(), new HashMap<>()), source, null, player, targetY, false, false, false);
         return ascent.success() || player.getBlockY() >= targetY;
     }
 
@@ -1461,10 +1553,14 @@ public class CollectDirtSkill implements Skill {
                                           ServerPlayerEntity commander,
                                           ServerPlayerEntity player,
                                           int targetY,
+                                          boolean stopAtSurface,
                                           boolean resumeRequested,
                                           boolean allowChestStore) {
         if (player == null) {
             return SkillExecutionResult.failure("No bot available for ascent.");
+        }
+        if (stopAtSurface && isOnSurface(player)) {
+            return SkillExecutionResult.success("Already at the surface with open sky.");
         }
         if (player.getBlockY() >= targetY) {
             return SkillExecutionResult.success("Already at or above target Y=" + targetY + ".");
@@ -1477,7 +1573,7 @@ public class CollectDirtSkill implements Skill {
             Direction direction = determineStraightStairDirection(context, player, resumeRequested);
             runOnServerThread(player, () -> LookController.faceBlock(player, player.getBlockPos().offset(direction)));
             
-            BotActions.selectBestTool(player, preferredTool, "sword");
+            selectPreferredToolOrHands(player, preferredTool);
             
             LOGGER.info("Starting ascent from Y={} to Y={} in direction {}", 
                     player.getBlockY(), targetY, direction);
@@ -1486,7 +1582,7 @@ public class CollectDirtSkill implements Skill {
             int steps = 0;
             int maxSteps = Math.abs(targetY - player.getBlockY()) * 5; // Generous limit
             
-            while (player.getBlockY() < targetY && 
+            while ((player.getBlockY() < targetY || (stopAtSurface && !isOnSurface(player))) &&
                    System.currentTimeMillis() - startTime < MAX_RUNTIME_MILLIS && 
                    steps < maxSteps) {
                 
@@ -1516,6 +1612,10 @@ public class CollectDirtSkill implements Skill {
             }
             
             steps++;
+            if (stopAtSurface && isOnSurface(player)) {
+                LOGGER.info("Ascent surface mode complete after {} steps at Y={}", steps, player.getBlockY());
+                return SkillExecutionResult.success("Reached surface with open sky after " + steps + " steps.");
+            }
             
             // Place torch every 6 steps
             if (steps % 6 == 0 && TorchPlacer.shouldPlaceTorch(player)) {
@@ -1533,6 +1633,11 @@ public class CollectDirtSkill implements Skill {
                     }
                 }
             }
+        }
+        
+        if (stopAtSurface && isOnSurface(player)) {
+            LOGGER.info("Ascent surface mode complete after {} steps, final Y={}", steps, player.getBlockY());
+            return SkillExecutionResult.success("Reached surface with open sky after " + steps + " steps.");
         }
         
         if (player.getBlockY() >= targetY) {
@@ -1756,7 +1861,7 @@ public class CollectDirtSkill implements Skill {
         } else if (state.isIn(net.minecraft.registry.tag.BlockTags.PICKAXE_MINEABLE)) {
             toolKeyword = "pickaxe";
         }
-        BotActions.selectBestTool(player, toolKeyword != null ? toolKeyword : preferredTool, "sword");
+        selectPreferredToolOrHands(player, toolKeyword != null ? toolKeyword : preferredTool);
 
         // In heavily modded worlds, some blocks can "re-fill" quickly (falling blocks, delayed updates).
         // Treat mining timeouts/hiccups as transient and retry a couple times before aborting the descent.
@@ -2284,25 +2389,28 @@ public class CollectDirtSkill implements Skill {
 
     private record LavaThreat(Direction direction, BlockPos plugPosition) {}
 
+    private int resolveSurfaceTargetY(ServerPlayerEntity player) {
+        if (player == null || !(player.getEntityWorld() instanceof ServerWorld world)) {
+            return player != null ? player.getBlockY() + 16 : 64;
+        }
+        int surfaceY = world.getTopY(Heightmap.Type.MOTION_BLOCKING_NO_LEAVES, player.getBlockX(), player.getBlockZ());
+        int minTarget = player.getBlockY() + 1;
+        return Math.max(minTarget, surfaceY + 1);
+    }
+
     private boolean isOnSurface(ServerPlayerEntity player) {
         if (player == null) {
             return false;
         }
+        if (!(player.getEntityWorld() instanceof ServerWorld world)) {
+            return false;
+        }
         BlockPos botPos = player.getBlockPos();
-        ServerWorld world = (ServerWorld) player.getEntityWorld();
 
-        // Check if there's air above the bot (at least 2 blocks for head room)
-        if (!world.getBlockState(botPos.up(1)).isAir() || !world.getBlockState(botPos.up(2)).isAir()) {
+        if (!world.isSkyVisible(botPos.up())) {
             return false;
         }
-
-        // Check if the block the bot is standing on is solid
-        if (world.getBlockState(botPos.down()).isAir()) {
-            return false;
-        }
-
-        // Check if the bot is at a reasonable surface Y-level (e.g., above sea level)
-        return botPos.getY() >= world.getSeaLevel();
+        return !world.getBlockState(botPos.down()).getCollisionShape(world, botPos.down()).isEmpty();
     }
 
     @SuppressWarnings("unchecked")

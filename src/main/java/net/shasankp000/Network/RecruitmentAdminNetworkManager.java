@@ -8,6 +8,7 @@ import net.shasankp000.AIPlayer;
 import net.shasankp000.Entity.createFakePlayer;
 import net.shasankp000.FilingSystem.ManualConfig;
 import net.shasankp000.GameAI.services.SurvivalRecruitmentService;
+import net.shasankp000.GameAI.services.WizardTomeGrantService;
 import net.shasankp000.network.CompanionQuestStatePayload;
 import net.shasankp000.network.RecruitmentPromptPayload;
 
@@ -64,6 +65,14 @@ public final class RecruitmentAdminNetworkManager {
         List<String> out = new ArrayList<>();
 
         switch (action) {
+            case "give_wizard_tome" -> {
+                int granted = WizardTomeGrantService.grant(player, Math.max(1, payload.intArg()));
+                if (granted <= 0) {
+                    out.add("Could not grant Wizard's Tome (player unavailable).");
+                } else {
+                    out.add("Gave Wizard's Tome x" + granted + ".");
+                }
+            }
             case "status" -> {
                 out.addAll(buildStatusLines(server, worldKey, st));
             }

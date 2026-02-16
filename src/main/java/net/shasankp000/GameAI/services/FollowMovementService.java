@@ -31,6 +31,12 @@ public final class FollowMovementService {
     private static final long LOCAL_NUDGE_COOLDOWN_MS = 650L;
     private static final ConcurrentHashMap<UUID, Long> LAST_LOCAL_NUDGE_MS = new ConcurrentHashMap<>();
     private static final int[] REPOSITION_Y_OFFSETS = new int[] { 0, 1, -1 };
+    private static final int DROP_GUARD_MIN_DEPTH = 3;
+    private static final int DROP_GUARD_MAX_PROBE_DEPTH = 12;
+    private static final double DROP_GUARD_FORWARD_PROBE = 0.8D;
+    private static final long DROP_WARNING_COOLDOWN_MS = 8_000L;
+    private static final ConcurrentHashMap<UUID, Long> LAST_DROP_WARNING_MS = new ConcurrentHashMap<>();
+    private static final String DROP_WARNING_LINE = "woah, I almost fell into that hole";
 
     public enum WaypointRepositionOutcome {
         NO_CANDIDATE,
@@ -120,6 +126,9 @@ public final class FollowMovementService {
         }
         LookController.faceBlock(bot, waypoint);
         if (tryLocalObstacleNudge(bot, waypointCenter)) {
+            return;
+        }
+        if (tryDropoffGuard(bot, waypointCenter)) {
             return;
         }
         if (lowerShield != null) {
@@ -268,6 +277,9 @@ public final class FollowMovementService {
         if (tryLocalObstacleNudge(bot, targetPos)) {
             return;
         }
+        if (tryDropoffGuard(bot, targetPos)) {
+            return;
+        }
 
         boolean sprint = distanceSq > followSprintDistanceSq;
         BotActions.sprint(bot, sprint);
@@ -335,10 +347,52 @@ public final class FollowMovementService {
         return true;
     }
 
+    private static boolean tryDropoffGuard(ServerPlayerEntity bot, Vec3d targetPos) {
+        if (bot == null || targetPos == null) {
+            return false;
+        }
+        if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
+            return false;
+        }
+        if (!bot.isOnGround() || bot.hasVehicle() || bot.isUsingItem() || bot.isTouchingWater()) {
+            return false;
+        }
+
+        Vec3d pos = new Vec3d(bot.getX(), bot.getY(), bot.getZ());
+        Vec3d toward = new Vec3d(targetPos.x - pos.x, 0.0D, targetPos.z - pos.z);
+        if (toward.lengthSquared() < 0.10D) {
+            return false;
+        }
+        Vec3d dir = toward.normalize();
+        BlockPos front = BlockPos.ofFloored(pos.x + dir.x * DROP_GUARD_FORWARD_PROBE, bot.getY(), pos.z + dir.z * DROP_GUARD_FORWARD_PROBE);
+        if (front.equals(bot.getBlockPos())) {
+            Direction fallbackDir = approximateToward(bot.getBlockPos(), BlockPos.ofFloored(targetPos));
+            front = bot.getBlockPos().offset(fallbackDir);
+        }
+        if (!isDangerousDropCell(world, front)) {
+            return false;
+        }
+
+        BlockPos safeBypass = selectDropoffBypassCandidate(world, bot.getBlockPos(), front, BlockPos.ofFloored(targetPos));
+        if (safeBypass != null) {
+            LookController.faceBlock(bot, safeBypass);
+            BotActions.sprint(bot, false);
+            BotActions.autoJumpIfNeeded(bot);
+            BotActions.applyMovementInput(bot, Vec3d.ofCenter(safeBypass), 0.18D);
+        } else {
+            BotActions.stop(bot);
+        }
+        maybeShowDropWarning(bot);
+        return true;
+    }
+
     private record RepositionCandidate(BlockPos pos, double lanePenalty) {
     }
 
     private record WaterEscapeCandidate(BlockPos pos, double laneBonus) {
+    }
+
+    private record DropBypassCandidate(BlockPos pos, double lanePenalty) {
     }
 
     private static BlockPos selectBestLocalRepositionCandidate(ServerWorld world, BlockPos current, BlockPos waypoint) {
@@ -444,6 +498,47 @@ public final class FollowMovementService {
         return best;
     }
 
+    private static BlockPos selectDropoffBypassCandidate(ServerWorld world, BlockPos current, BlockPos front, BlockPos goal) {
+        if (world == null || current == null || front == null || goal == null) {
+            return null;
+        }
+        Direction toward = approximateToward(current, goal);
+        Direction left = toward.rotateYCounterclockwise();
+        Direction right = toward.rotateYClockwise();
+
+        ArrayList<DropBypassCandidate> candidates = new ArrayList<>(8);
+        candidates.add(new DropBypassCandidate(current.offset(left), 0.0D));
+        candidates.add(new DropBypassCandidate(current.offset(right), 0.0D));
+        candidates.add(new DropBypassCandidate(current.offset(left).offset(toward), 0.10D));
+        candidates.add(new DropBypassCandidate(current.offset(right).offset(toward), 0.10D));
+        candidates.add(new DropBypassCandidate(current.offset(toward.getOpposite()), 0.40D));
+
+        BlockPos best = null;
+        double bestScore = Double.MAX_VALUE;
+        for (DropBypassCandidate cand : candidates) {
+            if (cand == null || cand.pos() == null) {
+                continue;
+            }
+            for (int dY : REPOSITION_Y_OFFSETS) {
+                BlockPos pos = cand.pos().add(0, dY, 0);
+                if (!isGroundedTwoHighClearance(world, pos)) {
+                    continue;
+                }
+                if (isDangerousDropCell(world, pos)) {
+                    continue;
+                }
+                double distScore = horizontalSq(pos, goal);
+                double yPenalty = Math.abs(pos.getY() - goal.getY()) * 1.4D;
+                double score = distScore + yPenalty + cand.lanePenalty();
+                if (score < bestScore) {
+                    bestScore = score;
+                    best = pos.toImmutable();
+                }
+            }
+        }
+        return best;
+    }
+
     private static boolean isWaterEscapeContext(ServerPlayerEntity bot, ServerWorld world) {
         if (bot == null || world == null) {
             return false;
@@ -455,6 +550,29 @@ public final class FollowMovementService {
         BlockPos head = feet.up();
         return world.getFluidState(feet).isOf(Fluids.WATER)
                 || world.getFluidState(head).isOf(Fluids.WATER);
+    }
+
+    private static boolean isDangerousDropCell(ServerWorld world, BlockPos pos) {
+        if (world == null || pos == null) {
+            return false;
+        }
+        if (!hasTwoHighClearance(world, pos)) {
+            return false;
+        }
+        if (!world.getFluidState(pos).isEmpty() || !world.getFluidState(pos.up()).isEmpty()) {
+            return false;
+        }
+        int fallDepth = 0;
+        for (int d = 1; d <= DROP_GUARD_MAX_PROBE_DEPTH; d++) {
+            BlockPos probe = pos.down(d);
+            BlockState state = world.getBlockState(probe);
+            boolean passable = state.getCollisionShape(world, probe).isEmpty() && world.getFluidState(probe).isEmpty();
+            if (!passable) {
+                break;
+            }
+            fallDepth++;
+        }
+        return fallDepth >= DROP_GUARD_MIN_DEPTH;
     }
 
     private static double horizontalSq(BlockPos a, BlockPos b) {
@@ -522,5 +640,19 @@ public final class FollowMovementService {
             return dx >= 0 ? Direction.EAST : Direction.WEST;
         }
         return dz >= 0 ? Direction.SOUTH : Direction.NORTH;
+    }
+
+    private static void maybeShowDropWarning(ServerPlayerEntity bot) {
+        if (bot == null || bot.isRemoved()) {
+            return;
+        }
+        UUID id = bot.getUuid();
+        long now = System.currentTimeMillis();
+        long last = LAST_DROP_WARNING_MS.getOrDefault(id, 0L);
+        if (now - last < DROP_WARNING_COOLDOWN_MS) {
+            return;
+        }
+        LAST_DROP_WARNING_MS.put(id, now);
+        CompanionOverheadDialogueService.showOverheadLine(bot, DROP_WARNING_LINE, 2_800, 32.0D, "follow-drop-guard", "dropoff");
     }
 }

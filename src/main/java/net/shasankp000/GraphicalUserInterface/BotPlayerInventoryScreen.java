@@ -55,6 +55,29 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
     private static final double FOLLOW_DISTANCE_MIN = 1.0D;
     private static final double FOLLOW_DISTANCE_MAX = 64.0D;
     private static final double FOLLOW_DISTANCE_DEFAULT = 4.0D;
+    private static final int WOODCUT_TREE_COUNT_MIN = 1;
+    private static final int WOODCUT_TREE_COUNT_MAX = 64;
+    private static final int WOODCUT_TREE_COUNT_DEFAULT = 4;
+    private static final int SKILL_COUNT_UNSET = 0;
+    private static final int SKILL_FISH_COUNT_MIN = 1;
+    private static final int SKILL_FISH_COUNT_MAX = 128;
+    private static final int SKILL_FISH_COUNT_DEFAULT = 8;
+    private static final int SKILL_WOOL_COUNT_MIN = 1;
+    private static final int SKILL_WOOL_COUNT_MAX = 256;
+    private static final int SKILL_WOOL_COUNT_DEFAULT = 16;
+    private static final int SKILL_STRIPMINE_COUNT_MIN = 1;
+    private static final int SKILL_STRIPMINE_COUNT_MAX = 128;
+    private static final int SKILL_STRIPMINE_COUNT_DEFAULT = 8;
+    private static final int SKILL_ASCENT_COUNT_MIN = 1;
+    private static final int SKILL_ASCENT_COUNT_MAX = 128;
+    private static final int SKILL_ASCENT_COUNT_DEFAULT = 5;
+    private static final int SKILL_DESCENT_COUNT_MIN = 1;
+    private static final int SKILL_DESCENT_COUNT_MAX = 128;
+    private static final int SKILL_DESCENT_COUNT_DEFAULT = 5;
+    private static final int TOPICS_OVERLAY_SEARCH_H = 14;
+    private static final int TOPICS_OVERLAY_SEARCH_GAP = 4;
+    private static final int TOPICS_OVERLAY_SCROLLBAR_W = 10;
+    private static final int TOPICS_OVERLAY_SCROLLBAR_MIN_THUMB_H = 18;
     private OtherClientPlayerEntity fallbackBot;
     private final String botAlias;
     private float lastMouseX;
@@ -64,6 +87,8 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
     // Overlay column split (0..1) for Dialogue vs Topics list.
     private double overlaySplitRatio = 0.56;
     private boolean overlayDraggingSplit = false;
+    private boolean overlayDraggingListScroll = false;
+    private int overlayListScrollGrabOffsetY = 0;
 
     // Hover tooltip (delayed) for entries in the expanded overlay.
     private TopicEntry overlayHoveredEntry = null;
@@ -77,6 +102,15 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
     // Admin list scroll (only used for overlay when Admin tab is selected).
     private int adminScrollIndex;
     private TopicCategory overlayCategory = TopicCategory.SKILL;
+    private int woodcutTreeCount = WOODCUT_TREE_COUNT_DEFAULT;
+    private int fishTargetCount = SKILL_COUNT_UNSET;
+    private int woolTargetCount = SKILL_COUNT_UNSET;
+    private int stripmineLength = SKILL_COUNT_UNSET;
+    private int ascentBlocks = SKILL_COUNT_UNSET;
+    private int descentBlocks = SKILL_COUNT_UNSET;
+    private boolean ascentSurfaceMode = false;
+    private String topicSearchQuery = "";
+    private boolean topicSearchFocused = false;
 
     // Best-effort: request server stage/permanent snapshot once per overlay open (used for stage-gated dialogue topics).
     private boolean companionQuestStateRequested = false;
@@ -132,6 +166,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         COMPANION_SUMMON,
         COMPANION_HOME,
         OPEN_SPELLS,
+        OPEN_GUIDE,
         STOP,
         RESUME,
         FOLLOW,
@@ -208,13 +243,14 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
     }
 
     private static final List<TopicEntry> SKILL_TOPIC_ENTRIES = List.of(
-            TopicEntry.skill("Stop", TopicAction.STOP, false, 0),
-            TopicEntry.skill("Resume", TopicAction.RESUME, false, 0),
-            TopicEntry.skill("Follow", TopicAction.FOLLOW, true, 0),
-            TopicEntry.skill("Guard", TopicAction.GUARD, true, 0),
+            TopicEntry.skill("📘 Guide", TopicAction.OPEN_GUIDE, false, 0),
+            TopicEntry.skill("🛑 Stop", TopicAction.STOP, false, 0),
+            TopicEntry.skill("▶ Resume", TopicAction.RESUME, false, 0),
+            TopicEntry.skill("👣 Follow", TopicAction.FOLLOW, true, 0),
+            TopicEntry.skill("🛡 Guard", TopicAction.GUARD, true, 0),
             TopicEntry.skill("Patrol", TopicAction.PATROL, true, 0),
-            TopicEntry.skill("Return Home", TopicAction.RETURN_HOME, true, 0),
-            TopicEntry.skill("Sleep", TopicAction.SLEEP, false, 0),
+            TopicEntry.skill("🏠 Return Home", TopicAction.RETURN_HOME, true, 0),
+            TopicEntry.skill("🛌 Sleep", TopicAction.SLEEP, false, 0),
             TopicEntry.skill("Auto Home @ Sunset", TopicAction.AUTO_RETURN_SUNSET, true, 0),
             TopicEntry.skill("Guard/Patrol eligible", TopicAction.AUTO_RETURN_SUNSET_GUARD_PATROL, true, 1),
             TopicEntry.skill("Idle Hobbies", TopicAction.IDLE_HOBBIES, true, 0),
@@ -222,9 +258,9 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             TopicEntry.skill("Voiced Dialogue", TopicAction.VOICED_DIALOGUE, true, 0),
             TopicEntry.skill("Unleash Tethered", TopicAction.UNLEASH_TETHERED, true, 0),
             TopicEntry.skill("Leash on Dismount", TopicAction.LEASH_ON_DISMOUNT, true, 0),
-            TopicEntry.skill("TP during Skills", TopicAction.TELEPORT_SKILLS, true, 0),
-            TopicEntry.skill("TP during Sweeps", TopicAction.TELEPORT_DROP_SWEEP, true, 0),
-            TopicEntry.skill("Drop Sweep", TopicAction.DROP_SWEEP, false, 0),
+            TopicEntry.skill("Teleport during Skills", TopicAction.TELEPORT_SKILLS, true, 0),
+            TopicEntry.skill("Teleport during Sweeps", TopicAction.TELEPORT_DROP_SWEEP, true, 0),
+            TopicEntry.skill("🧹 Cleanup", TopicAction.DROP_SWEEP, false, 0),
             TopicEntry.skill("Bases >", TopicAction.BASES, false, 0),
             TopicEntry.skill("Crafting >", TopicAction.CRAFTING, false, 0),
             TopicEntry.skill("Construction >", TopicAction.CONSTRUCTION, false, 0),
@@ -245,12 +281,12 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             // Curated, non-scroll quick actions for the collapsed panel.
             // (These are intentionally short labels; the expanded overlay still shows the full list.)
             private static final List<TopicEntry> QUICK_TOPIC_ENTRIES = List.of(
-                TopicEntry.skill("Stop", TopicAction.STOP, false, 0),
-                TopicEntry.skill("Follow", TopicAction.FOLLOW, true, 0),
-                TopicEntry.skill("Home", TopicAction.RETURN_HOME, true, 0),
-                TopicEntry.skill("Sleep", TopicAction.SLEEP, false, 0),
-                TopicEntry.skill("Guard", TopicAction.GUARD, true, 0),
-                TopicEntry.skill("Resume", TopicAction.RESUME, false, 0)
+                TopicEntry.skill("🛑 Stop", TopicAction.STOP, false, 0),
+                TopicEntry.skill("👣 Follow", TopicAction.FOLLOW, true, 0),
+                TopicEntry.skill("🏠 Home", TopicAction.RETURN_HOME, true, 0),
+                TopicEntry.skill("🛌 Sleep", TopicAction.SLEEP, false, 0),
+                TopicEntry.skill("🛡 Guard", TopicAction.GUARD, true, 0),
+                TopicEntry.skill("🧹 Cleanup", TopicAction.DROP_SWEEP, false, 0)
             );
 
     // Dialogue/quest topics are intentionally local/scripted: they feed the dialogue panel without
@@ -530,6 +566,66 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         return computeTopicsOverlayRect().contains(mouseX, mouseY);
     }
 
+    private int getOverlayRowsStartY(int listY) {
+        return listY + TOPICS_OVERLAY_LIST_HEADER_H + TOPICS_OVERLAY_SEARCH_H + TOPICS_OVERLAY_SEARCH_GAP;
+    }
+
+    private int getOverlayRowsHeight(int listH) {
+        return Math.max(1, listH - TOPICS_OVERLAY_LIST_HEADER_H - TOPICS_OVERLAY_SEARCH_H - TOPICS_OVERLAY_SEARCH_GAP);
+    }
+
+    private Rect computeOverlaySearchRect(int listX, int listY, int listW) {
+        int searchX = listX + 4;
+        int searchY = listY + TOPICS_OVERLAY_LIST_HEADER_H + 1;
+        int searchW = Math.max(40, listW - 8);
+        return new Rect(searchX, searchY, searchW, TOPICS_OVERLAY_SEARCH_H);
+    }
+
+    private int getOverlayListContentWidth(int listW) {
+        return Math.max(60, listW - TOPICS_OVERLAY_SCROLLBAR_W - 2);
+    }
+
+    private Rect computeOverlayListScrollbarTrack(int listX, int listStartY, int listW, int rowsHeight) {
+        int rowW = getOverlayListContentWidth(listW);
+        int trackX = listX + rowW + 1;
+        return new Rect(trackX, listStartY, TOPICS_OVERLAY_SCROLLBAR_W, Math.max(1, rowsHeight));
+    }
+
+    private Rect computeOverlayListScrollbarThumb(Rect track, int totalRows, int visibleRows) {
+        if (track == null || totalRows <= visibleRows || visibleRows <= 0) {
+            return null;
+        }
+        int maxScroll = Math.max(1, totalRows - visibleRows);
+        int thumbH = Math.max(TOPICS_OVERLAY_SCROLLBAR_MIN_THUMB_H, (track.h * visibleRows) / Math.max(1, totalRows));
+        thumbH = Math.min(track.h, thumbH);
+        int range = Math.max(0, track.h - thumbH);
+        int scroll = MathHelper.clamp(getOverlayScrollIndex(), 0, maxScroll);
+        int thumbY = track.y + (range <= 0 ? 0 : (int) Math.round((double) range * ((double) scroll / (double) maxScroll)));
+        return new Rect(track.x, thumbY, track.w, thumbH);
+    }
+
+    private void updateOverlayScrollFromThumb(net.minecraft.client.gui.Click click, Rect track, Rect thumb, int totalRows, int visibleRows) {
+        if (click == null || track == null || thumb == null || totalRows <= visibleRows || visibleRows <= 0) {
+            return;
+        }
+        int maxScroll = Math.max(0, totalRows - visibleRows);
+        if (maxScroll == 0) {
+            setOverlayScrollIndex(0);
+            return;
+        }
+        int minY = track.y;
+        int maxY = track.bottom() - thumb.h;
+        if (maxY <= minY) {
+            setOverlayScrollIndex(0);
+            return;
+        }
+        int desiredY = (int) click.y() - overlayListScrollGrabOffsetY;
+        desiredY = MathHelper.clamp(desiredY, minY, maxY);
+        double ratio = (double) (desiredY - minY) / (double) (maxY - minY);
+        int nextScroll = (int) Math.round(ratio * maxScroll);
+        setOverlayScrollIndex(MathHelper.clamp(nextScroll, 0, maxScroll));
+    }
+
     private void drawTopicsOverlay(DrawContext context, int mouseX, int mouseY) {
         Rect r = computeTopicsOverlayRect();
         int border = 0xFF000000;
@@ -559,7 +655,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         context.drawText(this.textRenderer, closeLabel, closeTextX, closeY + 2, 0xFFEFEFEF, false);
 
         // Footer hint.
-        String hint = "Scroll, click a topic; Esc closes";
+        String hint = "Scroll or drag scrollbar; click a topic; Esc closes";
         int footerH = this.textRenderer.fontHeight + TOPICS_OVERLAY_FOOTER_PAD * 2;
         int footerY = r.bottom() - footerH;
         context.fill(r.x + 1, footerY, r.right() - 1, r.bottom() - 1, 0xFF161616);
@@ -585,9 +681,14 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         int listW = cols.listW;
         int listH = cols.contentH;
 
-        List<TopicEntry> entries = getOverlayEntries();
-        int visibleRows = Math.max(1, (listH - TOPICS_OVERLAY_LIST_HEADER_H) / TOPIC_ROW_HEIGHT);
+        List<TopicEntry> entries = getFilteredOverlayEntries(getOverlayEntries());
+        int rowsHeight = getOverlayRowsHeight(listH);
+        int visibleRows = Math.max(1, rowsHeight / TOPIC_ROW_HEIGHT);
         clampOverlayScroll(visibleRows);
+        int listContentW = getOverlayListContentWidth(listW);
+        int listStartY = getOverlayRowsStartY(listY);
+        Rect scrollTrack = computeOverlayListScrollbarTrack(listX, listStartY, listW, rowsHeight);
+        Rect scrollThumb = computeOverlayListScrollbarThumb(scrollTrack, entries.size(), visibleRows);
 
         // Tabs (Skills / Dialogue / Admin)
         int tabY = listY + 2;
@@ -601,25 +702,69 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         drawOverlayTab(context, dialogueTabX, tabY, tabW, tabH, "Dialogue", overlayCategory == TopicCategory.DIALOGUE, true);
         drawOverlayTab(context, adminTabX, tabY, tabW, tabH, "Admin", overlayCategory == TopicCategory.ADMIN, isAdminTabEnabled());
 
+        Rect searchRect = computeOverlaySearchRect(listX, listY, listW);
+        drawOverlaySearchBox(context, searchRect, mouseX, mouseY);
+
         // Clip to list area.
-        int listStartY = listY + TOPICS_OVERLAY_LIST_HEADER_H;
-        context.enableScissor(listX, listStartY, listX + listW, listY + listH);
+        context.enableScissor(listX, listStartY, listX + listContentW, listStartY + rowsHeight);
         for (int i = 0; i < visibleRows; i++) {
             int entryIndex = getOverlayScrollIndex() + i;
             if (entryIndex >= entries.size()) break;
             TopicEntry entry = entries.get(entryIndex);
             int rowY = listStartY + i * TOPIC_ROW_HEIGHT;
             if (overlayCategory == TopicCategory.SKILL && entry.action == TopicAction.FOLLOW) {
-                drawFollowRow(context, listX, rowY, listW, mouseX, mouseY);
+                drawFollowRow(context, listX, rowY, listContentW, mouseX, mouseY);
+            } else if (overlayCategory == TopicCategory.SKILL && entry.action == TopicAction.SKILL_WOODCUT) {
+                drawWoodcutRow(context, listX, rowY, listContentW, mouseX, mouseY);
+            } else if (overlayCategory == TopicCategory.SKILL && isAdjustableSkillAction(entry.action)) {
+                drawAdjustableSkillRow(context, listX, rowY, listContentW, entry, mouseX, mouseY);
             } else {
                 boolean active = entry.action != null && isEntryActive(entry.action);
-                drawTopicRow(context, listX, rowY, listW, entry, active, mouseX, mouseY);
+                drawTopicRow(context, listX, rowY, listContentW, entry, active, mouseX, mouseY);
             }
         }
         context.disableScissor();
 
+        if (scrollTrack != null) {
+            context.fill(scrollTrack.x, scrollTrack.y, scrollTrack.right(), scrollTrack.bottom(), 0xFF161616);
+            context.fill(scrollTrack.x, scrollTrack.y, scrollTrack.right(), scrollTrack.y + 1, 0xFF2C2C2C);
+            context.fill(scrollTrack.x, scrollTrack.bottom() - 1, scrollTrack.right(), scrollTrack.bottom(), 0xFF2C2C2C);
+            context.fill(scrollTrack.x, scrollTrack.y, scrollTrack.x + 1, scrollTrack.bottom(), 0xFF2C2C2C);
+            context.fill(scrollTrack.right() - 1, scrollTrack.y, scrollTrack.right(), scrollTrack.bottom(), 0xFF2C2C2C);
+        }
+        if (scrollThumb != null) {
+            boolean thumbHover = scrollThumb.contains(mouseX, mouseY);
+            int thumbFill = (thumbHover || overlayDraggingListScroll) ? 0xFFB08C40 : 0xFF7A6240;
+            context.fill(scrollThumb.x + 1, scrollThumb.y + 1, scrollThumb.right() - 1, scrollThumb.bottom() - 1, thumbFill);
+        }
+
         // Delayed hover tooltip (after scissor, so it can draw over the list cleanly).
         drawOverlayHoverTooltip(context, mouseX, mouseY);
+    }
+
+    private void drawOverlaySearchBox(DrawContext context, Rect searchRect, int mouseX, int mouseY) {
+        if (searchRect == null) {
+            return;
+        }
+        boolean hover = searchRect.contains(mouseX, mouseY);
+        int fill = topicSearchFocused ? 0xFF262015 : (hover ? 0xFF1F1F1F : 0xFF171717);
+        int border = topicSearchFocused ? 0xFFB08C40 : 0xFF2A2A2A;
+        context.fill(searchRect.x, searchRect.y, searchRect.right(), searchRect.bottom(), fill);
+        context.fill(searchRect.x, searchRect.y, searchRect.right(), searchRect.y + 1, border);
+        context.fill(searchRect.x, searchRect.bottom() - 1, searchRect.right(), searchRect.bottom(), border);
+        context.fill(searchRect.x, searchRect.y, searchRect.x + 1, searchRect.bottom(), border);
+        context.fill(searchRect.right() - 1, searchRect.y, searchRect.right(), searchRect.bottom(), border);
+
+        String query = topicSearchQuery != null ? topicSearchQuery : "";
+        boolean showCursor = topicSearchFocused && ((System.currentTimeMillis() / 500L) % 2L == 0L);
+        String shown = query.isBlank() ? "Search topics..." : query;
+        if (showCursor) {
+            shown = shown + "|";
+        }
+        shown = elideToWidth(shown, Math.max(1, searchRect.w - 8));
+        int textColor = query.isBlank() ? COLOR_TEXT_SUBTLE : COLOR_TEXT_PARCHMENT;
+        int textY = searchRect.y + Math.max(1, (searchRect.h - this.textRenderer.fontHeight) / 2);
+        context.drawText(this.textRenderer, shown, searchRect.x + 4, textY, textColor, false);
     }
 
     private void drawOverlayTab(DrawContext context, int x, int y, int w, int h, String label, boolean active, boolean enabled) {
@@ -785,8 +930,10 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         this.topicsExpanded = open;
         if (!open) {
             overlayDraggingSplit = false;
+            overlayDraggingListScroll = false;
         }
         if (!open) {
+            topicSearchFocused = false;
             companionQuestStateRequested = false;
             adminResetConfirmArmed = false;
             adminResetConfirmArmedAtMs = 0L;
@@ -804,7 +951,8 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         int contentY = r.y + headerH + 2;
         int footerY = r.bottom() - footerH;
         int contentH = (footerY - 2) - contentY;
-        int visibleRows = Math.max(1, (contentH - TOPICS_OVERLAY_LIST_HEADER_H) / TOPIC_ROW_HEIGHT);
+        int listH = Math.max(1, contentH);
+        int visibleRows = Math.max(1, getOverlayRowsHeight(listH) / TOPIC_ROW_HEIGHT);
         clampOverlayScroll(visibleRows);
     }
 
@@ -869,11 +1017,48 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             }
         }
 
+        Rect searchRect = computeOverlaySearchRect(listX, listY, listW);
+        if (searchRect.contains(mouseX, mouseY)) {
+            topicSearchFocused = true;
+            return true;
+        }
+        topicSearchFocused = false;
+
+        int rowsHeight = getOverlayRowsHeight(cols.contentH);
+        int visibleRows = Math.max(1, rowsHeight / TOPIC_ROW_HEIGHT);
+        List<TopicEntry> entries = getFilteredOverlayEntries(getOverlayEntries());
+        Rect scrollTrack = computeOverlayListScrollbarTrack(listX, getOverlayRowsStartY(listY), listW, rowsHeight);
+        Rect scrollThumb = computeOverlayListScrollbarThumb(scrollTrack, entries.size(), visibleRows);
+        if (scrollTrack != null && scrollTrack.contains(mouseX, mouseY) && click.button() == 0) {
+            if (scrollThumb != null && scrollThumb.contains(mouseX, mouseY)) {
+                overlayDraggingListScroll = true;
+                overlayListScrollGrabOffsetY = (int) mouseY - scrollThumb.y;
+                return true;
+            }
+            if (scrollThumb != null) {
+                int page = Math.max(1, visibleRows - 1);
+                int delta = mouseY < scrollThumb.y ? -page : page;
+                setOverlayScrollIndex(MathHelper.clamp(getOverlayScrollIndex() + delta, 0, Math.max(0, entries.size() - visibleRows)));
+                return true;
+            }
+            return true;
+        }
+
         // Follow +/- controls.
         if (overlayCategory == TopicCategory.SKILL) {
             int adjust = getFollowAdjustDirectionInOverlay(mouseX, mouseY);
             if (adjust != 0) {
                 adjustFollowDistance(adjust);
+                return true;
+            }
+            int woodcutAdjust = getWoodcutAdjustDirectionInOverlay(mouseX, mouseY);
+            if (woodcutAdjust != 0) {
+                adjustWoodcutTreeCount(woodcutAdjust);
+                return true;
+            }
+            SkillAdjustHit skillAdjust = getAdjustableSkillHitInOverlay(mouseX, mouseY);
+            if (skillAdjust != null) {
+                applySkillAdjust(skillAdjust);
                 return true;
             }
         }
@@ -935,12 +1120,12 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
 
         OverlayColumns cols = computeOverlayColumns(r);
         int listX = cols.listX;
-        int listY = cols.contentY + TOPICS_OVERLAY_LIST_HEADER_H;
-        int listW = cols.listW;
-        int listH = Math.max(1, contentH - TOPICS_OVERLAY_LIST_HEADER_H);
+        int listY = getOverlayRowsStartY(cols.contentY);
+        int listW = getOverlayListContentWidth(cols.listW);
+        int listH = getOverlayRowsHeight(contentH);
         int visibleRows = Math.max(1, listH / TOPIC_ROW_HEIGHT);
         clampOverlayScroll(visibleRows);
-        List<TopicEntry> entries = getOverlayEntries();
+        List<TopicEntry> entries = getFilteredOverlayEntries(getOverlayEntries());
 
         if (mouseX < listX || mouseX >= listX + listW || mouseY < listY || mouseY >= listY + listH) {
             return null;
@@ -956,6 +1141,14 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         return entries.get(entryIndex);
     }
 
+    private enum SkillAdjustControl {
+        INCREMENT,
+        DECREMENT,
+        TOGGLE_MODE
+    }
+
+    private record SkillAdjustHit(TopicAction action, SkillAdjustControl control) {}
+
     private int getFollowAdjustDirectionInOverlay(double mouseX, double mouseY) {
         if (overlayCategory != TopicCategory.SKILL) {
             return 0;
@@ -970,13 +1163,14 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
 
         OverlayColumns cols = computeOverlayColumns(r);
         int listX = cols.listX;
-        int listY = cols.contentY + TOPICS_OVERLAY_LIST_HEADER_H;
-        int listW = cols.listW;
-        int listH = Math.max(1, contentH - TOPICS_OVERLAY_LIST_HEADER_H);
+        int listY = getOverlayRowsStartY(cols.contentY);
+        int listW = getOverlayListContentWidth(cols.listW);
+        int listH = getOverlayRowsHeight(contentH);
         int visibleRows = Math.max(1, listH / TOPIC_ROW_HEIGHT);
         clampOverlayScroll(visibleRows);
 
-        int followIndex = getFollowEntryIndex();
+        List<TopicEntry> entries = getFilteredOverlayEntries(SKILL_TOPIC_ENTRIES);
+        int followIndex = getSkillEntryIndex(entries, TopicAction.FOLLOW);
         int visibleStart = skillScrollIndex;
         int visibleEnd = skillScrollIndex + visibleRows;
         if (followIndex < visibleStart || followIndex >= visibleEnd) {
@@ -998,6 +1192,106 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             }
         }
         return 0;
+    }
+
+    private int getWoodcutAdjustDirectionInOverlay(double mouseX, double mouseY) {
+        if (overlayCategory != TopicCategory.SKILL) {
+            return 0;
+        }
+        Rect r = computeTopicsOverlayRect();
+        int headerH = this.textRenderer.fontHeight + TOPICS_OVERLAY_HEADER_PAD * 2;
+        int footerH = this.textRenderer.fontHeight + TOPICS_OVERLAY_FOOTER_PAD * 2;
+
+        int footerY = r.bottom() - footerH;
+        int contentY = r.y + headerH + 2;
+        int contentH = (footerY - 2) - contentY;
+
+        OverlayColumns cols = computeOverlayColumns(r);
+        int listX = cols.listX;
+        int listY = getOverlayRowsStartY(cols.contentY);
+        int listW = getOverlayListContentWidth(cols.listW);
+        int listH = getOverlayRowsHeight(contentH);
+        int visibleRows = Math.max(1, listH / TOPIC_ROW_HEIGHT);
+        clampOverlayScroll(visibleRows);
+
+        List<TopicEntry> entries = getFilteredOverlayEntries(SKILL_TOPIC_ENTRIES);
+        int woodcutIndex = getSkillEntryIndex(entries, TopicAction.SKILL_WOODCUT);
+        if (woodcutIndex < 0) {
+            return 0;
+        }
+        int visibleStart = skillScrollIndex;
+        int visibleEnd = skillScrollIndex + visibleRows;
+        if (woodcutIndex < visibleStart || woodcutIndex >= visibleEnd) {
+            return 0;
+        }
+
+        int rowY = listY + (woodcutIndex - visibleStart) * TOPIC_ROW_HEIGHT;
+        int controlSize = TOPIC_ROW_HEIGHT - 2;
+        int controlY = rowY + 1;
+        int plusX = listX + listW - controlSize;
+        int minusX = plusX - TOPIC_CONTROL_GAP - controlSize;
+
+        if (mouseY >= controlY && mouseY < controlY + controlSize) {
+            if (mouseX >= plusX && mouseX < plusX + controlSize) {
+                return 1;
+            }
+            if (mouseX >= minusX && mouseX < minusX + controlSize) {
+                return -1;
+            }
+        }
+        return 0;
+    }
+
+    private SkillAdjustHit getAdjustableSkillHitInOverlay(double mouseX, double mouseY) {
+        if (overlayCategory != TopicCategory.SKILL) {
+            return null;
+        }
+        Rect r = computeTopicsOverlayRect();
+        int headerH = this.textRenderer.fontHeight + TOPICS_OVERLAY_HEADER_PAD * 2;
+        int footerH = this.textRenderer.fontHeight + TOPICS_OVERLAY_FOOTER_PAD * 2;
+        int footerY = r.bottom() - footerH;
+        int contentY = r.y + headerH + 2;
+        int contentH = (footerY - 2) - contentY;
+
+        OverlayColumns cols = computeOverlayColumns(r);
+        int listX = cols.listX;
+        int listY = getOverlayRowsStartY(cols.contentY);
+        int listW = getOverlayListContentWidth(cols.listW);
+        int listH = getOverlayRowsHeight(contentH);
+        int visibleRows = Math.max(1, listH / TOPIC_ROW_HEIGHT);
+        clampOverlayScroll(visibleRows);
+
+        List<TopicEntry> entries = getFilteredOverlayEntries(SKILL_TOPIC_ENTRIES);
+        int visibleStart = skillScrollIndex;
+        int visibleEnd = skillScrollIndex + visibleRows;
+        int controlSize = TOPIC_ROW_HEIGHT - 2;
+
+        for (TopicAction action : getAdjustableSkillActions()) {
+            int entryIndex = getSkillEntryIndex(entries, action);
+            if (entryIndex < visibleStart || entryIndex >= visibleEnd) {
+                continue;
+            }
+            int rowY = listY + (entryIndex - visibleStart) * TOPIC_ROW_HEIGHT;
+            int controlY = rowY + 1;
+            int plusX = listX + listW - controlSize;
+            int minusX = plusX - TOPIC_CONTROL_GAP - controlSize;
+            if (mouseY < controlY || mouseY >= controlY + controlSize) {
+                continue;
+            }
+            if (mouseX >= plusX && mouseX < plusX + controlSize) {
+                return new SkillAdjustHit(action, SkillAdjustControl.INCREMENT);
+            }
+            if (mouseX >= minusX && mouseX < minusX + controlSize) {
+                return new SkillAdjustHit(action, SkillAdjustControl.DECREMENT);
+            }
+            if (action == TopicAction.SKILL_ASCENT) {
+                int modeX = minusX - TOPIC_CONTROL_GAP - controlSize;
+                if (mouseX >= modeX && mouseX < modeX + controlSize) {
+                    return new SkillAdjustHit(action, SkillAdjustControl.TOGGLE_MODE);
+                }
+            }
+        }
+        return null;
     }
 
     private void drawFollowRow(DrawContext context, int rowX, int rowY, int rowW, int mouseX, int mouseY) {
@@ -1032,6 +1326,114 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         drawControlBox(context, plusX, controlY, controlSize, "+", mouseX, mouseY);
     }
 
+    private void drawWoodcutRow(DrawContext context, int rowX, int rowY, int rowW, int mouseX, int mouseY) {
+        boolean hover = mouseX >= rowX && mouseX < rowX + rowW
+                && mouseY >= rowY && mouseY < rowY + TOPIC_ROW_HEIGHT;
+        int rowColor = hover ? 0xFF2A2A2A : 0xFF1A1A1A;
+        context.fill(rowX, rowY, rowX + rowW, rowY + TOPIC_ROW_HEIGHT, rowColor);
+
+        int controlSize = TOPIC_ROW_HEIGHT - 2;
+        int controlY = rowY + 1;
+        int plusX = rowX + rowW - controlSize;
+        int minusX = plusX - TOPIC_CONTROL_GAP - controlSize;
+
+        String countLabel = "Trees " + woodcutTreeCount;
+        int countX = minusX - TOPIC_CONTROL_GAP - this.textRenderer.getWidth(countLabel);
+        int labelX = rowX + 4;
+        if (countX < labelX + 44) {
+            countX = labelX + 44;
+        }
+
+        int textY = rowY + Math.max(1, (TOPIC_ROW_HEIGHT - this.textRenderer.fontHeight) / 2);
+        context.drawText(this.textRenderer, "Woodcut", labelX, textY, COLOR_TEXT_PARCHMENT, false);
+        context.drawText(this.textRenderer, countLabel, countX, textY, 0xFFE6D7A3, false);
+
+        drawControlBox(context, minusX, controlY, controlSize, "-", mouseX, mouseY);
+        drawControlBox(context, plusX, controlY, controlSize, "+", mouseX, mouseY);
+    }
+
+    private boolean isAdjustableSkillAction(TopicAction action) {
+        if (action == null) {
+            return false;
+        }
+        return action == TopicAction.SKILL_FISH
+                || action == TopicAction.SKILL_WOOL
+                || action == TopicAction.SKILL_STRIPMINE
+                || action == TopicAction.SKILL_ASCENT
+                || action == TopicAction.SKILL_DESCENT;
+    }
+
+    private TopicAction[] getAdjustableSkillActions() {
+        return new TopicAction[] {
+                TopicAction.SKILL_FISH,
+                TopicAction.SKILL_WOOL,
+                TopicAction.SKILL_STRIPMINE,
+                TopicAction.SKILL_ASCENT,
+                TopicAction.SKILL_DESCENT
+        };
+    }
+
+    private int getSkillEntryIndex(List<TopicEntry> entries, TopicAction action) {
+        if (entries == null || action == null) {
+            return -1;
+        }
+        for (int i = 0; i < entries.size(); i++) {
+            TopicEntry entry = entries.get(i);
+            if (entry != null && entry.action == action) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    private void drawAdjustableSkillRow(DrawContext context, int rowX, int rowY, int rowW, TopicEntry entry, int mouseX, int mouseY) {
+        if (entry == null || entry.action == null) {
+            return;
+        }
+        boolean hover = mouseX >= rowX && mouseX < rowX + rowW
+                && mouseY >= rowY && mouseY < rowY + TOPIC_ROW_HEIGHT;
+        int rowColor = hover ? 0xFF2A2A2A : 0xFF1A1A1A;
+        context.fill(rowX, rowY, rowX + rowW, rowY + TOPIC_ROW_HEIGHT, rowColor);
+
+        int controlSize = TOPIC_ROW_HEIGHT - 2;
+        int controlY = rowY + 1;
+        int plusX = rowX + rowW - controlSize;
+        int minusX = plusX - TOPIC_CONTROL_GAP - controlSize;
+
+        String label = entry.label;
+        String valueLabel = getAdjustableSkillValueLabel(entry.action);
+        int valueX = minusX - TOPIC_CONTROL_GAP - this.textRenderer.getWidth(valueLabel);
+        if (entry.action == TopicAction.SKILL_ASCENT) {
+            int modeX = minusX - TOPIC_CONTROL_GAP - controlSize;
+            valueX = modeX - TOPIC_CONTROL_GAP - this.textRenderer.getWidth(valueLabel);
+            drawControlBox(context, modeX, controlY, controlSize, "S", mouseX, mouseY, ascentSurfaceMode);
+        }
+
+        int labelX = rowX + 4 + entry.indent * 8;
+        if (valueX < labelX + 42) {
+            valueX = labelX + 42;
+        }
+        int textY = rowY + Math.max(1, (TOPIC_ROW_HEIGHT - this.textRenderer.fontHeight) / 2);
+        context.drawText(this.textRenderer, label, labelX, textY, COLOR_TEXT_PARCHMENT, false);
+        context.drawText(this.textRenderer, valueLabel, valueX, textY, 0xFFE6D7A3, false);
+
+        drawControlBox(context, minusX, controlY, controlSize, "-", mouseX, mouseY);
+        drawControlBox(context, plusX, controlY, controlSize, "+", mouseX, mouseY);
+    }
+
+    private String getAdjustableSkillValueLabel(TopicAction action) {
+        return switch (action) {
+            case SKILL_FISH -> fishTargetCount > 0 ? "Catches " + fishTargetCount : "Until sunset";
+            case SKILL_WOOL -> woolTargetCount > 0 ? "Wool " + woolTargetCount : "Default";
+            case SKILL_STRIPMINE -> stripmineLength > 0 ? "Length " + stripmineLength : "Default";
+            case SKILL_ASCENT -> ascentSurfaceMode
+                    ? "Surface"
+                    : (ascentBlocks > 0 ? "Blocks " + ascentBlocks : "Default");
+            case SKILL_DESCENT -> descentBlocks > 0 ? "Blocks " + descentBlocks : "Default";
+            default -> "";
+        };
+    }
+
     private void drawTopicRow(DrawContext context, int rowX, int rowY, int rowW, TopicEntry entry,
                               boolean active, int mouseX, int mouseY) {
         boolean enabled;
@@ -1053,7 +1455,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
 
         int textY = rowY + Math.max(1, (TOPIC_ROW_HEIGHT - this.textRenderer.fontHeight) / 2);
         int labelX = rowX + 4 + entry.indent * 8;
-        String label = entry.indent > 0 ? "- " + entry.label : entry.label;
+        String label = entry.label;
 
         // UI declutter: only show state for toggles; actions are implicit via clicking the row.
         String status = entry.toggle ? (active ? "ON" : "OFF") : null;
@@ -1186,6 +1588,13 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             if (prompt != null && !prompt.isBlank()) {
                 return java.util.List.of(prompt);
             }
+        }
+
+        if (entry.category == TopicCategory.SKILL && entry.action == TopicAction.DROP_SWEEP) {
+            return java.util.List.of(
+                    "Cleanup",
+                    "Runs cleanup (drop sweep) to collect nearby dropped items."
+            );
         }
 
         return java.util.List.of(entry.label);
@@ -1324,8 +1733,15 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
     }
 
     private void drawControlBox(DrawContext context, int x, int y, int size, String label, int mouseX, int mouseY) {
+        drawControlBox(context, x, y, size, label, mouseX, mouseY, false);
+    }
+
+    private void drawControlBox(DrawContext context, int x, int y, int size, String label, int mouseX, int mouseY, boolean active) {
         boolean hover = mouseX >= x && mouseX < x + size && mouseY >= y && mouseY < y + size;
-        int fill = hover ? 0xFF2F2F2F : 0xFF1A1A1A;
+        int fill = active ? 0xFF3A2C14 : 0xFF1A1A1A;
+        if (hover) {
+            fill = active ? 0xFF4A3720 : 0xFF2F2F2F;
+        }
         context.fill(x, y, x + size, y + size, fill);
         int textX = x + (size - this.textRenderer.getWidth(label)) / 2;
         int textY = y + Math.max(1, (size - this.textRenderer.fontHeight) / 2);
@@ -1377,6 +1793,17 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             updateOverlaySplitFromMouse(click.x());
             return true;
         }
+        if (topicsExpanded && overlayDraggingListScroll && click.button() == 0) {
+            Rect r = computeTopicsOverlayRect();
+            OverlayColumns cols = computeOverlayColumns(r);
+            int rowsHeight = getOverlayRowsHeight(cols.contentH);
+            int visibleRows = Math.max(1, rowsHeight / TOPIC_ROW_HEIGHT);
+            List<TopicEntry> entries = getFilteredOverlayEntries(getOverlayEntries());
+            Rect track = computeOverlayListScrollbarTrack(cols.listX, getOverlayRowsStartY(cols.contentY), cols.listW, rowsHeight);
+            Rect thumb = computeOverlayListScrollbarThumb(track, entries.size(), visibleRows);
+            updateOverlayScrollFromThumb(click, track, thumb, entries.size(), visibleRows);
+            return true;
+        }
         return super.mouseDragged(click, deltaX, deltaY);
     }
 
@@ -1384,6 +1811,10 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
     public boolean mouseReleased(net.minecraft.client.gui.Click click) {
         if (overlayDraggingSplit) {
             overlayDraggingSplit = false;
+            return true;
+        }
+        if (overlayDraggingListScroll) {
+            overlayDraggingListScroll = false;
             return true;
         }
         return super.mouseReleased(click);
@@ -1397,8 +1828,8 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             int footerH = this.textRenderer.fontHeight + TOPICS_OVERLAY_FOOTER_PAD * 2;
             int listY = r.y + headerH + 2;
             int listH = (r.bottom() - footerH - 2) - listY;
-            List<TopicEntry> entries = getOverlayEntries();
-            int visibleRows = Math.max(1, (listH - TOPICS_OVERLAY_LIST_HEADER_H) / TOPIC_ROW_HEIGHT);
+            List<TopicEntry> entries = getFilteredOverlayEntries(getOverlayEntries());
+            int visibleRows = Math.max(1, getOverlayRowsHeight(listH) / TOPIC_ROW_HEIGHT);
             int maxScroll = Math.max(0, entries.size() - visibleRows);
             if (maxScroll == 0) {
                 return true;
@@ -1414,11 +1845,61 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
 
     @Override
     public boolean keyPressed(KeyInput input) {
-        if (input != null && topicsExpanded && input.key() == 256 /* ESC */) {
-            toggleTopicsExpanded(false);
-            return true;
+        if (input != null && topicsExpanded) {
+            int key = input.key();
+            if (topicSearchFocused) {
+                if (key == 259 /* BACKSPACE */) {
+                    if (!topicSearchQuery.isEmpty()) {
+                        setTopicSearchQuery(topicSearchQuery.substring(0, topicSearchQuery.length() - 1));
+                    }
+                    return true;
+                }
+                char typed = keyToSearchCharacter(input);
+                if (typed != 0) {
+                    setTopicSearchQuery(topicSearchQuery + typed);
+                    return true;
+                }
+                if (key == 257 || key == 335) { // ENTER
+                    topicSearchFocused = false;
+                    return true;
+                }
+                if (key == 256 /* ESC */) {
+                    if (!topicSearchQuery.isEmpty()) {
+                        setTopicSearchQuery("");
+                    } else {
+                        topicSearchFocused = false;
+                    }
+                    return true;
+                }
+            }
+            if (key == 256 /* ESC */) {
+                toggleTopicsExpanded(false);
+                return true;
+            }
         }
         return super.keyPressed(input);
+    }
+
+    private char keyToSearchCharacter(KeyInput input) {
+        if (input == null) {
+            return 0;
+        }
+        int key = input.key();
+        if (key >= 65 && key <= 90) {
+            return (char) ('a' + (key - 65));
+        }
+        if (key >= 48 && key <= 57) {
+            return (char) ('0' + (key - 48));
+        }
+        return switch (key) {
+            case 32 -> ' ';
+            case 44 -> ',';
+            case 45 -> '-';
+            case 46 -> '.';
+            case 47 -> '/';
+            case 95 -> '_';
+            default -> 0;
+        };
     }
 
     private TopicEntry getTopicEntryAt(double mouseX, double mouseY) {
@@ -1460,13 +1941,12 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
     }
 
 
-    private int getFollowEntryIndex() {
-        for (int i = 0; i < SKILL_TOPIC_ENTRIES.size(); i++) {
-            if (SKILL_TOPIC_ENTRIES.get(i).action == TopicAction.FOLLOW) {
-                return i;
-            }
-        }
-        return 0;
+    private int getFollowEntryIndex(List<TopicEntry> entries) {
+        return getSkillEntryIndex(entries, TopicAction.FOLLOW);
+    }
+
+    private int getWoodcutEntryIndex(List<TopicEntry> entries) {
+        return getSkillEntryIndex(entries, TopicAction.SKILL_WOODCUT);
     }
 
     private void handleTopicEntry(TopicEntry entry) {
@@ -1549,6 +2029,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case COMPANION_SUMMON -> runCompanionSummon();
             case COMPANION_HOME -> runCompanionHome();
             case OPEN_SPELLS -> openSpellsMenu();
+            case OPEN_GUIDE -> openGuideMenu();
             case STOP -> runStop();
             case RESUME -> runResume();
             case FOLLOW -> toggleFollow();
@@ -1571,18 +2052,18 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case COOKING -> openCookingMenu();
             case HUNTING -> openHuntingMenu();
             case CONSTRUCTION -> openConstructionMenu();
-            case SKILL_FISH -> runSkillCommand("fish", null);
-            case SKILL_WOODCUT -> runSkillCommand("woodcut", null);
+            case SKILL_FISH -> runFishSkillCommand();
+            case SKILL_WOODCUT -> runWoodcutSkillCommand();
             case SKILL_WOODCUT_CLEANUP -> runSkillCommand("woodcut_cleanup", null);
-            case SKILL_WOOL -> runSkillCommand("wool", null);
+            case SKILL_WOOL -> runWoolSkillCommand();
             case SKILL_HOVEL -> runShelterWithLook("hovel");
             case SKILL_BURROW -> runShelterWithLook("burrow");
             case SKILL_FARM -> runSkillCommand("farm", null);
             case SKILL_COLLECT_DIRT -> runSkillCommand("collect_dirt", null);
             case SKILL_MINING -> runSkillCommand("mining", null);
-            case SKILL_STRIPMINE -> runSkillCommand("stripmine", null);
-            case SKILL_ASCENT -> runSkillCommand("mining", "ascent");
-            case SKILL_DESCENT -> runSkillCommand("mining", "descent");
+            case SKILL_STRIPMINE -> runStripmineSkillCommand();
+            case SKILL_ASCENT -> runAscentSkillCommand();
+            case SKILL_DESCENT -> runDescentSkillCommand();
         }
     }
 
@@ -1868,7 +2349,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
 
         // Non-recruitment admin convenience actions.
         if (k.equals("give_wizard_tome")) {
-            sendChatCommand("bot wizard_tome");
+            ClientPlayNetworking.send(new RecruitmentAdminActionPayload(botAlias, "give_wizard_tome", 1, false));
             return;
         }
 
@@ -1966,13 +2447,59 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         return this.handler != null && this.handler.isBotAutoReturnGuardPatrolEligible();
     }
 
-    private void runSkillCommand(String skillName, String action) {
+    private String buildSkillCommand(String skillName, String action) {
         String botTarget = formatBotTarget();
         String args = action != null && !action.isBlank()
                 ? action + " " + botTarget
                 : botTarget;
-        String command = "bot skill " + skillName + " " + args;
+        return "bot skill " + skillName + " " + args;
+    }
+
+    private void runSkillCommand(String skillName, String action) {
+        String command = buildSkillCommand(skillName, action);
         sendChatCommand(command);
+    }
+
+    private void queueDirectionalMiningCommand(String actionLabel, String skillName, String action) {
+        String command = buildSkillCommand(skillName, action);
+        net.shasankp000.AIPlayerClient.setPendingDirectionalMining(actionLabel, command);
+        this.close();
+    }
+
+    private void runWoodcutSkillCommand() {
+        runSkillCommand("woodcut", Integer.toString(woodcutTreeCount));
+    }
+
+    private void runFishSkillCommand() {
+        String arg = fishTargetCount > 0 ? Integer.toString(fishTargetCount) : null;
+        runSkillCommand("fish", arg);
+    }
+
+    private void runWoolSkillCommand() {
+        String arg = woolTargetCount > 0 ? Integer.toString(woolTargetCount) : null;
+        runSkillCommand("wool", arg);
+    }
+
+    private void runStripmineSkillCommand() {
+        String arg = stripmineLength > 0 ? Integer.toString(stripmineLength) : null;
+        queueDirectionalMiningCommand("stripmine", "stripmine", arg);
+    }
+
+    private void runAscentSkillCommand() {
+        String arg;
+        if (ascentSurfaceMode) {
+            arg = "ascent surface";
+        } else if (ascentBlocks > 0) {
+            arg = "ascent " + ascentBlocks;
+        } else {
+            arg = "ascent";
+        }
+        queueDirectionalMiningCommand("ascent", "mining", arg);
+    }
+
+    private void runDescentSkillCommand() {
+        String arg = descentBlocks > 0 ? ("descent " + descentBlocks) : "descent";
+        queueDirectionalMiningCommand("descent", "mining", arg);
     }
 
     private boolean isMouseOverTopicPanel(double mouseX, double mouseY) {
@@ -2025,6 +2552,48 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         };
     }
 
+    private void setTopicSearchQuery(String raw) {
+        String next = raw != null ? raw : "";
+        if (next.length() > 64) {
+            next = next.substring(0, 64);
+        }
+        if (next.equals(topicSearchQuery)) {
+            return;
+        }
+        topicSearchQuery = next;
+        skillScrollIndex = 0;
+        dialogueScrollIndex = 0;
+        adminScrollIndex = 0;
+    }
+
+    private List<TopicEntry> getFilteredOverlayEntries(List<TopicEntry> base) {
+        if (base == null || base.isEmpty()) {
+            return List.of();
+        }
+        String q = topicSearchQuery != null ? topicSearchQuery.trim().toLowerCase(Locale.ROOT) : "";
+        if (q.isBlank()) {
+            return base;
+        }
+        java.util.ArrayList<TopicEntry> out = new java.util.ArrayList<>();
+        for (TopicEntry entry : base) {
+            if (entry == null) {
+                continue;
+            }
+            String label = entry.label != null ? entry.label.toLowerCase(Locale.ROOT) : "";
+            String aux = "";
+            if (entry.category == TopicCategory.DIALOGUE) {
+                String prompt = getDialoguePrompt(entry.dialogueKey, entry.label);
+                aux = prompt != null ? prompt.toLowerCase(Locale.ROOT) : "";
+            } else if (entry.category == TopicCategory.ADMIN) {
+                aux = entry.dialogueKey != null ? entry.dialogueKey.toLowerCase(Locale.ROOT) : "";
+            }
+            if (label.contains(q) || aux.contains(q)) {
+                out.add(entry);
+            }
+        }
+        return out;
+    }
+
     private int getOverlayScrollIndex() {
         return switch (overlayCategory) {
             case DIALOGUE -> dialogueScrollIndex;
@@ -2042,7 +2611,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
     }
 
     private void clampOverlayScroll(int visibleRows) {
-        List<TopicEntry> entries = getOverlayEntries();
+        List<TopicEntry> entries = getFilteredOverlayEntries(getOverlayEntries());
         int maxScroll = Math.max(0, (entries != null ? entries.size() : 0) - visibleRows);
         setOverlayScrollIndex(MathHelper.clamp(getOverlayScrollIndex(), 0, maxScroll));
     }
@@ -2100,6 +2669,61 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         sendChatCommand(command);
     }
 
+    private void adjustWoodcutTreeCount(int direction) {
+        woodcutTreeCount = MathHelper.clamp(
+                woodcutTreeCount + direction,
+                WOODCUT_TREE_COUNT_MIN,
+                WOODCUT_TREE_COUNT_MAX
+        );
+    }
+
+    private void applySkillAdjust(SkillAdjustHit hit) {
+        if (hit == null || hit.action() == null || hit.control() == null) {
+            return;
+        }
+        if (hit.action() == TopicAction.SKILL_ASCENT && hit.control() == SkillAdjustControl.TOGGLE_MODE) {
+            ascentSurfaceMode = !ascentSurfaceMode;
+            if (ascentSurfaceMode) {
+                ascentBlocks = SKILL_COUNT_UNSET;
+            }
+            return;
+        }
+        int delta = hit.control() == SkillAdjustControl.INCREMENT ? 1 : -1;
+        switch (hit.action()) {
+            case SKILL_FISH -> fishTargetCount = adjustOptionalCount(fishTargetCount, delta,
+                    SKILL_FISH_COUNT_DEFAULT, SKILL_FISH_COUNT_MIN, SKILL_FISH_COUNT_MAX);
+            case SKILL_WOOL -> woolTargetCount = adjustOptionalCount(woolTargetCount, delta,
+                    SKILL_WOOL_COUNT_DEFAULT, SKILL_WOOL_COUNT_MIN, SKILL_WOOL_COUNT_MAX);
+            case SKILL_STRIPMINE -> stripmineLength = adjustOptionalCount(stripmineLength, delta,
+                    SKILL_STRIPMINE_COUNT_DEFAULT, SKILL_STRIPMINE_COUNT_MIN, SKILL_STRIPMINE_COUNT_MAX);
+            case SKILL_ASCENT -> {
+                if (ascentSurfaceMode) {
+                    ascentSurfaceMode = false;
+                }
+                ascentBlocks = adjustOptionalCount(ascentBlocks, delta,
+                        SKILL_ASCENT_COUNT_DEFAULT, SKILL_ASCENT_COUNT_MIN, SKILL_ASCENT_COUNT_MAX);
+            }
+            case SKILL_DESCENT -> descentBlocks = adjustOptionalCount(descentBlocks, delta,
+                    SKILL_DESCENT_COUNT_DEFAULT, SKILL_DESCENT_COUNT_MIN, SKILL_DESCENT_COUNT_MAX);
+            default -> {
+            }
+        }
+    }
+
+    private int adjustOptionalCount(int current, int direction, int defaultValue, int min, int max) {
+        if (direction == 0) {
+            return MathHelper.clamp(current, SKILL_COUNT_UNSET, max);
+        }
+        if (current <= SKILL_COUNT_UNSET) {
+            return direction > 0 ? MathHelper.clamp(defaultValue, min, max) : SKILL_COUNT_UNSET;
+        }
+        int next = current + direction;
+        if (next < min) {
+            return SKILL_COUNT_UNSET;
+        }
+        return MathHelper.clamp(next, min, max);
+    }
+
     private void toggleGuard() {
         String botTarget = formatBotTarget();
         String command = isGuardActive() ? "bot stop " + botTarget : "bot guard " + botTarget;
@@ -2119,6 +2743,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         
         // Also clear any pending shelter placement
         net.shasankp000.AIPlayerClient.clearPendingShelter();
+        net.shasankp000.AIPlayerClient.clearPendingDirectionalMining();
     }
 
     private void runResume() {
@@ -2269,6 +2894,13 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             return;
         }
         this.client.setScreen(new CompanionSpellsScreen(this, this.botAlias));
+    }
+
+    private void openGuideMenu() {
+        if (this.client == null) {
+            return;
+        }
+        this.client.setScreen(new BotGuideScreen(this, this.botAlias));
     }
 
     /**

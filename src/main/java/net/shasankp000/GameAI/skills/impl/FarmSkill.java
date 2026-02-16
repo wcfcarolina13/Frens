@@ -3,10 +3,13 @@ package net.shasankp000.GameAI.skills.impl;
 import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
+import net.minecraft.entity.decoration.LeashKnotEntity;
+import net.minecraft.entity.mob.MobEntity;
 import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.item.HoeItem;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
+import net.minecraft.item.ItemUsageContext;
 import net.minecraft.item.Items;
 import net.minecraft.registry.tag.BlockTags;
 import net.minecraft.server.command.ServerCommandSource;
@@ -16,6 +19,7 @@ import net.minecraft.util.ActionResult;
 import net.minecraft.util.Hand;
 import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.Heightmap;
@@ -24,6 +28,7 @@ import net.shasankp000.Entity.LookController;
 import net.shasankp000.GameAI.BotActions;
 import net.shasankp000.GameAI.services.MovementService;
 import net.shasankp000.GameAI.services.ReturnBaseStuckService;
+import net.shasankp000.GameAI.services.TaskService;
 import net.shasankp000.GameAI.skills.Skill;
 import net.shasankp000.GameAI.skills.SkillContext;
 import net.shasankp000.GameAI.skills.SkillExecutionResult;
@@ -36,8 +41,10 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
@@ -106,6 +113,24 @@ public class FarmSkill implements Skill {
             Items.CARROT
     );
 
+    private static final class SkillAbortException extends RuntimeException {
+        private SkillAbortException() {
+            super("farm-skill-abort");
+        }
+    }
+
+    private static final class FarmSiteCandidate {
+        private final BlockPos center;
+        private final int blockingTreeBlocks;
+        private final double distSqToSeed;
+
+        private FarmSiteCandidate(BlockPos center, int blockingTreeBlocks, double distSqToSeed) {
+            this.center = center;
+            this.blockingTreeBlocks = blockingTreeBlocks;
+            this.distSqToSeed = distSqToSeed;
+        }
+    }
+
     @Override
     public String name() {
         return "farm";
@@ -120,130 +145,166 @@ public class FarmSkill implements Skill {
         }
         ServerWorld world = source.getWorld();
         PlayerInventory inventory = bot.getInventory();
-        logPos("start", bot);
+        try {
+            abortIfRequested(bot);
+            logPos("start", bot);
 
-        int seedCount = countSeeds(inventory);
-        if (seedCount <= 0) {
-            ChatUtils.sendSystemMessage(source, "I need seeds before I can farm.");
-            return SkillExecutionResult.failure("Missing seeds.");
-        }
-
-        if (!hasHoe(inventory)) {
-            ChatUtils.sendSystemMessage(source, "I need a hoe to till the soil.");
-            return SkillExecutionResult.failure("Missing hoe.");
-        }
-
-        if (!ensureHoeInHotbar(bot)) {
-            ChatUtils.sendSystemMessage(source, "I need a hoe in my hotbar to till.");
-            return SkillExecutionResult.failure("Hoe not accessible.");
-        }
-
-        ensureNotOnFarmland(bot, world, source);
-        net.shasankp000.GameAI.BotEventHandler.rescueFromBurial(bot);
-        logPos("postSafeMove", bot);
-
-        boolean reuseExistingIrrigation = false;
-
-        // Prefer an existing enclosed 2x2 still-water basin as the farm center.
-        BlockPos existingIrrigation = findNearbyEnclosedIrrigation2x2(world, bot.getBlockPos(), WATER_SEARCH_RADIUS);
-
-        BlockPos farmCenter;
-        BlockPos refillSource;
-        if (existingIrrigation != null) {
-            reuseExistingIrrigation = true;
-            farmCenter = existingIrrigation.toImmutable();
-            refillSource = farmCenter;
-            LOGGER.info("Using existing enclosed 2x2 still-water basin as farm center at {}", farmCenter);
-        } else {
-            BlockPos rough = findFarmCenter(world, bot.getBlockPos());
-            rough = clampCenterToGroundNear(world, rough, bot.getBlockPos().getY());
-
-            BlockPos chosen = selectReachableNewFarmCenterOnGrid(bot, world, source, rough);
-            if (chosen == null) {
-                ChatUtils.sendSystemMessage(source, "No suitable reachable spot on the farm grid (avoid oceans/doors/cliffs). Try a flatter / more open spot.");
-                return SkillExecutionResult.failure("No clear reachable grid cell available.");
+            int seedCount = countSeeds(inventory);
+            if (seedCount <= 0) {
+                ChatUtils.sendSystemMessage(source, "I need seeds before I can farm.");
+                return SkillExecutionResult.failure("Missing seeds.");
             }
-            farmCenter = chosen;
 
-            // Prefer refill sources near the farm center.
-            List<BlockPos> refillSources = findStillWaterSources(world, farmCenter, WATER_SEARCH_RADIUS);
-            refillSource = refillSources.isEmpty() ? null : refillSources.get(0);
-            if (refillSource != null) {
-                LOGGER.info("Found still water at {} for irrigation/refills", refillSource);
+            if (!hasHoe(inventory)) {
+                ChatUtils.sendSystemMessage(source, "I need a hoe to till the soil.");
+                return SkillExecutionResult.failure("Missing hoe.");
+            }
+
+            if (!ensureHoeInHotbar(bot)) {
+                ChatUtils.sendSystemMessage(source, "I need a hoe in my hotbar to till.");
+                return SkillExecutionResult.failure("Hoe not accessible.");
+            }
+
+            ensureNotOnFarmland(bot, world, source);
+            net.shasankp000.GameAI.BotEventHandler.rescueFromBurial(bot);
+            logPos("postSafeMove", bot);
+            abortIfRequested(bot);
+
+            boolean reuseExistingIrrigation = false;
+
+            // Prefer an existing enclosed 2x2 still-water basin as the farm center.
+            BlockPos existingIrrigation = findNearbyEnclosedIrrigation2x2(world, bot.getBlockPos(), WATER_SEARCH_RADIUS);
+
+            BlockPos farmCenter;
+            BlockPos refillSource;
+            if (existingIrrigation != null) {
+                reuseExistingIrrigation = true;
+                farmCenter = existingIrrigation.toImmutable();
+                refillSource = farmCenter;
+                LOGGER.info("Using existing enclosed 2x2 still-water basin as farm center at {}", farmCenter);
             } else {
-                LOGGER.warn("No viable still water found within {} blocks of {}", WATER_SEARCH_RADIUS, farmCenter);
+                BlockPos rough = findFarmCenter(world, bot.getBlockPos());
+                rough = clampCenterToGroundNear(world, rough, bot.getBlockPos().getY());
+
+                BlockPos chosen = selectReachableNewFarmCenterOnGrid(bot, world, source, rough);
+                if (chosen == null) {
+                    ChatUtils.sendSystemMessage(source, "No suitable reachable spot on the farm grid (avoid oceans/doors/cliffs). Try a flatter / more open spot.");
+                    return SkillExecutionResult.failure("No clear reachable grid cell available.");
+                }
+                farmCenter = chosen;
+
+                // Prefer refill sources near the farm center.
+                List<BlockPos> refillSources = findStillWaterSources(world, farmCenter, WATER_SEARCH_RADIUS);
+                refillSource = refillSources.isEmpty() ? null : refillSources.get(0);
+                if (refillSource != null) {
+                    LOGGER.info("Found still water at {} for irrigation/refills", refillSource);
+                } else {
+                    LOGGER.warn("No viable still water found within {} blocks of {}", WATER_SEARCH_RADIUS, farmCenter);
+                }
+
+                farmCenter = offsetAwayFromNearbyFarmland(world, farmCenter, HYDRATION_RADIUS + 3);
+                farmCenter = clampCenterToGroundNear(world, farmCenter, bot.getBlockPos().getY());
             }
 
-            farmCenter = offsetAwayFromNearbyFarmland(world, farmCenter, HYDRATION_RADIUS + 3);
-            farmCenter = clampCenterToGroundNear(world, farmCenter, bot.getBlockPos().getY());
-        }
-
-        // Preserve nearby still-water tiles inside the farm footprint (integrate them rather than bulldozing).
-        Set<BlockPos> protectedStillWater = findProtectedStillWaterInFarmArea(world, farmCenter);
-        for (BlockPos p : new BlockPos[]{farmCenter, farmCenter.add(1, 0, 0), farmCenter.add(0, 0, 1), farmCenter.add(1, 0, 1)}) {
-            if (isStillWater(world, p)) {
-                protectedStillWater.add(p.toImmutable());
-            }
-        }
-
-        // Check for dangerous terrain BEFORE tree clearing to avoid false positives
-        // from temporary height changes during woodcut operations
-        if (hasSimplePrecipice(world, farmCenter)) {
-            ChatUtils.sendSystemMessage(source, "Unsafe drop near farm site; find flatter ground.");
-            return SkillExecutionResult.failure("Unsafe terrain near farm site.");
-        }
-
-        escapeTreeAndWoodcut(bot, world, source, context, farmCenter);
-        clearBlockingTrees(bot, world, source, context, farmCenter);
-
-        if (!ensureWaterSupply(bot, world, source, farmCenter, refillSource)) {
-            return SkillExecutionResult.failure("No water available for irrigation.");
-        }
-
-        levelGround(bot, world, source, farmCenter, context, protectedStillWater);
-
-        if (!reuseExistingIrrigation) {
-            if (!digIrrigationHole(bot, world, source, farmCenter)) {
-                return SkillExecutionResult.failure("Failed to dig irrigation hole.");
+            // Preserve nearby still-water tiles inside the farm footprint (integrate them rather than bulldozing).
+            Set<BlockPos> protectedStillWater = findProtectedStillWaterInFarmArea(world, farmCenter);
+            for (BlockPos p : new BlockPos[]{farmCenter, farmCenter.add(1, 0, 0), farmCenter.add(0, 0, 1), farmCenter.add(1, 0, 1)}) {
+                if (isStillWater(world, p)) {
+                    protectedStillWater.add(p.toImmutable());
+                }
             }
 
-            reinforceIrrigationEdges(bot, world, source, farmCenter);
-
-            if (!fillIrrigation(bot, world, source, farmCenter, refillSource)) {
-                return SkillExecutionResult.failure("Failed to fill irrigation hole.");
+            // Check for dangerous terrain BEFORE tree clearing to avoid false positives
+            // from temporary height changes during woodcut operations
+            if (hasSimplePrecipice(world, farmCenter)) {
+                ChatUtils.sendSystemMessage(source, "Unsafe drop near farm site; find flatter ground.");
+                return SkillExecutionResult.failure("Unsafe terrain near farm site.");
             }
-        } else {
-            LOGGER.info("Skipping irrigation dig/fill: using existing enclosed water basin at {}", farmCenter);
+
+            escapeTreeAndWoodcut(bot, world, source, context, farmCenter);
+            clearBlockingTrees(bot, world, source, context, farmCenter);
+            abortIfRequested(bot);
+
+            if (!ensureWaterSupply(bot, world, source, farmCenter, refillSource)) {
+                return SkillExecutionResult.failure("No water available for irrigation.");
+            }
+            abortIfRequested(bot);
+
+            Integer targetFarmY = computeFarmTargetY(world, farmCenter, protectedStillWater);
+            if (targetFarmY != null) {
+                LOGGER.info("[FarmIrrigation] targetY={} centerBefore={}", targetFarmY, farmCenter);
+                levelGround(bot, world, source, farmCenter, targetFarmY, context, protectedStillWater);
+                if (targetFarmY != farmCenter.getY()) {
+                    BlockPos normalizedCenter = new BlockPos(farmCenter.getX(), targetFarmY, farmCenter.getZ());
+                    // If we are reusing an existing enclosed basin, keep Y aligned with actual water if normalization misses it.
+                    if (reuseExistingIrrigation && !isLikelyIrrigationCenter(world, normalizedCenter)) {
+                        LOGGER.warn("[FarmIrrigation] center-normalize skipped for existing basin oldY={} newY={} center={}",
+                                farmCenter.getY(), targetFarmY, farmCenter);
+                    } else {
+                        LOGGER.info("[FarmIrrigation] center-normalized oldY={} newY={} center={}",
+                                farmCenter.getY(), targetFarmY, farmCenter);
+                        farmCenter = normalizedCenter;
+                    }
+                }
+            } else {
+                LOGGER.warn("[FarmIrrigation] no targetY samples available at center={}, skipping leveling", farmCenter);
+            }
+            abortIfRequested(bot);
+
+            if (!reuseExistingIrrigation) {
+                ReturnBaseStuckService.clear(bot.getUuid());
+                LOGGER.info("[FarmIrrigation] cleared stale stuck state before irrigation at {}", farmCenter);
+                if (!digIrrigationHole(bot, world, source, farmCenter)) {
+                    return SkillExecutionResult.failure("Failed to dig irrigation hole.");
+                }
+
+                reinforceIrrigationEdges(bot, world, source, farmCenter);
+                if (!stabilizeIrrigationBasin(bot, world, source, farmCenter)) {
+                    return SkillExecutionResult.failure("Failed to stabilize irrigation basin.");
+                }
+
+                if (!fillIrrigation(bot, world, source, farmCenter, refillSource)) {
+                    return SkillExecutionResult.failure("Failed to fill irrigation hole.");
+                }
+            } else {
+                LOGGER.info("Skipping irrigation dig/fill: using existing enclosed water basin at {}", farmCenter);
+            }
+            abortIfRequested(bot);
+
+            int tilled = tillPlots(bot, world, source, farmCenter, seedCount);
+            int planted = plantSeeds(bot, world, source, farmCenter, seedCount);
+            if (!reuseExistingIrrigation) {
+                secureIrrigationContainment(bot, world, source, farmCenter);
+            }
+            repairDamagedPlots(bot, world, source, farmCenter, protectedStillWater);
+            // After repairs, try to use remaining seeds on any newly leveled plots
+            int remainingSeeds = countSeeds(inventory);
+            if (remainingSeeds > 0) {
+                tilled += tillPlots(bot, world, source, farmCenter, remainingSeeds);
+                planted += plantSeeds(bot, world, source, farmCenter, remainingSeeds);
+            }
+
+            // One more tree sweep before final water fetch to ensure sunlight is clear
+            clearBlockingTrees(bot, world, source, context, farmCenter);
+
+            finalTopOffBuckets(bot, world, source, farmCenter, refillSource);
+
+            return SkillExecutionResult.success(
+                    "Prepared a hydrated farm and planted " + planted + " seeds (tilled " + tilled + ")."
+            );
+        } catch (SkillAbortException abort) {
+            String reason = TaskService.getCancelReason(bot.getUuid()).orElse("§cCurrent task aborted.");
+            LOGGER.info("[FarmIrrigation] farm aborted: bot={} reason={}", bot.getName().getString(), reason);
+            return SkillExecutionResult.failure(reason);
         }
-
-        int tilled = tillPlots(bot, world, source, farmCenter, seedCount);
-        int planted = plantSeeds(bot, world, source, farmCenter, seedCount);
-        if (!reuseExistingIrrigation) {
-            secureIrrigationContainment(bot, world, source, farmCenter);
-        }
-        repairDamagedPlots(bot, world, source, farmCenter, protectedStillWater);
-        // After repairs, try to use remaining seeds on any newly leveled plots
-        int remainingSeeds = countSeeds(inventory);
-        if (remainingSeeds > 0) {
-            tilled += tillPlots(bot, world, source, farmCenter, remainingSeeds);
-            planted += plantSeeds(bot, world, source, farmCenter, remainingSeeds);
-        }
-
-        // One more tree sweep before final water fetch to ensure sunlight is clear
-        clearBlockingTrees(bot, world, source, context, farmCenter);
-
-        finalTopOffBuckets(bot, world, source, farmCenter, refillSource);
-
-        return SkillExecutionResult.success(
-                "Prepared a hydrated farm and planted " + planted + " seeds (tilled " + tilled + ")."
-        );
     }
 
     private static boolean digIrrigationHole(ServerPlayerEntity bot, ServerWorld world, ServerCommandSource source, BlockPos center) {
-        LOGGER.info("Digging 2x2 irrigation hole at {}", center);
+        abortIfRequested(bot);
+        LOGGER.info("[FarmIrrigation] Digging 2x2 irrigation hole at {}", center);
         // Move near the center before digging to ensure reach
-        MovementService.MovementResult approach = moveTo(source, bot, center.up());
-        waitUntilClose(bot, center, 3.0, 20);
+        MovementService.MovementResult approach = moveTo(source, bot, center.up(), false);
+        waitUntilClose(bot, center, 3.0, 20, false);
         double dist = bot.getEyePos().distanceTo(Vec3d.ofCenter(center));
         if (dist > 4.5D) {
             LOGGER.warn("Unable to reach irrigation hole center {} (dist={}): {}", center, String.format("%.2f", dist), approach.detail());
@@ -265,18 +326,27 @@ public class FarmSkill implements Skill {
 
         // First pass: ensure solid foundation 2 blocks deep under each water spot
         for (BlockPos pos : waterSpots) {
+            abortIfRequested(bot);
             ensureStandingOffFarmland(bot, world, source, pos);
             for (int dy = 1; dy <= 2; dy++) {
                 BlockPos base = pos.down(dy);
                 BlockState baseState = world.getBlockState(base);
                 if (baseState.getCollisionShape(world, base).isEmpty()) {
-                    fillWithDirt(bot, world, base);
+                    if (!fillWithDirt(bot, world, base)) {
+                        moveTo(source, bot, pos.up(), false);
+                        waitUntilClose(bot, base, 4.4, 16, false);
+                        if (!fillWithDirt(bot, world, base)) {
+                            LOGGER.warn("[FarmIrrigation] failed to fill basin foundation at {}", base.toShortString());
+                            return false;
+                        }
+                    }
                 }
             }
         }
 
         // Second pass: clear the hole spaces
         for (BlockPos pos : waterSpots) {
+            abortIfRequested(bot);
             BlockState state = world.getBlockState(pos);
             if (!state.isAir() && !state.isOf(Blocks.WATER)) {
                 mineBlock(bot, pos, world);
@@ -292,11 +362,13 @@ public class FarmSkill implements Skill {
             }
         }
         clearAboveHole(bot, world, waterSpots);
+        clearIrrigationAccessRing(bot, world, center);
         return true;
     }
 
     private static void clearAboveHole(ServerPlayerEntity bot, ServerWorld world, BlockPos[] waterSpots) {
         for (BlockPos pos : waterSpots) {
+            abortIfRequested(bot);
             for (int dy = 1; dy <= 3; dy++) {
                 BlockPos check = pos.up(dy);
                 BlockState state = world.getBlockState(check);
@@ -304,6 +376,38 @@ public class FarmSkill implements Skill {
                 mineBlock(bot, check, world);
                 sleep(50);
             }
+        }
+    }
+
+    private static void clearIrrigationAccessRing(ServerPlayerEntity bot, ServerWorld world, BlockPos center) {
+        int cleared = 0;
+        int minX = center.getX() - 1;
+        int maxX = center.getX() + 2;
+        int minZ = center.getZ() - 1;
+        int maxZ = center.getZ() + 2;
+        for (int x = minX; x <= maxX; x++) {
+            abortIfRequested(bot);
+            for (int z = minZ; z <= maxZ; z++) {
+                boolean insideHole = x >= center.getX() && x <= center.getX() + 1
+                        && z >= center.getZ() && z <= center.getZ() + 1;
+                if (insideHole) {
+                    continue;
+                }
+                BlockPos ground = new BlockPos(x, center.getY(), z);
+                for (int dy = 1; dy <= 2; dy++) {
+                    BlockPos check = ground.up(dy);
+                    BlockState state = world.getBlockState(check);
+                    if (state.isAir() || !state.isReplaceable()) {
+                        continue;
+                    }
+                    mineBlock(bot, check, world);
+                    cleared++;
+                    sleep(40);
+                }
+            }
+        }
+        if (cleared > 0) {
+            LOGGER.info("[FarmIrrigation] cleared {} replaceable blocks around irrigation access ring", cleared);
         }
     }
 
@@ -338,28 +442,126 @@ public class FarmSkill implements Skill {
         }
     }
 
-    private static boolean treeNear(ServerPlayerEntity bot, ServerWorld world, BlockPos center) {
-        boolean found = false;
-        for (BlockPos pos : BlockPos.iterate(center.add(-TREE_CLEAR_RADIUS, 0, -TREE_CLEAR_RADIUS),
-                center.add(TREE_CLEAR_RADIUS, 8, TREE_CLEAR_RADIUS))) {
-            BlockState state = world.getBlockState(pos);
-            if (state.isIn(BlockTags.LOGS) || state.isIn(BlockTags.LEAVES)) {
-                found = true;
+    private static boolean stabilizeIrrigationBasin(ServerPlayerEntity bot, ServerWorld world, ServerCommandSource source, BlockPos center) {
+        BlockPos[] hole = {center, center.add(1, 0, 0), center.add(0, 0, 1), center.add(1, 0, 1)};
+        for (int pass = 1; pass <= 3; pass++) {
+            abortIfRequested(bot);
+            boolean changed = false;
+
+            for (BlockPos pos : hole) {
+                abortIfRequested(bot);
+                BlockState topState = world.getBlockState(pos);
+                if (!topState.isAir() && !topState.isOf(Blocks.WATER)) {
+                    mineBlock(bot, pos, world);
+                    changed = true;
+                }
+                for (int depth = 1; depth <= 3; depth++) {
+                    BlockPos below = pos.down(depth);
+                    if (!isSolidContainmentBlock(world, below)) {
+                        if (!fillWithDirt(bot, world, below)) {
+                            moveTo(source, bot, pos.up(), false);
+                            waitUntilClose(bot, below, 4.4, 16, false);
+                            if (!fillWithDirt(bot, world, below)) {
+                                LOGGER.warn("[FarmIrrigation] basin stabilization failed at {}", below.toShortString());
+                                return false;
+                            }
+                        }
+                        changed = true;
+                    }
+                }
+            }
+
+            int minX = center.getX() - 1;
+            int maxX = center.getX() + 2;
+            int minZ = center.getZ() - 1;
+            int maxZ = center.getZ() + 2;
+            for (int x = minX; x <= maxX; x++) {
+                for (int z = minZ; z <= maxZ; z++) {
+                    boolean insideHole = x >= center.getX() && x <= center.getX() + 1
+                            && z >= center.getZ() && z <= center.getZ() + 1;
+                    if (insideHole) {
+                        continue;
+                    }
+                    for (int depth = 0; depth <= 2; depth++) {
+                        BlockPos check = new BlockPos(x, center.getY() - depth, z);
+                        if (!isSolidContainmentBlock(world, check)) {
+                            if (!fillWithDirt(bot, world, check)) {
+                                moveTo(source, bot, check.up(), false);
+                                waitUntilClose(bot, check, 4.4, 16, false);
+                                if (!fillWithDirt(bot, world, check)) {
+                                    LOGGER.warn("[FarmIrrigation] basin ring seal failed at {}", check.toShortString());
+                                    // Ring patches are best-effort; keep going unless the core 2x2 basin is unstable.
+                                    continue;
+                                }
+                            }
+                            changed = true;
+                        }
+                    }
+                }
+            }
+
+            String leakReason = irrigationLeakReason(world, center);
+            if (leakReason == null) {
+                LOGGER.info("[FarmIrrigation] basin stabilized at {} on pass {}", center.toShortString(), pass);
+                return true;
+            }
+
+            LOGGER.warn("[FarmIrrigation] basin still leaking at {} pass={} reason={}", center.toShortString(), pass, leakReason);
+            if (!changed) {
                 break;
             }
         }
-        if (found) {
-            // Also require sunlight to the farm center; if blocked, treat as needing woodcut
-            if (!world.isSkyVisible(center.up(3))) {
-                return true;
+
+        String finalLeakReason = irrigationLeakReason(world, center);
+        if (finalLeakReason != null) {
+            LOGGER.warn("[FarmIrrigation] basin stabilization failed at {} reason={}", center.toShortString(), finalLeakReason);
+            return false;
+        }
+        return true;
+    }
+
+    private static boolean isSolidContainmentBlock(ServerWorld world, BlockPos pos) {
+        BlockState state = world.getBlockState(pos);
+        if (state.isAir() || state.isReplaceable() || state.isOf(Blocks.WATER)) {
+            return false;
+        }
+        return !state.getCollisionShape(world, pos).isEmpty();
+    }
+
+    private static String irrigationLeakReason(ServerWorld world, BlockPos center) {
+        BlockPos[] hole = {center, center.add(1, 0, 0), center.add(0, 0, 1), center.add(1, 0, 1)};
+        for (BlockPos pos : hole) {
+            BlockState top = world.getBlockState(pos);
+            if (!top.isAir() && !top.isOf(Blocks.WATER)) {
+                return "blocked-top pos=" + pos.toShortString() + " block=" + top.getBlock().getTranslationKey();
+            }
+            for (int depth = 1; depth <= 2; depth++) {
+                BlockPos below = pos.down(depth);
+                if (!isSolidContainmentBlock(world, below)) {
+                    return "open-below pos=" + below.toShortString();
+                }
             }
         }
-        return found;
+        return null;
+    }
+
+    private static boolean treeNear(ServerPlayerEntity bot, ServerWorld world, BlockPos center) {
+        return countBlockingTreeBlocks(world, center) > 0;
     }
 
     private static SkillExecutionResult runWoodcutInline(ServerCommandSource source, SkillContext ctx) {
+        ServerPlayerEntity bot = source.getPlayer();
+        abortIfRequested(bot);
         try {
-            return new WoodcutSkill().execute(new SkillContext(source, ctx.sharedState(), java.util.Map.of("internal", true)));
+            Map<String, Object> params = new HashMap<>();
+            params.put("internal", true);
+            params.put("replantSaplings", false);
+            params.put("count", 1);
+            params.put("searchRadius", TREE_CLEAR_RADIUS + 2);
+            params.put("verticalRange", 8);
+            return new WoodcutSkill().execute(new SkillContext(source, ctx.sharedState(), params));
+        } catch (SkillAbortException abort) {
+            throw abort;
         } catch (Exception e) {
             LOGGER.warn("Inline woodcut failed: {}", e.getMessage(), e);
             return SkillExecutionResult.failure("Woodcut error: " + e.getMessage());
@@ -379,7 +581,11 @@ public class FarmSkill implements Skill {
         if (topY > world.getBottomY()) {
             BlockPos top = new BlockPos(x, topY - 1, z);
             BlockState topState = world.getBlockState(top);
-            if (!topState.isAir() && !topState.isIn(BlockTags.LOGS) && !topState.isIn(BlockTags.LEAVES) && !topState.isOf(Blocks.WATER)) {
+            if (!topState.isAir()
+                    && !topState.isReplaceable()
+                    && !topState.isIn(BlockTags.LOGS)
+                    && !topState.isIn(BlockTags.LEAVES)
+                    && !topState.isOf(Blocks.WATER)) {
                 return top;
             }
         }
@@ -388,7 +594,7 @@ public class FarmSkill implements Skill {
         for (int dy = 0; dy <= 12; dy++) {
             BlockPos candidate = center.down(dy);
             BlockState state = world.getBlockState(candidate);
-            if (state.isAir() || state.isIn(BlockTags.LOGS) || state.isIn(BlockTags.LEAVES) || state.isOf(Blocks.WATER)) {
+            if (state.isAir() || state.isReplaceable() || state.isIn(BlockTags.LOGS) || state.isIn(BlockTags.LEAVES) || state.isOf(Blocks.WATER)) {
                 continue;
             }
             return new BlockPos(center.getX(), candidate.getY(), center.getZ());
@@ -412,7 +618,9 @@ public class FarmSkill implements Skill {
         if (surfaceTop > world.getBottomY()) {
             BlockPos surface = new BlockPos(x, surfaceTop - 1, z);
             BlockState surfaceState = world.getBlockState(surface);
-            if (!surfaceState.isAir() && !surfaceState.isOf(Blocks.WATER)
+            if (!surfaceState.isAir()
+                    && !surfaceState.isReplaceable()
+                    && !surfaceState.isOf(Blocks.WATER)
                     && !surfaceState.isIn(BlockTags.LOGS) && !surfaceState.isIn(BlockTags.LEAVES)) {
                 if (Math.abs(surface.getY() - preferredY) <= 8) {
                     return surface;
@@ -428,14 +636,14 @@ public class FarmSkill implements Skill {
         for (int y = maxY; y >= minY; y--) {
             BlockPos ground = new BlockPos(x, y, z);
             BlockState groundState = world.getBlockState(ground);
-            if (groundState.isAir() || groundState.isOf(Blocks.WATER)
+            if (groundState.isAir() || groundState.isReplaceable() || groundState.isOf(Blocks.WATER)
                     || groundState.isIn(BlockTags.LOGS) || groundState.isIn(BlockTags.LEAVES)) {
                 continue;
             }
             if (groundState.getCollisionShape(world, ground).isEmpty()) {
                 continue;
             }
-            if (!world.isAir(ground.up())) {
+            if (!isPassableStandingSpace(world, ground.up())) {
                 continue;
             }
             int dy = Math.abs(y - preferredY);
@@ -555,29 +763,58 @@ public class FarmSkill implements Skill {
         int baseX = Math.floorDiv(seedCenter.getX(), grid) * grid;
         int baseZ = Math.floorDiv(seedCenter.getZ(), grid) * grid;
 
+        List<FarmSiteCandidate> rankedCandidates = new ArrayList<>();
         int[] offsets = {0, 1, -1, 2, -2};
         for (int dx : offsets) {
             for (int dz : offsets) {
                 BlockPos candidate = new BlockPos(baseX + dx * grid, seedCenter.getY(), baseZ + dz * grid);
                 candidate = clampCenterToGroundNear(world, candidate, bot.getBlockPos().getY());
+                candidate = alignCenterToFarmAreaMedianY(world, candidate);
                 if (!farmAreaClear(world, candidate)) {
                     continue;
                 }
-
-                LOGGER.info("Farm site candidate {}: approaching to verify reachability", candidate);
-                moveTo(source, bot, candidate.up());
-                waitUntilClose(bot, candidate, 4.0, 30);
-                double dist = bot.getEyePos().distanceTo(Vec3d.ofCenter(candidate));
-                if (dist <= 5.0D) {
-                    LOGGER.info("Farm site selected at {} (reachable dist={})", candidate, String.format("%.2f", dist));
-                    return candidate;
-                }
-
-                LOGGER.info("Farm site rejected at {} (unreachable dist={})", candidate, String.format("%.2f", dist));
+                int treeBlocks = countBlockingTreeBlocks(world, candidate);
+                double distSq = candidate.getSquaredDistance(seedCenter);
+                rankedCandidates.add(new FarmSiteCandidate(candidate, treeBlocks, distSq));
             }
         }
 
+        rankedCandidates.sort((a, b) -> {
+            if (a.blockingTreeBlocks != b.blockingTreeBlocks) {
+                return Integer.compare(a.blockingTreeBlocks, b.blockingTreeBlocks);
+            }
+            return Double.compare(a.distSqToSeed, b.distSqToSeed);
+        });
+
+        for (FarmSiteCandidate candidate : rankedCandidates) {
+            LOGGER.info("[FarmIrrigation] candidate {} treeBlocks={} dist={}",
+                    candidate.center.toShortString(),
+                    candidate.blockingTreeBlocks,
+                    String.format("%.2f", Math.sqrt(candidate.distSqToSeed)));
+            LOGGER.info("Farm site candidate {}: approaching to verify reachability", candidate.center);
+            moveTo(source, bot, candidate.center.up());
+            waitUntilClose(bot, candidate.center, 4.0, 30);
+            double dist = bot.getEyePos().distanceTo(Vec3d.ofCenter(candidate.center));
+            if (dist <= 5.0D) {
+                LOGGER.info("Farm site selected at {} (reachable dist={} treeBlocks={})",
+                        candidate.center,
+                        String.format("%.2f", dist),
+                        candidate.blockingTreeBlocks);
+                return candidate.center;
+            }
+
+            LOGGER.info("Farm site rejected at {} (unreachable dist={})", candidate.center, String.format("%.2f", dist));
+        }
+
         return null;
+    }
+
+    private static BlockPos alignCenterToFarmAreaMedianY(ServerWorld world, BlockPos center) {
+        Integer medianY = estimateFarmAreaMedianSurfaceY(world, center);
+        if (medianY == null || medianY == center.getY()) {
+            return center;
+        }
+        return new BlockPos(center.getX(), medianY, center.getZ());
     }
 
     private static boolean isInsideTree(ServerPlayerEntity bot, ServerWorld world) {
@@ -661,23 +898,33 @@ public class FarmSkill implements Skill {
     }
 
     private static void escapeTreeAndWoodcut(ServerPlayerEntity bot, ServerWorld world, ServerCommandSource source, SkillContext ctx, BlockPos center) {
+        abortIfRequested(bot);
         boolean insideTree = isInsideTree(bot, world);
         boolean skyBlocked = !world.isSkyVisible(bot.getBlockPos().up(3));
-        boolean nearbyTree = treeNear(bot, world, center);
+        int nearbyTreeBlocks = countBlockingTreeBlocks(world, center);
+        boolean nearbyTree = nearbyTreeBlocks > 0;
         if (!insideTree && !skyBlocked && !nearbyTree) {
             return;
         }
 
         ChatUtils.sendSystemMessage(source, "Freeing myself from nearby trees before farming.");
         for (int attempt = 1; attempt <= 2; attempt++) {
-            LOGGER.info("escapeTree attempt {} insideTree={} skyBlocked={} nearbyTree={}", attempt, insideTree, skyBlocked, nearbyTree);
+            abortIfRequested(bot);
+            LOGGER.info("escapeTree attempt {} insideTree={} skyBlocked={} nearbyTree={} blockingTreeBlocks={}",
+                    attempt, insideTree, skyBlocked, nearbyTree, nearbyTreeBlocks);
+            int before = nearbyTreeBlocks;
             SkillExecutionResult result = runWoodcutInline(source, new SkillContext(source, ctx.sharedState()));
             LOGGER.info("escapeTree woodcut result success={} msg={}", result.success(), result.message());
             net.shasankp000.GameAI.BotEventHandler.rescueFromBurial(bot);
             insideTree = isInsideTree(bot, world);
             skyBlocked = !world.isSkyVisible(bot.getBlockPos().up(3));
-            nearbyTree = treeNear(bot, world, center);
+            nearbyTreeBlocks = countBlockingTreeBlocks(world, center);
+            nearbyTree = nearbyTreeBlocks > 0;
             if (!insideTree && !nearbyTree) {
+                break;
+            }
+            if (nearbyTree && nearbyTreeBlocks >= before) {
+                LOGGER.info("escapeTree stopping early: no tree-clear progress (before={}, after={})", before, nearbyTreeBlocks);
                 break;
             }
         }
@@ -713,18 +960,52 @@ public class FarmSkill implements Skill {
     }
 
     private static void clearBlockingTrees(ServerPlayerEntity bot, ServerWorld world, ServerCommandSource source, SkillContext ctx, BlockPos center) {
+        abortIfRequested(bot);
         int attempts = 0;
-        while (attempts < 3 && treeNear(bot, world, center)) {
+        int blockingTreeBlocks = countBlockingTreeBlocks(world, center);
+        while (attempts < 3 && blockingTreeBlocks > 0) {
+            abortIfRequested(bot);
             attempts++;
             ChatUtils.sendSystemMessage(source, "Clearing trees near the farm area (pass " + attempts + ").");
             SkillContext woodcutCtx = new SkillContext(source, ctx.sharedState());
             SkillExecutionResult woodcutResult = runWoodcutInline(source, woodcutCtx);
+            int nextBlockingTreeBlocks = countBlockingTreeBlocks(world, center);
+            LOGGER.info("clearBlockingTrees pass={} result={} before={} after={}",
+                    attempts, woodcutResult.success(), blockingTreeBlocks, nextBlockingTreeBlocks);
             if (!woodcutResult.success()) {
                 ChatUtils.sendSystemMessage(source, "Tree clearing attempt " + attempts + " failed; trying again if needed.");
-            } else if (!treeNear(bot, world, center)) {
+            } else if (nextBlockingTreeBlocks <= 0) {
                 break;
             }
+            if (nextBlockingTreeBlocks >= blockingTreeBlocks) {
+                LOGGER.info("clearBlockingTrees stopping: no progress reducing blocking trees (before={}, after={})",
+                        blockingTreeBlocks, nextBlockingTreeBlocks);
+                break;
+            }
+            blockingTreeBlocks = nextBlockingTreeBlocks;
         }
+    }
+
+    private static int countBlockingTreeBlocks(ServerWorld world, BlockPos center) {
+        int minX = center.getX() - HYDRATION_RADIUS - 1;
+        int maxX = center.getX() + HYDRATION_RADIUS + 2;
+        int minZ = center.getZ() - HYDRATION_RADIUS - 1;
+        int maxZ = center.getZ() + HYDRATION_RADIUS + 2;
+        int minY = center.getY();
+        int maxY = center.getY() + 9;
+        int count = 0;
+        for (int x = minX; x <= maxX; x++) {
+            for (int z = minZ; z <= maxZ; z++) {
+                for (int y = minY; y <= maxY; y++) {
+                    BlockPos pos = new BlockPos(x, y, z);
+                    BlockState state = world.getBlockState(pos);
+                    if (state.isIn(BlockTags.LOGS) || state.isIn(BlockTags.LEAVES)) {
+                        count++;
+                    }
+                }
+            }
+        }
+        return count;
     }
 
     private static BlockPos snapToFarmGrid(ServerWorld world, BlockPos center) {
@@ -749,6 +1030,93 @@ public class FarmSkill implements Skill {
     }
 
     private static boolean farmAreaClear(ServerWorld world, BlockPos center) {
+        String rejectReason = farmAreaRejectReason(world, center);
+        if (rejectReason != null) {
+            LOGGER.info("[FarmIrrigation] site-reject center={} reason={}", center, rejectReason);
+            return false;
+        }
+        return true;
+    }
+
+    private static String farmAreaRejectReason(ServerWorld world, BlockPos center) {
+        int minX = center.getX() - HYDRATION_RADIUS;
+        int maxX = center.getX() + 1 + HYDRATION_RADIUS;
+        int minZ = center.getZ() - HYDRATION_RADIUS;
+        int maxZ = center.getZ() + 1 + HYDRATION_RADIUS;
+        int minY = center.getY() - 1;
+        int maxY = center.getY() + 3;
+
+        String tetherHazard = findFenceOrTetherHazard(world, center, minX, maxX, minZ, maxZ, minY, maxY);
+        if (tetherHazard != null) {
+            return tetherHazard;
+        }
+
+        List<Integer> sampledY = new ArrayList<>();
+        List<BlockPos> sampledPos = new ArrayList<>();
+        for (int x = minX; x <= maxX; x++) {
+            for (int z = minZ; z <= maxZ; z++) {
+                int topY = world.getTopY(Heightmap.Type.WORLD_SURFACE, x, z);
+                if (topY <= world.getBottomY()) {
+                    return "no-surface x=" + x + " z=" + z;
+                }
+                BlockPos surface = new BlockPos(x, topY - 1, z);
+                BlockState surfaceState = world.getBlockState(surface);
+
+                // Reject underwater / liquid surface cells (prevents ocean-floor farming).
+                if (surfaceState.isOf(Blocks.WATER)) {
+                    return "water-surface pos=" + surface.toShortString();
+                }
+                // Avoid building a new farm on top of an existing farm.
+                if (surfaceState.isOf(Blocks.FARMLAND)) {
+                    return "existing-farmland pos=" + surface.toShortString();
+                }
+                sampledY.add(surface.getY());
+                sampledPos.add(surface);
+            }
+        }
+
+        if (sampledY.isEmpty()) {
+            return "no-surface-samples";
+        }
+
+        List<Integer> sortedY = new ArrayList<>(sampledY);
+        sortedY.sort(Integer::compareTo);
+        int medianY = sortedY.get(sortedY.size() / 2);
+        int moderateOutliers = 0;
+        int severeOutliers = 0;
+        int worstDelta = 0;
+        BlockPos worstPos = center;
+        for (int i = 0; i < sampledY.size(); i++) {
+            int delta = Math.abs(sampledY.get(i) - medianY);
+            if (delta > 2) {
+                moderateOutliers++;
+            }
+            if (delta > 4) {
+                severeOutliers++;
+            }
+            if (delta > worstDelta) {
+                worstDelta = delta;
+                worstPos = sampledPos.get(i);
+            }
+        }
+        int total = sampledY.size();
+        int maxModerateOutliers = Math.max(8, total / 3);
+        int maxSevereOutliers = Math.max(2, total / 12);
+        if (severeOutliers > maxSevereOutliers || moderateOutliers > maxModerateOutliers) {
+            return "steep-terrain medianY=" + medianY
+                    + " worstDelta=" + worstDelta
+                    + " worstPos=" + worstPos.toShortString()
+                    + " moderate=" + moderateOutliers + "/" + total
+                    + " severe=" + severeOutliers + "/" + total;
+        }
+        return null;
+    }
+
+    private static Integer estimateFarmAreaMedianSurfaceY(ServerWorld world, BlockPos center) {
+        if (world == null || center == null) {
+            return null;
+        }
+        List<Integer> heights = new ArrayList<>();
         int minX = center.getX() - HYDRATION_RADIUS;
         int maxX = center.getX() + 1 + HYDRATION_RADIUS;
         int minZ = center.getZ() - HYDRATION_RADIUS;
@@ -757,27 +1125,65 @@ public class FarmSkill implements Skill {
             for (int z = minZ; z <= maxZ; z++) {
                 int topY = world.getTopY(Heightmap.Type.WORLD_SURFACE, x, z);
                 if (topY <= world.getBottomY()) {
-                    return false;
+                    continue;
                 }
                 BlockPos surface = new BlockPos(x, topY - 1, z);
-                BlockState surfaceState = world.getBlockState(surface);
-
-                // Reject underwater / liquid surface cells (prevents ocean-floor farming).
-                if (surfaceState.isOf(Blocks.WATER)) {
-                    return false;
+                BlockState state = world.getBlockState(surface);
+                if (state.isAir() || state.isOf(Blocks.WATER)) {
+                    continue;
                 }
-                // Avoid building a new farm on top of an existing farm.
-                if (surfaceState.isOf(Blocks.FARMLAND)) {
-                    return false;
-                }
+                heights.add(surface.getY());
+            }
+        }
+        if (heights.isEmpty()) {
+            return null;
+        }
+        heights.sort(Integer::compareTo);
+        return heights.get(heights.size() / 2);
+    }
 
-                // Avoid steep/uneven areas for initial site selection (leveling is intentionally limited).
-                if (Math.abs(surface.getY() - center.getY()) > 2) {
-                    return false;
+    private static String findFenceOrTetherHazard(ServerWorld world,
+                                                  BlockPos center,
+                                                  int minX,
+                                                  int maxX,
+                                                  int minZ,
+                                                  int maxZ,
+                                                  int minY,
+                                                  int maxY) {
+        for (int x = minX; x <= maxX; x++) {
+            for (int z = minZ; z <= maxZ; z++) {
+                for (int y = minY; y <= maxY; y++) {
+                    BlockPos pos = new BlockPos(x, y, z);
+                    BlockState state = world.getBlockState(pos);
+                    if (state.isIn(BlockTags.FENCES) || state.isIn(BlockTags.FENCE_GATES) || state.isIn(BlockTags.WALLS)) {
+                        return "fence-block pos=" + pos.toShortString() + " block=" + state.getBlock().getTranslationKey();
+                    }
                 }
             }
         }
-        return true;
+
+        Box scanBox = new Box(minX, minY, minZ, maxX + 1, maxY + 1, maxZ + 1);
+        List<LeashKnotEntity> knots = world.getEntitiesByClass(
+                LeashKnotEntity.class,
+                scanBox,
+                knot -> knot != null && knot.isAlive()
+        );
+        if (!knots.isEmpty()) {
+            LeashKnotEntity knot = knots.get(0);
+            return "leash-knot pos=" + knot.getBlockPos().toShortString();
+        }
+
+        List<MobEntity> leashed = world.getEntitiesByClass(
+                MobEntity.class,
+                scanBox,
+                mob -> mob != null && mob.isAlive() && mob.isLeashed()
+        );
+        if (!leashed.isEmpty()) {
+            MobEntity mob = leashed.get(0);
+            return "leashed-mob type=" + mob.getType().toString() + " pos=" + mob.getBlockPos().toShortString();
+        }
+
+        return null;
     }
 
     private static boolean needsWoodcut(ServerPlayerEntity bot, ServerWorld world) {
@@ -788,36 +1194,61 @@ public class FarmSkill implements Skill {
     private static boolean fillIrrigation(ServerPlayerEntity bot, ServerWorld world, ServerCommandSource source, BlockPos center, BlockPos refillSource) {
         BlockPos[] corners = {center, center.add(1, 0, 1)};
         BlockPos[] hole = {center, center.add(1, 0, 0), center.add(0, 0, 1), center.add(1, 0, 1)};
+        int noProgressAttempts = 0;
+        String previousEndState = null;
 
         for (int attempt = 1; attempt <= IRRIGATION_ATTEMPTS; attempt++) {
-            LOGGER.info("fillIrrigation attempt {} holeState={}", attempt, describeHoleWater(world, hole));
+            abortIfRequested(bot);
+            String startState = describeHoleWater(world, hole);
+            LOGGER.info("[FarmIrrigation] fillIrrigation attempt {} holeState={}", attempt, startState);
+            int[] startCounts = countHoleWater(world, hole);
+            if (isAcceptableIrrigation(startCounts)) {
+                LOGGER.info("[FarmIrrigation] irrigation already acceptable at attempt {} (still={}, water={}, flow={}, dry={})",
+                        attempt, startCounts[1], startCounts[0], startCounts[2], startCounts[3]);
+                return true;
+            }
             // If we got pulled into water during bucket refills, get back onto land before placing.
-            escapeWaterIfNeeded(bot, world, source);
+            escapeWaterIfNeeded(bot, world, source, false);
 
             for (BlockPos target : corners) {
+                abortIfRequested(bot);
                 if (isStillWater(world, target)) {
                     continue;
                 }
+                if (!hasWaterPlacementSupport(world, target)) {
+                    LOGGER.warn("[FarmIrrigation] no support faces at {}; reinforcing edges before placement", target.toShortString());
+                    reinforceIrrigationEdges(bot, world, source, center);
+                }
                 if (!ensureWaterBucketInHand(bot, world, source, center, refillSource)) {
-                    LOGGER.warn("No water bucket ready for placement at {}", target);
+                    LOGGER.warn("[FarmIrrigation] no water bucket ready for placement at {}", target);
                     return false;
                 }
 
                 List<BlockPos> stands = enumerateStandingAroundHole(world, target, center);
+                if (stands.isEmpty()) {
+                    clearIrrigationAccessRing(bot, world, center);
+                    stands = enumerateStandingAroundHole(world, target, center);
+                }
+                if (stands.size() > 8) {
+                    stands = new ArrayList<>(stands.subList(0, 8));
+                }
                 boolean placed = false;
                 for (BlockPos stand : stands) {
-                    moveTo(source, bot, stand);
-                    waitUntilClose(bot, target, 3.0, 24);
+                    abortIfRequested(bot);
+                    moveTo(source, bot, stand, false);
+                    waitUntilClose(bot, target, 3.0, 24, false);
                     if (placeWater(bot, world, target)) {
+                        cleanupImmediateIrrigationSpill(bot, world, center);
                         placed = true;
                         break;
                     }
                 }
 
                 if (!placed) {
-                    LOGGER.warn("Failed to place water at {} after trying {} stands", target, stands.size());
+                    LOGGER.warn("[FarmIrrigation] failed to place water at {} after {} stand attempts", target, stands.size());
                     // Try stepping into the hole and reattempt once more
                     if (tryPlaceFromInside(bot, world, source, target, center)) {
+                        cleanupImmediateIrrigationSpill(bot, world, center);
                         placed = true;
                     } else {
                         pickupMisplacedWater(bot, world, center);
@@ -828,18 +1259,35 @@ public class FarmSkill implements Skill {
             // Water physics can take a moment; wait and re-check a few times before declaring failure.
             if (awaitAcceptableIrrigation(world, hole, 8, 250)) {
                 int[] c = countHoleWater(world, hole);
-                LOGGER.info("Irrigation hole filled; water ok on attempt {} (still={}, water={}, flow={}, dry={})",
+                LOGGER.info("[FarmIrrigation] Irrigation hole filled on attempt {} (still={}, water={}, flow={}, dry={})",
                         attempt, c[1], c[0], c[2], c[3]);
                 return true;
             }
 
-            LOGGER.warn("Irrigation still incomplete after attempt {}, cleaning up stray flowing water and retrying", attempt);
+            String endState = describeHoleWater(world, hole);
+            if (endState.equals(startState)) {
+                noProgressAttempts++;
+            } else {
+                noProgressAttempts = 0;
+            }
+            if (previousEndState != null && previousEndState.equals(endState)) {
+                noProgressAttempts++;
+            }
+            previousEndState = endState;
+            if (noProgressAttempts >= 2) {
+                LOGGER.warn("[FarmIrrigation] no-progress early-stop at attempt {} state={} noProgressAttempts={}",
+                        attempt, endState, noProgressAttempts);
+                return false;
+            }
+
+            LOGGER.warn("[FarmIrrigation] incomplete after attempt {}, cleaning stray flow and retrying", attempt);
+            cleanupImmediateIrrigationSpill(bot, world, center);
             pickupMisplacedWater(bot, world, center);
             // If we lost water buckets by placing incorrectly, try to refill before next attempt
             ensureWaterSupply(bot, world, source, center, refillSource);
         }
 
-        LOGGER.warn("Failed to establish infinite water in irrigation hole after {} attempts", IRRIGATION_ATTEMPTS);
+        LOGGER.warn("[FarmIrrigation] failed to establish stable irrigation after {} attempts", IRRIGATION_ATTEMPTS);
         return false;
     }
 
@@ -848,6 +1296,7 @@ public class FarmSkill implements Skill {
         int tilled = 0;
 
         for (BlockPos plot : plots) {
+            abortIfRequested(bot);
             if (tilled >= seedLimit) {
                 break; // Do not till more than we can plant
             }
@@ -894,6 +1343,7 @@ public class FarmSkill implements Skill {
         int planted = 0;
 
         for (BlockPos plot : plots) {
+            abortIfRequested(bot);
             if (planted >= seedLimit) {
                 break;
             }
@@ -974,6 +1424,7 @@ public class FarmSkill implements Skill {
     }
 
     private static boolean ensureWaterSupply(ServerPlayerEntity bot, ServerWorld world, ServerCommandSource source, BlockPos searchOrigin, BlockPos refillSource) {
+        abortIfRequested(bot);
         PlayerInventory inventory = bot.getInventory();
         int waterBuckets = countItem(inventory, Items.WATER_BUCKET);
         int emptyBuckets = countItem(inventory, Items.BUCKET);
@@ -987,8 +1438,10 @@ public class FarmSkill implements Skill {
 
         if (emptyBuckets > 0 || waterBuckets < 2) {
             List<BlockPos> sources = new ArrayList<>();
-            if (refillSource != null) {
+            if (refillSource != null && world.getBlockState(refillSource).isOf(Blocks.WATER)) {
                 sources.add(refillSource);
+            } else if (refillSource != null) {
+                LOGGER.warn("[FarmIrrigation] refillSource {} is no longer water; skipping preferred refill", refillSource.toShortString());
             }
             // Add additional still sources nearby (dedup with refillSource)
             for (BlockPos src : findStillWaterSources(world, origin, WATER_SEARCH_RADIUS)) {
@@ -1001,6 +1454,7 @@ public class FarmSkill implements Skill {
             }
 
             for (BlockPos src : sources) {
+                abortIfRequested(bot);
                 LOGGER.info("Attempting to fill buckets from source {}", src);
                 fillBucketsAt(bot, world, source, src);
                 waterBuckets = countItem(inventory, Items.WATER_BUCKET);
@@ -1041,6 +1495,11 @@ public class FarmSkill implements Skill {
     }
 
     private static void fillBucketsAt(ServerPlayerEntity bot, ServerWorld world, ServerCommandSource source, BlockPos waterSource) {
+        abortIfRequested(bot);
+        if (!world.getBlockState(waterSource).isOf(Blocks.WATER)) {
+            LOGGER.warn("[FarmIrrigation] fillBucketsAt skipped non-water source {}", waterSource.toShortString());
+            return;
+        }
         List<BlockPos> stands = enumerateStandingNearWater(world, waterSource);
         if (stands.isEmpty()) {
             LOGGER.warn("Unable to find stand position near water at {}", waterSource);
@@ -1049,7 +1508,13 @@ public class FarmSkill implements Skill {
         }
 
         boolean filledAny = false;
+        int refillAttempts = 0;
         while (true) {
+            abortIfRequested(bot);
+            if (++refillAttempts > 8) {
+                LOGGER.warn("[FarmIrrigation] fillBucketsAt attempt limit reached at source {}", waterSource.toShortString());
+                break;
+            }
             int bucketSlot = findInventoryItemSlot(bot.getInventory(), Items.BUCKET);
             if (bucketSlot == -1) {
                 LOGGER.info("fillBucketsAt: no more empty buckets");
@@ -1063,6 +1528,7 @@ public class FarmSkill implements Skill {
 
             boolean scooped = false;
             for (BlockPos stand : stands) {
+                abortIfRequested(bot);
                 moveTo(source, bot, stand);
                 waitUntilClose(bot, waterSource, 2.4, 24);
                 LOGGER.info("Trying refill from stand {}", stand);
@@ -1097,6 +1563,7 @@ public class FarmSkill implements Skill {
     }
 
     private static boolean ensureWaterBucketInHand(ServerPlayerEntity bot, ServerWorld world, ServerCommandSource source, BlockPos searchOrigin, BlockPos refillSource) {
+        abortIfRequested(bot);
         PlayerInventory inventory = bot.getInventory();
         int slot = findHotbarItemSlot(inventory, Items.WATER_BUCKET);
         if (slot == -1) {
@@ -1113,8 +1580,10 @@ public class FarmSkill implements Skill {
                 if (emptySlot != -1) {
                     BlockPos origin = (refillSource != null ? refillSource : (searchOrigin != null ? searchOrigin : bot.getBlockPos()));
                     List<BlockPos> sources = new ArrayList<>();
-                    if (refillSource != null) {
+                    if (refillSource != null && world.getBlockState(refillSource).isOf(Blocks.WATER)) {
                         sources.add(refillSource);
+                    } else if (refillSource != null) {
+                        LOGGER.warn("[FarmIrrigation] preferred refill source {} is dry; searching alternatives", refillSource.toShortString());
                     }
                     // Fall back to any still water near the farm site.
                     for (BlockPos src : findStillWaterSources(world, origin, WATER_SEARCH_RADIUS)) {
@@ -1131,6 +1600,7 @@ public class FarmSkill implements Skill {
                     }
 
                     for (BlockPos src : sources) {
+                        abortIfRequested(bot);
                         if (scoopFromSourceLocation(bot, world, source, src, emptySlot)) {
                             slot = emptySlot;
                             break;
@@ -1149,6 +1619,11 @@ public class FarmSkill implements Skill {
     }
 
     private static boolean scoopFromSourceLocation(ServerPlayerEntity bot, ServerWorld world, ServerCommandSource source, BlockPos waterSource, int bucketSlot) {
+        abortIfRequested(bot);
+        if (!world.getBlockState(waterSource).isOf(Blocks.WATER)) {
+            LOGGER.warn("[FarmIrrigation] scoopFromSourceLocation skipped non-water source {}", waterSource.toShortString());
+            return false;
+        }
         BlockPos stand = findStandingNearWater(world, waterSource);
         if (stand == null) {
             LOGGER.warn("No solid spot near water at {}", waterSource);
@@ -1160,118 +1635,30 @@ public class FarmSkill implements Skill {
     }
 
     private static boolean placeWater(ServerPlayerEntity bot, ServerWorld world, BlockPos waterPos) {
+        abortIfRequested(bot);
         if (!isWithinReach(bot, waterPos)) {
             LOGGER.debug("Water position {} out of reach", waterPos);
             return false;
         }
-        // Ensure we have a water bucket selected
-        int waterSlot = findHotbarItemSlot(bot.getInventory(), Items.WATER_BUCKET);
-        if (waterSlot == -1) waterSlot = findInventoryItemSlot(bot.getInventory(), Items.WATER_BUCKET);
-        if (waterSlot != -1) {
-            waterSlot = ensureHotbarAccess(bot, waterSlot);
-            selectHotbarSlot(bot, waterSlot);
-        }
-        
-        // Verify we actually have water bucket selected
-        if (!bot.getMainHandStack().isOf(Items.WATER_BUCKET)) {
-            LOGGER.warn("Water bucket not in hand for placement, have: {}", bot.getMainHandStack().getItem());
+        if (!ensureWaterBucketSelected(bot)) {
+            LOGGER.warn("[FarmIrrigation] water bucket not selected for placement at {} (hand={})",
+                    waterPos.toShortString(), bot.getMainHandStack().getItem());
             return false;
         }
 
         LookController.faceBlock(bot, waterPos);
         sleep(ACTION_DELAY_MS);
 
-        // Build a list of solid block faces that, when clicked, would place water at waterPos
-        // Priority: bottom of waterPos (click on block below), then sides (click on adjacent blocks)
-        List<BlockHitResult> hits = new ArrayList<>();
-        
-        // First priority: click on solid block below with direction UP
-        BlockPos below = waterPos.down();
-        BlockState belowState = world.getBlockState(below);
-        if (belowState.isSolidBlock(world, below) && !belowState.isOf(Blocks.CHEST) && !belowState.isOf(Blocks.TRAPPED_CHEST)) {
-            Vec3d hitVec = Vec3d.of(below).add(0.5, 1.0, 0.5); // Top center of block below
-            hits.add(new BlockHitResult(hitVec, Direction.UP, below, false));
-            LOGGER.debug("placeWater: added below hit at {} state={}", below.toShortString(), belowState.getBlock());
-        }
-        
-        // Second priority: click on solid adjacent horizontal blocks
-        for (Direction dir : Direction.Type.HORIZONTAL) {
-            BlockPos neighbor = waterPos.offset(dir);
-            BlockState neighborState = world.getBlockState(neighbor);
-            if (neighborState.isSolidBlock(world, neighbor) && !neighborState.isOf(Blocks.CHEST) && !neighborState.isOf(Blocks.TRAPPED_CHEST)) {
-                // Hit the inner face of the neighbor (facing toward waterPos)
-                Direction hitFace = dir.getOpposite();
-                double dx = dir.getOffsetX() * 0.5;
-                double dz = dir.getOffsetZ() * 0.5;
-                Vec3d hitVec = Vec3d.of(neighbor).add(0.5 - dx, 0.5, 0.5 - dz);
-                hits.add(new BlockHitResult(hitVec, hitFace, neighbor, false));
-                LOGGER.debug("placeWater: added side hit at {} dir={} state={}", neighbor.toShortString(), hitFace, neighborState.getBlock());
-            }
-        }
-        
+        // Build solid block faces that, when clicked, would place water at waterPos.
+        List<BlockHitResult> hits = buildWaterPlacementHits(world, waterPos);
         if (hits.isEmpty()) {
-            LOGGER.warn("placeWater: no solid blocks adjacent to {} for water placement", waterPos.toShortString());
+            LOGGER.warn("[FarmIrrigation] placeWater: no support faces at {}", waterPos.toShortString());
         }
 
-        for (BlockHitResult hit : hits) {
-            ActionResult result = bot.interactionManager.interactBlock(
-                    bot,
-                    world,
-                    bot.getMainHandStack(),
-                    Hand.MAIN_HAND,
-                    hit
-            );
-            LOGGER.info("placeWater interactBlock at {} via {} face={} result={} hand={}",
-                    waterPos.toShortString(), hit.getBlockPos().toShortString(), hit.getSide(), result, bot.getMainHandStack().getItem());
-            if (result.isAccepted()) {
-                bot.swingHand(Hand.MAIN_HAND, true);
-                sleep(50); // Small delay for block state to update
-                if (world.getBlockState(waterPos).isOf(Blocks.WATER)) {
-                    return true;
-                }
-            }
-        }
-
-        ActionResult result = bot.interactionManager.interactItem(bot, world, bot.getMainHandStack(), Hand.MAIN_HAND);
-        LOGGER.info("placeWater interactItem at {} result={} hand={}", waterPos, result, bot.getMainHandStack().getItem());
-        if (result.isAccepted()) {
-            bot.swingHand(Hand.MAIN_HAND, true);
-            return world.getBlockState(waterPos).isOf(Blocks.WATER);
-        }
-
-        // Fallback: step into the hole and try placing from within, then hop out
-        Vec3d enter = Vec3d.ofCenter(waterPos).add(0, 0.2, 0);
-        BlockPos stand = findStandingNearWater(world, waterPos);
-        if (stand != null) {
-            moveTo(bot.getCommandSource(), bot, stand);
-        }
-        BotActions.moveToward(bot, enter, 0.4);
-        waitUntilClose(bot, waterPos, 1.5, 10);
-        LookController.faceBlock(bot, waterPos);
-        sleep(ACTION_DELAY_MS);
-        result = bot.interactionManager.interactItem(bot, world, bot.getMainHandStack(), Hand.MAIN_HAND);
-        LOGGER.info("placeWater fallback inside at {} result={} hand={}", waterPos, result, bot.getMainHandStack().getItem());
-        if (result.isAccepted() && world.getBlockState(waterPos).isOf(Blocks.WATER)) {
-            bot.swingHand(Hand.MAIN_HAND, true);
-            BlockPos exit = findStandingNearWater(world, waterPos);
-            if (exit != null) {
-                moveTo(bot.getCommandSource(), bot, exit);
-            }
-            return true;
-        }
-        BlockHitResult insideHit = new BlockHitResult(Vec3d.ofCenter(waterPos), Direction.UP, waterPos, true);
-        result = bot.interactionManager.interactBlock(bot, world, bot.getMainHandStack(), Hand.MAIN_HAND, insideHit);
-        LOGGER.info("placeWater fallback interactBlock inside at {} result={} hand={}", waterPos, result, bot.getMainHandStack().getItem());
-        if (result.isAccepted() && world.getBlockState(waterPos).isOf(Blocks.WATER)) {
-            bot.swingHand(Hand.MAIN_HAND, true);
-            BlockPos exit = findStandingNearWater(world, waterPos);
-            if (exit != null) {
-                moveTo(bot.getCommandSource(), bot, exit);
-            }
+        if (placeWaterOnServerThread(bot, world, waterPos, hits)) {
             return true;
         }
 
-        // If we misplaced water nearby, try to pick it back up so we don't lose the bucket
         for (Direction dir : Direction.Type.HORIZONTAL) {
             BlockPos adj = waterPos.offset(dir);
             if (world.getBlockState(adj).isOf(Blocks.WATER)) {
@@ -1282,15 +1669,135 @@ public class FarmSkill implements Skill {
         return false;
     }
 
+    private static boolean placeWaterOnServerThread(ServerPlayerEntity bot, ServerWorld world, BlockPos waterPos, List<BlockHitResult> hits) {
+        var server = bot.getCommandSource().getServer();
+        if (server == null) {
+            LOGGER.warn("[FarmIrrigation] placeWater: no server available for {}", waterPos.toShortString());
+            return false;
+        }
+
+        CompletableFuture<Boolean> future = new CompletableFuture<>();
+        server.execute(() -> {
+            try {
+                if (!ensureWaterBucketSelected(bot)) {
+                    LOGGER.warn("[FarmIrrigation] water bucket unavailable on server thread at {}", waterPos.toShortString());
+                    future.complete(false);
+                    return;
+                }
+
+                for (BlockHitResult hit : hits) {
+                    if (!ensureWaterBucketSelected(bot)) {
+                        LOGGER.warn("[FarmIrrigation] hand changed before useOnBlock at {} (hand={})",
+                                waterPos.toShortString(), bot.getMainHandStack().getItem());
+                        future.complete(false);
+                        return;
+                    }
+                    ItemStack handStack = bot.getMainHandStack();
+                    ActionResult result = handStack.useOnBlock(new ItemUsageContext(bot, Hand.MAIN_HAND, hit));
+                    LOGGER.info("[FarmIrrigation] placeWater useOnBlock at {} via {} face={} result={} hand={}",
+                            waterPos.toShortString(), hit.getBlockPos().toShortString(), hit.getSide(), result, bot.getMainHandStack().getItem());
+                    if (result.isAccepted() || world.getBlockState(waterPos).isOf(Blocks.WATER)) {
+                        bot.swingHand(Hand.MAIN_HAND, true);
+                        if (world.getBlockState(waterPos).isOf(Blocks.WATER)) {
+                            future.complete(true);
+                            return;
+                        }
+                    }
+                }
+
+                if (!ensureWaterBucketSelected(bot)) {
+                    future.complete(false);
+                    return;
+                }
+                LookController.faceBlock(bot, waterPos);
+                ActionResult itemResult = bot.interactionManager.interactItem(
+                        bot,
+                        world,
+                        bot.getMainHandStack(),
+                        Hand.MAIN_HAND
+                );
+                LOGGER.info("[FarmIrrigation] placeWater interactItem fallback at {} result={} hand={}",
+                        waterPos.toShortString(), itemResult, bot.getMainHandStack().getItem());
+                if (itemResult.isAccepted() || world.getBlockState(waterPos).isOf(Blocks.WATER)) {
+                    bot.swingHand(Hand.MAIN_HAND, true);
+                    if (world.getBlockState(waterPos).isOf(Blocks.WATER)) {
+                        future.complete(true);
+                        return;
+                    }
+                }
+
+                future.complete(world.getBlockState(waterPos).isOf(Blocks.WATER));
+            } catch (Throwable t) {
+                LOGGER.warn("[FarmIrrigation] placeWater server-thread failure at {}: {}", waterPos.toShortString(), t.toString());
+                future.complete(false);
+            }
+        });
+
+        try {
+            return future.get(3, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
+        } catch (ExecutionException | TimeoutException e) {
+            LOGGER.warn("[FarmIrrigation] placeWater server-thread timeout/failure at {}: {}", waterPos.toShortString(), e.getMessage());
+            return false;
+        }
+    }
+
+    private static boolean ensureWaterBucketSelected(ServerPlayerEntity bot) {
+        int waterSlot = findHotbarItemSlot(bot.getInventory(), Items.WATER_BUCKET);
+        if (waterSlot == -1) {
+            int inventorySlot = findInventoryItemSlot(bot.getInventory(), Items.WATER_BUCKET);
+            if (inventorySlot != -1) {
+                waterSlot = ensureHotbarAccess(bot, inventorySlot);
+            }
+        }
+        if (waterSlot == -1) {
+            LOGGER.warn("[FarmIrrigation] no water bucket available for selection");
+            return false;
+        }
+        selectHotbarSlot(bot, waterSlot);
+        return bot.getMainHandStack().isOf(Items.WATER_BUCKET);
+    }
+
+    private static boolean hasWaterPlacementSupport(ServerWorld world, BlockPos waterPos) {
+        return !buildWaterPlacementHits(world, waterPos).isEmpty();
+    }
+
+    private static List<BlockHitResult> buildWaterPlacementHits(ServerWorld world, BlockPos waterPos) {
+        List<BlockHitResult> hits = new ArrayList<>();
+
+        BlockPos below = waterPos.down();
+        BlockState belowState = world.getBlockState(below);
+        if (belowState.isSolidBlock(world, below) && !belowState.isOf(Blocks.CHEST) && !belowState.isOf(Blocks.TRAPPED_CHEST)) {
+            Vec3d hitVec = Vec3d.of(below).add(0.5, 1.0, 0.5);
+            hits.add(new BlockHitResult(hitVec, Direction.UP, below, false));
+        }
+
+        for (Direction dir : Direction.Type.HORIZONTAL) {
+            BlockPos neighbor = waterPos.offset(dir);
+            BlockState neighborState = world.getBlockState(neighbor);
+            if (neighborState.isSolidBlock(world, neighbor) && !neighborState.isOf(Blocks.CHEST) && !neighborState.isOf(Blocks.TRAPPED_CHEST)) {
+                Direction hitFace = dir.getOpposite();
+                double dx = dir.getOffsetX() * 0.5;
+                double dz = dir.getOffsetZ() * 0.5;
+                Vec3d hitVec = Vec3d.of(neighbor).add(0.5 - dx, 0.5, 0.5 - dz);
+                hits.add(new BlockHitResult(hitVec, hitFace, neighbor, false));
+            }
+        }
+
+        return hits;
+    }
+
     private static boolean tryPlaceFromInside(ServerPlayerEntity bot, ServerWorld world, ServerCommandSource source, BlockPos waterPos, BlockPos center) {
-        LOGGER.info("Attempting inside-hole placement at {}", waterPos);
+        LOGGER.info("[FarmIrrigation] attempting inside-hole placement at {}", waterPos);
         BlockPos exit = findStandingAroundHole(world, waterPos, center);
         Vec3d enter = Vec3d.ofCenter(waterPos).add(0, 0.2, 0);
         BotActions.moveToward(bot, enter, 0.5);
-        waitUntilClose(bot, waterPos, 1.5, 14);
+        waitUntilClose(bot, waterPos, 1.5, 14, false);
         boolean placed = placeWater(bot, world, waterPos);
         if (exit != null) {
-            moveTo(source, bot, exit);
+            moveTo(source, bot, exit, false);
         }
         return placed;
     }
@@ -1311,6 +1818,28 @@ public class FarmSkill implements Skill {
                     pickupWater(bot, world, check);
                 }
             }
+        }
+    }
+
+    private static void cleanupImmediateIrrigationSpill(ServerPlayerEntity bot, ServerWorld world, BlockPos center) {
+        BlockPos[] hole = {center, center.add(1, 0, 0), center.add(0, 0, 1), center.add(1, 0, 1)};
+        Set<BlockPos> holeSet = Set.of(hole);
+        int cleaned = 0;
+        for (int x = center.getX() - 1; x <= center.getX() + 2; x++) {
+            for (int z = center.getZ() - 1; z <= center.getZ() + 2; z++) {
+                for (int y = center.getY(); y <= center.getY() + 1; y++) {
+                    BlockPos check = new BlockPos(x, y, z);
+                    if (holeSet.contains(check)) {
+                        continue;
+                    }
+                    if (world.getBlockState(check).isOf(Blocks.WATER) && pickupWater(bot, world, check)) {
+                        cleaned++;
+                    }
+                }
+            }
+        }
+        if (cleaned > 0) {
+            LOGGER.info("[FarmIrrigation] cleaned {} misplaced water tile(s) near {}", cleaned, center.toShortString());
         }
     }
 
@@ -1381,17 +1910,28 @@ public class FarmSkill implements Skill {
         for (int i = 0; i < Math.max(1, checks); i++) {
             sleep(Math.max(0, sleepMs));
             int[] c = countHoleWater(world, hole);
-            int water = c[0];
-            int still = c[1];
-            if (still >= 4) {
+            if (isAcceptableIrrigation(c)) {
                 return true;
             }
-            // Good-enough: two sources placed (diagonal corners), the rest may still be updating.
-            // Require the hole to be mostly filled; if it remains half-empty after settling,
-            // it's usually a leak / misplacement and we should retry.
-            if (still >= 2 && water >= 3) {
-                return true;
-            }
+        }
+        return false;
+    }
+
+    private static boolean isAcceptableIrrigation(int[] counts) {
+        int water = counts[0];
+        int still = counts[1];
+        // Ideal: full still basin.
+        if (still >= 4) {
+            return true;
+        }
+        // Good-enough: two source corners with near-full coverage while updates settle.
+        if (still >= 2 && water >= 3) {
+            return true;
+        }
+        // Snow/cold-biome fallback: if one source fills all 4 cells, keep going.
+        // This still hydrates nearby farmland and avoids false hard-fail loops.
+        if (still >= 1 && water >= 4) {
+            return true;
         }
         return false;
     }
@@ -1533,24 +2073,28 @@ public class FarmSkill implements Skill {
     }
 
     private static List<BlockPos> enumerateStandingAroundHole(ServerWorld world, BlockPos waterPos, BlockPos center) {
-        List<BlockPos> stands = new ArrayList<>();
+        java.util.LinkedHashSet<BlockPos> stands = new java.util.LinkedHashSet<>();
         for (Direction dir : Direction.Type.HORIZONTAL) {
-            BlockPos ground = waterPos.offset(dir);
-            if (isSafeStandingGround(world, ground) && !isInsideHole(ground, center)) {
-                stands.add(ground.up());
+            for (int dy = -1; dy <= 1; dy++) {
+                BlockPos ground = waterPos.offset(dir).up(dy);
+                if (isSafeStandingGroundForIrrigation(world, ground) && !isInsideHole(ground, center)) {
+                    stands.add(ground.up());
+                }
             }
         }
         // fallback to any safe spot nearby
         for (int dx = -2; dx <= 2; dx++) {
             for (int dz = -2; dz <= 2; dz++) {
                 if (dx == 0 && dz == 0) continue;
-                BlockPos ground = waterPos.add(dx, 0, dz);
-                if (isSafeStandingGround(world, ground)) {
-                    stands.add(ground.up());
+                for (int dy = -1; dy <= 1; dy++) {
+                    BlockPos ground = waterPos.add(dx, dy, dz);
+                    if (isSafeStandingGroundForIrrigation(world, ground) && !isInsideHole(ground, center)) {
+                        stands.add(ground.up());
+                    }
                 }
             }
         }
-        return stands;
+        return new ArrayList<>(stands);
     }
 
     private static boolean isInsideHole(BlockPos pos, BlockPos center) {
@@ -1626,7 +2170,7 @@ public class FarmSkill implements Skill {
                     BlockPos basePos = water.offset(dir, radius).up(dy);
                     BlockPos standPos = basePos.up();
                     BlockState base = world.getBlockState(basePos);
-                    boolean headroom = world.isAir(standPos) && world.isAir(standPos.up());
+                    boolean headroom = isPassableStandingSpace(world, standPos) && isPassableStandingSpace(world, standPos.up());
                     if (!base.isSolidBlock(world, basePos) || !headroom) {
                         continue;
                     }
@@ -1659,8 +2203,31 @@ public class FarmSkill implements Skill {
     private static boolean isSafeStandingGround(ServerWorld world, BlockPos ground) {
         BlockState base = world.getBlockState(ground);
         return !base.getCollisionShape(world, ground).isEmpty()
+                && base.getFluidState().isEmpty()
                 && !base.isOf(Blocks.FARMLAND)
-                && world.isAir(ground.up());
+                && isPassableStandingSpace(world, ground.up());
+    }
+
+    private static boolean isSafeStandingGroundForIrrigation(ServerWorld world, BlockPos ground) {
+        BlockState base = world.getBlockState(ground);
+        if (base.getCollisionShape(world, ground).isEmpty()) {
+            return false;
+        }
+        if (base.isOf(Blocks.FARMLAND) || !base.getFluidState().isEmpty()) {
+            return false;
+        }
+        return isPassableStandingSpace(world, ground.up()) && isPassableStandingSpace(world, ground.up().up());
+    }
+
+    private static boolean isPassableStandingSpace(ServerWorld world, BlockPos pos) {
+        BlockState state = world.getBlockState(pos);
+        if (!state.getFluidState().isEmpty()) {
+            return false;
+        }
+        if (state.isAir() || state.isReplaceable()) {
+            return true;
+        }
+        return state.getCollisionShape(world, pos).isEmpty();
     }
 
     private static void ensureStandingOffFarmland(ServerPlayerEntity bot, ServerWorld world, ServerCommandSource source, BlockPos target) {
@@ -1688,6 +2255,7 @@ public class FarmSkill implements Skill {
     }
 
     private static boolean scoopWater(ServerPlayerEntity bot, ServerWorld world, BlockPos waterPos, int bucketSlot) {
+        abortIfRequested(bot);
         selectHotbarSlot(bot, bucketSlot);
         if (!bot.getMainHandStack().isOf(Items.BUCKET)) {
             LOGGER.warn("scoopWater: slot {} does not hold a bucket (holds {})", bucketSlot, bot.getMainHandStack().getItem());
@@ -1711,12 +2279,12 @@ public class FarmSkill implements Skill {
             BlockPos closer = findStandingNearWater(world, waterPos);
             if (closer != null) {
                 LOGGER.info("scoopWater: moving closer to {}", closer);
-                moveTo(bot.getCommandSource(), bot, closer);
-                waitUntilClose(bot, waterPos, 2.5, 24);
+                moveTo(bot.getCommandSource(), bot, closer, false);
+                waitUntilClose(bot, waterPos, 2.5, 24, false);
             } else {
                 LOGGER.info("scoopWater: no stand found, walking to water block {}", waterPos.up());
-                moveTo(bot.getCommandSource(), bot, waterPos.up());
-                waitUntilClose(bot, waterPos, 2.2, 24);
+                moveTo(bot.getCommandSource(), bot, waterPos.up(), false);
+                waitUntilClose(bot, waterPos, 2.2, 24, false);
             }
         }
 
@@ -1833,10 +2401,10 @@ public class FarmSkill implements Skill {
         Vec3d enterPos = Vec3d.ofCenter(waterPos).add(0, 0.2, 0);
         BlockPos stand = findStandingNearWater(world, waterPos);
         if (stand != null) {
-            moveTo(bot.getCommandSource(), bot, stand);
+            moveTo(bot.getCommandSource(), bot, stand, false);
         }
         BotActions.moveToward(bot, enterPos, 0.4);
-        waitUntilClose(bot, waterPos, 1.5, 10);
+        waitUntilClose(bot, waterPos, 1.5, 10, false);
         LookController.faceBlock(bot, waterPos);
         sleep(120);
 
@@ -1889,7 +2457,7 @@ public class FarmSkill implements Skill {
                 // Move out of water
                 BlockPos exit = findStandingNearWater(world, waterPos);
                 if (exit != null) {
-                    moveTo(bot.getCommandSource(), bot, exit);
+                    moveTo(bot.getCommandSource(), bot, exit, false);
                 }
                 return true;
             }
@@ -1918,6 +2486,9 @@ public class FarmSkill implements Skill {
         CompletableFuture<String> future = MiningTool.mineBlock(bot, pos);
         try {
             future.get(10, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new SkillAbortException();
         } catch (Exception e) {
             LOGGER.debug("Mining {} failed: {}", pos, e.getMessage());
         }
@@ -2106,11 +2677,8 @@ public class FarmSkill implements Skill {
         return -1;
     }
 
-    private static void levelGround(ServerPlayerEntity bot, ServerWorld world, ServerCommandSource source, BlockPos center, SkillContext ctx, Set<BlockPos> protectedStillWater) {
-        // Keep leveling limited to the actual farm footprint to avoid destructive landscaping.
-        int radius = HYDRATION_RADIUS; // 4 blocks: covers the full 10x10 farm area
-        
-        // First pass: collect all surface heights to determine target
+    private static Integer computeFarmTargetY(ServerWorld world, BlockPos center, Set<BlockPos> protectedStillWater) {
+        int radius = HYDRATION_RADIUS;
         List<Integer> heights = new ArrayList<>();
         for (int dx = -radius; dx <= radius; dx++) {
             for (int dz = -radius; dz <= radius; dz++) {
@@ -2119,13 +2687,42 @@ public class FarmSkill implements Skill {
                     continue;
                 }
                 Integer y = findSurfaceY(world, base);
-                if (y != null) heights.add(y);
+                if (y != null) {
+                    heights.add(y);
+                }
             }
         }
-        if (heights.isEmpty()) return;
+        if (heights.isEmpty()) {
+            return null;
+        }
         heights.sort(Integer::compareTo);
         int targetY = heights.get(heights.size() / 2);
-        LOGGER.info("levelGround targetY={} samples={} protectedWater={}", targetY, heights.size(), protectedStillWater == null ? 0 : protectedStillWater.size());
+        LOGGER.info("[FarmIrrigation] levelGround targetY={} samples={} protectedWater={}",
+                targetY, heights.size(), protectedStillWater == null ? 0 : protectedStillWater.size());
+        return targetY;
+    }
+
+    private static boolean isLikelyIrrigationCenter(ServerWorld world, BlockPos center) {
+        BlockPos[] hole = {center, center.add(1, 0, 0), center.add(0, 0, 1), center.add(1, 0, 1)};
+        int still = 0;
+        for (BlockPos pos : hole) {
+            if (isStillWater(world, pos)) {
+                still++;
+            }
+        }
+        return still >= 2;
+    }
+
+    private static void levelGround(ServerPlayerEntity bot,
+                                    ServerWorld world,
+                                    ServerCommandSource source,
+                                    BlockPos center,
+                                    int targetY,
+                                    SkillContext ctx,
+                                    Set<BlockPos> protectedStillWater) {
+        abortIfRequested(bot);
+        // Keep leveling limited to the actual farm footprint to avoid destructive landscaping.
+        int radius = HYDRATION_RADIUS; // 4 blocks: covers the full 10x10 farm area
 
         // Second pass: process each column systematically
         // Process in order from center outward in a spiral-like pattern for more consistent results
@@ -2139,6 +2736,7 @@ public class FarmSkill implements Skill {
         columns.sort((a, b) -> Integer.compare(a[0] * a[0] + a[1] * a[1], b[0] * b[0] + b[1] * b[1]));
 
         for (int[] col : columns) {
+            abortIfRequested(bot);
             int dx = col[0];
             int dz = col[1];
             BlockPos columnBase = center.add(dx, 0, dz);
@@ -2158,11 +2756,6 @@ public class FarmSkill implements Skill {
                 continue;
             }
 
-            BlockPos stand = findStandingSpot(world, columnBase);
-            if (stand != null) {
-                moveTo(source, bot, stand.up());
-            }
-
             BlockPos topCheck = new BlockPos(columnBase.getX(), surfaceY, columnBase.getZ());
             BlockState topCheckState = world.getBlockState(topCheck);
             if (topCheckState.isIn(BlockTags.LOGS) || topCheckState.isIn(BlockTags.LEAVES)) {
@@ -2172,6 +2765,32 @@ public class FarmSkill implements Skill {
                 surfaceY = findSurfaceY(world, columnBase);
                 if (surfaceY == null) continue;
                 diff = surfaceY - targetY;
+            }
+
+            BlockPos top = new BlockPos(columnBase.getX(), targetY, columnBase.getZ());
+            if (protectedStillWater != null && protectedStillWater.contains(top)) {
+                continue;
+            }
+            BlockState topState = world.getBlockState(top);
+            boolean needsTopFix = !TILLABLE_SURFACES.contains(topState.getBlock())
+                    && !topState.isOf(Blocks.FARMLAND)
+                    && !topState.isOf(Blocks.WATER);
+
+            // Snow-covered but otherwise level columns should be skipped quickly.
+            if (diff == 0 && !needsTopFix) {
+                continue;
+            }
+
+            double distToColumn = bot.getEyePos().distanceTo(Vec3d.ofCenter(columnBase));
+            if (distToColumn > 4.6D) {
+                BlockPos stand = findStandingSpot(world, columnBase);
+                if (stand == null) {
+                    LOGGER.debug("levelGround: no safe stand near {}, skipping work for this column", columnBase);
+                    continue;
+                }
+                // Leveling iterates many columns; only reposition when needed and skip stuck ticks here.
+                moveTo(source, bot, stand.up(), false);
+                waitUntilClose(bot, columnBase, 4.6, 16, false);
             }
 
             // Mine down excess layers
@@ -2202,11 +2821,6 @@ public class FarmSkill implements Skill {
             }
 
             // Ensure top surface is tillable
-            BlockPos top = new BlockPos(columnBase.getX(), targetY, columnBase.getZ());
-            if (protectedStillWater != null && protectedStillWater.contains(top)) {
-                continue;
-            }
-            BlockState topState = world.getBlockState(top);
             if (!TILLABLE_SURFACES.contains(topState.getBlock()) && !topState.isOf(Blocks.FARMLAND) && !topState.isOf(Blocks.WATER)) {
                 if (!topState.isAir() && !topState.isOf(Blocks.WATER)) {
                     mineBlock(bot, top, world);
@@ -2218,6 +2832,7 @@ public class FarmSkill implements Skill {
         // Third pass: verify and fix any remaining gaps
         LOGGER.info("levelGround: verification pass");
         for (int dx = -radius; dx <= radius; dx++) {
+            abortIfRequested(bot);
             for (int dz = -radius; dz <= radius; dz++) {
                 BlockPos columnBase = center.add(dx, 0, dz);
                 BlockPos targetPos = new BlockPos(columnBase.getX(), targetY, columnBase.getZ());
@@ -2246,6 +2861,7 @@ public class FarmSkill implements Skill {
         LOGGER.info("levelGround: deep-fill pass (up to 3 blocks)");
         int maxDeepFill = 3;
         for (int dx = -radius; dx <= radius; dx++) {
+            abortIfRequested(bot);
             for (int dz = -radius; dz <= radius; dz++) {
                 BlockPos columnBase = center.add(dx, 0, dz);
                 if (protectedStillWater != null && protectedStillWater.contains(columnBase)) continue;
@@ -2417,7 +3033,12 @@ public class FarmSkill implements Skill {
     }
 
     private static MovementService.MovementResult moveTo(ServerCommandSource source, ServerPlayerEntity bot, BlockPos target) {
-        LOGGER.info("moveTo start from={} to={} eyeY={} vel={} onGround={} sneaking={}", bot.getBlockPos(), target, String.format("%.3f", bot.getY()), bot.getVelocity(), bot.isOnGround(), bot.isSneaking());
+        return moveTo(source, bot, target, false);
+    }
+
+    private static MovementService.MovementResult moveTo(ServerCommandSource source, ServerPlayerEntity bot, BlockPos target, boolean runStuckTick) {
+        abortIfRequested(bot);
+        LOGGER.debug("moveTo start from={} to={} eyeY={} vel={} onGround={} sneaking={}", bot.getBlockPos(), target, String.format("%.3f", bot.getY()), bot.getVelocity(), bot.isOnGround(), bot.isSneaking());
         logVerticalIfJump("moveTo-start", bot);
         int startY = bot.getBlockPos().getY();
         MovementService.MovementPlan plan = new MovementService.MovementPlan(
@@ -2429,7 +3050,7 @@ public class FarmSkill implements Skill {
                 bot.getHorizontalFacing()
         );
         MovementService.MovementResult result = MovementService.execute(source, bot, plan, false);
-        LOGGER.info("moveTo issued to {} currentPos={} eyeY={} vel={} onGround={} sneaking={}", target, bot.getBlockPos(), String.format("%.3f", bot.getY()), bot.getVelocity(), bot.isOnGround(), bot.isSneaking());
+        LOGGER.debug("moveTo issued to {} currentPos={} eyeY={} vel={} onGround={} sneaking={}", target, bot.getBlockPos(), String.format("%.3f", bot.getY()), bot.getVelocity(), bot.isOnGround(), bot.isSneaking());
         logVerticalIfJump("moveTo-issued", bot);
         // Check if we fell into a hole and need pillar escape
         int currentY = bot.getBlockPos().getY();
@@ -2438,24 +3059,32 @@ public class FarmSkill implements Skill {
             LOGGER.info("moveTo detected fall: startY={} currentY={} targetY={}, attempting pillar escape", startY, currentY, target.getY());
             checkAndEscapeHole(bot, target.getY());
         }
-        // Run return-base stuck tick to allow quick-nudge / mine escapes when the bot is stalled
-        try {
-            ReturnBaseStuckService.tickAndCheckStuck(bot, Vec3d.ofCenter(target));
-        } catch (Exception e) {
-            LOGGER.debug("ReturnBaseStuck tick failed: {}", e.getMessage());
+        if (runStuckTick) {
+            // Run return-base stuck tick to allow quick-nudge / mine escapes when the bot is stalled.
+            try {
+                ReturnBaseStuckService.tickAndCheckStuck(bot, Vec3d.ofCenter(target));
+            } catch (Throwable e) {
+                LOGGER.debug("ReturnBaseStuck tick failed: {}", e.getMessage());
+            }
         }
+        abortIfRequested(bot);
         return result;
     }
 
     private static void waitUntilClose(ServerPlayerEntity bot, BlockPos target, double maxDistance, int attempts) {
+        waitUntilClose(bot, target, maxDistance, attempts, false);
+    }
+
+    private static void waitUntilClose(ServerPlayerEntity bot, BlockPos target, double maxDistance, int attempts, boolean runStuckTick) {
         double lastY = bot.getY();
         for (int i = 0; i < attempts; i++) {
+            abortIfRequested(bot);
             double dist = bot.getEyePos().distanceTo(Vec3d.ofCenter(target));
             if (dist <= maxDistance) {
                 return;
             }
             if (i == 0 || i % 5 == 0 || Math.abs(bot.getY() - lastY) > 0.6) {
-                LOGGER.info("waitUntilClose tick={} dist={} pos={} eyeY={} vel={} onGround={} sneaking={}",
+                LOGGER.debug("waitUntilClose tick={} dist={} pos={} eyeY={} vel={} onGround={} sneaking={}",
                         i, String.format("%.2f", dist), bot.getBlockPos(), String.format("%.3f", bot.getY()),
                         bot.getVelocity(), bot.isOnGround(), bot.isSneaking());
             }
@@ -2464,11 +3093,13 @@ public class FarmSkill implements Skill {
             sleep(50);
         }
         LOGGER.debug("waitUntilClose timeout: dist={} target={} pos={}", bot.getEyePos().distanceTo(Vec3d.ofCenter(target)), target, bot.getBlockPos());
-        // If we timed out getting close, allow return-base stuck logic to attempt micro-escapes
-        try {
-            ReturnBaseStuckService.tickAndCheckStuck(bot, Vec3d.ofCenter(target));
-        } catch (Exception e) {
-            LOGGER.debug("ReturnBaseStuck tick failed during waitUntilClose: {}", e.getMessage());
+        if (runStuckTick) {
+            // If we timed out getting close, allow return-base stuck logic to attempt micro-escapes.
+            try {
+                ReturnBaseStuckService.tickAndCheckStuck(bot, Vec3d.ofCenter(target));
+            } catch (Throwable e) {
+                LOGGER.debug("ReturnBaseStuck tick failed during waitUntilClose: {}", e.getMessage());
+            }
         }
     }
 
@@ -2511,10 +3142,20 @@ public class FarmSkill implements Skill {
     }
 
     private static void sleep(int ms) {
+        if (Thread.currentThread().isInterrupted()) {
+            throw new SkillAbortException();
+        }
         try {
             Thread.sleep(ms);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+            throw new SkillAbortException();
+        }
+    }
+
+    private static void abortIfRequested(ServerPlayerEntity bot) {
+        if (bot != null && (SkillManager.shouldAbortSkill(bot) || !TaskService.hasActiveTask(bot.getUuid()))) {
+            throw new SkillAbortException();
         }
     }
 
@@ -2680,6 +3321,10 @@ public class FarmSkill implements Skill {
      * If stuck at a lower Y level, attempts pillar escape to climb back up.
      */
     private static void escapeWaterIfNeeded(ServerPlayerEntity bot, ServerWorld world, ServerCommandSource source) {
+        escapeWaterIfNeeded(bot, world, source, true);
+    }
+
+    private static void escapeWaterIfNeeded(ServerPlayerEntity bot, ServerWorld world, ServerCommandSource source, boolean runStuckTick) {
         BlockPos botPos = bot.getBlockPos();
         BlockState feetState = world.getBlockState(botPos);
         
@@ -2700,7 +3345,7 @@ public class FarmSkill implements Skill {
         BlockPos exit = findSolidGroundNearby(world, bot.getBlockPos(), 16);
         if (exit != null) {
             LOGGER.info("Farm escape: found solid ground at {}, navigating", exit.toShortString());
-            moveTo(source, bot, exit);
+            moveTo(source, bot, exit, runStuckTick);
             sleep(500);
         }
         
@@ -2709,7 +3354,7 @@ public class FarmSkill implements Skill {
             BlockPos broader = findSolidGroundNearby(world, bot.getBlockPos(), 24);
             if (broader != null) {
                 LOGGER.info("Farm escape: still in water; broader exit found at {}, navigating", broader.toShortString());
-                moveTo(source, bot, broader);
+                moveTo(source, bot, broader, runStuckTick);
                 sleep(700);
             }
         }

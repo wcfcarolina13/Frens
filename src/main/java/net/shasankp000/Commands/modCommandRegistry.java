@@ -84,6 +84,7 @@ import net.shasankp000.GameAI.services.SkillResumeService;
 import net.shasankp000.GameAI.services.SleepService;
 import net.shasankp000.GameAI.services.TaskService;
 import net.shasankp000.GameAI.services.WorkDirectionService;
+import net.shasankp000.GameAI.services.WizardTomeGrantService;
 import net.shasankp000.GameAI.skills.SkillContext;
 import net.shasankp000.GameAI.skills.SkillExecutionResult;
 import net.shasankp000.GameAI.BotActions;
@@ -256,6 +257,15 @@ public class modCommandRegistry {
                                                     ChatUtils.sendSystemMessage(context.getSource(), msg);
                                                     return 1;
                                                 })
+                                            )
+                                            .then(literal("clear")
+                                                .executes(context -> {
+                                                    DebugToggleService.clearRuntimeOverride();
+                                                    ChatUtils.sendSystemMessage(context.getSource(), "Debug runtime override cleared (env/properties now effective)");
+                                                    return 1;
+                                                })
+                                            )
+                                        )
                                 // Operator helper: quickly give yourself the Wizard's Tome quest item.
                                 .then(literal("wizard_tome")
                                         .executes(context -> executeGiveWizardTome(context.getSource(), 1))
@@ -266,15 +276,6 @@ public class modCommandRegistry {
                                                 ))
                                         )
                                 )
-                                            )
-                                            .then(literal("clear")
-                                                .executes(context -> {
-                                                    DebugToggleService.clearRuntimeOverride();
-                                                    ChatUtils.sendSystemMessage(context.getSource(), "Debug runtime override cleared (env/properties now effective)");
-                                                    return 1;
-                                                })
-                                            )
-                                        )
 	                        )
 	                        .then(literal("rl")
 	                                .then(CommandManager.argument("mode", StringArgumentType.string())
@@ -4262,13 +4263,10 @@ public class modCommandRegistry {
             return 0;
         }
 
-        int n = Math.max(1, Math.min(64, amount));
-        for (int i = 0; i < n; i++) {
-            ItemStack stack = new ItemStack(ModItems.WIZARD_TOME);
-            boolean inserted = player.getInventory().insertStack(stack);
-            if (!inserted && !stack.isEmpty()) {
-                player.dropItem(stack, false);
-            }
+        int n = WizardTomeGrantService.grant(player, amount);
+        if (n <= 0) {
+            ChatUtils.sendSystemMessage(source, "Could not grant Wizard's Tome.");
+            return 0;
         }
         ChatUtils.sendSystemMessage(source, "Gave Wizard's Tome x" + n + ".");
         return 1;
@@ -6085,6 +6083,7 @@ public class modCommandRegistry {
         Integer count = null;
         Integer ascentBlocks = null;
         Integer ascentTargetY = null;
+        boolean ascentToSurface = false;
         Integer descentBlocks = null;
         Integer descentTargetY = null;
         Set<Identifier> targetBlocks = new HashSet<>();
@@ -6100,6 +6099,12 @@ public class modCommandRegistry {
                     // Support both "ascend 5" and "ascend" (default 5 blocks).
                     if (i + 1 < tokens.length) {
                         String numStr = tokens[i + 1];
+                        if ("surface".equalsIgnoreCase(numStr)) {
+                            ascentToSurface = true;
+                            i++;
+                            LOGGER.info("Parsed ascent: climb until unobstructed sky (surface mode)");
+                            continue;
+                        }
                         try {
                             ascentBlocks = Math.abs(Integer.parseInt(numStr)); // Always positive
                             i++;
@@ -6216,6 +6221,9 @@ public class modCommandRegistry {
             }
             if (ascentTargetY != null) {
                 params.put("ascentTargetY", ascentTargetY);
+            }
+            if (ascentToSurface) {
+                params.put("ascentToSurface", true);
             }
             if (descentBlocks != null) {
                 params.put("descentBlocks", descentBlocks);
@@ -6593,6 +6601,12 @@ public class modCommandRegistry {
             private static void interruptAmbientHobbyIfAny(ServerPlayerEntity bot, String reason) {
                 if (bot == null) {
                     return;
+                }
+                try {
+                    // Any explicit player-directed task supersedes a pending resume/stop prompt.
+                    SkillResumeService.clearAndNotify(bot.getUuid());
+                } catch (Throwable ignored) {
+                    // Best-effort; command execution should not fail if resume service is unavailable.
                 }
                 try {
                     TaskService.getActiveTaskInfo(bot.getUuid()).ifPresent(info -> {

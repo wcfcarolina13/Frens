@@ -114,14 +114,17 @@ public final class BotAutoHuntService {
 
         EXECUTOR.submit(() -> {
             try {
-                SkillContext ctx = new SkillContext(botSource, net.shasankp000.FunctionCaller.FunctionCallerV2.getSharedState(), params, botSource);
+                SkillContext ctx = new SkillContext(botSource, SharedStateService.safeSharedState("auto-hunt"), params, botSource);
                 SkillExecutionResult result = SkillManager.runSkill("hunt", ctx);
                 LOGGER.info("Auto-hunt finished for {}: success={} msg='{}'",
                         bot.getName().getString(),
                         result != null && result.success(),
                         result != null ? result.message() : "null");
-            } catch (Exception e) {
-                LOGGER.warn("Auto-hunt crashed for {}: {}", bot.getName().getString(), e.getMessage(), e);
+            } catch (Throwable t) {
+                LOGGER.warn("Auto-hunt crashed for {}: {}",
+                        bot.getName().getString(),
+                        t.getClass().getSimpleName(),
+                        t);
             }
         });
     }

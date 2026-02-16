@@ -81,6 +81,9 @@ public final class FollowStateService {
     public static final Map<UUID, Integer> FOLLOW_WATER_ESCAPE_ATTEMPTS = new ConcurrentHashMap<>();
     public static final Map<UUID, Long> FOLLOW_WATER_ESCAPE_COOLDOWN_UNTIL_MS = new ConcurrentHashMap<>();
     public static final Map<UUID, Long> FOLLOW_LAST_WATER_ESCAPE_LOG_MS = new ConcurrentHashMap<>();
+    public static final Map<UUID, Integer> FOLLOW_NO_PATH_STREAK = new ConcurrentHashMap<>();
+    public static final Map<UUID, Long> FOLLOW_LAST_NO_PATH_TICK = new ConcurrentHashMap<>();
+    public static final Map<UUID, Long> FOLLOW_NEXT_REGROUP_PROMPT_TICK = new ConcurrentHashMap<>();
 
     private FollowStateService() {}
 
@@ -156,6 +159,9 @@ public final class FollowStateService {
         FOLLOW_WATER_ESCAPE_ATTEMPTS.remove(botId);
         FOLLOW_WATER_ESCAPE_COOLDOWN_UNTIL_MS.remove(botId);
         FOLLOW_LAST_WATER_ESCAPE_LOG_MS.remove(botId);
+        FOLLOW_NO_PATH_STREAK.remove(botId);
+        FOLLOW_LAST_NO_PATH_TICK.remove(botId);
+        FOLLOW_NEXT_REGROUP_PROMPT_TICK.remove(botId);
     }
 
     /**
@@ -177,6 +183,9 @@ public final class FollowStateService {
         FOLLOW_WATER_ESCAPE_VERIFY_UNTIL_TICK.remove(botId);
         FOLLOW_WATER_ESCAPE_ATTEMPTS.remove(botId);
         FOLLOW_WATER_ESCAPE_COOLDOWN_UNTIL_MS.remove(botId);
+        FOLLOW_NO_PATH_STREAK.remove(botId);
+        FOLLOW_LAST_NO_PATH_TICK.remove(botId);
+        FOLLOW_NEXT_REGROUP_PROMPT_TICK.remove(botId);
     }
 
     /**
@@ -257,6 +266,9 @@ public final class FollowStateService {
         FOLLOW_WATER_ESCAPE_ATTEMPTS.clear();
         FOLLOW_WATER_ESCAPE_COOLDOWN_UNTIL_MS.clear();
         FOLLOW_LAST_WATER_ESCAPE_LOG_MS.clear();
+        FOLLOW_NO_PATH_STREAK.clear();
+        FOLLOW_LAST_NO_PATH_TICK.clear();
+        FOLLOW_NEXT_REGROUP_PROMPT_TICK.clear();
     }
 
     /**
