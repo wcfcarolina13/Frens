@@ -111,6 +111,13 @@ public final class BotHomeService {
         return bot.getName().getString().toLowerCase(Locale.ROOT);
     }
 
+    private static String normalizeLabelKey(String label) {
+        if (label == null) {
+            return "";
+        }
+        return label.trim().toLowerCase(Locale.ROOT);
+    }
+
     private static WorldData worldData(MinecraftServer server, ServerWorld world) {
         ensureLoaded();
         String key = serverWorldKey(server, world);
@@ -480,28 +487,108 @@ public final class BotHomeService {
         if (server == null || world == null || label == null || label.isBlank() || pos == null) {
             return false;
         }
-        String normalized = label.trim().toLowerCase(Locale.ROOT);
+        String normalized = normalizeLabelKey(label);
+        String trimmed = label.trim();
         WorldData wd = worldData(server, world);
         synchronized (LOCK) {
             if (wd.basesByLabel == null) {
                 wd.basesByLabel = new HashMap<>();
             }
-            wd.basesByLabel.put(normalized, new SavedBase(label.trim(), SavedPos.from(pos)));
+            wd.basesByLabel.put(normalized, new SavedBase(trimmed, SavedPos.from(pos)));
         }
         flush();
         return true;
+    }
+
+    public static Optional<BlockPos> getBaseByLabel(MinecraftServer server, ServerWorld world, String label) {
+        if (server == null || world == null || label == null || label.isBlank()) {
+            return Optional.empty();
+        }
+        String normalized = normalizeLabelKey(label);
+        WorldData wd = worldData(server, world);
+        synchronized (LOCK) {
+            if (wd.basesByLabel == null || wd.basesByLabel.isEmpty()) {
+                return Optional.empty();
+            }
+            SavedBase base = wd.basesByLabel.get(normalized);
+            if (base == null || base.pos == null) {
+                return Optional.empty();
+            }
+            return Optional.of(base.pos.toBlockPos());
+        }
+    }
+
+    public static boolean setPreferredHomeBase(ServerPlayerEntity bot, String label) {
+        if (bot == null || !(bot.getEntityWorld() instanceof ServerWorld world)) {
+            return false;
+        }
+        MinecraftServer server = world.getServer();
+        if (server == null || label == null || label.isBlank()) {
+            return false;
+        }
+        String botId = botKey(bot);
+        if (botId.isBlank()) {
+            return false;
+        }
+        String normalized = normalizeLabelKey(label);
+        WorldData wd = worldData(server, world);
+        synchronized (LOCK) {
+            if (wd.basesByLabel == null || !wd.basesByLabel.containsKey(normalized)) {
+                return false;
+            }
+            if (wd.preferredHomeBaseByBot == null) {
+                wd.preferredHomeBaseByBot = new HashMap<>();
+            }
+            wd.preferredHomeBaseByBot.put(botId, normalized);
+        }
+        flush();
+        return true;
+    }
+
+    public static Optional<String> getPreferredHomeBaseLabel(ServerPlayerEntity bot) {
+        if (bot == null || !(bot.getEntityWorld() instanceof ServerWorld world)) {
+            return Optional.empty();
+        }
+        MinecraftServer server = world.getServer();
+        if (server == null) {
+            return Optional.empty();
+        }
+        String botId = botKey(bot);
+        if (botId.isBlank()) {
+            return Optional.empty();
+        }
+        WorldData wd = worldData(server, world);
+        synchronized (LOCK) {
+            if (wd.preferredHomeBaseByBot == null || wd.preferredHomeBaseByBot.isEmpty()
+                    || wd.basesByLabel == null || wd.basesByLabel.isEmpty()) {
+                return Optional.empty();
+            }
+            String preferredNorm = wd.preferredHomeBaseByBot.get(botId);
+            if (preferredNorm == null || preferredNorm.isBlank()) {
+                return Optional.empty();
+            }
+            SavedBase preferred = wd.basesByLabel.get(preferredNorm);
+            if (preferred == null || preferred.label == null || preferred.label.isBlank()) {
+                return Optional.empty();
+            }
+            return Optional.of(preferred.label);
+        }
     }
 
     public static boolean removeBase(MinecraftServer server, ServerWorld world, String label) {
         if (server == null || world == null || label == null || label.isBlank()) {
             return false;
         }
-        String normalized = label.trim().toLowerCase(Locale.ROOT);
+        String normalized = normalizeLabelKey(label);
         WorldData wd = worldData(server, world);
         boolean removed = false;
         synchronized (LOCK) {
             if (wd.basesByLabel != null) {
                 removed = wd.basesByLabel.remove(normalized) != null;
+            }
+            if (removed && wd.preferredHomeBaseByBot != null && !wd.preferredHomeBaseByBot.isEmpty()) {
+                wd.preferredHomeBaseByBot.entrySet().removeIf(e ->
+                        e != null && normalized.equals(e.getValue()));
             }
         }
         if (removed) {
@@ -518,9 +605,9 @@ public final class BotHomeService {
             return false;
         }
 
-        String oldNorm = oldLabel.trim().toLowerCase(Locale.ROOT);
+        String oldNorm = normalizeLabelKey(oldLabel);
         String newTrim = newLabel.trim();
-        String newNorm = newTrim.toLowerCase(Locale.ROOT);
+        String newNorm = normalizeLabelKey(newTrim);
 
         WorldData wd = worldData(server, world);
         boolean changed = false;
@@ -546,6 +633,16 @@ public final class BotHomeService {
                 wd.basesByLabel.remove(oldNorm);
                 wd.basesByLabel.put(newNorm, new SavedBase(newTrim, existing.pos));
                 changed = true;
+            }
+
+            if (changed && !oldNorm.equals(newNorm)
+                    && wd.preferredHomeBaseByBot != null
+                    && !wd.preferredHomeBaseByBot.isEmpty()) {
+                for (Map.Entry<String, String> entry : wd.preferredHomeBaseByBot.entrySet()) {
+                    if (entry != null && oldNorm.equals(entry.getValue())) {
+                        entry.setValue(newNorm);
+                    }
+                }
             }
         }
 
@@ -621,6 +718,10 @@ public final class BotHomeService {
         if (bot == null) {
             return Optional.empty();
         }
+        Optional<BlockPos> preferredHome = resolvePreferredHomeBase(bot);
+        if (preferredHome.isPresent()) {
+            return preferredHome;
+        }
         Optional<BlockPos> slept = getLastSleep(bot);
         Optional<BlockPos> base = findNearestBase(bot);
 
@@ -637,6 +738,37 @@ public final class BotHomeService {
         return sleptSq <= baseSq ? slept : base;
     }
 
+    private static Optional<BlockPos> resolvePreferredHomeBase(ServerPlayerEntity bot) {
+        if (bot == null || !(bot.getEntityWorld() instanceof ServerWorld world)) {
+            return Optional.empty();
+        }
+        MinecraftServer server = world.getServer();
+        if (server == null) {
+            return Optional.empty();
+        }
+        String botId = botKey(bot);
+        if (botId.isBlank()) {
+            return Optional.empty();
+        }
+
+        WorldData wd = worldData(server, world);
+        synchronized (LOCK) {
+            if (wd.preferredHomeBaseByBot == null || wd.preferredHomeBaseByBot.isEmpty()
+                    || wd.basesByLabel == null || wd.basesByLabel.isEmpty()) {
+                return Optional.empty();
+            }
+            String preferredNorm = wd.preferredHomeBaseByBot.get(botId);
+            if (preferredNorm == null || preferredNorm.isBlank()) {
+                return Optional.empty();
+            }
+            SavedBase preferred = wd.basesByLabel.get(preferredNorm);
+            if (preferred == null || preferred.pos == null) {
+                return Optional.empty();
+            }
+            return Optional.of(preferred.pos.toBlockPos());
+        }
+    }
+
     private static final class RootData {
         Map<String, WorldData> worlds = new HashMap<>();
     }
@@ -649,6 +781,7 @@ public final class BotHomeService {
         Map<String, Boolean> idleHobbiesEnabledByBot = new HashMap<>();
         Map<String, Boolean> autoHuntStarvingEnabledByBot = new HashMap<>();
         Map<String, SavedBase> basesByLabel = new HashMap<>();
+        Map<String, String> preferredHomeBaseByBot = new HashMap<>();
     }
 
     private static final class SavedBase {

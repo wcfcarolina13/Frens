@@ -12,9 +12,11 @@ import net.minecraft.client.gui.widget.ButtonWidget;
 import net.minecraft.client.gui.widget.TextFieldWidget;
 import net.minecraft.text.Text;
 import net.minecraft.util.math.MathHelper;
+import net.shasankp000.network.BaseGoToPayload;
 import net.shasankp000.network.BaseRemovePayload;
 import net.shasankp000.network.BaseRenamePayload;
 import net.shasankp000.network.BaseSetPayload;
+import net.shasankp000.network.BaseSetHomePayload;
 import net.shasankp000.network.RequestBasesPayload;
 
 import java.lang.reflect.Type;
@@ -30,7 +32,7 @@ public class BaseManagerScreen extends Screen {
     private static final Gson GSON = new GsonBuilder().disableHtmlEscaping().create();
     private static final Type BASE_LIST_TYPE = new TypeToken<List<BaseDto>>() {}.getType();
 
-    public record BaseDto(String label, int x, int y, int z) {}
+    public record BaseDto(String label, int x, int y, int z, boolean home) {}
 
     private static List<BaseDto> LAST_BASES = List.of();
 
@@ -48,6 +50,7 @@ public class BaseManagerScreen extends Screen {
     }
 
     private final Screen parent;
+    private final String botAlias;
 
     private TextFieldWidget nameField;
 
@@ -65,8 +68,13 @@ public class BaseManagerScreen extends Screen {
     private static final int LIST_MIN_H = 60;
 
     public BaseManagerScreen(Screen parent) {
+        this(parent, "");
+    }
+
+    public BaseManagerScreen(Screen parent, String botAlias) {
         super(Text.literal("Bases"));
         this.parent = parent;
+        this.botAlias = botAlias != null ? botAlias.trim() : "";
     }
 
     @Override
@@ -93,8 +101,16 @@ public class BaseManagerScreen extends Screen {
         this.addDrawableChild(ButtonWidget.builder(Text.literal("Rename"), (btn) -> sendRenameSelected())
                 .dimensions(cx - 110, btnY2, 70, 20)
                 .build());
-        this.addDrawableChild(ButtonWidget.builder(Text.literal("Close"), (btn) -> close())
+        this.addDrawableChild(ButtonWidget.builder(Text.literal("Set Home"), (btn) -> sendSetHomeSelected())
+                .dimensions(cx - 36, btnY2, 70, 20)
+                .build());
+        this.addDrawableChild(ButtonWidget.builder(Text.literal("Go To Base"), (btn) -> sendGoToSelected())
                 .dimensions(cx + 38, btnY2, 70, 20)
+                .build());
+
+        int btnY3 = btnY2 + CONTROL_ROW_DY;
+        this.addDrawableChild(ButtonWidget.builder(Text.literal("Close"), (btn) -> close())
+                .dimensions(cx - 36, btnY3, 70, 20)
                 .build());
 
         requestRefresh();
@@ -102,7 +118,7 @@ public class BaseManagerScreen extends Screen {
 
     private void requestRefresh() {
         if (ClientPlayNetworking.canSend(RequestBasesPayload.ID)) {
-            ClientPlayNetworking.send(new RequestBasesPayload(""));
+            ClientPlayNetworking.send(new RequestBasesPayload(botAlias));
         }
     }
 
@@ -114,6 +130,7 @@ public class BaseManagerScreen extends Screen {
         if (ClientPlayNetworking.canSend(BaseSetPayload.ID)) {
             ClientPlayNetworking.send(new BaseSetPayload(label));
         }
+        requestRefresh();
     }
 
     private void sendRemoveSelected() {
@@ -124,6 +141,7 @@ public class BaseManagerScreen extends Screen {
         if (ClientPlayNetworking.canSend(BaseRemovePayload.ID)) {
             ClientPlayNetworking.send(new BaseRemovePayload(selected.label));
         }
+        requestRefresh();
     }
 
     private void sendRenameSelected() {
@@ -138,6 +156,29 @@ public class BaseManagerScreen extends Screen {
         if (ClientPlayNetworking.canSend(BaseRenamePayload.ID)) {
             ClientPlayNetworking.send(new BaseRenamePayload(selected.label, newLabel));
         }
+        requestRefresh();
+    }
+
+    private void sendSetHomeSelected() {
+        BaseDto selected = getSelected();
+        if (selected == null || selected.label == null || selected.label.isBlank() || botAlias.isBlank()) {
+            return;
+        }
+        if (ClientPlayNetworking.canSend(BaseSetHomePayload.ID)) {
+            ClientPlayNetworking.send(new BaseSetHomePayload(botAlias, selected.label));
+        }
+        requestRefresh();
+    }
+
+    private void sendGoToSelected() {
+        BaseDto selected = getSelected();
+        if (selected == null || selected.label == null || selected.label.isBlank() || botAlias.isBlank()) {
+            return;
+        }
+        if (ClientPlayNetworking.canSend(BaseGoToPayload.ID)) {
+            ClientPlayNetworking.send(new BaseGoToPayload(botAlias, selected.label));
+        }
+        requestRefresh();
     }
 
     private BaseDto getSelected() {
@@ -203,7 +244,7 @@ public class BaseManagerScreen extends Screen {
         context.drawCenteredTextWithShadow(this.textRenderer, this.title, cx, 10, 0xFFFFFF);
 
         Rect list = listRect();
-        String hint = "Tip: Select a base, edit the name field, then click Rename.";
+        String hint = "Tip: Select a base, then use Rename / Set Home / Go To Base.";
         context.drawCenteredTextWithShadow(this.textRenderer, Text.literal(hint), cx, list.bottom() + 6, 0xFFB0B0B0);
     }
 
@@ -228,7 +269,8 @@ public class BaseManagerScreen extends Screen {
             int bg = selected ? 0xFF3A2C14 : 0xFF1A1A1A;
             context.fill(list.x + 2, rowY + 1, list.right() - 2, rowY + ROW_H - 1, bg);
 
-            String label = b != null && b.label != null ? b.label : "(unnamed)";
+            String rawLabel = b != null && b.label != null ? b.label : "(unnamed)";
+            String label = (b != null && b.home ? "[Home] " : "") + rawLabel;
             String coords = b != null ? ("(" + b.x + ", " + b.y + ", " + b.z + ")") : "";
             context.drawTextWithShadow(this.textRenderer, label, list.x + 6, rowY + 2, 0xFFEFEFEF);
             int coordsW = this.textRenderer.getWidth(coords);
@@ -240,7 +282,7 @@ public class BaseManagerScreen extends Screen {
         int cx = this.width / 2;
         int x = cx - 110;
         // Below the 2nd button row (+ a small gap). Prevents list background from overlapping controls.
-        int y = TOP_Y + (CONTROL_ROW_DY * 2) + BUTTON_H + LIST_TOP_GAP;
+        int y = TOP_Y + (CONTROL_ROW_DY * 3) + BUTTON_H + LIST_TOP_GAP;
         int w = 220;
         int h = Math.max(LIST_MIN_H, this.height - y - LIST_BOTTOM_MARGIN);
         return new Rect(x, y, w, h);

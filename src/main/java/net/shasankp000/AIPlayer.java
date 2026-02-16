@@ -419,6 +419,8 @@ public class AIPlayer implements ModInitializer {
         PayloadTypeRegistry.playC2S().register(net.shasankp000.network.BaseSetPayload.ID, net.shasankp000.network.BaseSetPayload.CODEC);
         PayloadTypeRegistry.playC2S().register(net.shasankp000.network.BaseRemovePayload.ID, net.shasankp000.network.BaseRemovePayload.CODEC);
         PayloadTypeRegistry.playC2S().register(net.shasankp000.network.BaseRenamePayload.ID, net.shasankp000.network.BaseRenamePayload.CODEC);
+        PayloadTypeRegistry.playC2S().register(net.shasankp000.network.BaseSetHomePayload.ID, net.shasankp000.network.BaseSetHomePayload.CODEC);
+        PayloadTypeRegistry.playC2S().register(net.shasankp000.network.BaseGoToPayload.ID, net.shasankp000.network.BaseGoToPayload.CODEC);
         PayloadTypeRegistry.playC2S().register(net.shasankp000.network.RequestCraftingHistoryPayload.ID, net.shasankp000.network.RequestCraftingHistoryPayload.CODEC);
         PayloadTypeRegistry.playS2C().register(net.shasankp000.network.CraftingHistoryPayload.ID, net.shasankp000.network.CraftingHistoryPayload.CODEC);
         PayloadTypeRegistry.playC2S().register(net.shasankp000.network.RequestCookablesPayload.ID, net.shasankp000.network.RequestCookablesPayload.CODEC);

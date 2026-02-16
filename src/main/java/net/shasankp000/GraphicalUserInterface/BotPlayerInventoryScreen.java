@@ -2891,7 +2891,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         if (this.client == null) {
             return;
         }
-        this.client.setScreen(new BaseManagerScreen(this));
+        this.client.setScreen(new BaseManagerScreen(this, botAlias));
     }
 
     private void openCraftingHistory() {

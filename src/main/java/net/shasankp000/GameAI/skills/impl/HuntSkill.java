@@ -3,11 +3,18 @@ package net.shasankp000.GameAI.skills.impl;
 import net.minecraft.component.DataComponentTypes;
 import net.minecraft.component.type.FoodComponent;
 import net.minecraft.entity.Entity;
+import net.minecraft.entity.passive.AbstractHorseEntity;
+import net.minecraft.entity.passive.TameableEntity;
 import net.minecraft.entity.LivingEntity;
+import net.minecraft.block.BlockState;
+import net.minecraft.block.Blocks;
+import net.minecraft.block.DoorBlock;
+import net.minecraft.block.FenceGateBlock;
 import net.minecraft.inventory.Inventory;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
+import net.minecraft.registry.tag.BlockTags;
 import net.minecraft.registry.tag.ItemTags;
 import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.network.ServerPlayerEntity;
@@ -15,6 +22,7 @@ import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Box;
+import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 import net.shasankp000.ChatUtils.ChatUtils;
 import net.shasankp000.GameAI.BotActions;
@@ -25,6 +33,8 @@ import net.shasankp000.GameAI.services.ToolProvisionService;
 import net.shasankp000.GameAI.services.HuntCatalog;
 import net.shasankp000.GameAI.services.HuntHistoryService;
 import net.shasankp000.GameAI.services.MovementService;
+import net.shasankp000.GameAI.services.ProtectedZoneService;
+import net.shasankp000.GameAI.services.CompanionOverheadDialogueService;
 import net.shasankp000.GameAI.services.ReturnBaseStuckService;
 import net.shasankp000.GameAI.services.SmeltingService;
 import net.shasankp000.GameAI.services.DebugFileLogger;
@@ -33,6 +43,7 @@ import net.shasankp000.GameAI.skills.SkillContext;
 import net.shasankp000.GameAI.skills.SkillExecutionResult;
 import net.shasankp000.GameAI.skills.SkillManager;
 import net.shasankp000.GameAI.skills.SkillPreferences;
+import net.shasankp000.GameAI.skills.support.TreeDetector;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -53,6 +64,8 @@ public final class HuntSkill implements Skill {
     private static final int FOOD_CONTAINER_RADIUS = 12;
     private static final int FOOD_CONTAINER_YSPAN = 4;
     private static final int MIN_PEACEFUL_COUNT = 3;
+    private static final int HOBBY_BASE_BUFFER_RADIUS = 24;
+    private static final int HOBBY_PROTECTED_BUFFER_RADIUS = 28;
     private static final double ATTACK_RANGE_SQ = 9.0D;
     private static final long ATTACK_TIMEOUT_MS = 12_000L;
     private static final long SWEEP_INTERVAL_MS = 12_000L;
@@ -74,6 +87,12 @@ public final class HuntSkill implements Skill {
             Items.TROPICAL_FISH,
             Items.PUFFERFISH
     );
+    private static final String[] HOBBY_HUNT_LINES = new String[] {
+            "Going for a hunt.",
+            "Let me track something down.",
+            "I'll bring back some food.",
+            "Time to scout for wild game."
+    };
 
     @Override
     public String name() {
@@ -138,6 +157,17 @@ public final class HuntSkill implements Skill {
 
         String targetLabel = explicitTarget != null ? explicitTarget.label() : "food mobs";
         String countLabel = request.targetCount == Integer.MAX_VALUE ? "until sunset" : Integer.toString(request.targetCount);
+        if (request.hobby()) {
+            ChatUtils.sendSystemMessage(source, "Going for a hunt.");
+            CompanionOverheadDialogueService.showOverheadLine(
+                    bot,
+                    HOBBY_HUNT_LINES[(int) (Math.random() * HOBBY_HUNT_LINES.length)],
+                    3_000,
+                    32.0D,
+                    "hunt-hobby-start",
+                    "ambient"
+            );
+        }
         ChatUtils.sendSystemMessage(source, "Hunting " + targetLabel + " (" + countLabel + ").");
 
         List<BlockPos> anchors = buildHuntAnchors(bot, world);
@@ -169,7 +199,7 @@ public final class HuntSkill implements Skill {
                 return SkillExecutionResult.failure("I need a weapon to hunt.");
             }
 
-            HuntCandidate candidate = findCandidate(world, bot, anchors, unlocked, explicitTarget);
+            HuntCandidate candidate = findCandidate(world, bot, anchors, unlocked, explicitTarget, request.hobby());
             if (candidate == null || candidate.entity == null) {
                 LOGGER.info("Hunt candidate not found (explicitTarget={})", explicitTarget != null);
                 if (explicitTarget != null) {
@@ -186,7 +216,7 @@ public final class HuntSkill implements Skill {
             }
 
             if (candidate.target.peaceful()) {
-                int count = countTargets(world, anchors, candidate.target);
+                int count = countTargets(world, bot, anchors, candidate.target, request.hobby());
                 if (count < MIN_PEACEFUL_COUNT) {
                     if (explicitTarget != null) {
                         runDropSweep(source, bot);
@@ -369,13 +399,23 @@ public final class HuntSkill implements Skill {
         return anchors;
     }
 
+    public static boolean hasAmbientHuntCandidate(ServerPlayerEntity bot, ServerWorld world) {
+        if (bot == null || world == null) {
+            return false;
+        }
+        Set<Identifier> unlocked = HuntHistoryService.getWorldHistory(world);
+        List<BlockPos> anchors = buildHuntAnchors(bot, world);
+        return findCandidate(world, bot, anchors, unlocked, null, true) != null;
+    }
+
     private static HuntCandidate findCandidate(ServerWorld world,
                                                ServerPlayerEntity bot,
                                                List<BlockPos> anchors,
                                                Set<Identifier> unlocked,
-                                               HuntCatalog.HuntTarget explicit) {
+                                               HuntCatalog.HuntTarget explicit,
+                                               boolean hobbyMode) {
         if (explicit != null) {
-            List<LivingEntity> entities = findTargets(world, anchors, explicit);
+            List<LivingEntity> entities = findTargets(world, bot, anchors, explicit, hobbyMode);
             LivingEntity nearest = entities.stream()
                     .min(Comparator.comparingDouble(e -> e.squaredDistanceTo(bot)))
                     .orElse(null);
@@ -391,12 +431,12 @@ public final class HuntSkill implements Skill {
                 continue;
             }
             if (target.peaceful()) {
-                int count = countTargets(world, anchors, target);
+                int count = countTargets(world, bot, anchors, target, hobbyMode);
                 if (count < MIN_PEACEFUL_COUNT) {
                     continue;
                 }
             }
-            List<LivingEntity> entities = findTargets(world, anchors, target);
+            List<LivingEntity> entities = findTargets(world, bot, anchors, target, hobbyMode);
             LivingEntity nearest = entities.stream()
                     .min(Comparator.comparingDouble(e -> e.squaredDistanceTo(bot)))
                     .orElse(null);
@@ -411,25 +451,172 @@ public final class HuntSkill implements Skill {
         return best;
     }
 
-    private static List<LivingEntity> findTargets(ServerWorld world, List<BlockPos> anchors, HuntCatalog.HuntTarget target) {
+    private static List<LivingEntity> findTargets(ServerWorld world,
+                                                  ServerPlayerEntity bot,
+                                                  List<BlockPos> anchors,
+                                                  HuntCatalog.HuntTarget target,
+                                                  boolean hobbyMode) {
         Box box = buildSearchBox(anchors);
         List<LivingEntity> out = new ArrayList<>();
         world.getEntitiesByType(target.type(), box, Entity::isAlive).forEach(entity -> {
             if (entity instanceof LivingEntity living && withinAnchors(anchors, new Vec3d(
-                    living.getX(), living.getY(), living.getZ()))) {
+                    living.getX(), living.getY(), living.getZ()))
+                    && isEligibleHuntTarget(world, bot, living, hobbyMode)) {
                 out.add(living);
             }
         });
         return out;
     }
 
-    private static int countTargets(ServerWorld world, List<BlockPos> anchors, HuntCatalog.HuntTarget target) {
+    private static int countTargets(ServerWorld world,
+                                    ServerPlayerEntity bot,
+                                    List<BlockPos> anchors,
+                                    HuntCatalog.HuntTarget target,
+                                    boolean hobbyMode) {
         Box box = buildSearchBox(anchors);
         return world.getEntitiesByType(target.type(), box, Entity::isAlive)
                 .stream()
-                .mapToInt(entity -> withinAnchors(anchors, new Vec3d(
-                        entity.getX(), entity.getY(), entity.getZ())) ? 1 : 0)
+                .mapToInt(entity -> {
+                    if (!(entity instanceof LivingEntity living)) {
+                        return 0;
+                    }
+                    boolean within = withinAnchors(anchors, new Vec3d(entity.getX(), entity.getY(), entity.getZ()));
+                    return within && isEligibleHuntTarget(world, bot, living, hobbyMode) ? 1 : 0;
+                })
                 .sum();
+    }
+
+    private static boolean isEligibleHuntTarget(ServerWorld world,
+                                                ServerPlayerEntity bot,
+                                                LivingEntity living,
+                                                boolean hobbyMode) {
+        if (living == null || living.isRemoved() || !living.isAlive()) {
+            return false;
+        }
+        if (living.isBaby()) {
+            return false;
+        }
+        if (!hobbyMode) {
+            return true;
+        }
+        BlockPos pos = living.getBlockPos();
+        if (isDomesticated(living)) {
+            return false;
+        }
+        if (isNearSavedBase(bot, world, pos, HOBBY_BASE_BUFFER_RADIUS)) {
+            return false;
+        }
+        if (isNearProtectedZone(world, pos, HOBBY_PROTECTED_BUFFER_RADIUS)) {
+            return false;
+        }
+        if (isLikelyEnclosedByPlayerBuild(world, pos)) {
+            return false;
+        }
+        if (TreeDetector.isNearHumanBlocks(world, pos, 5)) {
+            return false;
+        }
+        return true;
+    }
+
+    private static boolean isDomesticated(LivingEntity living) {
+        if (living instanceof TameableEntity tameable && tameable.isTamed()) {
+            return true;
+        }
+        if (living instanceof AbstractHorseEntity horse && horse.isTame()) {
+            return true;
+        }
+        return living.hasCustomName();
+    }
+
+    private static boolean isNearSavedBase(ServerPlayerEntity bot, ServerWorld world, BlockPos pos, int radius) {
+        if (bot == null || world == null || pos == null || radius <= 0) {
+            return false;
+        }
+        double rSq = (double) radius * radius;
+        Optional<BlockPos> bed = BotHomeService.getLastSleep(bot);
+        if (bed.isPresent() && bed.get().getSquaredDistance(pos) <= rSq) {
+            return true;
+        }
+        if (world.getServer() != null) {
+            for (BotHomeService.BaseEntry base : BotHomeService.listBases(world.getServer(), world)) {
+                if (base.pos() != null && base.pos().getSquaredDistance(pos) <= rSq) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private static boolean isNearProtectedZone(ServerWorld world, BlockPos pos, int radius) {
+        if (world == null || pos == null || radius <= 0) {
+            return false;
+        }
+        if (ProtectedZoneService.isProtected(pos, world, null)) {
+            return true;
+        }
+        double r = Math.max(1, radius);
+        double rSq = r * r;
+        for (ProtectedZoneService.ProtectedZone zone : ProtectedZoneService.listZones(world)) {
+            if (zone == null || zone.getCenter() == null) {
+                continue;
+            }
+            double buffer = zone.getRadius() + r;
+            double dSq = zone.getCenter().getSquaredDistance(pos);
+            if (dSq <= buffer * buffer || dSq <= rSq) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean isLikelyEnclosedByPlayerBuild(ServerWorld world, BlockPos origin) {
+        if (world == null || origin == null) {
+            return false;
+        }
+        int barrierBlocks = 0;
+        int solidBlocks = 0;
+        int cardinalBlocked = 0;
+
+        for (Direction dir : Direction.Type.HORIZONTAL) {
+            BlockPos p = origin.offset(dir);
+            BlockState s = world.getBlockState(p);
+            if (isBarrierBlock(s)) {
+                cardinalBlocked++;
+            }
+        }
+        if (cardinalBlocked >= 3) {
+            return true;
+        }
+
+        for (BlockPos pos : BlockPos.iterate(origin.add(-2, -1, -2), origin.add(2, 2, 2))) {
+            if (!world.isChunkLoaded(pos)) {
+                continue;
+            }
+            BlockState state = world.getBlockState(pos);
+            if (state == null || state.isAir()) {
+                continue;
+            }
+            if (isBarrierBlock(state)) {
+                barrierBlocks++;
+            }
+            if (state.isFullCube(world, pos)) {
+                solidBlocks++;
+            }
+        }
+        return barrierBlocks >= 8 || solidBlocks >= 30;
+    }
+
+    private static boolean isBarrierBlock(BlockState state) {
+        if (state == null) {
+            return false;
+        }
+        if (state.isIn(BlockTags.FENCES) || state.isIn(BlockTags.WALLS)) {
+            return true;
+        }
+        if (state.getBlock() instanceof FenceGateBlock || state.getBlock() instanceof DoorBlock) {
+            return true;
+        }
+        return state.isOf(Blocks.IRON_BARS);
     }
 
     private static Box buildSearchBox(List<BlockPos> anchors) {

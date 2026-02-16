@@ -145,6 +145,18 @@ public class AIPlayerClient implements ClientModInitializer {
     // selections do not leak through to vanilla hotbar switching.
     private static int overlayHotbarLockedSlot = -1;
 
+    private static final int TOP_TIP_MARGIN = 4;
+    private static final int TOP_TIP_GAP = 4;
+    private static int topTipLeftY = TOP_TIP_MARGIN;
+    private static int topTipCenterY = TOP_TIP_MARGIN;
+    private static int topTipRightY = TOP_TIP_MARGIN;
+
+    private enum TopTipLane {
+        LEFT,
+        CENTER,
+        RIGHT
+    }
+
     // Expose recruitment UI state to other client UI surfaces (e.g., bot inventory overlay).
     public static boolean isSurvivalRecruitmentEnabled() {
         return survivalRecruitmentEnabled;
@@ -460,11 +472,19 @@ public class AIPlayerClient implements ClientModInitializer {
                 handleLeashKey(client);
             }
             if (KEY_RECRUIT_CONTACT.wasPressed()) {
+                // When go-to key and recruit key share the same physical key, the go-to branch above
+                // already handled this press. Avoid a second contextual pass that can open spells.
+                if (goToPressed) {
+                    // no-op
+                } else if (shouldForceGoToLookStorageContext(client)) {
+                    handleGoToLook(client);
+                } else {
                 // Context key (default '-'):
                 // - During recruitment: initiates contact.
                 // - After recruitment: opens companion spells when available.
-                if (!handleSpellsContextKey(client)) {
-                    handleRecruitContactKey(client);
+                    if (!handleSpellsContextKey(client)) {
+                        handleRecruitContactKey(client);
+                    }
                 }
             }
 
@@ -672,6 +692,7 @@ public class AIPlayerClient implements ClientModInitializer {
             });
         });
 
+        HudRenderCallback.EVENT.register((context, tickDelta) -> resetTopTipLayout(context));
         HudRenderCallback.EVENT.register((context, tickDelta) -> renderResumeDecisionHint(context));
         HudRenderCallback.EVENT.register((context, tickDelta) -> renderLeashButton(context));
         HudRenderCallback.EVENT.register((context, tickDelta) -> renderRecruitmentPrompt(context));
@@ -687,6 +708,33 @@ public class AIPlayerClient implements ClientModInitializer {
 
         // Apply/expire overhead dialogue each tick (client-only nameplate override).
         ClientTickEvents.END_CLIENT_TICK.register(AIPlayerClient::tickOverheadDialogue);
+    }
+
+    private static void resetTopTipLayout(DrawContext context) {
+        topTipLeftY = TOP_TIP_MARGIN;
+        topTipCenterY = TOP_TIP_MARGIN;
+        topTipRightY = TOP_TIP_MARGIN;
+    }
+
+    private static int reserveTopTipY(TopTipLane lane, int tipHeight) {
+        int height = Math.max(1, tipHeight);
+        int y;
+        switch (lane) {
+            case LEFT -> {
+                y = topTipLeftY;
+                topTipLeftY += height + TOP_TIP_GAP;
+            }
+            case RIGHT -> {
+                y = topTipRightY;
+                topTipRightY += height + TOP_TIP_GAP;
+            }
+            case CENTER -> {
+                y = topTipCenterY;
+                topTipCenterY += height + TOP_TIP_GAP;
+            }
+            default -> y = TOP_TIP_MARGIN;
+        }
+        return y;
     }
 
     private static void handleRecruitContactKey(MinecraftClient client) {
@@ -731,8 +779,8 @@ public class AIPlayerClient implements ClientModInitializer {
         int w2 = client.textRenderer.getWidth(line2);
         int maxW = Math.max(w1, w2);
         int x = 12;
-        int y = 10;
         int boxH = client.textRenderer.fontHeight * 2 + 6;
+        int y = reserveTopTipY(TopTipLane.LEFT, boxH + 7);
 
         context.fill(x - 6, y - 4, x + maxW + 6, y + boxH, 0xAA101010);
         context.fill(x - 7, y - 5, x + maxW + 7, y - 4, 0xFF4A4A4A);
@@ -827,8 +875,8 @@ public class AIPlayerClient implements ClientModInitializer {
 
         int margin = 12;
         int x = Math.max(margin, client.getWindow().getScaledWidth() - margin - maxW);
-        int y = 10;
         int boxH = client.textRenderer.fontHeight * 2 + 6;
+        int y = reserveTopTipY(TopTipLane.RIGHT, boxH + 7);
 
         context.fill(x - 6, y - 4, x + maxW + 6, y + boxH, 0xAA101010);
         context.fill(x - 7, y - 5, x + maxW + 7, y - 4, 0xFF4A4A4A);
@@ -842,6 +890,9 @@ public class AIPlayerClient implements ClientModInitializer {
 
     private static boolean handleSpellsContextKey(MinecraftClient client) {
         if (client == null || client.player == null || client.currentScreen != null) {
+            return false;
+        }
+        if (shouldForceGoToLookStorageContext(client)) {
             return false;
         }
         // If '-' is currently reserved for a pending directional/shelter confirm flow,
@@ -918,9 +969,8 @@ public class AIPlayerClient implements ClientModInitializer {
         int w2 = client.textRenderer.getWidth(line2);
         int maxW = Math.max(w1, w2);
         int x = 12;
-        // Stack beneath the recruitment prompt area.
-        int y = 10 + (client.textRenderer.fontHeight * 2 + 10);
         int boxH = client.textRenderer.fontHeight * 2 + 6;
+        int y = reserveTopTipY(TopTipLane.LEFT, boxH + 7);
 
         context.fill(x - 6, y - 4, x + maxW + 6, y + boxH, 0xAA101010);
         context.fill(x - 7, y - 5, x + maxW + 7, y - 4, 0xFF4A4A4A);
@@ -1409,7 +1459,7 @@ public class AIPlayerClient implements ClientModInitializer {
         String line = "Select direction to " + action + ". Press [" + goToKey + "] to confirm or [" + stopKey + "] to cancel.";
         int w = client.textRenderer.getWidth(line);
         int x = (context.getScaledWindowWidth() - w) / 2;
-        int y = 34;
+        int y = reserveTopTipY(TopTipLane.CENTER, client.textRenderer.fontHeight + 9);
 
         context.fill(x - 6, y - 4, x + w + 6, y + client.textRenderer.fontHeight + 4, 0xAA101010);
         context.drawTextWithShadow(client.textRenderer, line, x, y, 0xFFE6D7A3);
@@ -1511,7 +1561,7 @@ public class AIPlayerClient implements ClientModInitializer {
 
         int w = client.textRenderer.getWidth(line);
         int x = (context.getScaledWindowWidth() - w) / 2;
-        int y = hasPendingDirectionalMining() ? 50 : 34;
+        int y = reserveTopTipY(TopTipLane.CENTER, client.textRenderer.fontHeight + 9);
 
         context.fill(x - 6, y - 4, x + w + 6, y + client.textRenderer.fontHeight + 4, 0xAA101010);
         context.drawTextWithShadow(client.textRenderer, line, x, y, 0xFFE6D7A3);
@@ -1763,7 +1813,7 @@ public class AIPlayerClient implements ClientModInitializer {
         int w3 = client.textRenderer.getWidth(line3);
         int maxWidth = Math.max(w1, Math.max(w2, w3));
         int x = (context.getScaledWindowWidth() - maxWidth) / 2;
-        int y = 10;
+        int y = reserveTopTipY(TopTipLane.CENTER, client.textRenderer.fontHeight * 3 + 13);
         context.fill(x - 6, y - 4, x + maxWidth + 6, y + client.textRenderer.fontHeight * 3 + 8, 0xAA101010);
         context.drawTextWithShadow(client.textRenderer, line1, x, y, 0xFFE6D7A3);
         context.drawTextWithShadow(client.textRenderer, line2, x, y + client.textRenderer.fontHeight + 2, 0xFFB8A76A);

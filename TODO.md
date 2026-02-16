@@ -60,6 +60,7 @@ Canonical in-game verification checklist: `docs/testing/IN_GAME_AUDIT_MASTER.md`
 - [ ] Shift-click, double-click, drag support
 - [ ] Quick-action buttons (Sort, Equip Best, Take All, Give All)
 - [ ] Bundle packing verification: drop_sweep crafts/uses bundles when inventory is truly full.
+- [ ] Chest management overhaul (future): locking/access policy for bot interaction, chest categorization rules (what can go in), and organization modes (single-chest, multi-chest, and selectable sorting styles).
 
 ### Navigation & Movement
 - [ ] Swimming parity (surface and underwater)

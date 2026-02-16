@@ -15,9 +15,12 @@ import net.shasankp000.GameAI.skills.impl.FeedAnimalsSkill;
 import net.shasankp000.GameAI.skills.impl.FishingSkill;
 import net.shasankp000.GameAI.skills.impl.FlowerPickSkill;
 import net.shasankp000.GameAI.skills.impl.HuntSkill;
+import net.shasankp000.GameAI.skills.impl.LeafLitterSkill;
 import net.shasankp000.GameAI.skills.impl.MiningSkill;
+import net.shasankp000.GameAI.skills.impl.MushroomForageSkill;
 import net.shasankp000.GameAI.skills.impl.ShelterSkill;
 import net.shasankp000.GameAI.skills.impl.StripMineSkill;
+import net.shasankp000.GameAI.skills.impl.WanderSkill;
 import net.shasankp000.GameAI.skills.impl.WoodcutCleanupSkill;
 import net.shasankp000.GameAI.skills.impl.WoodcutSkill;
 import org.slf4j.Logger;
@@ -61,6 +64,9 @@ public final class SkillManager {
         register(new FeedAnimalsSkill());
         register(new FlowerPickSkill());
         register(new HuntSkill());
+        register(new WanderSkill());
+        register(new LeafLitterSkill());
+        register(new MushroomForageSkill());
         DebugFileLogger.log("SkillManager.staticInit end");
     }
 

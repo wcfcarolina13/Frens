@@ -16,6 +16,7 @@ import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.World;
 import net.shasankp000.AIPlayer;
 import net.shasankp000.GameAI.BotEventHandler;
+import net.shasankp000.GameAI.skills.impl.HuntSkill;
 import net.shasankp000.GameAI.skills.SkillContext;
 import net.shasankp000.GameAI.skills.SkillExecutionResult;
 import net.shasankp000.GameAI.skills.SkillManager;
@@ -51,7 +52,7 @@ public final class BotIdleHobbiesService {
 
     private static final Map<UUID, Long> NEXT_DECISION_TICK = new ConcurrentHashMap<>();
     private static final long BLOCKED_REASON_LOG_INTERVAL_TICKS = 20L * 45L;
-    private static final Map<UUID, String> LAST_BLOCKED_REASON = new ConcurrentHashMap<>();
+    private static final Map<UUID, String> LAST_BLOCKED_REASON_KEY = new ConcurrentHashMap<>();
     private static final Map<UUID, Long> LAST_BLOCKED_REASON_LOG_TICK = new ConcurrentHashMap<>();
 
     // When a bot first appears in the current server session, delay idle-hobby starts briefly.
@@ -76,7 +77,7 @@ public final class BotIdleHobbiesService {
         LAST_HOBBY.clear();
         LAST_HOBBY_END_MS.clear();
         FIRST_SEEN_TICK.clear();
-        LAST_BLOCKED_REASON.clear();
+        LAST_BLOCKED_REASON_KEY.clear();
         LAST_BLOCKED_REASON_LOG_TICK.clear();
     }
 
@@ -183,7 +184,7 @@ public final class BotIdleHobbiesService {
 
             // Only start hobbies when truly idle (not following, not guard/patrol, not returning).
             if (BotEventHandler.getCurrentMode(bot) != BotEventHandler.Mode.IDLE) {
-                noteBlocked(bot, nowTick, "mode-not-idle:" + BotEventHandler.getCurrentMode(bot));
+                noteBlocked(bot, nowTick, "mode-not-idle", String.valueOf(BotEventHandler.getCurrentMode(bot)));
                 continue;
             }
 
@@ -230,7 +231,7 @@ public final class BotIdleHobbiesService {
             }
 
             if (nowTick < next) {
-                noteBlocked(bot, nowTick, "backoff:" + (next - nowTick) + "t");
+                noteBlocked(bot, nowTick, "backoff", (next - nowTick) + "t");
                 continue;
             }
 
@@ -246,7 +247,7 @@ public final class BotIdleHobbiesService {
                 double distHome = new Vec3d(bot.getX(), bot.getY(), bot.getZ()).distanceTo(home);
                 if (distHome > 24.0D) {
                     NEXT_DECISION_TICK.put(bot.getUuid(), nowTick + 200L);
-                    noteBlocked(bot, nowTick, "too-far-from-home:" + String.format(Locale.ROOT, "%.1f", distHome));
+                    noteBlocked(bot, nowTick, "too-far-from-home", String.format(Locale.ROOT, "%.1f", distHome));
                     continue;
                 }
             }
@@ -330,7 +331,7 @@ public final class BotIdleHobbiesService {
         boolean canHunt = huntUnlocked
                 && healthy
                 && !world.isThundering()
-                && hasNearbyHuntableTarget(world, bot.getBlockPos(), 28.0D);
+                && HuntSkill.hasAmbientHuntCandidate(bot, world);
         boolean canFeedAnimals = hasFeedTargets(bot, world);
         boolean canPickFlowers = hasNearbyFlowers(world, bot.getBlockPos(), 18);
 
@@ -376,7 +377,9 @@ public final class BotIdleHobbiesService {
                 && bot.getHealth() >= 18.0F
                 && bot.getHungerManager().getFoodLevel() >= 16
                 && !world.isThundering()
-                && hasNearbyHuntableTarget(world, bot.getBlockPos(), 28.0D);
+                && HuntSkill.hasAmbientHuntCandidate(bot, world);
+        boolean canCollectLeafLitter = hasNearbyLeafLitter(world, bot.getBlockPos(), 14);
+        boolean canForageMushrooms = hasNearbyMushrooms(world, bot.getBlockPos(), 16);
 
         if (canFeedAnimals) {
             return "feed_animals";
@@ -394,7 +397,17 @@ public final class BotIdleHobbiesService {
         if (hasCampfireNearby) {
             return "hangout";
         }
-        return null;
+        if (canCollectLeafLitter && canForageMushrooms) {
+            return RNG.nextBoolean() ? "leaf_litter" : "mushrooms";
+        }
+        if (canCollectLeafLitter) {
+            return "leaf_litter";
+        }
+        if (canForageMushrooms) {
+            return "mushrooms";
+        }
+        // If no specific hobby candidates exist, still do a low-intensity local stroll.
+        return "wander";
     }
 
     private static boolean hasItem(ServerPlayerEntity bot, net.minecraft.item.Item item) {
@@ -442,6 +455,39 @@ public final class BotIdleHobbiesService {
         return false;
     }
 
+    private static boolean hasNearbyLeafLitter(ServerWorld world, BlockPos origin, int radius) {
+        if (world == null || origin == null) {
+            return false;
+        }
+        int r = Math.max(6, radius);
+        for (BlockPos pos : BlockPos.iterate(origin.add(-r, -2, -r), origin.add(r, 2, r))) {
+            if (!world.isChunkLoaded(pos)) {
+                continue;
+            }
+            if (world.getBlockState(pos).isOf(net.minecraft.block.Blocks.LEAF_LITTER)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean hasNearbyMushrooms(ServerWorld world, BlockPos origin, int radius) {
+        if (world == null || origin == null) {
+            return false;
+        }
+        int r = Math.max(6, radius);
+        for (BlockPos pos : BlockPos.iterate(origin.add(-r, -2, -r), origin.add(r, 2, r))) {
+            if (!world.isChunkLoaded(pos)) {
+                continue;
+            }
+            if (world.getBlockState(pos).isOf(net.minecraft.block.Blocks.RED_MUSHROOM)
+                    || world.getBlockState(pos).isOf(net.minecraft.block.Blocks.BROWN_MUSHROOM)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private static boolean hasFeedTargets(ServerPlayerEntity bot, ServerWorld world) {
         if (bot == null || world == null) {
             return false;
@@ -450,29 +496,6 @@ public final class BotIdleHobbiesService {
             return false;
         }
         return !AnimalFeedingService.findAmbientFeedTargets(world, bot, 12).isEmpty();
-    }
-
-    private static boolean hasNearbyHuntableTarget(ServerWorld world, BlockPos origin, double radius) {
-        if (world == null || origin == null) {
-            return false;
-        }
-        double r = Math.max(8.0D, radius);
-        Box box = new Box(origin).expand(r);
-        for (Entity entity : world.getOtherEntities(null, box)) {
-            if (!(entity instanceof LivingEntity living) || !living.isAlive()) {
-                continue;
-            }
-            if (!HuntCatalog.isFoodMob(living.getType())) {
-                continue;
-            }
-            if (living instanceof PassiveEntity passive && passive.isBaby()) {
-                continue;
-            }
-            if (living.squaredDistanceTo(origin.getX() + 0.5D, origin.getY() + 0.5D, origin.getZ() + 0.5D) <= r * r) {
-                return true;
-            }
-        }
-        return false;
     }
 
     private static boolean hasAnyFeedItem(ServerPlayerEntity bot) {
@@ -523,6 +546,21 @@ public final class BotIdleHobbiesService {
             params.put("radius", 18);
         }
 
+        if ("wander".equalsIgnoreCase(skillName)) {
+            params.put("radius", 10 + RNG.nextInt(6)); // 10-15
+            params.put("steps", 1 + RNG.nextInt(2));   // 1-2
+        }
+
+        if ("leaf_litter".equalsIgnoreCase(skillName)) {
+            params.put("count", 3 + RNG.nextInt(3));   // 3-5
+            params.put("radius", 10 + RNG.nextInt(5)); // 10-14
+        }
+
+        if ("mushrooms".equalsIgnoreCase(skillName)) {
+            params.put("count", 2 + RNG.nextInt(2));   // 2-3
+            params.put("radius", 10 + RNG.nextInt(5)); // 10-14
+        }
+
 
         // Ambient hangouts should be short so they don't starve other hobbies (like fishing) after failures.
         // If a user explicitly runs /bot ... hangout they can still pass duration_sec.
@@ -571,19 +609,29 @@ public final class BotIdleHobbiesService {
         });
     }
 
-    private static void noteBlocked(ServerPlayerEntity bot, long nowTick, String reason) {
-        if (bot == null || reason == null || reason.isBlank()) {
+    private static void noteBlocked(ServerPlayerEntity bot, long nowTick, String reasonKey) {
+        noteBlocked(bot, nowTick, reasonKey, null);
+    }
+
+    private static void noteBlocked(ServerPlayerEntity bot, long nowTick, String reasonKey, String detail) {
+        if (bot == null || reasonKey == null || reasonKey.isBlank()) {
             return;
         }
         UUID id = bot.getUuid();
-        String previous = LAST_BLOCKED_REASON.get(id);
+        String key = reasonKey.trim().toLowerCase(Locale.ROOT);
+        String previous = LAST_BLOCKED_REASON_KEY.get(id);
         long lastTick = LAST_BLOCKED_REASON_LOG_TICK.getOrDefault(id, Long.MIN_VALUE);
-        boolean reasonChanged = !reason.equals(previous);
+        boolean reasonChanged = !key.equals(previous);
         if (!reasonChanged && nowTick - lastTick < BLOCKED_REASON_LOG_INTERVAL_TICKS) {
             return;
         }
-        LAST_BLOCKED_REASON.put(id, reason);
+        LAST_BLOCKED_REASON_KEY.put(id, key);
         LAST_BLOCKED_REASON_LOG_TICK.put(id, nowTick);
+
+        String reason = key;
+        if (detail != null && !detail.isBlank()) {
+            reason = reason + ":" + detail.trim();
+        }
         LOGGER.info("Idle hobbies blocked for {}: {}", bot.getName().getString(), reason);
     }
 
@@ -591,7 +639,7 @@ public final class BotIdleHobbiesService {
         if (botUuid == null) {
             return;
         }
-        LAST_BLOCKED_REASON.remove(botUuid);
+        LAST_BLOCKED_REASON_KEY.remove(botUuid);
         LAST_BLOCKED_REASON_LOG_TICK.remove(botUuid);
     }
 }

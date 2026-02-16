@@ -40,15 +40,26 @@ public class MiningTool {
     });
 
     public static CompletableFuture<String> mineBlock(ServerPlayerEntity bot, BlockPos targetBlockPos) {
-        CompletableFuture<String> miningResult = new CompletableFuture<>();
-        MinecraftServer server = bot.getEntityWorld().getServer();
+        return mineBlock(bot, targetBlockPos, false);
+    }
 
-        if (server == null) {
-            miningResult.complete("⚠️ Cannot mine: server unavailable.");
-            return miningResult;
-        }
+    /**
+     * Mines a block physically over time.
+     *
+     * @param preserveSelectedHotbarItem when true, keeps the currently selected item instead of
+     *                                   auto-switching to the best tool.
+     */
+    public static CompletableFuture<String> mineBlock(ServerPlayerEntity bot,
+                                                      BlockPos targetBlockPos,
+                                                      boolean preserveSelectedHotbarItem) {
+        CompletableFuture<String> miningResult = new CompletableFuture<>();
         if (bot == null || targetBlockPos == null) {
             miningResult.complete("⚠️ Cannot mine: invalid target.");
+            return miningResult;
+        }
+        MinecraftServer server = bot.getEntityWorld().getServer();
+        if (server == null) {
+            miningResult.complete("⚠️ Cannot mine: server unavailable.");
             return miningResult;
         }
 
@@ -73,12 +84,20 @@ public class MiningTool {
             }
             LookController.faceBlock(bot, targetBlockPos);
             BlockState blockState = initialState;
-            ItemStack bestTool = ToolSelector.selectBestToolForBlock(bot, blockState);
-            LOGGER.debug("Preparing to mine {} with tool={} (creative={})",
-                    targetBlockPos,
-                    bestTool.isEmpty() ? "empty-hand" : bestTool.getItem().toString(),
-                    bot.getAbilities().creativeMode);
-            switchToTool(bot, bestTool);
+            if (!preserveSelectedHotbarItem) {
+                ItemStack bestTool = ToolSelector.selectBestToolForBlock(bot, blockState);
+                LOGGER.debug("Preparing to mine {} with tool={} (creative={})",
+                        targetBlockPos,
+                        bestTool.isEmpty() ? "empty-hand" : bestTool.getItem().toString(),
+                        bot.getAbilities().creativeMode);
+                switchToTool(bot, bestTool);
+            } else {
+                ItemStack held = bot.getMainHandStack();
+                LOGGER.debug("Preparing to mine {} with preserved held item={} (creative={})",
+                        targetBlockPos,
+                        held == null || held.isEmpty() ? "empty-hand" : held.getItem().toString(),
+                        bot.getAbilities().creativeMode);
+            }
             bot.swingHand(Hand.MAIN_HAND);
 
             float delta = blockState.calcBlockBreakingDelta(bot, bot.getEntityWorld(), targetBlockPos);

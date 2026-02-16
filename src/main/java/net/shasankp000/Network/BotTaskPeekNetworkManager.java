@@ -104,8 +104,14 @@ public final class BotTaskPeekNetworkManager {
                 return "fishing";
             case "flowers":
                 return "collecting flowers";
+            case "leaf litter":
+                return "collecting leaf litter";
+            case "mushrooms":
+                return "foraging mushrooms";
             case "feed animals":
                 return "feeding animals";
+            case "wander":
+                return "wandering";
             default:
                 return raw;
         }
