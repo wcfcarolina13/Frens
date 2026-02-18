@@ -11,6 +11,8 @@ import net.shasankp000.GameAI.BotActions;
 
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.block.BlockState;
+import net.minecraft.block.Blocks;
+import net.minecraft.fluid.FluidState;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
@@ -361,7 +363,13 @@ public final class FollowMovementService {
             BotActions.autoJumpIfNeeded(bot);
             BotActions.applyMovementInput(bot, Vec3d.ofCenter(safeBypass), 0.18D);
         } else {
-            BotActions.stop(bot);
+            // No safe bypass — try elytra descent if available.
+            if (!ElytraFlightService.isInFlight(bot.getUuid())
+                    && ElytraFlightService.tryAutonomousDescent(bot, world.getServer())) {
+                // Elytra descent initiated — the flight service will handle it.
+            } else {
+                BotActions.stop(bot);
+            }
         }
         maybeShowDropWarning(bot);
         return true;
@@ -584,6 +592,9 @@ public final class FollowMovementService {
         if (belowState.getCollisionShape(world, below).isEmpty()) {
             return false;
         }
+        if (isDangerousGround(world, pos)) {
+            return false;
+        }
         return hasTwoHighClearance(world, pos) && world.getFluidState(pos).isEmpty() && world.getFluidState(pos.up()).isEmpty();
     }
 
@@ -679,5 +690,58 @@ public final class FollowMovementService {
         BlockPos feet = bot.getBlockPos();
         return world.getFluidState(feet).isIn(FluidTags.WATER)
                 || world.getFluidState(feet.up()).isIn(FluidTags.WATER);
+    }
+
+    // ---- Dangerous ground (lava / magma / fire) avoidance ----
+
+    /**
+     * Returns true if the given position has lava, magma, or fire that would harm the bot.
+     */
+    private static boolean isDangerousGround(ServerWorld world, BlockPos pos) {
+        if (world == null || pos == null) return false;
+        BlockState floor = world.getBlockState(pos.down());
+        if (floor.isOf(Blocks.MAGMA_BLOCK)) return true;
+        BlockState atFeet = world.getBlockState(pos);
+        if (atFeet.isOf(Blocks.FIRE) || atFeet.isOf(Blocks.SOUL_FIRE)) return true;
+        FluidState fluid = world.getFluidState(pos);
+        if (!fluid.isEmpty() && !fluid.isOf(Fluids.WATER)) return true;
+        return false;
+    }
+
+    /**
+     * If the bot is standing on dangerous ground (lava, magma, fire), scan for the nearest
+     * safe position and apply movement input toward it. Returns true if escape input was applied.
+     */
+    public static boolean tryDangerousGroundEscape(ServerPlayerEntity bot, BlockPos goalBlock) {
+        if (bot == null || goalBlock == null) return false;
+        if (!(bot.getEntityWorld() instanceof ServerWorld world)) return false;
+        BlockPos origin = bot.getBlockPos();
+        if (!isDangerousGround(world, origin)) return false;
+
+        // Scan a small area for the nearest safe, walkable position.
+        BlockPos best = null;
+        double bestDistSq = Double.MAX_VALUE;
+        int scanRadius = 5;
+        for (int dx = -scanRadius; dx <= scanRadius; dx++) {
+            for (int dz = -scanRadius; dz <= scanRadius; dz++) {
+                for (int dy = -2; dy <= 2; dy++) {
+                    BlockPos cand = origin.add(dx, dy, dz);
+                    if (isDangerousGround(world, cand)) continue;
+                    if (!isGroundedTwoHighClearance(world, cand)) continue;
+                    double distSq = cand.getSquaredDistance(origin);
+                    if (distSq < bestDistSq) {
+                        bestDistSq = distSq;
+                        best = cand;
+                    }
+                }
+            }
+        }
+        if (best == null) return false;
+
+        LookController.faceBlock(bot, best);
+        BotActions.sprint(bot, true);
+        BotActions.autoJumpIfNeeded(bot);
+        BotActions.applyMovementInput(bot, Vec3d.ofCenter(best), 0.22D);
+        return true;
     }
 }

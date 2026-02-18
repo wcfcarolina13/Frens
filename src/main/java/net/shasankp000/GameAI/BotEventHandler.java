@@ -37,7 +37,9 @@ import net.shasankp000.DangerZoneDetector.DangerZoneDetector;
 import net.shasankp000.Database.QTable;
 import net.shasankp000.Database.QTableStorage;
 import net.shasankp000.GameAI.services.BotPersistenceService;
+import net.shasankp000.GameAI.services.CompanionOverheadDialogueService;
 import net.shasankp000.GameAI.services.ElytraFlightService;
+import net.shasankp000.GameAI.services.TreeStuckEscapeService;
 import net.shasankp000.GameAI.services.BotLifecycleService;
 import net.shasankp000.GameAI.services.BotRegistry;
 import net.shasankp000.GameAI.services.BotCommandStateService;
@@ -1703,6 +1705,11 @@ public class BotEventHandler {
             return true; // ElytraFlightService handles all movement while flying
         }
 
+        // Tree-stuck escape: if the bot is stranded on a tree canopy, handle it before normal follow.
+        if (TreeStuckEscapeService.tryEscape(bot, server)) {
+            return true; // escape in progress, skip normal follow
+        }
+
         Vec3d targetPos = fixedGoal != null ? Vec3d.ofCenter(fixedGoal) : positionOf(target);
 
         // Post-combat arrow recovery (FOLLOW mode):
@@ -1805,25 +1812,65 @@ public class BotEventHandler {
         }
         if (target != null && bot.getEntityWorld() != target.getEntityWorld() && srv != null) {
             long now = srv.getOverworld().getTime();
-            if (now - state.dimHandoffNotifiedTick >= 100L) {
-                state.dimHandoffNotifiedTick = now;
-                ServerWorld targetWorld = srv.getWorld(target.getEntityWorld().getRegistryKey());
-                if (targetWorld != null) {
-                    LOGGER.info("Follow dimension handoff: moving {} from {} to {} (target dim {})",
-                            bot.getName().getString(),
-                            bot.getEntityWorld().getRegistryKey().getValue(),
-                            targetWorld.getRegistryKey().getValue(),
-                            target.getEntityWorld().getRegistryKey().getValue());
-                    ChatUtils.sendSystemMessage(bot.getCommandSource(),
-                            bot.getName().getString()
-                                    + " is in a different world. Spawn or move the bot into this world to continue following.");
-                } else {
-                    LOGGER.warn("Follow dimension handoff: unable to resolve target world {} for {}",
-                            target.getEntityWorld().getRegistryKey().getValue(),
-                            bot.getName().getString());
-                }
+            // Cooldown: only attempt dimension teleport once every 100 ticks (5s)
+            // to avoid spamming during rapid portal transitions
+            if (now - state.dimHandoffNotifiedTick < 100L) {
+                return false;
             }
-            return false;
+            state.dimHandoffNotifiedTick = now;
+
+            ServerWorld targetWorld = srv.getWorld(target.getEntityWorld().getRegistryKey());
+            if (targetWorld == null) {
+                LOGGER.warn("Follow dimension handoff: unable to resolve target world {} for {}",
+                        target.getEntityWorld().getRegistryKey().getValue(),
+                        bot.getName().getString());
+                return false;
+            }
+
+            // Abort active skills and dismount before dimension change
+            TaskService.forceAbort(bot.getUuid(), "\u00a7cDimension transition (following commander).");
+            if (bot.hasVehicle()) {
+                bot.stopRiding();
+            }
+            if (ElytraFlightService.isInFlight(bot.getUuid())) {
+                bot.stopGliding();
+                // ElytraFlightService will clean up on next tick when it sees phase mismatch
+            }
+
+            LOGGER.info("Follow dimension handoff: teleporting {} from {} to {} (following {})",
+                    bot.getName().getString(),
+                    bot.getEntityWorld().getRegistryKey().getValue(),
+                    targetWorld.getRegistryKey().getValue(),
+                    target.getName().getString());
+
+            bot.teleport(targetWorld,
+                    target.getX(), target.getY(), target.getZ(),
+                    EnumSet.noneOf(PositionFlag.class),
+                    target.getYaw(), target.getPitch(),
+                    true);
+            bot.setVelocity(Vec3d.ZERO);
+
+            // Dimension-specific personality line via overhead dialogue
+            {
+                String dimPath = targetWorld.getRegistryKey().getValue().getPath();
+                String line;
+                if (dimPath.contains("end")) {
+                    line = RANDOM.nextBoolean()
+                            ? "I'll follow you to the end...is that corny?"
+                            : "The End. Sure. Why not.";
+                } else if (dimPath.contains("nether")) {
+                    line = RANDOM.nextBoolean()
+                            ? "Into the fire with you, then."
+                            : "Nether it is. Stay close.";
+                } else {
+                    line = RANDOM.nextBoolean()
+                            ? "Fresh air. Finally."
+                            : "Back to the surface. Good.";
+                }
+                CompanionOverheadDialogueService.showOverheadLine(bot, line, 3_000, 48.0, "follow-dim", dimPath);
+            }
+
+            return true; // teleported successfully, follow continues next tick
         }
         LOGGER.debug("Follow tick: bot={} target={} dist={}/{} dy={} forceWalk={} allowTpPref={} canSee={} stopRange={}",
                 bot.getName().getString(),
@@ -2460,6 +2507,13 @@ public class BotEventHandler {
                         + " detail=" + waterEscape.detail());
                 return true;
             }
+        }
+
+        // Escape lava, magma blocks, or fire underfoot.
+        BlockPos dangerGoal = navGoalBlock != null ? navGoalBlock : (target != null ? target.getBlockPos() : null);
+        if (dangerGoal != null && FollowMovementService.tryDangerousGroundEscape(bot, dangerGoal)) {
+            maybeLogFollowDecision(bot, "dangerous-ground-escape");
+            return true;
         }
 
         Vec3d commanderGoal = fixedGoalActive ? navGoalPos : positionOf(target);

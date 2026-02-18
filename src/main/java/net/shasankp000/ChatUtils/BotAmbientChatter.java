@@ -19,6 +19,7 @@ import net.shasankp000.FilingSystem.ManualConfig;
 import net.shasankp000.GameAI.BotEventHandler;
 import net.shasankp000.GameAI.services.BotHomeService;
 import net.shasankp000.GameAI.services.BotIdleHobbiesService;
+import net.shasankp000.GameAI.services.CompanionOverheadDialogueService;
 import net.shasankp000.GameAI.services.TaskService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -273,6 +274,26 @@ public final class BotAmbientChatter {
             BotDialogueSounds.LINE_END_ENTER_2,
         };
 
+        // Portal proximity (Overworld)
+        private static final SoundEvent[] NETHER_PORTAL_OW_CHATTER = {
+            BotDialogueSounds.LINE_PORTAL_NETHER_OVERWORLD_1,
+            BotDialogueSounds.LINE_PORTAL_NETHER_OVERWORLD_2,
+        };
+        private static final SoundEvent[] END_PORTAL_OW_CHATTER = {
+            BotDialogueSounds.LINE_PORTAL_END_OVERWORLD_1,
+            BotDialogueSounds.LINE_PORTAL_END_OVERWORLD_2,
+        };
+
+        // Weird portals (wrong dimension)
+        private static final SoundEvent[] WEIRD_END_IN_NETHER_CHATTER = {
+            BotDialogueSounds.LINE_WEIRD_PORTAL_END_IN_NETHER_1,
+            BotDialogueSounds.LINE_WEIRD_PORTAL_END_IN_NETHER_2,
+        };
+        private static final SoundEvent[] WEIRD_NETHER_IN_END_CHATTER = {
+            BotDialogueSounds.LINE_WEIRD_PORTAL_NETHER_IN_END_1,
+            BotDialogueSounds.LINE_WEIRD_PORTAL_NETHER_IN_END_2,
+        };
+
     // Relaxed/happy sounds when all is well (CONTENT mood)
     private static final SoundEvent[] CONTENT_CHATTER = {
             BotDialogueSounds.LINE_IDLE_ENJOYING_CALM,
@@ -332,6 +353,18 @@ public final class BotAmbientChatter {
         boolean hadEndGateway;
         boolean hadEndCity;
         boolean hadEndermen;
+
+        // Portal proximity flags (Overworld)
+        boolean hadNetherPortalOW;
+        long lastNetherPortalOWEventTick;
+        boolean hadEndPortalOW;
+        long lastEndPortalOWEventTick;
+
+        // Weird portal flags (wrong dimension)
+        boolean hadEndPortalNether;
+        long lastEndPortalNetherEventTick;
+        boolean hadNetherPortalEnd;
+        long lastNetherPortalEndEventTick;
 
         long lastEnvScanTick;
 
@@ -627,23 +660,31 @@ public final class BotAmbientChatter {
             state.hadEndCity = false;
             state.hadEndermen = false;
 
+            state.hadNetherPortalOW = false;
+            state.hadEndPortalOW = false;
+            state.hadEndPortalNether = false;
+            state.hadNetherPortalEnd = false;
+
             // Reset overworld-only baselines.
             state.lastWeatherKind = -1;
             state.lastSunsetSoonDay = -1;
 
             // Try a rare, themed entry callout (special cooldown).
-            if (isNether && (nowTick - state.lastEnterNetherTick) >= EVENT_COOLDOWN_SPECIAL_TICKS && RNG.nextFloat() < 0.80f) {
-                if (playEvent(bot, NETHER_ENTRY_CHATTER[RNG.nextInt(NETHER_ENTRY_CHATTER.length)])) {
-                    state.lastAnyAmbientTick = nowTick;
-                    state.lastEnterNetherTick = nowTick;
-                    return true;
+            // Suppress if a dimension-handoff overhead line was already shown recently.
+            if (!CompanionOverheadDialogueService.isRecentlyShown(bot.getUuid())) {
+                if (isNether && (nowTick - state.lastEnterNetherTick) >= EVENT_COOLDOWN_SPECIAL_TICKS && RNG.nextFloat() < 0.80f) {
+                    if (playEvent(bot, NETHER_ENTRY_CHATTER[RNG.nextInt(NETHER_ENTRY_CHATTER.length)])) {
+                        state.lastAnyAmbientTick = nowTick;
+                        state.lastEnterNetherTick = nowTick;
+                        return true;
+                    }
                 }
-            }
-            if (isEnd && (nowTick - state.lastEnterEndTick) >= EVENT_COOLDOWN_SPECIAL_TICKS && RNG.nextFloat() < 0.85f) {
-                if (playEvent(bot, END_ENTRY_CHATTER[RNG.nextInt(END_ENTRY_CHATTER.length)])) {
-                    state.lastAnyAmbientTick = nowTick;
-                    state.lastEnterEndTick = nowTick;
-                    return true;
+                if (isEnd && (nowTick - state.lastEnterEndTick) >= EVENT_COOLDOWN_SPECIAL_TICKS && RNG.nextFloat() < 0.85f) {
+                    if (playEvent(bot, END_ENTRY_CHATTER[RNG.nextInt(END_ENTRY_CHATTER.length)])) {
+                        state.lastAnyAmbientTick = nowTick;
+                        state.lastEnterEndTick = nowTick;
+                        return true;
+                    }
                 }
             }
 
@@ -669,6 +710,11 @@ public final class BotAmbientChatter {
         boolean hasEndCity = state.hadEndCity;
         boolean hasEndermen = state.hadEndermen;
 
+        boolean hasNetherPortalOW = state.hadNetherPortalOW;
+        boolean hasEndPortalOW = state.hadEndPortalOW;
+        boolean hasEndPortalNether = state.hadEndPortalNether;
+        boolean hasNetherPortalEnd = state.hadNetherPortalEnd;
+
         if (doScan) {
             state.lastEnvScanTick = nowTick;
 
@@ -678,11 +724,17 @@ public final class BotAmbientChatter {
             hasBats = (isUnderground || isLowLight) && hasNearbyBats(world, pos);
             hasDripstone = isUnderground && isLowLight && hasNearbyDripstone(world, pos);
             hasDeepslate = isDeepUnderground && isLowLight && hasNearbyDeepslate(world, pos);
+            // Portal proximity (Overworld)
+            hasNetherPortalOW = hasNearbyBlock(world, pos, 10, Blocks.NETHER_PORTAL);
+            hasEndPortalOW = hasNearbyBlock(world, pos, 12,
+                Blocks.END_PORTAL_FRAME, Blocks.END_PORTAL);
             } else {
             hasAmethyst = false;
             hasBats = false;
             hasDripstone = false;
             hasDeepslate = false;
+            hasNetherPortalOW = false;
+            hasEndPortalOW = false;
             }
 
             // Nether features
@@ -716,6 +768,9 @@ public final class BotAmbientChatter {
                 EntityType.PIGLIN,
                 EntityType.PIGLIN_BRUTE
             );
+            // Weird: End portal in the Nether
+            hasEndPortalNether = hasNearbyBlock(world, pos, 12,
+                Blocks.END_PORTAL_FRAME, Blocks.END_PORTAL);
             } else {
             hasNetherLava = false;
             hasNetherSoulSand = false;
@@ -723,6 +778,7 @@ public final class BotAmbientChatter {
             hasNetherBlackstone = false;
             hasNetherGhast = false;
             hasNetherPiglins = false;
+            hasEndPortalNether = false;
             }
 
             // End features
@@ -742,11 +798,14 @@ public final class BotAmbientChatter {
             hasEndermen = hasNearbyEntityType(world, pos, 18,
                 EntityType.ENDERMAN
             );
+            // Weird: Nether portal in The End
+            hasNetherPortalEnd = hasNearbyBlock(world, pos, 10, Blocks.NETHER_PORTAL);
             } else {
             hasEndChorus = false;
             hasEndGateway = false;
             hasEndCity = false;
             hasEndermen = false;
+            hasNetherPortalEnd = false;
             }
         }
 
@@ -773,6 +832,11 @@ public final class BotAmbientChatter {
             state.hadEndGateway = hasEndGateway;
             state.hadEndCity = hasEndCity;
             state.hadEndermen = hasEndermen;
+
+            state.hadNetherPortalOW = hasNetherPortalOW;
+            state.hadEndPortalOW = hasEndPortalOW;
+            state.hadEndPortalNether = hasEndPortalNether;
+            state.hadNetherPortalEnd = hasNetherPortalEnd;
 
             // Overworld-only baselines
             state.lastWeatherKind = computeWeatherKind(world, pos);
@@ -878,6 +942,59 @@ public final class BotAmbientChatter {
 
         // Special-feature "discovery" triggers first (higher priority).
         if (doScan) {
+            // Portal proximity triggers (Overworld)
+            if (isOverworld) {
+                if (hasNetherPortalOW && !state.hadNetherPortalOW && (nowTick - state.lastNetherPortalOWEventTick) >= EVENT_COOLDOWN_SPECIAL_TICKS && RNG.nextFloat() < 0.70f) {
+                    if (playEvent(bot, NETHER_PORTAL_OW_CHATTER[RNG.nextInt(NETHER_PORTAL_OW_CHATTER.length)])) {
+                        state.lastAnyAmbientTick = nowTick;
+                        state.lastNetherPortalOWEventTick = nowTick;
+                        state.hadNetherPortalOW = hasNetherPortalOW;
+                        state.hadEndPortalOW = hasEndPortalOW;
+                        state.wasUnderground = isUnderground;
+                        state.wasDark = darkForEvents;
+                        return true;
+                    }
+                }
+
+                if (hasEndPortalOW && !state.hadEndPortalOW && (nowTick - state.lastEndPortalOWEventTick) >= EVENT_COOLDOWN_SPECIAL_TICKS && RNG.nextFloat() < 0.80f) {
+                    if (playEvent(bot, END_PORTAL_OW_CHATTER[RNG.nextInt(END_PORTAL_OW_CHATTER.length)])) {
+                        state.lastAnyAmbientTick = nowTick;
+                        state.lastEndPortalOWEventTick = nowTick;
+                        state.hadEndPortalOW = hasEndPortalOW;
+                        state.hadNetherPortalOW = hasNetherPortalOW;
+                        state.wasUnderground = isUnderground;
+                        state.wasDark = darkForEvents;
+                        return true;
+                    }
+                }
+            }
+
+            // Weird portal triggers (wrong dimension — rare, high roll chance)
+            if (isNether) {
+                if (hasEndPortalNether && !state.hadEndPortalNether && (nowTick - state.lastEndPortalNetherEventTick) >= EVENT_COOLDOWN_SPECIAL_TICKS && RNG.nextFloat() < 0.90f) {
+                    if (playEvent(bot, WEIRD_END_IN_NETHER_CHATTER[RNG.nextInt(WEIRD_END_IN_NETHER_CHATTER.length)])) {
+                        state.lastAnyAmbientTick = nowTick;
+                        state.lastEndPortalNetherEventTick = nowTick;
+                        state.hadEndPortalNether = hasEndPortalNether;
+                        state.wasUnderground = isUnderground;
+                        state.wasDark = darkForEvents;
+                        return true;
+                    }
+                }
+            }
+            if (isEnd) {
+                if (hasNetherPortalEnd && !state.hadNetherPortalEnd && (nowTick - state.lastNetherPortalEndEventTick) >= EVENT_COOLDOWN_SPECIAL_TICKS && RNG.nextFloat() < 0.90f) {
+                    if (playEvent(bot, WEIRD_NETHER_IN_END_CHATTER[RNG.nextInt(WEIRD_NETHER_IN_END_CHATTER.length)])) {
+                        state.lastAnyAmbientTick = nowTick;
+                        state.lastNetherPortalEndEventTick = nowTick;
+                        state.hadNetherPortalEnd = hasNetherPortalEnd;
+                        state.wasUnderground = isUnderground;
+                        state.wasDark = darkForEvents;
+                        return true;
+                    }
+                }
+            }
+
             // Nether/End discovery triggers first so we don't waste the opportunity on overworld cave flavor.
             if (isNether) {
                 if (hasNetherNetherBricks && !state.hadNetherNetherBricks && (nowTick - state.lastNetherFortressEventTick) >= EVENT_COOLDOWN_SPECIAL_TICKS && RNG.nextFloat() < 0.80f) {
@@ -1149,6 +1266,11 @@ public final class BotAmbientChatter {
             state.hadEndGateway = hasEndGateway;
             state.hadEndCity = hasEndCity;
             state.hadEndermen = hasEndermen;
+
+            state.hadNetherPortalOW = hasNetherPortalOW;
+            state.hadEndPortalOW = hasEndPortalOW;
+            state.hadEndPortalNether = hasEndPortalNether;
+            state.hadNetherPortalEnd = hasNetherPortalEnd;
         }
 
         return false;

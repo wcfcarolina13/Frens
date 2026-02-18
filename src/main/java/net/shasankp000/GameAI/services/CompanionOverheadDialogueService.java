@@ -34,6 +34,10 @@ public final class CompanionOverheadDialogueService {
     private static final ConcurrentHashMap<UUID, Long> LAST_BERRY_STING_MS = new ConcurrentHashMap<>();
     private static final ConcurrentHashMap<UUID, Long> LAST_BERRY_EDIBLE_MS = new ConcurrentHashMap<>();
 
+    // Global overhead-display timestamp for cross-system suppression (e.g., portal chatter overlap).
+    private static final ConcurrentHashMap<UUID, Long> LAST_ANY_OVERHEAD_MS = new ConcurrentHashMap<>();
+    private static final long OVERHEAD_GLOBAL_SUPPRESSION_MS = 4_000L;
+
     private static final String[] LEAF_STUCK_LINES = new String[] {
             "These branches are thick!",
             "Hold on — stuck in some branches.",
@@ -55,6 +59,13 @@ public final class CompanionOverheadDialogueService {
     private static final java.util.Random RNG = new java.util.Random();
 
     private CompanionOverheadDialogueService() {
+    }
+
+    /** Returns true if an overhead line was shown for this bot within the suppression window. */
+    public static boolean isRecentlyShown(UUID botId) {
+        if (botId == null) return false;
+        long last = LAST_ANY_OVERHEAD_MS.getOrDefault(botId, 0L);
+        return (System.currentTimeMillis() - last) < OVERHEAD_GLOBAL_SUPPRESSION_MS;
     }
 
     /**
@@ -97,10 +108,7 @@ public final class CompanionOverheadDialogueService {
                 // Best-effort only.
             }
         }
-
-        // Server-side fallback: a short-lived hologram above the bot. This is more reliable for
-        // fakeplayer bots than client-only nameplate overrides.
-        CompanionOverheadHologramService.show(bot, line, durationMs);
+        LAST_ANY_OVERHEAD_MS.put(id, System.currentTimeMillis());
 
         // If we have an audio mapping for this overhead line, play it.
         tryPlayVoicedOverheadLine(bot, line);
@@ -162,9 +170,7 @@ public final class CompanionOverheadDialogueService {
                 // Best-effort only.
             }
         }
-
-        // Server-side fallback.
-        CompanionOverheadHologramService.show(bot, line, dur);
+        LAST_ANY_OVERHEAD_MS.put(id, System.currentTimeMillis());
 
         if (tag != null && !tag.isBlank()) {
             if (reason != null && !reason.isBlank()) {
@@ -221,9 +227,7 @@ public final class CompanionOverheadDialogueService {
                 // Best-effort only.
             }
         }
-
-        // Server-side fallback.
-        CompanionOverheadHologramService.show(bot, line, durationMs);
+        LAST_ANY_OVERHEAD_MS.put(id, System.currentTimeMillis());
 
         // If we have an audio mapping for this overhead line, play it.
         tryPlayVoicedOverheadLine(bot, line);

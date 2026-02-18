@@ -377,6 +377,10 @@ public final class CompanionContextReactionService {
         if (!isHighThreatLocation(bot, world, hostiles)) {
             return false;
         }
+        // Suppress if a dimension-handoff overhead line was already shown recently.
+        if (CompanionOverheadDialogueService.isRecentlyShown(bot.getUuid())) {
+            return false;
+        }
         if (RNG.nextDouble() > 0.16D) {
             return false;
         }

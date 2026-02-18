@@ -701,7 +701,6 @@ public class AIPlayer implements ModInitializer {
         ServerTickEvents.END_SERVER_TICK.register(net.shasankp000.GameAI.services.VillageProximityReactionService::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(net.shasankp000.GameAI.services.PetProximityReactionService::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(net.shasankp000.GameAI.services.CompanionContextReactionService::onServerTick);
-        ServerTickEvents.END_SERVER_TICK.register(net.shasankp000.GameAI.services.CompanionOverheadHologramService::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(net.shasankp000.GameAI.services.SweetBerryBushReactionService::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(net.shasankp000.GameAI.services.ElytraFlightService::onServerTick);
 

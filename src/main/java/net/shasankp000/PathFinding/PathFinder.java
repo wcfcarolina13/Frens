@@ -4,6 +4,8 @@ import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
 import net.minecraft.block.DoorBlock;
+import net.minecraft.fluid.FluidState;
+import net.minecraft.fluid.Fluids;
 import net.minecraft.registry.tag.BlockTags;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
@@ -458,6 +460,10 @@ public class PathFinder {
 
     private static boolean isPassable(ServerWorld world, BlockPos pos) {
         BlockState blockState = world.getBlockState(pos);
+        // Fire blocks have empty collision shapes but are deadly.
+        if (blockState.isOf(Blocks.FIRE) || blockState.isOf(Blocks.SOUL_FIRE)) {
+            return false;
+        }
         if (blockState.getBlock() instanceof DoorBlock) {
             // Plan through closed wooden doors (we can open them on approach).
             // Iron doors remain blocked unless already open (redstone).
@@ -465,6 +471,11 @@ public class PathFinder {
                 return blockState.getCollisionShape(world, pos).isEmpty();
             }
             return true;
+        }
+        // Lava has an empty collision shape but must be rejected.
+        FluidState fluid = world.getFluidState(pos);
+        if (!fluid.isEmpty() && !fluid.isOf(Fluids.WATER)) {
+            return false;
         }
         return blockState.isAir() || blockState.isOf(Blocks.WATER) || blockState.getCollisionShape(world, pos).isEmpty();
     }
@@ -542,11 +553,16 @@ public class PathFinder {
             }
         }
 
-        // Filter out positions near exposed campfires (give them a wide berth)
+        // Filter out positions near exposed campfires and dangerous floor blocks
         for (BlockPos candidate : candidates) {
             // Skip positions that are too close to exposed campfires
             if (BotCampfireAvoidanceService.isNearExposedCampfire(world, candidate, 2)) {
                 LOGGER.debug("PathFinder: skipping {} - too close to exposed campfire", candidate);
+                continue;
+            }
+            // Never path onto magma blocks (solid, but deal contact damage)
+            BlockState floorState = world.getBlockState(candidate.down());
+            if (floorState.isOf(Blocks.MAGMA_BLOCK)) {
                 continue;
             }
             neighbors.add(candidate);
