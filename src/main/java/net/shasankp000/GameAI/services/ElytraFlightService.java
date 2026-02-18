@@ -354,6 +354,17 @@ public final class ElytraFlightService {
         ItemStack savedChest = SAVED_CHESTPLATE.getOrDefault(botId, ItemStack.EMPTY);
         if (!savedChest.isEmpty()) {
             ItemStack currentElytra = bot.getEquippedStack(EquipmentSlot.CHEST);
+
+            // During EQUIPPING the original chestplate was swapped into the inventory
+            // slot that held the elytra (for crash/death safety). Find and remove it
+            // now so we don't duplicate when re-equipping the saved copy.
+            for (int i = 0; i < net.minecraft.entity.player.PlayerInventory.MAIN_SIZE; i++) {
+                if (ItemStack.areItemsAndComponentsEqual(bot.getInventory().getStack(i), savedChest)) {
+                    bot.getInventory().setStack(i, ItemStack.EMPTY);
+                    break;
+                }
+            }
+
             // Put elytra back in inventory
             if (!currentElytra.isEmpty()) {
                 bot.getInventory().insertStack(currentElytra);
