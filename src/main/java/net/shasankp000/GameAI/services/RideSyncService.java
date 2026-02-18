@@ -7,8 +7,11 @@ import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.mob.MobEntity;
 import net.minecraft.entity.decoration.LeashKnotEntity;
 import net.minecraft.entity.vehicle.AbstractBoatEntity;
+import net.minecraft.entity.vehicle.AbstractMinecartEntity;
 import net.minecraft.entity.vehicle.ChestBoatEntity;
 import net.minecraft.entity.vehicle.BoatEntity;
+import net.minecraft.block.AbstractRailBlock;
+import net.minecraft.item.MinecartItem;
 import net.minecraft.item.Items;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
@@ -62,6 +65,7 @@ public final class RideSyncService {
     private static final double SEARCH_RADIUS_SQ = SEARCH_RADIUS * SEARCH_RADIUS;
     private static final long RESYNC_COOLDOWN_TICKS = 40L;
     private static final long BOAT_RESYNC_COOLDOWN_TICKS = 10L;
+    private static final long MINECART_RESYNC_COOLDOWN_TICKS = 10L;
     private static final Map<UUID, UUID> SYNC_COMMANDER = new HashMap<>();
     private static final Map<UUID, UUID> SYNC_VEHICLE = new HashMap<>();
     private static final Map<UUID, Long> LAST_SYNC_TICK = new HashMap<>();
@@ -95,6 +99,14 @@ public final class RideSyncService {
     private static final Map<UUID, BlockPos> PENDING_BOAT_PLACE_POS = new HashMap<>();
     private static final Map<UUID, Long> PENDING_BOAT_PLACE_TICK = new HashMap<>();
     private static final long BOAT_PLACE_TIMEOUT_TICKS = 60L;
+    private static final Map<UUID, UUID>     LAST_COMMANDER_MINECART           = new HashMap<>();
+    private static final Map<UUID, Long>     LAST_COMMANDER_MINECART_LOST_TICK = new HashMap<>();
+    private static final Map<UUID, UUID>     LAST_BOT_MINECART                = new HashMap<>();
+    private static final Map<UUID, UUID>     PENDING_MINECART_BREAK           = new HashMap<>();
+    private static final Map<UUID, Long>     PENDING_MINECART_BREAK_START     = new HashMap<>();
+    private static final Map<UUID, Long>     LAST_MINECART_BREAK_TICK         = new HashMap<>();
+    private static final Map<UUID, BlockPos> PENDING_MINECART_PLACE_POS       = new HashMap<>();
+    private static final Map<UUID, Long>     PENDING_MINECART_PLACE_TICK      = new HashMap<>();
 
     // When RideSync decides the bot should approach a mount/boat/water placement, normal FOLLOW movement
     // can overwrite the movement input later in the tick. Persist a short-lived "approach target" that
@@ -162,7 +174,8 @@ public final class RideSyncService {
             return null;
         }
         Entity commanderVehicle = commander.getVehicle();
-        if (commanderVehicle == null || categorize(commanderVehicle) != RideCategory.BOAT) {
+        RideCategory cat = commanderVehicle != null ? categorize(commanderVehicle) : null;
+        if (cat != RideCategory.BOAT && cat != RideCategory.MINECART) {
             clearFollowOverride(id);
             return null;
         }
@@ -201,6 +214,8 @@ public final class RideSyncService {
         }
         maybeProcessBoatBreaks(server, bots);
         maybeProcessBoatPlacements(server, bots);
+        maybeProcessMinecartBreaks(server, bots);
+        maybeProcessMinecartPlacements(server, bots);
 
         // Low-frequency heartbeat for field debugging: confirms RideSync is actually ticking in-game.
         // (This has proven essential when reports show "no RideSync logs".)
@@ -217,16 +232,17 @@ public final class RideSyncService {
             String commanderVehicleType = commanderVehicle != null ? commanderVehicle.getType().toString() : "none";
             boolean commanderBoating = commanderVehicle != null && categorize(commanderVehicle) == RideCategory.BOAT;
             boolean commanderChestBoat = commanderVehicle != null && isChestBoat(commanderVehicle);
+            boolean commanderMinecart = commanderVehicle != null && categorize(commanderVehicle) == RideCategory.MINECART;
             double distToCommander = (sample != null && commander != null) ? Math.sqrt(sample.squaredDistanceTo(commander)) : Double.NaN;
 
-            // Log every 10s normally, but when the commander is boating, log more frequently so short repros
+            // Log every 10s normally, but when the commander is boating/carting, log more frequently so short repros
             // still capture useful context.
             boolean emit = (tick % 200) == 0;
-            if (!emit && commanderBoating) {
+            if (!emit && (commanderBoating || commanderMinecart)) {
                 emit = (tick % 40) == 0; // ~2s
             }
             if (emit) {
-                LOGGER.info("RideSyncTick: bots={} sample={} mode={} followTarget={} hasTask={} botHasVehicle={} commander={} commanderVehicle={} commanderBoating={} commanderChestBoat={} distToCommander={}",
+                LOGGER.info("RideSyncTick: bots={} sample={} mode={} followTarget={} hasTask={} botHasVehicle={} commander={} commanderVehicle={} commanderBoating={} commanderChestBoat={} commanderMinecart={} distToCommander={}",
                         bots.size(),
                         sample != null ? sample.getName().getString() : "none",
                         sample != null ? BotEventHandler.getCurrentMode(sample) : "none",
@@ -237,6 +253,7 @@ public final class RideSyncService {
                         commanderVehicleType,
                         commanderBoating,
                         commanderChestBoat,
+                        commanderMinecart,
                         Double.isFinite(distToCommander) ? String.format(Locale.ROOT, "%.2f", distToCommander) : "NaN");
             }
         } catch (Throwable ignored) {
@@ -267,12 +284,13 @@ public final class RideSyncService {
         Entity commanderVehicle = commander.getVehicle();
         RideCategory commanderCategory = commanderVehicle != null ? categorize(commanderVehicle) : null;
         updateCommanderBoatTracking(server, commander, commanderVehicle);
+        updateCommanderMinecartTracking(server, commander, commanderVehicle);
 
         for (ServerPlayerEntity bot : bots) {
             if (!shouldSyncBot(bot, commander)) {
                 // When the commander is boating and the bot is too far to qualify, emit a low-frequency
                 // diagnostic so we can distinguish "RideSync never ran" from "RideSync ran but skipped".
-                if (commanderVehicle != null && commanderCategory == RideCategory.BOAT) {
+                if (commanderVehicle != null && (commanderCategory == RideCategory.BOAT || commanderCategory == RideCategory.MINECART)) {
                     maybeLogRideStatus(server, bot, commander, commanderVehicle, bot.hasVehicle(), "skip:ineligible");
                 }
                 if (bot.hasVehicle()) {
@@ -292,6 +310,7 @@ public final class RideSyncService {
         }
 
         maybeQueueBoatBreaksFromCommanderLoss(server, commander, bots);
+        maybeQueueMinecartBreaksFromCommanderLoss(server, commander, bots);
 
         if (!(commander.getEntityWorld() instanceof ServerWorld world)) {
             return;
@@ -315,6 +334,7 @@ public final class RideSyncService {
             maybeLogRideStatus(server, bot, commander, commanderVehicle, false, "scan");
         if (bot.hasVehicle()) {
             recordBotBoat(bot);
+            recordBotMinecart(bot);
             maybeSyncMovement(bot, commander);
             continue;
         }
@@ -343,6 +363,16 @@ public final class RideSyncService {
                 if (tryPlaceAndMountOwnBoat(server, bot, commander, commanderVehicle, claimed)) {
                     continue;
                 }
+            }
+
+            // Minecart parity: find or place a minecart when the commander is in one.
+            if (commanderCategory == RideCategory.MINECART
+                    && tryMountNearbyIndependentMinecart(server, bot, commander, commanderVehicle, claimed)) {
+                continue;
+            }
+            if (commanderCategory == RideCategory.MINECART
+                    && tryPlaceAndMountOwnMinecart(server, bot, commander, commanderVehicle, claimed)) {
+                continue;
             }
 
             Entity preferred = resolvePreferredMount(bot, commander, commanderVehicle, world, commanderCategory, claimed);
@@ -491,6 +521,82 @@ public final class RideSyncService {
             MountPersistenceService.recordMount(bot, candidate);
             BotEventHandler.collectNearbyDrops(bot, 4.0D);
             maybeLogRideStatus(server, bot, commander, commanderVehicle, true, "nearby-boat:mounted");
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Search for a nearby empty rideable minecart (EntityType.MINECART only — not TNT/hopper/furnace/etc.)
+     * and mount it. Mirrors tryMountNearbyIndependentBoat but simpler since minecarts are single-passenger.
+     */
+    private static boolean tryMountNearbyIndependentMinecart(MinecraftServer server,
+                                                              ServerPlayerEntity bot,
+                                                              ServerPlayerEntity commander,
+                                                              Entity commanderVehicle,
+                                                              Set<Integer> claimed) {
+        if (server == null || bot == null || commander == null) {
+            return false;
+        }
+        if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
+            return false;
+        }
+        if (bot.hasVehicle()) {
+            return false;
+        }
+
+        final double radius = 20.0D;
+        Box box = bot.getBoundingBox().expand(radius, 6.0D, radius);
+        final int commanderVehicleId = commanderVehicle != null ? commanderVehicle.getId() : -1;
+
+        List<Entity> minecarts = world.getEntitiesByClass(
+                Entity.class,
+                box,
+                e -> e != null
+                        && e.isAlive()
+                        && !e.isRemoved()
+                        && e.getId() != commanderVehicleId
+                        && e.getType() == EntityType.MINECART
+                        && !e.hasPassengers()
+        );
+
+        if (minecarts.isEmpty()) {
+            return false;
+        }
+
+        minecarts.sort(Comparator.comparingDouble(bot::squaredDistanceTo));
+
+        for (Entity candidate : minecarts) {
+            if (candidate == null) {
+                continue;
+            }
+            if (claimed != null && claimed.contains(candidate.getId())) {
+                continue;
+            }
+            if (bot.squaredDistanceTo(candidate) > MOUNT_REACH_SQ) {
+                maybeApproachMount(bot, candidate, commander);
+                maybeLogRideStatus(server, bot, commander, commanderVehicle, false,
+                        "nearby-minecart:approach count=" + minecarts.size());
+                return true;
+            }
+            boolean mounted = tryMount(bot, candidate);
+            if (!mounted) {
+                maybeLogRideStatus(server, bot, commander, commanderVehicle, false, "nearby-minecart:mount-failed");
+                if (claimed != null) {
+                    claimed.add(candidate.getId());
+                }
+                continue;
+            }
+
+            SYNC_COMMANDER.put(bot.getUuid(), commander.getUuid());
+            SYNC_VEHICLE.put(bot.getUuid(), candidate.getUuid());
+            LAST_SYNC_TICK.put(bot.getUuid(), (long) server.getTicks());
+            if (claimed != null) {
+                claimed.add(candidate.getId());
+            }
+            MountPersistenceService.recordMount(bot, candidate);
+            BotEventHandler.collectNearbyDrops(bot, 4.0D);
+            maybeLogRideStatus(server, bot, commander, commanderVehicle, true, "nearby-minecart:mounted");
             return true;
         }
         return false;
@@ -1339,10 +1445,11 @@ public final class RideSyncService {
         // can still receive RideSync assistance to mount a nearby free boat.
         double maxDist = SEARCH_RADIUS * 2.0D; // ~48 blocks
         Entity commanderVehicle = commander.getVehicle();
-        if (commanderVehicle != null && categorize(commanderVehicle) == RideCategory.BOAT) {
-            // Boats can pull away very quickly while bots are swimming.
-            // When the commander is boating and the bot is unmounted, allow RideSync to keep running
-            // even at long distances so the bot can mount/place a LOCAL boat near itself.
+        RideCategory cmdCat = commanderVehicle != null ? categorize(commanderVehicle) : null;
+        if (cmdCat == RideCategory.BOAT || cmdCat == RideCategory.MINECART) {
+            // Boats/minecarts can pull away very quickly while bots are walking/swimming.
+            // When the commander is riding and the bot is unmounted, allow RideSync to keep running
+            // even at long distances so the bot can mount/place a vehicle near itself.
             if (!bot.hasVehicle()) {
                 return true;
             }
@@ -1397,6 +1504,19 @@ public final class RideSyncService {
                     return;
                 }
             }
+            if (botVehicle != null && categorize(botVehicle) == RideCategory.MINECART) {
+                boolean commanderOnLand = commander.isOnGround();
+                if (commanderOnLand && isFollowingCommander(bot, commander)) {
+                    bot.stopRiding();
+                    maybeQueueMinecartBreak(bot, botVehicle, commander);
+                    handleDismountCare(bot, botVehicle);
+                    MountPersistenceService.recordMount(bot, botVehicle);
+                    SYNC_COMMANDER.remove(bot.getUuid());
+                    SYNC_VEHICLE.remove(bot.getUuid());
+                    clearRideStuck(bot);
+                    return;
+                }
+            }
         }
 
         // If the commander is still mounted and we're still following them, do not auto-dismount
@@ -1421,6 +1541,7 @@ public final class RideSyncService {
             bot.stopRiding();
             if (vehicle != null) {
                 maybeQueueBoatBreak(bot, vehicle, commander);
+                maybeQueueMinecartBreak(bot, vehicle, commander);
                 handleDismountCare(bot, vehicle);
                 MountPersistenceService.recordMount(bot, vehicle);
             }
@@ -1436,6 +1557,7 @@ public final class RideSyncService {
         bot.stopRiding();
         if (vehicle != null) {
             maybeQueueBoatBreak(bot, vehicle, commander);
+            maybeQueueMinecartBreak(bot, vehicle, commander);
             handleDismountCare(bot, vehicle);
             MountPersistenceService.recordMount(bot, vehicle);
         }
@@ -1558,6 +1680,431 @@ public final class RideSyncService {
         if (vehicle != null && categorize(vehicle) == RideCategory.BOAT) {
             LAST_BOT_BOAT.put(bot.getUuid(), vehicle.getUuid());
         }
+    }
+
+    private static void recordBotMinecart(ServerPlayerEntity bot) {
+        if (bot == null || !bot.hasVehicle()) {
+            return;
+        }
+        Entity vehicle = bot.getVehicle();
+        if (vehicle != null && categorize(vehicle) == RideCategory.MINECART) {
+            LAST_BOT_MINECART.put(bot.getUuid(), vehicle.getUuid());
+        }
+    }
+
+    private static void updateCommanderMinecartTracking(MinecraftServer server,
+                                                         ServerPlayerEntity commander,
+                                                         Entity commanderVehicle) {
+        if (server == null || commander == null) {
+            return;
+        }
+        UUID commanderId = commander.getUuid();
+        if (commanderVehicle != null && categorize(commanderVehicle) == RideCategory.MINECART) {
+            LAST_COMMANDER_MINECART.put(commanderId, commanderVehicle.getUuid());
+            LAST_COMMANDER_MINECART_LOST_TICK.remove(commanderId);
+            return;
+        }
+        UUID lastCartId = LAST_COMMANDER_MINECART.get(commanderId);
+        if (lastCartId == null) {
+            return;
+        }
+        if (!(commander.getEntityWorld() instanceof ServerWorld world)) {
+            return;
+        }
+        Entity lastCart = world.getEntity(lastCartId);
+        if (lastCart == null || lastCart.isRemoved()) {
+            if (!LAST_COMMANDER_MINECART_LOST_TICK.containsKey(commanderId)) {
+                LAST_COMMANDER_MINECART_LOST_TICK.put(commanderId, (long) server.getTicks());
+            }
+        }
+    }
+
+    private static void maybeQueueMinecartBreak(ServerPlayerEntity bot,
+                                                 Entity vehicle,
+                                                 ServerPlayerEntity commander) {
+        if (bot == null || vehicle == null || commander == null) {
+            return;
+        }
+        if (categorize(vehicle) != RideCategory.MINECART) {
+            return;
+        }
+        LAST_BOT_MINECART.put(bot.getUuid(), vehicle.getUuid());
+        if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
+            return;
+        }
+        UUID commanderId = commander.getUuid();
+        Long lostTick = LAST_COMMANDER_MINECART_LOST_TICK.get(commanderId);
+        if (lostTick == null) {
+            // Commander didn't lose their minecart — queue break anyway since bot is dismounting.
+            PENDING_MINECART_BREAK.put(bot.getUuid(), vehicle.getUuid());
+            MinecraftServer server = world.getServer();
+            if (server != null) {
+                PENDING_MINECART_BREAK_START.put(bot.getUuid(), (long) server.getTicks());
+            }
+            return;
+        }
+        MinecraftServer server = world.getServer();
+        if (server == null) {
+            return;
+        }
+        long now = server.getTicks();
+        if (now - lostTick > COMMANDER_BOAT_DESTROY_WINDOW_TICKS) {
+            return;
+        }
+        PENDING_MINECART_BREAK.put(bot.getUuid(), vehicle.getUuid());
+        PENDING_MINECART_BREAK_START.put(bot.getUuid(), now);
+    }
+
+    private static void maybeQueueMinecartBreaksFromCommanderLoss(MinecraftServer server,
+                                                                   ServerPlayerEntity commander,
+                                                                   List<ServerPlayerEntity> bots) {
+        if (server == null || commander == null || bots == null || bots.isEmpty()) {
+            return;
+        }
+        Long lostTick = LAST_COMMANDER_MINECART_LOST_TICK.get(commander.getUuid());
+        if (lostTick == null) {
+            return;
+        }
+        long now = server.getTicks();
+        if (now - lostTick > COMMANDER_BOAT_DESTROY_WINDOW_TICKS) {
+            return;
+        }
+        for (ServerPlayerEntity bot : bots) {
+            if (bot == null || bot.hasVehicle()) {
+                continue;
+            }
+            if (PENDING_MINECART_BREAK.containsKey(bot.getUuid())) {
+                continue;
+            }
+            UUID cartId = LAST_BOT_MINECART.get(bot.getUuid());
+            if (cartId == null) {
+                continue;
+            }
+            if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
+                continue;
+            }
+            Entity cart = world.getEntity(cartId);
+            if (cart == null || cart.isRemoved() || cart.hasPassengers()) {
+                continue;
+            }
+            if (bot.squaredDistanceTo(cart) > (SEARCH_RADIUS_SQ * 4.0D)) {
+                continue;
+            }
+            PENDING_MINECART_BREAK.put(bot.getUuid(), cart.getUuid());
+            PENDING_MINECART_BREAK_START.put(bot.getUuid(), now);
+        }
+    }
+
+    private static void maybeProcessMinecartBreaks(MinecraftServer server, List<ServerPlayerEntity> bots) {
+        if (server == null || bots == null || bots.isEmpty()) {
+            return;
+        }
+        long now = server.getTicks();
+        for (ServerPlayerEntity bot : bots) {
+            UUID cartId = PENDING_MINECART_BREAK.get(bot.getUuid());
+            if (cartId == null) {
+                continue;
+            }
+            Long startTick = PENDING_MINECART_BREAK_START.get(bot.getUuid());
+            if (startTick == null || now - startTick > BOAT_BREAK_TIMEOUT_TICKS) {
+                PENDING_MINECART_BREAK.remove(bot.getUuid());
+                PENDING_MINECART_BREAK_START.remove(bot.getUuid());
+                continue;
+            }
+            if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
+                continue;
+            }
+            Entity cart = world.getEntity(cartId);
+            if (cart == null || cart.isRemoved()) {
+                PENDING_MINECART_BREAK.remove(bot.getUuid());
+                PENDING_MINECART_BREAK_START.remove(bot.getUuid());
+                continue;
+            }
+            if (bot.squaredDistanceTo(cart) > MOUNT_REACH_SQ) {
+                maybeApproachMount(bot, cart, bot);
+                continue;
+            }
+            long lastSwing = LAST_MINECART_BREAK_TICK.getOrDefault(bot.getUuid(), 0L);
+            if (now - lastSwing < BOAT_BREAK_COOLDOWN_TICKS) {
+                continue;
+            }
+            LAST_MINECART_BREAK_TICK.put(bot.getUuid(), now);
+            bot.attack(cart);
+            bot.swingHand(Hand.MAIN_HAND, true);
+        }
+    }
+
+    // ---- Minecart placement from inventory ----
+
+    private static boolean hasPendingMinecartPlacement(MinecraftServer server, ServerPlayerEntity bot) {
+        if (server == null || bot == null) {
+            return false;
+        }
+        Long startTick = PENDING_MINECART_PLACE_TICK.get(bot.getUuid());
+        if (startTick == null) {
+            return false;
+        }
+        long now = server.getTicks();
+        if (now - startTick > BOAT_PLACE_TIMEOUT_TICKS) {
+            PENDING_MINECART_PLACE_TICK.remove(bot.getUuid());
+            PENDING_MINECART_PLACE_POS.remove(bot.getUuid());
+            return false;
+        }
+        return true;
+    }
+
+    private static void queueMinecartPlacement(MinecraftServer server, ServerPlayerEntity bot, BlockPos railPos) {
+        if (server == null || bot == null || railPos == null) {
+            return;
+        }
+        PENDING_MINECART_PLACE_POS.put(bot.getUuid(), railPos.toImmutable());
+        PENDING_MINECART_PLACE_TICK.put(bot.getUuid(), (long) server.getTicks());
+    }
+
+    private static void maybeProcessMinecartPlacements(MinecraftServer server, List<ServerPlayerEntity> bots) {
+        if (server == null || bots == null || bots.isEmpty()) {
+            return;
+        }
+        long now = server.getTicks();
+        for (ServerPlayerEntity bot : bots) {
+            BlockPos placePos = PENDING_MINECART_PLACE_POS.get(bot.getUuid());
+            Long startTick = PENDING_MINECART_PLACE_TICK.get(bot.getUuid());
+            if (placePos == null || startTick == null) {
+                continue;
+            }
+            if (now - startTick > BOAT_PLACE_TIMEOUT_TICKS || bot.hasVehicle()) {
+                PENDING_MINECART_PLACE_TICK.remove(bot.getUuid());
+                PENDING_MINECART_PLACE_POS.remove(bot.getUuid());
+                continue;
+            }
+            if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
+                continue;
+            }
+            Box box = new Box(placePos).expand(3.5D, 3.0D, 3.5D);
+            List<Entity> carts = world.getEntitiesByClass(
+                    Entity.class,
+                    box,
+                    e -> e != null && e.isAlive() && !e.isRemoved()
+                            && e.getType() == EntityType.MINECART && !e.hasPassengers()
+            );
+            if (carts.isEmpty()) {
+                if (now - startTick > 20L) {
+                    PENDING_MINECART_PLACE_TICK.remove(bot.getUuid());
+                    PENDING_MINECART_PLACE_POS.remove(bot.getUuid());
+                }
+                continue;
+            }
+            Entity nearest = carts.stream()
+                    .min(Comparator.comparingDouble(bot::squaredDistanceTo))
+                    .orElse(null);
+            if (nearest == null) {
+                continue;
+            }
+            if (bot.squaredDistanceTo(nearest) > MOUNT_REACH_SQ) {
+                maybeApproachMount(bot, nearest, bot);
+                continue;
+            }
+            if (tryMount(bot, nearest)) {
+                PENDING_MINECART_PLACE_TICK.remove(bot.getUuid());
+                PENDING_MINECART_PLACE_POS.remove(bot.getUuid());
+            }
+        }
+    }
+
+    /**
+     * Find a minecart item in the bot's inventory.
+     * Prefers Items.MINECART, then falls back to any MinecartItem.
+     */
+    private static int findMinecartItemSlot(ServerPlayerEntity bot) {
+        if (bot == null) {
+            return -1;
+        }
+        // Prefer plain minecart first.
+        for (int i = 0; i < bot.getInventory().size(); i++) {
+            ItemStack stack = bot.getInventory().getStack(i);
+            if (!stack.isEmpty() && stack.isOf(Items.MINECART)) {
+                return i;
+            }
+        }
+        // Fallback: any MinecartItem (covers modded minecarts).
+        for (int i = 0; i < bot.getInventory().size(); i++) {
+            ItemStack stack = bot.getInventory().getStack(i);
+            if (!stack.isEmpty() && stack.getItem() instanceof MinecartItem) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    /**
+     * Scan a radius around origin for an AbstractRailBlock with headroom and no entity overlap.
+     */
+    private static BlockPos findNearbyRailForPlacement(ServerWorld world, BlockPos origin, int radius) {
+        if (world == null || origin == null) {
+            return null;
+        }
+        BlockPos best = null;
+        double bestDist = Double.MAX_VALUE;
+        for (BlockPos pos : BlockPos.iterate(origin.add(-radius, -2, -radius), origin.add(radius, 2, radius))) {
+            if (!(world.getBlockState(pos).getBlock() instanceof AbstractRailBlock)) {
+                continue;
+            }
+            // Need headroom above the rail.
+            BlockPos above = pos.up();
+            if (!world.getBlockState(above).getCollisionShape(world, above).isEmpty()) {
+                continue;
+            }
+            // No entity overlap on the rail.
+            Vec3d center = Vec3d.ofCenter(pos);
+            Box cartBox = new Box(
+                    center.x - 0.5D, center.y, center.z - 0.5D,
+                    center.x + 0.5D, center.y + 0.7D, center.z + 0.5D
+            );
+            boolean blockedByEntity = !world.getOtherEntities(null, cartBox,
+                    e -> e != null && e.isAlive() && !e.isRemoved()).isEmpty();
+            if (blockedByEntity) {
+                continue;
+            }
+            double dist = origin.getSquaredDistance(pos);
+            if (dist < bestDist) {
+                bestDist = dist;
+                best = pos.toImmutable();
+            }
+        }
+        return best;
+    }
+
+    /**
+     * Attempt to place a minecart from inventory onto a nearby rail and mount it.
+     * Mirrors tryPlaceAndMountOwnBoat but adapted for rails instead of water.
+     */
+    private static boolean tryPlaceAndMountOwnMinecart(MinecraftServer server,
+                                                        ServerPlayerEntity bot,
+                                                        ServerPlayerEntity commander,
+                                                        Entity commanderVehicle,
+                                                        Set<Integer> claimed) {
+        if (server == null || bot == null || commander == null) {
+            return false;
+        }
+        if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
+            return false;
+        }
+        if (bot.hasVehicle()) {
+            return false;
+        }
+
+        if (hasPendingMinecartPlacement(server, bot)) {
+            maybeLogRideStatus(server, bot, commander, commanderVehicle, false, "minecart-place:pending");
+            return true;
+        }
+
+        // Find a minecart item in inventory.
+        int cartSlot = findMinecartItemSlot(bot);
+        if (cartSlot == -1) {
+            maybeLogRideStatus(server, bot, commander, commanderVehicle, false, "minecart-place:no-item");
+            return false;
+        }
+
+        // Find a nearby rail to place onto.
+        BlockPos rail = findNearbyRailForPlacement(world, bot.getBlockPos(), 10);
+        if (rail == null) {
+            // Move toward the commander (who is presumably on rails).
+            if (commanderVehicle != null) {
+                maybeApproachMount(bot, commanderVehicle, commander);
+                maybeLogRideStatus(server, bot, commander, commanderVehicle, false, "minecart-place:approach-rail");
+                return true;
+            }
+            maybeLogRideStatus(server, bot, commander, commanderVehicle, false, "minecart-place:no-rail");
+            return false;
+        }
+
+        // Equip the minecart item to hotbar slot 0.
+        int hotbarSlot = ensureHotbarAccess(bot, cartSlot);
+        int targetSlot = 0;
+        if (hotbarSlot != targetSlot) {
+            swapInventoryStacks(bot, hotbarSlot, targetSlot);
+        }
+        bot.getInventory().setSelectedSlot(targetSlot);
+        bot.getInventory().markDirty();
+        HotbarLockService.lock(bot, server, targetSlot, 120L, "minecart-place");
+
+        ItemStack check = bot.getMainHandStack();
+        if (check == null || check.isEmpty() || !(check.getItem() instanceof MinecartItem) && !check.isOf(Items.MINECART)) {
+            String key = check != null && !check.isEmpty() ? check.getItem().getTranslationKey() : "empty";
+            maybeLogRideStatus(server, bot, commander, commanderVehicle, false, "minecart-place:no-item-in-hand:" + key);
+            HotbarLockService.clear(bot);
+            return false;
+        }
+
+        // Move close enough to place.
+        Vec3d placeAt = Vec3d.ofCenter(rail);
+        if (bot.squaredDistanceTo(placeAt) > 12.0D) {
+            BotActions.sprint(bot, false);
+            BotActions.applyMovementInput(bot, placeAt, 0.14D);
+            setFollowOverride(bot, server, placeAt);
+            maybeLogRideStatus(server, bot, commander, commanderVehicle, false, "minecart-place:approach");
+            return true;
+        }
+
+        // Aim at rail and place.
+        aimAt(bot, placeAt);
+
+        if (bot.isBlocking() || bot.isUsingItem()) {
+            bot.clearActiveItem();
+        }
+
+        Hand useHand = Hand.MAIN_HAND;
+        ItemStack stack = bot.getMainHandStack();
+        int beforeCount = stack.getCount();
+
+        // MinecartItem places via interactBlock on a rail.
+        net.minecraft.util.hit.BlockHitResult hit = new net.minecraft.util.hit.BlockHitResult(
+                placeAt, Direction.UP, rail, false);
+        ActionResult result = bot.interactionManager.interactBlock(bot, world, stack, useHand, hit);
+        int afterCount = stack.getCount();
+        boolean placed = (result != null && result.isAccepted()) || afterCount < beforeCount;
+
+        if (!placed) {
+            // Fallback: use item directly.
+            ActionResult resultUse = stack.use(world, bot, useHand);
+            afterCount = stack.getCount();
+            placed = (resultUse != null && resultUse.isAccepted()) || afterCount < beforeCount;
+        }
+
+        if (placed) {
+            bot.swingHand(useHand, true);
+            // Try to find the newly spawned minecart near the rail.
+            Box searchBox = new Box(rail).expand(3.0D, 2.0D, 3.0D);
+            List<Entity> carts = world.getEntitiesByClass(
+                    Entity.class,
+                    searchBox,
+                    e -> e != null && e.isAlive() && !e.isRemoved()
+                            && e.getType() == EntityType.MINECART && !e.hasPassengers()
+            );
+            Entity nearest = carts.stream()
+                    .min(Comparator.comparingDouble(bot::squaredDistanceTo))
+                    .orElse(null);
+            if (nearest != null && bot.squaredDistanceTo(nearest) <= MOUNT_REACH_SQ && tryMount(bot, nearest)) {
+                SYNC_COMMANDER.put(bot.getUuid(), commander.getUuid());
+                SYNC_VEHICLE.put(bot.getUuid(), nearest.getUuid());
+                LAST_SYNC_TICK.put(bot.getUuid(), (long) server.getTicks());
+                if (claimed != null) {
+                    claimed.add(nearest.getId());
+                }
+                MountPersistenceService.recordMount(bot, nearest);
+                BotEventHandler.collectNearbyDrops(bot, 4.0D);
+                maybeLogRideStatus(server, bot, commander, commanderVehicle, true, "minecart-placed-mounted");
+                HotbarLockService.clear(bot);
+                return true;
+            }
+            queueMinecartPlacement(server, bot, rail);
+            maybeLogRideStatus(server, bot, commander, commanderVehicle, false, "minecart-place:placed");
+            return true;
+        }
+
+        maybeLogRideStatus(server, bot, commander, commanderVehicle, false, "minecart-place:failed");
+        HotbarLockService.clear(bot);
+        return false;
     }
 
     private static boolean hasPendingBoatPlacement(MinecraftServer server, ServerPlayerEntity bot) {
@@ -1745,7 +2292,8 @@ public final class RideSyncService {
     private static boolean cooldownReady(MinecraftServer server, ServerPlayerEntity bot, RideCategory commanderCategory) {
         long now = server.getTicks();
         long last = LAST_SYNC_TICK.getOrDefault(bot.getUuid(), 0L);
-        long cooldown = (commanderCategory == RideCategory.BOAT) ? BOAT_RESYNC_COOLDOWN_TICKS : RESYNC_COOLDOWN_TICKS;
+        long cooldown = (commanderCategory == RideCategory.BOAT || commanderCategory == RideCategory.MINECART)
+                ? BOAT_RESYNC_COOLDOWN_TICKS : RESYNC_COOLDOWN_TICKS;
         return now - last >= cooldown;
     }
 
@@ -1952,6 +2500,12 @@ public final class RideSyncService {
             }
         } catch (Throwable ignored) {
         }
+        // On-rail minecarts are PASSIVE — rail physics drives them. Just align yaw and let rails do the work.
+        if (botVehicle instanceof AbstractMinecartEntity && isOnRail(botVehicle)) {
+            alignToCommander(bot, commander);
+            setMountInput(bot, false, false, false);
+            return;
+        }
         MountedLeafClearingService.maybeClear(bot, commander);
         // Use commander's Y so we follow their elevation on slopes
         Vec3d targetPos = new Vec3d(commanderVehicle.getX(), commanderVehicle.getY(), commanderVehicle.getZ());
@@ -2102,7 +2656,11 @@ public final class RideSyncService {
             forceMoveBoat(vehicle, targetPos, sprint, commanderSpeed, distance);
             return;
         }
-        
+        // On-rail minecarts are driven by rail physics — do NOT force-move or they'll fight the track.
+        if (vehicle instanceof AbstractMinecartEntity && isOnRail(vehicle)) {
+            return;
+        }
+
         Vec3d pos = new Vec3d(vehicle.getX(), vehicle.getY(), vehicle.getZ());
         Vec3d delta = new Vec3d(targetPos.x - pos.x, 0.0D, targetPos.z - pos.z);
         double lenSq = delta.lengthSquared();
@@ -2155,6 +2713,10 @@ public final class RideSyncService {
         
         // Boats handle their own buoyancy - do NOT apply artificial gravity or they will sink!
         if (vehicle instanceof AbstractBoatEntity) {
+            return;
+        }
+        // Minecarts handle their own physics on rails and off.
+        if (vehicle instanceof AbstractMinecartEntity) {
             return;
         }
         
@@ -2389,6 +2951,10 @@ public final class RideSyncService {
 
     private static void dampenVehicle(Entity vehicle) {
         if (vehicle == null) {
+            return;
+        }
+        // On-rail minecarts are driven by rail physics — don't kill their momentum.
+        if (vehicle instanceof AbstractMinecartEntity && isOnRail(vehicle)) {
             return;
         }
         if (vehicle instanceof AbstractBoatEntity boat) {
@@ -2840,6 +3406,25 @@ public final class RideSyncService {
             return RideCategory.STRIDER;
         }
         return null;
+    }
+
+    /**
+     * Returns true if the given entity (expected to be a minecart) is sitting on a rail block.
+     * Checks the block at the entity's position and one below (minecarts sit slightly above).
+     */
+    private static boolean isOnRail(Entity entity) {
+        if (entity == null || entity.isRemoved()) {
+            return false;
+        }
+        if (!(entity.getEntityWorld() instanceof ServerWorld world)) {
+            return false;
+        }
+        BlockPos pos = entity.getBlockPos();
+        if (world.getBlockState(pos).getBlock() instanceof AbstractRailBlock) {
+            return true;
+        }
+        BlockPos below = pos.down();
+        return world.getBlockState(below).getBlock() instanceof AbstractRailBlock;
     }
 
     private static ServerPlayerEntity resolveCommander(MinecraftServer server, ServerPlayerEntity bot) {
