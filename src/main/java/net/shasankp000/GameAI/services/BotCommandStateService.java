@@ -66,6 +66,8 @@ public final class BotCommandStateService {
         public boolean assistAllies;
         public boolean shieldRaised;
         public long shieldDecisionTick;
+        /** Server tick when the last dimension-handoff notification was sent (throttle). */
+        public long dimHandoffNotifiedTick = 0L;
     }
 
     private static final Map<UUID, State> STATES = new ConcurrentHashMap<>();

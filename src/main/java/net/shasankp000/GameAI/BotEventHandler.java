@@ -1804,15 +1804,26 @@ public class BotEventHandler {
             }
         }
         if (target != null && bot.getEntityWorld() != target.getEntityWorld() && srv != null) {
-            ServerWorld targetWorld = srv.getWorld(target.getEntityWorld().getRegistryKey());
-            if (targetWorld != null) {
-                LOGGER.info("Follow dimension handoff: moving {} from {} to {} (target dim {})", bot.getName().getString(), bot.getEntityWorld().getRegistryKey().getValue(), targetWorld.getRegistryKey().getValue(), target.getEntityWorld().getRegistryKey().getValue());
-                ChatUtils.sendSystemMessage(bot.getCommandSource(), bot.getName().getString() + " is in a different world. Spawn or move the bot into this world to continue following.");
-                return false;
-            } else {
-                LOGGER.warn("Follow dimension handoff: unable to resolve target world {} for {}", target.getEntityWorld().getRegistryKey().getValue(), bot.getName().getString());
-                return false;
+            long now = srv.getOverworld().getTime();
+            if (now - state.dimHandoffNotifiedTick >= 100L) {
+                state.dimHandoffNotifiedTick = now;
+                ServerWorld targetWorld = srv.getWorld(target.getEntityWorld().getRegistryKey());
+                if (targetWorld != null) {
+                    LOGGER.info("Follow dimension handoff: moving {} from {} to {} (target dim {})",
+                            bot.getName().getString(),
+                            bot.getEntityWorld().getRegistryKey().getValue(),
+                            targetWorld.getRegistryKey().getValue(),
+                            target.getEntityWorld().getRegistryKey().getValue());
+                    ChatUtils.sendSystemMessage(bot.getCommandSource(),
+                            bot.getName().getString()
+                                    + " is in a different world. Spawn or move the bot into this world to continue following.");
+                } else {
+                    LOGGER.warn("Follow dimension handoff: unable to resolve target world {} for {}",
+                            target.getEntityWorld().getRegistryKey().getValue(),
+                            bot.getName().getString());
+                }
             }
+            return false;
         }
         LOGGER.debug("Follow tick: bot={} target={} dist={}/{} dy={} forceWalk={} allowTpPref={} canSee={} stopRange={}",
                 bot.getName().getString(),
