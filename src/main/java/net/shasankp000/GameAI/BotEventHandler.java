@@ -37,6 +37,7 @@ import net.shasankp000.DangerZoneDetector.DangerZoneDetector;
 import net.shasankp000.Database.QTable;
 import net.shasankp000.Database.QTableStorage;
 import net.shasankp000.GameAI.services.BotPersistenceService;
+import net.shasankp000.GameAI.services.ElytraFlightService;
 import net.shasankp000.GameAI.services.BotLifecycleService;
 import net.shasankp000.GameAI.services.BotRegistry;
 import net.shasankp000.GameAI.services.BotCommandStateService;
@@ -1697,6 +1698,10 @@ public class BotEventHandler {
         }
 
         lowerShieldTracking(bot);
+
+        if (ElytraFlightService.isInFlight(bot.getUuid())) {
+            return true; // ElytraFlightService handles all movement while flying
+        }
 
         Vec3d targetPos = fixedGoal != null ? Vec3d.ofCenter(fixedGoal) : positionOf(target);
 

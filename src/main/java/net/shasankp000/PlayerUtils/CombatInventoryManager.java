@@ -12,6 +12,7 @@ import net.minecraft.item.ItemStack;
 import net.minecraft.server.network.ServerPlayerEntity;
 
 import net.shasankp000.GameAI.BotActions;
+import net.shasankp000.GameAI.services.ElytraFlightService;
 
 import java.util.Arrays;
 import java.util.Locale;
@@ -93,6 +94,9 @@ public final class CombatInventoryManager {
     }
 
     private static void autoEquipMissingArmor(ServerPlayerEntity bot) {
+        if (ElytraFlightService.isInFlight(bot.getUuid())) {
+            return;
+        }
         boolean missingPiece = Arrays.stream(new EquipmentSlot[]{EquipmentSlot.HEAD, EquipmentSlot.CHEST, EquipmentSlot.LEGS, EquipmentSlot.FEET})
                 .anyMatch(slot -> bot.getEquippedStack(slot).isEmpty());
 

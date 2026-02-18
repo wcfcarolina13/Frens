@@ -12,6 +12,7 @@ import net.minecraft.network.packet.s2c.play.EntityEquipmentUpdateS2CPacket;
 import net.minecraft.server.network.ServerPlayerEntity;
 import com.mojang.datafixers.util.Pair; // Import the correct Pair class
 import net.minecraft.registry.entry.RegistryEntry;
+import net.shasankp000.GameAI.services.ElytraFlightService;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -26,6 +27,9 @@ public class armorUtils {
 
         // Iterate through all armor slots
         for (EquipmentSlot slot : new EquipmentSlot[]{EquipmentSlot.HEAD, EquipmentSlot.CHEST, EquipmentSlot.LEGS, EquipmentSlot.FEET}) {
+            if (slot == EquipmentSlot.CHEST && ElytraFlightService.isInFlight(bot.getUuid())) {
+                continue;
+            }
             ItemStack equippedArmor = bot.getEquippedStack(slot);
 
             // Find the best armor piece in the inventory for this slot

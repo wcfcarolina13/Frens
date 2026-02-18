@@ -57,6 +57,9 @@ public final class BotFallSafetyService {
         if (bot == null || !bot.isAlive() || bot.isRemoved()) {
             return;
         }
+        if (ElytraFlightService.isInFlight(bot.getUuid())) {
+            return;
+        }
         if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
             return;
         }
