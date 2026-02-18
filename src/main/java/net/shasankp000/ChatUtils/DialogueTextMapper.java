@@ -676,6 +676,22 @@ public final class DialogueTextMapper {
         EXACT_MAP.put("Don't aim at trees. Trees always win.", BotDialogueSounds.LINE_TOPIC_ELYTRA_ASK_2);
         EXACT_MAP.put("First flight was pure confidence.", BotDialogueSounds.LINE_TOPIC_ELYTRA_MEMORY);
 
+        // ============ CARE: PLAYER HURT ============
+        EXACT_MAP.put("You're looking rough - need a breather?", BotDialogueSounds.LINE_CARE_PLAYER_HURT_1);
+        EXACT_MAP.put("That's a lot of damage. Take it easy.", BotDialogueSounds.LINE_CARE_PLAYER_HURT_2);
+        EXACT_MAP.put("Hang in there. I've got food if you need it.", BotDialogueSounds.LINE_CARE_PLAYER_HURT_3);
+        // ============ CARE: PLAYER HUNGRY ============
+        EXACT_MAP.put("Your stomach's growling - eat something.", BotDialogueSounds.LINE_CARE_PLAYER_HUNGRY_1);
+        EXACT_MAP.put("You should eat. I think I've got something.", BotDialogueSounds.LINE_CARE_PLAYER_HUNGRY_2);
+        EXACT_MAP.put("Low on food? Don't wait too long.", BotDialogueSounds.LINE_CARE_PLAYER_HUNGRY_3);
+
+        // Cross-dimension follow dialogue (overhead → sound lookup)
+        EXACT_MAP.put("I'll follow you to the end...is that corny?", BotDialogueSounds.LINE_FOLLOW_DIM_END);
+        EXACT_MAP.put("The End. Sure. Why not.", BotDialogueSounds.LINE_FOLLOW_DIM_END_2);
+        EXACT_MAP.put("Into the fire with you, then.", BotDialogueSounds.LINE_FOLLOW_DIM_NETHER);
+        EXACT_MAP.put("Nether it is. Stay close.", BotDialogueSounds.LINE_FOLLOW_DIM_NETHER_2);
+        EXACT_MAP.put("Fresh air. Finally.", BotDialogueSounds.LINE_FOLLOW_DIM_OVERWORLD);
+        EXACT_MAP.put("Back to the surface. Good.", BotDialogueSounds.LINE_FOLLOW_DIM_OVERWORLD_2);
 
         LOGGER.info("Initialized {} exact mappings and {} pattern mappings", EXACT_MAP.size(), PATTERN_MAP.size());
     }

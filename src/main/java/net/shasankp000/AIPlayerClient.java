@@ -197,7 +197,7 @@ public class AIPlayerClient implements ClientModInitializer {
             return;
         }
         client.player.playSound(SoundEvents.BLOCK_AMETHYST_CLUSTER_BREAK, 0.28f, 1.8f);
-        client.player.playSound(SoundEvents.BLOCK_ENCHANTMENT_TABLE_USE, 0.42f, 1.25f);
+        client.player.playSound(SoundEvents.BLOCK_AMETHYST_BLOCK_CHIME, 0.35f, 1.4f);
     }
 
     private static void playMagicPickupSound(MinecraftClient client) {

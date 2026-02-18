@@ -90,6 +90,24 @@ public final class FollowMovementService {
         bot.setHeadYaw(yaw);
         bot.setBodyYaw(yaw);
 
+        // Preventive lava/magma look-ahead: avoid walking into dangerous ground.
+        if (bot.getEntityWorld() instanceof ServerWorld sw) {
+            BlockPos ahead = bot.getBlockPos().offset(
+                approximateToward(bot.getBlockPos(), BlockPos.ofFloored(target)));
+            if (isDangerousGround(sw, ahead)) {
+                BlockPos safe = selectSafeLateralBypass(sw, bot.getBlockPos(), target);
+                if (safe != null) {
+                    LookController.faceBlock(bot, safe);
+                    BotActions.sprint(bot, false);
+                    BotActions.autoJumpIfNeeded(bot);
+                    BotActions.applyMovementInput(bot, Vec3d.ofCenter(safe), 0.16D);
+                    return;
+                }
+                BotActions.stop(bot);
+                return;
+            }
+        }
+
         if (lowerShield != null) {
             lowerShield.run();
         }
@@ -128,6 +146,24 @@ public final class FollowMovementService {
         if (tryDropoffGuard(bot, waypointCenter)) {
             return;
         }
+        // Preventive lava/magma look-ahead: avoid walking into dangerous ground.
+        if (bot.getEntityWorld() instanceof ServerWorld sw) {
+            BlockPos ahead = bot.getBlockPos().offset(
+                approximateToward(bot.getBlockPos(), waypoint));
+            if (isDangerousGround(sw, ahead)) {
+                BlockPos safe = selectSafeLateralBypass(sw, bot.getBlockPos(), waypointCenter);
+                if (safe != null) {
+                    LookController.faceBlock(bot, safe);
+                    BotActions.sprint(bot, false);
+                    BotActions.autoJumpIfNeeded(bot);
+                    BotActions.applyMovementInput(bot, Vec3d.ofCenter(safe), 0.16D);
+                    return;
+                }
+                BotActions.stop(bot);
+                return;
+            }
+        }
+
         if (lowerShield != null) {
             lowerShield.run();
         }
@@ -269,6 +305,24 @@ public final class FollowMovementService {
         }
         if (tryDropoffGuard(bot, targetPos)) {
             return;
+        }
+
+        // Preventive lava/magma look-ahead: avoid walking into dangerous ground.
+        if (bot.getEntityWorld() instanceof ServerWorld sw) {
+            BlockPos ahead = bot.getBlockPos().offset(approximateToward(bot.getBlockPos(),
+                    BlockPos.ofFloored(targetPos)));
+            if (isDangerousGround(sw, ahead)) {
+                BlockPos safe = selectSafeLateralBypass(sw, bot.getBlockPos(), targetPos);
+                if (safe != null) {
+                    LookController.faceBlock(bot, safe);
+                    BotActions.sprint(bot, false);
+                    BotActions.autoJumpIfNeeded(bot);
+                    BotActions.applyMovementInput(bot, Vec3d.ofCenter(safe), 0.16D);
+                    return;
+                }
+                BotActions.stop(bot);
+                return;
+            }
         }
 
         boolean sprint = distanceSq > followSprintDistanceSq;
@@ -695,6 +749,40 @@ public final class FollowMovementService {
     // ---- Dangerous ground (lava / magma / fire) avoidance ----
 
     /**
+     * Scan left, right, and diagonal-forward for a safe position that stays close to the goal.
+     */
+    private static BlockPos selectSafeLateralBypass(ServerWorld world, BlockPos origin, Vec3d goal) {
+        if (world == null || origin == null || goal == null) return null;
+        Direction toward = approximateToward(origin, BlockPos.ofFloored(goal));
+        Direction left = toward.rotateYCounterclockwise();
+        Direction right = toward.rotateYClockwise();
+
+        BlockPos[] candidates = {
+            origin.offset(left),
+            origin.offset(right),
+            origin.offset(left).offset(toward),
+            origin.offset(right).offset(toward),
+        };
+
+        BlockPos best = null;
+        double bestDist = Double.MAX_VALUE;
+        BlockPos goalBlock = BlockPos.ofFloored(goal);
+        for (BlockPos cand : candidates) {
+            for (int dy = -1; dy <= 1; dy++) {
+                BlockPos test = cand.add(0, dy, 0);
+                if (isDangerousGround(world, test)) continue;
+                if (!isGroundedTwoHighClearance(world, test)) continue;
+                double dist = test.getSquaredDistance(goalBlock);
+                if (dist < bestDist) {
+                    bestDist = dist;
+                    best = test;
+                }
+            }
+        }
+        return best;
+    }
+
+    /**
      * Returns true if the given position has lava, magma, or fire that would harm the bot.
      */
     private static boolean isDangerousGround(ServerWorld world, BlockPos pos) {
@@ -718,9 +806,9 @@ public final class FollowMovementService {
         BlockPos origin = bot.getBlockPos();
         if (!isDangerousGround(world, origin)) return false;
 
-        // Scan a small area for the nearest safe, walkable position.
+        // Scan a small area for the best safe, walkable position (prefer closer to goal).
         BlockPos best = null;
-        double bestDistSq = Double.MAX_VALUE;
+        double bestScore = Double.MAX_VALUE;
         int scanRadius = 5;
         for (int dx = -scanRadius; dx <= scanRadius; dx++) {
             for (int dz = -scanRadius; dz <= scanRadius; dz++) {
@@ -728,9 +816,11 @@ public final class FollowMovementService {
                     BlockPos cand = origin.add(dx, dy, dz);
                     if (isDangerousGround(world, cand)) continue;
                     if (!isGroundedTwoHighClearance(world, cand)) continue;
-                    double distSq = cand.getSquaredDistance(origin);
-                    if (distSq < bestDistSq) {
-                        bestDistSq = distSq;
+                    double goalDistSq = horizontalSq(cand, goalBlock);
+                    double originDistSq = cand.getSquaredDistance(origin);
+                    double score = goalDistSq * 0.6 + originDistSq * 0.4;
+                    if (score < bestScore) {
+                        bestScore = score;
                         best = cand;
                     }
                 }

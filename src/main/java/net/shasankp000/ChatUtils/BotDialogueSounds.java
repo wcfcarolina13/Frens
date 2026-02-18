@@ -625,6 +625,34 @@ public final class BotDialogueSounds {
     public static final SoundEvent LINE_TOPIC_ELYTRA_ASK_2 = register("bot.line.topic_elytra_ask_2");
     public static final SoundEvent LINE_TOPIC_ELYTRA_MEMORY = register("bot.line.topic_elytra_memory");
 
+    // Cross-dimension follow dialogue
+    public static final SoundEvent LINE_FOLLOW_DIM_END = register("bot.line.follow_dim_end");
+    public static final SoundEvent LINE_FOLLOW_DIM_END_2 = register("bot.line.follow_dim_end_2");
+    public static final SoundEvent LINE_FOLLOW_DIM_NETHER = register("bot.line.follow_dim_nether");
+    public static final SoundEvent LINE_FOLLOW_DIM_NETHER_2 = register("bot.line.follow_dim_nether_2");
+    public static final SoundEvent LINE_FOLLOW_DIM_OVERWORLD = register("bot.line.follow_dim_overworld");
+    public static final SoundEvent LINE_FOLLOW_DIM_OVERWORLD_2 = register("bot.line.follow_dim_overworld_2");
+
+    // Portal proximity dialogue (Overworld)
+    public static final SoundEvent LINE_PORTAL_NETHER_OVERWORLD_1 = register("bot.line.portal_nether_overworld_1");
+    public static final SoundEvent LINE_PORTAL_NETHER_OVERWORLD_2 = register("bot.line.portal_nether_overworld_2");
+    public static final SoundEvent LINE_PORTAL_END_OVERWORLD_1 = register("bot.line.portal_end_overworld_1");
+    public static final SoundEvent LINE_PORTAL_END_OVERWORLD_2 = register("bot.line.portal_end_overworld_2");
+
+    // Player care - hurt
+    public static final SoundEvent LINE_CARE_PLAYER_HURT_1 = register("bot.line.care_player_hurt_1");
+    public static final SoundEvent LINE_CARE_PLAYER_HURT_2 = register("bot.line.care_player_hurt_2");
+    public static final SoundEvent LINE_CARE_PLAYER_HURT_3 = register("bot.line.care_player_hurt_3");
+    // Player care - hungry
+    public static final SoundEvent LINE_CARE_PLAYER_HUNGRY_1 = register("bot.line.care_player_hungry_1");
+    public static final SoundEvent LINE_CARE_PLAYER_HUNGRY_2 = register("bot.line.care_player_hungry_2");
+    public static final SoundEvent LINE_CARE_PLAYER_HUNGRY_3 = register("bot.line.care_player_hungry_3");
+
+    // Weird portal lines (wrong dimension)
+    public static final SoundEvent LINE_WEIRD_PORTAL_END_IN_NETHER_1 = register("bot.line.weird_portal_end_in_nether_1");
+    public static final SoundEvent LINE_WEIRD_PORTAL_END_IN_NETHER_2 = register("bot.line.weird_portal_end_in_nether_2");
+    public static final SoundEvent LINE_WEIRD_PORTAL_NETHER_IN_END_1 = register("bot.line.weird_portal_nether_in_end_1");
+    public static final SoundEvent LINE_WEIRD_PORTAL_NETHER_IN_END_2 = register("bot.line.weird_portal_nether_in_end_2");
 
     private BotDialogueSounds() {
     }

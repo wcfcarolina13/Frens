@@ -9022,5 +9022,147 @@
         "weight": 1
       }
     ]
+  },
+  "bot.line.follow_dim_end": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/follow_dim_end__01", "weight": 1 },
+      { "name": "ai-player:dialogue/follow_dim_end__02", "weight": 1 },
+      { "name": "ai-player:dialogue/follow_dim_end__03", "weight": 1 }
+    ]
+  },
+  "bot.line.follow_dim_end_2": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/follow_dim_end_2__01", "weight": 1 },
+      { "name": "ai-player:dialogue/follow_dim_end_2__02", "weight": 1 },
+      { "name": "ai-player:dialogue/follow_dim_end_2__03", "weight": 1 }
+    ]
+  },
+  "bot.line.follow_dim_nether": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/follow_dim_nether__01", "weight": 1 },
+      { "name": "ai-player:dialogue/follow_dim_nether__02", "weight": 1 },
+      { "name": "ai-player:dialogue/follow_dim_nether__03", "weight": 1 }
+    ]
+  },
+  "bot.line.follow_dim_nether_2": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/follow_dim_nether_2__01", "weight": 1 },
+      { "name": "ai-player:dialogue/follow_dim_nether_2__02", "weight": 1 },
+      { "name": "ai-player:dialogue/follow_dim_nether_2__03", "weight": 1 }
+    ]
+  },
+  "bot.line.follow_dim_overworld": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/follow_dim_overworld__01", "weight": 1 },
+      { "name": "ai-player:dialogue/follow_dim_overworld__02", "weight": 1 },
+      { "name": "ai-player:dialogue/follow_dim_overworld__03", "weight": 1 }
+    ]
+  },
+  "bot.line.follow_dim_overworld_2": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/follow_dim_overworld_2__01", "weight": 1 },
+      { "name": "ai-player:dialogue/follow_dim_overworld_2__02", "weight": 1 },
+      { "name": "ai-player:dialogue/follow_dim_overworld_2__03", "weight": 1 }
+    ]
+  },
+  "bot.line.portal_nether_overworld_1": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/portal_nether_overworld_1__01", "weight": 1 },
+      { "name": "ai-player:dialogue/portal_nether_overworld_1__02", "weight": 1 },
+      { "name": "ai-player:dialogue/portal_nether_overworld_1__03", "weight": 1 }
+    ]
+  },
+  "bot.line.portal_nether_overworld_2": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/portal_nether_overworld_2__01", "weight": 1 },
+      { "name": "ai-player:dialogue/portal_nether_overworld_2__02", "weight": 1 },
+      { "name": "ai-player:dialogue/portal_nether_overworld_2__03", "weight": 1 }
+    ]
+  },
+  "bot.line.portal_end_overworld_1": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/portal_end_overworld_1__01", "weight": 1 },
+      { "name": "ai-player:dialogue/portal_end_overworld_1__02", "weight": 1 },
+      { "name": "ai-player:dialogue/portal_end_overworld_1__03", "weight": 1 }
+    ]
+  },
+  "bot.line.portal_end_overworld_2": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/portal_end_overworld_2__01", "weight": 1 },
+      { "name": "ai-player:dialogue/portal_end_overworld_2__02", "weight": 1 },
+      { "name": "ai-player:dialogue/portal_end_overworld_2__03", "weight": 1 }
+    ]
+  },
+  "bot.line.weird_portal_end_in_nether_1": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/weird_portal_end_in_nether_1__01", "weight": 1 },
+      { "name": "ai-player:dialogue/weird_portal_end_in_nether_1__02", "weight": 1 },
+      { "name": "ai-player:dialogue/weird_portal_end_in_nether_1__03", "weight": 1 }
+    ]
+  },
+  "bot.line.weird_portal_end_in_nether_2": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/weird_portal_end_in_nether_2__01", "weight": 1 },
+      { "name": "ai-player:dialogue/weird_portal_end_in_nether_2__02", "weight": 1 },
+      { "name": "ai-player:dialogue/weird_portal_end_in_nether_2__03", "weight": 1 }
+    ]
+  },
+  "bot.line.weird_portal_nether_in_end_1": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/weird_portal_nether_in_end_1__01", "weight": 1 },
+      { "name": "ai-player:dialogue/weird_portal_nether_in_end_1__02", "weight": 1 },
+      { "name": "ai-player:dialogue/weird_portal_nether_in_end_1__03", "weight": 1 }
+    ]
+  },
+  "bot.line.weird_portal_nether_in_end_2": {
+    "category": "voice",
+    "sounds": [
+      { "name": "ai-player:dialogue/weird_portal_nether_in_end_2__01", "weight": 1 },
+      { "name": "ai-player:dialogue/weird_portal_nether_in_end_2__02", "weight": 1 },
+      { "name": "ai-player:dialogue/weird_portal_nether_in_end_2__03", "weight": 1 }
+    ]
+  },
+  "bot.line.care_player_hurt_1": {
+    "category": "voice",
+    "replace": false,
+    "sounds": []
+  },
+  "bot.line.care_player_hurt_2": {
+    "category": "voice",
+    "replace": false,
+    "sounds": []
+  },
+  "bot.line.care_player_hurt_3": {
+    "category": "voice",
+    "replace": false,
+    "sounds": []
+  },
+  "bot.line.care_player_hungry_1": {
+    "category": "voice",
+    "replace": false,
+    "sounds": []
+  },
+  "bot.line.care_player_hungry_2": {
+    "category": "voice",
+    "replace": false,
+    "sounds": []
+  },
+  "bot.line.care_player_hungry_3": {
+    "category": "voice",
+    "replace": false,
+    "sounds": []
   }
 }

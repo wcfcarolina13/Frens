@@ -2928,7 +2928,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         }
         if (this.client.player != null) {
             this.client.player.playSound(SoundEvents.BLOCK_AMETHYST_CLUSTER_BREAK, 0.28f, 1.8f);
-            this.client.player.playSound(SoundEvents.BLOCK_ENCHANTMENT_TABLE_USE, 0.42f, 1.25f);
+            this.client.player.playSound(SoundEvents.BLOCK_AMETHYST_BLOCK_CHIME, 0.35f, 1.4f);
         }
         this.client.setScreen(new CompanionSpellsScreen(this, this.botAlias));
     }

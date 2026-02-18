@@ -23,6 +23,8 @@ import net.shasankp000.ChatUtils.BotDialogueSounds;
 import net.shasankp000.ChatUtils.ChatUtils;
 import net.shasankp000.GameAI.BotEventHandler;
 
+import net.minecraft.entity.player.HungerManager;
+
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -76,6 +78,8 @@ public final class CompanionContextReactionService {
         final Map<String, String> lastLineByTrigger = new HashMap<>();
         boolean wasInBoat = false;
         boolean wasLowHealth = false;
+        boolean wasCommanderLowHealth = false;
+        boolean wasCommanderHungry = false;
     }
 
     private static final ConcurrentHashMap<UUID, TriggerState> STATE = new ConcurrentHashMap<>();
@@ -181,6 +185,18 @@ public final class CompanionContextReactionService {
             new WeightedLine("meme_herobrine_saw_nothing", "I saw nothing. And I'm keeping it that way.", BotDialogueSounds.LINE_MEME_HEROBRINE_SAW_NOTHING, WEIGHT_VERY_RARE)
     };
 
+    private static final WeightedLine[] PLAYER_HURT_LINES = new WeightedLine[] {
+            new WeightedLine("care_player_hurt_1", "You're looking rough - need a breather?", BotDialogueSounds.LINE_CARE_PLAYER_HURT_1, WEIGHT_COMMON),
+            new WeightedLine("care_player_hurt_2", "That's a lot of damage. Take it easy.", BotDialogueSounds.LINE_CARE_PLAYER_HURT_2, WEIGHT_COMMON),
+            new WeightedLine("care_player_hurt_3", "Hang in there. I've got food if you need it.", BotDialogueSounds.LINE_CARE_PLAYER_HURT_3, WEIGHT_COMMON)
+    };
+
+    private static final WeightedLine[] PLAYER_HUNGRY_LINES = new WeightedLine[] {
+            new WeightedLine("care_player_hungry_1", "Your stomach's growling - eat something.", BotDialogueSounds.LINE_CARE_PLAYER_HUNGRY_1, WEIGHT_COMMON),
+            new WeightedLine("care_player_hungry_2", "You should eat. I think I've got something.", BotDialogueSounds.LINE_CARE_PLAYER_HUNGRY_2, WEIGHT_COMMON),
+            new WeightedLine("care_player_hungry_3", "Low on food? Don't wait too long.", BotDialogueSounds.LINE_CARE_PLAYER_HUNGRY_3, WEIGHT_COMMON)
+    };
+
     private static final WeightedLine[] SHELTER_LINES = new WeightedLine[] {
             new WeightedLine("shelter_roof_luxury", "We have a roof. Luxury.", BotDialogueSounds.LINE_SHELTER_ROOF_LUXURY, WEIGHT_UNCOMMON),
             new WeightedLine("shelter_not_pretty", "It's not pretty, but it's ours.", BotDialogueSounds.LINE_SHELTER_NOT_PRETTY, WEIGHT_UNCOMMON),
@@ -206,6 +222,8 @@ public final class CompanionContextReactionService {
         TRIGGER_COOLDOWN_MS.put("lightning_at_night", COOLDOWN_MEME_MS);
         TRIGGER_COOLDOWN_MS.put("shelter_completion", COOLDOWN_90S_MS);
         TRIGGER_COOLDOWN_MS.put("combat_phase_hint", COOLDOWN_COMBATISH_MS);
+        TRIGGER_COOLDOWN_MS.put("player_hurt", 60_000L);
+        TRIGGER_COOLDOWN_MS.put("player_hungry", COOLDOWN_90S_MS);
     }
 
     private CompanionContextReactionService() {
@@ -257,6 +275,12 @@ public final class CompanionContextReactionService {
             if (tryMetaAndMemes(bot, world, state, inCombat, hostiles)) {
                 continue;
             }
+            if (tryPlayerHurt(bot, world, state)) {
+                continue;
+            }
+            if (tryPlayerHungry(bot, world, state)) {
+                continue;
+            }
         }
 
         STATE.keySet().retainAll(live);
@@ -289,6 +313,8 @@ public final class CompanionContextReactionService {
             case "survive_near_death_or_totem", "meme_technoblade" -> tryTrigger(bot, "survive_near_death_or_totem", MEME_TECHNOBLADE_LINES, lineId, true);
             case "lightning_at_night", "meme_herobrine" -> tryTrigger(bot, "lightning_at_night", MEME_HEROBRINE_LINES, lineId, true);
             case "shelter_completion", "shelter" -> playShelterCompletion(bot, lineId);
+            case "player_hurt", "care_hurt" -> tryTrigger(bot, "player_hurt", PLAYER_HURT_LINES, lineId, true);
+            case "player_hungry", "care_hungry" -> tryTrigger(bot, "player_hungry", PLAYER_HUNGRY_LINES, lineId, true);
             default -> false;
         };
     }
@@ -648,5 +674,47 @@ public final class CompanionContextReactionService {
         }
         long time = Math.floorMod(world.getTimeOfDay(), 24_000L);
         return time >= 13_000L && time <= 23_000L;
+    }
+
+    // ---- Player-care triggers ----
+
+    private static boolean tryPlayerHurt(ServerPlayerEntity bot, ServerWorld world, TriggerState state) {
+        ServerPlayerEntity commander = findNearbyCommander(bot, world, 24.0);
+        if (commander == null) return false;
+        boolean lowHealth = commander.getHealth() <= Math.max(6.0f, commander.getMaxHealth() * 0.30f);
+        if (!lowHealth) {
+            state.wasCommanderLowHealth = false;
+            return false;
+        }
+        if (state.wasCommanderLowHealth) return false; // already reacted this bout
+        state.wasCommanderLowHealth = true;
+        if (RNG.nextDouble() > 0.70D) return false;
+        return tryTrigger(bot, "player_hurt", PLAYER_HURT_LINES, null, false);
+    }
+
+    private static boolean tryPlayerHungry(ServerPlayerEntity bot, ServerWorld world, TriggerState state) {
+        ServerPlayerEntity commander = findNearbyCommander(bot, world, 24.0);
+        if (commander == null) return false;
+        HungerManager hunger = commander.getHungerManager();
+        boolean isHungry = hunger.getFoodLevel() <= 6;
+        if (!isHungry) {
+            state.wasCommanderHungry = false;
+            return false;
+        }
+        if (state.wasCommanderHungry) return false; // already reacted this bout
+        state.wasCommanderHungry = true;
+        if (RNG.nextDouble() > 0.65D) return false;
+        return tryTrigger(bot, "player_hungry", PLAYER_HUNGRY_LINES, null, false);
+    }
+
+    private static ServerPlayerEntity findNearbyCommander(ServerPlayerEntity bot, ServerWorld world, double maxRange) {
+        if (bot == null || world == null) return null;
+        BotCommandStateService.State st = BotCommandStateService.stateFor(bot.getUuid());
+        UUID commanderUuid = st != null ? st.followTargetUuid : null;
+        if (commanderUuid == null) return null;
+        ServerPlayerEntity commander = world.getServer().getPlayerManager().getPlayer(commanderUuid);
+        if (commander == null || commander.isRemoved() || !commander.isAlive()) return null;
+        if (commander.squaredDistanceTo(bot) > maxRange * maxRange) return null;
+        return commander;
     }
 }
