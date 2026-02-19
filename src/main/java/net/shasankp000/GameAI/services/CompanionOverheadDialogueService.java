@@ -1,12 +1,10 @@
 package net.shasankp000.GameAI.services;
 
-import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.sound.SoundEvent;
 import net.shasankp000.ChatUtils.BotDialoguePlayer;
 import net.shasankp000.ChatUtils.DialogueTextMapper;
-import net.shasankp000.network.CompanionOverheadLinePayload;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -76,7 +74,7 @@ public final class CompanionOverheadDialogueService {
         if (bot == null || bot.isRemoved()) {
             return;
         }
-        if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
+        if (!(bot.getEntityWorld() instanceof ServerWorld)) {
             return;
         }
         UUID id = bot.getUuid();
@@ -94,20 +92,7 @@ public final class CompanionOverheadDialogueService {
         String line = LEAF_STUCK_LINES[RNG.nextInt(LEAF_STUCK_LINES.length)];
         int durationMs = DURATION_MS;
 
-        double r2 = RANGE * RANGE;
-        for (ServerPlayerEntity viewer : world.getPlayers()) {
-            if (viewer == null || viewer.isRemoved()) {
-                continue;
-            }
-            if (viewer.squaredDistanceTo(bot) > r2) {
-                continue;
-            }
-            try {
-                ServerPlayNetworking.send(viewer, new CompanionOverheadLinePayload(id, line, durationMs));
-            } catch (Throwable t) {
-                // Best-effort only.
-            }
-        }
+        CompanionOverheadHologramService.show(bot, line, durationMs);
         LAST_ANY_OVERHEAD_MS.put(id, System.currentTimeMillis());
 
         // If we have an audio mapping for this overhead line, play it.
@@ -145,7 +130,7 @@ public final class CompanionOverheadDialogueService {
         if (line == null || line.isBlank()) {
             return;
         }
-        if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
+        if (!(bot.getEntityWorld() instanceof ServerWorld)) {
             return;
         }
         UUID id = bot.getUuid();
@@ -154,26 +139,7 @@ public final class CompanionOverheadDialogueService {
         }
 
         int dur = durationMs > 0 ? durationMs : DURATION_MS;
-        double r = range > 0.0 ? range : RANGE;
-        double r2 = r * r;
 
-        for (ServerPlayerEntity viewer : world.getPlayers()) {
-            if (viewer == null || viewer.isRemoved()) {
-                continue;
-            }
-            if (viewer.squaredDistanceTo(bot) > r2) {
-                continue;
-            }
-            try {
-                ServerPlayNetworking.send(viewer, new CompanionOverheadLinePayload(id, line, dur));
-            } catch (Throwable ignored) {
-                // Best-effort only.
-            }
-        }
-
-        // Spawn/update the armor-stand hologram so the text is visible above the bot.
-        // (Player entities don't render customName, so the nameplate-override approach
-        //  doesn't work — the hologram trick is the reliable fallback.)
         CompanionOverheadHologramService.show(bot, line, dur);
 
         LAST_ANY_OVERHEAD_MS.put(id, System.currentTimeMillis());
@@ -198,7 +164,7 @@ public final class CompanionOverheadDialogueService {
         if (bot == null || bot.isRemoved()) {
             return;
         }
-        if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
+        if (!(bot.getEntityWorld() instanceof ServerWorld)) {
             return;
         }
         UUID id = bot.getUuid();
@@ -219,20 +185,7 @@ public final class CompanionOverheadDialogueService {
         String line = lines[RNG.nextInt(lines.length)];
         int durationMs = DURATION_MS;
 
-        double r2 = RANGE * RANGE;
-        for (ServerPlayerEntity viewer : world.getPlayers()) {
-            if (viewer == null || viewer.isRemoved()) {
-                continue;
-            }
-            if (viewer.squaredDistanceTo(bot) > r2) {
-                continue;
-            }
-            try {
-                ServerPlayNetworking.send(viewer, new CompanionOverheadLinePayload(id, line, durationMs));
-            } catch (Throwable t) {
-                // Best-effort only.
-            }
-        }
+        CompanionOverheadHologramService.show(bot, line, durationMs);
         LAST_ANY_OVERHEAD_MS.put(id, System.currentTimeMillis());
 
         // If we have an audio mapping for this overhead line, play it.

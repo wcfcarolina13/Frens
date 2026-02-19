@@ -429,9 +429,6 @@ public class AIPlayer implements ModInitializer {
         PayloadTypeRegistry.playC2S().register(net.shasankp000.network.RequestHuntablesPayload.ID, net.shasankp000.network.RequestHuntablesPayload.CODEC);
         PayloadTypeRegistry.playS2C().register(net.shasankp000.network.HuntablesPayload.ID, net.shasankp000.network.HuntablesPayload.CODEC);
 
-        // Overhead companion dialogue (non-chat).
-        PayloadTypeRegistry.playS2C().register(net.shasankp000.network.CompanionOverheadLinePayload.ID, net.shasankp000.network.CompanionOverheadLinePayload.CODEC);
-
         // Survival recruitment (find village -> recruit bot) payloads.
         PayloadTypeRegistry.playS2C().register(RecruitmentPromptPayload.ID, RecruitmentPromptPayload.CODEC);
         PayloadTypeRegistry.playS2C().register(OpenRecruitmentDialoguePayload.ID, OpenRecruitmentDialoguePayload.CODEC);

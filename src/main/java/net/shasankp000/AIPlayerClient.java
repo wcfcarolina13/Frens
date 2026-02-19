@@ -48,7 +48,6 @@ import net.shasankp000.network.RequestRecruitmentDialoguePayload;
 import net.shasankp000.network.ResumeDecisionPayload;
 import net.shasankp000.network.OpenConfigPayload;
 import net.shasankp000.network.RecruitmentAdminStatusPayload;
-import net.shasankp000.network.CompanionOverheadLinePayload;
 import net.shasankp000.network.BotTaskPeekRequestPayload;
 import net.shasankp000.network.BotTaskPeekStatusPayload;
 import net.shasankp000.items.ModItems;
@@ -126,16 +125,6 @@ public class AIPlayerClient implements ClientModInitializer {
     // Server-authoritative companion quest state snapshot (for stage-gated dialogue topics).
     private static final java.util.Map<String, Integer> COMPANION_STAGE = new java.util.HashMap<>();
     private static final java.util.Set<String> COMPANION_PERMANENT = new java.util.HashSet<>();
-
-    // ===== Companion overhead dialogue (non-chat) =====
-    private record OverheadLine(String line, long startedAtMs, long expiresAtMs, int durationMs) {
-    }
-    private static final java.util.Map<java.util.UUID, OverheadLine> OVERHEAD_LINES = new java.util.concurrent.ConcurrentHashMap<>();
-
-    // Client-only backup/restore of the bot player's nameplate while an overhead line is active.
-    private record OverheadNameBackup(Text customName, boolean customNameVisible) {
-    }
-    private static final java.util.Map<java.util.UUID, OverheadNameBackup> OVERHEAD_NAME_BACKUP = new java.util.concurrent.ConcurrentHashMap<>();
 
     // Hovered bot task hint state (debounced peek requests).
     private static java.util.UUID lookedAtBotUuid = null;
@@ -670,24 +659,6 @@ public class AIPlayerClient implements ClientModInitializer {
             });
         });
 
-        ClientPlayNetworking.registerGlobalReceiver(CompanionOverheadLinePayload.ID, (payload, context) -> {
-            context.client().execute(() -> {
-                if (payload == null || payload.botUuid() == null) {
-                    return;
-                }
-                String line = payload.line();
-                if (line == null || line.isBlank()) {
-                    return;
-                }
-                int durationMs = Math.max(250, payload.durationMs());
-                long now = System.currentTimeMillis();
-                OVERHEAD_LINES.put(payload.botUuid(), new OverheadLine(line, now, now + durationMs, durationMs));
-
-                // Helpful for debugging "no overhead text" reports without spamming per-tick logs.
-                AIPlayer.LOGGER.info("[Overhead] recv botUuid={} line='{}' durationMs={}", payload.botUuid(), line, durationMs);
-            });
-        });
-
         ClientPlayNetworking.registerGlobalReceiver(BotTaskPeekStatusPayload.ID, (payload, context) -> {
             context.client().execute(() -> {
                 lookedAtBotStatus = payload;
@@ -709,8 +680,6 @@ public class AIPlayerClient implements ClientModInitializer {
         // Update schematic preview box every client tick
         ClientTickEvents.END_CLIENT_TICK.register(AIPlayerClient::updateSchematicPreviewBox);
 
-        // Apply/expire overhead dialogue each tick (client-only nameplate override).
-        ClientTickEvents.END_CLIENT_TICK.register(AIPlayerClient::tickOverheadDialogue);
     }
 
     private static void resetTopTipLayout(DrawContext context) {
@@ -2250,47 +2219,4 @@ public class AIPlayerClient implements ClientModInitializer {
         }
     }
 
-    // ===== Companion overhead dialogue (non-chat) =====
-    // Fabric API in this project version doesn't expose a world-render callback, so we render overhead
-    // lines by temporarily overriding the *client-side* nameplate (custom name) of the companion player.
-
-    private static void tickOverheadDialogue(MinecraftClient client) {
-        if (client == null || client.world == null) {
-            return;
-        }
-        long now = System.currentTimeMillis();
-
-        for (var entry : OVERHEAD_LINES.entrySet()) {
-            java.util.UUID uuid = entry.getKey();
-            OverheadLine line = entry.getValue();
-            if (uuid == null || line == null) {
-                OVERHEAD_LINES.remove(uuid);
-                OVERHEAD_NAME_BACKUP.remove(uuid);
-                continue;
-            }
-
-            PlayerEntity bot = client.world.getPlayerByUuid(uuid);
-
-            if (now >= line.expiresAtMs()) {
-                // Expired: restore prior nameplate (best-effort).
-                OverheadNameBackup backup = OVERHEAD_NAME_BACKUP.remove(uuid);
-                if (backup != null && bot != null) {
-                    bot.setCustomName(backup.customName());
-                    bot.setCustomNameVisible(backup.customNameVisible());
-                }
-                OVERHEAD_LINES.remove(uuid);
-                continue;
-            }
-
-            // Active: apply nameplate override if the entity is present.
-            if (bot != null) {
-                OVERHEAD_NAME_BACKUP.computeIfAbsent(uuid, ignored -> new OverheadNameBackup(bot.getCustomName(), bot.isCustomNameVisible()));
-                bot.setCustomName(Text.literal(line.line()));
-                bot.setCustomNameVisible(true);
-            }
-        }
-
-        // Safety: remove backups for bots that no longer have active overhead lines.
-        OVERHEAD_NAME_BACKUP.keySet().removeIf(uuid -> !OVERHEAD_LINES.containsKey(uuid));
-    }
 }

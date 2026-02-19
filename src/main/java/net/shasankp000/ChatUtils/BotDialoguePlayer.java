@@ -5,11 +5,10 @@ import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.sound.SoundCategory;
 import net.minecraft.sound.SoundEvent;
-import net.minecraft.text.Text;
-import net.minecraft.util.Formatting;
 import net.shasankp000.AIPlayer;
 import net.shasankp000.FilingSystem.ManualConfig;
 import net.shasankp000.GameAI.BotEventHandler;
+import net.shasankp000.GameAI.services.CompanionOverheadHologramService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -34,8 +33,6 @@ public final class BotDialoguePlayer {
     private static final float VOLUME = 0.8f;
     private static final float PITCH = 1.0f;
     
-    // Subtitle range - players within this range see subtitles
-    private static final double SUBTITLE_RANGE = 16.0;
 
     /**
      * Anti-spam: limit how often a bot can play voiced dialogue, especially for combat/status.
@@ -756,27 +753,11 @@ public final class BotDialoguePlayer {
         if (subtitleText == null) {
             return; // No subtitle for this sound
         }
-        
-        if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
-            return;
-        }
-        
-        String botName = bot.getName().getString();
-        Text subtitle = Text.literal("[" + botName + "] ")
-                .formatted(Formatting.GRAY, Formatting.ITALIC)
-                .append(Text.literal(subtitleText).formatted(Formatting.WHITE, Formatting.ITALIC));
-        
-        // Send to all players within range
-        for (ServerPlayerEntity player : world.getPlayers()) {
-            if (player == bot) continue; // Don't send to the bot itself
-            
-            double distance = player.squaredDistanceTo(bot);
-            if (distance <= SUBTITLE_RANGE * SUBTITLE_RANGE) {
-                player.sendMessage(subtitle, true); // true = action bar
-            }
-        }
-        
-        LOGGER.debug("[Subtitle] Showed '{}' from {} to nearby players", subtitleText, botName);
+
+        // Display as hologram above the bot's head (visible to all nearby players).
+        CompanionOverheadHologramService.show(bot, subtitleText, 2800);
+
+        LOGGER.debug("[Subtitle] Showed '{}' from {} via hologram", subtitleText, bot.getName().getString());
     }
 
     /**

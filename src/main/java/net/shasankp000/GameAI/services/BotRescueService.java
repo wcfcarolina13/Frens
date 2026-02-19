@@ -522,7 +522,9 @@ public final class BotRescueService {
             targetPos = head;
             targetState = headState;
             location = "above";
-        } else if (!feetState.isAir() && feetState.blocksMovement() && !feetState.isOf(Blocks.BEDROCK) && !isRescueProtectedBlock(feetState)) {
+        } else if (!feetState.isAir() && feetState.blocksMovement() && !feetState.isOf(Blocks.BEDROCK)
+                && !feetState.isOf(Blocks.FARMLAND) && !feetState.isOf(Blocks.DIRT_PATH)
+                && !isRescueProtectedBlock(feetState)) {
             targetPos = feet;
             targetState = feetState;
             location = "at feet";
