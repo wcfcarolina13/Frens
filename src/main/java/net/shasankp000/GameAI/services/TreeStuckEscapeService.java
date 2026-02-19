@@ -190,7 +190,15 @@ public final class TreeStuckEscapeService {
             }
         }
 
-        // ── Strategy 2: Break leaves below to fall through ──
+        // ── Strategy 2: Elytra descent (fastest if available) ──
+        if (hasElytra(bot) && !ElytraFlightService.isInFlight(botId)) {
+            if (ElytraFlightService.tryAutonomousDescent(bot, server)) {
+                LOGGER.info("TreeStuck: {} using elytra descent", bot.getName().getString());
+                return true;
+            }
+        }
+
+        // ── Strategy 3: Break leaves below to fall through ──
         // Simplest and most reliable: just break the leaf under the bot's feet.
         BlockPos leafBelow = bot.getBlockPos().down();
         if (world.getBlockState(leafBelow).isIn(BlockTags.LEAVES)) {
@@ -200,7 +208,7 @@ public final class TreeStuckEscapeService {
             return true;
         }
 
-        // ── Strategy 3: Break leaves toward trunk ──
+        // ── Strategy 4: Break leaves toward trunk ──
         BlockPos trunk = findNearbyTrunk(world, bot.getBlockPos());
         if (trunk != null) {
             BlockPos leafToBreak = findLeafTowardTrunk(world, bot.getBlockPos(), trunk);
@@ -209,14 +217,6 @@ public final class TreeStuckEscapeService {
                 LOGGER.info("TreeStuck: {} breaking leaf at {} toward trunk at {}",
                         bot.getName().getString(), leafToBreak.toShortString(), trunk.toShortString());
                 startLeafMine(bot, leafToBreak);
-                return true;
-            }
-        }
-
-        // ── Strategy 4: Elytra descent ──
-        if (hasElytra(bot) && !ElytraFlightService.isInFlight(botId)) {
-            if (ElytraFlightService.tryAutonomousDescent(bot, server)) {
-                LOGGER.info("TreeStuck: {} using elytra descent", bot.getName().getString());
                 return true;
             }
         }

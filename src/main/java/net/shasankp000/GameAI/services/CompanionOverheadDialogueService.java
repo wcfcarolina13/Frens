@@ -170,6 +170,12 @@ public final class CompanionOverheadDialogueService {
                 // Best-effort only.
             }
         }
+
+        // Spawn/update the armor-stand hologram so the text is visible above the bot.
+        // (Player entities don't render customName, so the nameplate-override approach
+        //  doesn't work — the hologram trick is the reliable fallback.)
+        CompanionOverheadHologramService.show(bot, line, dur);
+
         LAST_ANY_OVERHEAD_MS.put(id, System.currentTimeMillis());
 
         if (tag != null && !tag.isBlank()) {
