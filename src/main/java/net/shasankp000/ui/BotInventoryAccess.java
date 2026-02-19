@@ -23,4 +23,15 @@ public final class BotInventoryAccess {
         ));
         return true;
     }
+
+    /** Remote inventory access — skips distance/dimension checks (full-access spell). */
+    public static boolean openBotInventoryRemote(ServerPlayerEntity viewer, ServerPlayerEntity bot) {
+        if (viewer == null || bot == null) return false;
+        viewer.openHandledScreen(new net.minecraft.screen.SimpleNamedScreenHandlerFactory(
+                (syncId, playerInv, player) ->
+                        new net.shasankp000.ui.BotPlayerInventoryScreenHandler(syncId, playerInv, bot.getInventory(), bot),
+                net.minecraft.text.Text.literal(bot.getName().getString() + "'s Inventory")
+        ));
+        return true;
+    }
 }

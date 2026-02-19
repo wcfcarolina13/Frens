@@ -301,4 +301,27 @@ Automated check results:
 
 - `dialogue/test_line__01`
 
-*Last updated: January 12, 2026*
+## New Audio Needed (February 2026 — Dimension Dialogue & Portal Proximity)
+
+These were added for cross-dimension follow dialogue, portal proximity reactions, and weird-portal lines. **Code support is in place** (sound events registered, chat→sound mapping added, subtitles added). The **Status** column reflects whether the corresponding `.ogg` assets are present.
+
+| Sound event id | sounds.json entry (suggested file) | Chat text | Status |
+|---|---|---|---|
+| `bot.line.follow_dim_end` | `ai-player:dialogue/follow_dim_end__01` | "I'll follow you to the end...is that corny?" | Pending |
+| `bot.line.follow_dim_end_2` | `ai-player:dialogue/follow_dim_end_2__01` | "The End. Sure. Why not." | Pending |
+| `bot.line.follow_dim_nether` | `ai-player:dialogue/follow_dim_nether__01` | "Into the fire with you, then." | Pending |
+| `bot.line.follow_dim_nether_2` | `ai-player:dialogue/follow_dim_nether_2__01` | "Nether it is. Stay close." | Pending |
+| `bot.line.follow_dim_overworld` | `ai-player:dialogue/follow_dim_overworld__01` | "Fresh air. Finally." | Pending |
+| `bot.line.follow_dim_overworld_2` | `ai-player:dialogue/follow_dim_overworld_2__01` | "Back to the surface. Good." | Pending |
+| `bot.line.portal_nether_overworld_1` | `ai-player:dialogue/portal_nether_overworld_1__01` | "That portal's giving me a bad feeling." | Pending |
+| `bot.line.portal_nether_overworld_2` | `ai-player:dialogue/portal_nether_overworld_2__01` | "Nether portal... you thinking what I'm thinking?" | Pending |
+| `bot.line.portal_end_overworld_1` | `ai-player:dialogue/portal_end_overworld_1__01` | "Is that...an End portal?" | Pending |
+| `bot.line.portal_end_overworld_2` | `ai-player:dialogue/portal_end_overworld_2__01` | "I can feel it pulling. That's an End portal." | Pending |
+| `bot.line.weird_portal_end_in_nether_1` | `ai-player:dialogue/weird_portal_end_in_nether_1__01` | "Is that...an End portal? In the Nether? That shouldn't be here." | Pending |
+| `bot.line.weird_portal_end_in_nether_2` | `ai-player:dialogue/weird_portal_end_in_nether_2__01` | "Okay, that's wrong. End portal in the Nether. Nope." | Pending |
+| `bot.line.weird_portal_nether_in_end_1` | `ai-player:dialogue/weird_portal_nether_in_end_1__01` | "A Nether portal? Here? Someone's been busy." | Pending |
+| `bot.line.weird_portal_nether_in_end_2` | `ai-player:dialogue/weird_portal_nether_in_end_2__01` | "Portal to the Nether...in The End. That's unsettling." | Pending |
+
+Each sound event has 3 variants (`__01`, `__02`, `__03`) in `sounds.json`. All 42 `.ogg` clips need to be generated.
+
+*Last updated: February 18, 2026*

@@ -34,6 +34,12 @@ final class BotCompanionCommands {
                         .then(CommandManager.argument("bot", StringArgumentType.string())
                                 .executes(ctx -> modCommandRegistry.executeCompanionHomeTargets(
                                         ctx,
+                                        StringArgumentType.getString(ctx, "bot")))))
+                .then(CommandManager.literal("open")
+                        .executes(ctx -> modCommandRegistry.executeCompanionOpenTargets(ctx, null))
+                        .then(CommandManager.argument("bot", StringArgumentType.string())
+                                .executes(ctx -> modCommandRegistry.executeCompanionOpenTargets(
+                                        ctx,
                                         StringArgumentType.getString(ctx, "bot")))));
     }
 }

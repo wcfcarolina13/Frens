@@ -505,6 +505,25 @@ public final class BotDialoguePlayer {
         SUBTITLE_MAP.put(BotDialogueSounds.LINE_TOPIC_ELYTRA_ASK_2, "Don't aim at trees. Trees always win.");
         SUBTITLE_MAP.put(BotDialogueSounds.LINE_TOPIC_ELYTRA_MEMORY, "First flight was pure confidence.");
 
+        // Cross-dimension follow dialogue
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_FOLLOW_DIM_END, "I'll follow you to the end...is that corny?");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_FOLLOW_DIM_END_2, "The End. Sure. Why not.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_FOLLOW_DIM_NETHER, "Into the fire with you, then.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_FOLLOW_DIM_NETHER_2, "Nether it is. Stay close.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_FOLLOW_DIM_OVERWORLD, "Fresh air. Finally.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_FOLLOW_DIM_OVERWORLD_2, "Back to the surface. Good.");
+
+        // Portal proximity dialogue (Overworld)
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_PORTAL_NETHER_OVERWORLD_1, "That portal's giving me a bad feeling.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_PORTAL_NETHER_OVERWORLD_2, "Nether portal... you thinking what I'm thinking?");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_PORTAL_END_OVERWORLD_1, "Is that...an End portal?");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_PORTAL_END_OVERWORLD_2, "I can feel it pulling. That's an End portal.");
+
+        // Weird portal lines (wrong dimension)
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_WEIRD_PORTAL_END_IN_NETHER_1, "Is that...an End portal? In the Nether? That shouldn't be here.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_WEIRD_PORTAL_END_IN_NETHER_2, "Okay, that's wrong. End portal in the Nether. Nope.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_WEIRD_PORTAL_NETHER_IN_END_1, "A Nether portal? Here? Someone's been busy.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_WEIRD_PORTAL_NETHER_IN_END_2, "Portal to the Nether...in The End. That's unsettling.");
 
     }
 

@@ -27,6 +27,7 @@ public class CompanionSpellsScreen extends Screen {
     private ButtonWidget comeBtn;
     private ButtonWidget summonBtn;
     private ButtonWidget homeBtn;
+    private ButtonWidget openInvBtn;
 
     private static final class AccessState {
         final boolean full;
@@ -67,8 +68,12 @@ public class CompanionSpellsScreen extends Screen {
                 .dimensions(cx - w / 2, top + 2 * (h + gap), w, h)
                 .build());
 
+        openInvBtn = this.addDrawableChild(ButtonWidget.builder(Text.literal("Remote Inventory"), (btn) -> sendSpell(withBotAlias("bot companion open")))
+                .dimensions(cx - w / 2, top + 3 * (h + gap), w, h)
+                .build());
+
         this.addDrawableChild(ButtonWidget.builder(Text.literal("Back"), (btn) -> close())
-                .dimensions(cx - w / 2, top + 3 * (h + gap) + 10, w, h)
+                .dimensions(cx - w / 2, top + 4 * (h + gap) + 10, w, h)
                 .build());
 
         refreshEnabledState();
@@ -86,6 +91,7 @@ public class CompanionSpellsScreen extends Screen {
         if (comeBtn != null) comeBtn.active = state.full || state.horn;
         if (summonBtn != null) summonBtn.active = state.full || eyeReady;
         if (homeBtn != null) homeBtn.active = state.full;
+        if (openInvBtn != null) openInvBtn.active = state.full;
     }
 
     private AccessState getAccessState() {

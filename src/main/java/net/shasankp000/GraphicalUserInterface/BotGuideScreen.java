@@ -849,6 +849,22 @@ public final class BotGuideScreen extends Screen {
                         "direct admin"
                 ),
                 new GuideTopic(
+                        "items_wizard_tome",
+                        "Items",
+                        "Wizard's Tome",
+                        "A rare magical item that unlocks companion spells and abilities.",
+                        List.of(
+                                "Crafted via ritual: sneak-right-click an Enchanting Table in The End.",
+                                "Requires a fully powered table (15 bookshelves).",
+                                "Hold an Eye of Ender and have in inventory: 1 Book, 1 Diamond, 3 Redstone, 3 Lapis Lazuli.",
+                                "Once crafted, open it to access the companion spells menu.",
+                                "Can also be obtained via /give @p ai-player:wizard_tome in creative."
+                        ),
+                        "/give @p ai-player:wizard_tome (creative)",
+                        "Open Spells keybind (when holding tome)",
+                        "wizard tome spellbook magic enchant craft ritual end"
+                ),
+                new GuideTopic(
                         "shortcuts",
                         "Shortcuts",
                         "Command + Keybind Cheatsheet",

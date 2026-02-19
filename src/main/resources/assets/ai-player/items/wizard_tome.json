@@ -1,0 +1,6 @@
+{
+  "model": {
+    "type": "minecraft:model",
+    "model": "ai-player:item/wizard_tome"
+  }
+}

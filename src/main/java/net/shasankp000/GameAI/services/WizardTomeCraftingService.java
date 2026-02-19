@@ -5,8 +5,11 @@ import net.minecraft.block.Blocks;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
+import net.minecraft.particle.ParticleTypes;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
+import net.minecraft.sound.SoundCategory;
+import net.minecraft.sound.SoundEvents;
 import net.minecraft.util.ActionResult;
 import net.minecraft.util.Hand;
 import net.minecraft.util.math.BlockPos;
@@ -78,6 +81,17 @@ public final class WizardTomeCraftingService {
         if (!inserted && !out.isEmpty()) {
             player.dropItem(out, false);
         }
+
+        // Enchantment sound effect
+        world.playSound(null, player.getX(), player.getY(), player.getZ(),
+                SoundEvents.BLOCK_ENCHANTMENT_TABLE_USE, SoundCategory.PLAYERS, 1.0f, 1.0f);
+
+        // Magic particles around the player
+        double px = player.getX();
+        double py = player.getY() + 1.0;
+        double pz = player.getZ();
+        world.spawnParticles(ParticleTypes.ENCHANT, px, py, pz, 40, 0.6, 0.8, 0.6, 0.5);
+        world.spawnParticles(ParticleTypes.END_ROD, px, py, pz, 12, 0.4, 0.6, 0.4, 0.02);
 
         player.sendMessage(net.minecraft.text.Text.literal("You craft a Wizard's Tome."), true);
         return ActionResult.SUCCESS;

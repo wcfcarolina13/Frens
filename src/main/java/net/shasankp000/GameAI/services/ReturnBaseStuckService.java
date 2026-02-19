@@ -1731,6 +1731,10 @@ public final class ReturnBaseStuckService {
         if (state.isIn(BlockTags.LOGS) || state.isIn(BlockTags.PLANKS) || state.isIn(BlockTags.WOOL)) {
             return false;
         }
+        // Never destroy player-built roads.
+        if (state.isOf(Blocks.DIRT_PATH)) {
+            return false;
+        }
 
         float hardness = state.getHardness(world, pos);
         // Skip unbreakable blocks (bedrock, barriers, etc.) and very hard blocks

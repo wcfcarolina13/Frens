@@ -883,6 +883,10 @@ public final class BotActions {
         if (state.isIn(BlockTags.FENCES) || state.isIn(BlockTags.WALLS) || state.isIn(BlockTags.FENCE_GATES)) {
             return false;
         }
+        // Never destroy player-built roads.
+        if (state.isOf(Blocks.DIRT_PATH)) {
+            return false;
+        }
 
         float hardness = state.getHardness(world, pos);
         if (hardness < 0) {

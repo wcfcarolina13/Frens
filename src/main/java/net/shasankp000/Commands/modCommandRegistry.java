@@ -4063,10 +4063,17 @@ public class modCommandRegistry {
         if (!(commander.getEntityWorld() instanceof ServerWorld commanderWorld)) {
             return 0;
         }
-        if (!(bot.getEntityWorld() instanceof ServerWorld botWorld)
-                || botWorld.getRegistryKey() != commanderWorld.getRegistryKey()) {
-            ChatUtils.sendSystemMessage(source, alias + " can't be summoned across dimensions.");
+        if (!(bot.getEntityWorld() instanceof ServerWorld botWorld)) {
             return 0;
+        }
+        boolean crossDim = botWorld.getRegistryKey() != commanderWorld.getRegistryKey();
+        if (crossDim) {
+            boolean fullAccess = hasSpellbookToken(commander) || isNearEnchantingTable(commander, 4);
+            if (!fullAccess) {
+                ChatUtils.sendSystemMessage(source,
+                    alias + " can't be summoned across dimensions. Use an Enchanting Table or Wizard's Tome.");
+                return 0;
+            }
         }
 
         long nowTick = server.getTicks();
@@ -4110,6 +4117,64 @@ public class modCommandRegistry {
         }
 
         ChatUtils.sendSystemMessage(source, "Summoned " + alias + " to your location.");
+        return 1;
+    }
+
+    static int executeCompanionOpenTargets(CommandContext<ServerCommandSource> context, String targetArg) {
+        ServerCommandSource source = context.getSource();
+        MinecraftServer server = source.getServer();
+        ServerPlayerEntity commander;
+        try {
+            commander = source.getPlayer();
+        } catch (Exception e) {
+            commander = null;
+        }
+        if (server == null || commander == null) {
+            ChatUtils.sendSystemMessage(source, "Only players can remotely open a companion's inventory.");
+            return 0;
+        }
+        boolean recruitmentMode = SurvivalRecruitmentService.isEnabled(server);
+        ManualConfig.SurvivalRecruitmentState st = SurvivalRecruitmentService.getState(server);
+        String alias = resolveCompanionAlias(st, targetArg);
+
+        if (recruitmentMode) {
+            if (st == null || !st.isRecruited()) {
+                ChatUtils.sendSystemMessage(source, "This world hasn't recruited a companion yet.");
+                return 0;
+            }
+            if (!st.isPermanentCompanion()) {
+                ChatUtils.sendSystemMessage(source, "They're not a permanent companion yet.");
+                return 0;
+            }
+            if (!isAuthorizedCompanionCommander(commander, st)) {
+                ChatUtils.sendSystemMessage(source, "You aren't the one they pledged to.");
+                return 0;
+            }
+            String recruitedAlias = st.getBotAlias();
+            if (targetArg != null && !targetArg.isBlank() && !recruitedAlias.equalsIgnoreCase(targetArg.trim())) {
+                ChatUtils.sendSystemMessage(source, "This companion command only applies to '" + recruitedAlias + "'.");
+                return 0;
+            }
+        }
+
+        // Full access required (Wizard's Tome or Enchanting Table) — Eye of Ender is NOT sufficient.
+        boolean fullAccess = hasSpellbookToken(commander) || isNearEnchantingTable(commander, 4);
+        if (!fullAccess) {
+            ChatUtils.sendSystemMessage(source, "Remote inventory requires an Enchanting Table or Wizard's Tome.");
+            return 0;
+        }
+
+        ServerPlayerEntity bot = server.getPlayerManager().getPlayer(alias);
+        if (bot == null || bot.isRemoved() || !bot.isAlive()) {
+            ChatUtils.sendSystemMessage(source, "Couldn't open inventory for " + alias + " (not spawned).");
+            return 0;
+        }
+
+        boolean ok = BotInventoryAccess.openBotInventoryRemote(commander, bot);
+        if (!ok) {
+            ChatUtils.sendSystemMessage(source, "Failed to open " + alias + "'s inventory.");
+            return 0;
+        }
         return 1;
     }
 

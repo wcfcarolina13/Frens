@@ -9,6 +9,7 @@ import net.minecraft.network.packet.s2c.play.EntityEquipmentUpdateS2CPacket;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
+import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
 import net.shasankp000.GameAI.BotEventHandler;
 import org.slf4j.Logger;
@@ -43,6 +44,8 @@ public final class ElytraFlightService {
     private static final Map<UUID, Long> LAST_BOOST_TICK = new HashMap<>();
     private static final Map<UUID, ItemStack> SAVED_CHESTPLATE = new HashMap<>();
     private static final Map<UUID, UUID> FLIGHT_COMMANDER = new HashMap<>();
+    /** When set, the bot is performing an autonomous descent (not mirroring commander). */
+    private static final Map<UUID, Boolean> AUTONOMOUS_DESCENT = new HashMap<>();
 
     // ── Timing constants ────────────────────────────────────────────────────
     private static final long EQUIP_TIMEOUT_TICKS = 40L;
@@ -72,6 +75,65 @@ public final class ElytraFlightService {
     public static boolean isInFlight(UUID botUuid) {
         FlightPhase phase = PHASE.get(botUuid);
         return phase != null && phase != FlightPhase.NONE;
+    }
+
+    /**
+     * Start an autonomous descent — the bot equips its elytra and glides down to safety.
+     * Unlike commander-mirroring, this is self-initiated (e.g. when stuck on a tree or
+     * at a cliff edge with no bypass).
+     *
+     * <p>Conditions: not already in flight, has elytra, on ground, elevated (significant
+     * air below in at least 2 of 4 cardinal directions).</p>
+     *
+     * @return {@code true} if the descent was initiated.
+     */
+    public static boolean tryAutonomousDescent(ServerPlayerEntity bot, MinecraftServer server) {
+        if (bot == null || server == null) return false;
+        UUID botId = bot.getUuid();
+        if (isInFlight(botId)) return false;
+        if (!bot.isOnGround()) return false;
+        if (bot.hasVehicle() || bot.isTouchingWater()) return false;
+
+        // Must have an elytra (equipped or in inventory).
+        boolean hasElytra = bot.getEquippedStack(net.minecraft.entity.EquipmentSlot.CHEST).isOf(Items.ELYTRA)
+                || findItemSlot(bot, Items.ELYTRA) >= 0;
+        if (!hasElytra) return false;
+
+        // Elevation check: at least 2 of 4 cardinal directions must have > 6 blocks of air below.
+        if (!(bot.getEntityWorld() instanceof ServerWorld world)) return false;
+        int elevatedDirs = 0;
+        int minAirBlocks = 6;
+        for (net.minecraft.util.math.Direction dir : new net.minecraft.util.math.Direction[]{
+                net.minecraft.util.math.Direction.NORTH,
+                net.minecraft.util.math.Direction.SOUTH,
+                net.minecraft.util.math.Direction.EAST,
+                net.minecraft.util.math.Direction.WEST}) {
+            BlockPos probe = bot.getBlockPos().offset(dir);
+            int air = 0;
+            for (int y = 0; y < minAirBlocks + 1; y++) {
+                BlockPos below = probe.down(y + 1);
+                if (world.getBlockState(below).isAir()
+                        || world.getBlockState(below).isIn(net.minecraft.registry.tag.BlockTags.LEAVES)) {
+                    air++;
+                } else {
+                    break;
+                }
+            }
+            if (air >= minAirBlocks) elevatedDirs++;
+        }
+        if (elevatedDirs < 2) return false;
+
+        // All conditions met — begin autonomous descent.
+        long now = server.getTicks();
+        AUTONOMOUS_DESCENT.put(botId, Boolean.TRUE);
+        // Store follow target as the "flight commander" for steering purposes.
+        UUID followTarget = BotEventHandler.getFollowTargetUuid(bot);
+        if (followTarget != null) {
+            FLIGHT_COMMANDER.put(botId, followTarget);
+        }
+        setPhase(botId, FlightPhase.EQUIPPING, now);
+        LOGGER.info("ElytraFlight: {} entering AUTONOMOUS DESCENT", bot.getName().getString());
+        return true;
     }
 
     /**
@@ -225,6 +287,18 @@ public final class ElytraFlightService {
 
     private static void tickGliding(MinecraftServer server, ServerPlayerEntity bot, long now) {
         UUID botId = bot.getUuid();
+        boolean autonomous = AUTONOMOUS_DESCENT.getOrDefault(botId, false);
+
+        if (autonomous) {
+            tickGlidingAutonomous(server, bot, now);
+        } else {
+            tickGlidingCommander(server, bot, now);
+        }
+    }
+
+    /** Gliding tick when mirroring the commander's elytra flight. */
+    private static void tickGlidingCommander(MinecraftServer server, ServerPlayerEntity bot, long now) {
+        UUID botId = bot.getUuid();
 
         // Resolve commander
         ServerPlayerEntity commander = resolveFlightCommander(server, botId);
@@ -262,48 +336,13 @@ public final class ElytraFlightService {
             }
         }
 
-        // ── Steering ──
+        // ── Steering toward commander ──
         Vec3d botPos = new Vec3d(bot.getX(), bot.getY(), bot.getZ());
         Vec3d cmdPos = new Vec3d(commander.getX(), commander.getY(), commander.getZ());
-        Vec3d direction = cmdPos.subtract(botPos);
-        double horizDist = Math.sqrt(direction.x * direction.x + direction.z * direction.z);
-        double vertDist = direction.y;
-
-        // Calculate target pitch and yaw
-        float targetYaw = (float) (Math.toDegrees(Math.atan2(-direction.x, direction.z)));
-        float targetPitch;
-
-        if (horizDist < 1.0) {
-            // Commander is directly above/below — use altitude-based pitch
-            targetPitch = vertDist > 0 ? PITCH_DESCENT_SHALLOW : PITCH_LANDING;
-        } else {
-            targetPitch = (float) (-Math.toDegrees(Math.atan2(vertDist, horizDist)));
-        }
-
-        // Altitude management overrides
-        double altitudeDiff = bot.getY() - commander.getY();
-        if (altitudeDiff < ALTITUDE_GAIN_THRESHOLD) {
-            // Bot is too low — pitch up
-            targetPitch = Math.min(targetPitch, PITCH_DESCENT_SHALLOW);
-        } else if (altitudeDiff > ALTITUDE_LOSE_THRESHOLD) {
-            // Bot is too high — pitch down
-            targetPitch = Math.max(targetPitch, 20.0F);
-        }
-
-        // Clamp pitch
-        targetPitch = Math.max(PITCH_MIN, Math.min(PITCH_MAX, targetPitch));
-
-        bot.setPitch(targetPitch);
-        bot.setYaw(targetYaw);
-        bot.setHeadYaw(targetYaw);
+        applyGlideSteering(bot, botPos, cmdPos);
 
         // ── Anti-stall velocity nudge ──
-        Vec3d velocity = bot.getVelocity();
-        if (velocity.lengthSquared() < STALL_SPEED_SQ) {
-            Vec3d lookVec = bot.getRotationVector();
-            bot.setVelocity(velocity.add(lookVec.multiply(ANTI_STALL_MAGNITUDE)));
-            bot.velocityDirty = true;
-        }
+        applyAntiStall(bot);
 
         // ── Firework boosting ──
         long lastBoost = LAST_BOOST_TICK.getOrDefault(botId, 0L);
@@ -311,6 +350,53 @@ public final class ElytraFlightService {
         if (now - lastBoost >= BOOST_INTERVAL_TICKS && distSqToCommander > BOOST_DISTANCE_SQ) {
             tryFireworkBoost(bot, now);
         }
+    }
+
+    /** Gliding tick for autonomous descent (bot-initiated, not mirroring commander). */
+    private static void tickGlidingAutonomous(MinecraftServer server, ServerPlayerEntity bot, long now) {
+        UUID botId = bot.getUuid();
+
+        // Exit condition: bot has landed
+        if (bot.isOnGround()) {
+            LOGGER.info("ElytraFlight: {} autonomous descent landed", bot.getName().getString());
+            setPhase(botId, FlightPhase.CLEANUP, now);
+            return;
+        }
+
+        // Emergency exit: low health or in water
+        if (bot.getHealth() < EMERGENCY_HEALTH || bot.isTouchingWater()) {
+            LOGGER.info("ElytraFlight: {} autonomous descent emergency landing (health={} water={})",
+                    bot.getName().getString(), bot.getHealth(), bot.isTouchingWater());
+            setPhase(botId, FlightPhase.LANDING, now);
+            return;
+        }
+
+        // Re-establish gliding if vanilla un-set it
+        if (!bot.isGliding()) {
+            if (canBotGlide(bot)) {
+                bot.startGliding();
+            }
+            if (!bot.isGliding()) {
+                setPhase(botId, FlightPhase.CLEANUP, now);
+                return;
+            }
+        }
+
+        // ── Steering: toward follow target or gentle descent ──
+        Vec3d botPos = new Vec3d(bot.getX(), bot.getY(), bot.getZ());
+        ServerPlayerEntity target = resolveFlightCommander(server, botId);
+        if (target != null) {
+            Vec3d targetPos = new Vec3d(target.getX(), target.getY(), target.getZ());
+            applyGlideSteering(bot, botPos, targetPos);
+        } else {
+            // No target — just descend gently forward.
+            bot.setPitch(PITCH_LANDING);
+        }
+
+        // ── Anti-stall velocity nudge ──
+        applyAntiStall(bot);
+
+        // No firework boosting during autonomous descent — gravity only.
     }
 
     // ── LANDING phase ───────────────────────────────────────────────────────
@@ -400,6 +486,46 @@ public final class ElytraFlightService {
         LAST_BOOST_TICK.remove(botId);
         SAVED_CHESTPLATE.remove(botId);
         FLIGHT_COMMANDER.remove(botId);
+        AUTONOMOUS_DESCENT.remove(botId);
+    }
+
+    /** Shared steering logic: steer the bot toward a target position. */
+    private static void applyGlideSteering(ServerPlayerEntity bot, Vec3d botPos, Vec3d targetPos) {
+        Vec3d direction = targetPos.subtract(botPos);
+        double horizDist = Math.sqrt(direction.x * direction.x + direction.z * direction.z);
+        double vertDist = direction.y;
+
+        float targetYaw = (float) (Math.toDegrees(Math.atan2(-direction.x, direction.z)));
+        float targetPitch;
+
+        if (horizDist < 1.0) {
+            targetPitch = vertDist > 0 ? PITCH_DESCENT_SHALLOW : PITCH_LANDING;
+        } else {
+            targetPitch = (float) (-Math.toDegrees(Math.atan2(vertDist, horizDist)));
+        }
+
+        double altitudeDiff = bot.getY() - targetPos.y;
+        if (altitudeDiff < ALTITUDE_GAIN_THRESHOLD) {
+            targetPitch = Math.min(targetPitch, PITCH_DESCENT_SHALLOW);
+        } else if (altitudeDiff > ALTITUDE_LOSE_THRESHOLD) {
+            targetPitch = Math.max(targetPitch, 20.0F);
+        }
+
+        targetPitch = Math.max(PITCH_MIN, Math.min(PITCH_MAX, targetPitch));
+
+        bot.setPitch(targetPitch);
+        bot.setYaw(targetYaw);
+        bot.setHeadYaw(targetYaw);
+    }
+
+    /** Shared anti-stall nudge. */
+    private static void applyAntiStall(ServerPlayerEntity bot) {
+        Vec3d velocity = bot.getVelocity();
+        if (velocity.lengthSquared() < STALL_SPEED_SQ) {
+            Vec3d lookVec = bot.getRotationVector();
+            bot.setVelocity(velocity.add(lookVec.multiply(ANTI_STALL_MAGNITUDE)));
+            bot.velocityDirty = true;
+        }
     }
 
     private static ServerPlayerEntity resolveCommander(MinecraftServer server, ServerPlayerEntity bot) {
