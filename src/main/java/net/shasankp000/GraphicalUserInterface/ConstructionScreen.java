@@ -30,6 +30,8 @@ public class ConstructionScreen extends Screen {
             new ConstructionEntry("build defensive_wall_section", "Wall Section", "5-block crenellated wall", "defensive_wall_section"),
             new ConstructionEntry("build defensive_wall_corner", "Wall Corner", "L-shaped corner piece", "defensive_wall_corner"),
             new ConstructionEntry("build defensive_gatehouse", "Gatehouse", "Archway with pillars", "defensive_gatehouse"),
+            // Village fortification
+            new ConstructionEntry("fortify", "Fortify Village", "Defensive wall around nearby village", null),
             // Utility
             new ConstructionEntry("build bridge", "Bridge", "9-block bridge with railings", "bridge"),
             new ConstructionEntry("build test_platform", "Platform", "3x3 test platform", "test_platform")
@@ -137,7 +139,15 @@ public class ConstructionScreen extends Screen {
 
         // Get structure type directly from entry (already defined in CONSTRUCTION_OPTIONS)
         String structureType = entry.structureType();
-        
+
+        // No structure type means run as a direct skill command (e.g., fortify_village)
+        if (structureType == null || structureType.isEmpty()) {
+            String cmd = "bot " + entry.command() + (botTarget != null && !botTarget.isEmpty() ? " " + botTarget : "");
+            this.client.player.networkHandler.sendChatCommand(cmd);
+            this.close();
+            return;
+        }
+
         // All structure types use the preview system
         if (structureType != null && !structureType.isEmpty()) {
             net.shasankp000.AIPlayerClient.setPendingShelter(structureType, botTarget);

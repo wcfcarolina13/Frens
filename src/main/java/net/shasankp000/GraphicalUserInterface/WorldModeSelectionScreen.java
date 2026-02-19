@@ -31,7 +31,10 @@ public class WorldModeSelectionScreen extends Screen {
     @Override
     protected void init() {
         int cx = this.width / 2;
-        int top = Math.max(40, this.height / 2 - 70);
+        int panelY = Math.max(12, this.height / 2 - 120);
+        int panelH = 96;
+        // Place buttons below the info panel with a small gap
+        int top = panelY + panelH + 10;
         int w = Math.min(320, this.width - 40);
         int h = 20;
         int gap = 8;

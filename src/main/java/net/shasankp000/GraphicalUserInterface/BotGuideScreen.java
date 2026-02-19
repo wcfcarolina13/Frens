@@ -823,6 +823,21 @@ public final class BotGuideScreen extends Screen {
                         "down dig shaft"
                 ),
                 new GuideTopic(
+                        "construction_fortify",
+                        "Construction",
+                        "Fortify Village",
+                        "Builds a defensive stone wall perimeter around a nearby village.",
+                        List.of(
+                                "The bot detects village boundaries by scanning for villagers and POI blocks.",
+                                "Places corner towers, crenellated wall sections, and a gatehouse automatically.",
+                                "Give the bot stone bricks or cobblestone before starting.",
+                                "Options: dry_run (preview), radius=N, gates=N, center=X,Z."
+                        ),
+                        "bot fortify " + target,
+                        "Actions > Construction > Fortify Village",
+                        "fortify village wall defense perimeter corner gatehouse"
+                ),
+                new GuideTopic(
                         "modes_quest",
                         "Modes",
                         "Quest Mode",

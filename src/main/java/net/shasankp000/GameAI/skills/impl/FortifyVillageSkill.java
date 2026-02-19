@@ -10,6 +10,7 @@ import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 import net.shasankp000.ChatUtils.ChatUtils;
+import net.shasankp000.Entity.LookController;
 import net.shasankp000.GameAI.BotActions;
 import net.shasankp000.GameAI.schematic.SchematicData;
 import net.shasankp000.GameAI.schematic.SimpleSchematicBuilder;
@@ -193,13 +194,11 @@ public final class FortifyVillageSkill implements Skill {
                 schematic = schematic.rotated(segment.quarterTurns());
             }
 
-            // Navigate to approach position (2 blocks outside the wall)
+            // Navigate to approach position (outside the wall).
+            // Use tick-based walking for long distances since A* pathfinding
+            // hangs on paths >30 blocks.
             BlockPos approachPos = computeApproachPos(segment);
-            boolean moved = moveToReachBlock(source, bot, approachPos);
-            if (!moved) {
-                // Try direct navigation to origin
-                moveToReachBlock(source, bot, segment.origin());
-            }
+            walkToTarget(source, bot, approachPos, 15_000L);
             sleepQuiet(200);
 
             // Build this segment
@@ -474,6 +473,50 @@ public final class FortifyVillageSkill implements Skill {
             }
         }
         return null;
+    }
+
+    /**
+     * Walk toward a target position using tick-based impulse movement.
+     * Works reliably for any distance, unlike A* pathfinding which hangs on long paths.
+     * For short distances (<20 blocks), falls back to planLootApproach for precision.
+     */
+    private void walkToTarget(ServerCommandSource source, ServerPlayerEntity bot, BlockPos target, long timeoutMs) {
+        double distSq = bot.squaredDistanceTo(Vec3d.ofCenter(target));
+
+        // Short distance — use precise pathfinding
+        if (distSq < 400) { // < 20 blocks
+            moveToReachBlock(source, bot, target);
+            return;
+        }
+
+        // Long distance — use tick-based walking (face target + apply impulse each tick)
+        long deadline = System.currentTimeMillis() + timeoutMs;
+        Vec3d targetVec = Vec3d.ofCenter(target);
+
+        while (System.currentTimeMillis() < deadline) {
+            if (SkillManager.shouldAbortSkill(bot)) return;
+
+            double currentDistSq = bot.squaredDistanceTo(targetVec);
+            if (currentDistSq < 9.0) { // within 3 blocks — close enough
+                return;
+            }
+
+            // Switch to precise pathfinding for the last stretch
+            if (currentDistSq < 400) {
+                moveToReachBlock(source, bot, target);
+                return;
+            }
+
+            // Face and walk toward target
+            LookController.faceBlock(bot, target);
+            BotActions.sprint(bot, false);
+            BotActions.applyMovementInput(bot, targetVec, 0.28D);
+
+            sleepQuiet(50);
+        }
+
+        LOGGER.debug("Walk to {} timed out, attempting final pathfind", target.toShortString());
+        moveToReachBlock(source, bot, target);
     }
 
     private boolean moveToReachBlock(ServerCommandSource source, ServerPlayerEntity bot, BlockPos target) {

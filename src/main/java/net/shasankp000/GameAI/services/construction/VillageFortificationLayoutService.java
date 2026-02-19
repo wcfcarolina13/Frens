@@ -30,6 +30,8 @@ public class VillageFortificationLayoutService {
     private static final int MARGIN = 8;
     /** Minimum half-width/half-depth of the fortification rectangle. */
     private static final int MIN_RADIUS = 12;
+    /** Maximum half-width/half-depth — prevents absurdly large walls on flat worlds. */
+    private static final int MAX_RADIUS = 35;
     /** Default search radius for villagers and POI blocks. */
     private static final int DEFAULT_SEARCH_RADIUS = 64;
 
@@ -152,8 +154,8 @@ public class VillageFortificationLayoutService {
 
         int cx = (minX + maxX) / 2;
         int cz = (minZ + maxZ) / 2;
-        int halfX = Math.max(MIN_RADIUS, (maxX - minX) / 2 + MARGIN);
-        int halfZ = Math.max(MIN_RADIUS, (maxZ - minZ) / 2 + MARGIN);
+        int halfX = Math.min(MAX_RADIUS, Math.max(MIN_RADIUS, (maxX - minX) / 2 + MARGIN));
+        int halfZ = Math.min(MAX_RADIUS, Math.max(MIN_RADIUS, (maxZ - minZ) / 2 + MARGIN));
 
         // Sample terrain Y at center
         int cy = world.getTopY(net.minecraft.world.Heightmap.Type.MOTION_BLOCKING_NO_LEAVES, cx, cz);
