@@ -177,4 +177,20 @@ final class BotSkillCommands {
                                 "leash",
                                 StringArgumentType.getString(context, "target"))));
     }
+
+    /**
+     * Fortify command for building defensive walls around a village.
+     * Usage: /bot fortify              — auto-detect village, build wall
+     *        /bot fortify dry_run      — preview layout only
+     *        /bot fortify radius=25    — explicit radius
+     *        /bot fortify center=100,200 — explicit center
+     *        /bot fortify gates=2      — number of gatehouse sides
+     */
+    static ArgumentBuilder<ServerCommandSource, ?> buildFortify() {
+        return CommandManager.literal("fortify")
+                .executes(context -> modCommandRegistry.executeSkillTargets(context, "fortify_village", null))
+                .then(CommandManager.argument("options", StringArgumentType.greedyString())
+                        .executes(context -> modCommandRegistry.executeSkillTargets(context, "fortify_village",
+                                StringArgumentType.getString(context, "options"))));
+    }
 }

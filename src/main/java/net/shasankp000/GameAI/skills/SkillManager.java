@@ -13,6 +13,7 @@ import net.shasankp000.GameAI.skills.impl.DirtShovelSkill;
 import net.shasankp000.GameAI.skills.impl.DropSweepSkill;
 import net.shasankp000.GameAI.skills.impl.FeedAnimalsSkill;
 import net.shasankp000.GameAI.skills.impl.FishingSkill;
+import net.shasankp000.GameAI.skills.impl.FortifyVillageSkill;
 import net.shasankp000.GameAI.skills.impl.FlowerPickSkill;
 import net.shasankp000.GameAI.skills.impl.HuntSkill;
 import net.shasankp000.GameAI.skills.impl.LeafLitterSkill;
@@ -67,6 +68,7 @@ public final class SkillManager {
         register(new WanderSkill());
         register(new LeafLitterSkill());
         register(new MushroomForageSkill());
+        register(new FortifyVillageSkill());
         DebugFileLogger.log("SkillManager.staticInit end");
     }
 

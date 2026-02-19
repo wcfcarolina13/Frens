@@ -339,6 +339,7 @@ public class modCommandRegistry {
 	                        .then(BotSkillCommands.buildBuild())
 	                        .then(BotSkillCommands.buildLeash())
 	                        .then(BotSkillCommands.buildHitch())
+	                        .then(BotSkillCommands.buildFortify())
 	                        .then(BotLifecycleCommands.buildList())
 	                        .then(BotLifecycleCommands.buildDespawn())
 	                        .then(BotLifecycleCommands.buildStop())

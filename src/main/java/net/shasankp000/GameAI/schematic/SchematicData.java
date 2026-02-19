@@ -48,4 +48,35 @@ public record SchematicData(
     public boolean isReasonableSize() {
         return sizeX <= 64 && sizeY <= 64 && sizeZ <= 64 && blockCount() <= 5000;
     }
+
+    /**
+     * Returns a new SchematicData rotated clockwise by the given number of quarter turns (0-3).
+     * Only transforms XZ coordinates; palette is shared unchanged.
+     * 90° CW: (x,y,z) → (sizeZ-1-z, y, x), swap sizeX/sizeZ.
+     */
+    public SchematicData rotated(int quarterTurns) {
+        int turns = ((quarterTurns % 4) + 4) % 4; // normalize to 0-3
+        if (turns == 0) return this;
+
+        int curSizeX = sizeX;
+        int curSizeZ = sizeZ;
+        List<BlockPlacement> curBlocks = blocks;
+
+        for (int t = 0; t < turns; t++) {
+            List<BlockPlacement> rotated = new java.util.ArrayList<>(curBlocks.size());
+            for (BlockPlacement bp : curBlocks) {
+                BlockPos p = bp.relativePos();
+                // 90° CW: (x, y, z) → (curSizeZ - 1 - z, y, x)
+                BlockPos rp = new BlockPos(curSizeZ - 1 - p.getZ(), p.getY(), p.getX());
+                rotated.add(new BlockPlacement(rp, bp.paletteIndex()));
+            }
+            // swap dimensions
+            int tmp = curSizeX;
+            curSizeX = curSizeZ;
+            curSizeZ = tmp;
+            curBlocks = rotated;
+        }
+
+        return new SchematicData(name + "_r" + turns, curSizeX, sizeY, curSizeZ, palette, curBlocks);
+    }
 }
