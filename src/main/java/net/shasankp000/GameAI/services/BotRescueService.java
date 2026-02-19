@@ -543,6 +543,7 @@ public final class BotRescueService {
             String message = String.format("Spawned inside %s! Mining out with %s...", blockName, toolName);
             ServerCommandSource src = bot.getCommandSource().withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS);
             ChatUtils.sendChatMessages(src, message);
+            CompanionOverheadDialogueService.showOverheadLine(bot, message, 3_000, 48.0, "rescue", "spawn-inside");
             // Best-effort: play matching voiced dialogue for spawn-inside alert
             try {
                 BotDialoguePlayer.tryPlayDialogue(src, message);
@@ -670,6 +671,7 @@ public final class BotRescueService {
         }
         String msg = "I'm suffocating!";
         ChatUtils.sendChatMessages(source.withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS), msg);
+        CompanionOverheadDialogueService.showOverheadLine(bot, msg, 3_000, 48.0, "rescue", "suffocating");
         // Play the voiced dialogue for this message if voiced dialogue is enabled
         try {
             BotDialoguePlayer.tryPlayDialogue(source.withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS), msg);
@@ -735,6 +737,7 @@ public final class BotRescueService {
         }
         String message = String.format("I'm stuck in %s %s! Mining with %s...", blockName, location, toolName);
         ChatUtils.sendChatMessages(source.withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS), message);
+        CompanionOverheadDialogueService.showOverheadLine(bot, "I'm stuck!", 3_000, 48.0, "rescue", "stuck-block");
         // Best-effort: play matching voiced dialogue for the suffocation alert
         try {
             BotDialoguePlayer.tryPlayDialogue(source.withSilent().withPermissions(net.shasankp000.AIPlayer.OPERATOR_PERMISSIONS), message);
@@ -782,12 +785,14 @@ public final class BotRescueService {
                         // First shout
                         String shout = LOST_SHOUTS[java.util.concurrent.ThreadLocalRandom.current().nextInt(LOST_SHOUTS.length)];
                         ChatUtils.sendChatMessages(src, shout);
+                        CompanionOverheadDialogueService.showOverheadLine(candidate, shout, 4_000, 64.0, "rescue", "lost-shout");
                         try { BotDialoguePlayer.tryPlayDialogue(src, shout); } catch (Exception ignored) {}
                         LAST_LOST_SHOUT_MS.put(uuid, nowMs);
                     }
                 } else if (nowMs - lastShout >= LOST_SHOUT_REPEAT_MS) {
                     String shout = LOST_SHOUTS[java.util.concurrent.ThreadLocalRandom.current().nextInt(LOST_SHOUTS.length)];
                     ChatUtils.sendChatMessages(src, shout);
+                    CompanionOverheadDialogueService.showOverheadLine(candidate, shout, 4_000, 64.0, "rescue", "lost-shout");
                     try { BotDialoguePlayer.tryPlayDialogue(src, shout); } catch (Exception ignored) {}
                     LAST_LOST_SHOUT_MS.put(uuid, nowMs);
                 }
@@ -798,6 +803,7 @@ public final class BotRescueService {
                     LAST_LOST_SHOUT_MS.remove(uuid);
                     String found = FOUND_LINES[java.util.concurrent.ThreadLocalRandom.current().nextInt(FOUND_LINES.length)];
                     ChatUtils.sendChatMessages(src, found);
+                    CompanionOverheadDialogueService.showOverheadLine(candidate, found, 3_000, 48.0, "rescue", "found");
                     try { BotDialoguePlayer.tryPlayDialogue(src, found); } catch (Exception ignored) {}
                 }
 

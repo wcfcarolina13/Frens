@@ -100,3 +100,9 @@ screenshots/
 
 # Example mod (not part of main project)
 fabric-example-mod/
+
+# Claude Code project instructions
+CLAUDE.md
+
+# Resource packs (local assets)
+Wizards_Tome_Pack_v2/
