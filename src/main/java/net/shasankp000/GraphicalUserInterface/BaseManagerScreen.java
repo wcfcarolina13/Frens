@@ -32,7 +32,10 @@ public class BaseManagerScreen extends Screen {
     private static final Gson GSON = new GsonBuilder().disableHtmlEscaping().create();
     private static final Type BASE_LIST_TYPE = new TypeToken<List<BaseDto>>() {}.getType();
 
-    public record BaseDto(String label, int x, int y, int z, boolean home) {}
+    public record BaseDto(String label, int x, int y, int z, boolean home, String wallStatus) {
+        /** True when this entry represents a fortification wall rather than a simple base. */
+        boolean isWall() { return wallStatus != null && !wallStatus.isBlank(); }
+    }
 
     private static List<BaseDto> LAST_BASES = List.of();
 
@@ -109,8 +112,14 @@ public class BaseManagerScreen extends Screen {
                 .build());
 
         int btnY3 = btnY2 + CONTROL_ROW_DY;
-        this.addDrawableChild(ButtonWidget.builder(Text.literal("Close"), (btn) -> close())
+        this.addDrawableChild(ButtonWidget.builder(Text.literal("Resume Wall"), (btn) -> sendResumeWall())
+                .dimensions(cx - 110, btnY3, 70, 20)
+                .build());
+        this.addDrawableChild(ButtonWidget.builder(Text.literal("Patch Wall"), (btn) -> sendPatchWall())
                 .dimensions(cx - 36, btnY3, 70, 20)
+                .build());
+        this.addDrawableChild(ButtonWidget.builder(Text.literal("Close"), (btn) -> close())
+                .dimensions(cx + 38, btnY3, 70, 20)
                 .build());
 
         requestRefresh();
@@ -181,6 +190,30 @@ public class BaseManagerScreen extends Screen {
         requestRefresh();
     }
 
+    private void sendResumeWall() {
+        BaseDto selected = getSelected();
+        if (selected == null || !selected.isWall() || selected.label == null || selected.label.isBlank()) {
+            return;
+        }
+        MinecraftClient mc = this.client;
+        if (mc != null && mc.player != null) {
+            mc.player.networkHandler.sendChatCommand("bot fortify resume " + selected.label);
+        }
+        close();
+    }
+
+    private void sendPatchWall() {
+        BaseDto selected = getSelected();
+        if (selected == null || !selected.isWall() || selected.label == null || selected.label.isBlank()) {
+            return;
+        }
+        MinecraftClient mc = this.client;
+        if (mc != null && mc.player != null) {
+            mc.player.networkHandler.sendChatCommand("bot fortify patch " + selected.label);
+        }
+        close();
+    }
+
     private BaseDto getSelected() {
         List<BaseDto> bases = getBasesSnapshot();
         if (selectedIndex < 0 || selectedIndex >= bases.size()) {
@@ -244,7 +277,7 @@ public class BaseManagerScreen extends Screen {
         context.drawCenteredTextWithShadow(this.textRenderer, this.title, cx, 10, 0xFFFFFF);
 
         Rect list = listRect();
-        String hint = "Tip: Select a base, then use Rename / Set Home / Go To Base.";
+        String hint = "Tip: Select a base/wall, then use buttons. Walls support Resume & Patch.";
         context.drawCenteredTextWithShadow(this.textRenderer, Text.literal(hint), cx, list.bottom() + 6, 0xFFB0B0B0);
     }
 
@@ -270,8 +303,15 @@ public class BaseManagerScreen extends Screen {
             context.fill(list.x + 2, rowY + 1, list.right() - 2, rowY + ROW_H - 1, bg);
 
             String rawLabel = b != null && b.label != null ? b.label : "(unnamed)";
-            String label = (b != null && b.home ? "[Home] " : "") + rawLabel;
-            String coords = b != null ? ("(" + b.x + ", " + b.y + ", " + b.z + ")") : "";
+            String prefix = "";
+            if (b != null && b.home) prefix = "[Home] ";
+            if (b != null && b.isWall()) prefix = "§d[Wall] " + prefix;
+            String label = prefix + rawLabel;
+            String statusSuffix = "";
+            if (b != null && b.isWall()) {
+                statusSuffix = " §7[" + b.wallStatus + "]";
+            }
+            String coords = b != null ? ("(" + b.x + ", " + b.y + ", " + b.z + ")" + statusSuffix) : "";
             context.drawTextWithShadow(this.textRenderer, label, list.x + 6, rowY + 2, 0xFFEFEFEF);
             int coordsW = this.textRenderer.getWidth(coords);
             context.drawTextWithShadow(this.textRenderer, coords, list.right() - 6 - coordsW, rowY + 2, 0xFFB0B0B0);

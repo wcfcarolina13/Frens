@@ -826,16 +826,16 @@ public final class BotGuideScreen extends Screen {
                         "construction_fortify",
                         "Construction",
                         "Fortify Village",
-                        "Builds a defensive stone wall perimeter around a nearby village.",
+                        "Builds a defensive wall around a village using a convex hull of its structures.",
                         List.of(
-                                "The bot detects village boundaries by scanning for villagers and POI blocks.",
-                                "Places corner towers, crenellated wall sections, and a gatehouse automatically.",
+                                "The bot computes a convex hull around village structures and builds along the edges.",
+                                "Towers at each hull vertex, crenellated walls along edges, and a gatehouse on the longest edge.",
                                 "Give the bot stone bricks or cobblestone before starting.",
-                                "Options: dry_run (preview), radius=N, gates=N, center=X,Z."
+                                "Subcommands: dry_run (preview), resume <name>, patch <name>, list, name <old> <new>."
                         ),
                         "bot fortify " + target,
                         "Actions > Construction > Fortify Village",
-                        "fortify village wall defense perimeter corner gatehouse"
+                        "fortify village wall defense perimeter tower gatehouse resume patch hull"
                 ),
                 new GuideTopic(
                         "modes_quest",

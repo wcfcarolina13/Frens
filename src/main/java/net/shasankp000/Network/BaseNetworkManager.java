@@ -13,6 +13,7 @@ import net.shasankp000.ChatUtils.ChatUtils;
 import net.shasankp000.Entity.createFakePlayer;
 import net.shasankp000.GameAI.BotEventHandler;
 import net.shasankp000.GameAI.services.BotHomeService;
+import net.shasankp000.GameAI.services.construction.FortificationPersistenceService;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -29,7 +30,8 @@ public final class BaseNetworkManager {
 
     private BaseNetworkManager() {}
 
-    public record BaseDto(String label, int x, int y, int z, boolean home) {}
+    /** @param wallStatus null for regular bases; "complete" or "2/14 edges" for fortification walls */
+    public record BaseDto(String label, int x, int y, int z, boolean home, String wallStatus) {}
 
     public static void registerReceiversOnce() {
         if (REGISTERED) {
@@ -84,10 +86,16 @@ public final class BaseNetworkManager {
                         ChatUtils.sendSystemMessage(player.getCommandSource(), "Select a base to remove.");
                         return;
                     }
-                    boolean removed = BotHomeService.removeBase(player.getCommandSource().getServer(), world, label);
+                    MinecraftServer srv = player.getCommandSource().getServer();
+                    boolean removed = BotHomeService.removeBase(srv, world, label);
+                    if (!removed) {
+                        // Try removing a fortification wall with that name
+                        String wKey = FortificationPersistenceService.serverWorldKey(srv, world);
+                        removed = FortificationPersistenceService.delete(srv, wKey, label);
+                    }
                     ChatUtils.sendSystemMessage(player.getCommandSource(), removed
-                            ? "Removed base '" + label + "'."
-                            : "No base named '" + label + "' found.");
+                            ? "Removed '" + label + "'."
+                            : "No base or wall named '" + label + "' found.");
                     sendBasesList(player, currentBotAliasContext(player));
                 }));
 
@@ -106,9 +114,15 @@ public final class BaseNetworkManager {
                         ChatUtils.sendSystemMessage(player.getCommandSource(), "Select a base and enter a new name.");
                         return;
                     }
-                    boolean ok = BotHomeService.renameBase(player.getCommandSource().getServer(), world, oldLabel, newLabel);
+                    MinecraftServer srv = player.getCommandSource().getServer();
+                    boolean ok = BotHomeService.renameBase(srv, world, oldLabel, newLabel);
+                    if (!ok) {
+                        // Try renaming a fortification wall
+                        String wKey = FortificationPersistenceService.serverWorldKey(srv, world);
+                        ok = FortificationPersistenceService.rename(srv, wKey, oldLabel, newLabel);
+                    }
                     ChatUtils.sendSystemMessage(player.getCommandSource(), ok
-                            ? "Renamed base '" + oldLabel + "' -> '" + newLabel + "'."
+                            ? "Renamed '" + oldLabel + "' -> '" + newLabel + "'."
                             : "Rename failed (does it exist? is the new name already used?).");
                     sendBasesList(player, currentBotAliasContext(player));
                 }));
@@ -203,14 +217,34 @@ public final class BaseNetworkManager {
         }
         String homeNorm = homeLabel != null ? homeLabel.trim().toLowerCase(java.util.Locale.ROOT) : "";
 
-        List<BotHomeService.BaseEntry> bases = BotHomeService.listBases(player.getCommandSource().getServer(), world);
+        MinecraftServer server = player.getCommandSource().getServer();
+        List<BotHomeService.BaseEntry> bases = BotHomeService.listBases(server, world);
         List<BaseDto> out = new ArrayList<>(bases.size());
         for (BotHomeService.BaseEntry b : bases) {
             if (b == null || b.pos() == null) continue;
             String label = b.label() != null ? b.label() : "";
             boolean home = !homeNorm.isBlank() && homeNorm.equals(label.trim().toLowerCase(java.util.Locale.ROOT));
-            out.add(new BaseDto(label, b.pos().getX(), b.pos().getY(), b.pos().getZ(), home));
+            out.add(new BaseDto(label, b.pos().getX(), b.pos().getY(), b.pos().getZ(), home, null));
         }
+
+        // Include saved fortification walls
+        String worldKey = FortificationPersistenceService.serverWorldKey(server, world);
+        java.util.Set<String> baseLabelsLower = new java.util.HashSet<>();
+        for (BaseDto dto : out) {
+            if (dto.label() != null) baseLabelsLower.add(dto.label().trim().toLowerCase(java.util.Locale.ROOT));
+        }
+        for (FortificationPersistenceService.SavedFortification f : FortificationPersistenceService.listForWorld(server, worldKey)) {
+            String fName = f.getName();
+            if (fName == null) continue;
+            // Skip if already present as a base
+            if (baseLabelsLower.contains(fName.trim().toLowerCase(java.util.Locale.ROOT))) continue;
+            net.minecraft.util.math.BlockPos center = f.getCenter();
+            int totalEdges = f.getHullWallPoints().size();
+            String status = f.isComplete() ? "complete"
+                    : f.getCompletedEdges().size() + "/" + totalEdges + " edges";
+            out.add(new BaseDto(fName, center.getX(), center.getY(), center.getZ(), false, status));
+        }
+
         String json = GSON.toJson(out);
         ServerPlayNetworking.send(player, new BasesListPayload(json));
     }
