@@ -336,12 +336,11 @@ public final class CompanionContextReactionService {
     private static boolean tryFreefall(ServerPlayerEntity bot, TriggerState state) {
         boolean airborne = !bot.isOnGround() && !bot.isTouchingWater() && !bot.isSubmergedInWater();
         boolean fastDrop = airborne && bot.getVelocity().y < -0.85D && bot.fallDistance > 6.0F;
-        boolean wearingElytra = bot.getEquippedStack(EquipmentSlot.CHEST).isOf(Items.ELYTRA);
-        boolean elytraLikeFlight = airborne
-                && wearingElytra
-                && bot.fallDistance > 1.5F
-                && bot.getVelocity().horizontalLengthSquared() > 0.06D;
-        boolean freefall = fastDrop || elytraLikeFlight;
+        // bot.isGliding() is the definitive elytra-flight check — fallDistance stays
+        // near zero during level flight so the old heuristic never triggered.
+        boolean elytraGliding = bot.isGliding()
+                && bot.getEquippedStack(EquipmentSlot.CHEST).isOf(Items.ELYTRA);
+        boolean freefall = fastDrop || elytraGliding;
         if (!freefall) {
             return false;
         }

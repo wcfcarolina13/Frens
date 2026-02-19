@@ -100,23 +100,22 @@ public final class TreeStuckEscapeService {
         // (e.g. stepping off leaf edge toward safe drop).
         BlockPos activeTarget = ACTIVE_ESCAPE_TARGET.get(botId);
         if (activeTarget != null) {
-            double distSq = bot.squaredDistanceTo(Vec3d.ofCenter(activeTarget));
-            if (distSq <= 2.25) {
-                // Reached the target — clear and let normal follow resume or fall.
-                LOGGER.info("TreeStuck: {} reached escape target", bot.getName().getString());
-                clearState(botId);
-                return false;
-            }
-            // If somehow we're no longer on leaves and not near the target,
-            // we escaped some other way — clear state.
+            // Only success condition: bot is on solid non-leaf ground (actually descended).
             if (bot.isOnGround()) {
                 BlockState belowState = world.getBlockState(bot.getBlockPos().down());
                 if (!belowState.isIn(BlockTags.LEAVES)) {
-                    LOGGER.info("TreeStuck: {} no longer on leaves, escape done", bot.getName().getString());
+                    LOGGER.info("TreeStuck: {} escaped tree canopy", bot.getName().getString());
                     clearState(botId);
                     return false;
                 }
             }
+
+            // If airborne (falling off edge), let gravity work — don't steer.
+            if (!bot.isOnGround()) {
+                return true;
+            }
+
+            // Still on leaves — check for stale target.
             long targetAge = now - ESCAPE_TARGET_SET_TICK.getOrDefault(botId, now);
             if (targetAge > ESCAPE_TARGET_STALE_TICKS) {
                 // Couldn't reach safe drop — mark exhausted so we skip to leaf breaking.
@@ -128,11 +127,18 @@ public final class TreeStuckEscapeService {
                 // Fall through to strategy evaluation below.
             } else {
                 // Keep steering toward the active target every tick.
+                double distSq = bot.squaredDistanceTo(Vec3d.ofCenter(activeTarget));
                 LookController.faceBlock(bot, activeTarget);
                 BotActions.sprint(bot, false);
-                BotActions.applyMovementInput(bot, Vec3d.ofCenter(activeTarget), 0.28D);
-                // Periodic jump every 15 ticks to help navigate uneven leaf terrain.
-                if (targetAge % 15 == 0) {
+                // Push harder when close to the edge to force stepping into the air column.
+                double impulse = distSq <= 2.25 ? 0.35D : 0.28D;
+                BotActions.applyMovementInput(bot, Vec3d.ofCenter(activeTarget), impulse);
+                // Jump more frequently near the edge to step over leaf boundaries.
+                if (distSq <= 2.25) {
+                    if (targetAge % 5 == 0) {
+                        bot.jump();
+                    }
+                } else if (targetAge % 15 == 0) {
                     bot.jump();
                 }
                 return true;
@@ -172,8 +178,17 @@ public final class TreeStuckEscapeService {
         }
         LAST_TREE_ESCAPE_ATTEMPT_TICK.put(botId, now);
 
-        // Show initial stuck dialogue (once per cooldown).
-        showDialogue(bot, STUCK_LINES[new Random().nextInt(STUCK_LINES.length)]);
+        // Show initial stuck dialogue (once per cooldown), but suppress it when the
+        // commander is nearby and also on leaves (same tree — bot isn't really "stuck").
+        boolean commanderOnSameTree = false;
+        ServerPlayerEntity commander = resolveCommander(bot, server);
+        if (commander != null && commander.isOnGround() && bot.squaredDistanceTo(commander) < 64.0) {
+            BlockState cmdBelow = world.getBlockState(commander.getBlockPos().down());
+            commanderOnSameTree = cmdBelow.isIn(BlockTags.LEAVES);
+        }
+        if (!commanderOnSameTree) {
+            showDialogue(bot, STUCK_LINES[new Random().nextInt(STUCK_LINES.length)]);
+        }
 
         // ── Strategy 1: Find a safe drop edge and steer toward it ──
         // Skip if we already tried safe-drop and it was unreachable.
@@ -405,11 +420,17 @@ public final class TreeStuckEscapeService {
         });
     }
 
-    private static Vec3d getFollowTargetDirection(ServerPlayerEntity bot, MinecraftServer server) {
+    private static ServerPlayerEntity resolveCommander(ServerPlayerEntity bot, MinecraftServer server) {
         UUID targetUuid = BotEventHandler.getFollowTargetUuid(bot);
         if (targetUuid == null) return null;
         ServerPlayerEntity target = server.getPlayerManager().getPlayer(targetUuid);
         if (target == null || target.isRemoved()) return null;
+        return target;
+    }
+
+    private static Vec3d getFollowTargetDirection(ServerPlayerEntity bot, MinecraftServer server) {
+        ServerPlayerEntity target = resolveCommander(bot, server);
+        if (target == null) return null;
         Vec3d targetPos = new Vec3d(target.getX(), target.getY(), target.getZ());
         Vec3d botPos = new Vec3d(bot.getX(), bot.getY(), bot.getZ());
         Vec3d dir = targetPos.subtract(botPos);
