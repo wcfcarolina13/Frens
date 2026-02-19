@@ -84,6 +84,11 @@ public final class CompanionContextReactionService {
 
     private static final ConcurrentHashMap<UUID, TriggerState> STATE = new ConcurrentHashMap<>();
 
+    /** Tick at which each bot was first seen by this service. Used for spawn-grace silence. */
+    private static final ConcurrentHashMap<UUID, Long> FIRST_SEEN_TICK = new ConcurrentHashMap<>();
+    /** Number of ticks after spawn before the bot is allowed to trigger context reactions (~10 s). */
+    private static final long SPAWN_GRACE_TICKS = 200L;
+
     private static final WeightedLine[] AMBIENT_LINES = new WeightedLine[] {
             new WeightedLine("ambient_bad_feeling", "I have a bad feeling about this.", BotDialogueSounds.LINE_AMBIENT_BAD_FEELING, WEIGHT_RARE),
             new WeightedLine("ambient_my_job", "I can't believe this is my job.", BotDialogueSounds.LINE_AMBIENT_MY_JOB, WEIGHT_COMMON),
@@ -248,6 +253,14 @@ public final class CompanionContextReactionService {
             live.add(botId);
             TriggerState state = STATE.computeIfAbsent(botId, ignored -> new TriggerState());
 
+            // Spawn-grace: stay silent for the first few seconds so audio doesn't cut off while
+            // the world is still loading in.
+            long nowTick = server.getTicks();
+            long firstSeen = FIRST_SEEN_TICK.computeIfAbsent(botId, ignored -> nowTick);
+            if (nowTick - firstSeen < SPAWN_GRACE_TICKS) {
+                continue;
+            }
+
             List<Entity> hostiles = world.getOtherEntities(bot, bot.getBoundingBox().expand(14.0D), e -> e instanceof HostileEntity && e.isAlive());
             boolean inCombat = !hostiles.isEmpty();
 
@@ -284,6 +297,7 @@ public final class CompanionContextReactionService {
         }
 
         STATE.keySet().retainAll(live);
+        FIRST_SEEN_TICK.keySet().retainAll(live);
     }
 
     public static boolean playShelterCompletion(ServerPlayerEntity bot, String forcedLineId) {

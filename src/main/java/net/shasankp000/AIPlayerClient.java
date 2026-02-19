@@ -117,6 +117,8 @@ public class AIPlayerClient implements ClientModInitializer {
     private static boolean lastHasHornToken = false;
     private static boolean lastHasEnchantingTableToken = false;
     private static boolean lastHasWizardTomeToken = false;
+    /** Skip the very first inventory scan so items already in inventory don't re-trigger the hint. */
+    private static boolean spellHintFirstScanDone = false;
 
     // Simple per-bot dialogue log used by the Topics overlay.
     private static final java.util.Map<String, java.util.ArrayDeque<String>> DIALOGUE_LOG = new java.util.HashMap<>();
@@ -204,8 +206,8 @@ public class AIPlayerClient implements ClientModInitializer {
         if (client == null || client.player == null) {
             return;
         }
-        client.player.playSound(SoundEvents.ENTITY_EXPERIENCE_ORB_PICKUP, 0.42f, 1.6f);
-        client.player.playSound(SoundEvents.BLOCK_AMETHYST_BLOCK_CHIME, 0.36f, 1.35f);
+        client.player.playSound(SoundEvents.BLOCK_AMETHYST_BLOCK_CHIME, 0.38f, 1.6f);
+        client.player.playSound(SoundEvents.BLOCK_AMETHYST_CLUSTER_BREAK, 0.22f, 1.9f);
     }
 
     public static int getCompanionQuestStage(String botAlias) {
@@ -407,6 +409,7 @@ public class AIPlayerClient implements ClientModInitializer {
                 modeSelectionWorldKey = "default";
                 modeSelectionAutoOpenPending = false;
                 modeSelectionOpenedThisConnection = false;
+                spellHintFirstScanDone = false;
                 return;
             }
             if (client.currentScreen != null) {
@@ -810,6 +813,17 @@ public class AIPlayerClient implements ClientModInitializer {
         boolean hasHorn = hasGoatHornToken(client);
         boolean hasTable = hasEnchantingTableToken(client);
         boolean hasWizardTome = hasWizardTomeToken(client);
+
+        // On the very first scan after joining, just seed the flags so items already in
+        // inventory don't falsely trigger the "newly acquired" hint + sound.
+        if (!spellHintFirstScanDone) {
+            spellHintFirstScanDone = true;
+            lastHasWizardTomeToken = hasWizardTome;
+            lastHasEyeToken = hasEye;
+            lastHasHornToken = hasHorn;
+            lastHasEnchantingTableToken = hasTable;
+            return;
+        }
 
         String newlyAcquired = null;
         if (!lastHasWizardTomeToken && hasWizardTome) newlyAcquired = "Wizard's Tome";

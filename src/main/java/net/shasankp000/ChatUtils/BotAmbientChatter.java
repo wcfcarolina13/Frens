@@ -78,7 +78,7 @@ public final class BotAmbientChatter {
 
     // A small extra delay after commander join before *any* ambient chatter can play.
     // 20 ticks = 1 second.
-    private static final long COMMANDER_JOIN_GRACE_TICKS = 100L; // ~5 seconds
+    private static final long COMMANDER_JOIN_GRACE_TICKS = 200L; // ~10 seconds
 
     // Event-based triggers should never spam; enforce a small minimum gap between any ambient lines.
     private static final long MIN_GAP_BETWEEN_AMBIENT_TICKS = 100L; // ~5 seconds
