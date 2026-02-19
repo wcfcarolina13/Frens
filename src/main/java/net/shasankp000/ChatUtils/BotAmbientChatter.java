@@ -590,6 +590,11 @@ public final class BotAmbientChatter {
                     state.lastAnyAmbientTick = nowTick;
                     state.lastScheduledSoundId = sound.id().toString();
                     LOGGER.debug("Ambient chatter for {}: {}", botName, sound.id().getPath());
+                    // Show overhead text for the played sound.
+                    String text = DialogueTextMapper.textForSound(sound);
+                    if (text != null) {
+                        CompanionOverheadDialogueService.showOverheadLine(bot, text, 3_000, 48.0, "ambient", null);
+                    }
                 }
             }
 
@@ -1280,7 +1285,14 @@ public final class BotAmbientChatter {
         if (bot == null || sound == null) {
             return false;
         }
-        return BotDialoguePlayer.playSoundForBot(bot, sound);
+        boolean played = BotDialoguePlayer.playSoundForBot(bot, sound);
+        if (played) {
+            String text = DialogueTextMapper.textForSound(sound);
+            if (text != null) {
+                CompanionOverheadDialogueService.showOverheadLine(bot, text, 3_000, 48.0, "ambient", null);
+            }
+        }
+        return played;
     }
 
     /**
@@ -1618,7 +1630,14 @@ public final class BotAmbientChatter {
                 ? bot.getCommandSource().getServer().getTicks()
                 : 0L;
         SoundEvent sound = pickChatterSound(bot, state, nowTick);
-        return BotDialoguePlayer.playSoundForBot(bot, sound);
+        boolean played = BotDialoguePlayer.playSoundForBot(bot, sound);
+        if (played && sound != null) {
+            String text = DialogueTextMapper.textForSound(sound);
+            if (text != null) {
+                CompanionOverheadDialogueService.showOverheadLine(bot, text, 3_000, 48.0, "ambient", null);
+            }
+        }
+        return played;
     }
 
     private static int safeLightLevel(ServerWorld world, LightType type, BlockPos pos, int fallback) {

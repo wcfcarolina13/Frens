@@ -11,6 +11,7 @@ import net.shasankp000.ChatUtils.BotDialoguePlayer;
 import net.shasankp000.ChatUtils.BotDialogueSounds;
 import net.shasankp000.ChatUtils.ChatUtils;
 import net.shasankp000.GameAI.BotEventHandler;
+import net.shasankp000.GameAI.services.CompanionOverheadDialogueService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -518,6 +519,11 @@ public final class BotCombatCalloutService {
         // If the line was throttled, do nothing (avoid falling back to chat spam).
         if (res == BotDialoguePlayer.PlayResult.THROTTLED) {
             return;
+        }
+
+        // Show overhead text for all combat callouts (whether audio played or fell back to chat).
+        if (line != null && !line.isBlank()) {
+            CompanionOverheadDialogueService.showOverheadLine(bot, line, 2_500, 48.0, "combat", null);
         }
 
         // If voiced dialogue is disabled for this bot, or sound playback failed, fall back to chat.

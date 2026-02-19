@@ -46,6 +46,8 @@ public final class TreeStuckEscapeService {
     private static final ConcurrentHashMap<UUID, BlockPos> ACTIVE_ESCAPE_TARGET = new ConcurrentHashMap<>();
     /** Tick when active escape target was set — used to detect stale targets. */
     private static final ConcurrentHashMap<UUID, Long> ESCAPE_TARGET_SET_TICK = new ConcurrentHashMap<>();
+    /** Bots that already tried safe-drop steering and failed — skip to leaf breaking. */
+    private static final Set<UUID> SAFE_DROP_EXHAUSTED = ConcurrentHashMap.newKeySet();
 
     // ── Tuning constants ─────────────────────────────────────────────────────
     /** Ticks the bot must be near the same spot on leaves before we consider it stuck. */
@@ -53,7 +55,7 @@ public final class TreeStuckEscapeService {
     /** Minimum ticks between escape strategy re-evaluation. */
     private static final long ESCAPE_ATTEMPT_INTERVAL_TICKS = 40L;
     /** Maximum ticks to steer toward a safe drop before escalating. */
-    private static final long ESCAPE_TARGET_STALE_TICKS = 60L;
+    private static final long ESCAPE_TARGET_STALE_TICKS = 120L;
     /** Dialogue cooldown (ms). */
     private static final long DIALOGUE_COOLDOWN_MS = 12_000L;
     /** Max safe fall height (blocks) — vanilla is ~3.5 for no damage; 4 is survivable. */
@@ -87,24 +89,68 @@ public final class TreeStuckEscapeService {
         if (bot == null || server == null || bot.isRemoved() || !bot.isAlive()) {
             return false;
         }
-        if (!bot.isOnGround()) {
-            clearState(bot.getUuid());
-            return false;
-        }
         if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
             return false;
+        }
+
+        UUID botId = bot.getUuid();
+        long now = server.getTicks();
+
+        // If we have an active escape target, keep steering even if briefly airborne
+        // (e.g. stepping off leaf edge toward safe drop).
+        BlockPos activeTarget = ACTIVE_ESCAPE_TARGET.get(botId);
+        if (activeTarget != null) {
+            double distSq = bot.squaredDistanceTo(Vec3d.ofCenter(activeTarget));
+            if (distSq <= 2.25) {
+                // Reached the target — clear and let normal follow resume or fall.
+                LOGGER.info("TreeStuck: {} reached escape target", bot.getName().getString());
+                clearState(botId);
+                return false;
+            }
+            // If somehow we're no longer on leaves and not near the target,
+            // we escaped some other way — clear state.
+            if (bot.isOnGround()) {
+                BlockState belowState = world.getBlockState(bot.getBlockPos().down());
+                if (!belowState.isIn(BlockTags.LEAVES)) {
+                    LOGGER.info("TreeStuck: {} no longer on leaves, escape done", bot.getName().getString());
+                    clearState(botId);
+                    return false;
+                }
+            }
+            long targetAge = now - ESCAPE_TARGET_SET_TICK.getOrDefault(botId, now);
+            if (targetAge > ESCAPE_TARGET_STALE_TICKS) {
+                // Couldn't reach safe drop — mark exhausted so we skip to leaf breaking.
+                LOGGER.info("TreeStuck: {} safe-drop unreachable, switching to leaf breaking", bot.getName().getString());
+                SAFE_DROP_EXHAUSTED.add(botId);
+                ACTIVE_ESCAPE_TARGET.remove(botId);
+                ESCAPE_TARGET_SET_TICK.remove(botId);
+                LAST_TREE_ESCAPE_ATTEMPT_TICK.put(botId, 0L); // Force immediate re-eval
+                // Fall through to strategy evaluation below.
+            } else {
+                // Keep steering toward the active target every tick.
+                LookController.faceBlock(bot, activeTarget);
+                BotActions.sprint(bot, false);
+                BotActions.applyMovementInput(bot, Vec3d.ofCenter(activeTarget), 0.28D);
+                // Periodic jump every 15 ticks to help navigate uneven leaf terrain.
+                if (targetAge % 15 == 0) {
+                    bot.jump();
+                }
+                return true;
+            }
+        }
+
+        // If not on ground and no active target, just wait to land.
+        if (!bot.isOnGround()) {
+            return TREE_STUCK_SINCE_TICK.containsKey(botId); // Stay in escape mode if we were stuck.
         }
 
         // Fast path: block below feet must be a leaf block.
         BlockPos belowFeet = bot.getBlockPos().down();
         BlockState belowState = world.getBlockState(belowFeet);
         if (!belowState.isIn(BlockTags.LEAVES)) {
-            clearState(bot.getUuid());
+            clearState(botId);
             return false;
         }
-
-        UUID botId = bot.getUuid();
-        long now = server.getTicks();
 
         // Track how long we've been on leaves.
         TREE_STUCK_SINCE_TICK.putIfAbsent(botId, now);
@@ -119,38 +165,9 @@ public final class TreeStuckEscapeService {
             return true; // Mining a leaf — skip normal follow, wait for it to finish.
         }
 
-        // ── Continuous steering: if we have an active escape target, steer every tick ──
-        BlockPos activeTarget = ACTIVE_ESCAPE_TARGET.get(botId);
-        if (activeTarget != null) {
-            long targetAge = now - ESCAPE_TARGET_SET_TICK.getOrDefault(botId, now);
-            double distSq = bot.getBlockPos().getSquaredDistance(activeTarget);
-            if (distSq <= 1.0) {
-                // Reached the target — clear and let normal follow resume or fall.
-                LOGGER.info("TreeStuck: {} reached escape target", bot.getName().getString());
-                clearState(botId);
-                return false;
-            }
-            if (targetAge > ESCAPE_TARGET_STALE_TICKS) {
-                // Stuck steering toward target too long — escalate to leaf breaking.
-                LOGGER.info("TreeStuck: {} escape target stale, escalating to leaf break", bot.getName().getString());
-                ACTIVE_ESCAPE_TARGET.remove(botId);
-                ESCAPE_TARGET_SET_TICK.remove(botId);
-                // Fall through to strategy re-evaluation below.
-            } else {
-                // Keep steering toward the active target.
-                LookController.faceBlock(bot, activeTarget);
-                BotActions.sprint(bot, false);
-                BotActions.autoJumpIfNeeded(bot);
-                BotActions.applyMovementInput(bot, Vec3d.ofCenter(activeTarget), 0.22D);
-                return true;
-            }
-        }
-
         // ── Throttle strategy re-evaluation ──
         long lastAttempt = LAST_TREE_ESCAPE_ATTEMPT_TICK.getOrDefault(botId, 0L);
         if (now - lastAttempt < ESCAPE_ATTEMPT_INTERVAL_TICKS) {
-            // Between strategy evaluations — apply a small wander impulse so the bot isn't frozen.
-            BotActions.autoJumpIfNeeded(bot);
             return true;
         }
         LAST_TREE_ESCAPE_ATTEMPT_TICK.put(botId, now);
@@ -158,20 +175,32 @@ public final class TreeStuckEscapeService {
         // Show initial stuck dialogue (once per cooldown).
         showDialogue(bot, STUCK_LINES[new Random().nextInt(STUCK_LINES.length)]);
 
-        // ── Strategy 1: Find a safe drop edge and steer continuously ──
-        BlockPos safeDrop = findSafeDropEdge(world, bot.getBlockPos());
-        if (safeDrop != null) {
-            LOGGER.info("TreeStuck: {} targeting safe drop at {}", bot.getName().getString(), safeDrop.toShortString());
-            ACTIVE_ESCAPE_TARGET.put(botId, safeDrop);
-            ESCAPE_TARGET_SET_TICK.put(botId, now);
-            LookController.faceBlock(bot, safeDrop);
-            BotActions.sprint(bot, false);
-            BotActions.autoJumpIfNeeded(bot);
-            BotActions.applyMovementInput(bot, Vec3d.ofCenter(safeDrop), 0.22D);
+        // ── Strategy 1: Find a safe drop edge and steer toward it ──
+        // Skip if we already tried safe-drop and it was unreachable.
+        if (!SAFE_DROP_EXHAUSTED.contains(botId)) {
+            BlockPos safeDrop = findSafeDropEdge(world, bot.getBlockPos());
+            if (safeDrop != null) {
+                LOGGER.info("TreeStuck: {} targeting safe drop at {}", bot.getName().getString(), safeDrop.toShortString());
+                ACTIVE_ESCAPE_TARGET.put(botId, safeDrop);
+                ESCAPE_TARGET_SET_TICK.put(botId, now);
+                LookController.faceBlock(bot, safeDrop);
+                BotActions.sprint(bot, false);
+                BotActions.applyMovementInput(bot, Vec3d.ofCenter(safeDrop), 0.28D);
+                return true;
+            }
+        }
+
+        // ── Strategy 2: Break leaves below to fall through ──
+        // Simplest and most reliable: just break the leaf under the bot's feet.
+        BlockPos leafBelow = bot.getBlockPos().down();
+        if (world.getBlockState(leafBelow).isIn(BlockTags.LEAVES)) {
+            showDialogue(bot, LEAF_BREAK_LINE);
+            LOGGER.info("TreeStuck: {} breaking leaf below at {}", bot.getName().getString(), leafBelow.toShortString());
+            startLeafMine(bot, leafBelow);
             return true;
         }
 
-        // ── Strategy 2: Break leaves toward trunk, then descend ──
+        // ── Strategy 3: Break leaves toward trunk ──
         BlockPos trunk = findNearbyTrunk(world, bot.getBlockPos());
         if (trunk != null) {
             BlockPos leafToBreak = findLeafTowardTrunk(world, bot.getBlockPos(), trunk);
@@ -182,26 +211,9 @@ public final class TreeStuckEscapeService {
                 startLeafMine(bot, leafToBreak);
                 return true;
             }
-            BlockPos leafBelow = bot.getBlockPos().down();
-            if (world.getBlockState(leafBelow).isIn(BlockTags.LEAVES)) {
-                showDialogue(bot, LEAF_BREAK_LINE);
-                LOGGER.info("TreeStuck: {} breaking leaf below at {}", bot.getName().getString(), leafBelow.toShortString());
-                startLeafMine(bot, leafBelow);
-                return true;
-            }
-        } else {
-            // No trunk found — break the leaf directly below to fall through.
-            BlockPos leafBelow = bot.getBlockPos().down();
-            if (world.getBlockState(leafBelow).isIn(BlockTags.LEAVES)) {
-                showDialogue(bot, LEAF_BREAK_LINE);
-                LOGGER.info("TreeStuck: {} no trunk found, breaking leaf below at {}",
-                        bot.getName().getString(), leafBelow.toShortString());
-                startLeafMine(bot, leafBelow);
-                return true;
-            }
         }
 
-        // ── Strategy 3: Elytra descent ──
+        // ── Strategy 4: Elytra descent ──
         if (hasElytra(bot) && !ElytraFlightService.isInFlight(botId)) {
             if (ElytraFlightService.tryAutonomousDescent(bot, server)) {
                 LOGGER.info("TreeStuck: {} using elytra descent", bot.getName().getString());
@@ -209,7 +221,7 @@ public final class TreeStuckEscapeService {
             }
         }
 
-        // ── Strategy 4: Jump off and take the damage ──
+        // ── Strategy 5: Jump off and take the damage ──
         int dropHeight = measureDropBelow(world, bot.getBlockPos());
         if (dropHeight > 0 && dropHeight <= SURVIVABLE_DROP_HEIGHT) {
             showDialogue(bot, JUMP_OFF_LINE);
@@ -218,7 +230,7 @@ public final class TreeStuckEscapeService {
             if (jumpDir != null) {
                 Vec3d botPos = new Vec3d(bot.getX(), bot.getY(), bot.getZ());
                 LookController.faceBlock(bot, BlockPos.ofFloored(botPos.add(jumpDir)));
-                BotActions.applyMovementInput(bot, botPos.add(jumpDir.multiply(2.0)), 0.25D);
+                BotActions.applyMovementInput(bot, botPos.add(jumpDir.multiply(2.0)), 0.30D);
             }
             bot.jump();
             clearState(botId);
@@ -238,6 +250,7 @@ public final class TreeStuckEscapeService {
         LAST_TREE_ESCAPE_ATTEMPT_TICK.remove(botId);
         ACTIVE_ESCAPE_TARGET.remove(botId);
         ESCAPE_TARGET_SET_TICK.remove(botId);
+        SAFE_DROP_EXHAUSTED.remove(botId);
         // Don't clear dialogue cooldown — let it expire naturally.
         LEAF_MINE_INFLIGHT.remove(botId);
     }

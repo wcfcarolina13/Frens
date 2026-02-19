@@ -28,6 +28,8 @@ public final class DialogueTextMapper {
     // Use LinkedHashMap to maintain insertion order for pattern matching priority
     private static final Map<Pattern, SoundEvent> PATTERN_MAP = new LinkedHashMap<>();
     private static final Map<String, SoundEvent> EXACT_MAP = new LinkedHashMap<>();
+    /** Reverse map: SoundEvent identifier → first matching display text. */
+    private static final Map<String, String> SOUND_TO_TEXT = new java.util.HashMap<>();
 
     static {
         initializeMappings();
@@ -694,6 +696,23 @@ public final class DialogueTextMapper {
         EXACT_MAP.put("Back to the surface. Good.", BotDialogueSounds.LINE_FOLLOW_DIM_OVERWORLD_2);
 
         LOGGER.info("Initialized {} exact mappings and {} pattern mappings", EXACT_MAP.size(), PATTERN_MAP.size());
+
+        // Build reverse map (sound → first matching text) for overhead display.
+        for (Map.Entry<String, SoundEvent> entry : EXACT_MAP.entrySet()) {
+            String soundId = entry.getValue().id().toString();
+            SOUND_TO_TEXT.putIfAbsent(soundId, entry.getKey());
+        }
+    }
+
+    /**
+     * Reverse lookup: get the display text for a sound event.
+     * Returns null if no text is mapped.
+     */
+    public static String textForSound(SoundEvent sound) {
+        if (sound == null || sound.id() == null) {
+            return null;
+        }
+        return SOUND_TO_TEXT.get(sound.id().toString());
     }
 
     /**
