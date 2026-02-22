@@ -122,6 +122,18 @@ public final class BotDialogueSounds {
     public static final SoundEvent LINE_REACT_STEW_WOULDNT_TRUST = register("bot.line.react_stew_wouldnt_trust");
     public static final SoundEvent LINE_REACT_STEW_BOLD = register("bot.line.react_stew_bold");
 
+    // Line-specific sound events (food giving: accept)
+    public static final SoundEvent LINE_FOOD_ACCEPT_NEEDED = register("bot.line.food_accept_needed");
+    public static final SoundEvent LINE_FOOD_ACCEPT_DONT_MIND = register("bot.line.food_accept_dont_mind");
+    public static final SoundEvent LINE_FOOD_ACCEPT_APPRECIATED = register("bot.line.food_accept_appreciated");
+    public static final SoundEvent LINE_FOOD_ACCEPT_TIMING = register("bot.line.food_accept_timing");
+
+    // Line-specific sound events (food giving: refuse)
+    public static final SoundEvent LINE_FOOD_REFUSE_GOOD = register("bot.line.food_refuse_good");
+    public static final SoundEvent LINE_FOOD_REFUSE_LATER = register("bot.line.food_refuse_later");
+    public static final SoundEvent LINE_FOOD_REFUSE_NOT_HUNGRY = register("bot.line.food_refuse_not_hungry");
+    public static final SoundEvent LINE_FOOD_REFUSE_PASS = register("bot.line.food_refuse_pass");
+
     // Line-specific sound events (mode: follow)
     public static final SoundEvent LINE_MODE_FOLLOW_BEHIND = register("bot.line.mode_follow_behind");
     public static final SoundEvent LINE_MODE_FOLLOW_LEAD = register("bot.line.mode_follow_lead");

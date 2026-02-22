@@ -15,7 +15,7 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public final class BotInventoryFullDialogueService {
 
-    private static final long FULL_INVENTORY_COOLDOWN_MS = 20_000L;
+    private static final long FULL_INVENTORY_COOLDOWN_MS = 180_000L; // 3 minutes
     private static final long CHEST_RELIEF_COOLDOWN_MS = 12_000L;
     private static final double CHEST_RELIEF_CHANCE = 0.55D;
     private static final int OVERHEAD_DURATION_MS = 2_800;
@@ -59,7 +59,7 @@ public final class BotInventoryFullDialogueService {
                 continue;
             }
             // Keep this occasional even when inventory remains full for long stretches.
-            if (RNG.nextDouble() > 0.08D) {
+            if (RNG.nextDouble() > 0.03D) {
                 continue;
             }
             LAST_FULL_INVENTORY_LINE_MS.put(bot.getUuid(), now);

@@ -2,7 +2,10 @@ package net.wcfcarolina13.GameAI.services;
 
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
+import net.minecraft.block.entity.AbstractFurnaceBlockEntity;
+import net.minecraft.block.entity.CampfireBlockEntity;
 import net.minecraft.item.Item;
+import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
@@ -20,15 +23,14 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadLocalRandom;
 
 /**
- * Reacts with overhead dialogue when cooked food is taken from a furnace, smoker,
- * blast furnace, or campfire.
+ * Reacts with overhead dialogue when:
+ * <ol>
+ *   <li><b>Ambient cooking:</b> A bot is near a lit furnace/smoker/blast furnace that is
+ *       actively smelting food, or a lit campfire with food items on it.</li>
+ *   <li><b>Food collected:</b> A player/bot picks up cooked food while near a cooking block.</li>
+ * </ol>
  *
- * <p>Detection: polls player inventories every second for increases in cooked food
- * item counts. When an increase is detected and the player (real or bot) is near a
- * lit cooking block, the closest bot shows a food comment overhead.
- *
- * <p>Fires for both player-initiated and bot-initiated cooking. Long cooldowns
- * prevent spam.
+ * <p>Long per-bot cooldowns prevent spam. Both detection paths share the same cooldown.
  */
 public final class CookingReactionService {
 
@@ -37,10 +39,13 @@ public final class CookingReactionService {
     /** Poll interval in ticks (~1 second). */
     private static final int POLL_INTERVAL_TICKS = 20;
 
-    /** Max distance from player to cooking block to count as "at the cooking station". */
-    private static final int COOKING_BLOCK_SCAN_RADIUS = 5;
+    /** Ambient cooking scan runs less frequently to save perf. */
+    private static final int AMBIENT_POLL_INTERVAL_TICKS = 100; // every 5 seconds
 
-    /** Max distance from bot to the cooking player to react. */
+    /** Max distance from player/bot to cooking block. */
+    private static final int COOKING_BLOCK_SCAN_RADIUS = 6;
+
+    /** Max distance from bot to the cooking player to react (for inventory-change path). */
     private static final double BOT_REACT_RADIUS_SQ = 16.0 * 16.0;
 
     /** Per-bot cooldown between cooking reactions. */
@@ -87,49 +92,69 @@ public final class CookingReactionService {
         }
 
         long nowTick = server.getTicks();
+
+        // Only run on poll intervals.
         if (nowTick % POLL_INTERVAL_TICKS != 0) {
             return;
         }
 
         List<ServerPlayerEntity> bots = BotEventHandler.getRegisteredBots(server);
+        if (bots.isEmpty()) {
+            return;
+        }
 
-        // Check ALL players (real + bots) for cooked food inventory changes.
+        // --- Path 1: Inventory-change detection (every 1 second) ---
         for (ServerPlayerEntity player : server.getPlayerManager().getPlayerList()) {
-            if (player == null || player.isRemoved()) continue;
-            if (player.isSleeping()) continue;
+            if (player == null || player.isRemoved() || player.isSleeping()) continue;
             if (!(player.getEntityWorld() instanceof ServerWorld world)) continue;
 
             UUID pid = player.getUuid();
             int cookedCount = countCookedFoods(player);
             Integer prev = LAST_COOKED_COUNT.put(pid, cookedCount);
 
-            // First tick for this player — just record baseline.
-            if (prev == null) continue;
-
-            // No increase in cooked food items — skip.
+            if (prev == null) continue; // first tick baseline
             if (cookedCount <= prev) continue;
 
-            // Cooked food count increased. Check if player is near a lit cooking block.
-            if (!isNearLitCookingBlock(world, player.getBlockPos())) continue;
+            // Cooked food count increased. Check if player is near a cooking block.
+            if (!isNearCookingBlock(world, player.getBlockPos())) continue;
 
-            // Find the closest bot to react. If the player IS a bot, it can react to its own cooking.
             ServerPlayerEntity reactor = findClosestReactingBot(player, bots, nowTick);
             if (reactor == null) continue;
 
-            String line = COOKING_LINES[ThreadLocalRandom.current().nextInt(COOKING_LINES.length)];
-            LAST_REACTION_TICK.put(reactor.getUuid(), nowTick);
+            showCookingLine(reactor, player.getName().getString(), "inventory-change", nowTick);
+        }
 
-            CompanionOverheadDialogueService.showOverheadLine(
-                    reactor, line, DISPLAY_DURATION_MS, 48.0, "cooking", null);
+        // --- Path 2: Ambient cooking proximity (every 5 seconds) ---
+        if (nowTick % AMBIENT_POLL_INTERVAL_TICKS == 0) {
+            for (ServerPlayerEntity bot : bots) {
+                if (bot == null || bot.isRemoved() || bot.isSleeping()) continue;
+                if (!(bot.getEntityWorld() instanceof ServerWorld world)) continue;
 
-            LOGGER.debug("Cooking reaction bot={} cook={} line=\"{}\"",
-                    reactor.getName().getString(), player.getName().getString(), line);
+                UUID botId = bot.getUuid();
+                long lastReact = LAST_REACTION_TICK.getOrDefault(botId, Long.MIN_VALUE);
+                if (nowTick - lastReact < COOLDOWN_TICKS) continue;
+                if (CompanionOverheadDialogueService.isRecentlyShown(botId)) continue;
+
+                if (isNearActivelyCookingFood(world, bot.getBlockPos())) {
+                    showCookingLine(bot, bot.getName().getString(), "ambient-cooking", nowTick);
+                }
+            }
         }
     }
 
-    /**
-     * Counts the total number of cooked food items across all inventory slots.
-     */
+    private static void showCookingLine(ServerPlayerEntity bot, String triggerSource, String path, long nowTick) {
+        String line = COOKING_LINES[ThreadLocalRandom.current().nextInt(COOKING_LINES.length)];
+        LAST_REACTION_TICK.put(bot.getUuid(), nowTick);
+
+        CompanionOverheadDialogueService.showOverheadLine(
+                bot, line, DISPLAY_DURATION_MS, 48.0, "cooking", null);
+
+        LOGGER.info("Cooking reaction [{}] bot={} trigger={} line=\"{}\"",
+                path, bot.getName().getString(), triggerSource, line);
+    }
+
+    // ---- Inventory counting ----
+
     private static int countCookedFoods(ServerPlayerEntity player) {
         int total = 0;
         var inv = player.getInventory();
@@ -142,18 +167,23 @@ public final class CookingReactionService {
         return total;
     }
 
+    // ---- Block scanning ----
+
     /**
-     * Scans a small area around the position for a lit furnace, smoker, blast furnace,
-     * or campfire.
+     * Returns true if there is a furnace/smoker/blast furnace (any state) or a lit campfire
+     * within scan radius of the position.
      */
-    private static boolean isNearLitCookingBlock(ServerWorld world, BlockPos center) {
+    private static boolean isNearCookingBlock(ServerWorld world, BlockPos center) {
         int r = COOKING_BLOCK_SCAN_RADIUS;
         for (int dx = -r; dx <= r; dx++) {
             for (int dy = -r; dy <= r; dy++) {
                 for (int dz = -r; dz <= r; dz++) {
                     BlockPos pos = center.add(dx, dy, dz);
                     BlockState state = world.getBlockState(pos);
-                    if (isCookingBlock(state) && isLit(state)) {
+                    if (isFurnaceType(state)) {
+                        return true;
+                    }
+                    if (isCampfireType(state) && isLit(state)) {
                         return true;
                     }
                 }
@@ -162,11 +192,60 @@ public final class CookingReactionService {
         return false;
     }
 
-    private static boolean isCookingBlock(BlockState state) {
+    /**
+     * Returns true if there is a lit furnace/smoker/blast furnace that currently has a food
+     * item in its input slot, or a lit campfire with food items on it, within scan radius.
+     */
+    private static boolean isNearActivelyCookingFood(ServerWorld world, BlockPos center) {
+        int r = COOKING_BLOCK_SCAN_RADIUS;
+        for (int dx = -r; dx <= r; dx++) {
+            for (int dy = -r; dy <= r; dy++) {
+                for (int dz = -r; dz <= r; dz++) {
+                    BlockPos pos = center.add(dx, dy, dz);
+                    BlockState state = world.getBlockState(pos);
+
+                    // Furnace/smoker/blast furnace: must be lit AND have a food item in the input slot.
+                    if (isFurnaceType(state) && isLit(state)) {
+                        var be = world.getBlockEntity(pos);
+                        if (be instanceof AbstractFurnaceBlockEntity furnace) {
+                            ItemStack input = furnace.getStack(0);
+                            if (!input.isEmpty() && isFoodRelated(input)) {
+                                return true;
+                            }
+                            // Also check output slot — food just finished cooking.
+                            ItemStack output = furnace.getStack(2);
+                            if (!output.isEmpty() && isCookedFood(output)) {
+                                return true;
+                            }
+                        }
+                    }
+
+                    // Campfire: must be lit AND have at least one food item cooking.
+                    if (isCampfireType(state) && isLit(state)) {
+                        var be = world.getBlockEntity(pos);
+                        if (be instanceof CampfireBlockEntity campfire) {
+                            for (int slot = 0; slot < 4; slot++) {
+                                ItemStack cooking = campfire.getItemsBeingCooked().get(slot);
+                                if (cooking != null && !cooking.isEmpty()) {
+                                    return true;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    private static boolean isFurnaceType(BlockState state) {
         return state.isOf(Blocks.FURNACE)
                 || state.isOf(Blocks.SMOKER)
-                || state.isOf(Blocks.BLAST_FURNACE)
-                || state.isOf(Blocks.CAMPFIRE)
+                || state.isOf(Blocks.BLAST_FURNACE);
+    }
+
+    private static boolean isCampfireType(BlockState state) {
+        return state.isOf(Blocks.CAMPFIRE)
                 || state.isOf(Blocks.SOUL_CAMPFIRE);
     }
 
@@ -178,10 +257,24 @@ public final class CookingReactionService {
         }
     }
 
-    /**
-     * Finds the closest bot that can react — within range, not on cooldown, and not
-     * already showing overhead text.
-     */
+    /** Checks if the item is a raw food that would cook into a cooked food. */
+    private static boolean isFoodRelated(ItemStack stack) {
+        if (stack == null || stack.isEmpty()) return false;
+        Item item = stack.getItem();
+        // Raw inputs that produce cooked food.
+        return item == Items.BEEF || item == Items.PORKCHOP || item == Items.CHICKEN
+                || item == Items.MUTTON || item == Items.RABBIT
+                || item == Items.COD || item == Items.SALMON
+                || item == Items.POTATO || item == Items.KELP;
+    }
+
+    /** Checks if the item is a cooked food product. */
+    private static boolean isCookedFood(ItemStack stack) {
+        return stack != null && !stack.isEmpty() && COOKED_FOODS.contains(stack.getItem());
+    }
+
+    // ---- Bot selection ----
+
     private static ServerPlayerEntity findClosestReactingBot(
             ServerPlayerEntity cook,
             List<ServerPlayerEntity> bots,
@@ -191,8 +284,7 @@ public final class CookingReactionService {
         double bestDistSq = Double.MAX_VALUE;
 
         for (ServerPlayerEntity bot : bots) {
-            if (bot == null || bot.isRemoved()) continue;
-            if (bot.isSleeping()) continue;
+            if (bot == null || bot.isRemoved() || bot.isSleeping()) continue;
             if (bot.getEntityWorld() != cook.getEntityWorld()) continue;
 
             UUID botId = bot.getUuid();

@@ -331,12 +331,17 @@ public class Frens implements ModInitializer {
                 return spoke ? net.minecraft.util.ActionResult.SUCCESS : net.minecraft.util.ActionResult.PASS;
             }
 
-            // Normal right-click: allow shared inventory, but also emit a touch line (cooldown-gated).
+            // Normal right-click: try food-giving first, then allow shared inventory.
             if (player instanceof net.minecraft.server.network.ServerPlayerEntity serverPlayer) {
+                // If player is holding food, try the food-giving mechanic.
+                if (net.wcfcarolina13.GameAI.services.BotFoodGivingService.tryGiveFood(serverPlayer, bot)) {
+                    return net.minecraft.util.ActionResult.SUCCESS;
+                }
+                // Otherwise emit a touch line (cooldown-gated).
                 net.wcfcarolina13.GameAI.services.BotTouchChatService.trySendTouchLine(serverPlayer, bot);
             }
 
-            // Always allow the shared inventory view, regardless of held item.
+            // Allow the shared inventory view when not holding food.
 
             // Simple debounce per bot to prevent rapid re-open/close edge cases
             long now = System.currentTimeMillis();

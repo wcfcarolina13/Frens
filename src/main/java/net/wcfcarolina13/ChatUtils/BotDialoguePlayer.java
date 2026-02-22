@@ -173,6 +173,18 @@ public final class BotDialoguePlayer {
         SUBTITLE_MAP.put(BotDialogueSounds.LINE_REACT_STEW_WOULDNT_TRUST, "I wouldn't trust that.");
         SUBTITLE_MAP.put(BotDialogueSounds.LINE_REACT_STEW_BOLD, "Bold choice with the mystery stew.");
 
+        // Food giving: accept
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_FOOD_ACCEPT_NEEDED, "Thanks, I needed that.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_FOOD_ACCEPT_DONT_MIND, "Don't mind if I do.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_FOOD_ACCEPT_APPRECIATED, "Much appreciated.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_FOOD_ACCEPT_TIMING, "Perfect timing.");
+
+        // Food giving: refuse
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_FOOD_REFUSE_GOOD, "I'm good, thanks.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_FOOD_REFUSE_LATER, "Maybe later.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_FOOD_REFUSE_NOT_HUNGRY, "Not hungry right now.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_FOOD_REFUSE_PASS, "I'll pass for now.");
+
         // Status - injured
         SUBTITLE_MAP.put(BotDialogueSounds.LINE_STATUS_NEED_BREATHER, "I could use a breather.");
         SUBTITLE_MAP.put(BotDialogueSounds.LINE_STATUS_NOT_BEST, "Not feeling my best right now.");

@@ -181,6 +181,18 @@ public final class DialogueTextMapper {
         EXACT_MAP.put("I wouldn't trust that if I were you.", BotDialogueSounds.LINE_REACT_STEW_WOULDNT_TRUST);
         EXACT_MAP.put("Bold choice with the mystery stew.", BotDialogueSounds.LINE_REACT_STEW_BOLD);
 
+        // ============ FOOD GIVING: ACCEPT ============
+        EXACT_MAP.put("Thanks, I needed that.", BotDialogueSounds.LINE_FOOD_ACCEPT_NEEDED);
+        EXACT_MAP.put("Don't mind if I do.", BotDialogueSounds.LINE_FOOD_ACCEPT_DONT_MIND);
+        EXACT_MAP.put("Much appreciated.", BotDialogueSounds.LINE_FOOD_ACCEPT_APPRECIATED);
+        EXACT_MAP.put("Perfect timing.", BotDialogueSounds.LINE_FOOD_ACCEPT_TIMING);
+
+        // ============ FOOD GIVING: REFUSE ============
+        EXACT_MAP.put("I'm good, thanks.", BotDialogueSounds.LINE_FOOD_REFUSE_GOOD);
+        EXACT_MAP.put("Maybe later.", BotDialogueSounds.LINE_FOOD_REFUSE_LATER);
+        EXACT_MAP.put("Not hungry right now.", BotDialogueSounds.LINE_FOOD_REFUSE_NOT_HUNGRY);
+        EXACT_MAP.put("I'll pass for now.", BotDialogueSounds.LINE_FOOD_REFUSE_PASS);
+
         // ============ MODE: FOLLOW ============
         PATTERN_MAP.put(patternWithName("I'm right behind you, {name}."), BotDialogueSounds.LINE_MODE_FOLLOW_BEHIND);
         PATTERN_MAP.put(patternWithName("Now following {name}."), BotDialogueSounds.LINE_MODE_FOLLOW_KEEPING_UP);

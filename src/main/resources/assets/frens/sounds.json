@@ -1794,6 +1794,78 @@
       }
     ]
   },
+  "bot.line.food_accept_needed": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "frens:dialogue/food_accept_needed__01",
+        "weight": 1
+      }
+    ]
+  },
+  "bot.line.food_accept_dont_mind": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "frens:dialogue/food_accept_dont_mind__01",
+        "weight": 1
+      }
+    ]
+  },
+  "bot.line.food_accept_appreciated": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "frens:dialogue/food_accept_appreciated__01",
+        "weight": 1
+      }
+    ]
+  },
+  "bot.line.food_accept_timing": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "frens:dialogue/food_accept_timing__01",
+        "weight": 1
+      }
+    ]
+  },
+  "bot.line.food_refuse_good": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "frens:dialogue/food_refuse_good__01",
+        "weight": 1
+      }
+    ]
+  },
+  "bot.line.food_refuse_later": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "frens:dialogue/food_refuse_later__01",
+        "weight": 1
+      }
+    ]
+  },
+  "bot.line.food_refuse_not_hungry": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "frens:dialogue/food_refuse_not_hungry__01",
+        "weight": 1
+      }
+    ]
+  },
+  "bot.line.food_refuse_pass": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "frens:dialogue/food_refuse_pass__01",
+        "weight": 1
+      }
+    ]
+  },
   "bot.line.wake_snore_piglin": {
     "category": "voice",
     "sounds": [

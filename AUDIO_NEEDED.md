@@ -376,4 +376,26 @@ Triggered as **overhead (in-world) companion dialogue** when a nearby player (wi
 | `bot.line.react_stew_wouldnt_trust` | `frens:dialogue/react_stew_wouldnt_trust__01` | "I wouldn't trust that if I were you." | Pending |
 | `bot.line.react_stew_bold` | `frens:dialogue/react_stew_bold__01` | "Bold choice with the mystery stew." | Pending |
 
+### Food giving: accept (bot takes food from player)
+
+Triggered as **overhead (in-world) companion dialogue** when a player right-clicks the bot with food in hand and the bot is hungry. The bot takes one item, eats it, and may show a thank-you line. 1-minute per-bot cooldown, 70% trigger chance.
+
+| Sound event id | sounds.json entry (suggested file) | Text | Status |
+|---|---|---|---|
+| `bot.line.food_accept_needed` | `frens:dialogue/food_accept_needed__01` | "Thanks, I needed that." | Pending |
+| `bot.line.food_accept_dont_mind` | `frens:dialogue/food_accept_dont_mind__01` | "Don't mind if I do." | Pending |
+| `bot.line.food_accept_appreciated` | `frens:dialogue/food_accept_appreciated__01` | "Much appreciated." | Pending |
+| `bot.line.food_accept_timing` | `frens:dialogue/food_accept_timing__01` | "Perfect timing." | Pending |
+
+### Food giving: refuse (bot not hungry)
+
+Triggered as **overhead (in-world) companion dialogue** when a player right-clicks the bot with food in hand but the bot is not hungry enough to eat. 1-minute per-bot cooldown, 50% trigger chance.
+
+| Sound event id | sounds.json entry (suggested file) | Text | Status |
+|---|---|---|---|
+| `bot.line.food_refuse_good` | `frens:dialogue/food_refuse_good__01` | "I'm good, thanks." | Pending |
+| `bot.line.food_refuse_later` | `frens:dialogue/food_refuse_later__01` | "Maybe later." | Pending |
+| `bot.line.food_refuse_not_hungry` | `frens:dialogue/food_refuse_not_hungry__01` | "Not hungry right now." | Pending |
+| `bot.line.food_refuse_pass` | `frens:dialogue/food_refuse_pass__01` | "I'll pass for now." | Pending |
+
 *Last updated: February 21, 2026*
