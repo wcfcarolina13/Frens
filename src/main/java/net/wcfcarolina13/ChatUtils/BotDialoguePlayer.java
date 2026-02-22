@@ -145,6 +145,34 @@ public final class BotDialoguePlayer {
         SUBTITLE_MAP.put(BotDialogueSounds.LINE_COMBAT_MISSED_3, "Ugh. Missed.");
         SUBTITLE_MAP.put(BotDialogueSounds.LINE_COMBAT_MISSED_4, "That one went wide!");
         
+        // Wake-up lines (after sleeping near player)
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_WAKE_SNORE_PIGLIN, "You know you snore like a piglin?");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_WAKE_DREAM_NPC, "I had the strangest dream...");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_WAKE_GOOD_REST, "A good night's rest.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_WAKE_SEIZE_DAY, "Seize the day!");
+
+        // Cooking reactions (food taken from furnace/smoker/campfire)
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_COOK_SMELLS_GOOD, "Something smells good.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_COOK_DINNER, "Is that dinner?");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_COOK_GETTING_HUNGRY, "Now I'm getting hungry.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_COOK_LIKE_HOME, "Smells like home.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_COOK_HOT_MEAL, "Nothing beats a hot meal.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_COOK_SAVE_SOME, "Save me some, will you?");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_COOK_AMAZING, "That smells amazing.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_COOK_COULD_EAT, "I could eat.");
+
+        // Reaction: player eats rotten flesh
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_REACT_ROTTEN_REALLY, "Did you really just eat that?");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_REACT_ROTTEN_KNOW_THAT, "That's... rotten.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_REACT_ROTTEN_SMELL, "I can smell it from here.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_REACT_ROTTEN_BRAVE, "Your stomach is braver than mine.");
+
+        // Reaction: player eats suspicious stew
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_REACT_STEW_SUSPICIOUS, "That stew looks... suspicious.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_REACT_STEW_SURE, "You sure about that stew?");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_REACT_STEW_WOULDNT_TRUST, "I wouldn't trust that.");
+        SUBTITLE_MAP.put(BotDialogueSounds.LINE_REACT_STEW_BOLD, "Bold choice with the mystery stew.");
+
         // Status - injured
         SUBTITLE_MAP.put(BotDialogueSounds.LINE_STATUS_NEED_BREATHER, "I could use a breather.");
         SUBTITLE_MAP.put(BotDialogueSounds.LINE_STATUS_NOT_BEST, "Not feeling my best right now.");

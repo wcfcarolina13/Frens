@@ -1650,6 +1650,186 @@
       }
     ]
   },
+  "bot.line.cook_smells_good": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "frens:dialogue/cook_smells_good__01",
+        "weight": 1
+      }
+    ]
+  },
+  "bot.line.cook_dinner": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "frens:dialogue/cook_dinner__01",
+        "weight": 1
+      }
+    ]
+  },
+  "bot.line.cook_getting_hungry": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "frens:dialogue/cook_getting_hungry__01",
+        "weight": 1
+      }
+    ]
+  },
+  "bot.line.cook_like_home": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "frens:dialogue/cook_like_home__01",
+        "weight": 1
+      }
+    ]
+  },
+  "bot.line.cook_hot_meal": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "frens:dialogue/cook_hot_meal__01",
+        "weight": 1
+      }
+    ]
+  },
+  "bot.line.cook_save_some": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "frens:dialogue/cook_save_some__01",
+        "weight": 1
+      }
+    ]
+  },
+  "bot.line.cook_amazing": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "frens:dialogue/cook_amazing__01",
+        "weight": 1
+      }
+    ]
+  },
+  "bot.line.cook_could_eat": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "frens:dialogue/cook_could_eat__01",
+        "weight": 1
+      }
+    ]
+  },
+  "bot.line.react_rotten_really": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "frens:dialogue/react_rotten_really__01",
+        "weight": 1
+      }
+    ]
+  },
+  "bot.line.react_rotten_know_that": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "frens:dialogue/react_rotten_know_that__01",
+        "weight": 1
+      }
+    ]
+  },
+  "bot.line.react_rotten_smell": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "frens:dialogue/react_rotten_smell__01",
+        "weight": 1
+      }
+    ]
+  },
+  "bot.line.react_rotten_brave": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "frens:dialogue/react_rotten_brave__01",
+        "weight": 1
+      }
+    ]
+  },
+  "bot.line.react_stew_suspicious": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "frens:dialogue/react_stew_suspicious__01",
+        "weight": 1
+      }
+    ]
+  },
+  "bot.line.react_stew_sure": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "frens:dialogue/react_stew_sure__01",
+        "weight": 1
+      }
+    ]
+  },
+  "bot.line.react_stew_wouldnt_trust": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "frens:dialogue/react_stew_wouldnt_trust__01",
+        "weight": 1
+      }
+    ]
+  },
+  "bot.line.react_stew_bold": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "frens:dialogue/react_stew_bold__01",
+        "weight": 1
+      }
+    ]
+  },
+  "bot.line.wake_snore_piglin": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "frens:dialogue/wake_snore_piglin__01",
+        "weight": 1
+      }
+    ]
+  },
+  "bot.line.wake_dream_npc": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "frens:dialogue/wake_dream_npc__01",
+        "weight": 1
+      }
+    ]
+  },
+  "bot.line.wake_good_rest": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "frens:dialogue/wake_good_rest__01",
+        "weight": 1
+      }
+    ]
+  },
+  "bot.line.wake_seize_day": {
+    "category": "voice",
+    "sounds": [
+      {
+        "name": "frens:dialogue/wake_seize_day__01",
+        "weight": 1
+      }
+    ]
+  },
   "bot.line.mode_follow_behind": {
     "category": "voice",
     "sounds": [

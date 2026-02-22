@@ -94,6 +94,34 @@ public final class BotDialogueSounds {
     public static final SoundEvent LINE_SKILL_SLEEP_FINDING_BED = register("bot.line.skill_sleep_finding_bed");
     public static final SoundEvent LINE_SKILL_SLEEP_LONG_DAY = register("bot.line.skill_sleep_long_day");
 
+    // Line-specific sound events (wake-up after sleeping near player)
+    public static final SoundEvent LINE_WAKE_SNORE_PIGLIN = register("bot.line.wake_snore_piglin");
+    public static final SoundEvent LINE_WAKE_DREAM_NPC = register("bot.line.wake_dream_npc");
+    public static final SoundEvent LINE_WAKE_GOOD_REST = register("bot.line.wake_good_rest");
+    public static final SoundEvent LINE_WAKE_SEIZE_DAY = register("bot.line.wake_seize_day");
+
+    // Line-specific sound events (cooking reaction — food taken from furnace/smoker/campfire)
+    public static final SoundEvent LINE_COOK_SMELLS_GOOD = register("bot.line.cook_smells_good");
+    public static final SoundEvent LINE_COOK_DINNER = register("bot.line.cook_dinner");
+    public static final SoundEvent LINE_COOK_GETTING_HUNGRY = register("bot.line.cook_getting_hungry");
+    public static final SoundEvent LINE_COOK_LIKE_HOME = register("bot.line.cook_like_home");
+    public static final SoundEvent LINE_COOK_HOT_MEAL = register("bot.line.cook_hot_meal");
+    public static final SoundEvent LINE_COOK_SAVE_SOME = register("bot.line.cook_save_some");
+    public static final SoundEvent LINE_COOK_AMAZING = register("bot.line.cook_amazing");
+    public static final SoundEvent LINE_COOK_COULD_EAT = register("bot.line.cook_could_eat");
+
+    // Line-specific sound events (player eating rotten flesh)
+    public static final SoundEvent LINE_REACT_ROTTEN_REALLY = register("bot.line.react_rotten_really");
+    public static final SoundEvent LINE_REACT_ROTTEN_KNOW_THAT = register("bot.line.react_rotten_know_that");
+    public static final SoundEvent LINE_REACT_ROTTEN_SMELL = register("bot.line.react_rotten_smell");
+    public static final SoundEvent LINE_REACT_ROTTEN_BRAVE = register("bot.line.react_rotten_brave");
+
+    // Line-specific sound events (player eating suspicious stew)
+    public static final SoundEvent LINE_REACT_STEW_SUSPICIOUS = register("bot.line.react_stew_suspicious");
+    public static final SoundEvent LINE_REACT_STEW_SURE = register("bot.line.react_stew_sure");
+    public static final SoundEvent LINE_REACT_STEW_WOULDNT_TRUST = register("bot.line.react_stew_wouldnt_trust");
+    public static final SoundEvent LINE_REACT_STEW_BOLD = register("bot.line.react_stew_bold");
+
     // Line-specific sound events (mode: follow)
     public static final SoundEvent LINE_MODE_FOLLOW_BEHIND = register("bot.line.mode_follow_behind");
     public static final SoundEvent LINE_MODE_FOLLOW_LEAD = register("bot.line.mode_follow_lead");

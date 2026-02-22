@@ -324,4 +324,56 @@ These were added for cross-dimension follow dialogue, portal proximity reactions
 
 Each sound event has 3 variants (`__01`, `__02`, `__03`) in `sounds.json`. All 42 `.ogg` clips need to be generated.
 
-*Last updated: February 18, 2026*
+## New Audio Needed (February 2026 — Wake-Up & Eating Reactions)
+
+### Wake-up dialogue (after sleeping near player)
+
+Triggered as **overhead (in-world) companion dialogue** when the bot wakes up and a real player also slept within 16 blocks. ~40% chance of staying silent to avoid spam. 10-minute per-bot cooldown.
+
+| Sound event id | sounds.json entry (suggested file) | Text | Status |
+|---|---|---|---|
+| `bot.line.wake_snore_piglin` | `frens:dialogue/wake_snore_piglin__01` | "You know you snore like a piglin?" | Pending |
+| `bot.line.wake_dream_npc` | `frens:dialogue/wake_dream_npc__01` | "I had the strangest dream that I was an NPC in a video game." | Pending |
+| `bot.line.wake_good_rest` | `frens:dialogue/wake_good_rest__01` | "A good night's rest." | Pending |
+| `bot.line.wake_seize_day` | `frens:dialogue/wake_seize_day__01` | "Seize the day!" | Pending |
+
+### Cooking reaction (food taken from furnace/smoker/campfire)
+
+Triggered as **overhead (in-world) companion dialogue** when cooked food is taken from a furnace, smoker, blast furnace, or campfire. Detects inventory increases of cooked food items while near a lit cooking block. Works for both real players and bot self-cooking. 3-minute per-bot cooldown.
+
+Covered foods: Cooked Beef, Cooked Porkchop, Cooked Chicken, Cooked Mutton, Cooked Rabbit, Cooked Cod, Cooked Salmon, Baked Potato, Dried Kelp.
+
+| Sound event id | sounds.json entry (suggested file) | Text | Status |
+|---|---|---|---|
+| `bot.line.cook_smells_good` | `frens:dialogue/cook_smells_good__01` | "Something smells good." | Pending |
+| `bot.line.cook_dinner` | `frens:dialogue/cook_dinner__01` | "Is that dinner?" | Pending |
+| `bot.line.cook_getting_hungry` | `frens:dialogue/cook_getting_hungry__01` | "Now I'm getting hungry." | Pending |
+| `bot.line.cook_like_home` | `frens:dialogue/cook_like_home__01` | "Smells like home." | Pending |
+| `bot.line.cook_hot_meal` | `frens:dialogue/cook_hot_meal__01` | "Nothing beats a hot meal." | Pending |
+| `bot.line.cook_save_some` | `frens:dialogue/cook_save_some__01` | "Save me some, will you?" | Pending |
+| `bot.line.cook_amazing` | `frens:dialogue/cook_amazing__01` | "That smells amazing." | Pending |
+| `bot.line.cook_could_eat` | `frens:dialogue/cook_could_eat__01` | "I could eat." | Pending |
+
+### Rotten flesh eating reaction
+
+Triggered as **overhead (in-world) companion dialogue** when a nearby player (within 12 blocks) eats rotten flesh. 45-second per-player cooldown.
+
+| Sound event id | sounds.json entry (suggested file) | Text | Status |
+|---|---|---|---|
+| `bot.line.react_rotten_really` | `frens:dialogue/react_rotten_really__01` | "Did you really just eat that?" | Pending |
+| `bot.line.react_rotten_know_that` | `frens:dialogue/react_rotten_know_that__01` | "That's... rotten. You know that, right?" | Pending |
+| `bot.line.react_rotten_smell` | `frens:dialogue/react_rotten_smell__01` | "I can smell it from here." | Pending |
+| `bot.line.react_rotten_brave` | `frens:dialogue/react_rotten_brave__01` | "Your stomach is braver than mine." | Pending |
+
+### Suspicious stew eating reaction
+
+Triggered as **overhead (in-world) companion dialogue** when a nearby player (within 12 blocks) eats suspicious stew. 45-second per-player cooldown.
+
+| Sound event id | sounds.json entry (suggested file) | Text | Status |
+|---|---|---|---|
+| `bot.line.react_stew_suspicious` | `frens:dialogue/react_stew_suspicious__01` | "That stew looks... suspicious." | Pending |
+| `bot.line.react_stew_sure` | `frens:dialogue/react_stew_sure__01` | "You sure about that stew?" | Pending |
+| `bot.line.react_stew_wouldnt_trust` | `frens:dialogue/react_stew_wouldnt_trust__01` | "I wouldn't trust that if I were you." | Pending |
+| `bot.line.react_stew_bold` | `frens:dialogue/react_stew_bold__01` | "Bold choice with the mystery stew." | Pending |
+
+*Last updated: February 21, 2026*

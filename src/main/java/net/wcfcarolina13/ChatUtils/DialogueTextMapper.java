@@ -153,6 +153,34 @@ public final class DialogueTextMapper {
         EXACT_MAP.put("Give me a second-finding a bed.", BotDialogueSounds.LINE_SKILL_SLEEP_FINDING_BED);
         EXACT_MAP.put("Long day. Time to sleep.", BotDialogueSounds.LINE_SKILL_SLEEP_LONG_DAY);
 
+        // ============ WAKE-UP (after sleeping near player) ============
+        EXACT_MAP.put("You know you snore like a piglin?", BotDialogueSounds.LINE_WAKE_SNORE_PIGLIN);
+        EXACT_MAP.put("I had the strangest dream that I was an NPC in a video game.", BotDialogueSounds.LINE_WAKE_DREAM_NPC);
+        EXACT_MAP.put("A good night's rest.", BotDialogueSounds.LINE_WAKE_GOOD_REST);
+        EXACT_MAP.put("Seize the day!", BotDialogueSounds.LINE_WAKE_SEIZE_DAY);
+
+        // ============ COOKING REACTION (food taken from furnace/smoker/campfire) ============
+        EXACT_MAP.put("Something smells good.", BotDialogueSounds.LINE_COOK_SMELLS_GOOD);
+        EXACT_MAP.put("Is that dinner?", BotDialogueSounds.LINE_COOK_DINNER);
+        EXACT_MAP.put("Now I'm getting hungry.", BotDialogueSounds.LINE_COOK_GETTING_HUNGRY);
+        EXACT_MAP.put("Smells like home.", BotDialogueSounds.LINE_COOK_LIKE_HOME);
+        EXACT_MAP.put("Nothing beats a hot meal.", BotDialogueSounds.LINE_COOK_HOT_MEAL);
+        EXACT_MAP.put("Save me some, will you?", BotDialogueSounds.LINE_COOK_SAVE_SOME);
+        EXACT_MAP.put("That smells amazing.", BotDialogueSounds.LINE_COOK_AMAZING);
+        EXACT_MAP.put("I could eat.", BotDialogueSounds.LINE_COOK_COULD_EAT);
+
+        // ============ REACTION: PLAYER EATS ROTTEN FLESH ============
+        EXACT_MAP.put("Did you really just eat that?", BotDialogueSounds.LINE_REACT_ROTTEN_REALLY);
+        EXACT_MAP.put("That's... rotten. You know that, right?", BotDialogueSounds.LINE_REACT_ROTTEN_KNOW_THAT);
+        EXACT_MAP.put("I can smell it from here.", BotDialogueSounds.LINE_REACT_ROTTEN_SMELL);
+        EXACT_MAP.put("Your stomach is braver than mine.", BotDialogueSounds.LINE_REACT_ROTTEN_BRAVE);
+
+        // ============ REACTION: PLAYER EATS SUSPICIOUS STEW ============
+        EXACT_MAP.put("That stew looks... suspicious.", BotDialogueSounds.LINE_REACT_STEW_SUSPICIOUS);
+        EXACT_MAP.put("You sure about that stew?", BotDialogueSounds.LINE_REACT_STEW_SURE);
+        EXACT_MAP.put("I wouldn't trust that if I were you.", BotDialogueSounds.LINE_REACT_STEW_WOULDNT_TRUST);
+        EXACT_MAP.put("Bold choice with the mystery stew.", BotDialogueSounds.LINE_REACT_STEW_BOLD);
+
         // ============ MODE: FOLLOW ============
         PATTERN_MAP.put(patternWithName("I'm right behind you, {name}."), BotDialogueSounds.LINE_MODE_FOLLOW_BEHIND);
         PATTERN_MAP.put(patternWithName("Now following {name}."), BotDialogueSounds.LINE_MODE_FOLLOW_KEEPING_UP);
