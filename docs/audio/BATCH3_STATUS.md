@@ -2,7 +2,7 @@
 
 ## Source and phase split
 
-- Authoritative index: `../gemini_projects/ai-player-dialogue/january_2026_batch3/AUDIO_INDEX.md`
+- Authoritative index: `../gemini_projects/frens-dialogue/january_2026_batch3/AUDIO_INDEX.md`
 - Generated source date: January 22, 2026
 - Batch totals:
   - Non-topic lines: 87 IDs (Phase 1)
@@ -22,18 +22,18 @@
 |---|---|---|
 | Asset manifest + ingest | `tools/audio/batch3_phase1_manifest.tsv` | Implemented |
 | Static audio audit | `tools/audio/audit_batch3_phase1.sh` | Implemented |
-| Sound event declarations | `src/main/java/net/shasankp000/ChatUtils/BotDialogueSounds.java` | Implemented |
-| Sound json entries | `src/main/resources/assets/ai-player/sounds.json` | Implemented |
-| Subtitle mappings | `src/main/java/net/shasankp000/ChatUtils/BotDialoguePlayer.java` | Implemented |
-| Combat non-topic triggers | `src/main/java/net/shasankp000/GameAI/services/BotCombatCalloutService.java` | Implemented |
-| Bot combat metadata feed | `src/main/java/net/shasankp000/GameAI/BotEventHandler.java` | Implemented |
-| Friendly-fire dealt hook | `src/main/java/net/shasankp000/AIPlayer.java` | Implemented |
-| Villager proximity/interaction | `src/main/java/net/shasankp000/GameAI/services/VillageProximityReactionService.java` | Implemented |
-| Pet and tame-animal proximity | `src/main/java/net/shasankp000/GameAI/services/PetProximityReactionService.java` | Implemented |
-| Context trigger service | `src/main/java/net/shasankp000/GameAI/services/CompanionContextReactionService.java` | Implemented |
-| Context + pet tick registration | `src/main/java/net/shasankp000/AIPlayer.java` | Implemented |
-| Shelter completion hook | `src/main/java/net/shasankp000/GameAI/skills/impl/ShelterSkill.java` | Implemented |
-| Admin verification command | `src/main/java/net/shasankp000/Commands/BotUtilityCommands.java`, `src/main/java/net/shasankp000/Commands/modCommandRegistry.java` | Implemented (`/bot dialogue_test <bot> <trigger_key> [line_id]`) |
+| Sound event declarations | `src/main/java/net/wcfcarolina13/ChatUtils/BotDialogueSounds.java` | Implemented |
+| Sound json entries | `src/main/resources/assets/frens/sounds.json` | Implemented |
+| Subtitle mappings | `src/main/java/net/wcfcarolina13/ChatUtils/BotDialoguePlayer.java` | Implemented |
+| Combat non-topic triggers | `src/main/java/net/wcfcarolina13/GameAI/services/BotCombatCalloutService.java` | Implemented |
+| Bot combat metadata feed | `src/main/java/net/wcfcarolina13/GameAI/BotEventHandler.java` | Implemented |
+| Friendly-fire dealt hook | `src/main/java/net/wcfcarolina13/Frens.java` | Implemented |
+| Villager proximity/interaction | `src/main/java/net/wcfcarolina13/GameAI/services/VillageProximityReactionService.java` | Implemented |
+| Pet and tame-animal proximity | `src/main/java/net/wcfcarolina13/GameAI/services/PetProximityReactionService.java` | Implemented |
+| Context trigger service | `src/main/java/net/wcfcarolina13/GameAI/services/CompanionContextReactionService.java` | Implemented |
+| Context + pet tick registration | `src/main/java/net/wcfcarolina13/Frens.java` | Implemented |
+| Shelter completion hook | `src/main/java/net/wcfcarolina13/GameAI/skills/impl/ShelterSkill.java` | Implemented |
+| Admin verification command | `src/main/java/net/wcfcarolina13/Commands/BotUtilityCommands.java`, `src/main/java/net/wcfcarolina13/Commands/modCommandRegistry.java` | Implemented (`/bot dialogue_test <bot> <trigger_key> [line_id]`) |
 
 ## Overlap IDs intentionally preserved
 
@@ -74,11 +74,11 @@ These IDs were not remapped/replaced in Phase 1:
   - `batch3_traders_mounts`
   - `batch3_travel`
 - Routing files:
-  - `src/main/java/net/shasankp000/GameAI/services/Batch3TopicDialogueService.java`
-  - `src/main/java/net/shasankp000/GameAI/services/SurvivalCompanionQuestService.java`
-  - `src/main/java/net/shasankp000/GraphicalUserInterface/BotPlayerInventoryScreen.java`
-  - `src/main/java/net/shasankp000/network/CompanionQuestNetworkManager.java`
-  - `src/main/java/net/shasankp000/Commands/modCommandRegistry.java`
+  - `src/main/java/net/wcfcarolina13/GameAI/services/Batch3TopicDialogueService.java`
+  - `src/main/java/net/wcfcarolina13/GameAI/services/SurvivalCompanionQuestService.java`
+  - `src/main/java/net/wcfcarolina13/GraphicalUserInterface/BotPlayerInventoryScreen.java`
+  - `src/main/java/net/wcfcarolina13/network/CompanionQuestNetworkManager.java`
+  - `src/main/java/net/wcfcarolina13/Commands/modCommandRegistry.java`
 - Status: Implemented
 
 ## Coverage Tooling (Step 4)

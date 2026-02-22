@@ -1,0 +1,5616 @@
+package net.wcfcarolina13.GameAI;
+
+import net.wcfcarolina13.EntityUtil;
+import net.minecraft.block.BlockState;
+import net.minecraft.block.Blocks;
+import net.minecraft.block.DoorBlock;
+import net.minecraft.block.FenceGateBlock;
+import net.minecraft.state.property.Properties;
+import net.minecraft.component.DataComponentTypes;
+import net.minecraft.entity.Entity;
+import net.minecraft.entity.ItemEntity;
+import net.minecraft.entity.LivingEntity;
+import net.minecraft.entity.damage.DamageSource;
+import net.minecraft.entity.damage.DamageTypes;
+import net.minecraft.entity.player.PlayerInventory;
+import net.minecraft.network.packet.s2c.play.PositionFlag;
+import net.minecraft.registry.RegistryKey;
+import net.minecraft.registry.RegistryKeys;
+import net.minecraft.registry.tag.BlockTags;
+import net.minecraft.registry.tag.EntityTypeTags;
+import net.minecraft.server.ServerTask;
+import net.minecraft.server.command.ServerCommandSource;
+import net.minecraft.server.world.ServerWorld;
+import net.minecraft.util.hit.BlockHitResult;
+import net.minecraft.util.hit.HitResult;
+import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Box;
+import net.minecraft.util.math.Direction;
+import net.minecraft.util.math.Vec3d;
+import net.minecraft.item.ItemStack;
+import net.minecraft.world.Heightmap;
+import net.minecraft.world.World;
+import net.minecraft.world.GameMode;
+import net.minecraft.entity.EntityType;
+import net.wcfcarolina13.ChatUtils.ChatUtils;
+import net.wcfcarolina13.DangerZoneDetector.DangerZoneDetector;
+import net.wcfcarolina13.Database.QTable;
+import net.wcfcarolina13.Database.QTableStorage;
+import net.wcfcarolina13.GameAI.services.BotPersistenceService;
+import net.wcfcarolina13.GameAI.services.CompanionOverheadDialogueService;
+import net.wcfcarolina13.GameAI.services.ElytraFlightService;
+import net.wcfcarolina13.GameAI.services.TreeStuckEscapeService;
+import net.wcfcarolina13.GameAI.services.BotLifecycleService;
+import net.wcfcarolina13.GameAI.services.BotRegistry;
+import net.wcfcarolina13.GameAI.services.BotCommandStateService;
+import net.wcfcarolina13.GameAI.services.DropSweepService;
+import net.wcfcarolina13.GameAI.services.GuardPatrolService;
+import net.wcfcarolina13.GameAI.services.HealingService;
+import net.wcfcarolina13.GameAI.services.BotRescueService;
+import net.wcfcarolina13.GameAI.services.BotThreatService;
+import net.wcfcarolina13.GameAI.services.BotArrowRecoveryService;
+import net.wcfcarolina13.GameAI.services.BotStuckService;
+import net.wcfcarolina13.GameAI.services.BotRLActionService;
+import net.wcfcarolina13.GameAI.services.BotRLPersistenceThrottleService;
+import net.wcfcarolina13.GameAI.services.BotHomeService;
+import net.wcfcarolina13.Database.StateActionPair;
+import net.wcfcarolina13.Entity.AutoFaceEntity;
+import net.wcfcarolina13.Entity.LookController;
+
+import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.network.ServerPlayerEntity;
+import net.wcfcarolina13.Entity.FaceClosestEntity;
+import net.wcfcarolina13.LauncherDetection.LauncherEnvironment;
+
+import java.util.ArrayList;
+import net.wcfcarolina13.PlayerUtils.*;
+import net.wcfcarolina13.WorldUitls.GetTime;
+import net.wcfcarolina13.Entity.EntityDetails;
+import net.wcfcarolina13.PathFinding.GoTo;
+import net.wcfcarolina13.GameAI.DropSweeper;
+import net.wcfcarolina13.GameAI.services.TaskService;
+import net.wcfcarolina13.GameAI.services.MovementService;
+import net.wcfcarolina13.GameAI.services.BlockInteractionService;
+import net.wcfcarolina13.GameAI.services.FollowPathService;
+import net.wcfcarolina13.GameAI.services.FollowDebugService;
+import net.wcfcarolina13.GameAI.services.FollowStateService;
+import net.wcfcarolina13.GameAI.services.FollowPlannerService;
+import net.wcfcarolina13.GameAI.services.FollowStateService.FollowDoorPlan;
+import net.wcfcarolina13.GameAI.services.FollowStateService.FollowDoorRecovery;
+import net.wcfcarolina13.GameAI.services.FollowStateService.VerticalClimbLock;
+import net.wcfcarolina13.GameAI.services.FollowMovementService;
+import net.wcfcarolina13.GameAI.services.SharedStateService;
+import net.wcfcarolina13.GameAI.services.follow.FollowVerticalAssistPolicyUtil;
+import net.wcfcarolina13.GameAI.skills.SkillContext;
+import net.wcfcarolina13.GameAI.skills.SkillExecutionResult;
+import net.wcfcarolina13.GameAI.skills.SkillManager;
+import net.wcfcarolina13.Entity.createFakePlayer;
+import net.wcfcarolina13.WorldUitls.isBlockItem;
+import net.wcfcarolina13.GameAI.skills.SkillPreferences;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.io.IOException;
+import java.lang.reflect.Field;
+import java.util.*;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+
+import static net.wcfcarolina13.GameAI.State.isStateConsistent;
+import static net.wcfcarolina13.GameAI.services.FollowStateService.*;
+
+
+public class BotEventHandler {
+    public static final Logger LOGGER = LoggerFactory.getLogger("frens");
+    private static MinecraftServer server = null;
+    public static ServerPlayerEntity bot = null;
+    private static final boolean DEBUG_RL = false;
+    // Stage-2 refactor: primary bot selection moved to BotLifecycleService.
+    public static final String qTableDir = LauncherEnvironment.getStorageDirectory("qtable_storage");
+    private static final Object monitorLock = new Object();
+    private static boolean isExecuting = false;
+    private static final double DEFAULT_RISK_APPETITE = 0.5; // Default value upon respawn
+    public static boolean botDied = false; // Flag to track if the bot died
+    public static boolean hasRespawned = false; // flag to track if the bot has respawned before or not
+    public static int botSpawnCount = 0;
+    // Stage-2 refactor: last spawn state moved to BotLifecycleService.
+    private static State currentState = null;
+    private static final Random RANDOM = new Random();
+    // Stage-2 refactor: drop-sweep state moved to DropSweepService.
+    // Stage-2 refactor: burial/suffocation rescue moved to BotRescueService.
+    // Stage-2 refactor: follow/come state maps moved to FollowStateService.
+    private static final long FOLLOW_SEALED_STATE_TTL_MS = 1_000L;
+    private static final double FOLLOW_PERSONAL_SPACE = 3.0D; // prefer at least ~3 block gap
+    private static final double FOLLOW_BACKUP_DISTANCE = 1.05D; // trigger backup after linger
+    private static final long FOLLOW_BACKUP_TRIGGER_MS = 3_000L;
+    private static final double FOLLOW_SPRINT_DISTANCE_SQ = 4.0D; // >2 blocks -> sprint
+    private static final double FOLLOW_TELEPORT_DISTANCE_SQ = 225.0D; // ~15 blocks
+    private static final int FOLLOW_TELEPORT_STUCK_TICKS = 60; // ~3 seconds @20tps
+    private static final int FOLLOW_TELEPORT_COOLDOWN_TICKS = 40; // 2 seconds @20tps
+    private static final long FOLLOW_POST_DOOR_AVOID_MS = 6_000L;
+    private static final long FOLLOW_VERTICAL_ASSIST_COOLDOWN_MS = 350L;
+    private static final long FOLLOW_VERTICAL_LOCK_TTL_MS = 8_000L;
+    private static final int FOLLOW_VERTICAL_LOCK_NO_PROGRESS_TICKS = 30;
+    private static final int FOLLOW_VERTICAL_LOCK_HARD_FAIL_TICKS = 80;
+    private static final int FOLLOW_VERTICAL_LOCK_NO_DOOR_ABORT_TICKS = 12;
+    private static final int FOLLOW_CLIMB_EXIT_STAGNANT_TICKS = 8;
+    private static final long FOLLOW_VERTICAL_LOCK_REPLAN_COOLDOWN_MS = 1_500L;
+    private static final long FOLLOW_VERTICAL_LOCK_FAIL_COOLDOWN_MS = 4_000L;
+    private static final int FOLLOW_VERTICAL_DOOR_LOOP_BREAK_STREAK = 4;
+    private static final long FOLLOW_VERTICAL_DOOR_LOOP_BREAK_COOLDOWN_MS = 2_500L;
+    private static final long FOLLOW_COMMANDER_LADDER_HINT_TTL_MS = 8_000L;
+    private static final long FOLLOW_COMMANDER_LADDER_OFF_GRACE_MS = 4_000L;
+    private static final long COME_RECOVERY_STALE_TICKS = 200L; // 10s @20tps
+    private static final AtomicInteger COME_RECOVERY_THREAD_ID = new AtomicInteger(0);
+    private static final ExecutorService COME_RECOVERY_EXECUTOR = Executors.newCachedThreadPool(new ThreadFactory() {
+        @Override
+        public Thread newThread(Runnable r) {
+            Thread t = new Thread(r, "come-recovery-" + COME_RECOVERY_THREAD_ID.incrementAndGet());
+            t.setDaemon(true);
+            return t;
+        }
+    });
+
+    private static BlockPos currentAvoidDoor(UUID botId) {
+        return FollowStateService.currentAvoidDoor(botId);
+    }
+
+    private static void avoidDoorFor(UUID botId, BlockPos doorBase, long durationMs, String reason) {
+        if (botId == null || doorBase == null) {
+            return;
+        }
+        FollowStateService.avoidDoorFor(botId, doorBase, Math.max(500L, durationMs));
+        ServerPlayerEntity bot = server != null ? server.getPlayerManager().getPlayer(botId) : null;
+        if (bot != null) {
+            maybeLogFollowDecision(bot, "avoid-door: doorBase=" + doorBase.toShortString()
+                    + " durationMs=" + durationMs
+                    + " reason=" + (reason == null ? "" : reason));
+        }
+    }
+
+    private static boolean isNearRecentlyCrossedDoor(UUID botId, BlockPos doorBase, long windowMs, double radiusSq) {
+        if (botId == null || doorBase == null) {
+            return false;
+        }
+        long lastDoorMs = FollowStateService.FOLLOW_LAST_DOOR_CROSS_MS.getOrDefault(botId, -1L);
+        BlockPos lastDoor = FollowStateService.FOLLOW_LAST_DOOR_BASE.get(botId);
+        if (lastDoorMs < 0 || lastDoor == null) {
+            return false;
+        }
+        if ((System.currentTimeMillis() - lastDoorMs) > windowMs) {
+            return false;
+        }
+        return lastDoor.getSquaredDistance(doorBase) <= radiusSq;
+    }
+
+    public static void noteObstructDamage(ServerPlayerEntity bot) {
+        BotRescueService.noteObstructDamage(bot);
+    }
+
+    // Stage-2 refactor: per-bot command state moved to BotCommandStateService.
+    private static final Map<UUID, Long> LAST_RL_SAMPLE_TICK = new ConcurrentHashMap<>();
+    private static final Map<UUID, Long> FOLLOW_LAST_VERTICAL_ASSIST_MS = new ConcurrentHashMap<>();
+    private static final Map<UUID, BlockPos> FOLLOW_VERTICAL_DOOR_LOOP_LAST_BASE = new ConcurrentHashMap<>();
+    private static final Map<UUID, Integer> FOLLOW_VERTICAL_DOOR_LOOP_STREAK = new ConcurrentHashMap<>();
+    private static final Map<UUID, Long> FOLLOW_VERTICAL_DOOR_LOOP_LAST_BREAK_MS = new ConcurrentHashMap<>();
+    private static final Map<UUID, BlockPos> FOLLOW_VERTICAL_LOCK_LAST_POS = new ConcurrentHashMap<>();
+    private static final Map<UUID, Long> FOLLOW_VERTICAL_LOCK_LAST_REPLAN_MS = new ConcurrentHashMap<>();
+    private static final Map<UUID, Long> FOLLOW_VERTICAL_LOCK_FAIL_COOLDOWN_UNTIL_MS = new ConcurrentHashMap<>();
+    private static final Map<UUID, CommanderLadderHint> FOLLOW_COMMANDER_LADDER_HINT = new ConcurrentHashMap<>();
+    // Stage-2 refactor: burial/suffocation rescue moved to BotRescueService.
+    private static volatile boolean externalOverrideActive = false;
+    // Stage-2 refactor: lifecycle respawn flag moved to BotLifecycleService.
+    public enum CombatStyle {
+        AGGRESSIVE,
+        EVASIVE
+    }
+    private static CombatStyle combatStyle = CombatStyle.AGGRESSIVE;
+
+    public enum Mode {
+        IDLE,
+        FOLLOW,
+        GUARD,
+        PATROL,
+        STAY,
+        RETURNING_BASE
+    }
+    private static long lastRespawnHandledTick = -1;
+
+    private static void debugRL(String message) {
+        if (DEBUG_RL) {
+            LOGGER.debug(message);
+        }
+    }
+
+    public static boolean throttleTraining(ServerPlayerEntity bot, boolean urgent) {
+        if (bot == null || bot.getCommandSource().getServer() == null) {
+            return true;
+        }
+        int interval = urgent ? 2 : 20; // urgent ~0.1s, passive ~1s (assuming 20tps)
+        long now = bot.getCommandSource().getServer().getTicks();
+        long last = LAST_RL_SAMPLE_TICK.getOrDefault(bot.getUuid(), -1L);
+        if (last >= 0 && (now - last) < interval) {
+            return false;
+        }
+        LAST_RL_SAMPLE_TICK.put(bot.getUuid(), now);
+        return true;
+    }
+
+    private static BotCommandStateService.State stateFor(ServerPlayerEntity bot) {
+        return BotCommandStateService.stateFor(bot);
+    }
+
+    private static BotCommandStateService.State stateFor(UUID uuid) {
+        return BotCommandStateService.stateFor(uuid);
+    }
+
+    private static BotCommandStateService.State primaryState() {
+        UUID primaryUuid = BotLifecycleService.getPrimaryBotUuid();
+        if (primaryUuid != null) {
+            return stateFor(primaryUuid);
+        }
+        Iterator<UUID> iterator = BotRegistry.ids().iterator();
+        if (iterator.hasNext()) {
+            return stateFor(iterator.next());
+        }
+        return null;
+    }
+
+    private static void setMode(ServerPlayerEntity bot, Mode mode) {
+        BotCommandStateService.State state = stateFor(bot);
+        if (state != null) {
+            state.mode = mode;
+        }
+        if (bot != null && mode != Mode.FOLLOW) {
+            FOLLOW_COMMANDER_LADDER_HINT.remove(bot.getUuid());
+        }
+        UUID primaryUuid = BotLifecycleService.getPrimaryBotUuid();
+        if (bot != null && primaryUuid != null && bot.getUuid().equals(primaryUuid)) {
+            BotCommandStateService.State primary = primaryState();
+            if (primary != null) {
+                primary.mode = mode;
+            }
+        }
+    }
+
+    private static Mode getMode(ServerPlayerEntity bot) {
+        BotCommandStateService.State state = stateFor(bot);
+        return state != null ? state.mode : Mode.IDLE;
+    }
+
+    /**
+     * Force the bot into {@link Mode#IDLE}.
+     *
+     * <p>Intended for user-facing "resume idle" and post-action auto-resume.
+     * Does not abort tasks; callers should check {@link net.wcfcarolina13.GameAI.services.TaskService#hasActiveTask} first.
+     */
+    public static boolean setIdleMode(ServerPlayerEntity bot, boolean silent) {
+        if (bot == null || bot.isRemoved()) {
+            return false;
+        }
+
+        // Clear any directed mode targets.
+        setFollowTarget(bot, null);
+        setBaseTarget(bot, null);
+        clearGuard(bot);
+
+        Mode prior = getMode(bot);
+        setMode(bot, Mode.IDLE);
+        setAssistAllies(bot, true);
+
+        if (!silent && prior != Mode.IDLE) {
+            sendBotMessage(bot, "Back to idling.");
+        }
+        return prior != Mode.IDLE;
+    }
+
+    public static String setIdleMode(ServerPlayerEntity bot) {
+        boolean ok = setIdleMode(bot, true);
+        if (bot == null) {
+            return "No bot selected.";
+        }
+        return ok ? (bot.getName().getString() + " is now IDLE.") : (bot.getName().getString() + " is already IDLE.");
+    }
+
+    private static void setFollowTarget(ServerPlayerEntity bot, UUID targetUuid) {
+        BotCommandStateService.State state = stateFor(bot);
+        if (state != null) {
+            state.followTargetUuid = targetUuid;
+        }
+        UUID primaryUuid = BotLifecycleService.getPrimaryBotUuid();
+        if (bot != null && primaryUuid != null && bot.getUuid().equals(primaryUuid)) {
+            BotCommandStateService.State primary = primaryState();
+            if (primary != null) {
+                primary.followTargetUuid = targetUuid;
+            }
+        }
+    }
+
+    private static UUID getFollowTargetFor(ServerPlayerEntity bot) {
+        BotCommandStateService.State state = stateFor(bot);
+        return state != null ? state.followTargetUuid : null;
+    }
+
+    private static void clearState(ServerPlayerEntity bot) {
+        if (bot == null) {
+            return;
+        }
+        BotCommandStateService.clear(bot.getUuid());
+    }
+
+    private static void setGuardState(ServerPlayerEntity bot, Vec3d center, double radius) {
+        if (bot == null) {
+            return;
+        }
+        GuardPatrolService.setGuardState(bot.getUuid(), center, radius);
+    }
+
+    private static Vec3d getGuardCenter(ServerPlayerEntity bot) {
+        return bot == null ? null : GuardPatrolService.getGuardCenter(bot.getUuid());
+    }
+
+    private static double getGuardRadius(ServerPlayerEntity bot) {
+        return bot == null ? 6.0D : GuardPatrolService.getGuardRadius(bot.getUuid());
+    }
+
+    private static void setBaseTarget(ServerPlayerEntity bot, Vec3d base) {
+        BotCommandStateService.State state = stateFor(bot);
+        if (state != null) {
+            state.baseTarget = base;
+        }
+        UUID primaryUuid = BotLifecycleService.getPrimaryBotUuid();
+        if (bot != null && primaryUuid != null && bot.getUuid().equals(primaryUuid)) {
+            BotCommandStateService.State primary = primaryState();
+            if (primary != null) {
+                primary.baseTarget = base;
+            }
+        }
+    }
+
+    private static void clearGuard(ServerPlayerEntity bot) {
+        setGuardState(bot, null, getGuardRadius(bot));
+    }
+
+    private static void clearBase(ServerPlayerEntity bot) {
+        setBaseTarget(bot, null);
+    }
+
+    public static Vec3d getBaseTarget(ServerPlayerEntity bot) {
+        BotCommandStateService.State state = stateFor(bot);
+        return state != null ? state.baseTarget : null;
+    }
+
+    /**
+     * Check if the bot is currently in "return to base" mode.
+     * Return-to-base uses Mode.FOLLOW internally (for door/waypoint planning)
+     * but has state.baseTarget and state.followFixedGoal set.
+     * 
+     * @return true if the bot is actively returning to its base
+     */
+    public static boolean isReturningToBase(ServerPlayerEntity bot) {
+        if (bot == null) return false;
+        BotCommandStateService.State state = stateFor(bot);
+        if (state == null) return false;
+        // Return-to-base uses FOLLOW mode with baseTarget + followFixedGoal set
+        return state.mode == Mode.FOLLOW 
+                && state.baseTarget != null 
+                && state.followFixedGoal != null;
+    }
+
+    /**
+     * Check if the bot is actively following a player (not returning to base).
+     * This excludes return-to-base mode which also uses Mode.FOLLOW internally.
+     * 
+     * @return true if the bot is following a player entity
+     */
+    public static boolean isFollowingPlayer(ServerPlayerEntity bot) {
+        if (bot == null) return false;
+        BotCommandStateService.State state = stateFor(bot);
+        if (state == null) return false;
+        // Following a player: FOLLOW mode with followTargetUuid set (not baseTarget)
+        return state.mode == Mode.FOLLOW 
+                && state.followTargetUuid != null 
+                && state.baseTarget == null;
+    }
+
+    private static void setAssistAllies(ServerPlayerEntity bot, boolean enable) {
+        BotCommandStateService.State state = stateFor(bot);
+        if (state != null) {
+            state.assistAllies = enable;
+        }
+        UUID primaryUuid = BotLifecycleService.getPrimaryBotUuid();
+        if (bot != null && primaryUuid != null && bot.getUuid().equals(primaryUuid)) {
+            BotCommandStateService.State primary = primaryState();
+            if (primary != null) {
+                primary.assistAllies = enable;
+            }
+        }
+    }
+
+    private static boolean isAssistAllies(ServerPlayerEntity bot) {
+        BotCommandStateService.State state = stateFor(bot);
+        return state != null && state.assistAllies;
+    }
+
+    private static void setShieldRaised(ServerPlayerEntity bot, boolean raised) {
+        BotCommandStateService.State state = stateFor(bot);
+        if (state != null) {
+            state.shieldRaised = raised;
+        }
+        UUID primaryUuid = BotLifecycleService.getPrimaryBotUuid();
+        if (bot != null && primaryUuid != null && bot.getUuid().equals(primaryUuid)) {
+            BotCommandStateService.State primary = primaryState();
+            if (primary != null) {
+                primary.shieldRaised = raised;
+            }
+        }
+    }
+
+    private static boolean isShieldRaised(ServerPlayerEntity bot) {
+        BotCommandStateService.State state = stateFor(bot);
+        return state != null && state.shieldRaised;
+    }
+
+    private static long getShieldDecisionTick(ServerPlayerEntity bot) {
+        BotCommandStateService.State state = stateFor(bot);
+        return state != null ? state.shieldDecisionTick : 0L;
+    }
+
+    private static void setShieldDecisionTick(ServerPlayerEntity bot, long tick) {
+        BotCommandStateService.State state = stateFor(bot);
+        if (state != null) {
+            state.shieldDecisionTick = tick;
+        }
+        UUID primaryUuid = BotLifecycleService.getPrimaryBotUuid();
+        if (bot != null && primaryUuid != null && bot.getUuid().equals(primaryUuid)) {
+            BotCommandStateService.State primary = primaryState();
+            if (primary != null) {
+                primary.shieldDecisionTick = tick;
+            }
+        }
+    }
+
+    public BotEventHandler(MinecraftServer server, ServerPlayerEntity bot) {
+        UUID primaryUuid = BotLifecycleService.getPrimaryBotUuid();
+        if (server != null && bot != null && (primaryUuid == null || primaryUuid.equals(bot.getUuid()))) {
+            registerBot(bot);
+        }
+    }
+
+    public static void setExternalOverrideActive(boolean active) {
+        if (externalOverrideActive == active) {
+            return;
+        }
+        externalOverrideActive = active;
+        if (active) {
+            LOGGER.info("External override activated; pausing training loop.");
+        } else {
+            LOGGER.info("External override cleared; training loop may resume.");
+        }
+    }
+
+    public static boolean isExternalOverrideActive() {
+        return externalOverrideActive;
+    }
+
+    public static void rememberSpawn(ServerWorld world, Vec3d pos, float yaw, float pitch) {
+        BotLifecycleService.rememberSpawn(world, pos, yaw, pitch);
+    }
+
+    public static void ensureBotPresence(MinecraftServer srv) {
+        // Survival recruitment mode: do not conjure bots into existence before the player recruits in a village.
+        if (srv != null
+                && net.wcfcarolina13.GameAI.services.SurvivalRecruitmentService.isEnabled(srv)
+                && !net.wcfcarolina13.GameAI.services.SurvivalRecruitmentService.isWorldRecruited(srv)) {
+            return;
+        }
+
+        // Survival recruitment mode: if the recruited companion is marked dead, do not auto-respawn them.
+        // Resurrection should be performed via the ritual flow.
+        if (srv != null && net.wcfcarolina13.GameAI.services.SurvivalRecruitmentService.isEnabled(srv)) {
+            try {
+                net.wcfcarolina13.FilingSystem.ManualConfig.SurvivalRecruitmentState st =
+                        net.wcfcarolina13.GameAI.services.SurvivalRecruitmentService.getState(srv);
+                if (st != null && st.isRecruited() && st.isCompanionDead()) {
+                    return;
+                }
+            } catch (Throwable ignored) {
+                // If state lookup fails, fall back to legacy behavior.
+            }
+        }
+        String lastBotName = BotLifecycleService.getLastBotName();
+        if (srv == null || lastBotName == null) {
+            return;
+        }
+        ServerPlayerEntity existing = null;
+        UUID primaryUuid = BotLifecycleService.getPrimaryBotUuid();
+        if (primaryUuid != null) {
+            existing = srv.getPlayerManager().getPlayer(primaryUuid);
+        }
+        if (existing == null) {
+            Iterator<UUID> iterator = BotRegistry.ids().iterator();
+            while (existing == null && iterator.hasNext()) {
+                UUID candidateId = iterator.next();
+                existing = srv.getPlayerManager().getPlayer(candidateId);
+                if (existing != null) {
+                    BotLifecycleService.setPrimaryBotUuid(candidateId);
+                }
+            }
+        }
+        if (existing == null) {
+            existing = srv.getPlayerManager().getPlayer(lastBotName);
+        }
+        if (existing != null) {
+            registerBot(existing);
+            return;
+        }
+        if (BotLifecycleService.isPendingBotRespawn()) {
+            return;
+        }
+
+        BotLifecycleService.SpawnSnapshot snapshot = BotLifecycleService.getLastSpawn();
+        RegistryKey<World> worldKey = (snapshot != null && snapshot.worldKey() != null) ? snapshot.worldKey() : World.OVERWORLD;
+        ServerWorld world = srv.getWorld(worldKey);
+        if (world == null) {
+            world = srv.getOverworld();
+            worldKey = World.OVERWORLD;
+        }
+        Vec3d spawn = snapshot != null ? snapshot.position() : null;
+        if (spawn == null) {
+            double centerX = world.getWorldBorder().getCenterX();
+            double centerZ = world.getWorldBorder().getCenterZ();
+            int spawnX = (int) Math.round(centerX);
+            int spawnZ = (int) Math.round(centerZ);
+            int spawnY = world.getTopY(net.minecraft.world.Heightmap.Type.MOTION_BLOCKING, spawnX, spawnZ);
+            spawn = new Vec3d(spawnX + 0.5, spawnY, spawnZ + 0.5);
+        }
+        final RegistryKey<World> targetWorld = worldKey;
+        final Vec3d spawnPos = spawn;
+        final float yaw = snapshot != null ? snapshot.yaw() : 0.0F;
+        final float pitch = snapshot != null ? snapshot.pitch() : 0.0F;
+        BotLifecycleService.setPendingBotRespawn(true);
+        UUID targetUuid = BotLifecycleService.getPrimaryBotUuid();
+        srv.execute(() -> {
+            if (targetUuid != null) {
+                TaskService.forceAbort(targetUuid, "§cRestoring bot after owner respawn.");
+            } else {
+                TaskService.forceAbort("§cRestoring bot after owner respawn.");
+            }
+            createFakePlayer.createFake(lastBotName, srv, spawnPos, yaw, pitch, targetWorld, GameMode.SURVIVAL, false);
+        });
+    }
+
+    public static void registerBot(ServerPlayerEntity candidate) {
+        if (candidate == null) {
+            return;
+        }
+        BotRegistry.register(candidate.getUuid());
+        BotLifecycleService.setPrimaryBotUuid(candidate.getUuid());
+        BotEventHandler.bot = candidate;
+        stateFor(candidate);
+        MinecraftServer srv = candidate.getCommandSource().getServer();
+        if (srv != null && (BotEventHandler.server == null || BotEventHandler.server == srv)) {
+            BotEventHandler.server = srv;
+        }
+        BotLifecycleService.setLastBotName(candidate.getName().getString());
+        if (candidate.getEntityWorld() instanceof ServerWorld serverWorld) {
+            rememberSpawn(serverWorld, new Vec3d(candidate.getX(), candidate.getY(), candidate.getZ()), candidate.getYaw(), candidate.getPitch());
+        }
+        BotLifecycleService.setPendingBotRespawn(false);
+        net.wcfcarolina13.GameAI.services.BotControlApplier.applyToBot(candidate);
+        
+        // Proactively check if bot spawned inside blocks and needs to mine out
+        if (srv != null) {
+            srv.execute(() -> {
+                // Delay check by a few ticks to let spawn complete
+                srv.send(new net.minecraft.server.ServerTask(srv.getTicks() + 5, () -> {
+                    if (!candidate.isRemoved()) {
+                        checkForSpawnInBlocks(candidate);
+                    }
+                }));
+            });
+        }
+    }
+
+    public static void unregisterBot(ServerPlayerEntity bot) {
+        if (bot == null) {
+            return;
+        }
+        UUID uuid = bot.getUuid();
+        BotRegistry.unregister(uuid);
+        BotPersistenceService.removeBot(bot);
+        clearState(bot);
+        LAST_RL_SAMPLE_TICK.remove(uuid);
+        UUID primaryUuid = BotLifecycleService.getPrimaryBotUuid();
+        if (primaryUuid != null && primaryUuid.equals(uuid)) {
+            BotLifecycleService.setPrimaryBotUuid(null);
+            Iterator<UUID> iterator = BotRegistry.ids().iterator();
+            if (iterator.hasNext()) {
+                BotLifecycleService.setPrimaryBotUuid(iterator.next());
+            }
+        }
+        if (BotEventHandler.bot != null && BotEventHandler.bot.getUuid().equals(uuid)) {
+            BotEventHandler.bot = null;
+        }
+    }
+
+    public static boolean isRegisteredBot(ServerPlayerEntity candidate) {
+        return candidate != null && BotRegistry.isRegistered(candidate.getUuid());
+    }
+
+    public static List<ServerPlayerEntity> getRegisteredBots(MinecraftServer fallback) {
+        MinecraftServer srv = server != null ? server : fallback;
+        if (srv == null) {
+            return List.of();
+        }
+        List<ServerPlayerEntity> bots = new ArrayList<>();
+        for (UUID uuid : BotRegistry.ids()) {
+            ServerPlayerEntity player = srv.getPlayerManager().getPlayer(uuid);
+            if (player != null) {
+                bots.add(player);
+            }
+        }
+        return bots;
+    }
+
+    private static State initializeBotState(QTable qTable) {
+        State initialState = null;
+
+        if (qTable == null || qTable.getTable().isEmpty()) {
+            debugRL("No initial state available. Q-table is empty.");
+        } else {
+            debugRL("Loaded Q-table: Total state-action pairs = " + qTable.getTable().size());
+
+            // Get the most recent state from the Q-table
+            StateActionPair recentPair = qTable.getTable().keySet().iterator().next();
+            initialState = recentPair.getState();
+
+            debugRL("Setting initial state to: " + initialState);
+        }
+
+        return initialState;
+    }
+
+    public void detectAndReact(RLAgent rlAgentHook, double distanceToHostileEntity, QTable qTable) throws IOException {
+        if (!net.wcfcarolina13.Commands.modCommandRegistry.enableReinforcementLearning) {
+            return;
+        }
+        if (bot != null) {
+            engageImmediateThreats(bot);
+        }
+        if (externalOverrideActive) {
+            LOGGER.debug("Skipping detectAndReact because external override is active.");
+            return;
+        }
+        // Never let the RL/training loop fight player-issued commands (follow/skills/guard/etc).
+        // This avoids “bot looks busy” stalls where training actions cancel commanded movement.
+        if (bot != null) {
+            Mode mode = getMode(bot);
+            if (mode != null && mode != Mode.IDLE) {
+                LOGGER.debug("Skipping detectAndReact because bot is in mode={}", mode);
+                return;
+            }
+        }
+        synchronized (monitorLock) {
+            if (isExecuting) {
+                debugRL("Executing detection code");
+                return; // Skip if already executing
+            } else {
+                debugRL("No immediate threats detected");
+                // Reset state when no threats are detected
+                BotEventHandler.currentState = createInitialState(bot);
+            }
+            isExecuting = true;
+        }
+
+        try {
+            double dangerDistance = DangerZoneDetector.detectDangerZone(bot, 10, 10, 10);
+            debugRL("Distance from danger zone: " + dangerDistance + " blocks");
+
+            List<Entity> nearbyEntities = AutoFaceEntity.detectNearbyEntities(bot, 10); // Example bounding box size
+            List<Entity> hostileEntities = nearbyEntities.stream()
+                    .filter(EntityUtil::isHostile)
+                    .toList();
+
+            LOGGER.debug("detectAndReact triggered: hostiles={}, trainingMode={}, alreadyExecuting={}",
+                    hostileEntities.size(), net.wcfcarolina13.Commands.modCommandRegistry.isTrainingMode, isExecuting);
+
+            BlockDistanceLimitedSearch blockDistanceLimitedSearch = new BlockDistanceLimitedSearch(bot, 3, 5);
+
+            List<String> nearbyBlocks = blockDistanceLimitedSearch.detectNearbyBlocks();
+
+            boolean hasSculkNearby = nearbyBlocks.stream()
+                    .anyMatch(block -> block.contains("Sculk Sensor") || block.contains("Sculk Shrieker"));
+
+            BotStuckService.EnvironmentSnapshot environmentSnapshot = BotStuckService.analyzeEnvironment(bot);
+            boolean threatDetected = shouldEnterCombat(!hostileEntities.isEmpty(), dangerDistance, hasSculkNearby);
+            BotStuckService.updateStuckTracker(bot, environmentSnapshot);
+
+            debugRL("Nearby blocks: " + nearbyBlocks);
+
+            int timeofDay = GetTime.getTimeOfWorld(bot);
+            String time = (timeofDay >= 12000 && timeofDay < 24000) ? "night" : "day";
+
+            World world = bot.getCommandSource().withSilent().withPermissions(net.wcfcarolina13.Frens.OPERATOR_PERMISSIONS).getWorld();
+            RegistryKey<World> dimType = world.getRegistryKey();
+            String dimension = dimType.getValue().toString();
+
+            if (!hostileEntities.isEmpty()) {
+                // Combat callout: threat detected
+                Entity closestThreat = hostileEntities.stream()
+                        .min(Comparator.comparingDouble(e -> e.squaredDistanceTo(bot)))
+                        .orElse(null);
+                if (closestThreat != null) {
+                    net.wcfcarolina13.GameAI.services.BotCombatCalloutService.onThreatDetected(bot, closestThreat);
+                }
+                
+                List<EntityDetails> nearbyEntitiesList = nearbyEntities.stream()
+                        .map(entity -> EntityDetails.from(bot, entity))
+                        .toList();
+
+                State currentState;
+
+                if (hasRespawned && botDied) {
+                    State lastKnownState = QTableStorage.loadLastKnownState(qTableDir + "/lastKnownState.bin");
+                    currentState = createInitialState(bot);
+                    BotEventHandler.botDied = false;
+
+                    if (isStateConsistent(lastKnownState, currentState)) {
+                        debugRL("Merged values from last known state.");
+                        currentState.setRiskMap(lastKnownState.getRiskMap());
+                        currentState.setPodMap(lastKnownState.getPodMap());
+                    }
+                } else {
+                    currentState = initializeBotState(qTable);
+
+                    debugRL("Created initial state");
+                }
+
+                if (botSpawnCount == 0) {
+                    currentState = createInitialState(bot);
+                }
+
+                performLearningStep(rlAgentHook, qTable, currentState, nearbyEntitiesList, nearbyBlocks,
+                        distanceToHostileEntity, time, dimension);
+
+            } else if ((dangerDistance > 0.0 && dangerDistance <= 5.0) || hasSculkNearby) {
+                debugRL("Danger zone detected within 5 blocks");
+
+                debugRL("Triggered handler for danger zone case.");
+
+                List<EntityDetails> nearbyEntitiesList = nearbyEntities.stream()
+                        .map(entity -> EntityDetails.from(bot, entity))
+                        .toList();
+
+                State currentState;
+
+                if (hasRespawned && botDied) {
+                    State lastKnownState = QTableStorage.loadLastKnownState(qTableDir + "/lastKnownState.bin");
+                    currentState = createInitialState(bot);
+                    BotEventHandler.botDied = false;
+
+                    if (isStateConsistent(lastKnownState, currentState)) {
+                        debugRL("Merged values from last known state.");
+                        currentState.setRiskMap(lastKnownState.getRiskMap());
+                        currentState.setPodMap(lastKnownState.getPodMap());
+                    }
+                } else {
+                    currentState = initializeBotState(qTable);
+                }
+
+                if (botSpawnCount == 0) {
+                    currentState = createInitialState(bot);
+                }
+
+                performLearningStep(rlAgentHook, qTable, currentState, nearbyEntitiesList, nearbyBlocks,
+                        distanceToHostileEntity, time, dimension);
+            } else {
+                debugRL("Passive environment detected. Running exploratory step.");
+
+                collectNearbyDrops(bot, 6.0D);
+
+                List<EntityDetails> nearbyEntitiesList = nearbyEntities.stream()
+                        .map(entity -> EntityDetails.from(bot, entity))
+                        .toList();
+
+                State currentState = BotEventHandler.currentState != null ? BotEventHandler.currentState : createInitialState(bot);
+                if (currentState.getRiskMap() == null) {
+                    currentState.setRiskMap(new HashMap<>());
+                }
+                if (currentState.getPodMap() == null) {
+                    currentState.setPodMap(new HashMap<>());
+                }
+
+                double safeDistance = Double.isFinite(distanceToHostileEntity) && distanceToHostileEntity > 0
+                        ? distanceToHostileEntity
+                        : 50.0;
+
+                performLearningStep(rlAgentHook, qTable, currentState, nearbyEntitiesList, nearbyBlocks,
+                        safeDistance, time, dimension);
+            }
+
+
+        } finally {
+            synchronized (monitorLock) {
+                isExecuting = false;
+                AutoFaceEntity.isHandlerTriggered = false;
+                AutoFaceEntity.setBotExecutingTask(false);
+                AutoFaceEntity.isBotMoving = false;
+                debugRL("Resetting handler trigger flag to: " + false);
+            }
+        }
+    }
+
+    public static void tickHunger(MinecraftServer server) {
+        if (server == null) return;
+        for (ServerPlayerEntity player : getRegisteredBots(server)) {
+            HealingService.autoEat(player);
+        }
+    }
+
+
+    public static State getCurrentState() {
+
+        return BotEventHandler.currentState;
+
+    }
+
+    public void detectAndReactPlayMode(RLAgent rlAgentHook, QTable qTable) {
+        if (!net.wcfcarolina13.Commands.modCommandRegistry.enableReinforcementLearning) {
+            return;
+        }
+        if (externalOverrideActive) {
+            LOGGER.debug("Skipping detectAndReactPlayMode because external override is active.");
+            return;
+        }
+        if (bot != null) {
+            Mode mode = getMode(bot);
+            if (mode != null && mode != Mode.IDLE) {
+                LOGGER.debug("Skipping detectAndReactPlayMode because bot is in mode={}", mode);
+                return;
+            }
+        }
+        synchronized (monitorLock) {
+            if (isExecuting) {
+                debugRL("Already executing detection code, skipping...");
+                return; // Skip if already executing
+            }
+            isExecuting = true;
+        }
+
+        try {
+            ServerCommandSource botSource = bot.getCommandSource().withSilent().withPermissions(net.wcfcarolina13.Frens.OPERATOR_PERMISSIONS);
+
+
+            if (qTable == null) {
+                ChatUtils.sendChatMessages(botSource, "I have no training data to work with! Please spawn me in training mode so that I can learn first!");
+            }
+
+            else {
+                // Detect nearby hostile entities
+                List<Entity> nearbyEntities = AutoFaceEntity.detectNearbyEntities(bot, 10); // Example bounding box size
+                List<Entity> hostileEntities = nearbyEntities.stream()
+                        .filter(EntityUtil::isHostile)
+                        .toList();
+
+                if (!hostileEntities.isEmpty()) {
+                    // Gather state information
+                    State currentState = createInitialState(bot);
+
+//                double riskAppetite = currentState.getRiskAppetite();
+//
+                    Map<StateActions.Action, Double> riskMap = currentState.getRiskMap();
+
+
+
+                    // Choose action
+                    StateActions.Action chosenAction = rlAgentHook.chooseActionPlayMode(currentState, qTable, riskMap, "detectAndReactPlayMode");
+
+
+                    // Log chosen action for debugging
+                    debugRL("Play Mode - Chosen action: " + chosenAction);
+
+                    // Execute action
+                    executeAction(chosenAction);
+                }
+                else if (DangerZoneDetector.detectDangerZone(bot, 10, 10, 10) <= 5.0 && DangerZoneDetector.detectDangerZone(bot, 10, 10, 10) > 0.0) {
+
+                    // Gather state information
+                    State currentState = createInitialState(bot);
+
+                    Map<StateActions.Action, Double> riskMap = currentState.getRiskMap();
+
+
+                    // Choose action
+                    StateActions.Action chosenAction = rlAgentHook.chooseActionPlayMode(currentState, qTable, riskMap, "detectAndReactPlayMode");
+
+
+                    // Log chosen action for debugging
+                    debugRL("Play Mode - Chosen action: " + chosenAction);
+
+                    // Execute action
+                    executeAction(chosenAction);
+                }
+
+
+            }
+        } finally {
+            synchronized (monitorLock) {
+                debugRL("Resetting handler trigger flag.");
+                isExecuting = false;
+                AutoFaceEntity.isHandlerTriggered = false; // Reset the trigger flag
+                AutoFaceEntity.setBotExecutingTask(false);
+                AutoFaceEntity.isBotMoving = false;
+            }
+        }
+    }
+
+    private static void executeAction(StateActions.Action chosenAction) {
+        ActionHoldTracker.recordAction(chosenAction);
+        switch (chosenAction) {
+            case MOVE_FORWARD -> performAction("moveForward");
+            case MOVE_BACKWARD -> performAction("moveBackward");
+            case TURN_LEFT -> performAction("turnLeft");
+            case TURN_RIGHT -> performAction("turnRight");
+            case JUMP -> performAction("jump");
+            case JUMP_FORWARD -> performAction("jumpForward");
+            case SNEAK -> performAction("sneak");
+            case SPRINT -> performAction("sprint");
+            case STOP_SNEAKING -> performAction("unsneak");
+            case STOP_SPRINTING -> performAction("unsprint");
+            case STOP_MOVING -> performAction("stopMoving");
+            case USE_ITEM -> performAction("useItem");
+            case EQUIP_ARMOR -> armorUtils.autoEquipArmor(bot);
+            case ATTACK -> {
+                performAction("attack");
+                // Combat callout: engagement - find nearest hostile at attack time
+                if (bot != null) {
+                    List<Entity> nearbyHostiles = AutoFaceEntity.detectNearbyEntities(bot, 10.0D).stream()
+                            .filter(e -> e instanceof net.minecraft.entity.mob.HostileEntity)
+                            .toList();
+                    if (!nearbyHostiles.isEmpty()) {
+                        Entity target = nearbyHostiles.stream()
+                                .min(Comparator.comparingDouble(e -> e.squaredDistanceTo(bot)))
+                                .orElse(null);
+                        if (target != null) {
+                            net.wcfcarolina13.GameAI.services.BotCombatCalloutService.onEngagement(bot, target);
+                        }
+                    }
+                }
+            }
+            case BREAK_BLOCK_FORWARD -> performAction("breakBlock");
+            case PLACE_SUPPORT_BLOCK -> performAction("placeSupportBlock");
+            case ESCAPE_STAIRS -> performAction("escapeStairs");
+            case HOTBAR_1 -> performAction("hotbar1");
+            case HOTBAR_2 -> performAction("hotbar2");
+            case HOTBAR_3 -> performAction("hotbar3");
+            case HOTBAR_4 -> performAction("hotbar4");
+            case HOTBAR_5 -> performAction("hotbar5");
+            case HOTBAR_6 -> performAction("hotbar6");
+            case HOTBAR_7 -> performAction("hotbar7");
+            case HOTBAR_8 -> performAction("hotbar8");
+            case HOTBAR_9 -> performAction("hotbar9");
+            case STAY -> debugRL("Performing action: Stay and do nothing");
+        }
+    }
+
+    private static ServerPlayerEntity findEscortPlayer(ServerPlayerEntity bot) {
+        MinecraftServer srv = bot.getCommandSource().getServer();
+        if (srv == null) {
+            return null;
+        }
+
+        return srv.getPlayerManager().getPlayerList().stream()
+                .filter(player -> !player.getUuid().equals(bot.getUuid()))
+                .filter(player -> !player.isSpectator())
+                .min(Comparator.comparingDouble(player -> player.squaredDistanceTo(bot)))
+                .orElse(null);
+    }
+
+    private static boolean shouldEnterCombat(boolean hostilesNearby, double dangerDistance, boolean hasSculkNearby) {
+        boolean dangerProximity = dangerDistance > 0.0 && dangerDistance <= 5.0;
+        return hostilesNearby || dangerProximity || hasSculkNearby;
+    }
+
+    private static boolean assessImmediateThreat(ServerPlayerEntity bot) {
+        if (bot == null) {
+            return false;
+        }
+        double dangerDistance = DangerZoneDetector.detectDangerZone(bot, 10, 10, 10);
+        List<Entity> nearbyEntities = AutoFaceEntity.detectNearbyEntities(bot, 10);
+        boolean hostilesNearby = nearbyEntities.stream().anyMatch(EntityUtil::isHostile);
+        boolean hasSculkNearby = false;
+        if (!hostilesNearby) {
+            try {
+                BlockDistanceLimitedSearch search = new BlockDistanceLimitedSearch(bot, 3, 5);
+                hasSculkNearby = search.detectNearbyBlocks().stream()
+                        .anyMatch(block -> block.contains("Sculk Sensor") || block.contains("Sculk Shrieker"));
+            } catch (Exception e) {
+                LOGGER.warn("Unable to evaluate sculk proximity while assessing threats: {}", e.getMessage());
+            }
+        }
+        return shouldEnterCombat(hostilesNearby, dangerDistance, hasSculkNearby);
+    }
+
+
+
+    public static void onBotRespawn(ServerPlayerEntity bot) {
+        registerBot(bot);
+        BotStuckService.resetBot(bot.getUuid());
+
+        ServerPlayerEntity escortPlayer = findEscortPlayer(bot);
+        Vec3d target = escortPlayer != null
+                ? new Vec3d(escortPlayer.getX(), escortPlayer.getY(), escortPlayer.getZ())
+                : BotStuckService.getLastSafePosition(bot.getUuid());
+        MinecraftServer srv = bot.getCommandSource().getServer();
+        ServerWorld botWorld = bot.getCommandSource().getWorld();
+        ServerWorld destinationWorld = botWorld;
+
+        if (escortPlayer != null) {
+            destinationWorld = escortPlayer.getCommandSource().getWorld();
+            BotStuckService.setLastSafePosition(bot.getUuid(), new Vec3d(escortPlayer.getX(), escortPlayer.getY(), escortPlayer.getZ()));
+        }
+
+        if (target == null) {
+            BlockPos anchor = bot.getBlockPos().up(2);
+            target = new Vec3d(anchor.getX() + 0.5, anchor.getY(), anchor.getZ() + 0.5);
+        }
+
+        if (destinationWorld != null && destinationWorld != botWorld) {
+            bot.teleport(destinationWorld, target.x, target.y, target.z,
+                    EnumSet.noneOf(PositionFlag.class),
+                    escortPlayer != null ? escortPlayer.getYaw() : bot.getYaw(),
+                    escortPlayer != null ? escortPlayer.getPitch() : bot.getPitch(),
+                    true);
+        } else {
+            bot.refreshPositionAndAngles(target.x, target.y, target.z,
+                    escortPlayer != null ? escortPlayer.getYaw() : bot.getYaw(),
+                    escortPlayer != null ? escortPlayer.getPitch() : bot.getPitch());
+        }
+
+        bot.setVelocity(Vec3d.ZERO);
+        bot.setInvulnerable(true);
+        if (srv != null) {
+            srv.send(new ServerTask(srv.getTicks() + 40, () -> bot.setInvulnerable(false)));
+            lastRespawnHandledTick = srv.getTicks();
+        }
+
+        BotStuckService.setLastSafePosition(bot.getUuid(), target);
+        TaskService.forceAbort(bot.getUuid(), "§cTask aborted due to bot respawn.");
+        setExternalOverrideActive(false);
+        setMode(bot, Mode.IDLE);
+        setAssistAllies(bot, true);        if (destinationWorld != null) {
+            rememberSpawn(destinationWorld, target, bot.getYaw(), bot.getPitch());
+        }
+
+        ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withPermissions(net.wcfcarolina13.Frens.OPERATOR_PERMISSIONS),
+                bot.getName().getString() + " has regrouped and is ready to re-engage.");
+
+        rescueFromBurial(bot);
+    }
+
+    public static void ensureRespawnHandled(ServerPlayerEntity bot) {
+        if (!isRegisteredBot(bot)) {
+            return;
+        }
+        MinecraftServer srv = bot.getCommandSource().getServer();
+        if (srv == null) {
+            return;
+        }
+
+        long checkTick = srv.getTicks() + 5;
+        srv.send(new ServerTask((int) checkTick, () -> {
+            long ticksSince = lastRespawnHandledTick < 0 ? Long.MAX_VALUE : checkTick - lastRespawnHandledTick;
+            if (ticksSince <= 5) {
+                return; // recent respawn already handled
+            }
+
+            LOGGER.warn("AFTER_RESPAWN did not fire for bot {}; forcing respawn routine", bot.getName().getString());
+            if (bot.isDead()) {
+                bot.setHealth(bot.getMaxHealth());
+            }
+            onBotRespawn(bot);
+        }));
+    }
+
+    public static boolean updateBehavior(ServerPlayerEntity bot, MinecraftServer server, List<Entity> nearbyEntities, List<Entity> hostileEntities) {
+        if (!isRegisteredBot(bot)) {
+            return false;
+        }
+
+        BotCommandStateService.State state = stateFor(bot);
+        Mode mode = state != null ? state.mode : Mode.IDLE;
+        List<Entity> augmentedHostiles = BotThreatService.augmentHostiles(
+                bot,
+                hostileEntities,
+                isAssistAllies(bot),
+                server,
+                BotRegistry.ids());
+
+        // Combat callout bookkeeping: treat "hostiles present" as ongoing combat activity.
+        // Without this, long skeleton fights can go quiet for >5s and trigger a premature "standing down".
+        try {
+            net.wcfcarolina13.GameAI.services.BotCombatCalloutService.noteCombatOngoing(bot, !augmentedHostiles.isEmpty());
+        } catch (Throwable ignored) {
+        }
+
+        // Arrow recovery bookkeeping:
+        // - if hostiles present, remember the last "combat" tick
+        // - always tick arrow tracking so we can detect "miss" events (cooldown-gated)
+        if (!augmentedHostiles.isEmpty()) {
+            BotArrowRecoveryService.noteHostilesSeen(bot, server.getTicks());
+        }
+        BotArrowRecoveryService.tickArrowTracking(bot, server, !augmentedHostiles.isEmpty());
+
+        switch (mode) {
+            case FOLLOW -> {
+                // Arrow recovery during FOLLOW: only allow short, bounded detours when we're not far from
+                // the commander (or fixed goal). This makes post-combat arrow pickup much more reliable.
+                if (augmentedHostiles.isEmpty()) {
+                    boolean allowRecovery = false;
+                    if (state != null) {
+                        if (state.followTargetUuid != null) {
+                            ServerPlayerEntity commander = server != null
+                                    ? server.getPlayerManager().getPlayer(state.followTargetUuid)
+                                    : null;
+                            if (commander != null && !commander.isRemoved()) {
+                                double dx = commander.getX() - bot.getX();
+                                double dz = commander.getZ() - bot.getZ();
+                                allowRecovery = (dx * dx + dz * dz) <= (30.0D * 30.0D);
+                            }
+                        } else if (state.followFixedGoal != null) {
+                            double gx = state.followFixedGoal.getX() + 0.5D;
+                            double gz = state.followFixedGoal.getZ() + 0.5D;
+                            double dx = gx - bot.getX();
+                            double dz = gz - bot.getZ();
+                            allowRecovery = (dx * dx + dz * dz) <= (30.0D * 30.0D);
+                        }
+                    }
+                    if (allowRecovery && BotArrowRecoveryService.tryRecoverMissedArrows(bot, server, null, 26.0D)) {
+                        return true;
+                    }
+                }
+                return handleFollow(bot, state, server, augmentedHostiles);
+            }
+            case GUARD -> {
+                return handleGuard(bot, state, nearbyEntities, augmentedHostiles);
+            }
+            case PATROL -> {
+                return handlePatrol(bot, state, nearbyEntities, augmentedHostiles);
+            }
+            case STAY -> {
+                if (!augmentedHostiles.isEmpty() && engageHostiles(bot, server, augmentedHostiles)) {
+                    return true;
+                }
+                // Use the combat anchor so slight post-fight drift doesn't make arrows "fall off" the radar.
+                if (BotArrowRecoveryService.tryRecoverMissedArrows(bot, server, null, 18.0D)) {
+                    return true;
+                }
+                BotActions.stop(bot);
+                return true;
+            }
+            case RETURNING_BASE -> {
+                // Note: This case is currently not used. Return-to-base uses FOLLOW mode with
+                // state.baseTarget set. Stuck detection is handled in handleFollow.
+                if (!augmentedHostiles.isEmpty() && engageHostiles(bot, server, augmentedHostiles)) {
+                    return true;
+                }
+                return handleReturnToBase(bot, state);
+            }
+            default -> {
+                if (!augmentedHostiles.isEmpty()) {
+                    return engageHostiles(bot, server, augmentedHostiles);
+                }
+                if (BotArrowRecoveryService.tryRecoverMissedArrows(bot, server, null, 24.0D)) {
+                    return true;
+                }
+                return false;
+            }
+        }
+    }
+
+    public static String setFollowMode(ServerPlayerEntity bot, ServerPlayerEntity target) {
+        return setFollowMode(bot, target, true);
+    }
+
+    /**
+     * @param announce Whether to send a bot-authored chat acknowledgement (use false for commands
+     *                 that already emit a system summary to avoid redundant messages).
+     */
+    public static String setFollowMode(ServerPlayerEntity bot, ServerPlayerEntity target, boolean announce) {
+        if (isExternalOverrideActive()) {
+            sendBotMessage(bot, "Busy with another task right now.");
+            return "Bot is busy executing another task. Try again after it finishes.";
+        }
+        if (target == null) {
+            return "Unable to follow — target not found.";
+        }
+        registerBot(bot);
+        setFollowTarget(bot, target.getUuid());
+        BotCommandStateService.State state = stateFor(bot);
+        if (state != null) {
+            state.followNoTeleport = false;
+            state.followStopRange = 0.0D;
+            state.followStandoffRange = 0.0D;
+            state.followFixedGoal = null;
+            state.comeBestGoalDistSq = Double.NaN;
+            state.comeTicksSinceBest = 0;
+            state.comeRerouteAttempts = 0;
+            state.comeNextRerouteTick = 0L;
+            state.comeNextSkillTick = 0L;
+            state.comeRecoverySkillInFlight = false;
+            state.comeRecoverySkillStartTick = 0L;
+            state.comeAllowRecoverySkills = true;
+        }
+        setMode(bot, Mode.FOLLOW);
+        clearGuard(bot);
+        clearBase(bot);
+        // Kick off a follow plan immediately so "around the corner / door enclosures" work even when
+        // the commander isn't standing in front of the door. This is async + bounded, so it won't block ticks.
+        UUID id = bot.getUuid();
+        FollowStateService.clearPlanning(id);
+        FollowDebugService.clear(id);
+        requestFollowPathPlan(bot, target, true, "follow-start");
+        if (announce) {
+            sendBotMessage(bot, "Following " + target.getName().getString() + ".");
+        }
+        return "Now following " + target.getName().getString() + ".";
+    }
+
+    public static String setFollowModeWalk(ServerPlayerEntity bot, ServerPlayerEntity target, double stopRange) {
+        if (bot == null || target == null) {
+            return "Unable to follow — target not found.";
+        }
+        registerBot(bot);
+        setFollowTarget(bot, target.getUuid());
+        BotCommandStateService.State state = stateFor(bot);
+        if (state != null) {
+            state.followNoTeleport = true;
+            state.followStopRange = Math.max(1.5D, stopRange);
+            state.followStandoffRange = 0.0D;
+            state.followFixedGoal = null;
+            state.comeBestGoalDistSq = Double.NaN;
+            state.comeTicksSinceBest = 0;
+            state.comeRerouteAttempts = 0;
+            state.comeNextRerouteTick = 0L;
+            state.comeNextSkillTick = 0L;
+            state.comeRecoverySkillInFlight = false;
+            state.comeRecoverySkillStartTick = 0L;
+            state.comeAllowRecoverySkills = true;
+        }
+        setMode(bot, Mode.FOLLOW);
+        clearGuard(bot);
+        clearBase(bot);
+        UUID id = bot.getUuid();
+        FollowStateService.clearPlanning(id);
+        FollowDebugService.clear(id);
+        requestFollowPathPlan(bot, target, true, "follow-start-walk");
+        sendBotMessage(bot, "Walking to you.");
+        return "Walking to " + target.getName().getString() + ".";
+    }
+
+    public static String setComeModeWalk(ServerPlayerEntity bot,
+                                        ServerPlayerEntity commander,
+                                        BlockPos fixedGoal,
+                                        double stopRange) {
+        return setComeModeWalk(bot, commander, fixedGoal, stopRange, true);
+    }
+
+    /**
+     * Come mode (fixed-goal follow-walk). If allowRecoverySkills is false, the bot will not launch
+     * "come recovery" digging skills (collect_dirt ascent / stripmine) and will only walk/path.
+     */
+    public static String setComeModeWalk(ServerPlayerEntity bot,
+                                        ServerPlayerEntity commander,
+                                        BlockPos fixedGoal,
+                                        double stopRange,
+                                        boolean allowRecoverySkills) {
+        if (bot == null || fixedGoal == null) {
+            return "Unable to come — destination not found.";
+        }
+        registerBot(bot);
+        setFollowTarget(bot, commander != null ? commander.getUuid() : null);
+        BotCommandStateService.State state = stateFor(bot);
+        if (state != null) {
+            state.followNoTeleport = true;
+            state.followStopRange = Math.max(1.5D, stopRange);
+            state.followStandoffRange = 0.0D;
+            state.followFixedGoal = fixedGoal.toImmutable();
+            state.comeBestGoalDistSq = Double.NaN;
+            state.comeTicksSinceBest = 0;
+            state.comeRerouteAttempts = 0;
+            state.comeNextRerouteTick = 0L;
+            state.comeNextSkillTick = 0L;
+            state.comeRecoverySkillInFlight = false;
+            state.comeRecoverySkillStartTick = 0L;
+            state.comeAllowRecoverySkills = allowRecoverySkills;
+        }
+        setMode(bot, Mode.FOLLOW);
+        clearGuard(bot);
+        clearBase(bot);
+
+        UUID id = bot.getUuid();
+        FollowStateService.clearPlanning(id);
+        FollowDebugService.clear(id);
+
+        requestFollowPathPlanToGoal(bot, fixedGoal, true, "come-start");
+        sendBotMessage(bot, "Walking to your last location.");
+        return "Walking to your last location.";
+    }
+
+    public static String stopFollowing(ServerPlayerEntity bot) {
+        return stopFollowing(bot, true);
+    }
+
+    /**
+     * @param announce Whether to send a bot-authored chat acknowledgement (use false for commands
+     *                 that already emit a system summary to avoid redundant messages).
+     */
+    public static String stopFollowing(ServerPlayerEntity bot, boolean announce) {
+        if (bot != null) {
+            registerBot(bot);
+        }
+        BotCommandStateService.State existingState = stateFor(bot);
+        boolean hadFixedGoal = existingState != null && existingState.followFixedGoal != null;
+        boolean wasFollowing = getMode(bot) == Mode.FOLLOW && (getFollowTargetFor(bot) != null || hadFixedGoal);
+        setFollowTarget(bot, null);
+        if (bot != null) {
+            UUID id = bot.getUuid();
+            FollowStateService.clearAll(id);
+            FollowDebugService.clear(id);
+        }
+        BotCommandStateService.State state = stateFor(bot);
+        if (state != null) {
+            state.followNoTeleport = false;
+            state.followStopRange = 0.0D;
+            state.followStandoffRange = 0.0D;
+            state.followFixedGoal = null;
+            state.comeBestGoalDistSq = Double.NaN;
+            state.comeTicksSinceBest = 0;
+            state.comeRerouteAttempts = 0;
+            state.comeNextRerouteTick = 0L;
+            state.comeNextSkillTick = 0L;
+            state.comeRecoverySkillInFlight = false;
+            state.comeRecoverySkillStartTick = 0L;
+            state.comeAllowRecoverySkills = true;
+        }
+
+        // IMPORTANT: return-to-base uses FOLLOW mode with baseTarget + followFixedGoal.
+        // Clearing followFixedGoal alone is not enough in some edge cases (UI/handlers may still
+        // treat baseTarget as a pending home intent). A stop/follow-stop should cancel BOTH.
+        clearBase(bot);
+        if (bot != null) {
+            BotActions.stop(bot);
+        }
+        setMode(bot, Mode.IDLE);
+        setAssistAllies(bot, true);
+        if (announce && bot != null && wasFollowing) {
+            sendBotMessage(bot, "Stopping follow command.");
+        }
+        return wasFollowing ? "Bot stopped following." : "Bot is not currently following anyone.";
+    }
+
+    /**
+     * Follow a player, but keep a larger "standoff" distance while the bot has line-of-sight.
+     * If line-of-sight breaks (around corners/doors), normal pursuit + planning should resume.
+     */
+    public static String setFollowModeDistance(ServerPlayerEntity bot, ServerPlayerEntity target, double standoffRange) {
+        if (isExternalOverrideActive()) {
+            sendBotMessage(bot, "Busy with another task right now.");
+            return "Bot is busy executing another task. Try again after it finishes.";
+        }
+        if (target == null) {
+            return "Unable to follow — target not found.";
+        }
+        registerBot(bot);
+        setFollowTarget(bot, target.getUuid());
+        BotCommandStateService.State state = stateFor(bot);
+        if (state != null) {
+            state.followNoTeleport = false;
+            state.followStopRange = 0.0D;
+            state.followStandoffRange = Math.max(0.0D, standoffRange);
+            state.followFixedGoal = null;
+            state.comeBestGoalDistSq = Double.NaN;
+            state.comeTicksSinceBest = 0;
+            state.comeRerouteAttempts = 0;
+            state.comeNextRerouteTick = 0L;
+            state.comeNextSkillTick = 0L;
+            state.comeRecoverySkillInFlight = false;
+            state.comeRecoverySkillStartTick = 0L;
+            state.comeAllowRecoverySkills = true;
+        }
+        setMode(bot, Mode.FOLLOW);
+        clearGuard(bot);
+        clearBase(bot);
+
+        UUID id = bot.getUuid();
+        FollowStateService.clearPlanning(id);
+        FollowDebugService.clear(id);
+        requestFollowPathPlan(bot, target, true, "follow-distance-start");
+        sendBotMessage(bot, "Following " + target.getName().getString() + " at a distance.");
+        return "Now following " + target.getName().getString() + " at a distance.";
+    }
+
+    /**
+     * Adjust the current follow standoff distance (0 disables standoff and reverts to default follow spacing).
+     */
+    public static void setFollowStandoffRange(ServerPlayerEntity bot, double standoffRange) {
+        if (bot == null) {
+            return;
+        }
+        registerBot(bot);
+        BotCommandStateService.State state = stateFor(bot);
+        if (state != null) {
+            state.followStandoffRange = Math.max(0.0D, standoffRange);
+        }
+    }
+
+    public static String setGuardMode(ServerPlayerEntity bot, double radius) {
+        registerBot(bot);
+        // If a drop sweep is currently driving movement, cancel it so GUARD can take over immediately.
+        DropSweepService.requestCancel(bot, "mode-switch-guard");
+        setGuardState(bot, positionOf(bot), Math.max(3.0D, radius));
+        setMode(bot, Mode.GUARD);
+        setFollowTarget(bot, null);
+        clearBase(bot);
+        GuardPatrolService.setPatrolTarget(bot.getUuid(), null);
+        sendBotMessage(bot, String.format(Locale.ROOT, "Guarding this area (radius %.1f blocks).", getGuardRadius(bot)));
+        return "Guarding the area.";
+    }
+
+    public static String setPatrolMode(ServerPlayerEntity bot, double radius) {
+        registerBot(bot);
+        // If a drop sweep is currently driving movement, cancel it so PATROL can take over immediately.
+        DropSweepService.requestCancel(bot, "mode-switch-patrol");
+        setGuardState(bot, positionOf(bot), Math.max(3.0D, radius));
+        setMode(bot, Mode.PATROL);
+        setFollowTarget(bot, null);
+        clearBase(bot);
+        GuardPatrolService.setPatrolTarget(bot.getUuid(), null);
+        sendBotMessage(bot, String.format(Locale.ROOT, "Patrolling this area (radius %.1f blocks).", getGuardRadius(bot)));
+        return "Patrolling the area.";
+    }
+
+    public static String setStayMode(ServerPlayerEntity bot) {
+        registerBot(bot);
+        setMode(bot, Mode.STAY);
+        setFollowTarget(bot, null);
+        setGuardState(bot, positionOf(bot), getGuardRadius(bot));
+        clearBase(bot);
+        sendBotMessage(bot, "Staying put here.");
+        return "Bot will hold position.";
+    }
+
+    public static String setReturnToBase(ServerPlayerEntity bot, Vec3d base) {
+        registerBot(bot);
+        if (base == null) {
+            return "No base location available.";
+        }
+        
+        // Guard: if already returning to the same (or very close) base, don't reset state
+        // This prevents repeated calls from resetting stuck detection counters
+        if (isReturningToBase(bot)) {
+            BotCommandStateService.State existingState = stateFor(bot);
+            if (existingState != null && existingState.baseTarget != null) {
+                double dx = base.x - existingState.baseTarget.x;
+                double dz = base.z - existingState.baseTarget.z;
+                double distSq = dx * dx + dz * dz;
+                if (distSq < 9.0D) { // Within 3 blocks of same target
+                    LOGGER.debug("setReturnToBase: already returning to nearby base, skipping reset");
+                    return "Bot is already returning to base.";
+                }
+            }
+        }
+        
+        // Preserve baseTarget so sunset automation can track "home" for auto-sleep.
+        setBaseTarget(bot, base);
+
+        // Use the follow-walk system with a fixed goal. This gives us the more robust door/corner/waypoint
+        // planning that FOLLOW/COME already have, avoiding the simple "push into wall" steering.
+        setFollowTarget(bot, null);
+        BlockPos goal = BlockPos.ofFloored(base.x, base.y, base.z).toImmutable();
+        BotCommandStateService.State state = stateFor(bot);
+        if (state != null) {
+            state.followNoTeleport = false;
+            state.followStopRange = 0.0D;
+            state.followStandoffRange = 0.0D;
+            state.followFixedGoal = goal;
+            state.comeBestGoalDistSq = Double.NaN;
+            state.comeTicksSinceBest = 0;
+            state.comeRerouteAttempts = 0;
+            state.comeNextRerouteTick = 0L;
+            state.comeNextSkillTick = 0L;
+            state.comeRecoverySkillInFlight = false;
+            state.comeRecoverySkillStartTick = 0L;
+            // For "head home", prefer safe walking/pathing over digging recovery skills.
+            state.comeAllowRecoverySkills = false;
+        }
+        setMode(bot, Mode.FOLLOW);
+        clearGuard(bot);
+
+        UUID id = bot.getUuid();
+        FollowStateService.clearPlanning(id);
+        FollowDebugService.clear(id);
+        // Note: ReturnBaseStuckService counter is NOT cleared here - it should keep counting
+        requestFollowPathPlanToGoal(bot, goal, true, "return-base-start");
+
+        sendBotMessage(bot, "Returning to base.");
+        return "Bot is returning to base.";
+    }
+
+    public static String setReturnToBase(ServerPlayerEntity bot, ServerPlayerEntity commander) {
+        if (bot == null) {
+            return "No bot available.";
+        }
+        ServerWorld world = bot.getCommandSource().getWorld();
+
+        // Policy: home/base return is not cross-dimension.
+        if (world.getRegistryKey() != net.minecraft.world.World.OVERWORLD) {
+            sendBotMessage(bot, "I can't return home from this dimension.");
+            return "Home return is not available in this dimension.";
+        }
+
+        Vec3d base = null;
+        java.util.Optional<BlockPos> home = BotHomeService.resolveHomeTarget(bot);
+        if (home.isPresent()) {
+            base = Vec3d.ofCenter(home.get());
+        }
+
+        // Fallback for older worlds / no saved home info.
+        if (base == null) {
+            ServerWorld spawnWorld = commander != null ? commander.getCommandSource().getWorld() : world;
+            BlockPos spawn = resolveSpawnPoint(spawnWorld);
+            base = Vec3d.ofCenter(spawn);
+        }
+
+        return setReturnToBase(bot, base);
+    }
+
+    public static String setReturnToBase(ServerPlayerEntity bot) {
+        ServerWorld world = bot.getCommandSource().getWorld();
+        BlockPos spawn = resolveSpawnPoint(world);
+        return setReturnToBase(bot, Vec3d.ofCenter(spawn));
+    }
+
+    public static String toggleAssistAllies(ServerPlayerEntity bot, boolean enable) {
+        registerBot(bot);
+        setAssistAllies(bot, enable);
+        String message = enable ? "Engaging threats against allies." : "Standing down unless attacked.";
+        sendBotMessage(bot, message);
+        return message;
+    }
+
+    public static String setBotDefense(ServerPlayerEntity bot, boolean enable) {
+        registerBot(bot);
+        setAssistAllies(bot, enable);
+        String message = enable
+                ? "I'll defend nearby bots when they are attacked."
+                : "I'll focus on my own fights.";
+        sendBotMessage(bot, message);
+        return message;
+    }
+
+    private static BlockPos resolveSpawnPoint(ServerWorld world) {
+        Object spawnPoint = world.getSpawnPoint();
+        if (spawnPoint != null) {
+            Class<?> clazz = spawnPoint.getClass();
+            try {
+                Object result = clazz.getMethod("pos").invoke(spawnPoint);
+                if (result instanceof BlockPos blockPos) {
+                    return blockPos;
+                }
+            } catch (ReflectiveOperationException ignored) {
+            }
+            try {
+                Object result = clazz.getMethod("toImmutable").invoke(spawnPoint);
+                if (result instanceof BlockPos blockPos) {
+                    return blockPos;
+                }
+            } catch (ReflectiveOperationException ignored) {
+            }
+            try {
+                Field field = clazz.getDeclaredField("pos");
+                field.setAccessible(true);
+                Object result = field.get(spawnPoint);
+                if (result instanceof BlockPos blockPos) {
+                    return blockPos;
+                }
+            } catch (ReflectiveOperationException ignored) {
+            }
+        }
+        return BlockPos.ORIGIN;
+    }
+
+    public static Mode getCurrentMode() {
+        BotCommandStateService.State state = primaryState();
+        return state != null ? state.mode : Mode.IDLE;
+    }
+
+    public static Mode getCurrentMode(ServerPlayerEntity bot) {
+        return getMode(bot);
+    }
+
+    public static boolean isPassiveMode() {
+        Mode mode = getCurrentMode();
+        return mode == Mode.IDLE || mode == Mode.STAY || mode == Mode.GUARD || mode == Mode.PATROL;
+    }
+
+    public static CombatStyle getCombatStyle() {
+        return combatStyle;
+    }
+
+    public static boolean engageImmediateThreats(ServerPlayerEntity bot) {
+        if (bot == null) {
+            return false;
+        }
+        MinecraftServer srv = bot.getCommandSource().getServer();
+        if (srv == null) {
+            return false;
+        }
+        List<Entity> hostiles = AutoFaceEntity.detectNearbyEntities(bot, 10.0D)
+                .stream()
+                .filter(EntityUtil::isHostile)
+                .toList();
+        if (hostiles.isEmpty()) {
+            return false;
+        }
+        srv.execute(() -> engageHostiles(bot, srv, hostiles));
+        return true;
+    }
+
+    public static Vec3d getGuardCenterVec() {
+        UUID primary = BotLifecycleService.getPrimaryBotUuid();
+        return primary != null ? GuardPatrolService.getGuardCenter(primary) : null;
+    }
+
+    public static double getGuardRadiusValue() {
+        UUID primary = BotLifecycleService.getPrimaryBotUuid();
+        return GuardPatrolService.getGuardRadius(primary);
+    }
+
+    public static ServerPlayerEntity getFollowTarget() {
+        BotCommandStateService.State state = primaryState();
+        UUID targetUuid = state != null ? state.followTargetUuid : null;
+        if (targetUuid == null || server == null) {
+            return null;
+        }
+        return server.getPlayerManager().getPlayer(targetUuid);
+    }
+
+    public static UUID getFollowTargetUuid(ServerPlayerEntity bot) {
+        return getFollowTargetFor(bot);
+    }
+
+    public static UUID getFollowTargetUuid() {
+        BotCommandStateService.State state = primaryState();
+        return state != null ? state.followTargetUuid : null;
+    }
+
+    public static String setCombatStyle(ServerPlayerEntity bot, CombatStyle style) {
+        combatStyle = style;
+        String message = style == CombatStyle.AGGRESSIVE ?
+                "Combat stance set to aggressive." :
+                "Combat stance set to evasive.";
+        sendBotMessage(bot, message);
+        return message;
+    }
+
+    private static boolean handleFollow(ServerPlayerEntity bot, BotCommandStateService.State state, MinecraftServer server, List<Entity> hostileEntities) {
+        UUID targetUuid = state != null ? state.followTargetUuid : null;
+        BlockPos fixedGoal = state != null ? state.followFixedGoal : null;
+        ServerPlayerEntity target = targetUuid != null && server != null
+                ? server.getPlayerManager().getPlayer(targetUuid)
+                : null;
+        if (target == null && fixedGoal == null) {
+            setMode(bot, Mode.IDLE);
+            setFollowTarget(bot, null);
+	            if (bot != null) {
+	                UUID id = bot.getUuid();
+	                FollowStateService.clearAll(id);
+	                FollowDebugService.clear(id);
+		            }
+	            sendBotMessage(bot, "Follow target lost. Returning to idle.");
+	            return false;
+	        }
+
+        List<Entity> augmentedHostiles = new ArrayList<>(hostileEntities);
+
+        if (!augmentedHostiles.isEmpty() && engageHostiles(bot, server, augmentedHostiles)) {
+            return true;
+        }
+
+        lowerShieldTracking(bot);
+
+        if (ElytraFlightService.isInFlight(bot.getUuid())) {
+            return true; // ElytraFlightService handles all movement while flying
+        }
+
+        // Tree-stuck escape: if the bot is stranded on a tree canopy, handle it before normal follow.
+        if (TreeStuckEscapeService.tryEscape(bot, server)) {
+            return true; // escape in progress, skip normal follow
+        }
+
+        Vec3d targetPos = fixedGoal != null ? Vec3d.ofCenter(fixedGoal) : positionOf(target);
+
+        // Post-combat arrow recovery (FOLLOW mode):
+        // Only when following an actual player (not fixed-goal return-to-base/come),
+        // and keep it bounded near the commander so we don't take long detours.
+        if (target != null && fixedGoal == null && server != null) {
+            double distToCommanderSq = bot.squaredDistanceTo(targetPos);
+            if (distToCommanderSq <= 16.0D * 16.0D) {
+                if (BotArrowRecoveryService.tryRecoverMissedArrows(bot, server, targetPos, 10.0D)) {
+                    return true;
+                }
+            }
+        }
+
+    double distanceSq = bot.squaredDistanceTo(targetPos);
+    double horizDistSq = horizontalDistanceSq(bot, targetPos);
+	        if (target != null) {
+            handleFollowPersonalSpace(bot, target, horizDistSq, targetPos);
+	        }
+        boolean forceWalk = state != null && state.followNoTeleport;
+        double stopRange = state != null ? state.followStopRange : 0.0D;
+        boolean allowTeleportPref = SkillPreferences.teleportDuringSkills(bot) && !forceWalk;
+        boolean canSee = target != null && bot.canSee(target);
+        if (fixedGoal != null) {
+            canSee = !isDirectRouteBlocked(bot, targetPos, fixedGoal);
+        }
+        double deltaY = fixedGoal != null
+                ? (targetPos.y - bot.getY())
+                : (target.getY() - bot.getY());
+        double absDeltaY = Math.abs(deltaY);
+        MinecraftServer srv = bot.getCommandSource().getServer();
+
+        if (fixedGoal != null && state != null && srv != null) {
+            long nowTick = srv.getTicks();
+            if (state.comeRecoverySkillInFlight) {
+                boolean hasTask = TaskService.hasActiveTask(bot.getUuid());
+                long startedTick = state.comeRecoverySkillStartTick;
+                long ageTicks = startedTick > 0L ? Math.max(0L, nowTick - startedTick) : 0L;
+                if (!hasTask && startedTick > 0L && ageTicks >= COME_RECOVERY_STALE_TICKS) {
+                    LOGGER.warn("[ComeRecovery] stale-inflight-cleared bot={} goal={} ageTicks={} hasTask={}",
+                            bot.getName().getString(),
+                            fixedGoal.toShortString(),
+                            ageTicks,
+                            hasTask);
+                    state.comeRecoverySkillInFlight = false;
+                    state.comeRecoverySkillStartTick = 0L;
+                    state.comeNextSkillTick = Math.max(state.comeNextSkillTick, nowTick + 40L);
+                }
+            }
+
+            double goalDistSq = bot.getBlockPos().getSquaredDistance(fixedGoal);
+            if (!Double.isFinite(state.comeBestGoalDistSq)) {
+                state.comeBestGoalDistSq = goalDistSq;
+                state.comeTicksSinceBest = 0;
+            } else {
+                // Only count progress if we beat the previous best by a meaningful amount.
+                if (goalDistSq <= state.comeBestGoalDistSq - 1.0D) {
+                    state.comeBestGoalDistSq = goalDistSq;
+                    state.comeTicksSinceBest = 0;
+                    state.comeRerouteAttempts = 0;
+                    state.comeNextRerouteTick = 0L;
+                } else {
+                    state.comeTicksSinceBest++;
+                }
+            }
+
+            // If we're vertically separated and have no LoS to the goal, try mining recovery sooner.
+            boolean verticalProblem = absDeltaY >= 6.0D && !canSee;
+            int triggerTicks = verticalProblem ? 25 : 60;
+
+            if (state.comeAllowRecoverySkills && state.comeTicksSinceBest >= triggerTicks) {
+                if (state.comeRecoverySkillInFlight) {
+                    if ((state.comeTicksSinceBest % 20) == 0) {
+                        LOGGER.info("[ComeRecovery] launch-wait bot={} goal={} ticksSinceBest={} startedTick={} nowTick={} hasTask={}",
+                                bot.getName().getString(),
+                                fixedGoal.toShortString(),
+                                state.comeTicksSinceBest,
+                                state.comeRecoverySkillStartTick,
+                                nowTick,
+                                TaskService.hasActiveTask(bot.getUuid()));
+                    }
+                } else if (nowTick < state.comeNextSkillTick) {
+                    if (state.comeTicksSinceBest % 20 == 0) {
+                        LOGGER.info("[FollowAssert] recovery-cooldown bot={} goal={} ticksSinceBest={} nowTick={} nextSkillTick={}",
+                                bot.getName().getString(),
+                                fixedGoal.toShortString(),
+                                state.comeTicksSinceBest,
+                                nowTick,
+                                state.comeNextSkillTick);
+                    }
+                } else if (triggerComeRecoverySkill(bot, target, fixedGoal, targetPos, deltaY, horizDistSq, srv, state)) {
+                    return true;
+                }
+            } else if (!state.comeAllowRecoverySkills && state.comeTicksSinceBest == triggerTicks) {
+                LOGGER.info("[FollowAssert] recovery-suppressed bot={} goal={} reason=safe-regroup ticksSinceBest={}",
+                        bot.getName().getString(),
+                        fixedGoal.toShortString(),
+                        state.comeTicksSinceBest);
+            }
+        }
+        if (target != null && bot.getEntityWorld() != target.getEntityWorld() && srv != null) {
+            long now = srv.getOverworld().getTime();
+            // Cooldown: only attempt dimension teleport once every 100 ticks (5s)
+            // to avoid spamming during rapid portal transitions
+            if (now - state.dimHandoffNotifiedTick < 100L) {
+                return false;
+            }
+            state.dimHandoffNotifiedTick = now;
+
+            ServerWorld targetWorld = srv.getWorld(target.getEntityWorld().getRegistryKey());
+            if (targetWorld == null) {
+                LOGGER.warn("Follow dimension handoff: unable to resolve target world {} for {}",
+                        target.getEntityWorld().getRegistryKey().getValue(),
+                        bot.getName().getString());
+                return false;
+            }
+
+            // Abort active skills and dismount before dimension change
+            TaskService.forceAbort(bot.getUuid(), "\u00a7cDimension transition (following commander).");
+            if (bot.hasVehicle()) {
+                bot.stopRiding();
+            }
+            if (ElytraFlightService.isInFlight(bot.getUuid())) {
+                bot.stopGliding();
+                // ElytraFlightService will clean up on next tick when it sees phase mismatch
+            }
+
+            LOGGER.info("Follow dimension handoff: teleporting {} from {} to {} (following {})",
+                    bot.getName().getString(),
+                    bot.getEntityWorld().getRegistryKey().getValue(),
+                    targetWorld.getRegistryKey().getValue(),
+                    target.getName().getString());
+
+            bot.teleport(targetWorld,
+                    target.getX(), target.getY(), target.getZ(),
+                    EnumSet.noneOf(PositionFlag.class),
+                    target.getYaw(), target.getPitch(),
+                    true);
+            bot.setVelocity(Vec3d.ZERO);
+
+            // Dimension-specific personality line via overhead dialogue
+            {
+                String dimPath = targetWorld.getRegistryKey().getValue().getPath();
+                String line;
+                if (dimPath.contains("end")) {
+                    line = RANDOM.nextBoolean()
+                            ? "I'll follow you to the end...is that corny?"
+                            : "The End. Sure. Why not.";
+                } else if (dimPath.contains("nether")) {
+                    line = RANDOM.nextBoolean()
+                            ? "Into the fire with you, then."
+                            : "Nether it is. Stay close.";
+                } else {
+                    line = RANDOM.nextBoolean()
+                            ? "Fresh air. Finally."
+                            : "Back to the surface. Good.";
+                }
+                CompanionOverheadDialogueService.showOverheadLine(bot, line, 3_000, 48.0, "follow-dim", dimPath);
+            }
+
+            return true; // teleported successfully, follow continues next tick
+        }
+        LOGGER.debug("Follow tick: bot={} target={} dist={}/{} dy={} forceWalk={} allowTpPref={} canSee={} stopRange={}",
+                bot.getName().getString(),
+                target != null ? target.getName().getString() : "goal",
+                Math.sqrt(distanceSq),
+                fixedGoal != null ? fixedGoal : target.getBlockPos(),
+                String.format(Locale.ROOT, "%.2f", deltaY),
+                forceWalk,
+                allowTeleportPref,
+                canSee,
+                stopRange);
+        if (fixedGoal == null && target != null && srv != null && !ElytraFlightService.isInFlight(bot.getUuid())) {
+            double botAboveTarget = bot.getY() - target.getY();
+            if (botAboveTarget >= 6.0D) {
+                if (ElytraFlightService.tryAutonomousFollowFlightNow(srv, bot, srv.getTicks())) {
+                    return true;
+                }
+            }
+        }
+        // stopRange is used for "come"-style one-shot moves: do not stop if we're vertically far away
+        // (e.g., standing under the commander on a floor below).
+        if (fixedGoal != null && stopRange > 0.0D) {
+            double stopRangeSq = stopRange * stopRange;
+            if (horizDistSq <= stopRangeSq && absDeltaY <= 2.5D) {
+                stopFollowing(bot);
+                return true;
+            }
+        }
+
+        // Special case: return-to-base uses FOLLOW with a fixed goal, but keeps baseTarget populated.
+        // Use the older RETURNING_BASE arrival semantics (arrive -> STAY) while benefiting from
+        // FOLLOW's door/corner/waypoint planning.
+        if (fixedGoal != null && state != null && state.baseTarget != null) {
+            double dxHome = state.baseTarget.x - bot.getX();
+            double dzHome = state.baseTarget.z - bot.getZ();
+            double homeHorizDistSq = dxHome * dxHome + dzHome * dzHome;
+            if (homeHorizDistSq <= 3.0D * 3.0D) {
+                UUID id = bot.getUuid();
+                FollowStateService.clearAll(id);
+                FollowDebugService.clear(id);
+                setFollowTarget(bot, null);
+                state.followNoTeleport = false;
+                state.followStopRange = 0.0D;
+                state.followStandoffRange = 0.0D;
+                state.followFixedGoal = null;
+                state.comeBestGoalDistSq = Double.NaN;
+                state.comeTicksSinceBest = 0;
+                state.comeRerouteAttempts = 0;
+                state.comeNextRerouteTick = 0L;
+                state.comeNextSkillTick = 0L;
+                state.comeRecoverySkillInFlight = false;
+                state.comeRecoverySkillStartTick = 0L;
+                state.comeAllowRecoverySkills = true;
+                BotActions.stop(bot);
+                setMode(bot, Mode.IDLE);
+                setBaseTarget(bot, null);
+                net.wcfcarolina13.GameAI.services.ReturnBaseStuckService.clear(bot.getUuid());
+                sendBotMessage(bot, "Arrived at base.");
+                return true;
+            }
+            
+            // Bot is returning to base but hasn't arrived yet - check for stuck condition
+            // This enables progressive escape attempts (backup, pillar, flare) when stuck
+            LOGGER.debug("Return-base stuck check: calling tickAndCheckStuck for {} at {}", 
+                    bot.getName().getString(), bot.getBlockPos().toShortString());
+            if (net.wcfcarolina13.GameAI.services.ReturnBaseStuckService.tickAndCheckStuck(bot, state.baseTarget)) {
+                triggerStuckFlare(bot);
+            }
+        }
+
+        UUID botId = bot.getUuid();
+        if (fixedGoal == null && target != null) {
+            updateCommanderLadderHint(bot, target);
+        } else {
+            FOLLOW_COMMANDER_LADDER_HINT.remove(botId);
+        }
+        BlockPos navGoalBlock = fixedGoal != null ? fixedGoal : target.getBlockPos();
+        Vec3d navGoalPos = targetPos;
+        boolean usingWaypoints = false;
+        ArrayDeque<BlockPos> waypoints = FollowStateService.FOLLOW_WAYPOINTS.get(botId);
+        int waypointCount = waypoints != null ? waypoints.size() : 0;
+        if (waypoints != null) {
+            while (!waypoints.isEmpty()) {
+	                BlockPos peek = waypoints.peekFirst();
+	                if (peek == null) {
+	                    waypoints.pollFirst();
+	                    continue;
+	                }
+	                // Never target door blocks as waypoints: standing "in" the door block can trigger rescue logic
+	                // and cause oscillation at doorway thresholds. Instead, expand the door waypoint into
+	                // approach+step tiles on either side of the doorway.
+	                if (bot.getEntityWorld() instanceof ServerWorld world) {
+	                    BlockState peekState = world.getBlockState(peek);
+	                    BlockState peekUpState = world.getBlockState(peek.up());
+                        boolean peekIsOpenable = peekState.getBlock() instanceof DoorBlock
+                                || peekUpState.getBlock() instanceof DoorBlock
+                                || peekState.getBlock() instanceof FenceGateBlock
+                                || peekUpState.getBlock() instanceof FenceGateBlock;
+                        if (peekIsOpenable) {
+	                        FollowDoorPlan doorWpPlan = buildFollowDoorPlan(bot, world, peek);
+	                        if (doorWpPlan != null) {
+	                            waypoints.pollFirst();
+	                            waypoints.addFirst(doorWpPlan.stepThroughPos().toImmutable());
+	                            waypoints.addFirst(doorWpPlan.approachPos().toImmutable());
+	                            continue;
+	                        }
+	                    }
+	                }
+	                if (bot.getBlockPos().getSquaredDistance(peek) <= FollowPathService.WAYPOINT_REACH_SQ) {
+	                    waypoints.pollFirst();
+	                    FollowStateService.FOLLOW_LAST_DISTANCE_SQ.remove(botId);
+	                    FollowStateService.FOLLOW_STAGNANT_TICKS.remove(botId);
+                    FollowStateService.FOLLOW_LAST_BLOCK_POS.remove(botId);
+                    FollowStateService.FOLLOW_POS_STAGNANT_TICKS.remove(botId);
+                    continue;
+                }
+                navGoalBlock = peek;
+                navGoalPos = Vec3d.ofCenter(peek);
+                usingWaypoints = true;
+                break;
+            }
+            if (waypoints.isEmpty()) {
+                FollowStateService.FOLLOW_WAYPOINTS.remove(botId);
+                usingWaypoints = false;
+                navGoalBlock = fixedGoal != null ? fixedGoal : target.getBlockPos();
+                navGoalPos = targetPos;
+                waypointCount = 0;
+            }
+        }
+	        // If the commander is far away, do not let stale local waypoints keep us orbiting a doorway.
+	        // Once we're out of a tight enclosure, prioritise direct pursuit / long-range catch-up.
+	        if (usingWaypoints && distanceSq >= 900.0D) { // ~30 blocks
+	            BotStuckService.EnvironmentSnapshot env = BotStuckService.analyzeEnvironment(bot);
+	            if (env != null && (!env.enclosed() || env.hasEscapeRoute())) {
+		                FollowStateService.FOLLOW_WAYPOINTS.remove(botId);
+		                FollowStateService.FOLLOW_DOOR_PLAN.remove(botId);
+		                FollowStateService.FOLLOW_DOOR_LAST_BLOCK.remove(botId);
+	                FollowStateService.FOLLOW_DOOR_STUCK_TICKS.remove(botId);
+	                FollowStateService.FOLLOW_DOOR_RECOVERY.remove(botId);
+	                usingWaypoints = false;
+	                navGoalBlock = fixedGoal != null ? fixedGoal : target.getBlockPos();
+	                navGoalPos = targetPos;
+	                maybeLogFollowDecision(bot, "drop-waypoints: long-range target dist="
+	                        + String.format(Locale.ROOT, "%.2f", Math.sqrt(distanceSq)));
+	            }
+	        }
+
+        double progressDistSq = bot.getBlockPos().getSquaredDistance(navGoalBlock);
+        boolean directBlocked = progressDistSq <= 36.0D && isDirectRouteBlocked(bot, navGoalPos, navGoalBlock);
+        boolean botSealed = isSealedSpace(bot);
+        boolean commanderSealed = target != null && isSealedSpace(target);
+        maybeLogFollowStatus(bot, target, distanceSq, horizDistSq, canSee, directBlocked, usingWaypoints, navGoalBlock, waypointCount, botSealed, commanderSealed);
+
+        if (handleFollowObstacles(bot, target, navGoalPos, navGoalBlock, progressDistSq, distanceSq, absDeltaY, canSee, directBlocked, allowTeleportPref, forceWalk, srv)) {
+            return true;
+        }
+        // Personal space / standoff applies even when following waypoints; otherwise the bot can "pile onto" the commander
+        // when the final waypoint is near the player.
+        double desiredSpace = FOLLOW_PERSONAL_SPACE;
+        if (target != null && state != null && state.followStandoffRange > 0.0D) {
+            desiredSpace = Math.max(desiredSpace, state.followStandoffRange);
+        }
+        double personalSpaceSq = desiredSpace * desiredSpace;
+        // Personal space only applies when following an actual entity. For fixed-goal follow,
+        // stopping early based on Euclidean distance can strand the bot behind doors/walls.
+        if (target != null && canSee && horizDistSq <= personalSpaceSq) {
+            FOLLOW_WAYPOINTS.remove(botId);
+            FOLLOW_DOOR_PLAN.remove(botId);
+            BotActions.stop(bot);
+            LookController.faceBlock(bot, BlockPos.ofFloored(targetPos));
+            return true;
+        }
+        if (usingWaypoints) {
+            double sprintDistanceSq = Math.max(distanceSq, progressDistSq);
+            boolean sprint = sprintDistanceSq > FOLLOW_SPRINT_DISTANCE_SQ;
+            moveToward(bot, navGoalPos, 1.0D, sprint);
+        } else {
+            // If we're physically blocked (glass/fence/door), don't "settle" just because we're close in Euclidean distance.
+            boolean allowCloseStop = canSee && !directBlocked;
+            followInputStep(bot, targetPos, horizDistSq, allowCloseStop, desiredSpace);
+        }
+        return true;
+    }
+
+    public static void collectNearbyDrops(ServerPlayerEntity bot, double radius) {
+        Mode currentMode = getMode(bot);
+        boolean trainingMode = net.wcfcarolina13.Commands.modCommandRegistry.isTrainingMode;
+        boolean commandDrivenSweep = currentMode == Mode.GUARD || currentMode == Mode.PATROL;
+        DropSweepService.collectNearbyDrops(
+                bot,
+                radius,
+                trainingMode,
+                commandDrivenSweep,
+                BotEventHandler::isExternalOverrideActive,
+                BotEventHandler::setExternalOverrideActive
+        );
+    }
+
+    private static boolean handleGuard(ServerPlayerEntity bot, BotCommandStateService.State state, List<Entity> nearbyEntities, List<Entity> hostileEntities) {
+        Vec3d center = getGuardCenter(bot);
+        double radius = getGuardRadius(bot);
+        if (center == null) {
+            center = positionOf(bot);
+            setGuardState(bot, center, radius);
+        }
+        MinecraftServer server = bot.getCommandSource().getServer();
+
+        if (!hostileEntities.isEmpty() && engageHostiles(bot, server, hostileEntities)) {
+            return true;
+        }
+
+        lowerShieldTracking(bot);
+
+        // After combat, try to recover missed arrows (stay within the guard radius).
+        if (server != null && BotArrowRecoveryService.tryRecoverMissedArrows(bot, server, center, radius)) {
+            return true;
+        }
+
+        // If a sweep is in-flight for this bot, let it keep driving movement unless we've requested cancellation.
+        if (DropSweepService.isInProgressFor(bot) && !DropSweepService.isCancelRequestedFor(bot)) {
+            return true;
+        }
+
+        Entity nearestItem = findNearestDrop(bot, radius);
+        if (nearestItem != null) {
+            collectNearbyDrops(bot, Math.max(radius, 4.0D));
+            return true;
+        }
+
+        double distanceFromCenter = positionOf(bot).distanceTo(center);
+        if (distanceFromCenter > 1.5D) {
+            moveToward(bot, center, 0.9D, false);
+            return true;
+        }
+
+        BotActions.stop(bot);
+        return true;
+    }
+
+    private static boolean handlePatrol(ServerPlayerEntity bot, BotCommandStateService.State state, List<Entity> nearbyEntities, List<Entity> hostileEntities) {
+        Vec3d center = getGuardCenter(bot);
+        double radius = getGuardRadius(bot);
+        if (center == null) {
+            center = positionOf(bot);
+            setGuardState(bot, center, radius);
+        }
+        MinecraftServer server = bot.getCommandSource().getServer();
+
+        if (!hostileEntities.isEmpty() && engageHostiles(bot, server, hostileEntities)) {
+            return true;
+        }
+
+        lowerShieldTracking(bot);
+
+        // After combat, try to recover missed arrows (stay within the patrol radius).
+        if (server != null && BotArrowRecoveryService.tryRecoverMissedArrows(bot, server, center, radius)) {
+            return true;
+        }
+
+        // If a sweep is in-flight for this bot, let it keep driving movement unless we've requested cancellation.
+        if (DropSweepService.isInProgressFor(bot) && !DropSweepService.isCancelRequestedFor(bot)) {
+            return true;
+        }
+
+        Entity nearestItem = findNearestDrop(bot, radius);
+        if (nearestItem != null) {
+            collectNearbyDrops(bot, Math.max(radius, 4.0D));
+            return true;
+        }
+
+        double distanceFromCenter = positionOf(bot).distanceTo(center);
+        if (distanceFromCenter > radius) {
+            GuardPatrolService.setPatrolTarget(bot.getUuid(), null);
+            if (server != null) {
+                GuardPatrolService.setNextPatrolPickTick(bot.getUuid(), server.getTicks() + 20L);
+            }
+            moveToward(bot, center, 2.0D, false);
+            return true;
+        }
+
+        Vec3d patrolTarget = GuardPatrolService.getPatrolTarget(bot.getUuid());
+        if (patrolTarget != null) {
+            double dist = positionOf(bot).distanceTo(patrolTarget);
+            if (dist > 1.35D) {
+                moveToward(bot, patrolTarget, 1.1D, false);
+                return true;
+            }
+            GuardPatrolService.setPatrolTarget(bot.getUuid(), null);
+            if (server != null) {
+                GuardPatrolService.setNextPatrolPickTick(bot.getUuid(), server.getTicks() + 10L);
+            }
+        }
+
+        if (patrolTarget == null && server != null) {
+            long nowTick = server.getTicks();
+            long nextPickTick = GuardPatrolService.getNextPatrolPickTick(bot.getUuid());
+            if (nowTick >= nextPickTick) {
+                Vec3d next = randomPointWithin(center, radius * 0.85D);
+                GuardPatrolService.setPatrolTarget(bot.getUuid(), next);
+                GuardPatrolService.setNextPatrolPickTick(bot.getUuid(), nowTick + 40L + RANDOM.nextInt(40));
+                moveToward(bot, next, 1.1D, false);
+                return true;
+            }
+        }
+
+        BotActions.stop(bot);
+        return true;
+    }
+
+    private static boolean handleReturnToBase(ServerPlayerEntity bot, BotCommandStateService.State state) {
+        // Note: This method is currently unused. Return-to-base uses FOLLOW mode via setReturnToBase().
+        // Keeping this for potential future use or if we want to switch back to dedicated mode.
+        Vec3d base = state != null ? state.baseTarget : null;
+        if (base == null) {
+            setMode(bot, Mode.IDLE);
+            setAssistAllies(bot, true);
+            net.wcfcarolina13.GameAI.services.ReturnBaseStuckService.clear(bot.getUuid());
+            return false;
+        }
+
+        // Important: use horizontal distance, matching FollowMovementService.moveToward().
+        // Otherwise the bot can be close enough to stop moving, but never "arrive" here,
+        // leaving RETURNING_BASE stuck indefinitely.
+        double dx = base.x - bot.getX();
+        double dz = base.z - bot.getZ();
+        double horizDistSq = dx * dx + dz * dz;
+        if (horizDistSq <= 3.0D * 3.0D) {
+            setMode(bot, Mode.STAY);
+            sendBotMessage(bot, "Arrived at base. Holding position.");
+            setBaseTarget(bot, null);
+            net.wcfcarolina13.GameAI.services.ReturnBaseStuckService.clear(bot.getUuid());
+
+            // If idle hobbies are enabled, automatically resume idling after a short pause.
+            MinecraftServer srv = bot.getCommandSource() != null ? bot.getCommandSource().getServer() : null;
+            if (srv != null) {
+                try {
+                    net.wcfcarolina13.GameAI.services.BotIdleResumeService.scheduleResumeIfEnabled(
+                            srv,
+                            bot,
+                            400L,
+                            "return-to-base"
+                    );
+                } catch (Throwable ignored) {
+                }
+            }
+            return true;
+        }
+
+        // Check if bot is stuck and should trigger a flare
+        if (net.wcfcarolina13.GameAI.services.ReturnBaseStuckService.tickAndCheckStuck(bot, base)) {
+            triggerStuckFlare(bot);
+        }
+
+        // Door handling: like vanilla villagers, try to open/traverse doors when blocked
+        if (bot.getEntityWorld() instanceof ServerWorld world) {
+            BlockPos baseBlock = BlockPos.ofFloored(base.x, base.y, base.z);
+            
+            // Check for doors directly in front of the bot
+            BlockPos botPos = bot.getBlockPos();
+            for (Direction dir : Direction.Type.HORIZONTAL) {
+                BlockPos candidate = botPos.offset(dir);
+                BlockState candidateState = world.getBlockState(candidate);
+                BlockState candidateUpState = world.getBlockState(candidate.up());
+                boolean isDoor = candidateState.getBlock() instanceof DoorBlock
+                        || candidateUpState.getBlock() instanceof DoorBlock
+                        || candidateState.getBlock() instanceof FenceGateBlock
+                        || candidateUpState.getBlock() instanceof FenceGateBlock;
+                if (isDoor) {
+                    // Try to open and step through
+                    if (MovementService.tryOpenDoorAt(bot, candidate)) {
+                        // Commit to stepping through
+                        if (MovementService.tryTraverseOpenableToward(bot, candidate, baseBlock, "return-base-door")) {
+                            return true;
+                        }
+                    }
+                }
+            }
+            
+            // If we seem stuck (not making progress), look for nearby doors as escape routes
+            UUID botId = bot.getUuid();
+            BlockPos curBlock = bot.getBlockPos();
+            BlockPos prevBlock = FOLLOW_LAST_BLOCK_POS.get(botId);
+            int posStagnant = FOLLOW_POS_STAGNANT_TICKS.getOrDefault(botId, 0);
+            if (prevBlock != null && prevBlock.equals(curBlock)) {
+                posStagnant++;
+            } else {
+                posStagnant = 0;
+                FOLLOW_LAST_BLOCK_POS.put(botId, curBlock.toImmutable());
+            }
+            FOLLOW_POS_STAGNANT_TICKS.put(botId, posStagnant);
+            
+            // If stagnant for 10+ ticks, try door escape planning
+            if (posStagnant >= 10) {
+                MovementService.DoorSubgoalPlan doorPlan = MovementService.findDoorEscapePlan(bot, baseBlock, null);
+                if (doorPlan != null) {
+                    // Open the door
+                    MovementService.tryOpenDoorAt(bot, doorPlan.doorBase());
+                    // Try to traverse through
+                    if (MovementService.tryTraverseOpenableToward(bot, doorPlan.doorBase(), baseBlock, "return-base-escape")) {
+                        // Reset stagnation since we're moving through the door
+                        FOLLOW_POS_STAGNANT_TICKS.put(botId, 0);
+                        return true;
+                    }
+                }
+            }
+            
+            // Also check for doors along the direct line to base
+            BlockPos blockingDoor = BlockInteractionService.findDoorAlongLine(bot, base, 6.0D);
+            if (blockingDoor != null) {
+                MovementService.tryOpenDoorAt(bot, blockingDoor);
+            }
+        }
+
+        moveToward(bot, base, 2.0D, false);
+        return true;
+    }
+
+    /**
+     * Triggers the flare skill when bot is stuck during return-to-base.
+     * Runs asynchronously to avoid blocking the tick thread.
+     */
+    private static void triggerStuckFlare(ServerPlayerEntity bot) {
+        if (bot == null) {
+            return;
+        }
+        UUID botId = bot.getUuid();
+        
+        // Send message to commander that bot is stuck
+        sendBotMessage(bot, "§eI'm stuck and too far from base. Sending a flare signal!");
+        
+        // Mark the flare as sent (for cooldown)
+        net.wcfcarolina13.GameAI.services.ReturnBaseStuckService.markFlareSent(botId);
+        
+        // Execute flare skill in a separate thread
+        MinecraftServer server = bot.getCommandSource() != null ? bot.getCommandSource().getServer() : null;
+        if (server == null) {
+            return;
+        }
+        
+        Thread flareThread = new Thread(() -> {
+            try {
+                ServerCommandSource source = bot.getCommandSource().withSilent();
+                SkillContext context = new SkillContext(source, null, null);
+                SkillExecutionResult result = SkillManager.runSkill("flare", context);
+                if (!result.success()) {
+                    // Log but don't spam - flare failed silently
+                    LOGGER.info("Flare skill failed for {}: {}", bot.getName().getString(), result.message());
+                }
+            } catch (Exception e) {
+                LOGGER.warn("Error running flare skill for {}: {}", bot.getName().getString(), e.getMessage());
+            }
+        }, "flare-stuck-" + bot.getName().getString());
+        flareThread.setDaemon(true);
+        flareThread.start();
+    }
+
+    private static boolean engageHostiles(ServerPlayerEntity bot, MinecraftServer server, List<Entity> hostileEntities) {
+        if (hostileEntities.isEmpty()) {
+            return false;
+        }
+        Entity closest = hostileEntities.stream()
+                .min(Comparator.comparingDouble(e -> e.squaredDistanceTo(bot)))
+                .orElse(null);
+        if (closest == null) {
+            return false;
+        }
+        double distance = Math.sqrt(closest.squaredDistanceTo(bot));
+        boolean targetVisible = closest instanceof LivingEntity living && bot.canSee(living);
+        boolean hasRanged = targetVisible && BotActions.hasRangedWeapon(bot);
+        double verticalDiff = bot.getY() - closest.getY();
+        boolean projectileThreat = closest.getType().isIn(EntityTypeTags.SKELETONS) || closest.getName().getString().toLowerCase(Locale.ROOT).contains("pillager");
+        boolean creeperThreat = closest.getType() == EntityType.CREEPER;
+        boolean multipleThreats = hostileEntities.size() > 1;
+        boolean lowHealth = bot.getHealth() <= bot.getMaxHealth() * 0.5F;
+        boolean shouldBlock = (projectileThreat || creeperThreat || multipleThreats || lowHealth) && distance <= 4.5D;
+
+        if (combatStyle == CombatStyle.EVASIVE && distance <= 6.0D && verticalDiff > 1.0D) {
+            BotActions.moveBackward(bot);
+            if (bot.isOnGround() && verticalDiff > 2.0D) {
+                BotActions.jump(bot);
+            }
+            return true;
+        }
+
+        if (creeperThreat && distance <= 4.0D) {
+            BotActions.raiseShield(bot);
+            BotActions.moveBackward(bot);
+            return true;
+        }
+
+        if (hasRanged && distance >= 5.0D && closest instanceof LivingEntity living) {
+            if (BotActions.tryRepositionForRanged(bot, living, server.getTicks())) {
+                return true;
+            }
+            if (BotActions.performRangedAttack(bot, living, server.getTicks())) {
+                return true;
+            }
+        } else {
+            BotActions.resetRangedState(bot);
+        }
+
+        if (creeperThreat && distance <= 3.0D) {
+            long tick = bot.getCommandSource().getServer().getTicks();
+            if (!isShieldRaised(bot) && BotActions.raiseShield(bot)) {
+                setShieldRaised(bot, true);
+                setShieldDecisionTick(bot, tick);
+            }
+            BotActions.moveBackward(bot);
+            return true;
+        }
+
+        if (distance > 3.0D) {
+            lowerShieldTracking(bot);
+            moveToward(bot, positionOf(closest), 2.5D, true);
+        } else if (shouldBlock) {
+            long now = bot.getCommandSource().getServer().getTicks();
+            if (!isShieldRaised(bot)) {
+                if (BotActions.raiseShield(bot)) {
+                    setShieldRaised(bot, true);
+                    setShieldDecisionTick(bot, now);
+                }
+                return true;
+            }
+
+            if (now - getShieldDecisionTick(bot) >= 15) {
+                lowerShieldTracking(bot);
+                if (!BotActions.selectBestMeleeWeapon(bot)) {
+                    BotActions.selectBestWeapon(bot);
+                }
+                BotActions.attackNearest(bot, hostileEntities);
+                setShieldDecisionTick(bot, now);
+            }
+            return true;
+        } else {
+            lowerShieldTracking(bot);
+            boolean hasMelee = BotActions.selectBestMeleeWeapon(bot);
+            if (!hasMelee && hasRanged && closest instanceof LivingEntity living) {
+                BotActions.clearForceMelee(bot);
+                if (BotActions.tryRepositionForRanged(bot, living, server.getTicks())) {
+                    return true;
+                }
+                BotActions.performRangedAttack(bot, living, server.getTicks());
+            } else {
+                if (!hasMelee) {
+                    BotActions.selectBestWeapon(bot);
+                }
+                BotActions.attackNearest(bot, hostileEntities);
+            }
+        }
+        return true;
+    }
+
+    private static void moveToward(ServerPlayerEntity bot, Vec3d target, double stopDistance, boolean sprint) {
+        FollowMovementService.moveToward(bot, target, stopDistance, sprint, () -> lowerShieldTracking(bot));
+    }
+
+    private static void followInputStep(ServerPlayerEntity bot, Vec3d targetPos, double distanceSq, boolean allowCloseStop, double followPersonalSpace) {
+        FollowMovementService.followInputStep(bot, targetPos, distanceSq, allowCloseStop, followPersonalSpace, FOLLOW_SPRINT_DISTANCE_SQ);
+    }
+
+    private static boolean handleFollowObstacles(ServerPlayerEntity bot,
+                                                 ServerPlayerEntity target,
+                                                 Vec3d navGoalPos,
+                                                 BlockPos navGoalBlock,
+                                                 double progressDistSq,
+                                                 double targetDistSq,
+                                                 double absDeltaY,
+                                                 boolean canSee,
+                                                 boolean directBlocked,
+                                                 boolean allowTeleportPref,
+                                                 boolean forceWalk,
+                                                 MinecraftServer server) {
+        if (bot == null) {
+            return false;
+        }
+        BotCommandStateService.State st = stateFor(bot);
+        boolean fixedGoalActive = st != null && st.followFixedGoal != null;
+        boolean returningToBase = fixedGoalActive && st != null && st.baseTarget != null;
+        if (!fixedGoalActive && target == null) {
+            return false;
+        }
+        boolean botSealed = isSealedSpace(bot);
+        boolean commanderSealed = target != null && isSealedSpace(target);
+        boolean teleportPreferenceEnabled = SkillPreferences.teleportDuringSkills(bot);
+        // Only treat "very close" as resolved if we're not physically blocked; otherwise we still need
+        // door/waypoint planning to reach the commander through the enclosure.
+        if (progressDistSq <= 2.25D && canSee && !directBlocked) {
+            UUID id = bot.getUuid();
+            FOLLOW_LAST_DISTANCE_SQ.remove(id);
+            FOLLOW_STAGNANT_TICKS.remove(id);
+            FOLLOW_LAST_BLOCK_POS.remove(id);
+            FOLLOW_POS_STAGNANT_TICKS.remove(id);
+            FollowStateService.clearVerticalClimbLock(id);
+            FOLLOW_VERTICAL_LOCK_LAST_POS.remove(id);
+            FOLLOW_VERTICAL_LOCK_LAST_REPLAN_MS.remove(id);
+            FOLLOW_COMMANDER_LADDER_HINT.remove(id);
+            return false;
+        }
+
+        UUID id = bot.getUuid();
+        CommanderLadderHint ladderHint = getCommanderLadderHint(id);
+        Double last = FOLLOW_LAST_DISTANCE_SQ.get(id);
+        int stagnant = FOLLOW_STAGNANT_TICKS.getOrDefault(id, 0);
+        if (last != null && progressDistSq >= last - 0.01D) {
+            stagnant++;
+        } else {
+            stagnant = 0;
+        }
+        FOLLOW_LAST_DISTANCE_SQ.put(id, progressDistSq);
+
+        // Secondary stagnation signal: if we're not changing block position at all, we're effectively stuck
+        // (common when pushing into fences/doors/corners where distance may still jitter slightly).
+        BlockPos curBlock = bot.getBlockPos();
+        BlockPos prevBlock = FOLLOW_LAST_BLOCK_POS.get(id);
+        int posStagnant = FOLLOW_POS_STAGNANT_TICKS.getOrDefault(id, 0);
+        if (prevBlock != null && prevBlock.equals(curBlock)) {
+            posStagnant++;
+        } else {
+            posStagnant = 0;
+            FOLLOW_LAST_BLOCK_POS.put(id, curBlock.toImmutable());
+        }
+        FOLLOW_POS_STAGNANT_TICKS.put(id, posStagnant);
+        int blockedTicks = FOLLOW_DIRECT_BLOCKED_TICKS.getOrDefault(id, 0);
+        if (directBlocked) {
+            blockedTicks++;
+            FOLLOW_DIRECT_BLOCKED_TICKS.put(id, blockedTicks);
+        } else {
+            FOLLOW_DIRECT_BLOCKED_TICKS.remove(id);
+            blockedTicks = 0;
+        }
+        int effectiveStagnant = Math.max(Math.max(stagnant, posStagnant), blockedTicks);
+        int leafPosThreshold = returningToBase ? 3 : 5;
+        int leafStagnantThreshold = returningToBase ? 6 : 10;
+        if (directBlocked && posStagnant >= leafPosThreshold && effectiveStagnant >= leafStagnantThreshold) {
+            BlockPos directionGoal = navGoalBlock != null ? navGoalBlock : (target != null ? target.getBlockPos() : null);
+            Direction towardAction = directionGoal != null
+                    ? approximateToward(bot.getBlockPos(), directionGoal)
+                    : bot.getHorizontalFacing();
+            if (MovementService.hasLeafObstruction(bot, towardAction)
+                    && MovementService.clearLeafObstruction(bot, towardAction)) {
+                maybeLogFollowDecision(bot, "leaf-cleared: toward=" + towardAction + " stagnant=" + effectiveStagnant);
+                return true;
+            }
+        }
+
+        if (returningToBase && navGoalBlock != null && effectiveStagnant >= 8) {
+            FollowMovementService.FollowWaterEscapeResult waterEscape =
+                    FollowMovementService.tryFollowWaterLedgeEscapeDetailed(bot, navGoalBlock);
+            if (waterEscape != null && (waterEscape.outcome() == FollowMovementService.FollowWaterEscapeOutcome.INPUT_APPLIED
+                    || waterEscape.outcome() == FollowMovementService.FollowWaterEscapeOutcome.DISPLACED)) {
+                maybeLogFollowDecision(bot, "water-ledge-escape: outcome=" + waterEscape.outcome()
+                        + " detail=" + waterEscape.detail());
+                return true;
+            }
+        }
+
+        // Escape lava, magma blocks, or fire underfoot.
+        BlockPos dangerGoal = navGoalBlock != null ? navGoalBlock : (target != null ? target.getBlockPos() : null);
+        if (dangerGoal != null && FollowMovementService.tryDangerousGroundEscape(bot, dangerGoal)) {
+            maybeLogFollowDecision(bot, "dangerous-ground-escape");
+            return true;
+        }
+
+        if (!fixedGoalActive && target != null && bot.isClimbing() && !target.isClimbing()) {
+            double climbGap = target.getY() - bot.getY();
+            if (climbGap >= -1.5D && climbGap <= 3.5D) {
+                if (shouldAllowClimbExit(bot, target, ladderHint, effectiveStagnant + 4, false)
+                        && tryExitClimbableTowardTarget(bot, target, effectiveStagnant + 4, "follow-climb-dismount", false)) {
+                    return true;
+                }
+            }
+        }
+
+        boolean hintVerticalCommit = target != null && shouldCommitToHintLadder(bot, target, ladderHint);
+        boolean targetAboveBot = target != null
+                && ((target.getY() - bot.getY()) >= 3.0D
+                || (hintVerticalCommit && (target.getY() - bot.getY()) >= 1.75D));
+        if (!fixedGoalActive && target != null) {
+            if (maybeAcquireVerticalClimbLock(bot, target, targetDistSq, targetAboveBot, directBlocked, effectiveStagnant)) {
+                return true;
+            }
+            VerticalClimbLock verticalLock = FollowStateService.getVerticalClimbLock(id);
+            if (verticalLock != null && tickVerticalClimbLock(bot, target, verticalLock, targetDistSq, effectiveStagnant, directBlocked)) {
+                return true;
+            }
+        }
+        boolean targetBelowBot = target != null
+                && ((bot.getY() - target.getY()) >= 3.0D
+                || (hintVerticalCommit && (bot.getY() - target.getY()) >= 1.75D));
+        boolean preferVerticalClimb = shouldPreferVerticalClimb(bot, target, targetAboveBot, targetDistSq);
+        if (!fixedGoalActive && targetBelowBot && tryVerticalClimbDescentAssist(bot, target, targetDistSq, effectiveStagnant, directBlocked)) {
+            return true;
+        }
+        if (!fixedGoalActive && targetAboveBot && tryVerticalClimbAssist(bot, target, targetDistSq, effectiveStagnant, directBlocked)) {
+            return true;
+        }
+
+        Vec3d commanderGoal = fixedGoalActive ? navGoalPos : positionOf(target);
+        BlockPos commanderGoalBlock = fixedGoalActive ? navGoalBlock : target.getBlockPos();
+        boolean commanderRouteBlocked = isDirectRouteBlocked(bot, commanderGoal, commanderGoalBlock);
+        if (target != null && canSee && commanderRouteBlocked && isOpenDoorBetween(bot, target)) {
+            commanderRouteBlocked = false;
+        }
+        // For fixed-goal follow, the original canSee flag represents LoS to the FINAL goal, which can be
+        // blocked by distant terrain even when the current navigation goal (waypoint) is locally clear.
+        // Use the direct-route check to the current nav goal as the "route clear" signal instead.
+        boolean clearRoute = fixedGoalActive ? !commanderRouteBlocked : (canSee && !commanderRouteBlocked);
+        if (clearRoute) {
+            if (!botSealed && !commanderSealed) {
+                FOLLOW_DOOR_PLAN.remove(id);
+                FOLLOW_DOOR_LAST_BLOCK.remove(id);
+                FOLLOW_DOOR_STUCK_TICKS.remove(id);
+                FOLLOW_DOOR_RECOVERY.remove(id);
+                FOLLOW_WAYPOINTS.remove(id);
+                maybeLogFollowDecision(bot, "commander-route clear: dist="
+                        + String.format(Locale.ROOT, "%.2f", Math.sqrt(targetDistSq)));
+                return false;
+            } else {
+                maybeLogFollowDecision(bot, "commander-route clear but sealed: botSealed="
+                        + botSealed + " commanderSealed=" + commanderSealed);
+            }
+        }
+
+        if (!fixedGoalActive) {
+            boolean overrideApplied = applyLongRangeFollowOverride(bot, target, targetDistSq, navGoalBlock, canSee, directBlocked, botSealed, commanderSealed);
+            if (overrideApplied) {
+                directBlocked = false;
+            }
+        }
+
+        // Reuse return-to-base stuck escape logic for normal follow (non-fixed goal), but only when
+        // teleportation is explicitly disabled ("force walk") and the bot is NOT mounted.
+        //
+        // Mining / pillaring escapes are far too destructive for normal follow, and when mounted they
+        // can cause dismount loops and block-breaking while the horse is just trying to climb terrain.
+        if (!fixedGoalActive && target != null) {
+            if (forceWalk && !bot.hasVehicle()) {
+                net.wcfcarolina13.GameAI.services.ReturnBaseStuckService.tickAndCheckStuck(bot, positionOf(target));
+            } else {
+                // Prevent stale stuck timers from accumulating when not using the follow stuck system.
+                net.wcfcarolina13.GameAI.services.ReturnBaseStuckService.clear(bot.getUuid());
+            }
+        }
+
+        if (target != null && shouldPrioritizeCommanderOverDoors(bot, target, canSee, directBlocked, targetDistSq, botSealed, commanderSealed)) {
+            FOLLOW_DOOR_PLAN.remove(id);
+            FOLLOW_DOOR_LAST_BLOCK.remove(id);
+            FOLLOW_DOOR_STUCK_TICKS.remove(id);
+            FOLLOW_DOOR_RECOVERY.remove(id);
+            FOLLOW_WAYPOINTS.remove(id);
+            maybeLogFollowDecision(bot, "skip-door-magnet: forcing direct follow dist="
+                    + String.format(Locale.ROOT, "%.2f", Math.sqrt(targetDistSq))
+                    + " sealed=" + botSealed + "/" + commanderSealed);
+            return false;
+        }
+
+        // If we are executing a door sub-goal (enclosure escape), drive that first.
+        FollowDoorPlan activeDoorPlan = FOLLOW_DOOR_PLAN.get(id);
+        long nowMs = System.currentTimeMillis();
+        if (activeDoorPlan == null) {
+            FOLLOW_VERTICAL_DOOR_LOOP_LAST_BASE.remove(id);
+            FOLLOW_VERTICAL_DOOR_LOOP_STREAK.remove(id);
+        }
+        if (activeDoorPlan != null) {
+            if (preferVerticalClimb && target != null) {
+                FOLLOW_DOOR_PLAN.remove(id);
+                FOLLOW_DOOR_LAST_BLOCK.remove(id);
+                FOLLOW_DOOR_STUCK_TICKS.remove(id);
+                FOLLOW_DOOR_RECOVERY.remove(id);
+                avoidDoorFor(id, activeDoorPlan.doorBase(), 3_000L, "prefer-vertical-climb");
+                maybeLogFollowDecision(bot, "door-plan cancel: prefer-vertical-climb doorBase="
+                        + activeDoorPlan.doorBase().toShortString());
+                if (tryVerticalClimbAssist(bot, target, targetDistSq, effectiveStagnant, directBlocked)) {
+                    return true;
+                }
+                return false;
+            }
+            if (shouldBreakVerticalDoorLoop(bot, target, targetDistSq, targetAboveBot, directBlocked, effectiveStagnant, activeDoorPlan, nowMs)) {
+                MovementService.markDoorEscapeFailed(bot, activeDoorPlan.doorBase());
+                FOLLOW_DOOR_PLAN.remove(id);
+                FOLLOW_DOOR_LAST_BLOCK.remove(id);
+                FOLLOW_DOOR_STUCK_TICKS.remove(id);
+                FOLLOW_DOOR_RECOVERY.remove(id);
+                avoidDoorFor(id, activeDoorPlan.doorBase(), 12_000L, "vertical-door-loop-break");
+                maybeLogFollowDecision(bot, "door-loop-break: doorBase=" + activeDoorPlan.doorBase().toShortString()
+                        + " targetDy=" + String.format(Locale.ROOT, "%.2f", (target != null ? (target.getY() - bot.getY()) : 0.0D))
+                        + " stagnant=" + effectiveStagnant);
+                if (!fixedGoalActive && target != null) {
+                    requestFollowPathPlan(bot, target, true, "vertical-door-loop-break");
+                }
+                if (!fixedGoalActive && targetAboveBot && tryVerticalClimbAssist(bot, target, targetDistSq, effectiveStagnant, directBlocked)) {
+                    return true;
+                }
+                return false;
+            }
+            // If the commander moved away and we now have a clear direct route, stop "lingering" on the doorway
+            // and resume normal follow immediately.
+            if (canSee && targetDistSq <= 144.0D) { // ~12 blocks
+                BlockPos commanderBlock = commanderGoalBlock != null
+                        ? commanderGoalBlock
+                        : (target != null ? target.getBlockPos() : null);
+                boolean blockedToCommander = isDirectRouteBlocked(bot, commanderGoal, commanderBlock);
+                if (!blockedToCommander) {
+                    FOLLOW_DOOR_PLAN.remove(id);
+                    FOLLOW_DOOR_LAST_BLOCK.remove(id);
+                    FOLLOW_DOOR_STUCK_TICKS.remove(id);
+                    FOLLOW_DOOR_RECOVERY.remove(id);
+                    maybeLogFollowDecision(bot, "door-plan cancel: clear-to-commander dist="
+                            + String.format(Locale.ROOT, "%.2f", Math.sqrt(targetDistSq)));
+                    return false;
+                }
+            }
+            if (nowMs >= activeDoorPlan.expiresAtMs()) {
+                // Mark this door as failed to prevent oscillation.
+                MovementService.markDoorEscapeFailed(bot, activeDoorPlan.doorBase());
+                FOLLOW_DOOR_PLAN.remove(id);
+                FOLLOW_DOOR_LAST_BLOCK.remove(id);
+                FOLLOW_DOOR_STUCK_TICKS.remove(id);
+                FOLLOW_DOOR_RECOVERY.remove(id);
+            } else {
+                boolean inProgress = tickFollowDoorPlan(bot, id, activeDoorPlan);
+                if (inProgress) {
+                    return true;
+                }
+            }
+        }
+
+        // If we're adjacent to a closed door, try opening it first (cheap, no raycast).
+        // Guarded to avoid “door distraction” when the commander is far away and we don't actually need to interact with doors.
+        if (!preferVerticalClimb && (directBlocked || effectiveStagnant >= 3 || targetDistSq <= 400.0D) && bot.getEntityWorld() instanceof ServerWorld world) {
+            BlockPos base = bot.getBlockPos();
+            Direction returnToBaseDoorDir = null;
+            if (returningToBase && navGoalBlock != null) {
+                returnToBaseDoorDir = approximateToward(base, navGoalBlock);
+            }
+            for (Direction dir : Direction.Type.HORIZONTAL) {
+                if (returningToBase
+                        && !botSealed
+                        && !directBlocked
+                        && effectiveStagnant < 10
+                        && returnToBaseDoorDir != null
+                        && dir != returnToBaseDoorDir) {
+                    continue;
+                }
+                BlockPos candidate = base.offset(dir);
+                if (world.getBlockState(candidate).getBlock() instanceof net.minecraft.block.DoorBlock
+                        || world.getBlockState(candidate.up()).getBlock() instanceof net.minecraft.block.DoorBlock
+                        || world.getBlockState(candidate).getBlock() instanceof FenceGateBlock
+                        || world.getBlockState(candidate.up()).getBlock() instanceof FenceGateBlock) {
+                    BlockPos doorBase = normalizeDoorBase(world, candidate);
+                    if (doorBase != null) {
+                        if (doorBase.equals(currentAvoidDoor(id))) {
+                            continue;
+                        }
+                        // Skip doors that are NOT between bot and goal (avoids side-tracking on unrelated doors).
+                        // A door is "between" if stepping through it gets us closer to the goal.
+                        BlockPos goalBlock = navGoalBlock != null ? navGoalBlock : (target != null ? target.getBlockPos() : null);
+                        if (goalBlock != null) {
+                            double currentDistSq = base.getSquaredDistance(goalBlock);
+                            FollowDoorPlan probePlan = buildFollowDoorPlan(bot, world, candidate);
+                            BlockPos afterPos = probePlan != null ? probePlan.stepThroughPos() : candidate;
+                            double afterDoorDistSq = afterPos.getSquaredDistance(goalBlock);
+                            // If the door isn't closer to the goal than our current position, skip it
+                            // unless we're directly blocked (stuck against something).
+                            if (afterDoorDistSq >= currentDistSq && !directBlocked && effectiveStagnant < 6) {
+                                continue;
+                            }
+                            if (returningToBase
+                                    && !botSealed
+                                    && !directBlocked
+                                    && effectiveStagnant < 10
+                                    && !isStepMeaningfullyTowardGoal(base, afterPos, goalBlock)) {
+                                continue;
+                            }
+                        }
+                        if (targetDistSq >= 900.0D && (MovementService.isDoorRecentlyClosed(id, doorBase)
+                                || isNearRecentlyCrossedDoor(id, doorBase, 12_000L, 36.0D))) {
+                            avoidDoorFor(id, doorBase, 8_000L, "avoid-adjacent-longrange");
+                            maybeLogFollowDecision(bot, "skip-door: avoid adjacent doorBase=" + doorBase.toShortString()
+                                    + " dist=" + String.format(Locale.ROOT, "%.2f", Math.sqrt(targetDistSq)));
+                            continue;
+                        }
+                    }
+                    if (MovementService.tryOpenDoorAt(bot, candidate)) {
+                        // Reuse the proven "approach → open → step through" behavior whenever we're blocked.
+                        if (directBlocked) {
+                            FollowDoorPlan plan = buildFollowDoorPlan(bot, world, candidate);
+                            if (plan != null) {
+                                FOLLOW_DOOR_PLAN.put(id, plan);
+                                maybeLogFollowDecision(bot, "door-adjacent: plan doorBase=" + plan.doorBase().toShortString()
+                                        + " approach=" + plan.approachPos().toShortString()
+                                        + " step=" + plan.stepThroughPos().toShortString());
+                                return true;
+                            }
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+
+        // If the direct route is blocked and we're not making progress, proactively treat a nearby door as an escape
+        // objective instead of continuing to push into a fence/glass corner.
+        // For fixed-goal (return-to-base), be more conservative to avoid oscillating on nearby doors.
+        int escapeThreshold = fixedGoalActive ? 10 : ((targetDistSq >= 900.0D && !canSee) ? 8 : 4);
+        if (!preferVerticalClimb && directBlocked && effectiveStagnant >= escapeThreshold && FOLLOW_DOOR_PLAN.get(id) == null && bot.getEntityWorld() instanceof ServerWorld world) {
+            long now = System.currentTimeMillis();
+            long lastPlanMs = FOLLOW_LAST_ESCAPE_DOOR_PLAN_MS.getOrDefault(id, -1L);
+            // Use longer cooldown for fixed-goal to prevent rapid door oscillation.
+            long planCooldown = fixedGoalActive ? 2000L : 900L;
+            if (now - lastPlanMs >= planCooldown) {
+                FOLLOW_LAST_ESCAPE_DOOR_PLAN_MS.put(id, now);
+                BlockPos avoidDoor = currentAvoidDoor(id);
+                long lastDoorMs = FOLLOW_LAST_DOOR_CROSS_MS.getOrDefault(id, -1L);
+                if (lastDoorMs >= 0 && (System.currentTimeMillis() - lastDoorMs) < 5_000L) {
+                    avoidDoor = FOLLOW_LAST_DOOR_BASE.get(id);
+                }
+                MovementService.DoorSubgoalPlan escape = MovementService.findDoorEscapePlan(bot, navGoalBlock, avoidDoor);
+                if (escape != null) {
+                    if (returningToBase && !botSealed && navGoalBlock != null
+                            && !isStepMeaningfullyTowardGoal(bot.getBlockPos(), escape.stepThroughPos(), navGoalBlock)) {
+                        avoidDoorFor(id, escape.doorBase(), 8_000L, "return-base-escape-not-toward-goal");
+                        maybeLogFollowDecision(bot, "skip-door: return-base escape not toward goal doorBase="
+                                + escape.doorBase().toShortString());
+                        escape = null;
+                    }
+                    if (escape != null && targetDistSq >= 900.0D && MovementService.isDoorRecentlyClosed(id, escape.doorBase())) {
+                        avoidDoorFor(id, escape.doorBase(), 8_000L, "recently-closed-escape");
+                        maybeLogFollowDecision(bot, "skip-door: recently closed escape doorBase=" + escape.doorBase().toShortString()
+                                + " dist=" + String.format(Locale.ROOT, "%.2f", Math.sqrt(targetDistSq)));
+                        escape = MovementService.findDoorEscapePlan(bot, navGoalBlock, escape.doorBase());
+                    }
+                    if (escape != null && targetDistSq >= 900.0D && isNearRecentlyCrossedDoor(id, escape.doorBase(), 12_000L, 36.0D)) {
+                        avoidDoorFor(id, escape.doorBase(), 8_000L, "near-last-door-escape");
+                        maybeLogFollowDecision(bot, "skip-door: near last-crossed escape doorBase=" + escape.doorBase().toShortString()
+                                + " dist=" + String.format(Locale.ROOT, "%.2f", Math.sqrt(targetDistSq)));
+                        escape = MovementService.findDoorEscapePlan(bot, navGoalBlock, escape.doorBase());
+                    }
+                    if (escape != null && (targetDistSq < 900.0D || !MovementService.isDoorRecentlyClosed(id, escape.doorBase()))) {
+                        // Use longer timeout for fixed goal (return-to-base) since bot must reach destination
+                        long doorTimeout = fixedGoalActive ? 10_000L : 5_000L;
+                        FollowDoorPlan plan = new FollowDoorPlan(
+                                escape.doorBase().toImmutable(),
+                                escape.approachPos().toImmutable(),
+                                escape.stepThroughPos().toImmutable(),
+                                System.currentTimeMillis() + doorTimeout,
+                                false
+                        );
+                        FOLLOW_DOOR_PLAN.put(id, plan);
+                        maybeLogFollowDecision(bot, "door-escape: directBlocked stagnant=" + effectiveStagnant
+                                + " blockedTicks=" + blockedTicks
+                                + " doorBase=" + plan.doorBase().toShortString()
+                                + " approach=" + plan.approachPos().toShortString()
+                                + " step=" + plan.stepThroughPos().toShortString());
+                        return true;
+                    }
+                }
+                if (fixedGoalActive && navGoalBlock != null) {
+                    requestFollowPathPlanToGoal(bot, navGoalBlock, true, "direct-blocked-stuck");
+                } else {
+                    if (target != null) {
+                        requestFollowPathPlan(bot, target, true, "direct-blocked-stuck");
+                    }
+                }
+            }
+        }
+
+        // Proactively open a door directly between bot and target when close enough.
+        // This handles the common "follow while behind a closed door" case even when
+        // distanceSq jitters and the stagnant counter doesn't hit exactly.
+        if (!preferVerticalClimb && targetDistSq <= 400.0D) { // keep this local; long-range “door ray” tends to create distractions
+            Vec3d doorRayGoal = navGoalPos != null ? navGoalPos : (target != null ? target.getEyePos() : null);
+            if (doorRayGoal == null) {
+                return false;
+            }
+            BlockPos blockingDoor = BlockInteractionService.findDoorAlongLine(bot, doorRayGoal, 5.5D);
+            if (blockingDoor != null) {
+                if (bot.getEntityWorld() instanceof ServerWorld world) {
+                    BlockPos normalized = normalizeDoorBase(world, blockingDoor);
+                    if (normalized != null && normalized.equals(currentAvoidDoor(id))) {
+                        return false;
+                    }
+                }
+                MovementService.tryOpenDoorAt(bot, blockingDoor);
+                // Commit to stepping through the doorway (non-blocking) to avoid jittering on the threshold.
+                if (bot.getEntityWorld() instanceof ServerWorld world) {
+                    FollowDoorPlan plan = buildFollowDoorPlan(bot, world, blockingDoor);
+                    if (plan != null) {
+                        FOLLOW_DOOR_PLAN.put(id, plan);
+                        maybeLogFollowDecision(bot, "door-ray: hit=" + blockingDoor.toShortString()
+                                + " plan doorBase=" + plan.doorBase().toShortString()
+                                + " approach=" + plan.approachPos().toShortString()
+                                + " step=" + plan.stepThroughPos().toShortString());
+                        return true;
+                    }
+                }
+            }
+        }
+
+        // If the bot isn't making progress for a few ticks, try to open a door directly in the way.
+        if (effectiveStagnant == 4) {
+            if (navGoalBlock != null) {
+                MovementService.tryOpenDoorToward(bot, navGoalBlock);
+            } else if (target != null) {
+                MovementService.tryOpenDoorToward(bot, target.getBlockPos());
+            }
+        }
+
+        // If we're still stuck and the target is likely "around the corner", treat a nearby door as a sub-goal.
+        if (!preferVerticalClimb && effectiveStagnant >= 6 && FOLLOW_DOOR_PLAN.get(id) == null && bot.getEntityWorld() instanceof ServerWorld world) {
+            if (returningToBase && !botSealed && !directBlocked) {
+                return false;
+            }
+            // If the commander is close and visible and we're not directly blocked, never detour through doors.
+            // This prevents “door magnet” behavior when the bot is already in the right area.
+            if (target != null && canSee && !directBlocked && targetDistSq <= 64.0D) {
+                FOLLOW_WAYPOINTS.remove(id);
+                return false;
+            }
+            // Only treat doors as a sub-goal when we have reason to think we need to change rooms (blocked or no LoS).
+            if (target != null && !directBlocked && canSee) {
+                return false;
+            }
+            // If the commander is far away, avoid “nearest door” distractions; follow will rely on direct pursuit
+            // and (if enabled) wolf-teleport catch-up rather than local door heuristics.
+            if (target != null && !directBlocked && !canSee && targetDistSq >= 900.0D) { // ~30 blocks
+                return false;
+            }
+            BlockPos goalBlock = navGoalBlock != null ? navGoalBlock : (target != null ? target.getBlockPos() : null);
+            if (goalBlock == null) {
+                return false;
+            }
+            BlockPos avoidDoor = currentAvoidDoor(id);
+            long lastDoorMs = FOLLOW_LAST_DOOR_CROSS_MS.getOrDefault(id, -1L);
+            if (lastDoorMs >= 0 && (System.currentTimeMillis() - lastDoorMs) < 5_000L) {
+                avoidDoor = FOLLOW_LAST_DOOR_BASE.get(id);
+            }
+	            MovementService.DoorSubgoalPlan plan = MovementService.findDoorEscapePlan(bot, goalBlock, avoidDoor);
+	            if (plan != null) {
+	                if (targetDistSq >= 900.0D && MovementService.isDoorRecentlyClosed(id, plan.doorBase())) {
+	                    avoidDoorFor(id, plan.doorBase(), 8_000L, "recently-closed-corner");
+	                    maybeLogFollowDecision(bot, "skip-door: recently closed corner doorBase=" + plan.doorBase().toShortString()
+	                            + " dist=" + String.format(Locale.ROOT, "%.2f", Math.sqrt(targetDistSq)));
+	                    plan = MovementService.findDoorEscapePlan(bot, goalBlock, plan.doorBase());
+	                }
+	                if (plan != null && targetDistSq >= 900.0D && isNearRecentlyCrossedDoor(id, plan.doorBase(), 12_000L, 36.0D)) {
+	                    avoidDoorFor(id, plan.doorBase(), 8_000L, "near-last-door-corner");
+	                    maybeLogFollowDecision(bot, "skip-door: near last-crossed corner doorBase=" + plan.doorBase().toShortString()
+	                            + " dist=" + String.format(Locale.ROOT, "%.2f", Math.sqrt(targetDistSq)));
+	                    plan = MovementService.findDoorEscapePlan(bot, goalBlock, plan.doorBase());
+	                }
+	                if (plan != null) {
+	                    BlockPos lastDoor = FOLLOW_LAST_DOOR_BASE.get(id);
+	                    if (lastDoorMs >= 0 && lastDoor != null && lastDoor.equals(plan.doorBase()) && (System.currentTimeMillis() - lastDoorMs) < 4_500L) {
+	                        // Avoid immediate oscillation back through the same door we just crossed.
+	                    } else {
+                        // Use longer timeout for fixed goal (return-to-base) since bot must reach destination
+                        long doorTimeout = fixedGoalActive ? 10_000L : 4_000L;
+                        FollowDoorPlan followPlan = new FollowDoorPlan(
+                                plan.doorBase(),
+                                plan.approachPos(),
+                                plan.stepThroughPos(),
+                                System.currentTimeMillis() + doorTimeout,
+                                false
+                        );
+                        FOLLOW_DOOR_PLAN.put(id, followPlan);
+                        maybeLogFollowDecision(bot, "door-corner: stagnant=" + effectiveStagnant
+                                + " doorBase=" + followPlan.doorBase().toShortString()
+                                + " approach=" + followPlan.approachPos().toShortString()
+                                + " step=" + followPlan.stepThroughPos().toShortString());
+                        return true;
+                    }
+                }
+            }
+        }
+
+        if (fixedGoalActive && navGoalBlock != null) {
+            maybeRequestFollowPathPlanToGoal(bot, navGoalBlock, canSee, effectiveStagnant);
+        } else {
+            if (target != null) {
+                maybeRequestFollowPathPlan(bot, target, canSee, effectiveStagnant);
+            }
+        }
+
+        Long replanAfterDoor = FOLLOW_REPLAN_AFTER_DOOR_MS.remove(id);
+        if (replanAfterDoor != null && (System.currentTimeMillis() - replanAfterDoor) < 4_500L) {
+            ArrayDeque<BlockPos> waypoints = FOLLOW_WAYPOINTS.get(id);
+            if (waypoints == null || waypoints.isEmpty()) {
+                if (fixedGoalActive && navGoalBlock != null) {
+                    requestFollowPathPlanToGoal(bot, navGoalBlock, true, "post-door");
+                } else {
+                    if (target != null) {
+                        requestFollowPathPlan(bot, target, true, "post-door");
+                    }
+                }
+            }
+        }
+
+        // Wolf-style teleport catch-up:
+        // - only when player has allowed teleport generally,
+        // - only when far enough or when we've been stuck for a while,
+        // - and never spam (cooldown).
+        if (!fixedGoalActive && allowTeleportPref && shouldWolfTeleport(targetDistSq, absDeltaY, canSee, effectiveStagnant, server)) {
+            if (tryWolfTeleport(bot, target, server)) {
+                FOLLOW_LAST_DISTANCE_SQ.remove(id);
+                FOLLOW_STAGNANT_TICKS.remove(id);
+                return true;
+            }
+        }
+
+        if (effectiveStagnant == 0) {
+            FOLLOW_STAGNANT_TICKS.remove(id);
+        } else {
+            FOLLOW_STAGNANT_TICKS.put(id, effectiveStagnant);
+        }
+        return false;
+    }
+
+    private static boolean shouldPrioritizeCommanderOverDoors(ServerPlayerEntity bot,
+                                                              ServerPlayerEntity target,
+                                                              boolean canSee,
+                                                              boolean directBlocked,
+                                                              double targetDistSq,
+                                                              boolean botSealed,
+                                                              boolean commanderSealed) {
+        if (bot == null || target == null) {
+            return false;
+        }
+        if (botSealed || commanderSealed) {
+            return false;
+        }
+        if (!directBlocked && (canSee || targetDistSq >= 900.0D)) {
+            return true;
+        }
+        return false;
+    }
+
+    private static double horizontalDistanceSq(ServerPlayerEntity bot, Vec3d targetPos) {
+        if (bot == null || targetPos == null) {
+            return Double.MAX_VALUE;
+        }
+        double dx = targetPos.x - bot.getX();
+        double dz = targetPos.z - bot.getZ();
+        return dx * dx + dz * dz;
+    }
+
+    private static boolean isDirectRouteBlocked(ServerPlayerEntity bot, Vec3d goalPos, BlockPos goalBlock) {
+        if (bot == null || goalPos == null) {
+            return false;
+        }
+        if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
+            return false;
+        }
+        double[] heights = new double[] { 0.12D, 1.10D };
+        boolean anyRayHit = false;
+        for (double h : heights) {
+            Vec3d from = new Vec3d(bot.getX(), bot.getY() + h, bot.getZ());
+            Vec3d to = new Vec3d(goalPos.x, goalPos.y + h, goalPos.z);
+            Vec3d delta = to.subtract(from);
+            if (delta.lengthSquared() < 1.0E-4) {
+                continue;
+            }
+            for (net.minecraft.world.RaycastContext.ShapeType shape : List.of(
+                    net.minecraft.world.RaycastContext.ShapeType.COLLIDER,
+                    net.minecraft.world.RaycastContext.ShapeType.OUTLINE
+            )) {
+                HitResult hit = world.raycast(new net.minecraft.world.RaycastContext(
+                        from,
+                        to,
+                        shape,
+                        net.minecraft.world.RaycastContext.FluidHandling.NONE,
+                        bot
+                ));
+                if (hit.getType() != HitResult.Type.BLOCK || !(hit instanceof BlockHitResult bhr)) {
+                    continue;
+                }
+                anyRayHit = true;
+                // If we hit any block before reaching the goal, consider the direct route blocked.
+                // goalBlock may be null (Vec3 goal), so treat any hit as blocked in that case.
+                if (goalBlock == null || !bhr.getBlockPos().equals(goalBlock)) {
+                    return true;
+                }
+            }
+        }
+        // If raycasts show a clear line, do NOT let the wide collision probe force a door plan. This prevents
+        // false positives when the bot is close to walls/fences but still has a clear approach to the commander.
+        if (!anyRayHit) {
+            return false;
+        }
+        // Otherwise, fall back to a conservative collision-based probe (catches fence "gap raycast" cases).
+        return isRouteLikelyBlockedByCollisions(bot, goalPos, goalBlock);
+    }
+
+    private static boolean isRouteLikelyBlockedByCollisions(ServerPlayerEntity bot, Vec3d goalPos, BlockPos goalBlock) {
+        if (bot == null || goalPos == null) {
+            return false;
+        }
+        if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
+            return false;
+        }
+
+        UUID id = bot.getUuid();
+        long now = System.currentTimeMillis();
+        BlockPos botPos = bot.getBlockPos();
+        BlockPos goalKey = goalBlock != null ? goalBlock : BlockPos.ofFloored(goalPos);
+        Long last = FOLLOW_LAST_BLOCKED_PROBE_MS.get(id);
+        BlockPos lastGoal = FOLLOW_LAST_BLOCKED_PROBE_GOAL.get(id);
+        BlockPos lastBot = FOLLOW_LAST_BLOCKED_PROBE_BOTPOS.get(id);
+        if (last != null && (now - last) < 250L && botPos.equals(lastBot) && goalKey.equals(lastGoal)) {
+            return FOLLOW_LAST_BLOCKED_PROBE_RESULT.getOrDefault(id, Boolean.FALSE);
+        }
+
+        FOLLOW_LAST_BLOCKED_PROBE_MS.put(id, now);
+        FOLLOW_LAST_BLOCKED_PROBE_GOAL.put(id, goalKey.toImmutable());
+        FOLLOW_LAST_BLOCKED_PROBE_BOTPOS.put(id, botPos.toImmutable());
+
+        Vec3d from = new Vec3d(bot.getX(), bot.getY(), bot.getZ());
+        Vec3d to = new Vec3d(goalPos.x, bot.getY(), goalPos.z);
+        Vec3d delta = to.subtract(from);
+        double len = Math.sqrt(delta.x * delta.x + delta.z * delta.z);
+        if (len < 1.0E-4) {
+            FOLLOW_LAST_BLOCKED_PROBE_RESULT.put(id, Boolean.FALSE);
+            return false;
+        }
+        double maxDist = Math.min(8.0D, len);
+        Vec3d dir = new Vec3d(delta.x / len, 0, delta.z / len);
+        Vec3d perp = new Vec3d(-dir.z, 0, dir.x);
+
+        // For very short distances, avoid wide probes that can falsely detect nearby enclosure walls.
+        boolean shortProbe = maxDist <= 2.8D;
+        double halfWidth = shortProbe ? 0.30D : Math.max(0.38D, (bot.getWidth() * 0.5D) + 0.10D);
+        double height = Math.max(1.8D, bot.getHeight());
+        double step = shortProbe ? 0.45D : 0.35D;
+        double startT = shortProbe ? 0.85D : 0.45D;
+        double[] offsets = shortProbe ? new double[] { 0.0D } : new double[] { 0.0D, 0.28D, -0.28D };
+
+        boolean blocked = false;
+        for (double t = startT; t <= maxDist; t += step) {
+            Vec3d base = from.add(dir.multiply(t));
+            for (double off : offsets) {
+                Vec3d p = off == 0.0D ? base : base.add(perp.multiply(off));
+                Box box = new Box(
+                        p.x - halfWidth,
+                        bot.getY(),
+                        p.z - halfWidth,
+                        p.x + halfWidth,
+                        bot.getY() + height,
+                        p.z + halfWidth
+                );
+                if (world.getBlockCollisions(bot, box).iterator().hasNext()) {
+                    blocked = true;
+                    break;
+                }
+            }
+            if (blocked) break;
+        }
+
+        FOLLOW_LAST_BLOCKED_PROBE_RESULT.put(id, blocked);
+        return blocked;
+    }
+
+    private static boolean tickFollowDoorPlan(ServerPlayerEntity bot, UUID botId, FollowDoorPlan plan) {
+        if (bot == null || botId == null || plan == null) {
+            return false;
+        }
+        if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
+            FOLLOW_DOOR_PLAN.remove(botId);
+            FOLLOW_DOOR_LAST_BLOCK.remove(botId);
+            FOLLOW_DOOR_STUCK_TICKS.remove(botId);
+            FOLLOW_DOOR_RECOVERY.remove(botId);
+            return false;
+        }
+
+        FollowDoorRecovery recovery = FOLLOW_DOOR_RECOVERY.get(botId);
+        if (recovery != null) {
+            if (recovery.remainingTicks() <= 0) {
+                FOLLOW_DOOR_RECOVERY.remove(botId);
+            } else {
+                BlockPos recoveryGoal = recovery.goal();
+                if (!isStandable(world, recoveryGoal)) {
+                    FOLLOW_DOOR_RECOVERY.remove(botId);
+                } else {
+                    Vec3d recoveryCenter = Vec3d.ofCenter(recoveryGoal);
+                    double distSq = bot.squaredDistanceTo(recoveryCenter);
+                    LookController.faceBlock(bot, recoveryGoal);
+                    BotActions.sprint(bot, distSq > FOLLOW_SPRINT_DISTANCE_SQ);
+                    BotActions.autoJumpIfNeeded(bot);
+                    BotActions.applyMovementInput(bot, recoveryCenter, 0.14);
+                    if (distSq <= 1.25D) {
+                        FOLLOW_DOOR_RECOVERY.remove(botId);
+                    } else {
+                        FOLLOW_DOOR_RECOVERY.put(botId, new FollowDoorRecovery(recoveryGoal.toImmutable(), recovery.remainingTicks() - 1));
+                    }
+                    return true;
+                }
+            }
+        }
+        BlockPos doorBase = normalizeDoorBase(world, plan.doorBase());
+        if (doorBase == null) {
+            doorBase = plan.doorBase();
+        }
+        BlockState doorState = world.getBlockState(doorBase);
+
+        // If we are near the door and it's closed, try opening it even before we perfectly reach the
+        // approach cell. This reduces "push into door" stalls when alignment is imperfect.
+        boolean doorOpen = doorState.contains(Properties.OPEN)
+            && Boolean.TRUE.equals(doorState.get(Properties.OPEN));
+        if (!plan.stepping() && !doorOpen) {
+            double doorDistSq = bot.squaredDistanceTo(Vec3d.ofCenter(doorBase));
+            if (doorDistSq <= 4.0D) { // ~2 blocks
+                MovementService.tryOpenDoorAt(bot, doorBase);
+                doorState = world.getBlockState(doorBase);
+            }
+        }
+
+        // Keep the plan stable: approach/step are chosen when the plan is built.
+        // (Dynamic re-picking can oscillate around hinge corners.)
+        BlockPos approachPos = plan.approachPos();
+        BlockPos stepPos = plan.stepThroughPos();
+
+        BlockPos goal = plan.stepping() ? stepPos : approachPos;
+        Vec3d goalCenter = Vec3d.ofCenter(goal);
+        double distSq = bot.squaredDistanceTo(goalCenter);
+        boolean sprint = distSq > FOLLOW_SPRINT_DISTANCE_SQ;
+        LookController.faceBlock(bot, goal);
+        BotActions.sprint(bot, sprint);
+        BotActions.autoJumpIfNeeded(bot);
+        BotActions.applyMovementInput(bot, goalCenter, sprint ? 0.18 : 0.14);
+
+        // If we're stuck on a doorway threshold, apply a small lateral nudge to re-align.
+        BlockPos curBlock = bot.getBlockPos();
+        BlockPos prev = FOLLOW_DOOR_LAST_BLOCK.get(botId);
+        int stuck = FOLLOW_DOOR_STUCK_TICKS.getOrDefault(botId, 0);
+        if (prev != null && prev.equals(curBlock)) {
+            stuck++;
+        } else {
+            stuck = 0;
+            FOLLOW_DOOR_LAST_BLOCK.put(botId, curBlock.toImmutable());
+        }
+        FOLLOW_DOOR_STUCK_TICKS.put(botId, stuck);
+        if (stuck >= 8) {
+            // When blocked by a doorway/fence corner, attempt short, local repositioning moves.
+            // Choosing recovery relative to the current block works better than using only the approach block.
+            BlockPos cur = bot.getBlockPos();
+            Direction towardGoal = approximateToward(cur, goal);
+            if (!towardGoal.getAxis().isHorizontal()) {
+                towardGoal = bot.getHorizontalFacing();
+            }
+
+            ArrayList<BlockPos> candidates = new ArrayList<>(10);
+
+            // Prefer a true “double back” on the approach side (more reliable than tiny nudges).
+            Direction awayFromDoor = Direction.getFacing(
+                    approachPos.getX() - doorBase.getX(),
+                    0,
+                    approachPos.getZ() - doorBase.getZ());
+            if (awayFromDoor.getAxis().isHorizontal()) {
+                BlockPos retreat2 = doorBase.offset(awayFromDoor, 2);
+                BlockPos retreat3 = doorBase.offset(awayFromDoor, 3);
+                if (isStandable(world, retreat2)) {
+                    FOLLOW_DOOR_RECOVERY.put(botId, new FollowDoorRecovery(retreat2.toImmutable(), 14));
+                    FOLLOW_DOOR_STUCK_TICKS.put(botId, 0);
+                    BotActions.stop(bot);
+                    maybeLogFollowDecision(bot, "door-recovery: goal=" + retreat2.toShortString()
+                            + " doorBase=" + doorBase.toShortString()
+                            + " stepping=" + plan.stepping());
+                    Vec3d retreatCenter = Vec3d.ofCenter(retreat2);
+                    LookController.faceBlock(bot, retreat2);
+                    BotActions.applyMovementInput(bot, retreatCenter, 0.14);
+                    return true;
+                }
+                if (isStandable(world, retreat3)) {
+                    FOLLOW_DOOR_RECOVERY.put(botId, new FollowDoorRecovery(retreat3.toImmutable(), 16));
+                    FOLLOW_DOOR_STUCK_TICKS.put(botId, 0);
+                    BotActions.stop(bot);
+                    maybeLogFollowDecision(bot, "door-recovery: goal=" + retreat3.toShortString()
+                            + " doorBase=" + doorBase.toShortString()
+                            + " stepping=" + plan.stepping());
+                    Vec3d retreatCenter = Vec3d.ofCenter(retreat3);
+                    LookController.faceBlock(bot, retreat3);
+                    BotActions.applyMovementInput(bot, retreatCenter, 0.14);
+                    return true;
+                }
+                candidates.add(doorBase.offset(awayFromDoor, 2).offset(awayFromDoor.rotateYClockwise()));
+                candidates.add(doorBase.offset(awayFromDoor, 2).offset(awayFromDoor.rotateYCounterclockwise()));
+            }
+
+            // Fallback: local sidesteps/backstep (clears hinge/fence corners).
+            candidates.add(cur.offset(towardGoal.getOpposite()));
+            candidates.add(cur.offset(towardGoal.rotateYClockwise()));
+            candidates.add(cur.offset(towardGoal.rotateYCounterclockwise()));
+
+            double bestDist = Double.MAX_VALUE;
+            BlockPos best = null;
+            for (BlockPos c : candidates) {
+                if (c == null || !isStandable(world, c)) {
+                    continue;
+                }
+                double d = c.getSquaredDistance(goal);
+                if (d < bestDist) {
+                    bestDist = d;
+                    best = c.toImmutable();
+                }
+            }
+
+            if (best != null) {
+                FOLLOW_DOOR_RECOVERY.put(botId, new FollowDoorRecovery(best, 12));
+                FOLLOW_DOOR_STUCK_TICKS.put(botId, 0);
+                BotActions.stop(bot);
+                maybeLogFollowDecision(bot, "door-recovery: goal=" + best.toShortString()
+                        + " toward=" + towardGoal
+                        + " doorBase=" + doorBase.toShortString()
+                        + " stepping=" + plan.stepping());
+                Vec3d bestCenter = Vec3d.ofCenter(best);
+                LookController.faceBlock(bot, best);
+                BotActions.applyMovementInput(bot, bestCenter, 0.14);
+                return true;
+            }
+
+            // If we can't find any safe local reposition, stop committing to this door plan.
+            if (stuck >= 16) {
+                maybeLogFollowDecision(bot, "door-plan abort: stuck=" + stuck
+                        + " doorBase=" + doorBase.toShortString()
+                        + " goal=" + goal.toShortString()
+                        + " stepping=" + plan.stepping());
+                avoidDoorFor(botId, doorBase, 2_000L, "door-plan-abort");
+                FOLLOW_DOOR_PLAN.remove(botId);
+                FOLLOW_DOOR_LAST_BLOCK.remove(botId);
+                FOLLOW_DOOR_STUCK_TICKS.remove(botId);
+                FOLLOW_DOOR_RECOVERY.remove(botId);
+                return false;
+            }
+        }
+
+        if (distSq <= 2.25D) {
+            if (!plan.stepping()) {
+            boolean isOpen = doorState.contains(Properties.OPEN)
+                && Boolean.TRUE.equals(doorState.get(Properties.OPEN));
+                // Always invoke the door helper here:
+                // - if the door is closed, this opens it
+                // - if the door is already open, this schedules an auto-close behind the bot
+                boolean opened = MovementService.tryOpenDoorAt(bot, doorBase) || isOpen;
+                if (!opened) {
+                    // Don't commit to stepping through a door we couldn't open; instead, try to re-approach
+                    // for a better interaction angle.
+                    if (!FOLLOW_DOOR_RECOVERY.containsKey(botId)) {
+                        Direction away = Direction.getFacing(
+                                approachPos.getX() - doorBase.getX(),
+                                0,
+                                approachPos.getZ() - doorBase.getZ());
+                        if (away.getAxis().isHorizontal()) {
+                            BlockPos retreat = approachPos.offset(away).offset(away);
+                            if (isStandable(world, retreat)) {
+                                FOLLOW_DOOR_RECOVERY.put(botId, new FollowDoorRecovery(retreat.toImmutable(), 10));
+                            }
+                        }
+                    }
+                    maybeLogFollowDecision(bot, "door-open failed: doorBase=" + doorBase.toShortString());
+                    return true;
+                }
+                FOLLOW_DOOR_PLAN.put(botId, new FollowDoorPlan(
+                        doorBase.toImmutable(),
+                        approachPos,
+                        stepPos,
+                        plan.expiresAtMs(),
+                        true
+                ));
+                return true;
+            }
+
+            // Only consider the doorway crossed once we're no longer standing in the door block itself.
+            BlockPos botBlock = bot.getBlockPos();
+            boolean twoHighDoor = doorState.getBlock() instanceof net.minecraft.block.DoorBlock;
+            if (botBlock.equals(doorBase) || (twoHighDoor && botBlock.equals(doorBase.up()))) {
+                // Still “in the door”; keep executing the plan (or recovery) instead of oscillating.
+                return true;
+            }
+            FOLLOW_DOOR_PLAN.remove(botId);
+            FOLLOW_DOOR_LAST_BLOCK.remove(botId);
+            FOLLOW_DOOR_STUCK_TICKS.remove(botId);
+            FOLLOW_DOOR_RECOVERY.remove(botId);
+            FOLLOW_LAST_DOOR_BASE.put(botId, plan.doorBase());
+            FOLLOW_LAST_DOOR_CROSS_MS.put(botId, System.currentTimeMillis());
+            FOLLOW_REPLAN_AFTER_DOOR_MS.put(botId, System.currentTimeMillis());
+            avoidDoorFor(botId, doorBase, FOLLOW_POST_DOOR_AVOID_MS, "post-door-cross");
+            return false;
+        }
+        return true;
+    }
+
+    private static FollowDoorPlan buildFollowDoorPlan(ServerPlayerEntity bot, ServerWorld world, BlockPos doorHit) {
+        if (bot == null || world == null || doorHit == null) {
+            return null;
+        }
+        BlockPos doorBase = normalizeDoorBase(world, doorHit);
+        if (doorBase == null) {
+            return null;
+        }
+        BlockPos avoidDoor = currentAvoidDoor(bot.getUuid());
+        if (avoidDoor != null && avoidDoor.equals(doorBase)) {
+            return null;
+        }
+        BlockState state = world.getBlockState(doorBase);
+        boolean isDoor = state.getBlock() instanceof net.minecraft.block.DoorBlock;
+        boolean isGate = state.getBlock() instanceof FenceGateBlock;
+        if (!isDoor && !isGate) {
+            return null;
+        }
+        if (isDoor && state.isOf(net.minecraft.block.Blocks.IRON_DOOR)) {
+            return null;
+        }
+        // Prefer true front/back tiles (more reliable than picking an arbitrary standable neighbor near the hinge).
+        Direction facing = null;
+        if (isDoor && state.contains(net.minecraft.block.DoorBlock.FACING)) {
+            facing = state.get(net.minecraft.block.DoorBlock.FACING);
+        } else if (isGate && state.contains(FenceGateBlock.FACING)) {
+            facing = state.get(FenceGateBlock.FACING);
+        }
+
+        if (facing != null) {
+            BlockPos front = doorBase.offset(facing);
+            BlockPos back = doorBase.offset(facing.getOpposite());
+            if (isStandable(world, front) && isStandable(world, back)) {
+                BlockPos botPos = bot.getBlockPos();
+                boolean botCloserToFront = botPos.getSquaredDistance(front) <= botPos.getSquaredDistance(back);
+                BlockPos approach = (botCloserToFront ? front : back).toImmutable();
+                BlockPos step = (botCloserToFront ? back : front).toImmutable();
+                return new FollowDoorPlan(doorBase.toImmutable(), approach, step, System.currentTimeMillis() + 6_000L, false);
+            }
+        }
+        BlockPos botPos = bot.getBlockPos();
+        java.util.ArrayList<BlockPos> standableNeighbors = new java.util.ArrayList<>(4);
+        for (Direction dir : Direction.Type.HORIZONTAL) {
+            BlockPos n = doorBase.offset(dir);
+            if (isStandable(world, n)) {
+                standableNeighbors.add(n.toImmutable());
+            }
+        }
+        if (standableNeighbors.size() < 2) {
+            return null;
+        }
+        standableNeighbors.sort(java.util.Comparator.comparingDouble(p -> p.getSquaredDistance(botPos)));
+        BlockPos approach = standableNeighbors.get(0);
+        BlockPos step = standableNeighbors.stream()
+                .max(java.util.Comparator.comparingDouble(p -> p.getSquaredDistance(approach)))
+                .orElse(standableNeighbors.get(1));
+        if (!isStandable(world, approach) || !isStandable(world, step) || approach.equals(step)) {
+            return null;
+        }
+        return new FollowDoorPlan(doorBase.toImmutable(), approach.toImmutable(), step.toImmutable(), System.currentTimeMillis() + 6_000L, false);
+    }
+
+    private static void maybeRequestFollowPathPlan(ServerPlayerEntity bot, ServerPlayerEntity target, boolean canSee, int stagnantTicks) {
+        if (bot == null || target == null) {
+            return;
+        }
+        UUID botId = bot.getUuid();
+        if (!FollowPathService.shouldPlan(bot, target, canSee, stagnantTicks)) {
+            return;
+        }
+        // If we already have waypoints and aren't badly stuck, keep following them.
+        ArrayDeque<BlockPos> existing = FOLLOW_WAYPOINTS.get(botId);
+        if (existing != null && !existing.isEmpty() && stagnantTicks < 12) {
+            BlockPos currentTarget = target.getBlockPos().toImmutable();
+            BlockPos lastTarget = FOLLOW_LAST_PATH_TARGET.get(botId);
+            double movedSq = lastTarget != null ? lastTarget.getSquaredDistance(currentTarget) : 0.0D;
+            double distSq = bot.getBlockPos().getSquaredDistance(currentTarget);
+            // If the commander moved significantly, or is far outside the bounded planner window,
+            // drop stale door-centric waypoints so the bot doesn't “stick” to an old door plan.
+            if (movedSq >= 256.0D || (!canSee && distSq >= 900.0D)) {
+                FOLLOW_WAYPOINTS.remove(botId);
+            } else {
+                return;
+            }
+        }
+        requestFollowPathPlan(bot, target, stagnantTicks >= 10, "stagnant-" + stagnantTicks);
+    }
+
+    private static void maybeRequestFollowPathPlanToGoal(ServerPlayerEntity bot, BlockPos goal, boolean canSee, int stagnantTicks) {
+        if (bot == null || goal == null) {
+            return;
+        }
+        if (canSee && stagnantTicks < 6) {
+            return;
+        }
+        UUID botId = bot.getUuid();
+        ArrayDeque<BlockPos> existing = FOLLOW_WAYPOINTS.get(botId);
+        if (existing != null && !existing.isEmpty() && stagnantTicks < 12) {
+            return;
+        }
+        requestFollowPathPlanToGoal(bot, goal, stagnantTicks >= 10, "stagnant-" + stagnantTicks);
+    }
+
+    private static void requestFollowPathPlan(ServerPlayerEntity bot, ServerPlayerEntity target, boolean force, String reason) {
+        FollowPlannerService.requestPlanToTarget(LOGGER, bot, target, force, reason);
+    }
+
+    private static void requestFollowPathPlanToGoal(ServerPlayerEntity bot, BlockPos goal, boolean force, String reason) {
+        noteComeRerouteAttempt(bot, goal, force, reason);
+        FollowPlannerService.requestPlanToGoal(LOGGER, bot, goal, force, reason);
+    }
+
+    private static void noteComeRerouteAttempt(ServerPlayerEntity bot, BlockPos goal, boolean force, String reason) {
+        if (bot == null || goal == null) {
+            return;
+        }
+        BotCommandStateService.State st = stateFor(bot);
+        if (st == null || st.followFixedGoal == null || !st.followFixedGoal.equals(goal)) {
+            return;
+        }
+        if (!force && !isStuckDrivenPlanReason(reason)) {
+            return;
+        }
+        MinecraftServer srv = bot.getCommandSource() != null ? bot.getCommandSource().getServer() : null;
+        if (srv == null) {
+            return;
+        }
+        long nowTick = srv.getTicks();
+        if (st.comeNextRerouteTick > nowTick) {
+            if ((nowTick % 40L) == 0L) {
+                LOGGER.info("[FollowAssert] planner-backoff bot={} goal={} reason={} nowTick={} nextRerouteTick={} attempts={}",
+                        bot.getName().getString(),
+                        goal.toShortString(),
+                        reason == null ? "" : reason,
+                        nowTick,
+                        st.comeNextRerouteTick,
+                        st.comeRerouteAttempts);
+            }
+            return;
+        }
+        st.comeRerouteAttempts = Math.max(0, st.comeRerouteAttempts) + 1;
+        st.comeNextRerouteTick = nowTick + (force ? 30L : 20L);
+        LOGGER.info("[FollowAssert] planner-backoff bot={} goal={} reason={} attempts={} nextRerouteTick={}",
+                bot.getName().getString(),
+                goal.toShortString(),
+                reason == null ? "" : reason,
+                st.comeRerouteAttempts,
+                st.comeNextRerouteTick);
+    }
+
+    private static boolean isStuckDrivenPlanReason(String reason) {
+        if (reason == null || reason.isBlank()) {
+            return false;
+        }
+        return reason.startsWith("stagnant-")
+                || reason.equals("direct-blocked-stuck")
+                || reason.equals("water-stuck")
+                || reason.equals("water-ledge-stuck")
+                || reason.startsWith("direct-blocked");
+    }
+
+    private static boolean triggerComeRecoverySkill(ServerPlayerEntity bot,
+                                                   ServerPlayerEntity commander,
+                                                   BlockPos goal,
+                                                   Vec3d goalPos,
+                                                   double deltaY,
+                                                   double horizDistSq,
+                                                   MinecraftServer server,
+                                                   BotCommandStateService.State state) {
+        if (bot == null || goal == null || goalPos == null || server == null || state == null) {
+            return false;
+        }
+        if (bot.isDead() || bot.isRemoved()) {
+            return false;
+        }
+        if (state.comeRecoverySkillInFlight) {
+            LOGGER.info("[ComeRecovery] launch-skip bot={} goal={} reason=inflight",
+                    bot.getName().getString(),
+                    goal.toShortString());
+            return false;
+        }
+
+        int dyBlocks = (int) Math.round(deltaY);
+        double horizDist = Math.sqrt(Math.max(0.0D, horizDistSq));
+
+        Direction towardGoal = approximateToward(bot.getBlockPos(), goal);
+        if (towardGoal == null || !towardGoal.getAxis().isHorizontal()) {
+            towardGoal = bot.getHorizontalFacing();
+        }
+
+        String skillName = null;
+        String rawArgs = null;
+        Map<String, Object> params = new HashMap<>();
+        params.put("direction", towardGoal);
+
+        // When we're vertically separated (common: tunnel below the destination), build stairs first.
+        // We allow a moderate horizontal offset because stair-building still helps escape a narrow tunnel.
+        if (Math.abs(dyBlocks) >= 5 && horizDist <= 12.0D) {
+            skillName = "collect_dirt";
+            int blocks = Math.min(12, Math.max(5, Math.abs(dyBlocks)));
+            if (dyBlocks > 0) {
+                params.put("ascentBlocks", blocks);
+                rawArgs = "ascent " + blocks;
+            } else {
+                params.put("descentBlocks", blocks);
+                rawArgs = "descent " + blocks;
+            }
+        } else if (horizDist >= 5.0D && horizDist <= 24.0D) {
+            // If horizontally offset in a tunnel, carve toward the goal a bit and try again.
+            skillName = "stripmine";
+            int length = (int) Math.min(14, Math.max(6, Math.ceil(horizDist) + 2));
+            params.put("count", length);
+            rawArgs = Integer.toString(length);
+        } else {
+            return false;
+        }
+
+        String announce = bot.getName().getString()
+                + " is blocked getting to your last location; attempting " + skillName + " (" + rawArgs + ").";
+
+        // Avoid spamming skill launches.
+        state.comeRerouteAttempts = 0;
+        state.comeNextRerouteTick = 0L;
+        state.comeNextSkillTick = server.getTicks() + 120L;
+        state.comeTicksSinceBest = 0;
+        state.comeBestGoalDistSq = Double.NaN;
+        state.comeRecoverySkillInFlight = true;
+        state.comeRecoverySkillStartTick = server.getTicks();
+
+        LOGGER.info("[ComeRecovery] launch-queued bot={} goal={} skill={} args={} dyBlocks={} horizDist={}",
+                bot.getName().getString(),
+                goal.toShortString(),
+                skillName,
+                rawArgs,
+                dyBlocks,
+                String.format(Locale.ROOT, "%.2f", horizDist));
+
+        // Interrupt any active skill, then run the recovery skill asynchronously.
+        final String finalSkillName = skillName;
+        final String finalRawArgs = rawArgs;
+        final Map<String, Object> finalParams = Map.copyOf(params);
+        TaskService.forceAbort(bot.getUuid(), "§cInterrupted by /bot come recovery.");
+        try {
+            CompletableFuture.runAsync(() -> {
+                try {
+                    SkillContext ctx = new SkillContext(
+                            bot.getCommandSource(),
+                            SharedStateService.safeSharedState("come-recovery"),
+                            finalParams
+                    );
+                    LOGGER.info("[ComeRecovery] launch-confirmed bot={} goal={} skill={} args={}",
+                            bot.getName().getString(),
+                            goal.toShortString(),
+                            finalSkillName,
+                            finalRawArgs);
+                    server.execute(() -> {
+                        if (commander != null) {
+                            ChatUtils.sendSystemMessage(commander.getCommandSource(), announce);
+                        } else {
+                            ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withPermissions(net.wcfcarolina13.Frens.OPERATOR_PERMISSIONS), announce);
+                        }
+                    });
+                    SkillExecutionResult result = SkillManager.runSkill(finalSkillName, ctx);
+                    String resultMessage = (result != null && result.message() != null)
+                            ? result.message()
+                            : "Come recovery completed.";
+                    LOGGER.info("[ComeRecovery] skill-result bot={} goal={} skill={} success={} msg='{}'",
+                            bot.getName().getString(),
+                            goal.toShortString(),
+                            finalSkillName,
+                            result != null && result.success(),
+                            resultMessage);
+                    server.execute(() -> {
+                        state.comeRecoverySkillInFlight = false;
+                        state.comeRecoverySkillStartTick = 0L;
+                        if (commander != null) {
+                            ChatUtils.sendSystemMessage(commander.getCommandSource(), resultMessage);
+                        } else {
+                            ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withPermissions(net.wcfcarolina13.Frens.OPERATOR_PERMISSIONS), resultMessage);
+                        }
+                    });
+                } catch (Throwable t) {
+                    LOGGER.warn("[ComeRecovery] launch-failed bot={} goal={} skill={} args={} err={}",
+                            bot.getName().getString(),
+                            goal.toShortString(),
+                            finalSkillName,
+                            finalRawArgs,
+                            t.getClass().getSimpleName(),
+                            t);
+                    server.execute(() -> {
+                        state.comeRecoverySkillInFlight = false;
+                        state.comeRecoverySkillStartTick = 0L;
+                        String msg = "Come recovery failed: " + (t.getMessage() != null ? t.getMessage() : t.getClass().getSimpleName());
+                        if (commander != null) {
+                            ChatUtils.sendSystemMessage(commander.getCommandSource(), msg);
+                        } else {
+                            ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withPermissions(net.wcfcarolina13.Frens.OPERATOR_PERMISSIONS), msg);
+                        }
+                    });
+                }
+            }, COME_RECOVERY_EXECUTOR);
+        } catch (Throwable t) {
+            LOGGER.warn("[ComeRecovery] launch-queue-failed bot={} goal={} skill={} args={} err={}",
+                    bot.getName().getString(),
+                    goal.toShortString(),
+                    finalSkillName,
+                    finalRawArgs,
+                    t.getClass().getSimpleName(),
+                    t);
+            state.comeRecoverySkillInFlight = false;
+            state.comeRecoverySkillStartTick = 0L;
+            String msg = "Come recovery failed: " + (t.getMessage() != null ? t.getMessage() : t.getClass().getSimpleName());
+            if (commander != null) {
+                ChatUtils.sendSystemMessage(commander.getCommandSource(), msg);
+            } else {
+                ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withPermissions(net.wcfcarolina13.Frens.OPERATOR_PERMISSIONS), msg);
+            }
+            return false;
+        }
+        return true;
+    }
+
+    private static void maybeLogFollowDecision(ServerPlayerEntity bot, String message) {
+        FollowDebugService.maybeLogDecision(LOGGER, bot, message);
+    }
+
+    private static void maybeLogFollowStatus(ServerPlayerEntity bot,
+                                            ServerPlayerEntity target,
+                                            double targetDistSq,
+                                            double horizDistSq,
+                                            boolean canSee,
+                                            boolean directBlocked,
+                                            boolean usingWaypoints,
+                                            BlockPos navGoalBlock,
+                                            int waypointCount,
+                                            boolean botSealed,
+                                            boolean commanderSealed) {
+        if (bot == null || target == null) {
+            return;
+        }
+        UUID botId = bot.getUuid();
+        long now = System.currentTimeMillis();
+
+        FollowDoorPlan doorPlan = FOLLOW_DOOR_PLAN.get(botId);
+        String doorPlanStr = "";
+        if (doorPlan != null) {
+            long remaining = Math.max(0L, doorPlan.expiresAtMs() - now);
+            doorPlanStr = " doorPlan=doorBase=" + doorPlan.doorBase().toShortString()
+                    + " approach=" + doorPlan.approachPos().toShortString()
+                    + " step=" + doorPlan.stepThroughPos().toShortString()
+                    + " stepping=" + doorPlan.stepping()
+                    + " ttlMs=" + remaining;
+        }
+
+        BlockPos lastDoor = FOLLOW_LAST_DOOR_BASE.get(botId);
+        long lastDoorMs = FOLLOW_LAST_DOOR_CROSS_MS.getOrDefault(botId, -1L);
+        String lastDoorStr = "";
+        if (lastDoor != null && lastDoorMs >= 0) {
+            lastDoorStr = " lastDoor=" + lastDoor.toShortString()
+                    + " lastDoorAgeMs=" + (now - lastDoorMs);
+        }
+
+        BlockPos avoidDoor = currentAvoidDoor(botId);
+        String avoidStr = avoidDoor != null ? (" avoidDoor=" + avoidDoor.toShortString()) : "";
+
+        String navGoalStr = navGoalBlock != null ? navGoalBlock.toShortString() : "";
+        FollowDebugService.maybeLogStatus(
+                LOGGER,
+                bot,
+                target,
+                targetDistSq,
+                horizDistSq,
+                canSee,
+                directBlocked,
+                usingWaypoints,
+                waypointCount,
+                botSealed,
+                commanderSealed,
+                navGoalStr,
+                doorPlanStr,
+                lastDoorStr,
+                avoidStr
+        );
+    }
+
+    private static void updateCommanderLadderHint(ServerPlayerEntity bot, ServerPlayerEntity target) {
+        if (bot == null || target == null) {
+            return;
+        }
+        UUID botId = bot.getUuid();
+        long now = System.currentTimeMillis();
+        CommanderLadderHint existing = FOLLOW_COMMANDER_LADDER_HINT.get(botId);
+
+        if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
+            FOLLOW_COMMANDER_LADDER_HINT.remove(botId);
+            return;
+        }
+
+        if (target.isClimbing()) {
+            BlockPos targetAnchor = findNearbyClimbableAnchor(world, target.getBlockPos(), 1, -2, 2);
+            if (targetAnchor == null && isClimbable(world, target.getBlockPos())) {
+                targetAnchor = target.getBlockPos().toImmutable();
+            }
+            if (targetAnchor != null) {
+                BlockPos bottom = climbableColumnBottom(world, targetAnchor, 24);
+                if (bottom != null) {
+                    int topY = climbableColumnTopY(world, bottom, 24);
+                    int direction = existing != null ? existing.recentDirection() : 0;
+                    if (existing != null) {
+                        double dy = target.getY() - existing.lastCommanderY();
+                        if (Math.abs(dy) >= 0.08D) {
+                            direction = dy > 0.0D ? 1 : -1;
+                        }
+                    }
+                    long lastOffMs = existing != null ? existing.lastOffMs() : 0L;
+                    FOLLOW_COMMANDER_LADDER_HINT.put(botId, new CommanderLadderHint(
+                            bottom.getX(),
+                            bottom.getZ(),
+                            bottom.getY(),
+                            topY,
+                            now,
+                            lastOffMs,
+                            target.getY(),
+                            direction
+                    ));
+                    return;
+                }
+            }
+        }
+
+        if (existing == null) {
+            return;
+        }
+        if ((now - existing.lastSeenMs()) > FOLLOW_COMMANDER_LADDER_HINT_TTL_MS) {
+            FOLLOW_COMMANDER_LADDER_HINT.remove(botId);
+            return;
+        }
+        FOLLOW_COMMANDER_LADDER_HINT.put(botId, new CommanderLadderHint(
+                existing.x(),
+                existing.z(),
+                existing.bottomY(),
+                existing.topY(),
+                existing.lastSeenMs(),
+                now,
+                target.getY(),
+                existing.recentDirection()
+        ));
+    }
+
+    private static CommanderLadderHint getCommanderLadderHint(UUID botId) {
+        if (botId == null) {
+            return null;
+        }
+        CommanderLadderHint hint = FOLLOW_COMMANDER_LADDER_HINT.get(botId);
+        if (hint == null) {
+            return null;
+        }
+        long now = System.currentTimeMillis();
+        boolean staleSeen = (now - hint.lastSeenMs()) > FOLLOW_COMMANDER_LADDER_HINT_TTL_MS;
+        boolean staleOff = hint.lastOffMs() <= 0L || (now - hint.lastOffMs()) > FOLLOW_COMMANDER_LADDER_OFF_GRACE_MS;
+        if (staleSeen && staleOff) {
+            FOLLOW_COMMANDER_LADDER_HINT.remove(botId);
+            return null;
+        }
+        return hint;
+    }
+
+    private static boolean isNearHintLadderColumn(BlockPos pos, CommanderLadderHint hint) {
+        if (pos == null || hint == null) {
+            return false;
+        }
+        int dx = Math.abs(pos.getX() - hint.x());
+        int dz = Math.abs(pos.getZ() - hint.z());
+        if (dx > 1 || dz > 1) {
+            return false;
+        }
+        int minY = Math.min(hint.bottomY(), hint.topY()) - 1;
+        int maxY = Math.max(hint.bottomY(), hint.topY()) + 1;
+        return pos.getY() >= minY && pos.getY() <= maxY;
+    }
+
+    private static boolean shouldCommitToHintLadder(ServerPlayerEntity bot,
+                                                    ServerPlayerEntity target,
+                                                    CommanderLadderHint hint) {
+        if (bot == null || target == null || hint == null) {
+            return false;
+        }
+        double verticalGap = target.getY() - bot.getY();
+        if (Math.abs(verticalGap) < 1.75D) {
+            return false;
+        }
+        if (!isNearHintLadderColumn(bot.getBlockPos(), hint)) {
+            return false;
+        }
+        double targetDyToColumn = Math.min(
+                Math.abs(target.getY() - hint.bottomY()),
+                Math.abs(target.getY() - hint.topY()));
+        return targetDyToColumn <= 3.0D;
+    }
+
+    private static boolean shouldAllowClimbExit(ServerPlayerEntity bot,
+                                                ServerPlayerEntity target,
+                                                CommanderLadderHint hint,
+                                                int stagnantTicks,
+                                                boolean conservative) {
+        if (bot == null || target == null) {
+            return false;
+        }
+        double verticalGap = target.getY() - bot.getY();
+        double distSq = bot.squaredDistanceTo(positionOf(target));
+        if (Math.abs(verticalGap) <= 1.0D && distSq <= 2.25D) {
+            return true;
+        }
+
+        if (hint == null) {
+            // Without a remembered ladder column, be conservative for ascent so we don't bail off
+            // an active ladder run a block or two too early.
+            if (!conservative) {
+                if (bot.getEntityWorld() instanceof ServerWorld world) {
+                    BlockPos anchor = findNearbyClimbableAnchor(world, bot.getBlockPos(), 1, -1, 2);
+                    if (anchor != null) {
+                        int topY = climbableColumnTopY(world, anchor, 12);
+                        if (topY >= target.getY() - 0.8D && (target.getY() - bot.getY()) > 0.85D) {
+                            return false;
+                        }
+                    }
+                }
+            }
+            double maxGap = conservative ? 1.25D : 1.0D;
+            double maxDistSq = conservative ? 4.0D : 8.0D;
+            if (Math.abs(verticalGap) <= maxGap && distSq <= maxDistSq) {
+                return true;
+            }
+            return !conservative
+                    && stagnantTicks >= (FOLLOW_CLIMB_EXIT_STAGNANT_TICKS + 8)
+                    && Math.abs(verticalGap) <= 0.9D;
+        }
+
+        double targetY = target.getY();
+        double botY = bot.getY();
+        boolean targetNearTop = targetY >= (hint.topY() - 1.0D);
+        boolean botNearTop = botY >= (hint.topY() - 0.5D);
+        boolean targetNearBottom = targetY <= (hint.bottomY() + 1.0D);
+        boolean botNearBottom = botY <= (hint.bottomY() + 0.1D);
+
+        if (verticalGap >= 0.75D) {
+            return targetNearTop && botNearTop;
+        }
+        if (verticalGap <= -0.75D) {
+            return targetNearBottom && botNearBottom;
+        }
+        if (hint.recentDirection() > 0) {
+            return targetNearTop && botNearTop;
+        }
+        if (hint.recentDirection() < 0) {
+            return targetNearBottom && botNearBottom;
+        }
+        return (targetNearTop && botNearTop) || (targetNearBottom && botNearBottom);
+    }
+
+    private static boolean applyLongRangeFollowOverride(ServerPlayerEntity bot,
+                                                        ServerPlayerEntity target,
+                                                        double targetDistSq,
+                                                        BlockPos navGoalBlock,
+                                                        boolean canSee,
+                                                        boolean directBlocked,
+                                                        boolean botSealed,
+                                                        boolean commanderSealed) {
+        if (bot == null || target == null || !canSee || directBlocked || targetDistSq < 625.0D || botSealed || commanderSealed) {
+            return false;
+        }
+	        BotStuckService.EnvironmentSnapshot env = BotStuckService.analyzeEnvironment(bot);
+	        if (env == null || env.enclosed()) {
+	            return false;
+	        }
+        UUID botId = bot.getUuid();
+        boolean hadDoorPlan = FOLLOW_DOOR_PLAN.containsKey(botId);
+        boolean hadWaypoints = FOLLOW_WAYPOINTS.containsKey(botId);
+        FOLLOW_DOOR_PLAN.remove(botId);
+        FOLLOW_DOOR_LAST_BLOCK.remove(botId);
+        FOLLOW_DOOR_STUCK_TICKS.remove(botId);
+        FOLLOW_DOOR_RECOVERY.remove(botId);
+        FOLLOW_AVOID_DOOR_BASE.remove(botId);
+        FOLLOW_AVOID_DOOR_UNTIL_MS.remove(botId);
+        FOLLOW_WAYPOINTS.remove(botId);
+        FOLLOW_LAST_DISTANCE_SQ.remove(botId);
+        FOLLOW_STAGNANT_TICKS.remove(botId);
+        FOLLOW_DIRECT_BLOCKED_TICKS.remove(botId);
+        FOLLOW_POS_STAGNANT_TICKS.remove(botId);
+        FOLLOW_LAST_BLOCK_POS.remove(botId);
+        FollowStateService.clearVerticalClimbLock(botId);
+        FOLLOW_VERTICAL_LOCK_LAST_POS.remove(botId);
+        FOLLOW_VERTICAL_LOCK_LAST_REPLAN_MS.remove(botId);
+        FOLLOW_COMMANDER_LADDER_HINT.remove(botId);
+        String reason = "long-range override: dist=" + String.format(Locale.ROOT, "%.2f", Math.sqrt(targetDistSq))
+                + " navGoal=" + (navGoalBlock != null ? navGoalBlock.toShortString() : "none")
+                + " env.enclosed=" + env.enclosed()
+                + " hadDoorPlan=" + hadDoorPlan
+                + " hadWaypoints=" + hadWaypoints;
+        maybeLogFollowDecision(bot, reason);
+        return true;
+    }
+
+    private static boolean shouldPreferVerticalClimb(ServerPlayerEntity bot,
+                                                     ServerPlayerEntity target,
+                                                     boolean targetAboveBot,
+                                                     double targetDistSq) {
+        if (bot == null || target == null || !targetAboveBot) {
+            return false;
+        }
+        if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
+            return false;
+        }
+        if (targetDistSq > (60.0D * 60.0D)) {
+            return false;
+        }
+        // If we can likely use a ladder/vine/scaffolding nearby, suppress door-subgoal churn.
+        return hasClimbableNearby(world, bot.getBlockPos(), 6, -3, 10)
+                || hasClimbableNearby(world, target.getBlockPos(), 6, -6, 6);
+    }
+
+    private static boolean hasClimbableNearby(ServerWorld world,
+                                              BlockPos center,
+                                              int horizRadius,
+                                              int minDy,
+                                              int maxDy) {
+        if (world == null || center == null || horizRadius <= 0) {
+            return false;
+        }
+        for (int dx = -horizRadius; dx <= horizRadius; dx++) {
+            for (int dz = -horizRadius; dz <= horizRadius; dz++) {
+                for (int dy = minDy; dy <= maxDy; dy++) {
+                    BlockPos probe = center.add(dx, dy, dz);
+                    if (isClimbable(world, probe)) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    private record CommanderLadderHint(int x, int z, int bottomY, int topY, long lastSeenMs, long lastOffMs,
+                                       double lastCommanderY, int recentDirection) {
+    }
+
+    private record ClimbAssistCandidate(BlockPos climbPos, BlockPos standPos, int topY, double score) {
+    }
+
+    private static boolean maybeAcquireVerticalClimbLock(ServerPlayerEntity bot,
+                                                         ServerPlayerEntity target,
+                                                         double targetDistSq,
+                                                         boolean targetAboveBot,
+                                                         boolean directBlocked,
+                                                         int effectiveStagnant) {
+        if (bot == null || target == null) {
+            return false;
+        }
+        boolean allowIndependentSummit = directBlocked && effectiveStagnant >= 3;
+        double verticalGap = target.getY() - bot.getY();
+        if (allowIndependentSummit && verticalGap < -2.0D) {
+            return false;
+        }
+        if (!targetAboveBot && !allowIndependentSummit) {
+            return false;
+        }
+        UUID botId = bot.getUuid();
+        if (FollowStateService.getVerticalClimbLock(botId) != null) {
+            return false;
+        }
+        long nowMs = System.currentTimeMillis();
+        long failCooldownUntil = FOLLOW_VERTICAL_LOCK_FAIL_COOLDOWN_UNTIL_MS.getOrDefault(botId, 0L);
+        if (failCooldownUntil > nowMs) {
+            return false;
+        }
+        if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
+            return false;
+        }
+        if (bot.hasVehicle() || bot.isTouchingWater() || ElytraFlightService.isInFlight(botId)) {
+            return false;
+        }
+        double maxAcquireDistanceSq = targetAboveBot ? (80.0D * 80.0D) : (64.0D * 64.0D);
+        if (targetDistSq > maxAcquireDistanceSq) {
+            return false;
+        }
+        if (!directBlocked && effectiveStagnant < 2 && targetDistSq < 36.0D && !targetAboveBot) {
+            return false;
+        }
+
+        CommanderLadderHint ladderHint = getCommanderLadderHint(botId);
+        ClimbAssistCandidate candidate = candidateFromCommanderLadderHint(world, bot.getBlockPos(), target.getBlockPos(), ladderHint, true);
+        if (candidate == null) {
+            candidate = findBestClimbAssistCandidate(world, bot.getBlockPos(), target.getBlockPos(), 6);
+        }
+        if (candidate == null) {
+            return false;
+        }
+        if (candidate.topY() <= bot.getY() + 1.5D) {
+            return false;
+        }
+
+        BlockPos forcedDoorBase = null;
+        BlockPos doorHit = BlockInteractionService.findDoorAlongLine(bot, Vec3d.ofCenter(candidate.standPos()), 6.5D);
+        if (doorHit != null) {
+            forcedDoorBase = normalizeDoorBase(world, doorHit);
+        }
+        double standDistSq = bot.squaredDistanceTo(Vec3d.ofCenter(candidate.standPos()));
+        boolean standRouteBlocked = isDirectRouteBlocked(bot, Vec3d.ofCenter(candidate.standPos()), candidate.standPos());
+        // Fallback: if raycast missed a door (diagonal line skips door block), do area scan
+        if (forcedDoorBase == null && standRouteBlocked) {
+            BlockPos nearDoor = findDoorNearPath(world, bot.getBlockPos(), candidate.standPos(), 2);
+            if (nearDoor != null) {
+                forcedDoorBase = normalizeDoorBase(world, nearDoor);
+            }
+        }
+        if (standDistSq > 4.0D && standRouteBlocked && forcedDoorBase == null) {
+            FOLLOW_DOOR_PLAN.remove(botId);
+            FOLLOW_DOOR_LAST_BLOCK.remove(botId);
+            FOLLOW_DOOR_STUCK_TICKS.remove(botId);
+            FOLLOW_DOOR_RECOVERY.remove(botId);
+            FOLLOW_VERTICAL_LOCK_FAIL_COOLDOWN_UNTIL_MS.put(botId, nowMs + 2_500L);
+            long lastReplanMs = FOLLOW_VERTICAL_LOCK_LAST_REPLAN_MS.getOrDefault(botId, 0L);
+            if ((nowMs - lastReplanMs) >= FOLLOW_VERTICAL_LOCK_REPLAN_COOLDOWN_MS) {
+                FOLLOW_VERTICAL_LOCK_LAST_REPLAN_MS.put(botId, nowMs);
+                requestFollowPathPlanToGoal(bot, candidate.standPos(), true, "vertical-lock-stand-route-blocked");
+            }
+            maybeLogFollowDecision(bot, "vertical-lock skip: blocked stand route without forced door stand="
+                    + candidate.standPos().toShortString());
+            return false;
+        }
+
+        VerticalClimbLock lock = new VerticalClimbLock(
+                candidate.climbPos().toImmutable(),
+                candidate.standPos().toImmutable(),
+                candidate.topY(),
+                nowMs + FOLLOW_VERTICAL_LOCK_TTL_MS,
+                0,
+                nowMs,
+                forcedDoorBase != null ? forcedDoorBase.toImmutable() : null,
+                0
+        );
+        FollowStateService.setVerticalClimbLock(botId, lock);
+        FOLLOW_DOOR_PLAN.remove(botId);
+        FOLLOW_DOOR_LAST_BLOCK.remove(botId);
+        FOLLOW_DOOR_STUCK_TICKS.remove(botId);
+        FOLLOW_DOOR_RECOVERY.remove(botId);
+        FOLLOW_VERTICAL_LOCK_LAST_POS.put(botId, bot.getBlockPos().toImmutable());
+        MovementService.suppressDoorAutoClose(botId, FOLLOW_VERTICAL_LOCK_TTL_MS + 2_000L);
+        maybeLogFollowDecision(bot, "vertical-lock acquire climbable=" + lock.entryClimbPos().toShortString()
+                + " stand=" + lock.entryStandPos().toShortString()
+                + " topY=" + lock.topY()
+                + (lock.forcedDoorBase() != null ? " forcedDoor=" + lock.forcedDoorBase().toShortString() : ""));
+        return tickVerticalClimbLock(bot, target, lock, targetDistSq, effectiveStagnant, directBlocked);
+    }
+
+    private static boolean tickVerticalClimbLock(ServerPlayerEntity bot,
+                                                 ServerPlayerEntity target,
+                                                 VerticalClimbLock lock,
+                                                 double targetDistSq,
+                                                 int effectiveStagnant,
+                                                 boolean directBlocked) {
+        if (bot == null || target == null || lock == null) {
+            return false;
+        }
+        UUID botId = bot.getUuid();
+        long nowMs = System.currentTimeMillis();
+        if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
+            releaseVerticalClimbLock(bot, lock, "world-unavailable", true);
+            return false;
+        }
+
+        double verticalGap = target.getY() - bot.getY();
+        double remainingTopGap = lock.topY() - bot.getY();
+        if (!FollowVerticalAssistPolicyUtil.shouldKeepVerticalLock(
+                verticalGap,
+                remainingTopGap,
+                nowMs,
+                lock.expiresAtMs(),
+                lock.noProgressTicks(),
+                FOLLOW_VERTICAL_LOCK_HARD_FAIL_TICKS)) {
+            releaseVerticalClimbLock(bot, lock, "goal-reached-or-expired verticalGap="
+                    + String.format(Locale.ROOT, "%.2f", verticalGap)
+                    + " remainingTopGap=" + String.format(Locale.ROOT, "%.2f", remainingTopGap), false);
+            return false;
+        }
+
+        FOLLOW_DOOR_PLAN.remove(botId);
+        FOLLOW_DOOR_LAST_BLOCK.remove(botId);
+        FOLLOW_DOOR_STUCK_TICKS.remove(botId);
+        FOLLOW_DOOR_RECOVERY.remove(botId);
+        MovementService.suppressDoorAutoClose(botId, 1_500L);
+
+        BlockPos currentPos = bot.getBlockPos();
+        BlockPos lastPos = FOLLOW_VERTICAL_LOCK_LAST_POS.get(botId);
+        double currentStandDistSq = currentPos.getSquaredDistance(lock.entryStandPos());
+        boolean progressMade = false;
+        if (lastPos != null) {
+            double previousStandDistSq = lastPos.getSquaredDistance(lock.entryStandPos());
+            progressMade = currentPos.getY() > lastPos.getY()
+                    || currentStandDistSq + 0.01D < previousStandDistSq;
+        } else if (bot.isClimbing()) {
+            progressMade = true;
+        }
+        FOLLOW_VERTICAL_LOCK_LAST_POS.put(botId, currentPos.toImmutable());
+
+        int noProgressTicks = progressMade ? 0 : (lock.noProgressTicks() + 1);
+        long lastProgressMs = progressMade ? nowMs : lock.lastProgressMs();
+        int doorTraverseAttempts = lock.doorTraverseAttempts();
+        if (noProgressTicks >= FOLLOW_VERTICAL_LOCK_NO_PROGRESS_TICKS) {
+            long lastReplanMs = FOLLOW_VERTICAL_LOCK_LAST_REPLAN_MS.getOrDefault(botId, 0L);
+            if ((nowMs - lastReplanMs) >= FOLLOW_VERTICAL_LOCK_REPLAN_COOLDOWN_MS) {
+                FOLLOW_VERTICAL_LOCK_LAST_REPLAN_MS.put(botId, nowMs);
+                requestFollowPathPlanToGoal(bot, lock.entryStandPos(), true, "vertical-climb-lock-stuck");
+                maybeLogFollowDecision(bot, "vertical-lock replan stand=" + lock.entryStandPos().toShortString()
+                        + " noProgressTicks=" + noProgressTicks
+                        + " stagnant=" + effectiveStagnant
+                        + " directBlocked=" + directBlocked
+                        + " dist=" + String.format(Locale.ROOT, "%.2f", Math.sqrt(targetDistSq)));
+            }
+        }
+        if (noProgressTicks >= FOLLOW_VERTICAL_LOCK_HARD_FAIL_TICKS) {
+            FOLLOW_VERTICAL_LOCK_FAIL_COOLDOWN_UNTIL_MS.put(botId, nowMs + FOLLOW_VERTICAL_LOCK_FAIL_COOLDOWN_MS);
+            releaseVerticalClimbLock(bot, lock, "hard-fail noProgressTicks=" + noProgressTicks, true);
+            return false;
+        }
+        if (lock.forcedDoorBase() == null && currentStandDistSq > 4.0D && noProgressTicks >= FOLLOW_VERTICAL_LOCK_NO_DOOR_ABORT_TICKS) {
+            releaseVerticalClimbLock(bot, lock, "no-door-progress-abort noProgressTicks=" + noProgressTicks, false);
+            return false;
+        }
+
+        VerticalClimbLock updatedLock = new VerticalClimbLock(
+                lock.entryClimbPos(),
+                lock.entryStandPos(),
+                lock.topY(),
+                lock.expiresAtMs(),
+                noProgressTicks,
+                lastProgressMs,
+                lock.forcedDoorBase(),
+                doorTraverseAttempts
+        );
+
+        if (bot.isClimbing()) {
+            FollowStateService.setVerticalClimbLock(botId, updatedLock);
+            if (tryExitClimbableTowardTarget(bot, target, noProgressTicks, "vertical-lock", false)) {
+                return true;
+            }
+            BlockPos climbAim = remainingTopGap > 0.8D ? updatedLock.entryClimbPos().up(2) : target.getBlockPos();
+            Vec3d climbGoal = remainingTopGap > 0.8D ? Vec3d.ofCenter(updatedLock.entryClimbPos()) : positionOf(target);
+            LookController.faceBlock(bot, climbAim);
+            BotActions.sprint(bot, false);
+            BotActions.jump(bot);
+            BotActions.applyMovementInput(bot, climbGoal, 0.14D);
+            maybeLogFollowDecision(bot, "vertical-lock tick: climbing targetY=" + target.getBlockY()
+                    + " remainingTopGap=" + String.format(Locale.ROOT, "%.2f", remainingTopGap)
+                    + " noProgressTicks=" + noProgressTicks);
+            return true;
+        }
+
+        if (currentStandDistSq > 4.0D) {
+            if (updatedLock.forcedDoorBase() != null
+                    && updatedLock.doorTraverseAttempts() < 2
+                    && (updatedLock.doorTraverseAttempts() == 0 || noProgressTicks >= 8)) {
+                boolean traversed = MovementService.tryTraverseOpenableToward(
+                        bot,
+                        updatedLock.forcedDoorBase(),
+                        updatedLock.entryStandPos(),
+                        "vertical-lock");
+                updatedLock = new VerticalClimbLock(
+                        updatedLock.entryClimbPos(),
+                        updatedLock.entryStandPos(),
+                        updatedLock.topY(),
+                        updatedLock.expiresAtMs(),
+                        updatedLock.noProgressTicks(),
+                        updatedLock.lastProgressMs(),
+                        updatedLock.forcedDoorBase(),
+                        updatedLock.doorTraverseAttempts() + 1
+                );
+                FollowStateService.setVerticalClimbLock(botId, updatedLock);
+                if (traversed) {
+                    maybeLogFollowDecision(bot, "vertical-lock tick: traversed forced door="
+                            + updatedLock.forcedDoorBase().toShortString());
+                    return true;
+                }
+            }
+            Vec3d standCenter = Vec3d.ofCenter(updatedLock.entryStandPos());
+            LookController.faceBlock(bot, updatedLock.entryClimbPos());
+            BotActions.sprint(bot, false);
+            BotActions.autoJumpIfNeeded(bot);
+            BotActions.applyMovementInput(bot, standCenter, 0.17D);
+            FollowStateService.setVerticalClimbLock(botId, updatedLock);
+            maybeLogFollowDecision(bot, "vertical-lock tick: approach stand="
+                    + updatedLock.entryStandPos().toShortString()
+                    + " noProgressTicks=" + noProgressTicks);
+            return true;
+        }
+
+        Vec3d climbCenter = Vec3d.ofCenter(updatedLock.entryClimbPos());
+        LookController.faceBlock(bot, updatedLock.entryClimbPos().up());
+        BotActions.sprint(bot, false);
+        BotActions.jump(bot);
+        BotActions.applyMovementInput(bot, climbCenter, 0.12D);
+        FollowStateService.setVerticalClimbLock(botId, updatedLock);
+        maybeLogFollowDecision(bot, "vertical-lock tick: engage climbable="
+                + updatedLock.entryClimbPos().toShortString()
+                + " topY=" + updatedLock.topY()
+                + " targetY=" + target.getBlockY()
+                + " noProgressTicks=" + noProgressTicks);
+        return true;
+    }
+
+    private static void releaseVerticalClimbLock(ServerPlayerEntity bot,
+                                                 VerticalClimbLock lock,
+                                                 String reason,
+                                                 boolean avoidDoor) {
+        if (bot == null) {
+            return;
+        }
+        UUID botId = bot.getUuid();
+        FollowStateService.clearVerticalClimbLock(botId);
+        FOLLOW_VERTICAL_LOCK_LAST_POS.remove(botId);
+        FOLLOW_VERTICAL_LOCK_LAST_REPLAN_MS.remove(botId);
+        FOLLOW_DOOR_PLAN.remove(botId);
+        FOLLOW_DOOR_LAST_BLOCK.remove(botId);
+        FOLLOW_DOOR_STUCK_TICKS.remove(botId);
+        FOLLOW_DOOR_RECOVERY.remove(botId);
+        if (avoidDoor && lock != null && lock.forcedDoorBase() != null) {
+            avoidDoorFor(botId, lock.forcedDoorBase(), 12_000L, "vertical-lock-release");
+        }
+        maybeLogFollowDecision(bot, "vertical-lock release reason=" + reason
+                + (lock != null && lock.forcedDoorBase() != null ? " doorBase=" + lock.forcedDoorBase().toShortString() : ""));
+    }
+
+    private static boolean tryVerticalClimbAssist(ServerPlayerEntity bot,
+                                                  ServerPlayerEntity target,
+                                                  double targetDistSq,
+                                                  int effectiveStagnant,
+                                                  boolean directBlocked) {
+        if (bot == null || target == null) {
+            return false;
+        }
+        if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
+            return false;
+        }
+        if (bot.hasVehicle() || bot.isTouchingWater() || ElytraFlightService.isInFlight(bot.getUuid())) {
+            return false;
+        }
+        UUID id = bot.getUuid();
+        CommanderLadderHint ladderHint = getCommanderLadderHint(id);
+        boolean commitToHintLadder = shouldCommitToHintLadder(bot, target, ladderHint);
+        double verticalGap = target.getY() - bot.getY();
+        if (verticalGap < (commitToHintLadder ? 1.75D : 3.0D)) {
+            return false;
+        }
+        if (targetDistSq > (80.0D * 80.0D)) {
+            return false;
+        }
+        if (!commitToHintLadder && !directBlocked && effectiveStagnant < 2 && targetDistSq < 36.0D) {
+            return false;
+        }
+
+        long nowMs = System.currentTimeMillis();
+        long lastAssist = FOLLOW_LAST_VERTICAL_ASSIST_MS.getOrDefault(id, 0L);
+        if (!commitToHintLadder && (nowMs - lastAssist) < FOLLOW_VERTICAL_ASSIST_COOLDOWN_MS) {
+            return false;
+        }
+
+        if (bot.isClimbing()) {
+            FOLLOW_LAST_VERTICAL_ASSIST_MS.put(id, nowMs);
+            if (shouldAllowClimbExit(bot, target, ladderHint, effectiveStagnant, false)
+                    && tryExitClimbableTowardTarget(bot, target, effectiveStagnant, "vertical-climb-assist", false)) {
+                return true;
+            }
+            BlockPos climbAnchor = findNearbyClimbableAnchor(world, bot.getBlockPos(), 1, -1, 1);
+            Vec3d climbGoal = climbAnchor != null ? Vec3d.ofCenter(climbAnchor) : positionOf(target);
+            LookController.faceBlock(bot, climbAnchor != null ? climbAnchor.up() : target.getBlockPos());
+            BotActions.sprint(bot, false);
+            BotActions.jump(bot);
+            BotActions.applyMovementInput(bot, climbGoal, climbAnchor != null ? 0.10D : 0.14D);
+            if (effectiveStagnant >= 2) {
+                maybeLogFollowDecision(bot, "vertical-climb-assist: already-climbing dy="
+                        + String.format(Locale.ROOT, "%.2f", verticalGap)
+                        + (climbAnchor != null ? " anchor=" + climbAnchor.toShortString() : ""));
+            }
+            return true;
+        }
+
+        ClimbAssistCandidate candidate = candidateFromCommanderLadderHint(world, bot.getBlockPos(), target.getBlockPos(), ladderHint, true);
+        if (candidate == null) {
+            candidate = findBestClimbAssistCandidate(world, bot.getBlockPos(), target.getBlockPos(), 6);
+        }
+        if (candidate == null) {
+            return false;
+        }
+
+        FOLLOW_LAST_VERTICAL_ASSIST_MS.put(id, nowMs);
+        Vec3d standCenter = Vec3d.ofCenter(candidate.standPos());
+        double standDistSq = bot.squaredDistanceTo(standCenter);
+        double engageStandDistSq = commitToHintLadder ? (1.6D * 1.6D) : (2.0D * 2.0D);
+        if (standDistSq > engageStandDistSq) {
+            LookController.faceBlock(bot, candidate.climbPos());
+            BotActions.sprint(bot, false);
+            BotActions.autoJumpIfNeeded(bot);
+            BotActions.applyMovementInput(bot, standCenter, 0.17D);
+            if (effectiveStagnant >= 2) {
+                maybeLogFollowDecision(bot, "vertical-climb-assist: approach climbable="
+                        + candidate.climbPos().toShortString()
+                        + " stand=" + candidate.standPos().toShortString()
+                        + " topY=" + candidate.topY());
+            }
+            return true;
+        }
+
+        Vec3d climbCenter = Vec3d.ofCenter(candidate.climbPos());
+        LookController.faceBlock(bot, candidate.climbPos().up());
+        BotActions.sprint(bot, false);
+        BotActions.jump(bot);
+        BotActions.applyMovementInput(bot, climbCenter, 0.12D);
+        maybeLogFollowDecision(bot, "vertical-climb-assist: engage climbable="
+                + candidate.climbPos().toShortString()
+                + " topY=" + candidate.topY()
+                + " targetY=" + target.getBlockY());
+        return true;
+    }
+
+    private static boolean tryVerticalClimbDescentAssist(ServerPlayerEntity bot,
+                                                         ServerPlayerEntity target,
+                                                         double targetDistSq,
+                                                         int effectiveStagnant,
+                                                         boolean directBlocked) {
+        if (bot == null || target == null) {
+            return false;
+        }
+        if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
+            return false;
+        }
+        if (bot.hasVehicle() || bot.isTouchingWater() || ElytraFlightService.isInFlight(bot.getUuid())) {
+            return false;
+        }
+        UUID id = bot.getUuid();
+        CommanderLadderHint ladderHint = getCommanderLadderHint(id);
+        boolean commitToHintLadder = shouldCommitToHintLadder(bot, target, ladderHint);
+        double verticalDrop = bot.getY() - target.getY();
+        if (verticalDrop < (commitToHintLadder ? 1.75D : 3.0D)) {
+            return false;
+        }
+        if (targetDistSq > (80.0D * 80.0D)) {
+            return false;
+        }
+        if (!commitToHintLadder && !directBlocked && effectiveStagnant < 2 && targetDistSq < 36.0D && !bot.isClimbing()) {
+            return false;
+        }
+
+        long nowMs = System.currentTimeMillis();
+        long lastAssist = FOLLOW_LAST_VERTICAL_ASSIST_MS.getOrDefault(id, 0L);
+        if (!commitToHintLadder && (nowMs - lastAssist) < FOLLOW_VERTICAL_ASSIST_COOLDOWN_MS) {
+            return false;
+        }
+
+        if (bot.isClimbing()) {
+            FOLLOW_LAST_VERTICAL_ASSIST_MS.put(id, nowMs);
+            if (shouldAllowClimbExit(bot, target, ladderHint, effectiveStagnant, true)
+                    && tryExitClimbableTowardTarget(bot, target, effectiveStagnant, "vertical-descent-assist", true)) {
+                return true;
+            }
+            BlockPos climbAnchor = findNearbyClimbableAnchor(world, bot.getBlockPos(), 1, -1, 1);
+            Vec3d descentGoal = climbAnchor != null ? Vec3d.ofCenter(climbAnchor) : positionOf(target);
+            LookController.faceBlock(bot, climbAnchor != null ? climbAnchor.down() : target.getBlockPos());
+            BotActions.sprint(bot, false);
+            BotActions.applyMovementInput(bot, descentGoal, climbAnchor != null ? 0.08D : 0.12D);
+            if (bot.getVelocity().y > -0.08D) {
+                Vec3d velocity = bot.getVelocity();
+                bot.setVelocity(velocity.x, -0.08D, velocity.z);
+                bot.velocityDirty = true;
+            }
+            if (effectiveStagnant >= 2) {
+                maybeLogFollowDecision(bot, "vertical-descent-assist: descending dy="
+                        + String.format(Locale.ROOT, "%.2f", verticalDrop)
+                        + (climbAnchor != null ? " anchor=" + climbAnchor.toShortString() : ""));
+            }
+            return true;
+        }
+
+        ClimbAssistCandidate candidate = candidateFromCommanderLadderHint(world, bot.getBlockPos(), target.getBlockPos(), ladderHint, false);
+        if (candidate == null) {
+            candidate = findBestClimbDescentCandidate(world, bot.getBlockPos(), target.getBlockPos(), 8);
+        }
+        if (candidate == null) {
+            return false;
+        }
+
+        FOLLOW_LAST_VERTICAL_ASSIST_MS.put(id, nowMs);
+        Vec3d standCenter = Vec3d.ofCenter(candidate.standPos());
+        double standDistSq = bot.squaredDistanceTo(standCenter);
+        double engageStandDistSq = commitToHintLadder ? (1.6D * 1.6D) : (2.0D * 2.0D);
+        if (standDistSq > engageStandDistSq) {
+            LookController.faceBlock(bot, candidate.climbPos());
+            BotActions.sprint(bot, false);
+            BotActions.autoJumpIfNeeded(bot);
+            BotActions.applyMovementInput(bot, standCenter, 0.17D);
+            if (effectiveStagnant >= 2) {
+                maybeLogFollowDecision(bot, "vertical-descent-assist: approach climbable="
+                        + candidate.climbPos().toShortString()
+                        + " stand=" + candidate.standPos().toShortString()
+                        + " targetY=" + target.getBlockY());
+            }
+            return true;
+        }
+
+        Vec3d climbCenter = Vec3d.ofCenter(candidate.climbPos());
+        LookController.faceBlock(bot, candidate.climbPos());
+        BotActions.sprint(bot, false);
+        BotActions.autoJumpIfNeeded(bot);
+        BotActions.applyMovementInput(bot, climbCenter, 0.12D);
+        maybeLogFollowDecision(bot, "vertical-descent-assist: engage climbable="
+                + candidate.climbPos().toShortString()
+                + " topY=" + candidate.topY()
+                + " targetY=" + target.getBlockY());
+        return true;
+    }
+
+    private static boolean tryExitClimbableTowardTarget(ServerPlayerEntity bot,
+                                                         ServerPlayerEntity target,
+                                                         int stagnantTicks,
+                                                         String context,
+                                                         boolean conservative) {
+        if (bot == null || target == null || !bot.isClimbing()) {
+            return false;
+        }
+        if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
+            return false;
+        }
+        if (target.isClimbing()) {
+            return false;
+        }
+        double verticalGap = target.getY() - bot.getY();
+        double targetDistSq = bot.squaredDistanceTo(positionOf(target));
+        double maxCloseGap = conservative ? 1.25D : 2.2D;
+        double maxCloseDistSq = conservative ? 4.0D : 12.25D;
+        boolean closeEnoughToDismount = Math.abs(verticalGap) <= maxCloseGap && targetDistSq <= maxCloseDistSq;
+        boolean stagnantNearLadder = !conservative
+                && Math.abs(verticalGap) <= 3.0D
+                && stagnantTicks >= FOLLOW_CLIMB_EXIT_STAGNANT_TICKS;
+        if (!closeEnoughToDismount && !stagnantNearLadder) {
+            return false;
+        }
+
+        BlockPos origin = bot.getBlockPos();
+        ArrayList<BlockPos> candidates = new ArrayList<>(96);
+        for (int dx = -2; dx <= 2; dx++) {
+            for (int dz = -2; dz <= 2; dz++) {
+                if (dx == 0 && dz == 0) {
+                    continue;
+                }
+                for (int dy = -1; dy <= 4; dy++) {
+                    BlockPos candidate = origin.add(dx, dy, dz);
+                    if (origin.getSquaredDistance(candidate) <= 10.0D) {
+                        candidates.add(candidate);
+                    }
+                }
+            }
+        }
+
+        BlockPos best = null;
+        double bestScore = Double.MAX_VALUE;
+        for (BlockPos candidate : candidates) {
+            if (candidate == null || !isStandable(world, candidate)) {
+                continue;
+            }
+            if (isClimbable(world, candidate)) {
+                continue;
+            }
+            double toTargetSq = candidate.getSquaredDistance(target.getBlockPos());
+            double originPenalty = candidate.getSquaredDistance(origin) * 0.25D;
+            double verticalPenalty = Math.abs(candidate.getY() - target.getBlockY()) * 2.0D;
+            double score = toTargetSq + originPenalty + verticalPenalty;
+            if (score < bestScore) {
+                bestScore = score;
+                best = candidate.toImmutable();
+            }
+        }
+
+        if (best == null) {
+            return false;
+        }
+
+        Vec3d bestCenter = Vec3d.ofCenter(best);
+        LookController.faceBlock(bot, best);
+        BotActions.sprint(bot, false);
+        BotActions.jump(bot);
+        BotActions.autoJumpIfNeeded(bot);
+        BotActions.applyMovementInput(bot, bestCenter, 0.15D);
+        if (best.getY() >= origin.getY() + 1) {
+            Vec3d velocity = bot.getVelocity();
+            bot.setVelocity(velocity.x, Math.max(velocity.y, 0.22D), velocity.z);
+            bot.velocityDirty = true;
+        }
+        maybeLogFollowDecision(bot, "climb-exit: context=" + context
+                + " to=" + best.toShortString()
+                + " dy=" + String.format(Locale.ROOT, "%.2f", verticalGap)
+                + " stagnant=" + stagnantTicks
+                + " conservative=" + conservative);
+        return true;
+    }
+
+    private static ClimbAssistCandidate candidateFromCommanderLadderHint(ServerWorld world,
+                                                                         BlockPos origin,
+                                                                         BlockPos goal,
+                                                                         CommanderLadderHint hint,
+                                                                         boolean ascending) {
+        if (world == null || origin == null || goal == null || hint == null) {
+            return null;
+        }
+        int columnTop = Math.max(hint.topY(), hint.bottomY());
+        int columnBottom = Math.min(hint.bottomY(), hint.topY());
+        if (ascending && columnTop < origin.getY() - 1) {
+            return null;
+        }
+        if (!ascending && columnBottom > origin.getY() + 1) {
+            return null;
+        }
+
+        BlockPos climbPos = resolveHintClimbPosAtY(world, hint, origin.getY());
+        if (climbPos == null) {
+            return null;
+        }
+
+        ClimbAssistCandidate best = null;
+        double bestScore = Double.MAX_VALUE;
+        for (Direction dir : Direction.Type.HORIZONTAL) {
+            BlockPos standPos = climbPos.offset(dir);
+            if (!isStandable(world, standPos)) {
+                continue;
+            }
+            double botDx = standPos.getX() - origin.getX();
+            double botDz = standPos.getZ() - origin.getZ();
+            double botHorizontalDistSq = (botDx * botDx) + (botDz * botDz);
+            if (!FollowVerticalAssistPolicyUtil.isReachableEntryStand(
+                    origin.getY(),
+                    standPos.getY(),
+                    botHorizontalDistSq,
+                    1,
+                    64.0D)) {
+                continue;
+            }
+            double goalDx = standPos.getX() - goal.getX();
+            double goalDz = standPos.getZ() - goal.getZ();
+            double goalHorizontalDistSq = (goalDx * goalDx) + (goalDz * goalDz);
+            int verticalGap = ascending
+                    ? Math.abs(goal.getY() - columnTop)
+                    : Math.abs(goal.getY() - columnBottom);
+            double score = FollowVerticalAssistPolicyUtil.scoreCandidate(
+                    true,
+                    verticalGap,
+                    botHorizontalDistSq,
+                    goalHorizontalDistSq);
+            if (score < bestScore) {
+                bestScore = score;
+                best = new ClimbAssistCandidate(climbPos.toImmutable(), standPos.toImmutable(), columnTop, score);
+            }
+        }
+        return best;
+    }
+
+    private static BlockPos resolveHintClimbPosAtY(ServerWorld world, CommanderLadderHint hint, int sampleY) {
+        if (world == null || hint == null) {
+            return null;
+        }
+        int minY = Math.min(hint.bottomY(), hint.topY());
+        int maxY = Math.max(hint.bottomY(), hint.topY());
+        int clampedY = Math.max(minY, Math.min(maxY, sampleY));
+        for (int spread = 0; spread <= 4; spread++) {
+            int upY = clampedY + spread;
+            if (upY <= maxY) {
+                BlockPos up = new BlockPos(hint.x(), upY, hint.z());
+                if (isClimbable(world, up)) {
+                    return up.toImmutable();
+                }
+            }
+            if (spread > 0) {
+                int downY = clampedY - spread;
+                if (downY >= minY) {
+                    BlockPos down = new BlockPos(hint.x(), downY, hint.z());
+                    if (isClimbable(world, down)) {
+                        return down.toImmutable();
+                    }
+                }
+            }
+        }
+        for (int y = minY; y <= maxY; y++) {
+            BlockPos probe = new BlockPos(hint.x(), y, hint.z());
+            if (isClimbable(world, probe)) {
+                return probe.toImmutable();
+            }
+        }
+        return null;
+    }
+
+    private static ClimbAssistCandidate findBestClimbAssistCandidate(ServerWorld world,
+                                                                     BlockPos origin,
+                                                                     BlockPos goal,
+                                                                     int radius) {
+        return findBestClimbAssistCandidate(world, origin, goal, radius, -3, 10, false);
+    }
+
+    private static ClimbAssistCandidate findBestClimbAssistCandidate(ServerWorld world,
+                                                                     BlockPos origin,
+                                                                     BlockPos goal,
+                                                                     int radius,
+                                                                     int minDy,
+                                                                     int maxDy,
+                                                                     boolean requireTopNearOrigin) {
+        if (world == null || origin == null || goal == null || radius <= 0) {
+            return null;
+        }
+        Set<BlockPos> visitedColumns = new HashSet<>();
+        ClimbAssistCandidate best = null;
+        double bestScore = Double.MAX_VALUE;
+        for (int dx = -radius; dx <= radius; dx++) {
+            for (int dz = -radius; dz <= radius; dz++) {
+                for (int dy = minDy; dy <= maxDy; dy++) {
+                    BlockPos probe = origin.add(dx, dy, dz);
+                    if (!isClimbable(world, probe)) {
+                        continue;
+                    }
+                    BlockPos columnBottom = climbableColumnBottom(world, probe, 12);
+                    if (columnBottom == null || !visitedColumns.add(columnBottom)) {
+                        continue;
+                    }
+                    int topY = climbableColumnTopY(world, columnBottom, 12);
+                    if (requireTopNearOrigin && topY < (origin.getY() - 1)) {
+                        continue;
+                    }
+                    int attachY = Math.max(columnBottom.getY(), Math.min(topY, origin.getY()));
+                    BlockPos climbPos = new BlockPos(columnBottom.getX(), attachY, columnBottom.getZ());
+                    for (Direction dir : Direction.Type.HORIZONTAL) {
+                        BlockPos standPos = climbPos.offset(dir);
+                        if (!isStandable(world, standPos)) {
+                            continue;
+                        }
+                        double botDx = standPos.getX() - origin.getX();
+                        double botDz = standPos.getZ() - origin.getZ();
+                        double botHorizontalDistSq = (botDx * botDx) + (botDz * botDz);
+                        if (!FollowVerticalAssistPolicyUtil.isReachableEntryStand(
+                                origin.getY(),
+                                standPos.getY(),
+                                botHorizontalDistSq,
+                                1,
+                                36.0D)) {
+                            continue;
+                        }
+                        double goalDx = standPos.getX() - goal.getX();
+                        double goalDz = standPos.getZ() - goal.getZ();
+                        double goalHorizontalDistSq = (goalDx * goalDx) + (goalDz * goalDz);
+                        int absGoalTopY = Math.abs(goal.getY() - topY);
+                        double attachPenalty = Math.abs(origin.getY() - attachY) * 25.0D;
+                        double score = FollowVerticalAssistPolicyUtil.scoreCandidate(
+                                true,
+                                absGoalTopY,
+                                botHorizontalDistSq,
+                                goalHorizontalDistSq) + attachPenalty;
+                        if (score < bestScore) {
+                            bestScore = score;
+                            best = new ClimbAssistCandidate(climbPos.toImmutable(), standPos.toImmutable(), topY, score);
+                        }
+                    }
+                }
+            }
+        }
+        return best;
+    }
+
+    private static ClimbAssistCandidate findBestClimbDescentCandidate(ServerWorld world,
+                                                                      BlockPos origin,
+                                                                      BlockPos goal,
+                                                                      int radius) {
+        if (world == null || origin == null || goal == null || radius <= 0) {
+            return null;
+        }
+        Set<Long> visitedColumns = new HashSet<>();
+        ClimbAssistCandidate best = null;
+        double bestScore = Double.MAX_VALUE;
+        for (int dx = -radius; dx <= radius; dx++) {
+            for (int dz = -radius; dz <= radius; dz++) {
+                for (int dy = -8; dy <= 4; dy++) {
+                    BlockPos probe = origin.add(dx, dy, dz);
+                    if (!isClimbable(world, probe)) {
+                        continue;
+                    }
+                    BlockPos bottom = climbableColumnBottom(world, probe, 16);
+                    if (bottom == null) {
+                        continue;
+                    }
+                    long columnKey = BlockPos.asLong(bottom.getX(), 0, bottom.getZ());
+                    if (!visitedColumns.add(columnKey)) {
+                        continue;
+                    }
+                    int topY = climbableColumnTopY(world, bottom, 16);
+                    if (topY < origin.getY() - 2 || topY > origin.getY() + 3) {
+                        continue;
+                    }
+                    int bottomY = bottom.getY();
+                    if (bottomY > goal.getY() + 2) {
+                        // This column doesn't descend anywhere near the commander's level.
+                        continue;
+                    }
+                    int attachY = Math.max(bottomY, Math.min(topY, origin.getY()));
+                    BlockPos attachPos = new BlockPos(bottom.getX(), attachY, bottom.getZ());
+                    for (Direction dir : Direction.Type.HORIZONTAL) {
+                        BlockPos standPos = attachPos.offset(dir);
+                        if (!isStandable(world, standPos)) {
+                            continue;
+                        }
+                        double botDx = standPos.getX() - origin.getX();
+                        double botDz = standPos.getZ() - origin.getZ();
+                        double botHorizontalDistSq = (botDx * botDx) + (botDz * botDz);
+                        if (!FollowVerticalAssistPolicyUtil.isReachableEntryStand(
+                                origin.getY(),
+                                standPos.getY(),
+                                botHorizontalDistSq,
+                                1,
+                                64.0D)) {
+                            continue;
+                        }
+                        double goalDx = standPos.getX() - goal.getX();
+                        double goalDz = standPos.getZ() - goal.getZ();
+                        double goalHorizontalDistSq = (goalDx * goalDx) + (goalDz * goalDz);
+                        int absGoalBottomY = Math.abs(goal.getY() - bottomY);
+                        double attachPenalty = Math.abs(origin.getY() - attachY) * 40.0D;
+                        double score = FollowVerticalAssistPolicyUtil.scoreCandidate(
+                                true,
+                                absGoalBottomY,
+                                botHorizontalDistSq,
+                                goalHorizontalDistSq) + attachPenalty;
+                        if (score < bestScore) {
+                            bestScore = score;
+                            best = new ClimbAssistCandidate(attachPos.toImmutable(), standPos.toImmutable(), topY, score);
+                        }
+                    }
+                }
+            }
+        }
+        return best;
+    }
+
+    private static BlockPos climbableColumnBottom(ServerWorld world, BlockPos start, int maxDrop) {
+        if (world == null || start == null) {
+            return null;
+        }
+        if (!isClimbable(world, start)) {
+            return null;
+        }
+        BlockPos bottom = start;
+        for (int i = 1; i <= Math.max(1, maxDrop); i++) {
+            BlockPos down = bottom.down();
+            if (!isClimbable(world, down)) {
+                break;
+            }
+            bottom = down;
+        }
+        return bottom;
+    }
+
+    private static int climbableColumnTopY(ServerWorld world, BlockPos start, int maxRise) {
+        if (world == null || start == null) {
+            return Integer.MIN_VALUE;
+        }
+        int topY = start.getY();
+        for (int i = 1; i <= Math.max(1, maxRise); i++) {
+            BlockPos up = start.up(i);
+            if (!isClimbable(world, up)) {
+                break;
+            }
+            topY = up.getY();
+        }
+        return topY;
+    }
+
+    private static BlockPos findNearbyClimbableAnchor(ServerWorld world,
+                                                      BlockPos origin,
+                                                      int horizRadius,
+                                                      int minDy,
+                                                      int maxDy) {
+        if (world == null || origin == null || horizRadius < 0) {
+            return null;
+        }
+        BlockPos best = null;
+        double bestScore = Double.MAX_VALUE;
+        for (int dx = -horizRadius; dx <= horizRadius; dx++) {
+            for (int dz = -horizRadius; dz <= horizRadius; dz++) {
+                for (int dy = minDy; dy <= maxDy; dy++) {
+                    BlockPos probe = origin.add(dx, dy, dz);
+                    if (!isClimbable(world, probe)) {
+                        continue;
+                    }
+                    double horizontal = (dx * dx) + (dz * dz);
+                    double vertical = Math.abs(dy) * 0.5D;
+                    double score = horizontal + vertical;
+                    if (score < bestScore) {
+                        bestScore = score;
+                        best = probe.toImmutable();
+                    }
+                }
+            }
+        }
+        return best;
+    }
+
+    private static boolean isClimbable(ServerWorld world, BlockPos pos) {
+        if (world == null || pos == null) {
+            return false;
+        }
+        return world.getBlockState(pos).isIn(BlockTags.CLIMBABLE);
+    }
+
+    private static boolean shouldBreakVerticalDoorLoop(ServerPlayerEntity bot,
+                                                       ServerPlayerEntity target,
+                                                       double targetDistSq,
+                                                       boolean targetAboveBot,
+                                                       boolean directBlocked,
+                                                       int effectiveStagnant,
+                                                       FollowDoorPlan activeDoorPlan,
+                                                       long nowMs) {
+        if (bot == null || target == null || activeDoorPlan == null || !targetAboveBot) {
+            return false;
+        }
+        if (!directBlocked && effectiveStagnant < 3) {
+            return false;
+        }
+        if (targetDistSq < 4.0D) {
+            return false;
+        }
+
+        UUID id = bot.getUuid();
+        BlockPos doorBase = activeDoorPlan.doorBase().toImmutable();
+        BlockPos lastDoor = FOLLOW_VERTICAL_DOOR_LOOP_LAST_BASE.get(id);
+        int streak = (lastDoor != null && lastDoor.equals(doorBase))
+                ? (FOLLOW_VERTICAL_DOOR_LOOP_STREAK.getOrDefault(id, 0) + 1)
+                : 1;
+        FOLLOW_VERTICAL_DOOR_LOOP_LAST_BASE.put(id, doorBase);
+        FOLLOW_VERTICAL_DOOR_LOOP_STREAK.put(id, streak);
+        if (streak < FOLLOW_VERTICAL_DOOR_LOOP_BREAK_STREAK) {
+            return false;
+        }
+
+        long lastBreak = FOLLOW_VERTICAL_DOOR_LOOP_LAST_BREAK_MS.getOrDefault(id, 0L);
+        if ((nowMs - lastBreak) < FOLLOW_VERTICAL_DOOR_LOOP_BREAK_COOLDOWN_MS) {
+            return false;
+        }
+        FOLLOW_VERTICAL_DOOR_LOOP_LAST_BREAK_MS.put(id, nowMs);
+        FOLLOW_VERTICAL_DOOR_LOOP_STREAK.put(id, 0);
+        return true;
+    }
+
+    private static boolean isOpenDoorBetween(ServerPlayerEntity bot, ServerPlayerEntity target) {
+        if (bot == null || target == null) {
+            return false;
+        }
+        ServerWorld world = bot.getEntityWorld() instanceof ServerWorld serverWorld ? serverWorld : null;
+        if (world == null) {
+            return false;
+        }
+        Vec3d goal = positionOf(target);
+        BlockPos blockingDoor = BlockInteractionService.findDoorAlongLine(bot, goal, 6.0D);
+        if (blockingDoor == null) {
+            return false;
+        }
+        BlockPos doorBase = normalizeDoorBase(world, blockingDoor);
+        if (doorBase == null) {
+            return false;
+        }
+        BlockState state = world.getBlockState(doorBase);
+        return state.contains(Properties.OPEN) && Boolean.TRUE.equals(state.get(Properties.OPEN));
+    }
+
+    private static boolean isSealedSpace(ServerPlayerEntity entity) {
+        if (entity == null) {
+            return false;
+        }
+        UUID id = entity.getUuid();
+        long now = System.currentTimeMillis();
+        long last = FOLLOW_SEALED_STATE_MS.getOrDefault(id, -1L);
+        if (last >= 0 && (now - last) < FOLLOW_SEALED_STATE_TTL_MS) {
+            return FOLLOW_SEALED_STATE.getOrDefault(id, false);
+        }
+	        BotStuckService.EnvironmentSnapshot env = BotStuckService.analyzeEnvironment(entity);
+	        boolean sealed = env != null && env.enclosed() && !env.hasEscapeRoute() && hasClosedDoorNearby(entity, 4);
+	        FOLLOW_SEALED_STATE_MS.put(id, now);
+	        FOLLOW_SEALED_STATE.put(id, sealed);
+	        return sealed;
+    }
+
+    private static boolean hasClosedDoorNearby(ServerPlayerEntity entity, int radius) {
+        if (entity == null || radius <= 0) {
+            return false;
+        }
+        ServerWorld world = entity.getEntityWorld() instanceof ServerWorld serverWorld ? serverWorld : null;
+        if (world == null) {
+            return false;
+        }
+        BlockPos origin = entity.getBlockPos();
+        for (int dx = -radius; dx <= radius; dx++) {
+            for (int dy = -2; dy <= 2; dy++) {
+                for (int dz = -radius; dz <= radius; dz++) {
+                    BlockPos probe = origin.add(dx, dy, dz);
+                    BlockPos doorBase = normalizeDoorBase(world, probe);
+                    if (doorBase == null) {
+                        continue;
+                    }
+                    BlockState state = world.getBlockState(doorBase);
+                    if (!(state.getBlock() instanceof DoorBlock) && !(state.getBlock() instanceof FenceGateBlock)) {
+                        continue;
+                    }
+                    if (state.contains(Properties.OPEN) && Boolean.TRUE.equals(state.get(Properties.OPEN))) {
+                        continue;
+                    }
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private static BlockPos normalizeDoorBase(ServerWorld world, BlockPos pos) {
+        if (world == null || pos == null) {
+            return null;
+        }
+        BlockState state = world.getBlockState(pos);
+        if (state.getBlock() instanceof net.minecraft.block.DoorBlock) {
+            if (state.contains(net.minecraft.block.DoorBlock.HALF)
+                    && state.get(net.minecraft.block.DoorBlock.HALF) == net.minecraft.block.enums.DoubleBlockHalf.UPPER) {
+                return pos.down();
+            }
+            return pos;
+        }
+        if (state.getBlock() instanceof FenceGateBlock) {
+            return pos;
+        }
+        BlockState down = world.getBlockState(pos.down());
+        if (down.getBlock() instanceof net.minecraft.block.DoorBlock || down.getBlock() instanceof FenceGateBlock) {
+            return normalizeDoorBase(world, pos.down());
+        }
+        BlockState up = world.getBlockState(pos.up());
+        if (up.getBlock() instanceof net.minecraft.block.DoorBlock || up.getBlock() instanceof FenceGateBlock) {
+            return normalizeDoorBase(world, pos.up());
+        }
+        return null;
+    }
+
+    /**
+     * Area scan fallback for door detection when the single raycast in
+     * {@code findDoorAlongLine} misses a door on a diagonal path.
+     * Checks blocks within {@code radius} horizontal of the line between
+     * {@code from} and {@code to} (and at both Y levels for doors).
+     */
+    private static BlockPos findDoorNearPath(ServerWorld world, BlockPos from, BlockPos to, int radius) {
+        if (world == null || from == null || to == null) return null;
+        int minX = Math.min(from.getX(), to.getX()) - radius;
+        int maxX = Math.max(from.getX(), to.getX()) + radius;
+        int minY = Math.min(from.getY(), to.getY());
+        int maxY = Math.max(from.getY(), to.getY()) + 1; // +1 for upper door half
+        int minZ = Math.min(from.getZ(), to.getZ()) - radius;
+        int maxZ = Math.max(from.getZ(), to.getZ()) + radius;
+        BlockPos best = null;
+        double bestDistSq = Double.MAX_VALUE;
+        BlockPos.Mutable probe = new BlockPos.Mutable();
+        for (int x = minX; x <= maxX; x++) {
+            for (int z = minZ; z <= maxZ; z++) {
+                for (int y = minY; y <= maxY; y++) {
+                    probe.set(x, y, z);
+                    var block = world.getBlockState(probe).getBlock();
+                    if (block instanceof DoorBlock || block instanceof FenceGateBlock) {
+                        double dSq = from.getSquaredDistance(probe);
+                        if (dSq < bestDistSq) {
+                            bestDistSq = dSq;
+                            best = probe.toImmutable();
+                        }
+                    }
+                }
+            }
+        }
+        return best;
+    }
+
+    /**
+     * Heuristic: returns true if moving from {@code from} to {@code step} is generally toward {@code goal}.
+     * Used to suppress "door magnet" behavior by skipping doors whose step-through tile is sideways/backward
+     * relative to the current goal.
+     */
+    private static boolean isStepMeaningfullyTowardGoal(BlockPos from, BlockPos step, BlockPos goal) {
+        if (from == null || step == null || goal == null) {
+            return true;
+        }
+        double ax = (goal.getX() + 0.5D) - (from.getX() + 0.5D);
+        double az = (goal.getZ() + 0.5D) - (from.getZ() + 0.5D);
+        double bx = (step.getX() + 0.5D) - (from.getX() + 0.5D);
+        double bz = (step.getZ() + 0.5D) - (from.getZ() + 0.5D);
+        double aLenSq = ax * ax + az * az;
+        double bLenSq = bx * bx + bz * bz;
+        if (aLenSq < 1.0e-6 || bLenSq < 1.0e-6) {
+            return true;
+        }
+        double dot = (ax * bx + az * bz) / (Math.sqrt(aLenSq) * Math.sqrt(bLenSq));
+        if (dot < 0.05D) {
+            return false;
+        }
+        double currentDistSq = from.getSquaredDistance(goal);
+        double stepDistSq = step.getSquaredDistance(goal);
+        // Allow minor "side-step" increases, but reject steps that clearly move away.
+        return stepDistSq <= currentDistSq + 1.0D;
+    }
+
+    private static boolean shouldWolfTeleport(double distanceSq,
+                                             double absDeltaY,
+                                             boolean canSee,
+                                             int stagnantTicks,
+                                             MinecraftServer server) {
+        if (server == null) {
+            return false;
+        }
+        boolean farAndNotVisible = distanceSq >= FOLLOW_TELEPORT_DISTANCE_SQ && !canSee;
+        boolean verticalSeparation = absDeltaY >= 10.0D && !canSee && distanceSq >= 49.0D;
+        boolean stuckTooLong = stagnantTicks >= FOLLOW_TELEPORT_STUCK_TICKS && distanceSq >= 49.0D;
+        return farAndNotVisible || verticalSeparation || stuckTooLong;
+    }
+
+    private static boolean tryWolfTeleport(ServerPlayerEntity bot, ServerPlayerEntity target, MinecraftServer server) {
+        if (bot == null || target == null || server == null) {
+            return false;
+        }
+        UUID id = bot.getUuid();
+        Long lastTick = FOLLOW_LAST_TELEPORT_TICK.get(id);
+        long nowTick = server.getTicks();
+        if (lastTick != null && nowTick - lastTick < FOLLOW_TELEPORT_COOLDOWN_TICKS) {
+            return false;
+        }
+        if (!(target.getEntityWorld() instanceof ServerWorld world)) {
+            return false;
+        }
+        BlockPos safe = findFollowTeleportPos(world, bot, target);
+        if (safe == null) {
+            return false;
+        }
+        // BlockPos here represents a *feet* position (2-block headroom checked); teleport using feet Y.
+        Vec3d center = new Vec3d(safe.getX() + 0.5D, safe.getY(), safe.getZ() + 0.5D);
+        bot.teleport(world,
+                center.x, center.y, center.z,
+                EnumSet.noneOf(PositionFlag.class),
+                target.getYaw(),
+                target.getPitch(),
+                true);
+        bot.setVelocity(Vec3d.ZERO);
+        FOLLOW_LAST_TELEPORT_TICK.put(id, nowTick);
+        LOGGER.info("Follow wolf-teleport: bot={} -> {} (near {})",
+                bot.getName().getString(),
+                safe.toShortString(),
+                target.getBlockPos().toShortString());
+        return true;
+    }
+
+    private static BlockPos findFollowTeleportPos(ServerWorld world, ServerPlayerEntity bot, ServerPlayerEntity target) {
+        if (world == null || bot == null || target == null) {
+            return null;
+        }
+        BlockPos base = target.getBlockPos();
+        Direction behind = target.getHorizontalFacing().getOpposite();
+        Direction left = behind.rotateYCounterclockwise();
+        Direction right = behind.rotateYClockwise();
+
+        List<BlockPos> candidates = new ArrayList<>(12);
+        candidates.add(base.offset(behind, 2));
+        candidates.add(base.offset(behind, 1));
+        candidates.add(base.offset(left, 2));
+        candidates.add(base.offset(right, 2));
+        candidates.add(base.offset(left, 1));
+        candidates.add(base.offset(right, 1));
+        candidates.add(base.up(1).offset(behind, 1));
+        candidates.add(base.down(1));
+        candidates.add(base.down(2));
+        candidates.add(base.down(1).offset(behind, 1));
+        candidates.add(base.down(1).offset(left, 1));
+        candidates.add(base.down(1).offset(right, 1));
+
+        BlockPos best = null;
+        double bestDist = Double.MAX_VALUE;
+        for (BlockPos pos : candidates) {
+            if (!world.isChunkLoaded(pos)) {
+                continue;
+            }
+            if (!isStandable(world, pos)) {
+                continue;
+            }
+            double dist = bot.getBlockPos().getSquaredDistance(pos);
+            if (dist < bestDist) {
+                bestDist = dist;
+                best = pos.toImmutable();
+            }
+        }
+        return best;
+    }
+
+    private static boolean isStandable(ServerWorld world, BlockPos pos) {
+        if (world == null || pos == null) {
+            return false;
+        }
+        BlockPos below = pos.down();
+        BlockState belowState = world.getBlockState(below);
+        if (belowState.isAir() || belowState.getCollisionShape(world, below).isEmpty()) {
+            return false;
+        }
+        BlockState body = world.getBlockState(pos);
+        BlockState head = world.getBlockState(pos.up());
+        if (!body.getCollisionShape(world, pos).isEmpty()) {
+            return false;
+        }
+        if (!head.getCollisionShape(world, pos.up()).isEmpty()) {
+            return false;
+        }
+        if (!world.getFluidState(pos).isEmpty() || !world.getFluidState(pos.up()).isEmpty()) {
+            return false;
+        }
+        return true;
+    }
+
+    private static Direction approximateToward(BlockPos from, BlockPos to) {
+        if (from == null || to == null) {
+            return Direction.NORTH;
+        }
+        int dx = to.getX() - from.getX();
+        int dz = to.getZ() - from.getZ();
+        if (Math.abs(dx) >= Math.abs(dz)) {
+            return dx >= 0 ? Direction.EAST : Direction.WEST;
+        }
+        return dz >= 0 ? Direction.SOUTH : Direction.NORTH;
+    }
+
+    private static boolean shouldPlanFollow(ServerPlayerEntity bot, ServerPlayerEntity target) {
+        if (bot == null || target == null) {
+            return false;
+        }
+        UUID id = bot.getUuid();
+        long now = System.currentTimeMillis();
+        BlockPos currentTargetPos = target.getBlockPos();
+
+        BlockPos lastPos = LAST_FOLLOW_TARGET_POS.get(id);
+        Long lastTime = LAST_FOLLOW_PLAN_MS.get(id);
+
+        boolean movedEnough = lastPos == null || lastPos.getSquaredDistance(currentTargetPos) > 9; // >3 blocks
+        boolean timeElapsed = lastTime == null || now - lastTime > 500; // 0.5s throttle
+
+        if (movedEnough || timeElapsed) {
+            LAST_FOLLOW_TARGET_POS.put(id, currentTargetPos.toImmutable());
+            LAST_FOLLOW_PLAN_MS.put(id, now);
+            return true;
+        }
+        return false;
+    }
+
+    private static void handleFollowPersonalSpace(ServerPlayerEntity bot,
+                                                  ServerPlayerEntity target,
+                                                  double distanceSq,
+                                                  Vec3d targetPos) {
+        FollowMovementService.handleFollowPersonalSpace(bot, target, distanceSq, targetPos, FOLLOW_BACKUP_DISTANCE, FOLLOW_BACKUP_TRIGGER_MS);
+    }
+
+    private static Entity findNearestItem(ServerPlayerEntity bot, List<Entity> entities, double radius) {
+        return entities.stream()
+                .filter(entity -> entity instanceof net.minecraft.entity.ItemEntity)
+                .filter(entity -> entity.squaredDistanceTo(bot) <= radius * radius)
+                .min(Comparator.comparingDouble(entity -> entity.squaredDistanceTo(bot)))
+                .orElse(null);
+    }
+
+    private static Entity findNearestDrop(ServerPlayerEntity bot, double radius) {
+        if (bot == null) {
+            return null;
+        }
+        if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
+            return null;
+        }
+        double verticalRange = Math.max(6.0D, radius);
+        Box searchBox = bot.getBoundingBox().expand(radius, verticalRange, radius);
+        return world.getEntitiesByClass(
+                        ItemEntity.class,
+                        searchBox,
+                        drop -> drop.isAlive() && !drop.isRemoved() && drop.squaredDistanceTo(bot) > 1.0D)
+                .stream()
+                .min(Comparator.comparingDouble(bot::squaredDistanceTo))
+                .orElse(null);
+    }
+
+    private static List<Entity> findHostilesAround(ServerPlayerEntity player, double radius) {
+        return BotThreatService.findHostilesAround(player, radius);
+    }
+
+    private static Vec3d randomPointWithin(Vec3d center, double radius) {
+        double angle = RANDOM.nextDouble() * Math.PI * 2;
+        double distance = RANDOM.nextDouble() * radius;
+        double x = center.x + Math.cos(angle) * distance;
+        double z = center.z + Math.sin(angle) * distance;
+        return new Vec3d(x, center.y, z);
+    }
+
+    private static void sendBotMessage(ServerPlayerEntity bot, String message) {
+        ChatUtils.sendChatMessages(bot.getCommandSource().withSilent().withPermissions(net.wcfcarolina13.Frens.OPERATOR_PERMISSIONS), message);
+    }
+
+    private static Vec3d positionOf(Entity entity) {
+        return new Vec3d(entity.getX(), entity.getY(), entity.getZ());
+    }
+
+    public static boolean rescueFromBurial(ServerPlayerEntity bot) {
+        return BotRescueService.rescueFromBurial(bot);
+    }
+
+    /**
+     * Proactively checks if bot is stuck in blocks and initiates time-based mining to escape.
+     * Uses MiningTool.mineBlock() for physical, tool-based breaking.
+     */
+    public static boolean checkAndEscapeSuffocation(ServerPlayerEntity bot) {
+        return BotRescueService.checkAndEscapeSuffocation(bot);
+    }
+
+    /**
+     * DISABLED: Programmatic block breaking removed.
+     * Bot must handle headspace clearance naturally through mining.
+     */
+    public static boolean ensureHeadspaceClearance(ServerPlayerEntity bot) {
+        return BotRescueService.ensureHeadspaceClearance(bot);
+    }
+
+    /**
+     * Checks if bot spawned inside blocks and proactively starts mining out.
+     * Called on spawn to prevent immediate suffocation death.
+     */
+    private static void checkForSpawnInBlocks(ServerPlayerEntity bot) {
+        BotRescueService.checkForSpawnInBlocks(bot);
+    }
+
+
+    public static void tickBurialRescue(MinecraftServer server) {
+        BotRescueService.tickBurialRescue(server);
+    }
+
+    private static void lowerShieldTracking(ServerPlayerEntity bot) {
+        if (bot == null) {
+            return;
+        }
+        if (isShieldRaised(bot)) {
+            BotActions.lowerShield(bot);
+            setShieldRaised(bot, false);
+        } else {
+            BotActions.lowerShield(bot);
+        }
+    }
+
+    private void performLearningStep(
+            RLAgent rlAgentHook,
+            QTable qTable,
+            State currentState,
+            List<EntityDetails> nearbyEntitiesList,
+            List<String> nearbyBlocks,
+            double distanceToHostileEntity,
+            String time,
+            String dimension) throws IOException {
+
+        if (externalOverrideActive) {
+            LOGGER.debug("Aborting learning step because external override is active.");
+            return;
+        }
+
+        LOGGER.info("Starting performLearningStep. Current state hash: {}, hostiles in state: {}",
+                currentState.hashCode(),
+                currentState.getNearbyEntities() != null ? currentState.getNearbyEntities().stream().filter(EntityDetails::isHostile).count() : 0);
+
+        double riskAppetite = rlAgentHook.calculateRiskAppetite(currentState);
+        List<StateActions.Action> potentialActionList = rlAgentHook.suggestPotentialActions(currentState);
+        Map<StateActions.Action, Double> riskMap = rlAgentHook.calculateRisk(currentState, potentialActionList);
+
+        Map<StateActions.Action, Double> chosenActionMap = rlAgentHook.chooseAction(currentState, riskAppetite, riskMap);
+        Map.Entry<StateActions.Action, Double> entry = chosenActionMap.entrySet().iterator().next();
+
+        StateActions.Action chosenAction = entry.getKey();
+        double risk = entry.getValue();
+
+        LOGGER.info("Training step chosen action: {}", chosenAction);
+
+        executeAction(chosenAction);
+
+        BlockDistanceLimitedSearch blockDistanceLimitedSearch = new BlockDistanceLimitedSearch(bot, 3, 5);
+        List<String> updatedBlocks = blockDistanceLimitedSearch.detectNearbyBlocks();
+
+        List<EntityDetails> updatedEntities = AutoFaceEntity.detectNearbyEntities(bot, 10).stream()
+                .map(entity -> EntityDetails.from(bot, entity))
+                .toList();
+
+        double newDistanceToHostile = updatedEntities.stream()
+                .filter(EntityDetails::isHostile)
+                .mapToDouble(entity -> Math.hypot(entity.getX() - bot.getX(), entity.getZ() - bot.getZ()))
+                .min()
+                .orElse(distanceToHostileEntity);
+
+        double dangerDistance = DangerZoneDetector.detectDangerZone(bot, 10, 5, 5);
+        int botHungerLevel = getPlayerHunger.getBotHungerLevel(bot);
+        int botOxygenLevel = getPlayerOxygen.getBotOxygenLevel(bot);
+        int botFrostLevel = getFrostLevel.calculateFrostLevel(bot);
+        Map<String, ItemStack> armorItems = getArmorStack.getArmorItems(bot);
+        ItemStack offhandItem = getOffHandStack.getOffhandItem(bot);
+        List<ItemStack> hotBarItems = hotBarUtils.getHotbarItems(bot);
+        SelectedItemDetails selectedItem = new SelectedItemDetails(
+                hotBarUtils.getSelectedHotbarItemStack(bot).getItem().getName().getString(),
+                hotBarUtils.getSelectedHotbarItemStack(bot).getComponents().contains(DataComponentTypes.FOOD),
+                isBlockItem.checkBlockItem(hotBarUtils.getSelectedHotbarItemStack(bot))
+        );
+
+	        BotStuckService.EnvironmentSnapshot nextEnv = BotStuckService.analyzeEnvironment(bot);
+	        boolean confinedNoEscape = nextEnv.enclosed() && !nextEnv.hasEscapeRoute() && !nextEnv.hasHeadroom();
+	        if (!confinedNoEscape) {
+	            BotStuckService.setLastSafePosition(bot.getUuid(), new Vec3d(bot.getX(), bot.getY(), bot.getZ()));
+	        }
+
+        String updatedTime = GetTime.getTimeOfWorld(bot) >= 12000 ? "night" : "day";
+        String updatedDimension = bot.getCommandSource().getWorld().getRegistryKey().getValue().toString();
+
+        Map<StateActions.Action, Double> basePodMap = currentState.getPodMap() != null
+                ? currentState.getPodMap()
+                : new HashMap<>();
+
+        State nextState = new State(
+                (int) bot.getX(),
+                (int) bot.getY(),
+                (int) bot.getZ(),
+                updatedEntities,
+                updatedBlocks,
+                newDistanceToHostile,
+                (int) bot.getHealth(),
+                dangerDistance,
+                hotBarItems,
+                selectedItem,
+                updatedTime,
+                updatedDimension,
+                botHungerLevel,
+                botOxygenLevel,
+                botFrostLevel,
+                offhandItem,
+                armorItems,
+                nextEnv.enclosed(),
+                nextEnv.solidNeighborCount(),
+                nextEnv.hasHeadroom(),
+                nextEnv.hasEscapeRoute(),
+                chosenAction,
+                riskMap,
+                riskAppetite,
+                basePodMap
+        );
+
+        rlAgentHook.decayEpsilon();
+        Map<StateActions.Action, Double> actionPodMap = rlAgentHook.assessRiskOutcome(currentState, nextState, chosenAction);
+        nextState.setPodMap(actionPodMap);
+
+        ServerPlayerEntity commander = findEscortPlayer(bot);
+        Vec3d commanderPos = commander != null ? new Vec3d(commander.getX(), commander.getY(), commander.getZ()) : null;
+        float commanderHealth = commander != null ? commander.getHealth() : -1f;
+        Vec3d guardCenterVec = getGuardCenterVec();
+        double guardRadiusValue = guardCenterVec != null ? getGuardRadiusValue() : 0.0D;
+
+        ActionHoldTracker.ActionHoldSnapshot holdSnapshot = ActionHoldTracker.snapshot();
+
+        double reward = rlAgentHook.calculateReward(
+                (int) bot.getX(),
+                (int) bot.getY(),
+                (int) bot.getZ(),
+                updatedEntities,
+                updatedBlocks,
+                newDistanceToHostile,
+                (int) bot.getHealth(),
+                dangerDistance,
+                hotBarItems,
+                selectedItem,
+                updatedTime,
+                updatedDimension,
+                botHungerLevel,
+                botOxygenLevel,
+                offhandItem,
+                armorItems,
+                nextEnv.enclosed(),
+                nextEnv.hasHeadroom(),
+                nextEnv.hasEscapeRoute(),
+                nextEnv.solidNeighborCount(),
+                chosenAction,
+                risk,
+                actionPodMap.getOrDefault(chosenAction, 0.0),
+                getCurrentMode(),
+                getCombatStyle(),
+                commanderPos,
+                commanderHealth,
+                guardCenterVec,
+                guardRadiusValue,
+                holdSnapshot
+        );
+
+        LOGGER.info("Reward for action {}: {}", chosenAction, reward);
+
+        double qValue = rlAgentHook.calculateQValue(currentState, chosenAction, reward, nextState, qTable);
+        qTable.addEntry(currentState, chosenAction, qValue, nextState);
+
+        if (BotRLPersistenceThrottleService.shouldPersistNow(bot)) {
+            QTableStorage.saveQTable(qTable, null);
+            QTableStorage.saveEpsilon(rlAgentHook.getEpsilon(), qTableDir + "/epsilon.bin");
+            LOGGER.info("Persisted Q-table and epsilon (throttled) after action {}", chosenAction);
+        } else {
+            LOGGER.debug("Skipping Q-table persist due to throttle (action={})", chosenAction);
+        }
+
+        BotEventHandler.currentState = nextState;
+    }
+
+
+    public static State createInitialState(ServerPlayerEntity bot) {
+        List<ItemStack> hotBarItems = hotBarUtils.getHotbarItems(bot);
+        ItemStack selectedItemStack = hotBarUtils.getSelectedHotbarItemStack(bot);
+
+        BlockDistanceLimitedSearch blockDistanceLimitedSearch = new BlockDistanceLimitedSearch(bot, 3, 5);
+
+        List<String> nearbyBlocks = blockDistanceLimitedSearch.detectNearbyBlocks();
+
+	        BotStuckService.EnvironmentSnapshot environmentSnapshot = BotStuckService.analyzeEnvironment(bot);
+	        boolean confinedNoEscape = environmentSnapshot.enclosed() && !environmentSnapshot.hasEscapeRoute() && !environmentSnapshot.hasHeadroom();
+	        if (!confinedNoEscape) {
+	            BotStuckService.setLastSafePosition(bot.getUuid(), new Vec3d(bot.getX(), bot.getY(), bot.getZ()));
+	        }
+
+        SelectedItemDetails selectedItem = new SelectedItemDetails(
+                selectedItemStack.getItem().getName().getString(),
+                selectedItemStack.getComponents().contains(DataComponentTypes.FOOD),
+                isBlockItem.checkBlockItem(selectedItemStack)
+        );
+
+        List<Entity> nearbyEntities = AutoFaceEntity.detectNearbyEntities(bot, 10);
+        List<EntityDetails> nearbyEntitiesList = nearbyEntities.stream()
+                .map(entity -> EntityDetails.from(bot, entity))
+                .toList();
+
+        double dangerDistance = DangerZoneDetector.detectDangerZone(bot, 10, 5, 5);
+        int botHungerLevel = getPlayerHunger.getBotHungerLevel(bot);
+        int botOxygenLevel = getPlayerOxygen.getBotOxygenLevel(bot);
+        int botFrostLevel = getFrostLevel.calculateFrostLevel(bot);
+        Map<String, ItemStack> armorItems = getArmorStack.getArmorItems(bot);
+        ItemStack offhandItem = getOffHandStack.getOffhandItem(bot);
+        String time = GetTime.getTimeOfWorld(bot) >= 12000 ? "night" : "day";
+        String dimension = bot.getCommandSource().getWorld().getRegistryKey().getValue().toString();
+        Map<StateActions.Action, Double> riskMap = new HashMap<>();
+
+        Map<StateActions.Action, Double> podMap = new HashMap<>(); // blank pod map for now.
+
+        return new State(
+                (int) bot.getX(),
+                (int) bot.getY(),
+                (int) bot.getZ(),
+                nearbyEntitiesList,
+                nearbyBlocks,
+                0.0, // Distance to hostile can be updated dynamically elsewhere
+                (int) bot.getHealth(),
+                dangerDistance,
+                hotBarItems,
+                selectedItem,
+                time,
+                dimension,
+                botHungerLevel,
+                botOxygenLevel,
+                botFrostLevel,
+                offhandItem,
+                armorItems,
+                environmentSnapshot.enclosed(),
+                environmentSnapshot.solidNeighborCount(),
+                environmentSnapshot.hasHeadroom(),
+                environmentSnapshot.hasEscapeRoute(),
+                StateActions.Action.STAY,
+                riskMap,
+                DEFAULT_RISK_APPETITE,
+                podMap
+        );
+    }
+
+
+    private static void performAction(String action) {
+        BotRLActionService.performAction(bot, action, BotEventHandler::debugRL);
+    }
+
+    /**
+     * Resets all static fields to prevent state from leaking between worlds/servers.
+     * Must be called on server stop or when the bot completely disconnects.
+     */
+    public static void resetAll() {
+	        synchronized (monitorLock) {
+	            server = null;
+	            bot = null;
+	            BotLifecycleService.clear();
+	            BotRegistry.clear();
+		            BotCommandStateService.clearAll();
+		            LAST_RL_SAMPLE_TICK.clear();
+		            BotRescueService.reset();
+		            BotStuckService.resetAll();
+		            BotRLPersistenceThrottleService.resetAll();
+	            FollowStateService.reset();
+	            FollowDebugService.reset();
+	            DropSweepService.reset();
+                FOLLOW_LAST_VERTICAL_ASSIST_MS.clear();
+                FOLLOW_VERTICAL_DOOR_LOOP_LAST_BASE.clear();
+                FOLLOW_VERTICAL_DOOR_LOOP_STREAK.clear();
+                FOLLOW_VERTICAL_DOOR_LOOP_LAST_BREAK_MS.clear();
+                FOLLOW_VERTICAL_LOCK_LAST_POS.clear();
+                FOLLOW_VERTICAL_LOCK_LAST_REPLAN_MS.clear();
+                FOLLOW_VERTICAL_LOCK_FAIL_COOLDOWN_UNTIL_MS.clear();
+                FOLLOW_COMMANDER_LADDER_HINT.clear();
+            
+            isExecuting = false;
+            externalOverrideActive = false;
+            botDied = false;
+            hasRespawned = false;
+            botSpawnCount = 0;
+
+		            currentState = null;
+		            lastRespawnHandledTick = -1;
+		            
+		            LOGGER.info("BotEventHandler static state reset successfully.");
+		        }
+    }
+}

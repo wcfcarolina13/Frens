@@ -1,0 +1,10 @@
+{
+  "key.frens.follow_toggle_look": "Frens: Toggle Follow (look target)",
+  "key.frens.go_to_look": "Frens: Go To Look",
+  "key.frens.open_spells": "Frens: Open Spells",
+  "key.frens.resume": "Frens: Resume (pending)",
+  "key.frens.stop_look": "Frens: Stop (look target)",
+  "key.frens.leash": "Frens: Tie Lead to Fence",
+  "key.frens.recruit_contact": "Frens: Initiate Contact (village)",
+  "item.frens.wizard_tome": "Wizard's Tome"
+}

@@ -5,10 +5,10 @@ Generated: `2026-02-13 19:23:43Z`
 ## Inputs
 
 - Repo root: `/Users/roti/AI-Player-checkpoint`
-- Source ogg dir: `/Users/roti/gemini_projects/ai-player-dialogue/january_2026_batch3/output_ogg`
-- sounds.json: `src/main/resources/assets/ai-player/sounds.json`
-- BotDialogueSounds: `src/main/java/net/shasankp000/ChatUtils/BotDialogueSounds.java`
-- DialogueTextMapper: `src/main/java/net/shasankp000/ChatUtils/DialogueTextMapper.java`
+- Source ogg dir: `/Users/roti/gemini_projects/frens-dialogue/january_2026_batch3/output_ogg`
+- sounds.json: `src/main/resources/assets/frens/sounds.json`
+- BotDialogueSounds: `src/main/java/net/wcfcarolina13/ChatUtils/BotDialogueSounds.java`
+- DialogueTextMapper: `src/main/java/net/wcfcarolina13/ChatUtils/DialogueTextMapper.java`
 - Phase1 manifest: `tools/audio/batch3_phase1_manifest.tsv`
 - Topic manifest: `tools/audio/batch3_topic_manifest.tsv`
 - Log file: `/Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/logs/latest.log`
@@ -337,14 +337,14 @@ Generated: `2026-02-13 19:23:43Z`
 
 ## Log-Observed Played Sound Events (Top 40)
 
-- `ai-player:bot.line.wolf_guard_duty`: 2
-- `ai-player:bot.line.idle_taking_it_easy`: 2
-- `ai-player:bot.line.wolf_menace`: 2
-- `ai-player:bot.line.ambient_my_job`: 2
-- `ai-player:bot.line.touch_hmm`: 1
-- `ai-player:bot.line.ambient_blame_terrain`: 1
-- `ai-player:bot.line.meme_steve_adjacent`: 1
-- `ai-player:bot.line.idle_here_if_needed`: 1
-- `ai-player:bot.line.foliage_stuck_5`: 1
-- `ai-player:bot.line.meta_stop_looking`: 1
+- `frens:bot.line.wolf_guard_duty`: 2
+- `frens:bot.line.idle_taking_it_easy`: 2
+- `frens:bot.line.wolf_menace`: 2
+- `frens:bot.line.ambient_my_job`: 2
+- `frens:bot.line.touch_hmm`: 1
+- `frens:bot.line.ambient_blame_terrain`: 1
+- `frens:bot.line.meme_steve_adjacent`: 1
+- `frens:bot.line.idle_here_if_needed`: 1
+- `frens:bot.line.foliage_stuck_5`: 1
+- `frens:bot.line.meta_stop_looking`: 1
 

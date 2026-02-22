@@ -1,0 +1,13 @@
+{
+	"required": false,
+	"package": "net.wcfcarolina13.mixin",
+	"compatibilityLevel": "JAVA_17",
+	"mixins": [
+		"ExampleMixin",
+		"CraftingResultSlotMixin"
+	],
+	"client": [],
+	"injectors": {
+		"defaultRequire": 1
+	}
+}

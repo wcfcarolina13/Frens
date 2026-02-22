@@ -8,7 +8,7 @@ This feature allows you to use alternative AI providers that are compatible with
 
 Set the system property when launching the game:
 ```
--Daiplayer.llmMode=custom
+-Dfrens.llmMode=custom
 ```
 
 ### 2. Configure API Settings

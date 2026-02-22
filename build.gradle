@@ -97,6 +97,9 @@ dependencies {
 	dependencies {
 		implementation fileTree(dir: 'libs', include: ['*.jar'])
 	}
+
+	testImplementation 'org.junit.jupiter:junit-jupiter:5.11.4'
+	testImplementation 'org.mockito:mockito-inline:5.2.0'
 }
 
 shadowJar {
@@ -113,9 +116,9 @@ shadowJar {
 	exclude 'net/minecraft/**'
 	exclude 'ai/djl/**'
 	exclude 'io/github/amithkoujalgi/**'
-	relocate 'com.fasterxml.jackson', 'net.shasankp000.relocated.com.fasterxml.jackson'
-	relocate 'io.wispforest:owo-sentinel', 'net.shasankp000.relocated.io.wispforest:owo-sentinel'
-	relocate 'com.github.amithkoujalgi', 'net.shasankp000.relocated:com.github.amithkoujalgi'
+	relocate 'com.fasterxml.jackson', 'net.wcfcarolina13.relocated.com.fasterxml.jackson'
+	relocate 'io.wispforest:owo-sentinel', 'net.wcfcarolina13.relocated.io.wispforest:owo-sentinel'
+	relocate 'com.github.amithkoujalgi', 'net.wcfcarolina13.relocated:com.github.amithkoujalgi'
 }
 
 processResources {
@@ -128,7 +131,7 @@ processResources {
 	// The project-level sounds.json includes a non-vanilla "category" field for readability,
 	// but vanilla's loader will reject it (and then ALL custom sounds become "missing").
 	// Strip those lines at build-time so the packaged JAR contains a valid sounds.json.
-	filesMatching("assets/ai-player/sounds.json") {
+	filesMatching("assets/frens/sounds.json") {
 		filter { String line ->
 			line.contains('"category"') ? "" : line
 		}
@@ -178,4 +181,8 @@ tasks.withType(JavaExec).configureEach {
 		jvmArgs += "-Xmx4G"
 		jvmArgs += "-Xms2G"
 	}
+}
+
+tasks.withType(Test).configureEach {
+	useJUnitPlatform()
 }

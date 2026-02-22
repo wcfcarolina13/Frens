@@ -12,6 +12,39 @@ Historical record and reasoning. `TODO.md` is the source of truth for what’s n
 - Follow rework: bots now chase with WASD-style input, timeboxed path steps (no tick stalls), sensible teleport catch-up, and chill when adjacent; hill walking and vertical catch-up improved.
 
 ## Unreleased
+- Fortify: skip towers on resume — when `startEdgeIndex > 0`, tower phase is skipped entirely (already attempted in prior session, finish with patch). Eliminates ~60s of wasted walking to already-built towers.
+- Fortify: skip already-built tower vertices — `countPresentBlocks` check before walking to each vertex; 90%+ present = skip without navigating.
+- Fortify: **moat is now a single unified phase** — all MOAT_DIG + EXTERIOR_CLEAR blocks across ALL edges are collected and dug in one continuous sweep before any wall placement begins. Sorted by XZ locality (16-block grid regions → XZ column → top-down Y) so the bot works in one physical area regardless of edge boundaries. Eliminates the per-edge dig→place→escape→next-edge cycle that caused repeated stuck loops.
+- Fortify: **reference surface Y from FOUNDATION blocks** — `escapeIfInHole()` now uses the original terrain level (from layout FOUNDATION blocks) instead of the heightmap, which changes after moat digging. Previously the bot thought it was on the surface when it was actually on the moat floor because `terrainY()` returns the current top block, not the original surface.
+- Fortify: reduced movement overhead — removed redundant `walkTowardBlock` calls and unnecessary sleep delays in dig loop; single fast reach-check instead of double walk attempt; reduced walkTowardBlock timeouts from 2000/1500ms to 1500ms; removed 50ms sleep after each dig (MiningTool already waits via CompletableFuture).
+- Fortify: `escapeIfInHole()` rewritten as staircase ramp builder — when bot is trapped below terrain (e.g. in moat on resume), it picks the best direction and builds a diagonal staircase upward: places blocks under feet, clears headroom above, jumps forward and up, repeating until at terrain level. Works from anywhere including from inside the moat. Pillar-up as last resort if staircase fails.
+- Fortify: `ensureOnSurface()` at buildWall start — calls staircase escape to get bot to surface on resume from stuck positions.
+- Fortify: stuck-position detection in place loops — if bot hasn't moved for 5 consecutive block attempts, breaks the pass and escapes.
+- Fortify: place phase also sorts by locality segment (8-block clusters) before build priority, keeping the bot in one area before moving on.
+- Fortify: increase place-phase bail-out tolerance from 2 to 3 consecutive no-progress passes; increase MAX_PASSES_PER_EDGE from 4 to 6.
+- Fortify: major geometry overhaul — full cross-section now includes wall + stone brick slab top + inner cliff face + spider-proof overhang + 3-wide/3-deep moat with cobblestone floor + 2-block exterior clearance zone.
+- Fortify: village detection improved — POI scan step reduced to 1 (was 2), structure scan step reduced to 2 (was 3); scan range expanded from 15 to 25 blocks beyond POI bounding box; vertical ranges widened to catch taller structures.
+- Fortify: ~40 new village block types added to detection (dark oak, acacia, mangrove wood; stone bricks, bricks, mossy variants; terracotta, wool, hay blocks, bookshelves, iron bars, ladders) — prevents buildings from being left outside the wall.
+- Fortify: structure exclusion zone — detected village buildings are padded by 2 blocks and wall/moat/tower blocks at those XZ positions are skipped, creating natural gaps instead of building through houses.
+- Fortify: build execution split into dig + place phases — moat ditch and exterior clearance are dug first (top-down), then wall/floor/face/overhang/slab blocks are placed in priority order.
+- Fortify: gatehouse now generates a walkable bridge across the moat (MOAT_FLOOR blocks at terrain level under the gate gap).
+- Fortify: tower caps changed from TOWER_CAP to WALL_TOP_SLAB (stone brick slab), matching new wall top profile.
+- Fortify: new material fallback lists for slabs (stone brick slab → cobblestone slab → stone slab → cobblestone → dirt) and cobblestone (cobblestone → cobbled deepslate → stone → dirt).
+- Fortify: tryPlaceBlock now returns success for air target state (dig-phase blocks handled separately).
+- Fortify: digBlock helper uses MiningTool.mineBlock with 10s timeout, skips bedrock/doors/beds/unbreakable blocks.
+- Fortify: visualizer adds moat (dark blue 0x0066CC), overhang (purple 0x9933FF), and clearance (light red 0xFF3333) particle colors.
+- Fortify: guide text updated with moat/defense description and new particle color legend.
+- Fortify: fix broken completion tracking — edges now require 85% placement ratio (not just 1+ block) before being marked complete; final wall completion verified with world scan.
+- Fortify: `resume` on a complete wall now suggests `patch` instead of silently refusing.
+- Fortify: `patch` mode now shows per-edge completion stats with color coding (green/yellow/red), distinguishes never-built vs damaged edges, and prioritizes foundations before upper blocks.
+- Fortify: `list` shows overall completion percentage from per-edge tracking data.
+- Fortify: add `status <name>` subcommand — shows per-type and per-edge breakdown + spawns coloured ground-level particles (orange=towers, blue=walls, gold=gatehouse, red=missing, green=hull).
+- Fortify: `dry_run` now spawns ground footprint particles alongside the text summary.
+- Fortify: add overlap detection — new builds check existing walls for hull overlap (>30% blocks with warning, >5% warns and continues).
+- Fortify: add `merge <name>` subcommand — combines current village hull with named wall, saves unified layout, counts existing blocks as already placed.
+- Fortify: add hull geometry helpers (SAT overlap, point-in-hull, overlap percentage, hull merge) to VillageFortificationLayoutService.
+- Fortify: new FortificationVisualizerService for server-side DustParticleEffect visualization at ground level.
+- MovementService: throttle nudgeToward WARN logs to once per 10s per label prefix; repeated failures downgraded to DEBUG.
 - Backlog hygiene: archived 23 completed checklist items out of `TODO.md` so it now tracks pending work only. Completed references include return-base build fix, ascent/suffocation/task-lifecycle/drop handling fixes, protected-zone persistence, fishing skill + sleep integration, follow-distance command, follow/come/combat/mining verification passes, and debug/equip quality-of-life commands.
 - Dialogue: add missing `bot.line.*` sound entries for ambient/dark/wildlife/lost/found lines so code-triggered events play.
 - Dialogue: add follow-adventure banter when following far from base/recent bed; track last-sleep timestamps for "recent bed" checks.
@@ -44,7 +77,7 @@ Historical record and reasoning. `TODO.md` is the source of truth for what’s n
 - UI: stop pausing the game while the topics/crafting/cooking/hunting screens are open.
 - Hunt debugging: add detailed logging around task starts, blocked slots, and hunt execution flow.
 - Hunt debugging: add temporary stdout markers for skill/task entry so logs capture flow even if logger filters hide INFO.
-- Hunt debugging: write skill flow markers to `config/ai-player/skill_debug.log`.
+- Hunt debugging: write skill flow markers to `config/frens/skill_debug.log`.
 - Hunt debugging: add pre-context/pre-run markers and log SkillManager static init/register steps.
 - Skills: build the skill execution context on the server thread before dispatching to the executor to avoid worker-thread stalls.
 - Skills: guard shared state lookup so missing ollama4j classes can't crash `/bot skill`.
@@ -100,7 +133,7 @@ Historical record and reasoning. `TODO.md` is the source of truth for what’s n
 - Crafting: crafting-table placement is now more robust (avoids fluids and blocked tiles, and retries nearby placements) so “logs → planks → place table → chest” works more reliably for storage automation.
 - Shelter: added `/bot shelter hovel <alias?>` to build a quick dirt/cobble hovel (roofed, torches, fills gaps, gathers dirt if short).
 - Hunting: new `hunt` skill with mob catalog, unlock-on-kill gating, hunting grounds based on bot/bases/beds, cooking fallback, and drop/overflow handling. Topics menu adds Hunting popout and an auto-hunt-when-starving toggle.
-- Networking: standardized network payload packages to `net.shasankp000.network` to eliminate mixed-case imports.
+- Networking: standardized network payload packages to `net.wcfcarolina13.network` to eliminate mixed-case imports.
 - Shelter: hovel now prefers staying near the build site for material gathering (shallow local dig only; no auto descent/stripmine), and can detect/complete nearby pre-existing shelter footprints.
 - Shelter: hovel siting rejects unsupported/water-edge footprints (won’t try to build walls over shoreline overhangs), and runs a final interior leveling + gap patch pass right before drop-sweeping.
 - Shelter: hovel placement now attempts a “double back and exit” when reach-moves fail inside the footprint (targets doorway/perimeter openings instead of endlessly pushing into walls).
@@ -208,12 +241,12 @@ Historical record and reasoning. `TODO.md` is the source of truth for what’s n
 - Come: removed the old “blocked, run `/bot resume` to dig” staging path (now superseded by automatic recovery skills).
 - Refactor: removed obsolete Spartan mode; confined/no-escape handling now relies on environment checks plus the stuck/escape routines.
 - Refactor: extracted follow debug-log throttling to `FollowDebugService` (no behavior change).
-- Refactor: extracted follow/come state maps to `src/main/java/net/shasankp000/GameAI/services/FollowStateService.java` (behavior unchanged; BotEventHandler delegates state storage/reset).
-- Refactor: extracted follow waypoint planning to `src/main/java/net/shasankp000/GameAI/services/FollowPlannerService.java` (behavior unchanged; BotEventHandler delegates async planning and waypoint application checks).
-- Refactor: extracted follow movement helpers to `src/main/java/net/shasankp000/GameAI/services/FollowMovementService.java` (behavior unchanged; BotEventHandler delegates movement primitives).
-- Refactor: extracted stuck tracking + enclosure snapshot to `src/main/java/net/shasankp000/GameAI/services/BotStuckService.java` (now per-bot; no change for single-bot play).
-- Refactor: extracted RL action execution to `src/main/java/net/shasankp000/GameAI/services/BotRLActionService.java` (mechanical move; behavior unchanged).
-- Refactor: extracted RL persistence throttling to `src/main/java/net/shasankp000/GameAI/services/BotRLPersistenceThrottleService.java` (no behavior change).
+- Refactor: extracted follow/come state maps to `src/main/java/net/wcfcarolina13/GameAI/services/FollowStateService.java` (behavior unchanged; BotEventHandler delegates state storage/reset).
+- Refactor: extracted follow waypoint planning to `src/main/java/net/wcfcarolina13/GameAI/services/FollowPlannerService.java` (behavior unchanged; BotEventHandler delegates async planning and waypoint application checks).
+- Refactor: extracted follow movement helpers to `src/main/java/net/wcfcarolina13/GameAI/services/FollowMovementService.java` (behavior unchanged; BotEventHandler delegates movement primitives).
+- Refactor: extracted stuck tracking + enclosure snapshot to `src/main/java/net/wcfcarolina13/GameAI/services/BotStuckService.java` (now per-bot; no change for single-bot play).
+- Refactor: extracted RL action execution to `src/main/java/net/wcfcarolina13/GameAI/services/BotRLActionService.java` (mechanical move; behavior unchanged).
+- Refactor: extracted RL persistence throttling to `src/main/java/net/wcfcarolina13/GameAI/services/BotRLPersistenceThrottleService.java` (no behavior change).
 - Commands: `/bot skill` now accepts bot targets anywhere in the args (e.g., `ascend Jake 5`) and supports `ascend`/`descend` synonyms (defaulting to 5 blocks when no number is given).
 - UX: `/bot inventory` summary now includes bot stats (health/food/XP) so XP/level persistence is visible.
 - UX: `/bot open <alias>` is now distance/dimension independent for ops/admins; the GUI now shows bot XP progress/total XP alongside level.

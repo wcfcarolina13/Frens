@@ -6,7 +6,7 @@ This document tracks dialogue audio for the AI Player mod.
 
 ## Batch 3 Phase 1 Status (January 22, 2026 source)
 
-- Source of truth: `../gemini_projects/ai-player-dialogue/january_2026_batch3/AUDIO_INDEX.md`
+- Source of truth: `../gemini_projects/frens-dialogue/january_2026_batch3/AUDIO_INDEX.md`
 - Phase 1 scope integrated: **87 non-topic IDs** and **261 `.ogg` clips** (3 variants each)
 - Phase 2A integrated: **105 `topic_*` IDs** and **315 `.ogg` clips**
 - Overlap refresh integrated: remaining overlap filepaths mapped to source canonical names
@@ -22,20 +22,20 @@ Additional implementation details and trigger matrix are tracked in `docs/audio/
 
 ## New Audio Needed (January 2026 additions)
 
-These were added after the previous “complete” pass. **Code support is in place** (sound events registered, chat→sound mapping added, subtitles added). The **Status** column reflects whether the corresponding `.ogg` assets are present under `src/main/resources/assets/ai-player/sounds/dialogue/` and referenced by `sounds.json`.
+These were added after the previous “complete” pass. **Code support is in place** (sound events registered, chat→sound mapping added, subtitles added). The **Status** column reflects whether the corresponding `.ogg` assets are present under `src/main/resources/assets/frens/sounds/dialogue/` and referenced by `sounds.json`.
 
 | Sound event id | sounds.json entry (suggested file) | Chat text | Status |
 |---|---|---|---|
-| `bot.line.combat_missed_1` | `ai-player:dialogue/combat_missed_i_missed__01` | "I missed!" | ✅ Integrated |
-| `bot.line.combat_missed_2` | `ai-player:dialogue/combat_missed_dang_missed__01` | "Dang, missed!" | ✅ Integrated |
-| `bot.line.combat_missed_3` | `ai-player:dialogue/combat_missed_ugh_missed__01` | "Ugh. Missed." | ✅ Integrated |
-| `bot.line.combat_missed_4` | `ai-player:dialogue/combat_missed_went_wide__01` | "That one went wide!" | ✅ Integrated |
-| `bot.line.craft_recipe_unlocked_1` | `ai-player:dialogue/craft_recipe_unlocked_1__01` | "New recipe unlocked." | ✅ Integrated |
-| `bot.line.craft_recipe_unlocked_2` | `ai-player:dialogue/craft_recipe_unlocked_2__01` | "Nice. New recipe." | ✅ Integrated |
-| `bot.line.craft_recipe_unlocked_3` | `ai-player:dialogue/craft_recipe_unlocked_3__01` | "That's a new one." | ✅ Integrated |
-| `bot.line.craft_recipe_unlocked_4` | `ai-player:dialogue/craft_recipe_unlocked_4__01` | "Good. More options now." | ✅ Integrated |
-| `bot.line.craft_recipe_unlocked_5` | `ai-player:dialogue/craft_recipe_unlocked_5__01` | "Another recipe for the book." | ✅ Integrated |
-| `bot.line.craft_recipe_unlocked_6` | `ai-player:dialogue/craft_recipe_unlocked_6__01` | "That might come in handy." | ✅ Integrated |
+| `bot.line.combat_missed_1` | `frens:dialogue/combat_missed_i_missed__01` | "I missed!" | ✅ Integrated |
+| `bot.line.combat_missed_2` | `frens:dialogue/combat_missed_dang_missed__01` | "Dang, missed!" | ✅ Integrated |
+| `bot.line.combat_missed_3` | `frens:dialogue/combat_missed_ugh_missed__01` | "Ugh. Missed." | ✅ Integrated |
+| `bot.line.combat_missed_4` | `frens:dialogue/combat_missed_went_wide__01` | "That one went wide!" | ✅ Integrated |
+| `bot.line.craft_recipe_unlocked_1` | `frens:dialogue/craft_recipe_unlocked_1__01` | "New recipe unlocked." | ✅ Integrated |
+| `bot.line.craft_recipe_unlocked_2` | `frens:dialogue/craft_recipe_unlocked_2__01` | "Nice. New recipe." | ✅ Integrated |
+| `bot.line.craft_recipe_unlocked_3` | `frens:dialogue/craft_recipe_unlocked_3__01` | "That's a new one." | ✅ Integrated |
+| `bot.line.craft_recipe_unlocked_4` | `frens:dialogue/craft_recipe_unlocked_4__01` | "Good. More options now." | ✅ Integrated |
+| `bot.line.craft_recipe_unlocked_5` | `frens:dialogue/craft_recipe_unlocked_5__01` | "Another recipe for the book." | ✅ Integrated |
+| `bot.line.craft_recipe_unlocked_6` | `frens:dialogue/craft_recipe_unlocked_6__01` | "That might come in handy." | ✅ Integrated |
 
 ### Foliage obstruction / "stuck in branches" (new)
 
@@ -43,11 +43,11 @@ These are triggered as **overhead (in-world) companion dialogue** when the bot g
 
 | Sound event id | sounds.json entry (suggested file) | Text | Status |
 |---|---|---|---|
-| `bot.line.foliage_stuck_1` | `ai-player:dialogue/foliage_stuck_these_branches_are_thick__01` | "These branches are thick!" | ✅ Integrated |
-| `bot.line.foliage_stuck_2` | `ai-player:dialogue/foliage_stuck_hold_on_stuck_in_branches__01` | "Hold on — stuck in some branches." | ✅ Integrated |
-| `bot.line.foliage_stuck_3` | `ai-player:dialogue/foliage_stuck_cant_get_through_these_leaves__01` | "Can't get through these leaves." | ✅ Integrated |
-| `bot.line.foliage_stuck_4` | `ai-player:dialogue/foliage_stuck_foliage_got_me__01` | "Just a sec… foliage's got me." | ✅ Integrated |
-| `bot.line.foliage_stuck_5` | `ai-player:dialogue/foliage_stuck_ugh_leaves_in_the_way__01` | "Ugh. Leaves in the way." | ✅ Integrated |
+| `bot.line.foliage_stuck_1` | `frens:dialogue/foliage_stuck_these_branches_are_thick__01` | "These branches are thick!" | ✅ Integrated |
+| `bot.line.foliage_stuck_2` | `frens:dialogue/foliage_stuck_hold_on_stuck_in_branches__01` | "Hold on — stuck in some branches." | ✅ Integrated |
+| `bot.line.foliage_stuck_3` | `frens:dialogue/foliage_stuck_cant_get_through_these_leaves__01` | "Can't get through these leaves." | ✅ Integrated |
+| `bot.line.foliage_stuck_4` | `frens:dialogue/foliage_stuck_foliage_got_me__01` | "Just a sec… foliage's got me." | ✅ Integrated |
+| `bot.line.foliage_stuck_5` | `frens:dialogue/foliage_stuck_ugh_leaves_in_the_way__01` | "Ugh. Leaves in the way." | ✅ Integrated |
 
 ### Sweet Berry Bush reactions (new)
 
@@ -58,10 +58,10 @@ Triggered as **overhead (in-world) companion dialogue**:
 
 | Sound event id | sounds.json entry (suggested file) | Text | Status |
 |---|---|---|---|
-| `bot.line.berry_bush_sting_1` | `ai-player:dialogue/berry_bush_ouch__01` | "Ouch!" | ✅ Integrated |
-| `bot.line.berry_bush_sting_2` | `ai-player:dialogue/berry_bush_these_are_thorny__01` | "These are thorny!" | ✅ Integrated |
-| `bot.line.berry_bush_sting_3` | `ai-player:dialogue/berry_bush_yowch__01` | "Yowch!" | ✅ Integrated |
-| `bot.line.berry_bush_edible_1` | `ai-player:dialogue/berry_bush_these_are_edible_i_think__01` | "These are edible...I think." | ✅ Integrated |
+| `bot.line.berry_bush_sting_1` | `frens:dialogue/berry_bush_ouch__01` | "Ouch!" | ✅ Integrated |
+| `bot.line.berry_bush_sting_2` | `frens:dialogue/berry_bush_these_are_thorny__01` | "These are thorny!" | ✅ Integrated |
+| `bot.line.berry_bush_sting_3` | `frens:dialogue/berry_bush_yowch__01` | "Yowch!" | ✅ Integrated |
+| `bot.line.berry_bush_edible_1` | `frens:dialogue/berry_bush_these_are_edible_i_think__01` | "These are edible...I think." | ✅ Integrated |
 
 ### Mining POI callouts (new)
 
@@ -69,8 +69,8 @@ Mining-specific discoveries emitted by `MiningHazardDetector` now have dedicated
 
 | Sound event id | sounds.json entry (suggested file) | Chat text | Status |
 |---|---|---|---|
-| `bot.line.discover_mineshaft` | `ai-player:dialogue/discover_mineshaft__01` (+ `__02`) | "I found a mineshaft!" | ✅ Integrated |
-| `bot.line.discover_spawner` | `ai-player:dialogue/discover_spawner__01` (+ `__02`) | "I found a mob spawner!" | ✅ Integrated |
+| `bot.line.discover_mineshaft` | `frens:dialogue/discover_mineshaft__01` (+ `__02`) | "I found a mineshaft!" | ✅ Integrated |
+| `bot.line.discover_spawner` | `frens:dialogue/discover_spawner__01` (+ `__02`) | "I found a mob spawner!" | ✅ Integrated |
 
 ### Weather chatter + time-of-day reminders (new)
 
@@ -78,11 +78,11 @@ Overworld ambient callouts triggered when the bot is above ground (sky visible).
 
 | Sound event id | sounds.json entry (suggested file) | Trigger | Status |
 |---|---|---|---|
-| `bot.line.weather_rain` | `ai-player:dialogue/weather_rain_01__01` (+ `_02__01`…`_06__01`) | Weather changed to rain | ✅ Integrated |
-| `bot.line.weather_snow` | `ai-player:dialogue/weather_snow_01__01` (+ `_02__01`…`_06__01`) | Weather changed to snow (cold biome) | ✅ Integrated |
-| `bot.line.weather_thunder` | `ai-player:dialogue/weather_thunder_01__01` (+ `_02__01`…`_06__01`) | Weather changed to thunderstorm | ✅ Integrated |
-| `bot.line.weather_sunny` | `ai-player:dialogue/weather_sunny_01__01` (+ `_02__01`…`_06__01`) | Weather cleared (sometimes) | ✅ Integrated |
-| `bot.line.time_sunset_soon` | `ai-player:dialogue/time_sunset_soon_01__01` (+ `_02__01`…`_06__01`) | After noon, if not near base or recent bed | ✅ Integrated |
+| `bot.line.weather_rain` | `frens:dialogue/weather_rain_01__01` (+ `_02__01`…`_06__01`) | Weather changed to rain | ✅ Integrated |
+| `bot.line.weather_snow` | `frens:dialogue/weather_snow_01__01` (+ `_02__01`…`_06__01`) | Weather changed to snow (cold biome) | ✅ Integrated |
+| `bot.line.weather_thunder` | `frens:dialogue/weather_thunder_01__01` (+ `_02__01`…`_06__01`) | Weather changed to thunderstorm | ✅ Integrated |
+| `bot.line.weather_sunny` | `frens:dialogue/weather_sunny_01__01` (+ `_02__01`…`_06__01`) | Weather cleared (sometimes) | ✅ Integrated |
+| `bot.line.time_sunset_soon` | `frens:dialogue/time_sunset_soon_01__01` (+ `_02__01`…`_06__01`) | After noon, if not near base or recent bed | ✅ Integrated |
 
 ### Nonverbal hurt grunts (new)
 
@@ -90,7 +90,7 @@ Short nonverbal reactions when the bot is hit. Should be **wordless** (grunt/bre
 
 | Sound event id | sounds.json entry (suggested file) | Trigger | Status |
 |---|---|---|---|
-| `bot.fx.hurt_grunt` | `ai-player:dialogue/hurt_grunt_01__01` (+ `_02__01`…`_08__01`) | On damage taken | ✅ Integrated |
+| `bot.fx.hurt_grunt` | `frens:dialogue/hurt_grunt_01__01` (+ `_02__01`…`_08__01`) | On damage taken | ✅ Integrated |
 
 ### The Nether & The End ambience (new)
 
@@ -98,35 +98,35 @@ Idle/environment chatter that only plays while bots are in the Nether or The End
 
 | Sound event id | sounds.json entry (suggested file) | Chat text | Status |
 |---|---|---|---|
-| `bot.line.nether_enter_1` | `ai-player:dialogue/nether_enter_stay_close__01` | "Nether... stay close." | ✅ Integrated |
-| `bot.line.nether_enter_2` | `ai-player:dialogue/nether_enter_watch_your_step__01` | "We're in the Nether. Watch your step." | ✅ Integrated |
-| `bot.line.nether_hot` | `ai-player:dialogue/nether_hot_real_hot__01` | "It's hot. Real hot." | ✅ Integrated |
-| `bot.line.nether_lava` | `ai-player:dialogue/nether_lava_everywhere__01` | "Lava everywhere. Careful." | ✅ Integrated |
-| `bot.line.nether_ghasts` | `ai-player:dialogue/nether_ghasts_keep_an_eye_out__01` | "Keep an eye out for ghasts." | ✅ Integrated |
-| `bot.line.nether_piglins` | `ai-player:dialogue/nether_piglins_watching__01` | "Piglins are watching us." | ✅ Integrated |
-| `bot.line.nether_soul_sand` | `ai-player:dialogue/nether_soul_sand_hate_it__01` | "This soul sand... I hate it." | ✅ Integrated |
-| `bot.line.nether_fortress` | `ai-player:dialogue/nether_fortress_spotted__01` | "That looks like a fortress." | ✅ Integrated |
-| `bot.line.nether_bastion` | `ai-player:dialogue/nether_blackstone_bastion_nearby__01` | "Lots of blackstone... could be a bastion nearby." | ✅ Integrated |
-| `bot.line.nether_biome_crimson_forest` | `ai-player:dialogue/nether_biome_crimson_forest__01` | "Crimson forest... red as far as I can see." | ✅ Integrated |
-| `bot.line.nether_biome_warped_forest` | `ai-player:dialogue/nether_biome_warped_forest__01` | "Warped forest... keep your eyes open." | ✅ Integrated |
-| `bot.line.nether_biome_soul_sand_valley` | `ai-player:dialogue/nether_biome_soul_sand_valley__01` | "Soul Sand Valley... I don't like the sound of it." | ✅ Integrated |
-| `bot.line.nether_biome_basalt_deltas` | `ai-player:dialogue/nether_biome_basalt_deltas__01` | "Basalt deltas. Lots of sharp stone." | ✅ Integrated |
-| `bot.line.nether_biome_wastes` | `ai-player:dialogue/nether_biome_wastes__01` | "Nether wastes... heat and ash." | ✅ Integrated |
-| `bot.line.end_enter_1` | `ai-player:dialogue/end_enter_this_is_the_end__01` | "This is The End..." | ✅ Integrated |
-| `bot.line.end_enter_2` | `ai-player:dialogue/end_enter_dont_look_down__01` | "Don't look down. Just... don't." | ✅ Integrated |
-| `bot.line.end_eerie` | `ai-player:dialogue/end_eerie_this_place_feels_wrong__01` | "This place feels wrong." | ✅ Integrated |
-| `bot.line.end_void` | `ai-player:dialogue/end_void_one_step_and_its_over__01` | "One step and it's over." | ✅ Integrated |
-| `bot.line.end_islands` | `ai-player:dialogue/end_islands_floating_in_void__01` | "Islands floating in the void..." | ✅ Integrated |
-| `bot.line.end_chorus` | `ai-player:dialogue/end_chorus_fruit_nearby__01` | "Chorus fruit nearby." | ✅ Integrated |
-| `bot.line.end_endermen` | `ai-player:dialogue/end_endermen_everywhere__01` | "Endermen everywhere..." | ✅ Integrated |
-| `bot.line.end_keep_eyes_up` | `ai-player:dialogue/end_keep_your_eyes_up__01` | "Keep your eyes up. Stay sharp." | ✅ Integrated |
-| `bot.line.end_city` | `ai-player:dialogue/end_city_nearby__01` | "End City nearby." | ✅ Integrated |
-| `bot.line.end_gateway` | `ai-player:dialogue/end_gateway_spotted__01` | "End gateway spotted." | ✅ Integrated |
-| `bot.line.end_biome_main_island` | `ai-player:dialogue/end_biome_main_island__01` | "Main island. Stay focused." | ✅ Integrated |
-| `bot.line.end_biome_highlands` | `ai-player:dialogue/end_biome_highlands__01` | "End highlands ahead." | ✅ Integrated |
-| `bot.line.end_biome_midlands` | `ai-player:dialogue/end_biome_midlands__01` | "End midlands... still feels like the void." | ✅ Integrated |
-| `bot.line.end_biome_barrens` | `ai-player:dialogue/end_biome_barrens__01` | "End barrens... nothing out here." | ✅ Integrated |
-| `bot.line.end_biome_small_islands` | `ai-player:dialogue/end_biome_small_islands__01` | "Small islands... careful crossing." | ✅ Integrated |
+| `bot.line.nether_enter_1` | `frens:dialogue/nether_enter_stay_close__01` | "Nether... stay close." | ✅ Integrated |
+| `bot.line.nether_enter_2` | `frens:dialogue/nether_enter_watch_your_step__01` | "We're in the Nether. Watch your step." | ✅ Integrated |
+| `bot.line.nether_hot` | `frens:dialogue/nether_hot_real_hot__01` | "It's hot. Real hot." | ✅ Integrated |
+| `bot.line.nether_lava` | `frens:dialogue/nether_lava_everywhere__01` | "Lava everywhere. Careful." | ✅ Integrated |
+| `bot.line.nether_ghasts` | `frens:dialogue/nether_ghasts_keep_an_eye_out__01` | "Keep an eye out for ghasts." | ✅ Integrated |
+| `bot.line.nether_piglins` | `frens:dialogue/nether_piglins_watching__01` | "Piglins are watching us." | ✅ Integrated |
+| `bot.line.nether_soul_sand` | `frens:dialogue/nether_soul_sand_hate_it__01` | "This soul sand... I hate it." | ✅ Integrated |
+| `bot.line.nether_fortress` | `frens:dialogue/nether_fortress_spotted__01` | "That looks like a fortress." | ✅ Integrated |
+| `bot.line.nether_bastion` | `frens:dialogue/nether_blackstone_bastion_nearby__01` | "Lots of blackstone... could be a bastion nearby." | ✅ Integrated |
+| `bot.line.nether_biome_crimson_forest` | `frens:dialogue/nether_biome_crimson_forest__01` | "Crimson forest... red as far as I can see." | ✅ Integrated |
+| `bot.line.nether_biome_warped_forest` | `frens:dialogue/nether_biome_warped_forest__01` | "Warped forest... keep your eyes open." | ✅ Integrated |
+| `bot.line.nether_biome_soul_sand_valley` | `frens:dialogue/nether_biome_soul_sand_valley__01` | "Soul Sand Valley... I don't like the sound of it." | ✅ Integrated |
+| `bot.line.nether_biome_basalt_deltas` | `frens:dialogue/nether_biome_basalt_deltas__01` | "Basalt deltas. Lots of sharp stone." | ✅ Integrated |
+| `bot.line.nether_biome_wastes` | `frens:dialogue/nether_biome_wastes__01` | "Nether wastes... heat and ash." | ✅ Integrated |
+| `bot.line.end_enter_1` | `frens:dialogue/end_enter_this_is_the_end__01` | "This is The End..." | ✅ Integrated |
+| `bot.line.end_enter_2` | `frens:dialogue/end_enter_dont_look_down__01` | "Don't look down. Just... don't." | ✅ Integrated |
+| `bot.line.end_eerie` | `frens:dialogue/end_eerie_this_place_feels_wrong__01` | "This place feels wrong." | ✅ Integrated |
+| `bot.line.end_void` | `frens:dialogue/end_void_one_step_and_its_over__01` | "One step and it's over." | ✅ Integrated |
+| `bot.line.end_islands` | `frens:dialogue/end_islands_floating_in_void__01` | "Islands floating in the void..." | ✅ Integrated |
+| `bot.line.end_chorus` | `frens:dialogue/end_chorus_fruit_nearby__01` | "Chorus fruit nearby." | ✅ Integrated |
+| `bot.line.end_endermen` | `frens:dialogue/end_endermen_everywhere__01` | "Endermen everywhere..." | ✅ Integrated |
+| `bot.line.end_keep_eyes_up` | `frens:dialogue/end_keep_your_eyes_up__01` | "Keep your eyes up. Stay sharp." | ✅ Integrated |
+| `bot.line.end_city` | `frens:dialogue/end_city_nearby__01` | "End City nearby." | ✅ Integrated |
+| `bot.line.end_gateway` | `frens:dialogue/end_gateway_spotted__01` | "End gateway spotted." | ✅ Integrated |
+| `bot.line.end_biome_main_island` | `frens:dialogue/end_biome_main_island__01` | "Main island. Stay focused." | ✅ Integrated |
+| `bot.line.end_biome_highlands` | `frens:dialogue/end_biome_highlands__01` | "End highlands ahead." | ✅ Integrated |
+| `bot.line.end_biome_midlands` | `frens:dialogue/end_biome_midlands__01` | "End midlands... still feels like the void." | ✅ Integrated |
+| `bot.line.end_biome_barrens` | `frens:dialogue/end_biome_barrens__01` | "End barrens... nothing out here." | ✅ Integrated |
+| `bot.line.end_biome_small_islands` | `frens:dialogue/end_biome_small_islands__01` | "Small islands... careful crossing." | ✅ Integrated |
 
 ### Creature-specific kill callouts (new)
 
@@ -134,34 +134,34 @@ These add extra variety for kill confirmations and make them feel more contextua
 
 | Sound event id | sounds.json entry (suggested file) | Chat text | Status |
 |---|---|---|---|
-| `bot.line.combat_kill_creeper_1` | `ai-player:dialogue/combat_kill_creeper_down__01` | "Creeper down." | ✅ Integrated |
-| `bot.line.combat_kill_creeper_2` | `ai-player:dialogue/combat_kill_creeper_no_boom__01` | "No boom today." | ✅ Integrated |
-| `bot.line.combat_kill_skeleton_1` | `ai-player:dialogue/combat_kill_skeleton_down__01` | "Skeleton down." | ✅ Integrated |
-| `bot.line.combat_kill_skeleton_2` | `ai-player:dialogue/combat_kill_skeleton_bones_scattered__01` | "Bones scattered." | ✅ Integrated |
-| `bot.line.combat_kill_zombie_1` | `ai-player:dialogue/combat_kill_zombie_down__01` | "Zombie down." | ✅ Integrated |
-| `bot.line.combat_kill_zombie_2` | `ai-player:dialogue/combat_kill_zombie_back_in_ground__01` | "Back in the ground." | ✅ Integrated |
-| `bot.line.combat_kill_spider_1` | `ai-player:dialogue/combat_kill_spider_down__01` | "Spider down." | ✅ Integrated |
-| `bot.line.combat_kill_spider_2` | `ai-player:dialogue/combat_kill_spider_webs_wont_save_you__01` | "Webs won't save you." | ✅ Integrated |
-| `bot.line.combat_kill_enderman_1` | `ai-player:dialogue/combat_kill_enderman_down__01` | "Enderman down." | ✅ Integrated |
-| `bot.line.combat_kill_enderman_2` | `ai-player:dialogue/combat_kill_enderman_didnt_blink__01` | "Glad I didn't blink." | ✅ Integrated |
-| `bot.line.combat_kill_witch_1` | `ai-player:dialogue/combat_kill_witch_down__01` | "Witch down." | ✅ Integrated |
-| `bot.line.combat_kill_witch_2` | `ai-player:dialogue/combat_kill_witch_potion_solved__01` | "Potion problem solved." | ✅ Integrated |
-| `bot.line.combat_kill_slime_1` | `ai-player:dialogue/combat_kill_slime_down__01` | "Slime down." | ✅ Integrated |
-| `bot.line.combat_kill_slime_2` | `ai-player:dialogue/combat_kill_slime_back_to_goo__01` | "Back to goo." | ✅ Integrated |
-| `bot.line.combat_kill_pillager_1` | `ai-player:dialogue/combat_kill_pillager_down__01` | "Pillager down." | ✅ Integrated |
-| `bot.line.combat_kill_pillager_2` | `ai-player:dialogue/combat_kill_pillager_one_less_raider__01` | "One less raider." | ✅ Integrated |
-| `bot.line.combat_kill_vindicator_1` | `ai-player:dialogue/combat_kill_vindicator_down__01` | "Vindicator down." | ✅ Integrated |
-| `bot.line.combat_kill_vindicator_2` | `ai-player:dialogue/combat_kill_vindicator_axe_is_out__01` | "Axe is out." | ✅ Integrated |
-| `bot.line.combat_kill_evoker_1` | `ai-player:dialogue/combat_kill_evoker_down__01` | "Evoker down." | ✅ Integrated |
-| `bot.line.combat_kill_evoker_2` | `ai-player:dialogue/combat_kill_evoker_no_more_tricks__01` | "No more tricks." | ✅ Integrated |
-| `bot.line.combat_kill_magma_cube_1` | `ai-player:dialogue/combat_kill_magma_cube_down__01` | "Magma cube down." | ✅ Integrated |
-| `bot.line.combat_kill_magma_cube_2` | `ai-player:dialogue/combat_kill_magma_cube_back_to_magma__01` | "Back to magma." | ✅ Integrated |
-| `bot.line.combat_kill_ravager_1` | `ai-player:dialogue/combat_kill_ravager_down__01` | "Ravager down." | ✅ Integrated |
-| `bot.line.combat_kill_ravager_2` | `ai-player:dialogue/combat_kill_ravager_beast_down__01` | "Beast is down." | ✅ Integrated |
-| `bot.line.combat_kill_vex_1` | `ai-player:dialogue/combat_kill_vex_down__01` | "Vex down." | ✅ Integrated |
-| `bot.line.combat_kill_vex_2` | `ai-player:dialogue/combat_kill_vex_no_more_flying_blades__01` | "No more flying blades." | ✅ Integrated |
+| `bot.line.combat_kill_creeper_1` | `frens:dialogue/combat_kill_creeper_down__01` | "Creeper down." | ✅ Integrated |
+| `bot.line.combat_kill_creeper_2` | `frens:dialogue/combat_kill_creeper_no_boom__01` | "No boom today." | ✅ Integrated |
+| `bot.line.combat_kill_skeleton_1` | `frens:dialogue/combat_kill_skeleton_down__01` | "Skeleton down." | ✅ Integrated |
+| `bot.line.combat_kill_skeleton_2` | `frens:dialogue/combat_kill_skeleton_bones_scattered__01` | "Bones scattered." | ✅ Integrated |
+| `bot.line.combat_kill_zombie_1` | `frens:dialogue/combat_kill_zombie_down__01` | "Zombie down." | ✅ Integrated |
+| `bot.line.combat_kill_zombie_2` | `frens:dialogue/combat_kill_zombie_back_in_ground__01` | "Back in the ground." | ✅ Integrated |
+| `bot.line.combat_kill_spider_1` | `frens:dialogue/combat_kill_spider_down__01` | "Spider down." | ✅ Integrated |
+| `bot.line.combat_kill_spider_2` | `frens:dialogue/combat_kill_spider_webs_wont_save_you__01` | "Webs won't save you." | ✅ Integrated |
+| `bot.line.combat_kill_enderman_1` | `frens:dialogue/combat_kill_enderman_down__01` | "Enderman down." | ✅ Integrated |
+| `bot.line.combat_kill_enderman_2` | `frens:dialogue/combat_kill_enderman_didnt_blink__01` | "Glad I didn't blink." | ✅ Integrated |
+| `bot.line.combat_kill_witch_1` | `frens:dialogue/combat_kill_witch_down__01` | "Witch down." | ✅ Integrated |
+| `bot.line.combat_kill_witch_2` | `frens:dialogue/combat_kill_witch_potion_solved__01` | "Potion problem solved." | ✅ Integrated |
+| `bot.line.combat_kill_slime_1` | `frens:dialogue/combat_kill_slime_down__01` | "Slime down." | ✅ Integrated |
+| `bot.line.combat_kill_slime_2` | `frens:dialogue/combat_kill_slime_back_to_goo__01` | "Back to goo." | ✅ Integrated |
+| `bot.line.combat_kill_pillager_1` | `frens:dialogue/combat_kill_pillager_down__01` | "Pillager down." | ✅ Integrated |
+| `bot.line.combat_kill_pillager_2` | `frens:dialogue/combat_kill_pillager_one_less_raider__01` | "One less raider." | ✅ Integrated |
+| `bot.line.combat_kill_vindicator_1` | `frens:dialogue/combat_kill_vindicator_down__01` | "Vindicator down." | ✅ Integrated |
+| `bot.line.combat_kill_vindicator_2` | `frens:dialogue/combat_kill_vindicator_axe_is_out__01` | "Axe is out." | ✅ Integrated |
+| `bot.line.combat_kill_evoker_1` | `frens:dialogue/combat_kill_evoker_down__01` | "Evoker down." | ✅ Integrated |
+| `bot.line.combat_kill_evoker_2` | `frens:dialogue/combat_kill_evoker_no_more_tricks__01` | "No more tricks." | ✅ Integrated |
+| `bot.line.combat_kill_magma_cube_1` | `frens:dialogue/combat_kill_magma_cube_down__01` | "Magma cube down." | ✅ Integrated |
+| `bot.line.combat_kill_magma_cube_2` | `frens:dialogue/combat_kill_magma_cube_back_to_magma__01` | "Back to magma." | ✅ Integrated |
+| `bot.line.combat_kill_ravager_1` | `frens:dialogue/combat_kill_ravager_down__01` | "Ravager down." | ✅ Integrated |
+| `bot.line.combat_kill_ravager_2` | `frens:dialogue/combat_kill_ravager_beast_down__01` | "Beast is down." | ✅ Integrated |
+| `bot.line.combat_kill_vex_1` | `frens:dialogue/combat_kill_vex_down__01` | "Vex down." | ✅ Integrated |
+| `bot.line.combat_kill_vex_2` | `frens:dialogue/combat_kill_vex_no_more_flying_blades__01` | "No more flying blades." | ✅ Integrated |
 
-**Target location for new files:** `src/main/resources/assets/ai-player/sounds/dialogue/`
+**Target location for new files:** `src/main/resources/assets/frens/sounds/dialogue/`
 
 ## Status: Mostly complete (January 2026)
 
@@ -260,7 +260,7 @@ The January 2026 audio batch has been fully integrated:
 
 ## File Locations
 
-- **Audio Files**: `src/main/resources/assets/ai-player/sounds/dialogue/`
+- **Audio Files**: `src/main/resources/assets/frens/sounds/dialogue/`
 - **Sound Registry**: `sounds.json`
 - **Sound Events**: `BotDialogueSounds.java`
 - **Text Mappings**: `DialogueTextMapper.java`
@@ -307,20 +307,20 @@ These were added for cross-dimension follow dialogue, portal proximity reactions
 
 | Sound event id | sounds.json entry (suggested file) | Chat text | Status |
 |---|---|---|---|
-| `bot.line.follow_dim_end` | `ai-player:dialogue/follow_dim_end__01` | "I'll follow you to the end...is that corny?" | Pending |
-| `bot.line.follow_dim_end_2` | `ai-player:dialogue/follow_dim_end_2__01` | "The End. Sure. Why not." | Pending |
-| `bot.line.follow_dim_nether` | `ai-player:dialogue/follow_dim_nether__01` | "Into the fire with you, then." | Pending |
-| `bot.line.follow_dim_nether_2` | `ai-player:dialogue/follow_dim_nether_2__01` | "Nether it is. Stay close." | Pending |
-| `bot.line.follow_dim_overworld` | `ai-player:dialogue/follow_dim_overworld__01` | "Fresh air. Finally." | Pending |
-| `bot.line.follow_dim_overworld_2` | `ai-player:dialogue/follow_dim_overworld_2__01` | "Back to the surface. Good." | Pending |
-| `bot.line.portal_nether_overworld_1` | `ai-player:dialogue/portal_nether_overworld_1__01` | "That portal's giving me a bad feeling." | Pending |
-| `bot.line.portal_nether_overworld_2` | `ai-player:dialogue/portal_nether_overworld_2__01` | "Nether portal... you thinking what I'm thinking?" | Pending |
-| `bot.line.portal_end_overworld_1` | `ai-player:dialogue/portal_end_overworld_1__01` | "Is that...an End portal?" | Pending |
-| `bot.line.portal_end_overworld_2` | `ai-player:dialogue/portal_end_overworld_2__01` | "I can feel it pulling. That's an End portal." | Pending |
-| `bot.line.weird_portal_end_in_nether_1` | `ai-player:dialogue/weird_portal_end_in_nether_1__01` | "Is that...an End portal? In the Nether? That shouldn't be here." | Pending |
-| `bot.line.weird_portal_end_in_nether_2` | `ai-player:dialogue/weird_portal_end_in_nether_2__01` | "Okay, that's wrong. End portal in the Nether. Nope." | Pending |
-| `bot.line.weird_portal_nether_in_end_1` | `ai-player:dialogue/weird_portal_nether_in_end_1__01` | "A Nether portal? Here? Someone's been busy." | Pending |
-| `bot.line.weird_portal_nether_in_end_2` | `ai-player:dialogue/weird_portal_nether_in_end_2__01` | "Portal to the Nether...in The End. That's unsettling." | Pending |
+| `bot.line.follow_dim_end` | `frens:dialogue/follow_dim_end__01` | "I'll follow you to the end...is that corny?" | Pending |
+| `bot.line.follow_dim_end_2` | `frens:dialogue/follow_dim_end_2__01` | "The End. Sure. Why not." | Pending |
+| `bot.line.follow_dim_nether` | `frens:dialogue/follow_dim_nether__01` | "Into the fire with you, then." | Pending |
+| `bot.line.follow_dim_nether_2` | `frens:dialogue/follow_dim_nether_2__01` | "Nether it is. Stay close." | Pending |
+| `bot.line.follow_dim_overworld` | `frens:dialogue/follow_dim_overworld__01` | "Fresh air. Finally." | Pending |
+| `bot.line.follow_dim_overworld_2` | `frens:dialogue/follow_dim_overworld_2__01` | "Back to the surface. Good." | Pending |
+| `bot.line.portal_nether_overworld_1` | `frens:dialogue/portal_nether_overworld_1__01` | "That portal's giving me a bad feeling." | Pending |
+| `bot.line.portal_nether_overworld_2` | `frens:dialogue/portal_nether_overworld_2__01` | "Nether portal... you thinking what I'm thinking?" | Pending |
+| `bot.line.portal_end_overworld_1` | `frens:dialogue/portal_end_overworld_1__01` | "Is that...an End portal?" | Pending |
+| `bot.line.portal_end_overworld_2` | `frens:dialogue/portal_end_overworld_2__01` | "I can feel it pulling. That's an End portal." | Pending |
+| `bot.line.weird_portal_end_in_nether_1` | `frens:dialogue/weird_portal_end_in_nether_1__01` | "Is that...an End portal? In the Nether? That shouldn't be here." | Pending |
+| `bot.line.weird_portal_end_in_nether_2` | `frens:dialogue/weird_portal_end_in_nether_2__01` | "Okay, that's wrong. End portal in the Nether. Nope." | Pending |
+| `bot.line.weird_portal_nether_in_end_1` | `frens:dialogue/weird_portal_nether_in_end_1__01` | "A Nether portal? Here? Someone's been busy." | Pending |
+| `bot.line.weird_portal_nether_in_end_2` | `frens:dialogue/weird_portal_nether_in_end_2__01` | "Portal to the Nether...in The End. That's unsettling." | Pending |
 
 Each sound event has 3 variants (`__01`, `__02`, `__03`) in `sounds.json`. All 42 `.ogg` clips need to be generated.
 

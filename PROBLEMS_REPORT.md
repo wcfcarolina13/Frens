@@ -54,12 +54,12 @@ How to reproduce locally (recommended commands)
 ```
 
 Notes / observations that require attention
-- There appears to be mixed use of `net.shasankp000.Network` and `net.shasankp000.network` packages (case mismatch). Fixing this single inconsistency will likely remove a large batch of "cannot be resolved" problems.
+- There appears to be mixed use of `net.wcfcarolina13.Network` and `net.wcfcarolina13.network` packages (case mismatch). Fixing this single inconsistency will likely remove a large batch of "cannot be resolved" problems.
 - `OPERATOR_PERMISSIONS` is used widely (~101 occurrences) and depends on Minecraft server permission types. Aligning the Fabric mappings / API is critical.
 - The Gradle report (build/reports/problems/problems-report.html) contains 11 Gradle-level deprecation warnings — update Gradle scripts after the code compiles.
 
 Suggested immediate next PR
-- Fix package name casing under `src/main/java/net/shasankp000/Network` (or change imports to `Network` consistently).
+- Fix package name casing under `src/main/java/net/wcfcarolina13/Network` (or change imports to `Network` consistently).
 - Re-run `./gradlew clean build` and capture the updated diagnostics; then fix the top 10 remaining compile errors.
 
 If you want, I can:

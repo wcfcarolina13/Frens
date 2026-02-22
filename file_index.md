@@ -18,10 +18,10 @@ Last updated: 2025-11-19. Navigation map for common code and docs.
 - `LICENSE`, `eula.txt`, `Logs-Prism/`, `run/`, `tmp_collect*.json` — licensing, runtime artifacts, temp data.
 
 ## Entry Points
-- `src/main/java/net/shasankp000/AIPlayer.java` — main mod entry.
-- `src/main/java/net/shasankp000/AIPlayerClient.java` — client-side entry.
-- `src/main/java/net/shasankp000/AIPlayerDataGenerator.java` — data generation.
-- `src/main/java/net/shasankp000/CommandUtils.java`, `EntityUtil.java` — shared helpers.
+- `src/main/java/net/wcfcarolina13/Frens.java` — main mod entry.
+- `src/main/java/net/wcfcarolina13/FrensClient.java` — client-side entry.
+- `src/main/java/net/wcfcarolina13/FrensDataGenerator.java` — data generation.
+- `src/main/java/net/wcfcarolina13/CommandUtils.java`, `EntityUtil.java` — shared helpers.
 
 ## Commands
 - `Commands/modCommandRegistry.java` — command registration.
