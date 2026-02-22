@@ -88,6 +88,7 @@ public final class MovementService {
     // This is useful for construction tasks where nearby unrelated doors can become distractions.
     // NOTE: We still allow the simpler "open door directly ahead" and "traverse doorway" assists.
     private static final ThreadLocal<Boolean> DOOR_ESCAPE_DISABLED = ThreadLocal.withInitial(() -> false);
+    private static final ThreadLocal<Boolean> OBSTRUCTION_MINE_DISABLED = ThreadLocal.withInitial(() -> false);
 
     private static final long OBSTRUCTION_MINE_COOLDOWN_MS = 4500L;
     private static final Map<UUID, Map<BlockPos, Long>> OBSTRUCTION_MINE_COOLDOWN = new ConcurrentHashMap<>();
@@ -127,6 +128,26 @@ public final class MovementService {
 
     private static boolean doorEscapeEnabled() {
         return !Boolean.TRUE.equals(DOOR_ESCAPE_DISABLED.get());
+    }
+
+    public static <T> T withoutObstructionMining(Supplier<T> body) {
+        boolean prev = Boolean.TRUE.equals(OBSTRUCTION_MINE_DISABLED.get());
+        OBSTRUCTION_MINE_DISABLED.set(true);
+        try {
+            return body.get();
+        } finally {
+            OBSTRUCTION_MINE_DISABLED.set(prev);
+        }
+    }
+
+    public static void withoutObstructionMining(Runnable body) {
+        boolean prev = Boolean.TRUE.equals(OBSTRUCTION_MINE_DISABLED.get());
+        OBSTRUCTION_MINE_DISABLED.set(true);
+        try {
+            body.run();
+        } finally {
+            OBSTRUCTION_MINE_DISABLED.set(prev);
+        }
     }
 
     public static void suppressDoorAutoClose(UUID botId, long durationMs) {
@@ -2611,6 +2632,9 @@ public final class MovementService {
 
     private static boolean tryMineObstructionToward(ServerPlayerEntity bot, BlockPos goal, String label) {
         if (bot == null || goal == null) {
+            return false;
+        }
+        if (Boolean.TRUE.equals(OBSTRUCTION_MINE_DISABLED.get())) {
             return false;
         }
         // Keep this conservative: only mine during skills/build tasks, not during guard/patrol/follow.

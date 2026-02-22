@@ -21,6 +21,9 @@ public class PathFinder {
 
     public static final Logger LOGGER = LoggerFactory.getLogger("frens");
 
+    /** A/B test flag: set to true to use the Baritone-style pathfinder. */
+    public static boolean USE_BARITONE_STYLE = false;
+
     public static class PathNode {
         public final BlockPos pos;
         public final String blockName;
@@ -74,7 +77,29 @@ public class PathFinder {
         }
     }
 
+    private static final long PATHFIND_TIMEOUT_MS = 10_000L; // 10 second hard cap
+
     public static List<PathNode> calculatePath(BlockPos start, BlockPos target, ServerWorld world) {
+        long startTime = System.nanoTime();
+        String mode;
+        List<PathNode> result;
+
+        if (USE_BARITONE_STYLE) {
+            mode = "baritone";
+            result = BaritoneStylePathFinder.calculatePath(start, target, world);
+        } else {
+            mode = "bidir";
+            result = calculatePathBidirectional(start, target, world);
+        }
+
+        long elapsedMs = (System.nanoTime() - startTime) / 1_000_000;
+        LOGGER.info("[PathFinder] mode={} elapsed={}ms pathLen={} from={} to={}",
+                mode, elapsedMs, result.size(), start.toShortString(), target.toShortString());
+        return result;
+    }
+
+    /** Original bidirectional A* implementation. */
+    private static List<PathNode> calculatePathBidirectional(BlockPos start, BlockPos target, ServerWorld world) {
         LOGGER.info("Starting Bi-directional A* pathfinding with block tagging...");
 
         PriorityQueue<Node> openForward = new PriorityQueue<>();
@@ -93,7 +118,16 @@ public class PathFinder {
         openBackward.add(goalNode);
         openMapBackward.put(target, goalNode);
 
+        long deadline = System.currentTimeMillis() + PATHFIND_TIMEOUT_MS;
+        int iterations = 0;
+
         while (!openForward.isEmpty() && !openBackward.isEmpty()) {
+            // Time-limit check every 512 iterations to avoid System.currentTimeMillis() overhead
+            if ((++iterations & 0x1FF) == 0 && System.currentTimeMillis() > deadline) {
+                LOGGER.warn("A* pathfinding timed out after {}ms ({} iterations) from {} to {}",
+                        PATHFIND_TIMEOUT_MS, iterations, start.toShortString(), target.toShortString());
+                return new ArrayList<>();
+            }
 
             // ---------- Expand forward ----------
             Node currentForward = openForward.poll();

@@ -19,6 +19,7 @@ import net.minecraft.util.math.Vec3d;
 import net.wcfcarolina13.ChatUtils.ChatUtils;
 import net.wcfcarolina13.Entity.LookController;
 import net.wcfcarolina13.GameAI.BotActions;
+import net.wcfcarolina13.GameAI.services.CompanionOverheadDialogueService;
 import net.wcfcarolina13.GameAI.services.MovementService;
 import net.wcfcarolina13.GameAI.services.SafePositionService;
 import net.wcfcarolina13.GameAI.services.SneakLockService;
@@ -82,9 +83,9 @@ public final class FortifyVillageSkill implements Skill {
     private static final int TOWER_LOCAL_NO_PROGRESS_LIMIT = 3;
     private static final double TOWER_COMPLETION_TARGET_RATIO = 0.95D;
     private static final int TOWER_VERTEX_DEDUP_DISTANCE_SQ = 4; // <= 2 blocks in XZ
-    private static final long EDGE_SEGMENT_TIME_BUDGET_MS = 60_000L;
+    private static final long EDGE_SEGMENT_TIME_BUDGET_MS = 30_000L;
     private static final int EDGE_SEGMENT_NO_PROGRESS_STOP = 2;
-    private static final int EDGE_SEGMENT_PASS_CAP = 3;
+    private static final int EDGE_SEGMENT_PASS_CAP = 2;
     private static final int MAX_REPOSITION_ATTEMPTS_PER_BATCH = 6;
     private static final int PERIMETER_VERTEX_SKIP = 3;
     private static final int PERIMETER_WALK_SEARCH_RADIUS = 2;
@@ -156,13 +157,29 @@ public final class FortifyVillageSkill implements Skill {
                 return handleRename(source, server, world, args.trim().substring(5).trim());
             }
 
-            // /bot fortify resume <name>
+            // /bot fortify resume [name]
+            if (lower.equals("resume")) {
+                String wallName = findNearestWallName(server, world, bot.getBlockPos());
+                if (wallName == null) {
+                    return SkillExecutionResult.failure("No saved walls found. Build one first with `/bot fortify`.");
+                }
+                ChatUtils.sendSystemMessage(source, "§7[Fortify] Auto-detected nearest wall: §f" + wallName);
+                return handleResume(source, bot, world, server, wallName);
+            }
             if (lower.startsWith("resume ")) {
                 String wallName = args.trim().substring(7).trim();
                 return handleResume(source, bot, world, server, wallName);
             }
 
-            // /bot fortify patch <name>
+            // /bot fortify patch [name]
+            if (lower.equals("patch")) {
+                String wallName = findNearestWallName(server, world, bot.getBlockPos());
+                if (wallName == null) {
+                    return SkillExecutionResult.failure("No saved walls found. Build one first with `/bot fortify`.");
+                }
+                ChatUtils.sendSystemMessage(source, "§7[Fortify] Auto-detected nearest wall: §f" + wallName);
+                return handlePatch(source, bot, world, server, wallName);
+            }
             if (lower.startsWith("patch ")) {
                 String wallName = args.trim().substring(6).trim();
                 return handlePatch(source, bot, world, server, wallName);
@@ -174,7 +191,15 @@ public final class FortifyVillageSkill implements Skill {
                 return handleStatus(source, bot, world, server, wallName);
             }
 
-            // /bot fortify merge <name>
+            // /bot fortify merge [name]
+            if (lower.equals("merge")) {
+                String wallName = findNearestWallName(server, world, bot.getBlockPos());
+                if (wallName == null) {
+                    return SkillExecutionResult.failure("No saved walls found. Build one first with `/bot fortify`.");
+                }
+                ChatUtils.sendSystemMessage(source, "§7[Fortify] Auto-detected nearest wall: §f" + wallName);
+                return handleMerge(source, bot, world, server, wallName);
+            }
             if (lower.startsWith("merge ")) {
                 String wallName = args.trim().substring(6).trim();
                 return handleMerge(source, bot, world, server, wallName);
@@ -220,6 +245,31 @@ public final class FortifyVillageSkill implements Skill {
         return SkillExecutionResult.success("Listed " + forts.size() + " walls.");
     }
 
+    /**
+     * Find the nearest saved wall to the given position.
+     * Returns the wall name, or null if no walls exist for this world.
+     */
+    private String findNearestWallName(MinecraftServer server, ServerWorld world, BlockPos botPos) {
+        String worldKey = FortificationPersistenceService.serverWorldKey(server, world);
+        List<SavedFortification> forts = FortificationPersistenceService.listForWorld(server, worldKey);
+        if (forts.isEmpty()) {
+            return null;
+        }
+        String nearest = null;
+        double nearestDistSq = Double.MAX_VALUE;
+        for (SavedFortification f : forts) {
+            BlockPos center = f.getCenter();
+            double dx = botPos.getX() - center.getX();
+            double dz = botPos.getZ() - center.getZ();
+            double distSq = dx * dx + dz * dz;
+            if (distSq < nearestDistSq) {
+                nearestDistSq = distSq;
+                nearest = f.getName();
+            }
+        }
+        return nearest;
+    }
+
     private SkillExecutionResult handleRename(ServerCommandSource source, MinecraftServer server,
                                                ServerWorld world, String nameArgs) {
         String[] parts = nameArgs.split("\\s+", 2);
@@ -251,12 +301,14 @@ public final class FortifyVillageSkill implements Skill {
             return SkillExecutionResult.success("Wall already complete. Use patch to repair.");
         }
 
-        ChatUtils.sendChatMessages(source, "§e[Fortify] Resuming wall '" + wallName + "' from edge #" + saved.getLastEdgeIndex() + "...");
+        showOverhead(bot, "Resuming wall '" + wallName + "'...");
 
-        // Regenerate layout from saved hull vertices
+        // Regenerate layout from saved hull vertices, using saved surface profile for stability
         List<WallPoint> hullVertices = saved.getHullWallPoints();
+        VillageFortificationLayoutService.SurfaceProfile savedProfile =
+                VillageFortificationLayoutService.SurfaceProfile.fromSaved(saved.getSurfaceProfile());
         FortificationLayout layout = VillageFortificationLayoutService.generateLayoutFromHull(
-                hullVertices, world, saved.getCenter());
+                hullVertices, world, saved.getCenter(), savedProfile);
 
         if (layout.edges().isEmpty()) {
             return SkillExecutionResult.failure("Could not regenerate layout from saved hull.");
@@ -285,10 +337,12 @@ public final class FortifyVillageSkill implements Skill {
 
         SavedFortification saved = opt.get();
 
-        // Regenerate layout once (hull doesn't change between passes)
+        // Regenerate layout once using saved surface profile for stability
         List<WallPoint> hullVertices = saved.getHullWallPoints();
+        VillageFortificationLayoutService.SurfaceProfile savedProfile =
+                VillageFortificationLayoutService.SurfaceProfile.fromSaved(saved.getSurfaceProfile());
         FortificationLayout layout = VillageFortificationLayoutService.generateLayoutFromHull(
-                hullVertices, world, saved.getCenter());
+                hullVertices, world, saved.getCenter(), savedProfile);
 
         if (layout.allBlocks().isEmpty()) {
             return SkillExecutionResult.failure("Could not regenerate layout from saved hull.");
@@ -303,12 +357,12 @@ public final class FortifyVillageSkill implements Skill {
             if (SkillManager.shouldAbortSkill(bot)) break;
 
             if (autoRepeat && passNumber == 1) {
-                ChatUtils.sendChatMessages(source, "Let me check the blueprints...");
+                showOverhead(bot, "Checking the blueprints...");
             }
 
-            ChatUtils.sendChatMessages(source, autoRepeat
-                    ? "§e[Fortify] Pass " + passNumber + ": Scanning wall '" + wallName + "' for damage..."
-                    : "§e[Fortify] Scanning wall '" + wallName + "' for damage...");
+            showOverhead(bot, autoRepeat
+                    ? "Pass " + passNumber + ": Scanning for damage..."
+                    : "Scanning for damage...");
 
             // Find missing/damaged blocks grouped by edge
             Map<Integer, Integer> totalByEdge = new LinkedHashMap<>();
@@ -342,12 +396,12 @@ public final class FortifyVillageSkill implements Skill {
             }
 
             if (autoRepeat && !announcedPatchStart) {
-                ChatUtils.sendChatMessages(source, "Ok, let's get started.");
+                showOverhead(bot, "Found damage. Patching...");
                 announcedPatchStart = true;
             }
 
             // Per-edge completion stats
-            ChatUtils.sendChatMessages(source, "§e[Fortify] Found " + repairList.size() + " blocks to repair:");
+            showOverhead(bot, "Found " + repairList.size() + " blocks to repair");
             Map<Integer, Integer> prevActual = saved.getEdgeActualCounts();
             for (Map.Entry<Integer, Integer> edgeEntry : totalByEdge.entrySet()) {
                 int edgeIdx = edgeEntry.getKey();
@@ -376,7 +430,7 @@ public final class FortifyVillageSkill implements Skill {
             int buildBlocks = countBuildingBlocks(bot);
             if (buildBlocks == 0) {
                 if (grandTotalRepaired > 0) {
-                    ChatUtils.sendChatMessages(source, "§e[Fortify] Out of blocks. " + grandTotalRepaired + " total blocks repaired.");
+                    showOverhead(bot, "Out of blocks. " + grandTotalRepaired + " repaired.");
                 }
                 return SkillExecutionResult.failure("No building blocks in inventory for repairs.");
             }
@@ -421,8 +475,7 @@ public final class FortifyVillageSkill implements Skill {
             for (Map.Entry<Integer, List<ProceduralWallBlock>> entry : sortedEdges) {
                 if (SkillManager.shouldAbortSkill(bot)) break;
                 if (countBuildingBlocks(bot) == 0) {
-                    ChatUtils.sendChatMessages(source, "§e[Fortify] Out of blocks during patching. "
-                            + passRepaired + " blocks repaired this pass.");
+                    showOverhead(bot, "Out of blocks. " + passRepaired + " repaired this pass.");
                     break;
                 }
 
@@ -488,7 +541,12 @@ public final class FortifyVillageSkill implements Skill {
                                 .comparingInt((ProceduralWallBlock b) -> b.type() == WallBlockType.FOUNDATION ? 0 : 1)
                                 .thenComparingInt(b -> b.worldPos().getY()));
 
-                        navigateToEdgeApproach(source, bot, world, edge, surfaceProfile);
+                        // Navigate toward nearest missing block, not edge midpoint
+                        BlockPos nearestMissing = edgeMissing.stream()
+                                .min(Comparator.comparingDouble(b -> bot.getBlockPos().getSquaredDistance(b.worldPos())))
+                                .map(ProceduralWallBlock::worldPos)
+                                .orElse(null);
+                        navigateToEdgeApproach(source, bot, world, edge, surfaceProfile, nearestMissing);
                         sleepQuiet(100);
 
                         int placed = placeEdgeBlocks(
@@ -520,12 +578,11 @@ public final class FortifyVillageSkill implements Skill {
             }
 
             // Auto mode: report pass results and rescan
-            ChatUtils.sendChatMessages(source, "§e[Fortify] Pass " + passNumber + " complete ("
-                    + passRepaired + " repaired). Rescanning...");
+            showOverhead(bot, "Pass " + passNumber + ": " + passRepaired + " repaired. Rescanning...");
 
             // If this pass repaired nothing, stop to avoid infinite loop
             if (passRepaired == 0) {
-                ChatUtils.sendChatMessages(source, "§e[Fortify] No blocks repaired this pass (out of blocks or unreachable). Stopping.");
+                showOverhead(bot, "Nothing repaired this pass. Stopping.");
                 break;
             }
 
@@ -607,10 +664,12 @@ public final class FortifyVillageSkill implements Skill {
 
         SavedFortification saved = opt.get();
 
-        // Regenerate layout
+        // Regenerate layout using saved surface profile for stability
         List<WallPoint> hullVertices = saved.getHullWallPoints();
+        VillageFortificationLayoutService.SurfaceProfile savedProfile =
+                VillageFortificationLayoutService.SurfaceProfile.fromSaved(saved.getSurfaceProfile());
         FortificationLayout layout = VillageFortificationLayoutService.generateLayoutFromHull(
-                hullVertices, world, saved.getCenter());
+                hullVertices, world, saved.getCenter(), savedProfile);
 
         if (layout.allBlocks().isEmpty()) {
             return SkillExecutionResult.failure("Could not regenerate layout from saved hull.");
@@ -696,7 +755,7 @@ public final class FortifyVillageSkill implements Skill {
         }
 
         // Detect current village
-        ChatUtils.sendChatMessages(source, "§e[Fortify] Scanning for village to merge with '" + wallName + "'...");
+        showOverhead(bot, "Scanning for village to merge...");
         BlockPos searchCenter = bot.getBlockPos();
         VillageBounds bounds = VillageFortificationLayoutService.detectVillageBounds(world, searchCenter, 64);
         if (bounds.foundPOIs() == 0) {
@@ -742,17 +801,20 @@ public final class FortifyVillageSkill implements Skill {
                 wallName, worldKey, existing.getCenter(), mergedHull,
                 existing.getSearchRadius(), edgePlannedCounts);
         merged.setTotalBlocksPlaced(alreadyPresent);
+        if (mergedLayout.surfaceProfile() != null) {
+            merged.setSurfaceProfile(mergedLayout.surfaceProfile().export());
+        }
         FortificationPersistenceService.save(server, merged);
 
         String mergedDesc = VillageFortificationLayoutService.describePlan(mergedLayout);
         ChatUtils.sendChatMessages(source, "§a[Fortify] Merged! " + mergedDesc);
-        ChatUtils.sendSystemMessage(source, "§7  " + alreadyPresent + " existing blocks retained. "
-                + "Use §f/bot fortify resume " + wallName + "§7 to build the expanded wall.");
+        ChatUtils.sendSystemMessage(source, "§7  " + alreadyPresent + " existing blocks retained. Auto-resuming build...");
 
         // Show the merged layout with particles
         FortificationVisualizerService.spawnLayoutParticles(world, mergedLayout, Set.of(), bot);
 
-        return SkillExecutionResult.success("Merged wall '" + wallName + "': " + mergedDesc);
+        // Auto-resume building the expanded wall
+        return handleResume(source, bot, world, server, wallName);
     }
 
     private SkillExecutionResult handleNewBuild(ServerCommandSource source, ServerPlayerEntity bot,
@@ -766,7 +828,7 @@ public final class FortifyVillageSkill implements Skill {
         }
 
         // Detect village bounds
-        ChatUtils.sendChatMessages(source, "§e[Fortify] Scanning for village...");
+        ChatUtils.sendChatMessages(source, "Writing the blueprints...");
         BlockPos searchCenter = bot.getBlockPos();
         VillageBounds bounds = VillageFortificationLayoutService.detectVillageBounds(world, searchCenter, 64);
 
@@ -840,9 +902,13 @@ public final class FortifyVillageSkill implements Skill {
         String wallName = FortificationPersistenceService.autoName(layout.center());
         SavedFortification saved = FortificationPersistenceService.create(
                 wallName, worldKey, layout.center(), layout.hullVertices(), 64, edgePlannedCounts);
+        // Save original terrain Y values so patching uses stable positions
+        if (layout.surfaceProfile() != null) {
+            saved.setSurfaceProfile(layout.surfaceProfile().export());
+        }
         FortificationPersistenceService.save(server, saved);
 
-        ChatUtils.sendChatMessages(source, "§7[Fortify] Wall saved as '" + wallName + "'.");
+        showOverhead(bot, "Wall saved. Let's get started!");
 
         return buildWall(source, bot, world, server, layout, wallName, worldKey,
                 new HashSet<>(), 0, 0);
@@ -885,7 +951,7 @@ public final class FortifyVillageSkill implements Skill {
                 List<WallPoint> towerVertices = orderAndDedupeTowerVertices(layout.hullVertices(), bot.getBlockPos());
                 Map<Integer, List<ProceduralWallBlock>> blocksByVertex =
                         groupTowerBlocksByNearestVertex(towerBlocks, towerVertices);
-                ChatUtils.sendChatMessages(source, "§e[Fortify] Building " + towerVertices.size() + " corner towers...");
+                showOverhead(bot, "Building " + towerVertices.size() + " corner towers...");
 
                 for (int vi = 0; vi < towerVertices.size(); vi++) {
                     if (SkillManager.shouldAbortSkill(bot)) break;
@@ -974,8 +1040,7 @@ public final class FortifyVillageSkill implements Skill {
             allDigBlocks.removeIf(b -> world.getBlockState(b.worldPos()).isAir());
 
             if (!allDigBlocks.isEmpty()) {
-                ChatUtils.sendChatMessages(source, "§e[Fortify] Phase 1: Digging moat ("
-                        + allDigBlocks.size() + " blocks across all edges)...");
+                showOverhead(bot, "Digging moat (" + allDigBlocks.size() + " blocks)...");
 
                 List<BlockPos> perimeterPath = buildPerimeterPath(layout, world, surfaceProfile);
                 Set<BlockPos> startupTargets = collectExistingDigTargets(world, allDigBlocks);
@@ -1022,7 +1087,7 @@ public final class FortifyVillageSkill implements Skill {
             }
         } else {
             LOGGER.info("[Fortify] Moat stage disabled by configuration; skipping moat and clearance work.");
-            ChatUtils.sendChatMessages(source, "§7[Fortify] Moat stage temporarily disabled. Building walls/towers only.");
+            showOverhead(bot, "Building walls and towers...");
         }
 
         // ══════════════════════════════════════════════════════════════
@@ -1061,7 +1126,7 @@ public final class FortifyVillageSkill implements Skill {
                 continue;
             }
 
-            ChatUtils.sendChatMessages(source, String.format("§e[Fortify] Phase 2: Placing edge %d/%d (%.0f blocks long)%s...",
+            showOverhead(bot, String.format("Placing edge %d/%d (%.0f blocks)%s",
                     ei + 1, totalEdges, edge.length(),
                     ei == layout.gatehouseEdgeIndex() ? " [GATEHOUSE]" : ""));
 
@@ -1092,7 +1157,7 @@ public final class FortifyVillageSkill implements Skill {
         // Scaffold cleanup
         int tornDown = ScaffoldService.teardownTrackedScaffolds(bot);
         if (tornDown > 0) {
-            ChatUtils.sendChatMessages(source, "§7[Fortify] Cleaned up " + tornDown + " scaffold blocks.");
+            showOverhead(bot, "Cleaned up " + tornDown + " scaffolds.");
         }
 
         // Final report — verify with world scan before marking complete
@@ -1871,8 +1936,7 @@ public final class FortifyVillageSkill implements Skill {
         if (wallBlockCount > 0 && occupiedCount > wallBlockCount * 0.4) {
             LOGGER.warn("Edge {} has {}% overlap with existing structures, skipping",
                     edge.index(), (occupiedCount * 100) / wallBlockCount);
-            ChatUtils.sendChatMessages(source, "§e[Fortify] Skipping edge #" + edge.index()
-                    + " — overlaps with existing structures (" + occupiedCount + "/" + wallBlockCount + " wall blocks).");
+            showOverhead(bot, "Skipping edge #" + edge.index() + " (structure overlap)");
             return 0;
         }
 
@@ -1921,12 +1985,29 @@ public final class FortifyVillageSkill implements Skill {
             }
 
             List<ProceduralWallBlock> segmentBlocks = segmentEntry.getValue();
+
+            // Navigate to far segments — use walkToTarget (not DIRECT mode, which mines through walls)
+            if (!segmentBlocks.isEmpty()) {
+                BlockPos firstBlockPos = segmentBlocks.get(0).worldPos();
+                double distToSegmentSq = bot.getBlockPos().getSquaredDistance(firstBlockPos);
+                if (distToSegmentSq > 15 * 15) {
+                    BlockPos approachPos = firstBlockPos.withY(
+                            safeSurfaceY(surfaceProfile, world, firstBlockPos.getX(), firstBlockPos.getZ()));
+                    walkToTarget(source, bot, approachPos, 5_000L);
+                }
+            }
+
             Map<BlockPos, ProceduralWallBlock> blockMap = new HashMap<>();
             Set<BlockPos> remaining = new LinkedHashSet<>();
             List<PlacementTarget> targets = new ArrayList<>(segmentBlocks.size());
             Set<BlockPos> scaffoldFailedPositions = new HashSet<>();
 
             for (ProceduralWallBlock block : segmentBlocks) {
+                // Pre-filter: skip blocks already satisfied (avoids BLOCKED_BY_SOLID waste)
+                BlockState current = world.getBlockState(block.worldPos());
+                if (isPlannedBlockSatisfied(block, current)) {
+                    continue;
+                }
                 remaining.add(block.worldPos());
                 blockMap.put(block.worldPos(), block);
                 targets.add(new PlacementTarget(
@@ -1940,13 +2021,17 @@ public final class FortifyVillageSkill implements Skill {
                 ));
             }
 
+            // Sort targets bottom-up so lower blocks (supports) are placed before upper blocks
+            targets.sort(Comparator.comparingInt((PlacementTarget t) -> t.pos().getY())
+                    .thenComparingInt(PlacementTarget::priorityBand));
+
             int[] repositionAttempt = new int[]{0};
             ScaffoldService.ScaffoldSession scaffoldSession = ScaffoldService.beginSession(bot);
             long segmentBudgetMs = Math.min(EDGE_SEGMENT_TIME_BUDGET_MS, remainingBudgetMs);
             ExecutionPolicy segmentPolicy = new ExecutionPolicy(
                     EDGE_SEGMENT_PASS_CAP,
-                    executionPolicy.perTargetFailCap(),
-                    2,
+                    2,  // fail fast per target — scaffold escalation handles NO_LOS
+                    1,
                     segmentBudgetMs
             );
 
@@ -1959,6 +2044,9 @@ public final class FortifyVillageSkill implements Skill {
                     segmentPolicy,
                     new ConstructionTaskSpec.SupportPolicy(true, true, MAX_SCAFFOLD_HEIGHT),
                     (target, pass) -> {
+                        if (isWithinReach(bot, target.pos())) {
+                            return ConstructionRecoveryService.RecoveryResult.success(false);
+                        }
                         if (countBuildingBlocks(bot) == 0) {
                             return ConstructionRecoveryService.RecoveryResult.failure(FailureReason.NO_MATERIAL, false);
                         }
@@ -2015,8 +2103,43 @@ public final class FortifyVillageSkill implements Skill {
                                 return ConstructionTaskSpec.PlacementOutcome.ok();
                             }
                             if (placed.reason() != null && placed.reason().startsWith("no-solid-support")) {
-                                fillGroundUnder(bot, world, target.pos());
-                                return ConstructionTaskSpec.PlacementOutcome.fail(FailureReason.NO_SUPPORT, true);
+                                boolean filled = fillGroundUnder(bot, world, target.pos());
+                                return ConstructionTaskSpec.PlacementOutcome.fail(FailureReason.NO_SUPPORT, filled);
+                            }
+                            // NO_LOS recovery: face the target and retry; for elevated blocks
+                            // skip expensive perpendicular walks — scaffold escalation handles those
+                            if (placed.reason() != null && placed.reason().startsWith("no-line-of-sight")) {
+                                LookController.faceBlock(bot, target.pos());
+                                sleepQuiet(50);
+                                BotActions.PlaceResult retry = tryPlaceBlock(bot, world, target.pos(), target.desiredState());
+                                if (retry.success()) {
+                                    remaining.remove(target.pos());
+                                    sleepQuiet(BLOCK_PLACE_DELAY_MS);
+                                    return ConstructionTaskSpec.PlacementOutcome.ok();
+                                }
+                                // Only try perpendicular approach for blocks near bot Y level
+                                // (elevated blocks need scaffolding, not angle changes)
+                                boolean elevated = target.pos().getY() > bot.getBlockPos().getY() + 1;
+                                if (!elevated) {
+                                    BlockPos bp = bot.getBlockPos();
+                                    double dx = target.pos().getX() - bp.getX();
+                                    double dz = target.pos().getZ() - bp.getZ();
+                                    Direction[] perpDirs = Math.abs(dx) >= Math.abs(dz)
+                                            ? new Direction[]{Direction.NORTH, Direction.SOUTH}
+                                            : new Direction[]{Direction.EAST, Direction.WEST};
+                                    for (Direction dir : perpDirs) {
+                                        BlockPos sidePos = target.pos().offset(dir, 2).withY(bp.getY());
+                                        walkTowardBlock(bot, sidePos, 400L);
+                                        LookController.faceBlock(bot, target.pos());
+                                        sleepQuiet(50);
+                                        BotActions.PlaceResult sideRetry = tryPlaceBlock(bot, world, target.pos(), target.desiredState());
+                                        if (sideRetry.success()) {
+                                            remaining.remove(target.pos());
+                                            sleepQuiet(BLOCK_PLACE_DELAY_MS);
+                                            return ConstructionTaskSpec.PlacementOutcome.ok();
+                                        }
+                                    }
+                                }
                             }
                             return ConstructionTaskSpec.PlacementOutcome.fail(FailureReason.fromPlaceReason(placed.reason()));
                         } finally {
@@ -2072,6 +2195,16 @@ public final class FortifyVillageSkill implements Skill {
                     report.remainingCount(),
                     report.remainingByReason());
 
+            // ── Scaffold escalation: if NO_LOS dominates remaining failures, pillar up and retry ──
+            int noLosCount = report.remainingByReason().getOrDefault(FailureReason.NO_LOS, 0);
+            if (!remaining.isEmpty() && noLosCount > 0 && noLosCount >= remaining.size() / 2
+                    && !SkillManager.shouldAbortSkill(bot) && countBuildingBlocks(bot) > 0) {
+                LOGGER.info("[Fortify] Edge {} seg {}: NO_LOS={}/{} — scaffold escalation",
+                        edge.index(), currentSegmentOrdinal, noLosCount, remaining.size());
+                totalPlaced += attemptScaffoldEscalation(
+                        source, bot, world, remaining, blockMap, surfaceProfile, edge, currentSegmentOrdinal);
+            }
+
             if (report.placedCount() == 0 && report.remainingCount() > 0) {
                 segmentNoProgressStreak++;
                 if (shouldStopAfterNoProgressSegments(segmentNoProgressStreak, EDGE_SEGMENT_NO_PROGRESS_STOP)) {
@@ -2085,6 +2218,109 @@ public final class FortifyVillageSkill implements Skill {
         }
 
         return totalPlaced;
+    }
+
+    /**
+     * Scaffold escalation for edge segments where NO_LOS dominates.
+     * Pillar up near remaining blocks, place from elevation, then tear down.
+     */
+    private int attemptScaffoldEscalation(
+            ServerCommandSource source, ServerPlayerEntity bot, ServerWorld world,
+            Set<BlockPos> remaining, Map<BlockPos, ProceduralWallBlock> blockMap,
+            SurfaceProfile surfaceProfile, WallEdge edge, int segmentOrdinal) {
+
+        if (remaining.isEmpty()) return 0;
+
+        // Compute centroid of remaining blocks
+        int sumX = 0, sumZ = 0, highestY = Integer.MIN_VALUE;
+        for (BlockPos pos : remaining) {
+            sumX += pos.getX();
+            sumZ += pos.getZ();
+            if (pos.getY() > highestY) highestY = pos.getY();
+        }
+        int cx = sumX / remaining.size();
+        int cz = sumZ / remaining.size();
+        int groundY = safeSurfaceY(surfaceProfile, world, cx, cz);
+
+        // Find scaffold position: offset 2 blocks toward bot from centroid (inside the wall)
+        BlockPos botPos = bot.getBlockPos();
+        int dx = botPos.getX() - cx;
+        int dz = botPos.getZ() - cz;
+        double len = Math.sqrt(dx * dx + dz * dz);
+        int offX, offZ;
+        if (len > 0.5) {
+            offX = (int) Math.round(2.0 * dx / len);
+            offZ = (int) Math.round(2.0 * dz / len);
+        } else {
+            // Bot is right at centroid — offset toward edge anchor direction
+            offX = 0;
+            offZ = 2;
+        }
+
+        BlockPos scaffoldBase = new BlockPos(cx + offX, groundY, cz + offZ);
+
+        // Walk to scaffold base
+        walkToTarget(source, bot, scaffoldBase, 3_000L);
+        if (SkillManager.shouldAbortSkill(bot)) return 0;
+
+        // Calculate how high to pillar: need eye level near the highest remaining block
+        // Bot eye height is at Y + 1.62, reach is ~4.5 blocks
+        int currentY = bot.getBlockPos().getY();
+        int neededY = Math.max(currentY, highestY - 2); // eye at neededY+1.62, reach 4.5 down
+        int pillarSteps = Math.max(2, Math.min(MAX_SCAFFOLD_HEIGHT, neededY - currentY));
+
+        LOGGER.info("[Fortify] Edge {} seg {}: scaffold escalation at ({},{},{}) pillar={} highestTarget={}",
+                edge.index(), segmentOrdinal, scaffoldBase.getX(), scaffoldBase.getY(), scaffoldBase.getZ(),
+                pillarSteps, highestY);
+
+        ScaffoldService.ScaffoldSession elevSession = ScaffoldService.beginSession(bot);
+        boolean pillared = ScaffoldService.pillarToY(elevSession, currentY + pillarSteps);
+
+        int placed = 0;
+        if (pillared || bot.getBlockPos().getY() > currentY) {
+            // Sort remaining by distance to bot so we place nearest first
+            List<BlockPos> sortedRemaining = new ArrayList<>(remaining);
+            sortedRemaining.sort(Comparator.comparingDouble(p -> bot.getBlockPos().getSquaredDistance(p)));
+
+            for (BlockPos pos : sortedRemaining) {
+                if (SkillManager.shouldAbortSkill(bot)) break;
+                if (countBuildingBlocks(bot) == 0) break;
+
+                ProceduralWallBlock block = blockMap.get(pos);
+                if (block == null) continue;
+
+                // Check if already satisfied
+                if (isPlannedBlockSatisfied(block, world.getBlockState(pos))) {
+                    remaining.remove(pos);
+                    continue;
+                }
+
+                // Check reach from elevated position
+                if (!isWithinReach(bot, pos)) continue;
+
+                LookController.faceBlock(bot, pos);
+                sleepQuiet(60);
+                BotActions.PlaceResult result = tryPlaceBlock(bot, world, pos, block.state());
+                if (result.success()) {
+                    remaining.remove(pos);
+                    placed++;
+                    sleepQuiet(BLOCK_PLACE_DELAY_MS);
+                }
+            }
+
+            LOGGER.info("[Fortify] Edge {} seg {}: scaffold escalation placed={}/{}",
+                    edge.index(), segmentOrdinal, placed, sortedRemaining.size());
+        } else {
+            LOGGER.info("[Fortify] Edge {} seg {}: scaffold escalation pillar failed (Y unchanged)",
+                    edge.index(), segmentOrdinal);
+        }
+
+        // Tear down scaffold
+        int tornDown = ScaffoldService.teardown(elevSession, Collections.emptySet());
+        LOGGER.debug("[Fortify] Edge {} seg {}: scaffold teardown removed={}",
+                edge.index(), segmentOrdinal, tornDown);
+
+        return placed;
     }
 
     /** Priority order for placing blocks (lower = placed first). */
@@ -2249,7 +2485,7 @@ public final class FortifyVillageSkill implements Skill {
         return list;
     }
 
-    private void fillGroundUnder(ServerPlayerEntity bot, ServerWorld world, BlockPos pos) {
+    private boolean fillGroundUnder(ServerPlayerEntity bot, ServerWorld world, BlockPos pos) {
         List<BlockPos> toFill = new ArrayList<>();
         BlockPos cursor = pos.down();
         for (int i = 0; i < 4; i++) {
@@ -2258,18 +2494,21 @@ public final class FortifyVillageSkill implements Skill {
             toFill.add(cursor);
             cursor = cursor.down();
         }
-        if (toFill.isEmpty()) return;
+        if (toFill.isEmpty()) return false;
 
         BlockState foundation = world.getBlockState(toFill.get(toFill.size() - 1).down());
-        if (foundation.isAir()) return;
+        if (foundation.isAir()) return false;
 
+        boolean anyPlaced = false;
         List<Item> fillBlocks = List.of(Items.COBBLESTONE, Items.DIRT, Items.COBBLED_DEEPSLATE);
         Set<BlockPos> scaffoldMemory = ScaffoldService.getScaffoldMemory(bot);
         for (int i = toFill.size() - 1; i >= 0; i--) {
             BotActions.PlaceResult result = BotActions.tryPlaceBlockAt(bot, toFill.get(i), Direction.UP, fillBlocks);
             if (!result.success()) break;
             scaffoldMemory.add(toFill.get(i).toImmutable());
+            anyPlaced = true;
         }
+        return anyPlaced;
     }
 
     // ── Block digging ────────────────────────────────────────────
@@ -2298,6 +2537,10 @@ public final class FortifyVillageSkill implements Skill {
         if (state.getBlock() instanceof TrapdoorBlock) return false;
         if (state.getHardness(world, pos) < 0) return false;
 
+        // Neighbor-based village structure protection: if 2+ adjacent blocks are village
+        // structure blocks, this block is likely part of a building and should be preserved.
+        if (isAdjacentToVillageStructure(world, pos, 2)) return false;
+
         try {
             CompletableFuture<String> result = MiningTool.mineBlock(bot, pos);
             String outcome = awaitMiningOutcome(result, () -> SkillManager.shouldAbortSkill(bot),
@@ -2312,6 +2555,24 @@ public final class FortifyVillageSkill implements Skill {
         }
     }
 
+    /**
+     * Checks if a block position has at least {@code threshold} adjacent blocks (6 faces)
+     * that are village structure blocks (logs, planks, doors, cobblestone stairs, etc.).
+     * Used to protect blocks that are part of village buildings even if the block itself
+     * isn't on the explicit blacklist.
+     */
+    private boolean isAdjacentToVillageStructure(ServerWorld world, BlockPos pos, int threshold) {
+        int count = 0;
+        for (Direction dir : Direction.values()) {
+            BlockState neighbor = world.getBlockState(pos.offset(dir));
+            if (!neighbor.isAir() && VillageFortificationLayoutService.isVillageStructureBlock(neighbor.getBlock())) {
+                count++;
+                if (count >= threshold) return true;
+            }
+        }
+        return false;
+    }
+
     // ── Navigation ──────────────────────────────────────────────
 
     /**
@@ -2320,16 +2581,33 @@ public final class FortifyVillageSkill implements Skill {
      */
     private void navigateToEdgeApproach(ServerCommandSource source, ServerPlayerEntity bot,
                                          ServerWorld world, WallEdge edge, SurfaceProfile surfaceProfile) {
-        // Compute edge midpoint
-        int midX = (edge.start().x() + edge.end().x()) / 2;
-        int midZ = (edge.start().z() + edge.end().z()) / 2;
+        navigateToEdgeApproach(source, bot, world, edge, surfaceProfile, null);
+    }
+
+    /**
+     * Navigate to an approach position for the given edge.
+     * If {@code nearTarget} is provided (e.g. the first damaged block in patch mode),
+     * the approach point is placed near that target instead of the edge midpoint.
+     */
+    private void navigateToEdgeApproach(ServerCommandSource source, ServerPlayerEntity bot,
+                                         ServerWorld world, WallEdge edge, SurfaceProfile surfaceProfile,
+                                         BlockPos nearTarget) {
+        // Use nearTarget position if provided, otherwise fall back to edge midpoint
+        int refX, refZ;
+        if (nearTarget != null) {
+            refX = nearTarget.getX();
+            refZ = nearTarget.getZ();
+        } else {
+            refX = (edge.start().x() + edge.end().x()) / 2;
+            refZ = (edge.start().z() + edge.end().z()) / 2;
+        }
 
         // Compute outward normal (90° CW rotation of edge direction for CCW hull)
         double edgeDx = edge.end().x() - edge.start().x();
         double edgeDz = edge.end().z() - edge.start().z();
         double edgeLen = Math.sqrt(edgeDx * edgeDx + edgeDz * edgeDz);
         if (edgeLen < 0.001) {
-            walkToTarget(source, bot, new BlockPos(midX, bot.getBlockPos().getY(), midZ), 15_000L);
+            walkToTarget(source, bot, new BlockPos(refX, bot.getBlockPos().getY(), refZ), 15_000L);
             return;
         }
 
@@ -2337,11 +2615,26 @@ public final class FortifyVillageSkill implements Skill {
         double nx = edgeDz / edgeLen;
         double nz = -edgeDx / edgeLen;
 
-        int approachX = (int) Math.round(midX + nx * 3);
-        int approachZ = (int) Math.round(midZ + nz * 3);
+        int approachX = (int) Math.round(refX + nx * 3);
+        int approachZ = (int) Math.round(refZ + nz * 3);
         int approachY = safeSurfaceY(surfaceProfile, world, approachX, approachZ);
 
-        walkToTarget(source, bot, new BlockPos(approachX, approachY, approachZ), 8_000L);
+        BlockPos approachPos = new BlockPos(approachX, approachY, approachZ);
+        double distSq = bot.squaredDistanceTo(approachX + 0.5, bot.getY(), approachZ + 0.5);
+        if (distSq > 400.0D) { // > 20 blocks away — use proper pathfinding
+            Optional<MovementService.MovementPlan> plan = MovementService.planLootApproach(
+                    bot, approachPos, MovementService.MovementOptions.skillLoot());
+            if (plan.isPresent() && !SkillManager.shouldAbortSkill(bot)) {
+                LOGGER.info("[FortifyEdge] long-range nav to edge approach={} dist={}",
+                        approachPos.toShortString(), String.format("%.0f", Math.sqrt(distSq)));
+                // Suppress obstruction mining and door traversal during fortify navigation
+                MovementService.withoutDoorEscape(() ->
+                        MovementService.withoutObstructionMining(
+                                () -> MovementService.execute(source, bot, plan.get(), null)));
+                return; // MovementService already navigated; skip the short-range walkToTarget
+            }
+        }
+        walkToTarget(source, bot, approachPos, 8_000L);
     }
 
     /**
@@ -2530,6 +2823,11 @@ public final class FortifyVillageSkill implements Skill {
         Set<BlockPos> scaffoldFailedPositions = new HashSet<>();
 
         for (ProceduralWallBlock block : placeBlocks) {
+            // Pre-filter: skip blocks already satisfied (avoids BLOCKED_BY_SOLID waste)
+            BlockState current = world.getBlockState(block.worldPos());
+            if (isPlannedBlockSatisfied(block, current)) {
+                continue;
+            }
             remaining.add(block.worldPos());
             blockMap.put(block.worldPos(), block);
             targets.add(new PlacementTarget(
@@ -2553,6 +2851,9 @@ public final class FortifyVillageSkill implements Skill {
                 executionPolicy,
                 new ConstructionTaskSpec.SupportPolicy(true, true, MAX_SCAFFOLD_HEIGHT),
                 (target, pass) -> {
+                    if (isWithinReach(bot, target.pos())) {
+                        return ConstructionRecoveryService.RecoveryResult.success(false);
+                    }
                     if (countBuildingBlocks(bot) == 0) {
                         return ConstructionRecoveryService.RecoveryResult.failure(FailureReason.NO_MATERIAL, false);
                     }
@@ -2609,8 +2910,19 @@ public final class FortifyVillageSkill implements Skill {
                             return ConstructionTaskSpec.PlacementOutcome.ok();
                         }
                         if (placed.reason() != null && placed.reason().startsWith("no-solid-support")) {
-                            fillGroundUnder(bot, world, target.pos());
-                            return ConstructionTaskSpec.PlacementOutcome.fail(FailureReason.NO_SUPPORT, true);
+                            boolean filled = fillGroundUnder(bot, world, target.pos());
+                            return ConstructionTaskSpec.PlacementOutcome.fail(FailureReason.NO_SUPPORT, filled);
+                        }
+                        // NO_LOS recovery: face the target and retry once
+                        if (placed.reason() != null && placed.reason().startsWith("no-line-of-sight")) {
+                            LookController.faceBlock(bot, target.pos());
+                            sleepQuiet(50);
+                            BotActions.PlaceResult retry = tryPlaceBlock(bot, world, target.pos(), target.desiredState());
+                            if (retry.success()) {
+                                remaining.remove(target.pos());
+                                sleepQuiet(BLOCK_PLACE_DELAY_MS);
+                                return ConstructionTaskSpec.PlacementOutcome.ok();
+                            }
                         }
                         return ConstructionTaskSpec.PlacementOutcome.fail(FailureReason.fromPlaceReason(placed.reason()));
                     } finally {
@@ -2769,6 +3081,26 @@ public final class FortifyVillageSkill implements Skill {
         BlockPos lastAttemptPos = null;
         int stagnantAttemptStreak = 0;
 
+        // Long-range navigation: if bot is far from this tower, use MovementService
+        // to get to the general area before starting short-range local approach retries.
+        double distToTowerSq = bot.squaredDistanceTo(vertex.x() + 0.5, bot.getY(), vertex.z() + 0.5);
+        if (distToTowerSq > 400.0D) { // > 20 blocks away
+            BlockPos towerApproach = chooseTowerApproachPos(bot, world, vertex, surfaceProfile, 0);
+            if (towerApproach != null) {
+                Optional<MovementService.MovementPlan> plan = MovementService.planLootApproach(
+                        bot, towerApproach, MovementService.MovementOptions.skillLoot());
+                if (plan.isPresent() && !SkillManager.shouldAbortSkill(bot)) {
+                    LOGGER.info("[FortifyTower] long-range nav to tower {}/{} approach={} dist={}",
+                            vertexOrdinal + 1, totalVertices, towerApproach.toShortString(),
+                            String.format("%.0f", Math.sqrt(distToTowerSq)));
+                    // Suppress obstruction mining and door traversal during fortify navigation
+                    MovementService.withoutDoorEscape(() ->
+                            MovementService.withoutObstructionMining(
+                                    () -> MovementService.execute(source, bot, plan.get(), null)));
+                }
+            }
+        }
+
         for (int attempt = 1; attempt <= TOWER_LOCAL_MAX_ATTEMPTS; attempt++) {
             if (SkillManager.shouldAbortSkill(bot)) {
                 break;
@@ -2861,7 +3193,216 @@ public final class FortifyVillageSkill implements Skill {
             }
         }
 
+        // ── Scaffold phase: reach upper tower layers from elevated position ──
+        presentCount = countPresentBlocks(world, vertexBlocks);
+        if (!isTowerComplete(presentCount, plannedCount)
+                && !SkillManager.shouldAbortSkill(bot)
+                && countBuildingBlocks(bot) > 0) {
+            int scaffoldGained = executeTowerScaffoldPhase(
+                    source, bot, world, vertex, vertexBlocks, surfaceProfile,
+                    vertexOrdinal, totalVertices, plannedCount, referenceSurfaceY);
+            newlyPlaced += scaffoldGained;
+        }
+
         return newlyPlaced;
+    }
+
+    // ── Tower scaffold phase ──────────────────────────────────────
+
+    private static final long TOWER_SCAFFOLD_TIME_BUDGET_MS = 60_000L;
+    private static final int TOWER_SCAFFOLD_MAX_SIDES = 6;
+
+    /**
+     * Scaffold phase for incomplete towers: pillar up on cardinal sides and place
+     * remaining upper blocks from an elevated position, then tear down the scaffold.
+     */
+    private int executeTowerScaffoldPhase(ServerCommandSource source,
+                                          ServerPlayerEntity bot,
+                                          ServerWorld world,
+                                          WallPoint vertex,
+                                          List<ProceduralWallBlock> vertexBlocks,
+                                          SurfaceProfile surfaceProfile,
+                                          int vertexOrdinal,
+                                          int totalVertices,
+                                          int plannedCount,
+                                          int referenceSurfaceY) {
+        int presentCount = countPresentBlocks(world, vertexBlocks);
+        if (isTowerComplete(presentCount, plannedCount)) {
+            return 0;
+        }
+
+        // Find the highest target Y among unsatisfied blocks
+        int maxTargetY = Integer.MIN_VALUE;
+        for (ProceduralWallBlock block : vertexBlocks) {
+            if (!isActiveFortifyBlock(block)) continue;
+            BlockState current = world.getBlockState(block.worldPos());
+            if (!isPlannedBlockSatisfied(block, current)) {
+                maxTargetY = Math.max(maxTargetY, block.worldPos().getY());
+            }
+        }
+        if (maxTargetY == Integer.MIN_VALUE) {
+            return 0;
+        }
+
+        // Optimal scaffold Y: puts bot eye level near the upper blocks
+        int optimalY = maxTargetY - 2;
+        int groundY = safeSurfaceY(surfaceProfile, world, vertex.x(), vertex.z());
+        if (optimalY <= groundY) {
+            return 0; // no benefit from scaffolding
+        }
+
+        LOGGER.info("[FortifyTower] scaffold phase for tower {}/{} pos=({},{}) present={}/{} optimalY={}",
+                vertexOrdinal + 1, totalVertices, vertex.x(), vertex.z(),
+                presentCount, plannedCount, optimalY);
+        showOverhead(bot, "Scaffolding tower " + (vertexOrdinal + 1) + "/" + totalVertices);
+
+        long phaseStart = System.currentTimeMillis();
+        int totalGained = 0;
+        Set<Integer> triedSides = new HashSet<>();
+
+        for (int sideAttempt = 0; sideAttempt < TOWER_SCAFFOLD_MAX_SIDES; sideAttempt++) {
+            if (SkillManager.shouldAbortSkill(bot)) break;
+            if (countBuildingBlocks(bot) == 0) break;
+            if (System.currentTimeMillis() - phaseStart > TOWER_SCAFFOLD_TIME_BUDGET_MS) break;
+
+            presentCount = countPresentBlocks(world, vertexBlocks);
+            if (isTowerComplete(presentCount, plannedCount)) break;
+
+            BlockPos scaffoldBase = chooseTowerScaffoldPos(world, vertex, surfaceProfile, triedSides);
+            if (scaffoldBase == null) break;
+
+            // Navigate to scaffold base
+            forceExitTowerFootprint(source, bot, world, vertex, surfaceProfile, sideAttempt);
+            walkToTarget(source, bot, scaffoldBase, 3_000L);
+            double distSq = bot.squaredDistanceTo(scaffoldBase.getX() + 0.5, scaffoldBase.getY(), scaffoldBase.getZ() + 0.5);
+            if (distSq > 9.0) {
+                walkTowardBlock(bot, scaffoldBase, 2_000L);
+                distSq = bot.squaredDistanceTo(scaffoldBase.getX() + 0.5, scaffoldBase.getY(), scaffoldBase.getZ() + 0.5);
+            }
+
+            // If we're too far from the scaffold base, skip this side
+            if (distSq > 16.0) {
+                LOGGER.info("[FortifyTower] scaffold base unreachable side={} dist={} for tower ({},{})",
+                        sideAttempt, String.format("%.1f", Math.sqrt(distSq)), vertex.x(), vertex.z());
+                continue;
+            }
+
+            // Pillar up
+            int stepsNeeded = Math.max(0, optimalY - bot.getBlockPos().getY());
+            LOGGER.info("[FortifyTower] scaffold pillar attempt side={} botY={} optimalY={} steps={} for tower ({},{})",
+                    sideAttempt, bot.getBlockPos().getY(), optimalY, stepsNeeded, vertex.x(), vertex.z());
+            ScaffoldService.ScaffoldSession session = ScaffoldService.beginSession(bot);
+            boolean pillared = ScaffoldService.pillarToY(session, optimalY);
+            if (!pillared || session.trackedPositions().isEmpty()) {
+                LOGGER.info("[FortifyTower] scaffold pillar failed side={} pillared={} tracked={} botY={} for tower ({},{})",
+                        sideAttempt, pillared, session.trackedPositions().size(),
+                        bot.getBlockPos().getY(), vertex.x(), vertex.z());
+                teardownScaffoldSurvival(bot, world, session);
+                continue;
+            }
+
+            // Sneak for safety on scaffold
+            boolean scaffoldSneak = beginScaffoldEdgeHold(bot, world, bot.getBlockPos());
+
+            // Place remaining blocks within reach
+            int sidePlaced = 0;
+            for (ProceduralWallBlock block : vertexBlocks) {
+                if (SkillManager.shouldAbortSkill(bot)) break;
+                if (!isActiveFortifyBlock(block)) continue;
+                BlockState current = world.getBlockState(block.worldPos());
+                if (isPlannedBlockSatisfied(block, current)) continue;
+                if (!isWithinReach(bot, block.worldPos())) continue;
+
+                LookController.faceBlock(bot, block.worldPos());
+                sleepQuiet(BLOCK_PLACE_DELAY_MS);
+                BotActions.PlaceResult result = tryPlaceBlock(bot, world, block.worldPos(), block.state());
+                if (result.success()) {
+                    sidePlaced++;
+                }
+            }
+
+            endScaffoldEdgeHold(bot, scaffoldSneak);
+
+            // Tear down scaffold blocks (top-down, survival mining)
+            teardownScaffoldSurvival(bot, world, session);
+
+            totalGained += sidePlaced;
+            LOGGER.info("[FortifyTower] scaffold side={} placed={} for tower {}/{} ({},{})",
+                    sideAttempt, sidePlaced, vertexOrdinal + 1, totalVertices, vertex.x(), vertex.z());
+
+            // Progress guard: if a side placed nothing, stop trying more sides
+            if (sidePlaced == 0) {
+                break;
+            }
+        }
+
+        return totalGained;
+    }
+
+    /**
+     * Pick a scaffold position near a tower vertex. Tries cardinal directions at
+     * distances 2, 3, 4 blocks out, then diagonals. Each "side index" corresponds to
+     * a direction so we don't retry the same direction.
+     */
+    private BlockPos chooseTowerScaffoldPos(ServerWorld world, WallPoint vertex,
+                                            SurfaceProfile surfaceProfile,
+                                            Set<Integer> triedSides) {
+        // 8 directions: 4 cardinal + 4 diagonal
+        int[][] directions = {
+                {1, 0}, {-1, 0}, {0, 1}, {0, -1},  // cardinal (indices 0-3)
+                {1, 1}, {1, -1}, {-1, 1}, {-1, -1}  // diagonal (indices 4-7)
+        };
+        // Try increasing distances: 2, 3, 4 blocks out
+        for (int dist = 2; dist <= 4; dist++) {
+            for (int i = 0; i < directions.length; i++) {
+                // Encode side as (direction_index * 10 + dist) for uniqueness
+                int sideKey = i * 10 + dist;
+                if (triedSides.contains(sideKey)) continue;
+                int x = vertex.x() + directions[i][0] * dist;
+                int z = vertex.z() + directions[i][1] * dist;
+                int y = safeSurfaceY(surfaceProfile, world, x, z);
+                BlockPos pos = new BlockPos(x, y, z);
+                if (canStandAt(world, pos)) {
+                    triedSides.add(sideKey);
+                    LOGGER.debug("[FortifyTower] scaffold pos chosen: dir={} dist={} pos={}",
+                            i, dist, pos.toShortString());
+                    return pos;
+                }
+                // Also try one Y above (wall blocks may raise the floor)
+                BlockPos posUp = new BlockPos(x, y + 1, z);
+                if (canStandAt(world, posUp)) {
+                    triedSides.add(sideKey);
+                    LOGGER.debug("[FortifyTower] scaffold pos chosen (Y+1): dir={} dist={} pos={}",
+                            i, dist, posUp.toShortString());
+                    return posUp;
+                }
+            }
+        }
+        LOGGER.info("[FortifyTower] no standable scaffold pos found near tower ({},{})",
+                vertex.x(), vertex.z());
+        return null;
+    }
+
+    /**
+     * Mine tracked scaffold blocks top-down. Each block mined drops the bot 1 block
+     * (no fall damage from scaffold height). Uses digBlock() for survival-mode mining.
+     */
+    private void teardownScaffoldSurvival(ServerPlayerEntity bot, ServerWorld world,
+                                          ScaffoldService.ScaffoldSession session) {
+        if (session == null || session.trackedPositions().isEmpty()) return;
+
+        // Sort top-down for safe descent
+        List<BlockPos> toRemove = new ArrayList<>(session.trackedPositions());
+        toRemove.sort(Comparator.comparingInt(BlockPos::getY).reversed());
+
+        for (BlockPos pos : toRemove) {
+            if (SkillManager.shouldAbortSkill(bot)) break;
+            BlockState state = world.getBlockState(pos);
+            if (state.isAir()) continue;
+            LookController.faceBlock(bot, pos);
+            sleepQuiet(50L);
+            digBlock(bot, world, pos);
+        }
     }
 
     private void forceExitTowerFootprint(ServerCommandSource source,
@@ -2903,8 +3444,9 @@ public final class FortifyVillageSkill implements Skill {
                                           WallPoint vertex,
                                           SurfaceProfile surfaceProfile,
                                           int attemptOffset) {
+        // Tower footprint is vertex ±1 (3×3). Min offset 3 = 1 block clearance from edge.
         int[][] candidates = {
-                {2, 0}, {-2, 0}, {0, 2}, {0, -2},
+                {3, 0}, {-3, 0}, {0, 3}, {0, -3},
                 {3, 1}, {3, -1}, {-3, 1}, {-3, -1},
                 {1, 3}, {-1, 3}, {1, -3}, {-1, -3},
                 {4, 0}, {-4, 0}, {0, 4}, {0, -4}
@@ -3089,8 +3631,9 @@ public final class FortifyVillageSkill implements Skill {
     private BlockPos chooseTowerApproachPos(ServerPlayerEntity bot, ServerWorld world,
                                             WallPoint vertex, SurfaceProfile surfaceProfile,
                                             int attemptOffset) {
+        // Tower footprint is vertex ±1 (3×3). Min offset 3 = 1 block clearance from edge.
         int[][] candidates = {
-                {2, 0}, {-2, 0}, {0, 2}, {0, -2},
+                {3, 0}, {-3, 0}, {0, 3}, {0, -3},
                 {3, 1}, {3, -1}, {-3, 1}, {-3, -1},
                 {1, 3}, {-1, 3}, {1, -3}, {-1, -3},
                 {4, 0}, {-4, 0}, {0, 4}, {0, -4}
@@ -3271,15 +3814,17 @@ public final class FortifyVillageSkill implements Skill {
         if (world == null || bot == null) {
             return false;
         }
+        // Skip unwedge when bot is within 10 blocks — ensureCanReachBlockWithEffort handles positioning
+        if (targetPos != null) {
+            double horizSq = Math.pow(targetPos.getX() - bot.getBlockPos().getX(), 2)
+                    + Math.pow(targetPos.getZ() - bot.getBlockPos().getZ(), 2);
+            if (horizSq <= 100.0D) {
+                return false;
+            }
+        }
         int exits = countOpenExits(world, bot.getBlockPos(), null);
         if (exits <= 1) {
             return true;
-        }
-        if (passNumber >= 2 && targetPos != null) {
-            double horizSq = Math.pow(targetPos.getX() - bot.getBlockPos().getX(), 2)
-                    + Math.pow(targetPos.getZ() - bot.getBlockPos().getZ(), 2);
-            int dy = Math.abs(targetPos.getY() - bot.getBlockPos().getY());
-            return horizSq <= 4.0D && dy <= 1 && exits <= 2;
         }
         return false;
     }
@@ -3805,15 +4350,21 @@ public final class FortifyVillageSkill implements Skill {
             }
         }
 
-        // Strategy 2: Side approach from 4 directions (pass 2+)
+        // Strategy 2: Side approach from 2 perpendicular directions (pass 2+)
         if (passNumber >= 2) {
-            for (Direction dir : Direction.Type.HORIZONTAL) {
+            double dx = target.getX() - botPos.getX();
+            double dz = target.getZ() - botPos.getZ();
+            // Pick the two directions perpendicular to bot→target axis
+            Direction[] perpDirs = Math.abs(dx) >= Math.abs(dz)
+                    ? new Direction[]{Direction.NORTH, Direction.SOUTH}
+                    : new Direction[]{Direction.EAST, Direction.WEST};
+            for (Direction dir : perpDirs) {
                 if (SkillManager.shouldAbortSkill(bot)) {
                     BotActions.stop(bot);
                     return false;
                 }
                 BlockPos sidePos = target.offset(dir, 2).withY(bot.getBlockPos().getY());
-                walkTowardBlock(bot, sidePos, 800L);
+                walkTowardBlock(bot, sidePos, 600L);
                 if (isWithinReach(bot, target)) return true;
             }
         }
@@ -3834,8 +4385,10 @@ public final class FortifyVillageSkill implements Skill {
 
         // Strategy 4: Scaffolding as LAST RESORT for elevated blocks still out of reach.
         // Never scaffold on the first pass; let movement/jump/arc retries run first.
+        // Threshold lowered to verticalDiff >= 2: blocks 2+ above bot need scaffold to
+        // get line-of-sight for placement (lower wall layers block the view from ground).
         verticalDiff = target.getY() - bot.getBlockPos().getY(); // refresh after walking
-        if (passNumber >= 2 && verticalDiff > 2 && heightAboveGround > 0 && heightAboveGround <= MAX_SCAFFOLD_HEIGHT) {
+        if (passNumber >= 2 && verticalDiff >= 2 && heightAboveGround > 0 && heightAboveGround <= MAX_SCAFFOLD_HEIGHT) {
             BlockPos scaffoldBase = new BlockPos(target.getX(), bot.getBlockPos().getY(), target.getZ());
             boolean scaffoldBlacklisted = scaffoldFailedPositions != null
                     && scaffoldFailedPositions.contains(scaffoldBase);
@@ -4092,6 +4645,12 @@ public final class FortifyVillageSkill implements Skill {
             return current.isAir();
         }
 
+        // Foundation/tower-base blocks: any solid non-air block satisfies the requirement.
+        // The terrain (grass, dirt, stone) already provides the structural base the wall needs.
+        if (planned.type() == WallBlockType.FOUNDATION || planned.type() == WallBlockType.TOWER_BASE) {
+            return true; // existing solid block serves as foundation
+        }
+
         Item desiredItem = desired.getBlock().asItem();
         Item currentItem = current.getBlock().asItem();
         if (currentItem == Items.AIR) {
@@ -4177,6 +4736,12 @@ public final class FortifyVillageSkill implements Skill {
         BotActions.stop(bot);
         LOGGER.info("[FortifyAbort] phase={} elapsedMs={}", phase, (System.currentTimeMillis() - phaseStartMs));
         return true;
+    }
+
+    /** Show a transient overhead hologram for in-progress fortify status. */
+    private void showOverhead(ServerPlayerEntity bot, String text) {
+        CompanionOverheadDialogueService.showOverheadLine(
+                bot, text, 4_000, 48.0D, "fortify", null);
     }
 
     private void sleepQuiet(long ms) {

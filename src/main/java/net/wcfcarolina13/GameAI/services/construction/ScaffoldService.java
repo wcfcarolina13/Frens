@@ -30,7 +30,7 @@ public final class ScaffoldService {
 
     // Blocks suitable for scaffolding (cheap, easily broken)
     public static final List<Item> SCAFFOLD_BLOCKS = List.of(
-            Items.DIRT, Items.COBBLESTONE, Items.COBBLED_DEEPSLATE, Items.NETHERRACK
+            Items.DIRT, Items.COBBLED_DEEPSLATE, Items.NETHERRACK
     );
 
     private static final int MAX_SCAFFOLD_HEIGHT = 12;
@@ -177,15 +177,24 @@ public final class ScaffoldService {
             return false;
         }
         ServerPlayerEntity bot = session.bot();
-        int stepsNeeded = Math.max(0, targetY - bot.getBlockPos().getY());
+        int botY = bot.getBlockPos().getY();
+        int stepsNeeded = Math.max(0, targetY - botY);
         if (stepsNeeded == 0) {
             return true;
         }
-        List<BlockPos> placed = pillarUpWithPositions(bot, Math.min(stepsNeeded, MAX_SCAFFOLD_HEIGHT));
+        int cappedSteps = Math.min(stepsNeeded, MAX_SCAFFOLD_HEIGHT);
+        LOGGER.debug("pillarToY: botY={} targetY={} stepsNeeded={} capped={}",
+                botY, targetY, stepsNeeded, cappedSteps);
+        List<BlockPos> placed = pillarUpWithPositions(bot, cappedSteps);
         for (BlockPos pos : placed) {
             session.track(pos);
         }
-        return bot.getBlockPos().getY() >= targetY;
+        boolean reached = bot.getBlockPos().getY() >= targetY;
+        if (!reached) {
+            LOGGER.info("pillarToY incomplete: placed={} botY={} targetY={} onGround={}",
+                    placed.size(), bot.getBlockPos().getY(), targetY, bot.isOnGround());
+        }
+        return reached;
     }
 
     /**
@@ -193,7 +202,7 @@ public final class ScaffoldService {
      */
     public static List<BlockPos> pillarUpWithPositions(ServerPlayerEntity bot, int steps) {
         List<BlockPos> positions = new ArrayList<>();
-        
+
         if (bot == null || steps <= 0 || steps > MAX_SCAFFOLD_HEIGHT) {
             return positions;
         }
@@ -202,6 +211,7 @@ public final class ScaffoldService {
 
         for (int i = 0; i < steps; i++) {
             if (SkillManager.shouldAbortSkill(bot)) {
+                LOGGER.debug("pillarUp step {}/{}: aborted", i, steps);
                 break;
             }
 
@@ -209,19 +219,30 @@ public final class ScaffoldService {
             sleepQuiet(60L);
 
             if (!waitForOnGround(bot, LAND_TIMEOUT_MS)) {
+                LOGGER.info("pillarUp step {}/{}: not on ground (Y={})", i, steps, bot.getY());
                 break;
             }
 
             BlockPos targetPos = bot.getBlockPos();
             double startY = bot.getY();
 
+            // Check if there's head clearance to jump (2 blocks above)
+            BlockPos headSpace = targetPos.up().up();
+            if (!world.getBlockState(headSpace).isAir()
+                    && !world.getBlockState(headSpace).getCollisionShape(world, headSpace).isEmpty()) {
+                LOGGER.info("pillarUp step {}/{}: blocked overhead at {}", i, steps, headSpace.toShortString());
+                break;
+            }
+
             BotActions.jump(bot);
 
             if (!waitForAirborne(bot, JUMP_TIMEOUT_MS)) {
+                LOGGER.info("pillarUp step {}/{}: failed to become airborne", i, steps);
                 break;
             }
 
             if (!waitForJumpPlaceWindow(bot, startY, 600L)) {
+                LOGGER.info("pillarUp step {}/{}: missed place window", i, steps);
                 BotActions.stop(bot);
                 break;
             }
@@ -233,16 +254,19 @@ public final class ScaffoldService {
             }
 
             if (!placed) {
+                LOGGER.info("pillarUp step {}/{}: failed to place at {}", i, steps, targetPos.toShortString());
                 break;
             }
 
             positions.add(targetPos.toImmutable());
             if (!waitForYIncrease(bot, targetPos.getY(), 1000L)) {
+                LOGGER.info("pillarUp step {}/{}: Y didn't increase after placing at {}", i, steps, targetPos.toShortString());
                 BotActions.stop(bot);
                 break;
             }
         }
 
+        LOGGER.debug("pillarUp complete: {}/{} steps, placed={}", positions.size(), steps, positions);
         return positions;
     }
 

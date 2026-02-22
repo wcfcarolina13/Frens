@@ -56,6 +56,8 @@ public final class FortificationPersistenceService {
         Map<Integer, Integer> edgePlannedCounts;
         /** Per-edge actual placed block counts (edgeIndex -> blocks confirmed placed). Null-safe for old saves. */
         Map<Integer, Integer> edgeActualCounts;
+        /** Original terrain Y at each wall column XZ ("x,z" -> Y). Null-safe for old saves. */
+        Map<String, Integer> surfaceProfile;
 
         public String getName() { return name; }
         public String getWorldKey() { return worldKey; }
@@ -68,6 +70,8 @@ public final class FortificationPersistenceService {
         public boolean isComplete() { return complete; }
         public Map<Integer, Integer> getEdgePlannedCounts() { return edgePlannedCounts != null ? edgePlannedCounts : Map.of(); }
         public Map<Integer, Integer> getEdgeActualCounts() { return edgeActualCounts != null ? edgeActualCounts : Map.of(); }
+        public Map<String, Integer> getSurfaceProfile() { return surfaceProfile; }
+        public void setSurfaceProfile(Map<String, Integer> profile) { this.surfaceProfile = profile; }
         public void setTotalBlocksPlaced(int count) { this.totalBlocksPlaced = count; }
 
         /** Reconstruct hull vertices as WallPoints for layout regeneration. */
@@ -143,6 +147,7 @@ public final class FortificationPersistenceService {
         fort.complete = false;
         fort.edgePlannedCounts = edgePlannedCounts != null ? new HashMap<>(edgePlannedCounts) : new HashMap<>();
         fort.edgeActualCounts = new HashMap<>();
+        fort.surfaceProfile = new HashMap<>();
         return fort;
     }
 

@@ -97,6 +97,11 @@ public class VillageFortificationLayoutService {
         VILLAGE_STRUCTURE_BLOCKS = Collections.unmodifiableSet(b);
     }
 
+    /** Returns true if the given block type is commonly found in village structures. */
+    public static boolean isVillageStructureBlock(Block block) {
+        return VILLAGE_STRUCTURE_BLOCKS.contains(block);
+    }
+
     // ── Data types ──────────────────────────────────────────────
 
     /** A 2D point in the XZ plane used for convex hull computation. */
@@ -130,6 +135,94 @@ public class VillageFortificationLayoutService {
             BlockPos worldPos, BlockState state, WallBlockType type, int edgeIndex
     ) {}
 
+    /**
+     * Cached terrain-Y lookup that ensures layout stability across regenerations.
+     * On initial build the profile computes Y from the heightmap and caches it.
+     * On resume/patch the profile is pre-populated from saved data, so existing
+     * wall blocks don't shift the layout.
+     */
+    public static final class SurfaceProfile {
+        private final Map<Long, Integer> cache;
+
+        /** Empty profile — will compute and cache on demand. */
+        public SurfaceProfile() { this.cache = new HashMap<>(); }
+
+        /** Pre-populated profile from saved data. */
+        public SurfaceProfile(Map<Long, Integer> saved) {
+            this.cache = saved != null ? new HashMap<>(saved) : new HashMap<>();
+        }
+
+        private static long packXZ(int x, int z) {
+            return ((long) x << 32) | (z & 0xFFFFFFFFL);
+        }
+
+        // Wall materials to scan through when detecting existing wall on heightmap
+        private static final Set<Block> WALL_MATERIALS = Set.of(
+                Blocks.STONE_BRICKS, Blocks.STONE_BRICK_SLAB,
+                Blocks.CHISELED_STONE_BRICKS
+        );
+
+        /** Get terrain Y — from cache if available, else compute from heightmap. */
+        public int getY(ServerWorld world, int x, int z) {
+            return cache.computeIfAbsent(packXZ(x, z), k -> computeGroundY(world, x, z));
+        }
+
+        /**
+         * Compute the real ground Y, scanning down through any existing wall blocks.
+         * When the heightmap returns the top of a wall (stone bricks / slab),
+         * we scan down to find where the wall ends and natural terrain begins.
+         */
+        private static int computeGroundY(ServerWorld world, int x, int z) {
+            int rawY = world.getTopY(net.minecraft.world.Heightmap.Type.MOTION_BLOCKING_NO_LEAVES, x, z) - 1;
+            BlockState topState = world.getBlockState(new BlockPos(x, rawY, z));
+            if (!WALL_MATERIALS.contains(topState.getBlock())) {
+                return rawY; // Not a wall block — trust the heightmap
+            }
+            // Scan down through wall materials to find the original ground
+            int scanY = rawY;
+            while (scanY > world.getBottomY()) {
+                BlockState below = world.getBlockState(new BlockPos(x, scanY - 1, z));
+                if (!WALL_MATERIALS.contains(below.getBlock())) break;
+                scanY--;
+            }
+            // scanY is now the lowest wall material (the foundation)
+            // The original ground level was at the foundation Y
+            return scanY;
+        }
+
+        /** Export the cached profile for persistence. Keys are "x,z" strings. */
+        public Map<String, Integer> export() {
+            Map<String, Integer> result = new HashMap<>();
+            for (var entry : cache.entrySet()) {
+                long packed = entry.getKey();
+                int x = (int) (packed >> 32);
+                int z = (int) packed;
+                result.put(x + "," + z, entry.getValue());
+            }
+            return result;
+        }
+
+        /** True if this profile has any pre-populated data (from a previous build). */
+        public boolean hasSavedData() { return !cache.isEmpty(); }
+
+        /** Import from persistence format ("x,z" string keys). */
+        public static SurfaceProfile fromSaved(Map<String, Integer> saved) {
+            if (saved == null || saved.isEmpty()) return new SurfaceProfile();
+            Map<Long, Integer> map = new HashMap<>();
+            for (var entry : saved.entrySet()) {
+                String[] parts = entry.getKey().split(",");
+                if (parts.length == 2) {
+                    try {
+                        int x = Integer.parseInt(parts[0]);
+                        int z = Integer.parseInt(parts[1]);
+                        map.put(packXZ(x, z), entry.getValue());
+                    } catch (NumberFormatException ignored) {}
+                }
+            }
+            return new SurfaceProfile(map);
+        }
+    }
+
     /** Complete fortification layout produced by generateLayout(). */
     public record FortificationLayout(
             BlockPos center,
@@ -137,7 +230,8 @@ public class VillageFortificationLayoutService {
             List<ProceduralWallBlock> allBlocks,
             List<WallPoint> hullVertices,
             int gatehouseEdgeIndex,
-            int totalBlocks
+            int totalBlocks,
+            SurfaceProfile surfaceProfile
     ) {
         public List<ProceduralWallBlock> blocksForEdge(int idx) {
             List<ProceduralWallBlock> result = new ArrayList<>();
@@ -503,7 +597,7 @@ public class VillageFortificationLayoutService {
 
         if (structurePositions.isEmpty()) {
             LOGGER.warn("No village structures found, cannot generate layout");
-            return new FortificationLayout(center, List.of(), List.of(), List.of(), -1, 0);
+            return new FortificationLayout(center, List.of(), List.of(), List.of(), -1, 0, new SurfaceProfile());
         }
 
         // 2. Compute structure footprint for collision avoidance
@@ -531,13 +625,32 @@ public class VillageFortificationLayoutService {
      * place walls directly through newly detected village buildings.
      */
     public static FortificationLayout generateLayoutFromHull(List<WallPoint> hullVertices, ServerWorld world, BlockPos center) {
+        return generateLayoutFromHull(hullVertices, world, center, null);
+    }
+
+    /**
+     * Generate layout from pre-computed hull vertices with an optional saved surface profile.
+     * When a saved profile is provided, terrain Y lookups use the saved values instead of
+     * the current heightmap, ensuring layout stability even when the wall already exists.
+     */
+    public static FortificationLayout generateLayoutFromHull(List<WallPoint> hullVertices, ServerWorld world,
+                                                              BlockPos center, SurfaceProfile savedProfile) {
         if (hullVertices.size() < 3) {
             LOGGER.warn("Saved hull has {} points, cannot regenerate", hullVertices.size());
-            return new FortificationLayout(center, List.of(), List.of(), hullVertices, -1, 0);
+            return new FortificationLayout(center, List.of(), List.of(), hullVertices, -1, 0, new SurfaceProfile());
         }
-        List<WallPoint> structurePositions = detectVillagePositions(world, center, DEFAULT_SEARCH_RADIUS);
-        Set<Long> structureFootprint = computeStructureFootprint(world, structurePositions);
-        return generateWallBlocks(hullVertices, world, center, structureFootprint);
+        SurfaceProfile profile = savedProfile != null ? savedProfile : new SurfaceProfile();
+        // When a saved profile exists (resume/patch), skip structure footprint to prevent
+        // the bot's own wall blocks (stone bricks) from being detected as village structures
+        // and shrinking the layout. The hull already accounts for the village boundary.
+        Set<Long> structureFootprint;
+        if (savedProfile != null && savedProfile.hasSavedData()) {
+            structureFootprint = Set.of(); // empty — trust the established layout
+        } else {
+            List<WallPoint> structurePositions = detectVillagePositions(world, center, DEFAULT_SEARCH_RADIUS);
+            structureFootprint = computeStructureFootprint(world, structurePositions);
+        }
+        return generateWallBlocks(hullVertices, world, center, structureFootprint, profile);
     }
 
     /**
@@ -548,6 +661,12 @@ public class VillageFortificationLayoutService {
      */
     private static FortificationLayout generateWallBlocks(List<WallPoint> expandedHull, ServerWorld world,
                                                            BlockPos center, Set<Long> structureFootprint) {
+        return generateWallBlocks(expandedHull, world, center, structureFootprint, new SurfaceProfile());
+    }
+
+    private static FortificationLayout generateWallBlocks(List<WallPoint> expandedHull, ServerWorld world,
+                                                           BlockPos center, Set<Long> structureFootprint,
+                                                           SurfaceProfile surfaceProfile) {
         List<WallEdge> edges = new ArrayList<>();
         List<ProceduralWallBlock> allBlocks = new ArrayList<>();
         int n = expandedHull.size();
@@ -569,7 +688,7 @@ public class VillageFortificationLayoutService {
         // Generate tower blocks at each hull vertex (edgeIndex = -1 for towers)
         for (int i = 0; i < n; i++) {
             WallPoint vertex = expandedHull.get(i);
-            generateTower(allBlocks, vertex, world, -1, structureFootprint);
+            generateTower(allBlocks, vertex, world, -1, structureFootprint, surfaceProfile);
         }
 
         // Generate wall blocks for each edge
@@ -601,13 +720,13 @@ public class VillageFortificationLayoutService {
 
                 // Wall blocks before gatehouse
                 for (int j = startIdx; j < gateStart && j < endIdx; j++) {
-                    generateWallColumn(allBlocks, traced.get(j), world, i, normalX, normalZ, structureFootprint);
+                    generateWallColumn(allBlocks, traced.get(j), world, i, normalX, normalZ, structureFootprint, surfaceProfile);
                 }
 
                 // Gatehouse pillars + lintel
                 if (gateStart >= startIdx && gateEnd < endIdx) {
                     generateGatehouse(allBlocks, traced.get(gateStart), traced.get(gateEnd),
-                            world, i, normalX, normalZ, structureFootprint);
+                            world, i, normalX, normalZ, structureFootprint, surfaceProfile);
                 }
 
                 // Gatehouse bridge: fill moat under the gate gap with walkable floor
@@ -619,7 +738,7 @@ public class VillageFortificationLayoutService {
                             int mx = gp.x() + normalX * moatOff;
                             int mz = gp.z() + normalZ * moatOff;
                             if (!isInFootprint(structureFootprint, mx, mz)) {
-                                int baseY = terrainY(world, mx, mz);
+                                int baseY = surfaceProfile.getY(world, mx, mz);
                                 allBlocks.add(new ProceduralWallBlock(
                                         new BlockPos(mx, baseY - MOAT_DEPTH, mz),
                                         Blocks.COBBLESTONE.getDefaultState(),
@@ -631,12 +750,12 @@ public class VillageFortificationLayoutService {
 
                 // Wall blocks after gatehouse
                 for (int j = gateEnd + 1; j < endIdx; j++) {
-                    generateWallColumn(allBlocks, traced.get(j), world, i, normalX, normalZ, structureFootprint);
+                    generateWallColumn(allBlocks, traced.get(j), world, i, normalX, normalZ, structureFootprint, surfaceProfile);
                 }
             } else {
                 // Normal edge: all wall columns
                 for (int j = startIdx; j < endIdx; j++) {
-                    generateWallColumn(allBlocks, traced.get(j), world, i, normalX, normalZ, structureFootprint);
+                    generateWallColumn(allBlocks, traced.get(j), world, i, normalX, normalZ, structureFootprint, surfaceProfile);
                 }
             }
         }
@@ -645,7 +764,7 @@ public class VillageFortificationLayoutService {
                 expandedHull.size(), edges.size(), allBlocks.size(), gatehouseEdgeIndex);
 
         return new FortificationLayout(center, edges, allBlocks, expandedHull,
-                gatehouseEdgeIndex, allBlocks.size());
+                gatehouseEdgeIndex, allBlocks.size(), surfaceProfile);
     }
 
     /**
@@ -653,8 +772,9 @@ public class VillageFortificationLayoutService {
      * Tower: 3x3 stone brick ring Y+0..Y+4, center oak log post Y+0..Y+5, slab at Y+5.
      */
     private static void generateTower(List<ProceduralWallBlock> blocks, WallPoint vertex,
-                                       ServerWorld world, int edgeIndex, Set<Long> structureFootprint) {
-        int baseY = terrainY(world, vertex.x(), vertex.z());
+                                       ServerWorld world, int edgeIndex, Set<Long> structureFootprint,
+                                       SurfaceProfile surfaceProfile) {
+        int baseY = surfaceProfile.getY(world, vertex.x(), vertex.z());
         BlockState stoneBricks = Blocks.STONE_BRICKS.getDefaultState();
         BlockState slab = Blocks.STONE_BRICK_SLAB.getDefaultState();
         BlockState oakLog = Blocks.OAK_LOG.getDefaultState();
@@ -702,8 +822,9 @@ public class VillageFortificationLayoutService {
      */
     private static void generateWallColumn(List<ProceduralWallBlock> blocks, WallPoint point,
                                             ServerWorld world, int edgeIndex,
-                                            int normalX, int normalZ, Set<Long> structureFootprint) {
-        int baseY = terrainY(world, point.x(), point.z());
+                                            int normalX, int normalZ, Set<Long> structureFootprint,
+                                            SurfaceProfile surfaceProfile) {
+        int baseY = surfaceProfile.getY(world, point.x(), point.z());
         BlockState stoneBricks = Blocks.STONE_BRICKS.getDefaultState();
         BlockState slab = Blocks.STONE_BRICK_SLAB.getDefaultState();
         BlockState cobble = Blocks.COBBLESTONE.getDefaultState();
@@ -788,12 +909,13 @@ public class VillageFortificationLayoutService {
     private static void generateGatehouse(List<ProceduralWallBlock> blocks,
                                            WallPoint leftPillar, WallPoint rightPillar,
                                            ServerWorld world, int edgeIndex,
-                                           int normalX, int normalZ, Set<Long> structureFootprint) {
+                                           int normalX, int normalZ, Set<Long> structureFootprint,
+                                           SurfaceProfile surfaceProfile) {
         BlockState stoneBricks = Blocks.STONE_BRICKS.getDefaultState();
         BlockState chiseled = Blocks.CHISELED_STONE_BRICKS.getDefaultState();
 
         // Left pillar
-        int leftY = terrainY(world, leftPillar.x(), leftPillar.z());
+        int leftY = surfaceProfile.getY(world, leftPillar.x(), leftPillar.z());
         if (!isInFootprint(structureFootprint, leftPillar.x(), leftPillar.z())) {
             for (int dy = 0; dy < WALL_HEIGHT; dy++) {
                 blocks.add(new ProceduralWallBlock(
@@ -806,7 +928,7 @@ public class VillageFortificationLayoutService {
         }
 
         // Right pillar
-        int rightY = terrainY(world, rightPillar.x(), rightPillar.z());
+        int rightY = surfaceProfile.getY(world, rightPillar.x(), rightPillar.z());
         if (!isInFootprint(structureFootprint, rightPillar.x(), rightPillar.z())) {
             for (int dy = 0; dy < WALL_HEIGHT; dy++) {
                 blocks.add(new ProceduralWallBlock(
@@ -833,7 +955,7 @@ public class VillageFortificationLayoutService {
 
         // Inner face + moat for pillar positions (but no overhang/moat-dig at gate gap)
         for (WallPoint pillar : List.of(leftPillar, rightPillar)) {
-            int py = terrainY(world, pillar.x(), pillar.z());
+            int py = surfaceProfile.getY(world, pillar.x(), pillar.z());
             // Inner face
             int faceX = pillar.x() + normalX;
             int faceZ = pillar.z() + normalZ;

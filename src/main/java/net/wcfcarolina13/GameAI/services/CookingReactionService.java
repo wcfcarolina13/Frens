@@ -131,8 +131,8 @@ public final class CookingReactionService {
                 if (!(bot.getEntityWorld() instanceof ServerWorld world)) continue;
 
                 UUID botId = bot.getUuid();
-                long lastReact = LAST_REACTION_TICK.getOrDefault(botId, Long.MIN_VALUE);
-                if (nowTick - lastReact < COOLDOWN_TICKS) continue;
+                Long lastReact = LAST_REACTION_TICK.get(botId);
+                if (lastReact != null && nowTick - lastReact < COOLDOWN_TICKS) continue;
                 if (CompanionOverheadDialogueService.isRecentlyShown(botId)) continue;
 
                 if (isNearActivelyCookingFood(world, bot.getBlockPos())) {
@@ -288,8 +288,8 @@ public final class CookingReactionService {
             if (bot.getEntityWorld() != cook.getEntityWorld()) continue;
 
             UUID botId = bot.getUuid();
-            long lastReact = LAST_REACTION_TICK.getOrDefault(botId, Long.MIN_VALUE);
-            if (nowTick - lastReact < COOLDOWN_TICKS) continue;
+            Long lastReact = LAST_REACTION_TICK.get(botId);
+            if (lastReact != null && nowTick - lastReact < COOLDOWN_TICKS) continue;
 
             if (CompanionOverheadDialogueService.isRecentlyShown(botId)) continue;
 

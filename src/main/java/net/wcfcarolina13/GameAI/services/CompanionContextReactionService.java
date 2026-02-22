@@ -510,6 +510,12 @@ public final class CompanionContextReactionService {
             return false;
         }
         UUID botId = bot.getUuid();
+
+        // Don't overwrite a line recently shown by another system (cooking, food-giving, etc.).
+        if (CompanionOverheadDialogueService.isRecentlyShown(botId)) {
+            return false;
+        }
+
         TriggerState state = STATE.computeIfAbsent(botId, ignored -> new TriggerState());
 
         long now = System.currentTimeMillis();

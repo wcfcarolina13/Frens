@@ -418,6 +418,33 @@ public class modCommandRegistry {
                                                                 StringArgumentType.getString(context, "alias"),
                                                                 EntityArgumentType.getPlayer(context, "player")))))
                                 )
+                                .then(literal("pathfinder")
+                                        .then(CommandManager.argument("mode", StringArgumentType.string())
+                                                .executes(context -> {
+                                                    String mode = StringArgumentType.getString(context, "mode").toLowerCase();
+                                                    boolean baritone;
+                                                    switch (mode) {
+                                                        case "baritone": baritone = true; break;
+                                                        case "classic": case "bidir": baritone = false; break;
+                                                        default:
+                                                            context.getSource().sendFeedback(
+                                                                    () -> Text.literal("Usage: /bot config pathfinder <baritone|classic>"), false);
+                                                            return 0;
+                                                    }
+                                                    net.wcfcarolina13.PathFinding.PathFinder.USE_BARITONE_STYLE = baritone;
+                                                    String name = baritone ? "baritone" : "classic (bidirectional A*)";
+                                                    context.getSource().sendFeedback(
+                                                            () -> Text.literal("Pathfinder switched to: " + name), true);
+                                                    return 1;
+                                                }))
+                                        .executes(context -> {
+                                            String current = net.wcfcarolina13.PathFinding.PathFinder.USE_BARITONE_STYLE
+                                                    ? "baritone" : "classic (bidirectional A*)";
+                                            context.getSource().sendFeedback(
+                                                    () -> Text.literal("Current pathfinder: " + current), false);
+                                            return 1;
+                                        })
+                                )
                         )
                         .then(literal("walk")
                                 .then(CommandManager.argument("bot", EntityArgumentType.player())
