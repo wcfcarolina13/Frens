@@ -104,5 +104,20 @@ fabric-example-mod/
 # Claude Code project instructions
 CLAUDE.md
 
+# Release JARs (don't commit large binaries)
+releases/
+
+# MCP config (local)
+.mcp.json
+
+# Test stubs (CI skips tests)
+src/test/
+
+# Questing dev guide (duplicate of COMPANION_QUESTING_GUIDE.md)
+Questing Development Guide.md
+
+# Ralph state (ephemeral, machine-local)
+.ralph/
+
 # Resource packs (local assets)
 Wizards_Tome_Pack_v2/
