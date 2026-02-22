@@ -105,6 +105,16 @@ Required log marker families:
 | AUD-061 | Bot online for alias | `/bot identity_check <alias>` | Online UUID visible; UUID match field reflects config parity | [ ] |
 | AUD-062 | Alias with old/stale data files | `/bot identity_check <alias>` | Warning list highlights variant keys / multi snapshots | [ ] |
 
+### G. Miscellaneous Safety & Feature Checks
+
+| ID | Setup | Command(s) | Expected token/log/audio | Pass |
+|---|---|---|---|---|
+| AUD-070 | One bot following, 1x1 deep shaft in path | `/bot follow <bot>`, place shaft in movement lane | Bot sidesteps/stops; shows "woah, I almost fell into that hole" | [ ] |
+| AUD-071 | One bot, near passive endermen | Stand near passive endermen | Bot does NOT face/aggro passive endermen; provoke one and confirm bot targets hostile enderman | [ ] |
+| AUD-072 | One bot swimming/submerged | `/bot fish <bot>` while swimming | Bot relocates to dry shore before casting (or returns clear no-shore failure) | [ ] |
+| AUD-073 | One bot with water bucket, lethal height | Drop bot from lethal height (Overworld) | Clutch attempt near impact; no attempts in ultrawarm dimensions | [ ] |
+| AUD-074 | One bot, guide/search UI | Open guide screen, test search | Guide/search usable; actions from adjusted counts run with expected arguments | [ ] |
+
 ## Rare/Slow Trigger Audit via Forced Commands
 Use deterministic forcing to bypass low-frequency cadence triggers:
 
