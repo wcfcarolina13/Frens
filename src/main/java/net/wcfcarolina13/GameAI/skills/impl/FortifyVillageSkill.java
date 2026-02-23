@@ -3655,18 +3655,27 @@ public final class FortifyVillageSkill implements Skill {
             int stepsNeeded = Math.max(0, optimalY - bot.getBlockPos().getY());
             LOGGER.info("[FortifyTower] scaffold pillar attempt side={} botY={} optimalY={} steps={} for tower ({},{})",
                     sideAttempt, bot.getBlockPos().getY(), optimalY, stepsNeeded, vertex.x(), vertex.z());
+            // Engage sneak BEFORE pillaring — prevents bot from walking off the
+            // scaffold column if block placement timing is slightly off.
+            SneakLockService.acquire(bot.getUuid());
+            BotActions.sneak(bot, true);
+
             ScaffoldService.ScaffoldSession session = ScaffoldService.beginSession(bot);
             boolean pillared = ScaffoldService.pillarToY(session, optimalY);
             if (!pillared || session.trackedPositions().isEmpty()) {
                 LOGGER.info("[FortifyTower] scaffold pillar failed side={} pillared={} tracked={} botY={} for tower ({},{})",
                         sideAttempt, pillared, session.trackedPositions().size(),
                         bot.getBlockPos().getY(), vertex.x(), vertex.z());
+                SneakLockService.release(bot.getUuid());
+                if (!SneakLockService.isLocked(bot.getUuid())) {
+                    BotActions.sneak(bot, false);
+                }
                 teardownScaffoldSurvival(bot, world, session);
                 continue;
             }
 
-            // Sneak for safety on scaffold
-            boolean scaffoldSneak = beginScaffoldEdgeHold(bot, world, bot.getBlockPos());
+            // Sneak already acquired before pillar — mark as held for endScaffoldEdgeHold cleanup
+            boolean scaffoldSneak = true;
 
             // Place remaining blocks within reach
             int sidePlaced = 0;
@@ -4971,6 +4980,9 @@ public final class FortifyVillageSkill implements Skill {
                             lastBlockPos = bot.getBlockPos();
                             continue;
                         }
+                        // Count failed attempts too — prevents endless "no viable candidates"
+                        // cycling when the bot is stuck far from any wall
+                        breakThroughCount++;
                     }
                     // Lateral sidestep: move perpendicular to target direction
                     double toTargetX = targetVec.x - bot.getX();
