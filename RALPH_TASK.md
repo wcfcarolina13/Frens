@@ -107,6 +107,7 @@ Future work items, organized by priority. Not active Ralph criteria — these ar
 - [ ] Recipe awareness: refuse and explain if commander lacks recipe
 
 ### Farming & Survival
+- [ ] **Hunger-aware task interruption**: Bot should stop working (e.g. auto-patching, fortifying) when starving instead of working until death. HungerService should trigger a food acquisition flow: (1) search nearby chests/barrels for food, (2) find raw food and cook it in a furnace/smoker/campfire, or (3) hunt or fish to obtain food to cook. Resume the interrupted task after eating.
 - [ ] Create infinite water source
 - [ ] Animal husbandry (shear, collect meat, pen animals)
 - [ ] **Farm underground recovery**: Escape when underground with overhead dirt
