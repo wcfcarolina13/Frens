@@ -448,6 +448,14 @@ public final class FortifyVillageSkill implements Skill {
             int referenceSurfaceY = computeReferenceSurfaceY(bot, layout, world);
             SurfaceProfile surfaceProfile = createSurfaceProfile(layout, referenceSurfaceY);
 
+            // Clean up stray scaffold pillars before repairing
+            if (!SkillManager.shouldAbortSkill(bot)) {
+                int scaffoldsCleared = scanAndRemoveStrayScaffolds(bot, world, layout, surfaceProfile);
+                if (scaffoldsCleared > 0) {
+                    ChatUtils.sendSystemMessage(source, "§7  Cleaned up " + scaffoldsCleared + " stray scaffold blocks.");
+                }
+            }
+
             // Sort edges by proximity to bot (nearest first) to minimize travel
             BlockPos botPos = bot.getBlockPos();
             List<Map.Entry<Integer, List<ProceduralWallBlock>>> sortedEdges = new ArrayList<>(repairByEdge.entrySet());
@@ -2569,6 +2577,96 @@ public final class FortifyVillageSkill implements Skill {
     }
 
     /**
+     * Scans near the fortification perimeter for leftover scaffold pillars and mines them.
+     * Detection: for each XZ column near hull vertices and edge midpoints, look for columns
+     * of 2+ scaffold-type blocks above the surface Y that are NOT in the layout.
+     * Mines them top-down using digBlock().
+     *
+     * @return number of scaffold blocks removed
+     */
+    private int scanAndRemoveStrayScaffolds(ServerPlayerEntity bot, ServerWorld world,
+                                             FortificationLayout layout, SurfaceProfile surfaceProfile) {
+        // Build set of all layout positions for fast exclusion
+        Set<BlockPos> layoutPositions = new HashSet<>();
+        for (ProceduralWallBlock block : layout.allBlocks()) {
+            layoutPositions.add(block.worldPos());
+        }
+
+        // Collect unique XZ scan points from hull vertices + edge midpoints
+        Set<Long> scanColumns = new HashSet<>();
+        int scanRadius = 4;
+
+        for (WallPoint vertex : layout.hullVertices()) {
+            for (int dx = -scanRadius; dx <= scanRadius; dx++) {
+                for (int dz = -scanRadius; dz <= scanRadius; dz++) {
+                    scanColumns.add(packXZ(vertex.x() + dx, vertex.z() + dz));
+                }
+            }
+        }
+        for (WallEdge edge : layout.edges()) {
+            int midX = (edge.start().x() + edge.end().x()) / 2;
+            int midZ = (edge.start().z() + edge.end().z()) / 2;
+            for (int dx = -scanRadius; dx <= scanRadius; dx++) {
+                for (int dz = -scanRadius; dz <= scanRadius; dz++) {
+                    scanColumns.add(packXZ(midX + dx, midZ + dz));
+                }
+            }
+        }
+
+        int cleared = 0;
+
+        for (long packed : scanColumns) {
+            if (SkillManager.shouldAbortSkill(bot)) break;
+
+            int x = (int) (packed >> 32);
+            int z = (int) packed;
+            int surfY = safeSurfaceY(surfaceProfile, world, x, z);
+
+            // Walk upward from surface looking for scaffold columns
+            List<BlockPos> scaffoldColumn = new ArrayList<>();
+            for (int y = surfY + 1; y <= surfY + 20; y++) {
+                BlockPos pos = new BlockPos(x, y, z);
+                if (layoutPositions.contains(pos)) {
+                    // Part of the layout — stop scanning this column
+                    scaffoldColumn.clear();
+                    break;
+                }
+                BlockState state = world.getBlockState(pos);
+                if (state.isAir()) {
+                    break; // reached air — end of potential pillar
+                }
+                boolean isScaffold = ScaffoldService.SCAFFOLD_BLOCKS.stream()
+                        .anyMatch(item -> state.getBlock().asItem().equals(item));
+                if (isScaffold) {
+                    scaffoldColumn.add(pos);
+                } else {
+                    // Non-scaffold, non-air block — not a stray pillar
+                    scaffoldColumn.clear();
+                    break;
+                }
+            }
+
+            // Only remove columns of 2+ blocks (single dirt blocks could be natural terrain)
+            if (scaffoldColumn.size() >= 2) {
+                // Mine top-down
+                for (int i = scaffoldColumn.size() - 1; i >= 0; i--) {
+                    if (SkillManager.shouldAbortSkill(bot)) break;
+                    BlockPos pos = scaffoldColumn.get(i);
+                    if (digBlock(bot, world, pos)) {
+                        cleared++;
+                        sleepQuiet(50L);
+                    }
+                }
+            }
+        }
+
+        if (cleared > 0) {
+            LOGGER.info("[FortifyPatch] Cleared {} stray scaffold blocks", cleared);
+        }
+        return cleared;
+    }
+
+    /**
      * Checks if a block position has at least {@code threshold} adjacent blocks (6 faces)
      * that are village structure blocks (logs, planks, doors, cobblestone stairs, etc.).
      * Used to protect blocks that are part of village buildings even if the block itself
@@ -3482,7 +3580,7 @@ public final class FortifyVillageSkill implements Skill {
         }
 
         // Optimal scaffold Y: puts bot eye level near the upper blocks
-        int optimalY = maxTargetY - 2;
+        int optimalY = maxTargetY - 1;
         int groundY = safeSurfaceY(surfaceProfile, world, vertex.x(), vertex.z());
         if (optimalY <= groundY) {
             return 0; // no benefit from scaffolding
@@ -4646,7 +4744,7 @@ public final class FortifyVillageSkill implements Skill {
                 }
 
                 int currentBotY = bot.getBlockPos().getY();
-                int optimalY = target.getY() - 2;
+                int optimalY = target.getY() - 1;
                 int stepsNeeded = Math.max(0, optimalY - currentBotY);
 
                 if (stepsNeeded > 0 && stepsNeeded <= MAX_SCAFFOLD_HEIGHT) {

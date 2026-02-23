@@ -387,7 +387,7 @@ public final class ScaffoldService {
         int currentY = bot.getBlockPos().getY();
         // Bot's eyes are at Y+1.62, reach is ~4.5 blocks
         // To reach a block at targetY, we need bot at approximately targetY-3
-        int optimalY = target.getY() - 2;
+        int optimalY = target.getY() - 1;
         return Math.max(0, optimalY - currentY);
     }
 

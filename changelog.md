@@ -2,6 +2,10 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## 2026-02-23
+- **Fortify: scaffold height +1**: Changed scaffold target from `target.getY() - 2` to `target.getY() - 1` in three locations (FortifyVillageSkill `ensureCanReachBlockWithEffort`, `executeTowerScaffoldPhase`, and ScaffoldService `calculateScaffoldHeight`). Puts the bot one block higher, giving a better downward angle to top wall/tower blocks that were often unreachable at the old height.
+- **Fortify: proactive stray scaffold cleanup in auto-patch**: Added `scanAndRemoveStrayScaffolds()` to FortifyVillageSkill. Scans XZ columns near hull vertices and edge midpoints (±4 blocks) for leftover scaffold pillars (2+ consecutive dirt/cobbled_deepslate/netherrack blocks above surface Y, not in layout). Mines them top-down via `digBlock()`. Runs at the start of each auto-patch pass before repairs begin, so abandoned scaffolds don't block wall placement.
+
 ## 2026-02-22
 - **Fortify: break-through stuck recovery**: When the bot gets stuck navigating between wall segments (wedged in corners between existing cobblestone walls), it now mines through blocking blocks as a last resort, walks through the gap, then replaces them. Two-tier safety: first tries non-layout blocks, then allows breaking its own fortification wall blocks (with mandatory replacement using wall material fallback lists). If replacement fails, logs a warning for auto-patch to repair. Max one break-through per `walkToTarget()` call to prevent tunnel mining. Integrated into `walkToTarget()` (stuck handler), `tryUnwedgeFromTightSpace()` (failure path), and `navigateToEdgeApproach()` (post-MovementService fallback).
 - **Fortify: sprint during walkToTarget navigation**: Changed `BotActions.sprint(bot, false)` to `sprint(bot, !onScaffold)` in `walkToTarget()` so the bot sprints when navigating between sections (but not on scaffolds).
