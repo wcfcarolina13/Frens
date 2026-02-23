@@ -51,6 +51,7 @@ public class ManualConfig {
     private boolean defaultLlmWorldEnabled = true;
     private boolean gameplayTipsEnabled = true;
     private boolean idleHobbiesAnywhereEnabled = false;
+    private boolean baritonePathfinderEnabled = false;
     private Map<String, BotControlSettings> botControls = new HashMap<>();
     // Seed-agnostic, bot-persistent quest continuity (non-power progression).
     private Map<String, BotQuestMemory> botQuestMemory = new HashMap<>();
@@ -424,6 +425,9 @@ public class ManualConfig {
     public void setIdleHobbiesAnywhereEnabled(boolean idleHobbiesAnywhereEnabled) {
         this.idleHobbiesAnywhereEnabled = idleHobbiesAnywhereEnabled;
     }
+
+    public boolean isBaritonePathfinderEnabled() { return baritonePathfinderEnabled; }
+    public void setBaritonePathfinderEnabled(boolean v) { this.baritonePathfinderEnabled = v; }
 
     public Map<String, BotControlSettings> getBotControls() {
         if (botControls == null) {

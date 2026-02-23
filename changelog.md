@@ -3,6 +3,8 @@
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
 ## 2026-02-22
+- **Baritone Pathfinder toggle in Admin tab**: Added persisted `baritonePathfinderEnabled` field to `ManualConfig`. New toggle in Admin tab sets `PathFinder.USE_BARITONE_STYLE` and persists to `settings.json5`. Value restored on server start. `/bot config pathfinder` command also syncs to config.
+- **Remove duplicate toggles from Skills tab**: Removed Voiced Dialogue, Teleport during Skills, and Teleport during Sweeps from the Skills tab — these per-bot settings are already in Bot Controls screen (their canonical home).
 - **Permission predicate proxy fix**: Replaced broken `Proxy.newProxyInstance` last-resort fallback in `Frens.java` with direct `new PermissionPredicate()`. The proxy would throw `IllegalArgumentException` since `PermissionPredicate` is a class, not an interface. Dead code in practice (shipped stubs always resolve at step 1), but now correct if ever reached.
 - **Bot Controls UI refactor**: Replaced flat all-bots-at-once grid layout with single-bot view. Dropdown selector picks an alias; settings shown vertically in labelled groups (Spawning, Behavior, LLM) with descriptions. Added 8th setting `voicedDialogue` (was missing from old UI). Edits buffered per-alias so switching bots doesn’t lose unsaved changes. Added `isOpen()` and `renderOnTop()` to `DropdownMenuWidget` for z-order/input priority.
 - **Bot Controls shortcut in Admin tab**: Added "Bot Controls >" entry to the Admin tab in `BotPlayerInventoryScreen`, opens the new single-bot config screen directly from the bot interaction UI.

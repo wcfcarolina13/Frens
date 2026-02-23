@@ -497,7 +497,9 @@ public class Frens implements ModInitializer {
 
             enqueueBertLoad();
             net.wcfcarolina13.GameAI.services.BotControlApplier.applyPersistentSettings(server);
-            
+            net.wcfcarolina13.PathFinding.PathFinder.USE_BARITONE_STYLE =
+                    CONFIG != null && CONFIG.isBaritonePathfinderEnabled();
+
             // Load protected zones for all worlds
             server.getWorlds().forEach(world -> {
                 String worldId = world.getRegistryKey().getValue().toString();

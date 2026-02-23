@@ -179,13 +179,11 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         AUTO_RETURN_SUNSET_GUARD_PATROL,
         IDLE_HOBBIES,
         AUTO_HUNT_STARVING,
-        VOICED_DIALOGUE,
         GAMEPLAY_TIPS,
         IDLE_HOBBIES_ANYWHERE,
+        BARITONE_PATHFINDER,
         UNLEASH_TETHERED,
         LEASH_ON_DISMOUNT,
-        TELEPORT_SKILLS,
-        TELEPORT_DROP_SWEEP,
         DROP_SWEEP,
         BASES,
         CRAFTING,
@@ -259,11 +257,8 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             TopicEntry.skill("Guard/Patrol eligible", TopicAction.AUTO_RETURN_SUNSET_GUARD_PATROL, true, 1),
             TopicEntry.skill("Idle Hobbies", TopicAction.IDLE_HOBBIES, true, 0),
             TopicEntry.skill("Auto Hunt (Starving)", TopicAction.AUTO_HUNT_STARVING, true, 1),
-            TopicEntry.skill("Voiced Dialogue", TopicAction.VOICED_DIALOGUE, true, 0),
             TopicEntry.skill("Unleash Tethered", TopicAction.UNLEASH_TETHERED, true, 0),
             TopicEntry.skill("Leash on Dismount", TopicAction.LEASH_ON_DISMOUNT, true, 0),
-            TopicEntry.skill("Teleport during Skills", TopicAction.TELEPORT_SKILLS, true, 0),
-            TopicEntry.skill("Teleport during Sweeps", TopicAction.TELEPORT_DROP_SWEEP, true, 0),
             TopicEntry.skill("🧹 Cleanup", TopicAction.DROP_SWEEP, false, 0),
             TopicEntry.skill("Bases >", TopicAction.BASES, false, 0),
             TopicEntry.skill("Crafting >", TopicAction.CRAFTING, false, 0),
@@ -323,6 +318,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
                 // ── Toggles ──
                 new TopicEntry("Gameplay Tips", TopicCategory.ADMIN, TopicAction.GAMEPLAY_TIPS, true, 0, null),
                 new TopicEntry("Idle Hobbies Anywhere", TopicCategory.ADMIN, TopicAction.IDLE_HOBBIES_ANYWHERE, true, 0, null),
+                new TopicEntry("Baritone Pathfinder", TopicCategory.ADMIN, TopicAction.BARITONE_PATHFINDER, true, 0, null),
                 // ── Items ──
                 TopicEntry.admin("Give Wizard's Tome", "give_wizard_tome"),
                 // ── Recruitment ──
@@ -2053,13 +2049,11 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case AUTO_RETURN_SUNSET_GUARD_PATROL -> toggleAutoReturnSunsetGuardPatrol();
             case IDLE_HOBBIES -> toggleIdleHobbies();
             case AUTO_HUNT_STARVING -> toggleAutoHuntStarving();
-            case VOICED_DIALOGUE -> toggleVoicedDialogue();
             case GAMEPLAY_TIPS -> toggleGameplayTips();
             case IDLE_HOBBIES_ANYWHERE -> toggleIdleHobbiesAnywhere();
+            case BARITONE_PATHFINDER -> toggleBaritonePathfinder();
             case UNLEASH_TETHERED -> toggleUnleashTethered();
             case LEASH_ON_DISMOUNT -> toggleLeashOnDismount();
-            case TELEPORT_SKILLS -> toggleTeleportSkills();
-            case TELEPORT_DROP_SWEEP -> toggleTeleportDropSweep();
             case DROP_SWEEP -> runSkillCommand("drop_sweep", null);
             case BASES -> openBasesManager();
             case CRAFTING -> openCraftingHistory();
@@ -2427,13 +2421,11 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case AUTO_RETURN_SUNSET_GUARD_PATROL -> isAutoReturnGuardPatrolEligibleActive();
             case IDLE_HOBBIES -> isIdleHobbiesActive();
             case AUTO_HUNT_STARVING -> isAutoHuntStarvingActive();
-            case VOICED_DIALOGUE -> isVoicedDialogueActive();
             case GAMEPLAY_TIPS -> isGameplayTipsActive();
             case IDLE_HOBBIES_ANYWHERE -> isIdleHobbiesAnywhereActive();
+            case BARITONE_PATHFINDER -> isBaritonePathfinderActive();
             case UNLEASH_TETHERED -> isUnleashTetheredActive();
             case LEASH_ON_DISMOUNT -> isLeashOnDismountActive();
-            case TELEPORT_SKILLS -> isTeleportSkillsActive();
-            case TELEPORT_DROP_SWEEP -> isTeleportDropSweepActive();
             default -> false;
         };
     }
@@ -2817,17 +2809,6 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         sendChatCommand(command);
     }
 
-    private boolean isVoicedDialogueActive() {
-        ManualConfig.BotControlSettings settings = Frens.CONFIG.getEffectiveBotControl(botAlias);
-        return settings != null && settings.isVoicedDialogue();
-    }
-
-    private void toggleVoicedDialogue() {
-        ManualConfig.BotControlSettings settings = Frens.CONFIG.getOrCreateBotControl(botAlias);
-        settings.setVoicedDialogue(!settings.isVoicedDialogue());
-        Frens.CONFIG.save();
-    }
-
     private boolean isGameplayTipsActive() {
         return Frens.CONFIG == null || Frens.CONFIG.isGameplayTipsEnabled();
     }
@@ -2852,26 +2833,16 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         Frens.CONFIG.save();
     }
 
-    private boolean isTeleportSkillsActive() {
-        ManualConfig.BotControlSettings settings = Frens.CONFIG.getEffectiveBotControl(botAlias);
-        return settings != null && settings.isTeleportDuringSkills();
+    private boolean isBaritonePathfinderActive() {
+        return Frens.CONFIG != null && Frens.CONFIG.isBaritonePathfinderEnabled();
     }
 
-    private void toggleTeleportSkills() {
-        ManualConfig.BotControlSettings settings = Frens.CONFIG.getOrCreateBotControl(botAlias);
-        settings.setTeleportDuringSkills(!settings.isTeleportDuringSkills());
+    private void toggleBaritonePathfinder() {
+        if (Frens.CONFIG == null) return;
+        boolean newValue = !Frens.CONFIG.isBaritonePathfinderEnabled();
+        Frens.CONFIG.setBaritonePathfinderEnabled(newValue);
         Frens.CONFIG.save();
-    }
-
-    private boolean isTeleportDropSweepActive() {
-        ManualConfig.BotControlSettings settings = Frens.CONFIG.getEffectiveBotControl(botAlias);
-        return settings != null && settings.isTeleportDuringDropSweep();
-    }
-
-    private void toggleTeleportDropSweep() {
-        ManualConfig.BotControlSettings settings = Frens.CONFIG.getOrCreateBotControl(botAlias);
-        settings.setTeleportDuringDropSweep(!settings.isTeleportDuringDropSweep());
-        Frens.CONFIG.save();
+        net.wcfcarolina13.PathFinding.PathFinder.USE_BARITONE_STYLE = newValue;
     }
 
     private boolean isUnleashTetheredActive() {

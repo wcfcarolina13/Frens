@@ -432,6 +432,10 @@ public class modCommandRegistry {
                                                             return 0;
                                                     }
                                                     net.wcfcarolina13.PathFinding.PathFinder.USE_BARITONE_STYLE = baritone;
+                                                    if (Frens.CONFIG != null) {
+                                                        Frens.CONFIG.setBaritonePathfinderEnabled(baritone);
+                                                        Frens.CONFIG.save();
+                                                    }
                                                     String name = baritone ? "baritone" : "classic (bidirectional A*)";
                                                     context.getSource().sendFeedback(
                                                             () -> Text.literal("Pathfinder switched to: " + name), true);
