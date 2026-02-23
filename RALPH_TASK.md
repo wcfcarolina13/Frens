@@ -14,7 +14,7 @@ Address the highest-priority pending issues from the project backlog.
 
 ## P1 — High
 
-- [ ] Bot config UI refactor: Single-bot view with alias dropdown, grouped/scrollable settings, save/cancel affecting only the selected bot
+- [x] Bot config UI refactor: Single-bot view with alias dropdown, grouped/scrollable settings, save/cancel affecting only the selected bot
 - [ ] Bot identity separation (verification): Alias canonicalization + consistency guards across restart/respawn with multi-alias scenarios
 - [ ] Job resume prompts on death/leave (verification): Verify leave/rejoin prompt and resume behavior in-game
 - [ ] Per-bot chat addressing & broadcasts (verification): Verify no duplicate replies or cross-talk in runtime scenarios
