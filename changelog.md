@@ -2,6 +2,9 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 
+## 2026-02-22
+- **Bot Controls UI refactor**: Replaced flat all-bots-at-once grid layout with single-bot view. Dropdown selector picks an alias; settings shown vertically in labelled groups (Spawning, Behavior, LLM) with descriptions. Added 8th setting `voicedDialogue` (was missing from old UI). Edits buffered per-alias so switching bots doesn’t lose unsaved changes. Added `isOpen()` and `renderOnTop()` to `DropdownMenuWidget` for z-order/input priority.
+
 ## 2025-11-19
 - Hardened suffocation recovery: multiple iterations to detect head/feet blockage before damage ticks, throttle alerts, and mine with the correct tool rather than instant breaks. Spawn-in-block checks now run shortly after registration.
 - Upward stairs (ascent) refinements: walk-and-jump algorithm with headroom increases, issuer-facing direction lock, button-based direction overrides, and explicit `lockDirection` parameter for consistent stair orientation. Direction state resets per command to avoid stale facings.

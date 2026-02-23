@@ -241,6 +241,15 @@ public class DropdownMenuWidget extends ClickableWidget {
         }
     }
 
+    public boolean isOpen() {
+        return isOpen;
+    }
+
+    /** Public delegate for re-rendering on top (z-order fix). */
+    public void renderOnTop(DrawContext context, int mouseX, int mouseY, float delta) {
+        renderWidget(context, mouseX, mouseY, delta);
+    }
+
     public String getSelectedOption() {
         if (selectedIndex < 0 || options == null || selectedIndex >= options.size()) {
             return null;
