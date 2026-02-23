@@ -20,15 +20,34 @@ import java.util.*;
 
 /**
  * Single-bot configuration screen. A dropdown selects the alias; settings are
- * laid out vertically in labelled groups. Edits are buffered per-alias so
- * switching bots doesn't lose unsaved changes.
+ * laid out vertically in labelled groups inside a dark bordered panel.
+ * Edits are buffered per-alias so switching bots doesn't lose unsaved changes.
  */
 public class BotControlScreen extends Screen {
 
-    private static final int BUTTON_HEIGHT = 20;
-    private static final int SETTING_ROW_HEIGHT = 38;  // label + description + padding
-    private static final int SECTION_HEADER_HEIGHT = 22;
-    private static final int SETTING_BUTTON_WIDTH = 70;
+    // ── Layout constants (matching codebase style) ──────────────────────
+    private static final int BUTTON_H = 20;
+    private static final int TOGGLE_W = 46;           // compact: just "ON"/"OFF"
+    private static final int WIDE_TOGGLE_W = 60;      // for "Play"/"Training", "Survival"/"Creative"
+    private static final int ROW_H = 30;              // each setting row
+    private static final int SECTION_H = 18;          // section header height
+    private static final int PANEL_PAD = 8;           // inner padding of settings panel
+    private static final int SCROLL_STEP = 14;        // pixels per wheel tick
+
+    // ── Colors (matching BotGuideScreen / BaseManagerScreen palette) ────
+    private static final int COL_BG        = 0xD0101010; // full-screen overlay
+    private static final int COL_PANEL     = 0xFF121212; // panel fill
+    private static final int COL_BORDER    = 0xFF2A2A2A; // panel border
+    private static final int COL_TITLE     = 0xFFFFE08A; // gold title
+    private static final int COL_INFO      = 0xFFB0B0B0; // light gray info text
+    private static final int COL_SECTION   = 0xFFE6D7A3; // tan section header
+    private static final int COL_SEC_LINE  = 0x606B522C; // section divider line
+    private static final int COL_LABEL     = 0xFFEFEFEF; // setting label (near-white)
+    private static final int COL_DESC      = 0xFF7F7F7F; // description (muted gray)
+    private static final int COL_SUBTITLE  = 0xFFB0B0B0; // subtitle below dropdown
+    private static final int COL_HELPER    = 0xFF9FB6CD; // helper text (blue-gray)
+    private static final int COL_TRACK     = 0xFF171717; // scrollbar track
+    private static final int COL_THUMB     = 0xFF7A6240; // scrollbar thumb
 
     private final Screen parent;
 
@@ -50,8 +69,8 @@ public class BotControlScreen extends Screen {
 
     // ── Scroll state ────────────────────────────────────────────────────
     private double scrollOffset;
-    private int settingsTopY;   // top of scrollable settings area
-    private int settingsBottomY; // bottom of scrollable settings area
+    private int panelX, panelY, panelW, panelH; // settings panel bounds
+    private int scrollAreaH;                     // visible height inside panel
 
     // ── Owner/helper text for current alias ─────────────────────────────
     private String subtitleText = "";
@@ -63,12 +82,12 @@ public class BotControlScreen extends Screen {
     }
 
     // ════════════════════════════════════════════════════════════════════
-    //  init / rebuild
+    //  init
     // ════════════════════════════════════════════════════════════════════
 
     @Override
     protected void init() {
-        // If re-initializing (resize), capture current edits first
+        // Capture edits before resize clears widgets
         if (selectedAlias != null && !settingWidgets.isEmpty()) {
             captureCurrentWidgets();
         }
@@ -79,27 +98,34 @@ public class BotControlScreen extends Screen {
         settingWidgets.clear();
         scrollOffset = 0;
 
-        int centerX = this.width / 2;
-        int contentWidth = Math.min(this.width - 40, 340);
-        int leftX = (this.width - contentWidth) / 2;
+        int cx = this.width / 2;
+        int contentW = Math.min(this.width - 40, 280);
+        int lx = cx - contentW / 2;
+
+        // ── Title at y=8 ────────────────────────────────────────────────
+        // (drawn in render, not a widget)
 
         // ── Global toggles ──────────────────────────────────────────────
-        int globalY = 46;
+        int y = 24;
         boolean worldEnabled = Frens.CONFIG.isDefaultLlmWorldEnabled();
         worldToggle = CyclingButtonWidget.onOffBuilder(worldEnabled)
-                .build(leftX, globalY, contentWidth, 20,
-                        Text.of("LLM World Toggle"), (button, value) -> {});
-        worldToggle.setTooltip(Tooltip.of(Text.of("Master switch for LLM chat control in this world.")));
+                .build(lx, y, contentW, BUTTON_H,
+                        Text.of("LLM World Toggle"), (b, v) -> {});
+        worldToggle.setTooltip(Tooltip.of(Text.of(
+                "Master switch for LLM chat control in this world.")));
         this.addDrawableChild(worldToggle);
 
+        y += BUTTON_H + 4;
         boolean survivalMode = Frens.CONFIG.isSurvivalRecruitmentMode();
         survivalRecruitmentToggle = CyclingButtonWidget.onOffBuilder(survivalMode)
-                .build(leftX, globalY + 24, contentWidth, 20,
-                        Text.of("Survival Recruitment"), (button, value) -> {});
-        survivalRecruitmentToggle.setTooltip(Tooltip.of(Text.of("When ON: bots won't spawn until you find a village and recruit.")));
+                .build(lx, y, contentW, BUTTON_H,
+                        Text.of("Survival Recruitment"), (b, v) -> {});
+        survivalRecruitmentToggle.setTooltip(Tooltip.of(Text.of(
+                "When ON: bots won't spawn until you find a village and recruit.")));
         this.addDrawableChild(survivalRecruitmentToggle);
 
-        // ── Alias list ──────────────────────────────────────────────────
+        // ── Alias list & dropdown ───────────────────────────────────────
+        y += BUTTON_H + 10;
         aliasList = buildAliasList();
         if (previousAlias != null && aliasList.contains(previousAlias)) {
             selectedAlias = previousAlias;
@@ -107,41 +133,45 @@ public class BotControlScreen extends Screen {
             selectedAlias = aliasList.isEmpty() ? "default" : aliasList.get(0);
         }
 
-        // ── Dropdown ────────────────────────────────────────────────────
-        int dropdownY = globalY + 58;
         aliasDropdown = new DropdownMenuWidget(
-                leftX, dropdownY, contentWidth, 20,
+                lx, y, contentW, BUTTON_H,
                 Text.of("Select bot"), aliasList);
         aliasDropdown.setSelectedOption(selectedAlias);
         this.addDrawableChild(aliasDropdown);
-
-        // ── Subtitle / helper ───────────────────────────────────────────
         updateSubtitleText();
 
-        // ── Settings area bounds ────────────────────────────────────────
-        settingsTopY = dropdownY + 48;
-        settingsBottomY = this.height - 50;
+        // ── Settings panel bounds ───────────────────────────────────────
+        // subtitle takes ~2 lines below dropdown
+        int panelTopY = y + BUTTON_H + 28;
+        int panelBottomY = this.height - 42;
+        panelX = lx - 2;
+        panelY = panelTopY;
+        panelW = contentW + 4;
+        panelH = Math.max(40, panelBottomY - panelTopY);
+        scrollAreaH = panelH - 2; // 1px border each side
 
-        // ── Build setting widgets for selected alias ────────────────────
+        // ── Build setting widgets ───────────────────────────────────────
         rebuildSettingsWidgets();
 
-        // ── Save / Close buttons ────────────────────────────────────────
+        // ── Save / Close ────────────────────────────────────────────────
+        int btnW = 70;
+        int btnGap = 10;
         ButtonWidget saveButton = ButtonWidget.builder(Text.of("Save"), button -> {
             saveSettings();
             if (this.client != null) {
                 this.client.getToastManager().add(SystemToast.create(this.client,
                         SystemToast.Type.NARRATOR_TOGGLE,
-                        Text.of("Bot settings saved"), Text.of("Applied new bot preferences")));
+                        Text.of("Bot settings saved"),
+                        Text.of("Applied new bot preferences")));
             }
-        }).dimensions(centerX - 100, this.height - 34, 90, 20).build();
+        }).dimensions(cx - btnW - btnGap / 2, this.height - 30, btnW, BUTTON_H).build();
         this.addDrawableChild(saveButton);
 
         ButtonWidget closeButton = ButtonWidget.builder(Text.of("Close"), button -> close())
-                .dimensions(centerX + 10, this.height - 34, 90, 20).build();
+                .dimensions(cx + btnGap / 2, this.height - 30, btnW, BUTTON_H).build();
         this.addDrawableChild(closeButton);
     }
 
-    /** Build sorted alias list: "default" first, then alphabetical. */
     private List<String> buildAliasList() {
         LinkedHashSet<String> aliasSet = new LinkedHashSet<>(Frens.CONFIG.getBotGameProfile().keySet());
         aliasSet.add("Jake");
@@ -153,44 +183,44 @@ public class BotControlScreen extends Screen {
         return sorted;
     }
 
-    /** Update subtitle/helper text from config for the currently selected alias. */
     private void updateSubtitleText() {
         boolean isDefault = selectedAlias.equalsIgnoreCase("default");
         if (isDefault) {
-            subtitleText = "Fallback profile used whenever a bot has no alias override.";
+            subtitleText = "Fallback profile — applies when a bot has no override.";
             helperText = "";
         } else {
             ManualConfig.BotOwnership ownership = Frens.CONFIG.getOwner(selectedAlias);
-            String ownerName = ownership != null && ownership.ownerName() != null && !ownership.ownerName().isBlank()
+            String ownerName = ownership != null && ownership.ownerName() != null
+                    && !ownership.ownerName().isBlank()
                     ? ownership.ownerName() : "Unassigned";
             subtitleText = "Owner: " + ownerName;
-            helperText = "Customize how " + selectedAlias + " behaves in-game.";
+            helperText = "Customize how " + selectedAlias + " behaves.";
         }
     }
 
     // ════════════════════════════════════════════════════════════════════
-    //  Settings widget lifecycle
+    //  Settings snapshot / widget lifecycle
     // ════════════════════════════════════════════════════════════════════
 
-    /** Snapshot: captures the 8 per-bot toggle values. */
     private record SettingsSnapshot(
             boolean autoSpawn, String spawnMode, String gameMode,
             boolean teleportDuringSkills, boolean pauseOnFullInventory,
-            boolean teleportDuringDropSweep, boolean llmEnabled, boolean voicedDialogue) {}
+            boolean teleportDuringDropSweep, boolean llmEnabled,
+            boolean voicedDialogue) {}
 
-    private record SettingEntry(String label, String description, CyclingButtonWidget<?> widget) {}
+    private record SettingEntry(String label, String desc,
+                                CyclingButtonWidget<?> widget, int widgetW) {}
     private record SettingGroup(String name, List<SettingEntry> entries) {}
 
-    /** Capture the 8 currently-displayed widget values into the dirty buffer. */
+    @SuppressWarnings("unchecked")
     private void captureCurrentWidgets() {
         if (settingGroups.isEmpty() || selectedAlias == null) return;
-        // Flatten widgets: Spawning(3), Behavior(3), LLM(2)
         List<CyclingButtonWidget<?>> ws = settingWidgets;
         if (ws.size() < 8) return;
         dirtySettings.put(selectedAlias, new SettingsSnapshot(
                 (Boolean) ws.get(0).getValue(),
-                (String) ws.get(1).getValue(),
-                (String) ws.get(2).getValue(),
+                (String)  ws.get(1).getValue(),
+                (String)  ws.get(2).getValue(),
                 (Boolean) ws.get(3).getValue(),
                 (Boolean) ws.get(4).getValue(),
                 (Boolean) ws.get(5).getValue(),
@@ -199,115 +229,71 @@ public class BotControlScreen extends Screen {
         ));
     }
 
-    /** Remove old per-bot widgets, create new ones for selectedAlias. */
     private void rebuildSettingsWidgets() {
-        // Remove old setting widgets from drawable children
         for (CyclingButtonWidget<?> w : settingWidgets) {
             this.remove(w);
         }
         settingWidgets.clear();
         settingGroups.clear();
 
-        // Resolve initial values: dirty buffer first, then config
         SettingsSnapshot snap = dirtySettings.get(selectedAlias);
-        ManualConfig.BotControlSettings cfg = Frens.CONFIG.getOrCreateBotControl(selectedAlias);
-        boolean autoSpawn     = snap != null ? snap.autoSpawn     : cfg.isAutoSpawn();
-        String  spawnMode     = snap != null ? snap.spawnMode     : cfg.getSpawnMode();
-        String  gameMode      = snap != null ? snap.gameMode      : cfg.getGameMode();
-        boolean teleSkills    = snap != null ? snap.teleportDuringSkills    : cfg.isTeleportDuringSkills();
-        boolean pauseInv      = snap != null ? snap.pauseOnFullInventory   : cfg.isPauseOnFullInventory();
-        boolean teleDrop      = snap != null ? snap.teleportDuringDropSweep: cfg.isTeleportDuringDropSweep();
-        boolean llmEnabled    = snap != null ? snap.llmEnabled    : cfg.isLlmEnabled();
-        boolean voicedDialogue= snap != null ? snap.voicedDialogue: cfg.isVoicedDialogue();
-
-        int contentWidth = Math.min(this.width - 40, 340);
-        int leftX = (this.width - contentWidth) / 2;
-        int btnX = leftX + contentWidth - SETTING_BUTTON_WIDTH;
+        ManualConfig.BotControlSettings cfg =
+                Frens.CONFIG.getOrCreateBotControl(selectedAlias);
+        boolean autoSpawn  = snap != null ? snap.autoSpawn  : cfg.isAutoSpawn();
+        String  spawnMode  = snap != null ? snap.spawnMode  : cfg.getSpawnMode();
+        String  gameMode   = snap != null ? snap.gameMode   : cfg.getGameMode();
+        boolean teleSkills = snap != null ? snap.teleportDuringSkills : cfg.isTeleportDuringSkills();
+        boolean pauseInv   = snap != null ? snap.pauseOnFullInventory : cfg.isPauseOnFullInventory();
+        boolean teleDrop   = snap != null ? snap.teleportDuringDropSweep : cfg.isTeleportDuringDropSweep();
+        boolean llmEnabled = snap != null ? snap.llmEnabled : cfg.isLlmEnabled();
+        boolean voiced     = snap != null ? snap.voicedDialogue : cfg.isVoicedDialogue();
 
         // ── Spawning ────────────────────────────────────────────────────
         List<SettingEntry> spawning = new ArrayList<>();
-
-        CyclingButtonWidget<Boolean> autoSpawnBtn = CyclingButtonWidget.onOffBuilder(autoSpawn)
-                .build(btnX, 0, SETTING_BUTTON_WIDTH, BUTTON_HEIGHT, Text.of("Auto Spawn"), (b, v) -> {});
-        autoSpawnBtn.setTooltip(Tooltip.of(Text.of("Automatically spawn this bot at login.")));
-        this.addDrawableChild(autoSpawnBtn);
-        settingWidgets.add(autoSpawnBtn);
-        spawning.add(new SettingEntry("Auto Spawn",
-                "Automatically spawn this bot at login using the saved location.", autoSpawnBtn));
-
-        CyclingButtonWidget<String> spawnModeBtn = CyclingButtonWidget.<String>builder(
-                        v -> Text.of("play".equals(v) ? "Play" : "Training"),
-                        () -> spawnMode)
-                .values("training", "play")
-                .build(btnX, 0, SETTING_BUTTON_WIDTH, BUTTON_HEIGHT, Text.of("Mode"), (b, v) -> {});
-        spawnModeBtn.setTooltip(Tooltip.of(Text.of("Training keeps the bot sandboxed. Play enables full AI.")));
-        this.addDrawableChild(spawnModeBtn);
-        settingWidgets.add(spawnModeBtn);
-        spawning.add(new SettingEntry("Spawn Mode",
-                "Training keeps the bot sandboxed. Play enables full AI behaviors.", spawnModeBtn));
-
-        CyclingButtonWidget<String> gameModeBtn = CyclingButtonWidget.<String>builder(
-                        v -> Text.of("creative".equals(v) ? "Creative" : "Survival"),
-                        () -> gameMode)
-                .values("survival", "creative")
-                .build(btnX, 0, SETTING_BUTTON_WIDTH, BUTTON_HEIGHT, Text.of("Game"), (b, v) -> {});
-        gameModeBtn.setTooltip(Tooltip.of(Text.of("Minecraft gamemode for this bot.")));
-        this.addDrawableChild(gameModeBtn);
-        settingWidgets.add(gameModeBtn);
-        spawning.add(new SettingEntry("Game Mode",
-                "Minecraft gamemode for this bot (affects inventory, damage, etc).", gameModeBtn));
-
-        settingGroups.add(new SettingGroup("SPAWNING", spawning));
+        spawning.add(makeOnOff("Auto Spawn", "Spawn this bot automatically at login.", autoSpawn, TOGGLE_W));
+        spawning.add(makeString("Spawn Mode", "Training = sandboxed. Play = full AI.",
+                spawnMode, "training", "play",
+                v -> Text.of("play".equals(v) ? "Play" : "Training"), WIDE_TOGGLE_W));
+        spawning.add(makeString("Game Mode", "Minecraft gamemode (inventory, damage, etc).",
+                gameMode, "survival", "creative",
+                v -> Text.of("creative".equals(v) ? "Creative" : "Survival"), WIDE_TOGGLE_W));
+        settingGroups.add(new SettingGroup("Spawning", spawning));
 
         // ── Behavior ────────────────────────────────────────────────────
         List<SettingEntry> behavior = new ArrayList<>();
-
-        CyclingButtonWidget<Boolean> teleSkillsBtn = CyclingButtonWidget.onOffBuilder(teleSkills)
-                .build(btnX, 0, SETTING_BUTTON_WIDTH, BUTTON_HEIGHT, Text.of("Teleport"), (b, v) -> {});
-        teleSkillsBtn.setTooltip(Tooltip.of(Text.of("Allow emergency teleports during skills.")));
-        this.addDrawableChild(teleSkillsBtn);
-        settingWidgets.add(teleSkillsBtn);
-        behavior.add(new SettingEntry("Teleport During Skills",
-                "Allow emergency teleports during skills (needed for tight shafts).", teleSkillsBtn));
-
-        CyclingButtonWidget<Boolean> pauseInvBtn = CyclingButtonWidget.onOffBuilder(pauseInv)
-                .build(btnX, 0, SETTING_BUTTON_WIDTH, BUTTON_HEIGHT, Text.of("Pause Inv"), (b, v) -> {});
-        pauseInvBtn.setTooltip(Tooltip.of(Text.of("Pause when inventory is full.")));
-        this.addDrawableChild(pauseInvBtn);
-        settingWidgets.add(pauseInvBtn);
-        behavior.add(new SettingEntry("Pause on Full Inventory",
-                "Pause the job when inventory is full; resume with /bot resume.", pauseInvBtn));
-
-        CyclingButtonWidget<Boolean> teleDropBtn = CyclingButtonWidget.onOffBuilder(teleDrop)
-                .build(btnX, 0, SETTING_BUTTON_WIDTH, BUTTON_HEIGHT, Text.of("Drop Teleport"), (b, v) -> {});
-        teleDropBtn.setTooltip(Tooltip.of(Text.of("Allow teleports when collecting drops.")));
-        this.addDrawableChild(teleDropBtn);
-        settingWidgets.add(teleDropBtn);
-        behavior.add(new SettingEntry("Teleport During Drop Sweep",
-                "Allow teleports when collecting drops after mining.", teleDropBtn));
-
-        settingGroups.add(new SettingGroup("BEHAVIOR", behavior));
+        behavior.add(makeOnOff("Teleport During Skills", "Emergency teleports in tight shafts.", teleSkills, TOGGLE_W));
+        behavior.add(makeOnOff("Pause on Full Inventory", "Pause job when full; /bot resume.", pauseInv, TOGGLE_W));
+        behavior.add(makeOnOff("Teleport During Sweeps", "Teleport when collecting drops.", teleDrop, TOGGLE_W));
+        settingGroups.add(new SettingGroup("Behavior", behavior));
 
         // ── LLM ─────────────────────────────────────────────────────────
         List<SettingEntry> llm = new ArrayList<>();
-
-        CyclingButtonWidget<Boolean> llmBtn = CyclingButtonWidget.onOffBuilder(llmEnabled)
-                .build(btnX, 0, SETTING_BUTTON_WIDTH, BUTTON_HEIGHT, Text.of("LLM Bot"), (b, v) -> {});
-        llmBtn.setTooltip(Tooltip.of(Text.of("Enable natural-language control.")));
-        this.addDrawableChild(llmBtn);
-        settingWidgets.add(llmBtn);
-        llm.add(new SettingEntry("LLM Enabled",
-                "Enable natural-language control for this bot.", llmBtn));
-
-        CyclingButtonWidget<Boolean> voiceBtn = CyclingButtonWidget.onOffBuilder(voicedDialogue)
-                .build(btnX, 0, SETTING_BUTTON_WIDTH, BUTTON_HEIGHT, Text.of("Voiced"), (b, v) -> {});
-        voiceBtn.setTooltip(Tooltip.of(Text.of("Enable text-to-speech voiced dialogue.")));
-        this.addDrawableChild(voiceBtn);
-        settingWidgets.add(voiceBtn);
-        llm.add(new SettingEntry("Voiced Dialogue",
-                "Enable text-to-speech voiced dialogue for this bot.", voiceBtn));
-
+        llm.add(makeOnOff("LLM Enabled", "Natural-language control for this bot.", llmEnabled, TOGGLE_W));
+        llm.add(makeOnOff("Voiced Dialogue", "Text-to-speech voiced dialogue.", voiced, TOGGLE_W));
         settingGroups.add(new SettingGroup("LLM", llm));
+    }
+
+    /** Create a compact ON/OFF toggle (no label baked into button text). */
+    private SettingEntry makeOnOff(String label, String desc, boolean value, int w) {
+        CyclingButtonWidget<Boolean> btn = CyclingButtonWidget.onOffBuilder(value)
+                .build(0, 0, w, BUTTON_H, Text.empty(), (b, v) -> {});
+        this.addDrawableChild(btn);
+        settingWidgets.add(btn);
+        return new SettingEntry(label, desc, btn, w);
+    }
+
+    /** Create a compact string-cycling toggle (value only, no label prefix). */
+    private SettingEntry makeString(String label, String desc,
+                                    String value, String opt1, String opt2,
+                                    java.util.function.Function<String, Text> formatter,
+                                    int w) {
+        CyclingButtonWidget<String> btn = CyclingButtonWidget.<String>builder(
+                        formatter::apply, () -> value)
+                .values(opt1, opt2)
+                .build(0, 0, w, BUTTON_H, Text.empty(), (b, v) -> {});
+        this.addDrawableChild(btn);
+        settingWidgets.add(btn);
+        return new SettingEntry(label, desc, btn, w);
     }
 
     // ════════════════════════════════════════════════════════════════════
@@ -315,25 +301,23 @@ public class BotControlScreen extends Screen {
     // ════════════════════════════════════════════════════════════════════
 
     private void saveSettings() {
-        // Capture the currently displayed alias
         captureCurrentWidgets();
 
         ManualConfig config = Frens.CONFIG;
         config.setDefaultLlmWorldEnabled(worldToggle.getValue());
         config.setSurvivalRecruitmentMode(survivalRecruitmentToggle.getValue());
 
-        // Write only aliases that were actually visited/edited
         for (Map.Entry<String, SettingsSnapshot> entry : dirtySettings.entrySet()) {
-            ManualConfig.BotControlSettings settings = config.getOrCreateBotControl(entry.getKey());
-            SettingsSnapshot s = entry.getValue();
-            settings.setAutoSpawn(s.autoSpawn);
-            settings.setSpawnMode(s.spawnMode);
-            settings.setGameMode(s.gameMode);
-            settings.setTeleportDuringSkills(s.teleportDuringSkills);
-            settings.setPauseOnFullInventory(s.pauseOnFullInventory);
-            settings.setTeleportDuringDropSweep(s.teleportDuringDropSweep);
-            settings.setLlmEnabled(s.llmEnabled);
-            settings.setVoicedDialogue(s.voicedDialogue);
+            ManualConfig.BotControlSettings s = config.getOrCreateBotControl(entry.getKey());
+            SettingsSnapshot v = entry.getValue();
+            s.setAutoSpawn(v.autoSpawn);
+            s.setSpawnMode(v.spawnMode);
+            s.setGameMode(v.gameMode);
+            s.setTeleportDuringSkills(v.teleportDuringSkills);
+            s.setPauseOnFullInventory(v.pauseOnFullInventory);
+            s.setTeleportDuringDropSweep(v.teleportDuringDropSweep);
+            s.setLlmEnabled(v.llmEnabled);
+            s.setVoicedDialogue(v.voicedDialogue);
         }
         config.save();
         configNetworkManager.sendSaveConfigPacket(ConfigJsonUtil.configToJson());
@@ -345,100 +329,129 @@ public class BotControlScreen extends Screen {
 
     @Override
     public void render(DrawContext context, int mouseX, int mouseY, float delta) {
-        // Dark background
-        context.fill(0, 0, this.width, this.height, 0xB0000000);
+        // Full-screen dark overlay
+        context.fill(0, 0, this.width, this.height, COL_BG);
 
-        int contentWidth = Math.min(this.width - 40, 340);
-        int leftX = (this.width - contentWidth) / 2;
-        int centerX = this.width / 2;
+        int cx = this.width / 2;
+        int contentW = Math.min(this.width - 40, 280);
+        int lx = cx - contentW / 2;
 
-        // Title
+        // Title (gold, centered)
+        int titleW = this.textRenderer.getWidth(this.title);
         context.drawText(this.textRenderer, this.title,
-                centerX - this.textRenderer.getWidth(this.title) / 2, 12, 0xFFFFFF, true);
-
-        // Info text
-        List<OrderedText> infoLines = this.textRenderer.wrapLines(
-                Text.of("Per-bot customization. Switch bots with the dropdown; changes are buffered until you Save."),
-                contentWidth);
-        int infoY = 26;
-        for (OrderedText line : infoLines) {
-            context.drawText(this.textRenderer, line,
-                    centerX - this.textRenderer.getWidth(line) / 2, infoY, 0xFFD5A6, false);
-            infoY += this.textRenderer.fontHeight;
-        }
+                cx - titleW / 2, 10, COL_TITLE, true);
 
         // ── Subtitle / helper below dropdown ────────────────────────────
-        int subY = aliasDropdown.getY() + 24;
+        int subY = aliasDropdown.getY() + BUTTON_H + 4;
         if (!subtitleText.isEmpty()) {
-            context.drawText(this.textRenderer, subtitleText, leftX + 2, subY, 0xFFC6C6C6, false);
+            context.drawText(this.textRenderer, subtitleText,
+                    lx + 2, subY, COL_SUBTITLE, false);
             subY += this.textRenderer.fontHeight + 1;
         }
         if (!helperText.isEmpty()) {
-            context.drawText(this.textRenderer, helperText, leftX + 2, subY, 0xFF9FB6CD, false);
+            context.drawText(this.textRenderer, helperText,
+                    lx + 2, subY, COL_HELPER, false);
         }
 
-        // ── Scrollable settings area ────────────────────────────────────
-        renderSettingsArea(context, leftX, contentWidth, mouseX, mouseY);
+        // ── Settings panel (dark bordered box) ──────────────────────────
+        renderSettingsPanel(context, lx, contentW);
 
-        // All standard widgets (global toggles, dropdown button, setting buttons, save/close)
+        // All widgets (global toggles, dropdown, setting buttons, save/close)
         super.render(context, mouseX, mouseY, delta);
 
-        // Re-render dropdown on top when open (z-order fix)
+        // Dropdown on top when open (z-order fix)
         if (aliasDropdown.isOpen()) {
             aliasDropdown.renderOnTop(context, mouseX, mouseY, delta);
         }
     }
 
-    private void renderSettingsArea(DrawContext context, int leftX, int contentWidth, int mouseX, int mouseY) {
-        int maxScroll = Math.max(0, getSettingsContentHeight() - (settingsBottomY - settingsTopY));
+    private void renderSettingsPanel(DrawContext context, int lx, int contentW) {
+        int maxScroll = Math.max(0, getSettingsContentHeight() - scrollAreaH);
         scrollOffset = MathHelper.clamp(scrollOffset, 0, maxScroll);
 
-        context.enableScissor(leftX - 4, settingsTopY, leftX + contentWidth + 4, settingsBottomY);
+        // Panel background + border
+        context.fill(panelX - 1, panelY - 1,
+                panelX + panelW + 1, panelY + panelH + 1, COL_BORDER);
+        context.fill(panelX, panelY,
+                panelX + panelW, panelY + panelH, COL_PANEL);
 
-        int currentY = settingsTopY - (int) scrollOffset;
-        int btnX = leftX + contentWidth - SETTING_BUTTON_WIDTH;
+        // Scissor: clip to panel interior
+        int clipL = panelX + 1;
+        int clipR = panelX + panelW - 1;
+        int clipT = panelY + 1;
+        int clipB = panelY + panelH - 1;
+        context.enableScissor(clipL, clipT, clipR, clipB);
+
+        int innerL = panelX + PANEL_PAD;
+        int innerR = panelX + panelW - PANEL_PAD;
+        int innerW = innerR - innerL;
+        int currentY = clipT + 4 - (int) scrollOffset;
 
         for (SettingGroup group : settingGroups) {
-            // Section header
-            int headerTextY = currentY + 6;
-            String headerLabel = "── " + group.name + " ";
-            int headerTextWidth = this.textRenderer.getWidth(headerLabel);
-            context.drawText(this.textRenderer, headerLabel, leftX, headerTextY, 0xFFE6C17B, false);
-            // Horizontal line after header text
-            int lineY = headerTextY + this.textRenderer.fontHeight / 2;
-            context.fill(leftX + headerTextWidth + 2, lineY, leftX + contentWidth, lineY + 1, 0x80E6C17B);
-            currentY += SECTION_HEADER_HEIGHT;
+            // Section header: "Spawning" with divider line
+            int headerY = currentY + 4;
+            String headerText = group.name;
+            int textW = this.textRenderer.getWidth(headerText);
+            context.drawText(this.textRenderer, headerText,
+                    innerL, headerY, COL_SECTION, false);
+            int lineY = headerY + this.textRenderer.fontHeight / 2;
+            context.fill(innerL + textW + 6, lineY,
+                    innerR, lineY + 1, COL_SEC_LINE);
+            currentY += SECTION_H;
 
             for (SettingEntry entry : group.entries) {
-                boolean visible = currentY + SETTING_ROW_HEIGHT > settingsTopY && currentY < settingsBottomY;
+                boolean visible = currentY + ROW_H > clipT && currentY < clipB;
 
-                // Label (white)
                 if (visible) {
-                    context.drawText(this.textRenderer, entry.label, leftX + 4, currentY + 4, 0xFFFFFFFF, false);
-                    // Description (gray, below label)
-                    context.drawText(this.textRenderer, entry.description, leftX + 4,
-                            currentY + 4 + this.textRenderer.fontHeight + 1, 0xFF888888, false);
+                    // Label (near-white, left)
+                    context.drawText(this.textRenderer, entry.label,
+                            innerL + 2, currentY + 4, COL_LABEL, false);
+                    // Description (muted gray, truncated to avoid button)
+                    int descMaxW = innerW - entry.widgetW - 12;
+                    String desc = entry.desc;
+                    if (this.textRenderer.getWidth(desc) > descMaxW) {
+                        desc = this.textRenderer.trimToWidth(desc, descMaxW - 6) + "..";
+                    }
+                    context.drawText(this.textRenderer, desc,
+                            innerL + 2,
+                            currentY + 4 + this.textRenderer.fontHeight + 2,
+                            COL_DESC, false);
                 }
 
-                // Position the button right-aligned
-                entry.widget.setX(btnX);
-                entry.widget.setY(currentY + 2);
+                // Position button right-aligned inside panel
+                entry.widget.setX(innerR - entry.widgetW);
+                entry.widget.setY(currentY + 4);
                 entry.widget.visible = visible;
 
-                currentY += SETTING_ROW_HEIGHT;
+                currentY += ROW_H;
             }
         }
 
         context.disableScissor();
+
+        // ── Scrollbar (only if content overflows) ───────────────────────
+        if (maxScroll > 0) {
+            int trackX = panelX + panelW - 4;
+            int trackT = panelY + 1;
+            int trackB = panelY + panelH - 1;
+            int trackH = trackB - trackT;
+            context.fill(trackX, trackT, trackX + 3, trackB, COL_TRACK);
+
+            int contentH = getSettingsContentHeight();
+            int thumbH = Math.max(12, trackH * scrollAreaH / contentH);
+            float frac = (float) scrollOffset / maxScroll;
+            int thumbY = trackT + Math.round((trackH - thumbH) * frac);
+            context.fill(trackX, thumbY, trackX + 3, thumbY + thumbH, COL_THUMB);
+        }
     }
 
     private int getSettingsContentHeight() {
-        int height = 0;
+        int h = 4; // top padding
         for (SettingGroup group : settingGroups) {
-            height += SECTION_HEADER_HEIGHT;
-            height += group.entries.size() * SETTING_ROW_HEIGHT;
+            h += SECTION_H;
+            h += group.entries.size() * ROW_H;
         }
-        return height;
+        return h;
     }
 
     // ════════════════════════════════════════════════════════════════════
@@ -447,11 +460,11 @@ public class BotControlScreen extends Screen {
 
     @Override
     public boolean mouseClicked(net.minecraft.client.gui.Click click, boolean isInside) {
-        double mouseX = click.x();
-        double mouseY = click.y();
+        double mx = click.x();
+        double my = click.y();
 
         // Dropdown gets first priority
-        if (aliasDropdown.isMouseOver(mouseX, mouseY)) {
+        if (aliasDropdown.isMouseOver(mx, my)) {
             String before = aliasDropdown.getSelectedOption();
             boolean handled = super.mouseClicked(click, isInside);
             String after = aliasDropdown.getSelectedOption();
@@ -461,9 +474,8 @@ public class BotControlScreen extends Screen {
             return handled;
         }
 
-        // When dropdown is open, don't forward clicks to settings widgets
+        // When dropdown is open, swallow clicks (let it close)
         if (aliasDropdown.isOpen()) {
-            // Let the dropdown close itself
             return super.mouseClicked(click, isInside);
         }
 
@@ -471,7 +483,6 @@ public class BotControlScreen extends Screen {
     }
 
     private void onAliasChanged(String oldAlias, String newAlias) {
-        // Save current widget state to dirty buffer
         captureCurrentWidgets();
         selectedAlias = newAlias;
         updateSubtitleText();
@@ -480,16 +491,20 @@ public class BotControlScreen extends Screen {
     }
 
     @Override
-    public boolean mouseScrolled(double mouseX, double mouseY, double horizontalAmount, double verticalAmount) {
+    public boolean mouseScrolled(double mouseX, double mouseY,
+                                  double horizontalAmount, double verticalAmount) {
         // Dropdown scroll priority when open
         if (aliasDropdown.isOpen() && aliasDropdown.isMouseOver(mouseX, mouseY)) {
-            return aliasDropdown.mouseScrolled(mouseX, mouseY, horizontalAmount, verticalAmount);
+            return aliasDropdown.mouseScrolled(mouseX, mouseY,
+                    horizontalAmount, verticalAmount);
         }
 
-        // Settings area scroll
-        if (mouseY >= settingsTopY && mouseY <= settingsBottomY) {
-            int maxScroll = Math.max(0, getSettingsContentHeight() - (settingsBottomY - settingsTopY));
-            scrollOffset = MathHelper.clamp(scrollOffset - verticalAmount * 12, 0, maxScroll);
+        // Settings panel scroll
+        if (mouseX >= panelX && mouseX <= panelX + panelW
+                && mouseY >= panelY && mouseY <= panelY + panelH) {
+            int maxScroll = Math.max(0, getSettingsContentHeight() - scrollAreaH);
+            scrollOffset = MathHelper.clamp(
+                    scrollOffset - verticalAmount * SCROLL_STEP, 0, maxScroll);
             return true;
         }
 

@@ -317,24 +317,28 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
 
             // Operator-only admin tools for survival recruitment mode.
             private static final List<TopicEntry> ADMIN_TOPIC_ENTRIES = List.of(
-                // Spell-like companion commands earned via questing.
-                // Access is gated (Enchanting Table nearby, or a later-stage Wizard's Tome token).
+                // ── Screens ──
+                new TopicEntry("Bot Controls >", TopicCategory.ADMIN, TopicAction.OPEN_BOT_CONTROLS, false, 0, null),
                 new TopicEntry("Spells >", TopicCategory.ADMIN, TopicAction.OPEN_SPELLS, false, 0, null),
+                // ── Toggles ──
                 new TopicEntry("Gameplay Tips", TopicCategory.ADMIN, TopicAction.GAMEPLAY_TIPS, true, 0, null),
                 new TopicEntry("Idle Hobbies Anywhere", TopicCategory.ADMIN, TopicAction.IDLE_HOBBIES_ANYWHERE, true, 0, null),
+                // ── Items ──
                 TopicEntry.admin("Give Wizard's Tome", "give_wizard_tome"),
+                // ── Recruitment ──
                 TopicEntry.admin("Recruit status", "recruit_status"),
-                TopicEntry.admin("Reset recruit", "recruit_reset"),
                 TopicEntry.admin("Enable recruit", "recruit_enable"),
                 TopicEntry.admin("Disable recruit", "recruit_disable"),
-                    TopicEntry.admin("Set village anchor", "anchor_set"),
-                    TopicEntry.admin("Clear village anchor", "anchor_clear"),
+                TopicEntry.admin("Reset recruit", "recruit_reset"),
+                // ── Village ──
+                TopicEntry.admin("Set village anchor", "anchor_set"),
+                TopicEntry.admin("Clear village anchor", "anchor_clear"),
+                // ── Debug: quest stages ──
                 TopicEntry.admin("Set stage 0", "setstage:0"),
                 TopicEntry.admin("Set stage 1", "setstage:1"),
                 TopicEntry.admin("Set stage 2", "setstage:2"),
                 TopicEntry.admin("Set stage 3", "setstage:3"),
-                TopicEntry.admin("Set stage 4", "setstage:4"),
-                new TopicEntry("Bot Controls >", TopicCategory.ADMIN, TopicAction.OPEN_BOT_CONTROLS, false, 0, null)
+                TopicEntry.admin("Set stage 4", "setstage:4")
             );
 
     public BotPlayerInventoryScreen(BotPlayerInventoryScreenHandler handler, PlayerInventory inventory, Text title) {
