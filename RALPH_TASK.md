@@ -57,10 +57,15 @@ Future work items, organized by priority. Not active Ralph criteria — these ar
 ### Follow / Come
 - [ ] **Guard verification**: Run in-game tests for `/bot guard` (basic start/stop, radius handling, interaction with other tasks)
 - [ ] **Come tool crafting (verification)**: Verify torches/shovels/pickaxes are provisioned in-world when recipes/materials permit
+- [ ] **Follow stability (verification)**: Core planner/backoff/waypoint recovery runtime verification across dimensions/terrain
+- [ ] **Deterministic follow/come assertions (verification)**: Run `FOLLOW_COME_ASSERT_RUNBOOK.md` and record pass/fail outcomes
 - [ ] **Follow vertical recovery (verification)**: Bot should attempt a nearby projected anchor reroute first, then prompt regroup if still blocked
+  - [ ] In-game check: have commander drop into a shaft with a nearby reachable staircase and verify follow reroutes to descend
+  - [ ] In-game check: while following, place a 1x1 deep shaft in the movement lane; verify bot sidesteps/stops
 
 ### Shelter (Redo Needed)
 - [ ] **ShelterSkill refactor**: Split `ShelterSkill.java` into smaller hovel/burrow builder classes
+- [ ] **ScaffoldService extraction**: Centralize pillaring/scaffolding + ladder placement into a reusable service
 - [ ] **LeafClearService extraction**: Centralize leaf-block clearing so other skills can reuse it
 - [ ] **Shelter resource acquisition flow**: Auto-collect/craft materials by default; allow `ask|wait|manual` to pause
 - [ ] **Shelter options parameter**: Investigate what `options` currently controls for hovel/burrow
@@ -69,6 +74,7 @@ Future work items, organized by priority. Not active Ralph criteria — these ar
 
 ### Commands / UX
 - [ ] **Command pruning review**: Evaluate whether `look_player` and `direction reset` are still needed
+- [ ] In-game check: verify guide/search usability and that actions launched from adjusted counts run with the expected arguments
 
 ### Inventory & Items
 - [ ] Shift-click, double-click, drag support
@@ -90,6 +96,7 @@ Future work items, organized by priority. Not active Ralph criteria — these ar
 ### Fishing
 - [ ] Verify leaf-block clearing when navigating far from shoreline
 - [ ] Verify fishing from higher vertical positions (cliffs/piers)
+- [ ] In-game check: trigger `/bot fish` while bot is swimming/submerged and verify it relocates to dry shore before first cast
 - [ ] **Fishing reach**: Extend "near water" search/acceptance radius
 - [ ] **Water location memory**: Store/recall known water locations
 
@@ -97,10 +104,17 @@ Future work items, organized by priority. Not active Ralph criteria — these ar
 - [ ] Creeper evasion (sprint away when unarmed)
 - [ ] Protected build zones (no-grief areas)
 - [ ] Fight with teammates
+- [ ] In-game check: stand near passive endermen and confirm bot does not face/aggro them; then provoke one and confirm bot can still target it once hostile
+- [ ] In-game check: drop bot from lethal height with/without a water bucket (Overworld), verify clutch attempts near impact and no attempts in ultrawarm dimensions
 - [ ] Ride sync verification: mount/dismount mirroring across entities
 - [ ] Ride sync leashed persistence: tethered after disconnect/rejoin
 
 ### Crafting & Building
+- [ ] Place and use crafting table, furnace, chest
+- [ ] Craft common items (armor, torches, etc.)
+- [ ] Crafting helper: detect required inputs in bot inventory and report missing items
+- [ ] Crafting table craft: craft when inputs exist; announce success or missing items in chat
+- [ ] Placement: place crafted table near commander safely
 - [ ] Build walls (specified materials, dimensions)
 - [ ] Simple 2-person house
 - [ ] Block placement primitives
@@ -108,6 +122,8 @@ Future work items, organized by priority. Not active Ralph criteria — these ar
 
 ### Farming & Survival
 - [ ] **Hunger-aware task interruption**: Bot should stop working (e.g. auto-patching, fortifying) when starving instead of working until death. HungerService should trigger a food acquisition flow: (1) search nearby chests/barrels for food, (2) find raw food and cook it in a furnace/smoker/campfire, or (3) hunt or fish to obtain food to cook. Resume the interrupted task after eating.
+- [ ] Till soil, plant seeds, harvest, replant
+- [ ] Furnace usage with various fuels
 - [ ] Create infinite water source
 - [ ] Animal husbandry (shear, collect meat, pen animals)
 - [ ] **Farm underground recovery**: Escape when underground with overhead dirt
@@ -116,6 +132,8 @@ Future work items, organized by priority. Not active Ralph criteria — these ar
 - [ ] Hobby verification: flower picking, feed-animals, hobby hunt behavior
 
 ### Mining & Resource Gathering
+- [ ] Tree chopping (safe climbing, late drop collection)
+- [ ] Strip mining with safety offset (sand, gravel, lava)
 - [ ] Cave/structure detection and reporting
 - [ ] Water encounter handling
 
