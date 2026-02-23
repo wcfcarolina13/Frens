@@ -48,6 +48,9 @@ public class BotControlScreen extends Screen {
     private static final int COL_HELPER    = 0xFF9FB6CD; // helper text (blue-gray)
     private static final int COL_TRACK     = 0xFF171717; // scrollbar track
     private static final int COL_THUMB     = 0xFF7A6240; // scrollbar thumb
+    private static final int COL_THUMB_HL  = 0xFFB08C40; // scrollbar thumb hover/drag
+    private static final int SCROLLBAR_W   = 6;          // scrollbar width
+    private static final int THUMB_MIN_H   = 16;         // minimum thumb height
 
     private final Screen parent;
 
@@ -71,6 +74,8 @@ public class BotControlScreen extends Screen {
     private double scrollOffset;
     private int panelX, panelY, panelW, panelH; // settings panel bounds
     private int scrollAreaH;                     // visible height inside panel
+    private boolean draggingScroll;              // scrollbar thumb drag active
+    private int scrollGrabOffset;                // mouse Y offset within thumb
 
     // ── Owner/helper text for current alias ─────────────────────────────
     private String subtitleText = "";
@@ -354,7 +359,7 @@ public class BotControlScreen extends Screen {
         }
 
         // ── Settings panel (dark bordered box) ──────────────────────────
-        renderSettingsPanel(context, lx, contentW);
+        renderSettingsPanel(context, lx, contentW, mouseX, mouseY);
 
         // All widgets (global toggles, dropdown, setting buttons, save/close)
         super.render(context, mouseX, mouseY, delta);
@@ -365,7 +370,8 @@ public class BotControlScreen extends Screen {
         }
     }
 
-    private void renderSettingsPanel(DrawContext context, int lx, int contentW) {
+    private void renderSettingsPanel(DrawContext context, int lx, int contentW,
+                                      int mouseX, int mouseY) {
         int maxScroll = Math.max(0, getSettingsContentHeight() - scrollAreaH);
         scrollOffset = MathHelper.clamp(scrollOffset, 0, maxScroll);
 
@@ -400,14 +406,17 @@ public class BotControlScreen extends Screen {
             currentY += SECTION_H;
 
             for (SettingEntry entry : group.entries) {
-                boolean visible = currentY + ROW_H > clipT && currentY < clipB;
+                // Widget visible only if entire button fits inside clip region
+                int btnY = currentY + 4;
+                boolean textVisible = currentY + ROW_H > clipT && currentY < clipB;
+                boolean btnVisible = btnY >= clipT && btnY + BUTTON_H <= clipB;
 
-                if (visible) {
+                if (textVisible) {
                     // Label (near-white, left)
                     context.drawText(this.textRenderer, entry.label,
                             innerL + 2, currentY + 4, COL_LABEL, false);
                     // Description (muted gray, truncated to avoid button)
-                    int descMaxW = innerW - entry.widgetW - 12;
+                    int descMaxW = innerW - entry.widgetW - SCROLLBAR_W - 12;
                     String desc = entry.desc;
                     if (this.textRenderer.getWidth(desc) > descMaxW) {
                         desc = this.textRenderer.trimToWidth(desc, descMaxW - 6) + "..";
@@ -418,10 +427,10 @@ public class BotControlScreen extends Screen {
                             COL_DESC, false);
                 }
 
-                // Position button right-aligned inside panel
-                entry.widget.setX(innerR - entry.widgetW);
-                entry.widget.setY(currentY + 4);
-                entry.widget.visible = visible;
+                // Position button right-aligned, leaving room for scrollbar
+                entry.widget.setX(innerR - entry.widgetW - SCROLLBAR_W - 2);
+                entry.widget.setY(btnY);
+                entry.widget.visible = btnVisible;
 
                 currentY += ROW_H;
             }
@@ -431,18 +440,34 @@ public class BotControlScreen extends Screen {
 
         // ── Scrollbar (only if content overflows) ───────────────────────
         if (maxScroll > 0) {
-            int trackX = panelX + panelW - 4;
+            int trackX = panelX + panelW - SCROLLBAR_W - 1;
             int trackT = panelY + 1;
             int trackB = panelY + panelH - 1;
             int trackH = trackB - trackT;
-            context.fill(trackX, trackT, trackX + 3, trackB, COL_TRACK);
+            context.fill(trackX, trackT, trackX + SCROLLBAR_W, trackB, COL_TRACK);
 
-            int contentH = getSettingsContentHeight();
-            int thumbH = Math.max(12, trackH * scrollAreaH / contentH);
-            float frac = (float) scrollOffset / maxScroll;
-            int thumbY = trackT + Math.round((trackH - thumbH) * frac);
-            context.fill(trackX, thumbY, trackX + 3, thumbY + thumbH, COL_THUMB);
+            int[] thumb = computeThumb(trackT, trackH, maxScroll);
+            if (thumb != null) {
+                boolean hover = mouseX >= trackX && mouseX < trackX + SCROLLBAR_W
+                        && mouseY >= thumb[0] && mouseY < thumb[0] + thumb[1];
+                int col = (hover || draggingScroll) ? COL_THUMB_HL : COL_THUMB;
+                context.fill(trackX + 1, thumb[0], trackX + SCROLLBAR_W - 1,
+                        thumb[0] + thumb[1], col);
+            }
         }
+    }
+
+    /** Returns [thumbY, thumbH] or null if no scrollbar needed. */
+    private int[] computeThumb(int trackTop, int trackH, int maxScroll) {
+        int contentH = getSettingsContentHeight();
+        if (contentH <= scrollAreaH || trackH <= 0) return null;
+        int thumbH = Math.max(THUMB_MIN_H, trackH * scrollAreaH / contentH);
+        thumbH = Math.min(trackH, thumbH);
+        int range = Math.max(0, trackH - thumbH);
+        int clamped = MathHelper.clamp((int) scrollOffset, 0, maxScroll);
+        int thumbY = trackTop + (range <= 0 ? 0
+                : Math.round((float) range * clamped / maxScroll));
+        return new int[]{thumbY, thumbH};
     }
 
     private int getSettingsContentHeight() {
@@ -479,6 +504,32 @@ public class BotControlScreen extends Screen {
             return super.mouseClicked(click, isInside);
         }
 
+        // Scrollbar thumb grab
+        int maxScroll = Math.max(0, getSettingsContentHeight() - scrollAreaH);
+        if (maxScroll > 0) {
+            int trackX = panelX + panelW - SCROLLBAR_W - 1;
+            int trackT = panelY + 1;
+            int trackH = panelH - 2;
+            if (mx >= trackX && mx < trackX + SCROLLBAR_W
+                    && my >= trackT && my < trackT + trackH) {
+                int[] thumb = computeThumb(trackT, trackH, maxScroll);
+                if (thumb != null && my >= thumb[0] && my < thumb[0] + thumb[1]) {
+                    draggingScroll = true;
+                    scrollGrabOffset = (int) my - thumb[0];
+                    return true;
+                }
+                // Click on track but outside thumb — jump to position
+                if (thumb != null) {
+                    float frac = (float) (my - trackT) / trackH;
+                    scrollOffset = MathHelper.clamp(frac * maxScroll, 0, maxScroll);
+                    draggingScroll = true;
+                    int[] newThumb = computeThumb(trackT, trackH, maxScroll);
+                    scrollGrabOffset = newThumb != null ? (int) my - newThumb[0] : 0;
+                    return true;
+                }
+            }
+        }
+
         return super.mouseClicked(click, isInside);
     }
 
@@ -509,6 +560,38 @@ public class BotControlScreen extends Screen {
         }
 
         return super.mouseScrolled(mouseX, mouseY, horizontalAmount, verticalAmount);
+    }
+
+    @Override
+    public boolean mouseDragged(net.minecraft.client.gui.Click click,
+                                 double deltaX, double deltaY) {
+        if (draggingScroll) {
+            int maxScroll = Math.max(0, getSettingsContentHeight() - scrollAreaH);
+            if (maxScroll <= 0) return true;
+            int trackT = panelY + 1;
+            int trackH = panelH - 2;
+            int thumbH = Math.max(THUMB_MIN_H, trackH * scrollAreaH
+                    / Math.max(1, getSettingsContentHeight()));
+            thumbH = Math.min(trackH, thumbH);
+            int minY = trackT;
+            int maxY = trackT + trackH - thumbH;
+            if (maxY <= minY) return true;
+            int desiredY = (int) click.y() - scrollGrabOffset;
+            desiredY = MathHelper.clamp(desiredY, minY, maxY);
+            double ratio = (double) (desiredY - minY) / (double) (maxY - minY);
+            scrollOffset = MathHelper.clamp(ratio * maxScroll, 0, maxScroll);
+            return true;
+        }
+        return super.mouseDragged(click, deltaX, deltaY);
+    }
+
+    @Override
+    public boolean mouseReleased(net.minecraft.client.gui.Click click) {
+        if (draggingScroll) {
+            draggingScroll = false;
+            return true;
+        }
+        return super.mouseReleased(click);
     }
 
     @Override
