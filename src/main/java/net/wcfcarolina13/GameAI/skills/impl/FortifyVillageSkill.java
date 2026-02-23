@@ -2589,13 +2589,12 @@ public final class FortifyVillageSkill implements Skill {
     // ── Break-through stuck recovery ─────────────────────────────
 
     /**
-     * Check whether a block is safe to mine for navigation purposes.
-     * Rejects layout blocks, village structures, containers, and hazards.
+     * Check whether a non-layout block is safe to mine for navigation purposes.
+     * Rejects village structures, containers, and hazards.
      */
     private boolean isSafeToBreakForNavigation(ServerWorld world, BlockPos pos) {
         BlockState state = world.getBlockState(pos);
         if (state.isAir() || state.isReplaceable()) return false;
-        if (fortificationProtectedPositions.contains(pos)) return false;
         if (DIG_BLACKLIST.contains(state.getBlock())) return false;
         if (state.getBlock() instanceof net.minecraft.block.DoorBlock) return false;
         if (state.getBlock() instanceof net.minecraft.block.BedBlock) return false;
@@ -2613,12 +2612,29 @@ public final class FortifyVillageSkill implements Skill {
     }
 
     /**
+     * Check whether a fortification layout block can be temporarily mined for navigation.
+     * More permissive than {@link #isSafeToBreakForNavigation} — allows layout blocks
+     * but still rejects unbreakable, fluid, and block-entity blocks.
+     * Callers MUST replace these blocks after walking through.
+     */
+    private boolean isLayoutBlockBreakableForNavigation(ServerWorld world, BlockPos pos) {
+        if (!fortificationProtectedPositions.contains(pos)) return false; // not a layout block
+        BlockState state = world.getBlockState(pos);
+        if (state.isAir() || state.isReplaceable()) return false;
+        if (state.getHardness(world, pos) < 0) return false;
+        if (world.getBlockEntity(pos) != null) return false;
+        if (!state.getFluidState().isEmpty()) return false;
+        if (state.getCollisionShape(world, pos).isEmpty()) return false;
+        return true;
+    }
+
+    /**
      * Last-resort navigation: mine one blocking block between the bot and its target,
-     * walk through the gap, then best-effort replace the mined block.
+     * walk through the gap, then replace the mined block.
      * Returns true if the bot moved to a new position.
      *
-     * <p>Safety: only mines blocks that pass {@link #isSafeToBreakForNavigation},
-     * which excludes layout blocks, village structures, containers, and hazards.
+     * <p>Two-tier safety: prefers non-layout blocks first, then allows breaking
+     * fortification layout blocks (with mandatory replacement).
      * Max one break-through per call to prevent tunnel-mining.
      */
     private boolean tryBreakThroughObstacle(ServerPlayerEntity bot, ServerWorld world, BlockPos target) {
@@ -2630,7 +2646,6 @@ public final class FortifyVillageSkill implements Skill {
 
         // Build candidate directions: primary diagonal, then primary cardinals, then secondary cardinals
         List<BlockPos> candidateOffsets = new ArrayList<>();
-        // Primary: straight toward target (both axes if diagonal)
         if (dx != 0 && dz != 0) {
             candidateOffsets.add(new BlockPos(Integer.signum(dx), 0, Integer.signum(dz)));
         }
@@ -2640,7 +2655,6 @@ public final class FortifyVillageSkill implements Skill {
         if (dz != 0) {
             candidateOffsets.add(new BlockPos(0, 0, Integer.signum(dz)));
         }
-        // Secondary: lateral directions (perpendicular to primary)
         if (dx != 0) {
             candidateOffsets.add(new BlockPos(Integer.signum(dx), 0, 1));
             candidateOffsets.add(new BlockPos(Integer.signum(dx), 0, -1));
@@ -2650,69 +2664,90 @@ public final class FortifyVillageSkill implements Skill {
             candidateOffsets.add(new BlockPos(-1, 0, Integer.signum(dz)));
         }
 
-        for (BlockPos offset : candidateOffsets) {
-            BlockPos feetPos = botPos.add(offset);
-            BlockPos headPos = feetPos.up();
+        // Two passes: first try non-layout blocks, then allow layout blocks
+        for (int pass = 0; pass < 2; pass++) {
+            boolean allowLayout = (pass == 1);
 
-            // Both feet and head level must be clear or breakable
-            boolean feetBlocking = !world.getBlockState(feetPos).getCollisionShape(world, feetPos).isEmpty();
-            boolean headBlocking = !world.getBlockState(headPos).getCollisionShape(world, headPos).isEmpty();
-            if (!feetBlocking && !headBlocking) continue; // not actually blocked in this direction
+            for (BlockPos offset : candidateOffsets) {
+                BlockPos feetPos = botPos.add(offset);
+                BlockPos headPos = feetPos.up();
 
-            // Check safety for whichever positions need mining
-            if (feetBlocking && !isSafeToBreakForNavigation(world, feetPos)) continue;
-            if (headBlocking && !isSafeToBreakForNavigation(world, headPos)) continue;
+                boolean feetBlocking = !world.getBlockState(feetPos).getCollisionShape(world, feetPos).isEmpty();
+                boolean headBlocking = !world.getBlockState(headPos).getCollisionShape(world, headPos).isEmpty();
+                if (!feetBlocking && !headBlocking) continue;
 
-            // Check mining reach
-            if (feetBlocking && !isWithinMiningReach(bot, feetPos)) continue;
-            if (headBlocking && !isWithinMiningReach(bot, headPos)) continue;
+                // Check safety: tier 1 (non-layout) or tier 2 (layout with mandatory replace)
+                if (feetBlocking && !canBreakForNavigation(world, feetPos, allowLayout)) continue;
+                if (headBlocking && !canBreakForNavigation(world, headPos, allowLayout)) continue;
 
-            // Must be able to stand on the block below the feet position
-            BlockState belowState = world.getBlockState(feetPos.down());
-            if (belowState.getCollisionShape(world, feetPos.down()).isEmpty()) continue;
+                if (feetBlocking && !isWithinMiningReach(bot, feetPos)) continue;
+                if (headBlocking && !isWithinMiningReach(bot, headPos)) continue;
 
-            LOGGER.info("[FortifyNav] Breaking through obstruction at {} (head={})",
-                    feetPos.toShortString(), headBlocking ? headPos.toShortString() : "clear");
+                // Must be able to stand on the block below
+                BlockState belowState = world.getBlockState(feetPos.down());
+                if (belowState.getCollisionShape(world, feetPos.down()).isEmpty()) continue;
 
-            // Remember what we're mining for replacement
-            BlockState feetOriginal = feetBlocking ? world.getBlockState(feetPos) : null;
-            BlockState headOriginal = headBlocking ? world.getBlockState(headPos) : null;
+                boolean isLayoutBreak = (feetBlocking && fortificationProtectedPositions.contains(feetPos))
+                        || (headBlocking && fortificationProtectedPositions.contains(headPos));
 
-            // Mine head first (if needed), then feet
-            if (headBlocking) {
-                if (!digBlockForNavigation(bot, world, headPos)) continue;
-            }
-            if (feetBlocking) {
-                if (!digBlockForNavigation(bot, world, feetPos)) {
-                    // If feet mining failed but head was mined, still try to replace head
-                    if (headOriginal != null) {
-                        tryReplaceMinedBlock(bot, world, headPos, headOriginal);
-                    }
-                    continue;
+                LOGGER.info("[FortifyNav] Breaking through {} at {} (head={})",
+                        isLayoutBreak ? "WALL" : "obstruction",
+                        feetPos.toShortString(), headBlocking ? headPos.toShortString() : "clear");
+
+                BlockState feetOriginal = feetBlocking ? world.getBlockState(feetPos) : null;
+                BlockState headOriginal = headBlocking ? world.getBlockState(headPos) : null;
+
+                // Mine head first (if needed), then feet
+                if (headBlocking) {
+                    if (!digBlockForNavigation(bot, world, headPos)) continue;
                 }
+                if (feetBlocking) {
+                    if (!digBlockForNavigation(bot, world, feetPos)) {
+                        if (headOriginal != null) {
+                            replaceMinedBlock(bot, world, headPos, headOriginal, isLayoutBreak);
+                        }
+                        continue;
+                    }
+                }
+
+                // Walk through the gap
+                BlockPos before = bot.getBlockPos();
+                walkTowardBlock(bot, feetPos, 1_200L);
+                sleepQuiet(100);
+
+                boolean moved = !before.equals(bot.getBlockPos());
+
+                // Replace mined blocks — mandatory for layout blocks, best-effort otherwise
+                if (moved) {
+                    if (feetOriginal != null) replaceMinedBlock(bot, world, feetPos, feetOriginal, isLayoutBreak);
+                    if (headOriginal != null) replaceMinedBlock(bot, world, headPos, headOriginal, isLayoutBreak);
+                } else {
+                    // Didn't move — still replace immediately to restore wall integrity
+                    if (feetOriginal != null) replaceMinedBlock(bot, world, feetPos, feetOriginal, isLayoutBreak);
+                    if (headOriginal != null) replaceMinedBlock(bot, world, headPos, headOriginal, isLayoutBreak);
+                }
+
+                if (moved) {
+                    LOGGER.info("[FortifyNav] Break-through success, moved from {} to {}",
+                            before.toShortString(), bot.getBlockPos().toShortString());
+                }
+                return moved;
             }
-
-            // Walk through the gap
-            BlockPos before = bot.getBlockPos();
-            walkTowardBlock(bot, feetPos, 1_200L);
-            sleepQuiet(100);
-
-            boolean moved = !before.equals(bot.getBlockPos());
-
-            // Best-effort replace mined blocks behind us
-            if (moved) {
-                if (feetOriginal != null) tryReplaceMinedBlock(bot, world, feetPos, feetOriginal);
-                if (headOriginal != null) tryReplaceMinedBlock(bot, world, headPos, headOriginal);
-            }
-
-            if (moved) {
-                LOGGER.info("[FortifyNav] Break-through success, moved from {} to {}",
-                        before.toShortString(), bot.getBlockPos().toShortString());
-            }
-            return moved;
         }
 
         return false;
+    }
+
+    /**
+     * Unified check: can this block be mined for navigation?
+     * When {@code allowLayout} is false, only non-layout blocks pass.
+     * When {@code allowLayout} is true, layout blocks also pass (for wall traversal).
+     */
+    private boolean canBreakForNavigation(ServerWorld world, BlockPos pos, boolean allowLayout) {
+        if (fortificationProtectedPositions.contains(pos)) {
+            return allowLayout && isLayoutBlockBreakableForNavigation(world, pos);
+        }
+        return isSafeToBreakForNavigation(world, pos);
     }
 
     /** Mine a single block for navigation break-through. Thin wrapper around MiningTool. */
@@ -2731,18 +2766,29 @@ public final class FortifyVillageSkill implements Skill {
     }
 
     /**
-     * Best-effort replace a mined block to minimize environmental damage.
-     * Checks if the bot has the original block type or a common substitute.
+     * Replace a mined block. For layout blocks ({@code mandatory=true}), uses the
+     * wall material fallback lists and logs a warning on failure so auto-patch can
+     * repair it. For non-layout blocks, best-effort with common materials.
      */
-    private void tryReplaceMinedBlock(ServerPlayerEntity bot, ServerWorld world, BlockPos pos, BlockState originalState) {
-        // Don't replace if something is already there (bot or another block)
+    private void replaceMinedBlock(ServerPlayerEntity bot, ServerWorld world, BlockPos pos,
+                                   BlockState originalState, boolean mandatory) {
+        // Don't replace if something is already there
         if (!world.getBlockState(pos).isAir()) return;
-        // Don't replace if the bot is standing in the position
+        // Don't replace if the bot is occupying the position
         if (bot.getBlockPos().equals(pos) || bot.getBlockPos().up().equals(pos)) return;
 
         Item originalItem = originalState.getBlock().asItem();
+
+        // For layout (wall) blocks, use the broad wall material fallback list
         List<Item> replacements;
-        if (originalItem != Items.AIR) {
+        if (mandatory) {
+            // Try original first, then all stone-brick fallbacks (the primary wall material)
+            Set<Item> seen = new LinkedHashSet<>();
+            if (originalItem != Items.AIR) seen.add(originalItem);
+            seen.addAll(STONE_BRICK_FALLBACKS);
+            seen.addAll(COBBLE_FALLBACKS);
+            replacements = new ArrayList<>(seen);
+        } else if (originalItem != Items.AIR) {
             replacements = List.of(originalItem, Items.COBBLESTONE, Items.STONE, Items.DIRT);
         } else {
             replacements = List.of(Items.COBBLESTONE, Items.STONE, Items.DIRT);
@@ -2751,6 +2797,9 @@ public final class FortifyVillageSkill implements Skill {
         BotActions.PlaceResult result = BotActions.tryPlaceBlockAt(bot, pos, Direction.UP, replacements);
         if (result.success()) {
             LOGGER.info("[FortifyNav] Replaced mined block at {}", pos.toShortString());
+        } else if (mandatory) {
+            LOGGER.warn("[FortifyNav] FAILED to replace wall block at {} — auto-patch should repair",
+                    pos.toShortString());
         } else {
             LOGGER.debug("[FortifyNav] Could not replace block at {} (no suitable material)", pos.toShortString());
         }
