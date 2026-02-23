@@ -13,9 +13,12 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
+import net.minecraft.util.hit.BlockHitResult;
+import net.minecraft.util.hit.HitResult;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
+import net.minecraft.world.RaycastContext;
 import net.wcfcarolina13.ChatUtils.ChatUtils;
 import net.wcfcarolina13.Entity.LookController;
 import net.wcfcarolina13.GameAI.BotActions;
@@ -2770,6 +2773,7 @@ public final class FortifyVillageSkill implements Skill {
             for (BlockPos offset : candidateOffsets) {
                 BlockPos feetPos = botPos.add(offset);
                 BlockPos headPos = feetPos.up();
+                BlockPos overheadPos = headPos.up(); // Y+2: clear overhead for tall walls
 
                 boolean feetBlocking = !world.getBlockState(feetPos).getCollisionShape(world, feetPos).isEmpty();
                 boolean headBlocking = !world.getBlockState(headPos).getCollisionShape(world, headPos).isEmpty();
@@ -2782,28 +2786,53 @@ public final class FortifyVillageSkill implements Skill {
                 if (feetBlocking && !isWithinMiningReach(bot, feetPos)) continue;
                 if (headBlocking && !isWithinMiningReach(bot, headPos)) continue;
 
+                // Overhead is best-effort: mine if blocking AND reachable, soft-skip otherwise
+                boolean overheadBlocking = !world.getBlockState(overheadPos).getCollisionShape(world, overheadPos).isEmpty();
+                boolean mineOverhead = overheadBlocking
+                        && canBreakForNavigation(world, overheadPos, allowLayout)
+                        && isWithinMiningReach(bot, overheadPos);
+
                 // Must be able to stand on the block below
                 BlockState belowState = world.getBlockState(feetPos.down());
                 if (belowState.getCollisionShape(world, feetPos.down()).isEmpty()) continue;
 
                 boolean isLayoutBreak = (feetBlocking && fortificationProtectedPositions.contains(feetPos))
-                        || (headBlocking && fortificationProtectedPositions.contains(headPos));
+                        || (headBlocking && fortificationProtectedPositions.contains(headPos))
+                        || (mineOverhead && fortificationProtectedPositions.contains(overheadPos));
 
-                LOGGER.info("[FortifyNav] Breaking through {} at {} (head={})",
+                LOGGER.info("[FortifyNav] Breaking through {} at {} (head={} overhead={})",
                         isLayoutBreak ? "WALL" : "obstruction",
-                        feetPos.toShortString(), headBlocking ? headPos.toShortString() : "clear");
+                        feetPos.toShortString(),
+                        headBlocking ? headPos.toShortString() : "clear",
+                        mineOverhead ? overheadPos.toShortString() : "skip");
 
                 BlockState feetOriginal = feetBlocking ? world.getBlockState(feetPos) : null;
                 BlockState headOriginal = headBlocking ? world.getBlockState(headPos) : null;
+                BlockState overheadOriginal = mineOverhead ? world.getBlockState(overheadPos) : null;
 
-                // Mine head first (if needed), then feet
+                // Mine top-down: overhead first, then head, then feet
+                if (mineOverhead) {
+                    if (!digBlockForNavigation(bot, world, overheadPos)) {
+                        // Soft-skip: overhead failure doesn't reject this candidate
+                        mineOverhead = false;
+                        overheadOriginal = null;
+                    }
+                }
                 if (headBlocking) {
-                    if (!digBlockForNavigation(bot, world, headPos)) continue;
+                    if (!digBlockForNavigation(bot, world, headPos)) {
+                        if (overheadOriginal != null) {
+                            replaceMinedBlock(bot, world, overheadPos, overheadOriginal, isLayoutBreak);
+                        }
+                        continue;
+                    }
                 }
                 if (feetBlocking) {
                     if (!digBlockForNavigation(bot, world, feetPos)) {
                         if (headOriginal != null) {
                             replaceMinedBlock(bot, world, headPos, headOriginal, isLayoutBreak);
+                        }
+                        if (overheadOriginal != null) {
+                            replaceMinedBlock(bot, world, overheadPos, overheadOriginal, isLayoutBreak);
                         }
                         continue;
                     }
@@ -2823,14 +2852,9 @@ public final class FortifyVillageSkill implements Skill {
                 boolean moved = !before.equals(bot.getBlockPos());
 
                 // Replace mined blocks — mandatory for layout blocks, best-effort otherwise
-                if (moved) {
-                    if (feetOriginal != null) replaceMinedBlock(bot, world, feetPos, feetOriginal, isLayoutBreak);
-                    if (headOriginal != null) replaceMinedBlock(bot, world, headPos, headOriginal, isLayoutBreak);
-                } else {
-                    // Didn't move — still replace immediately to restore wall integrity
-                    if (feetOriginal != null) replaceMinedBlock(bot, world, feetPos, feetOriginal, isLayoutBreak);
-                    if (headOriginal != null) replaceMinedBlock(bot, world, headPos, headOriginal, isLayoutBreak);
-                }
+                if (feetOriginal != null) replaceMinedBlock(bot, world, feetPos, feetOriginal, isLayoutBreak);
+                if (headOriginal != null) replaceMinedBlock(bot, world, headPos, headOriginal, isLayoutBreak);
+                if (overheadOriginal != null) replaceMinedBlock(bot, world, overheadPos, overheadOriginal, isLayoutBreak);
 
                 if (moved) {
                     LOGGER.info("[FortifyNav] Break-through success, moved from {} to {}",
@@ -3442,7 +3466,7 @@ public final class FortifyVillageSkill implements Skill {
         // to get to the general area before starting short-range local approach retries.
         double distToTowerSq = bot.squaredDistanceTo(vertex.x() + 0.5, bot.getY(), vertex.z() + 0.5);
         if (distToTowerSq > 400.0D) { // > 20 blocks away
-            BlockPos towerApproach = chooseTowerApproachPos(bot, world, vertex, surfaceProfile, 0);
+            BlockPos towerApproach = chooseTowerApproachPos(bot, world, vertex, surfaceProfile, 0, vertexBlocks);
             if (towerApproach != null) {
                 Optional<MovementService.MovementPlan> plan = MovementService.planLootApproach(
                         bot, towerApproach, MovementService.MovementOptions.skillLoot());
@@ -3475,7 +3499,7 @@ public final class FortifyVillageSkill implements Skill {
             }
 
             forceExitTowerFootprint(source, bot, world, vertex, surfaceProfile, attempt - 1);
-            BlockPos towerApproach = chooseTowerApproachPos(bot, world, vertex, surfaceProfile, attempt - 1);
+            BlockPos towerApproach = chooseTowerApproachPos(bot, world, vertex, surfaceProfile, attempt - 1, vertexBlocks);
             boolean approached = moveToTowerApproach(
                     source, bot, world, towerApproach, surfaceProfile,
                     taskPrefix + ":" + vertexOrdinal + ":approach-" + attempt);
@@ -3814,6 +3838,8 @@ public final class FortifyVillageSkill implements Skill {
                 if (triedSides.contains(sideKey)) continue;
                 int x = vertex.x() + directions[i][0] * dist;
                 int z = vertex.z() + directions[i][1] * dist;
+                // Skip positions inside the 3x3 tower footprint
+                if (Math.abs(x - vertex.x()) <= 1 && Math.abs(z - vertex.z()) <= 1) continue;
                 int y = safeSurfaceY(surfaceProfile, world, x, z);
                 BlockPos pos = new BlockPos(x, y, z);
                 if (canStandAt(world, pos)) {
@@ -4079,12 +4105,19 @@ public final class FortifyVillageSkill implements Skill {
 
     private BlockPos chooseTowerApproachPos(ServerPlayerEntity bot, ServerWorld world,
                                             WallPoint vertex, SurfaceProfile surfaceProfile) {
-        return chooseTowerApproachPos(bot, world, vertex, surfaceProfile, 0);
+        return chooseTowerApproachPos(bot, world, vertex, surfaceProfile, 0, null);
     }
 
     private BlockPos chooseTowerApproachPos(ServerPlayerEntity bot, ServerWorld world,
                                             WallPoint vertex, SurfaceProfile surfaceProfile,
                                             int attemptOffset) {
+        return chooseTowerApproachPos(bot, world, vertex, surfaceProfile, attemptOffset, null);
+    }
+
+    private BlockPos chooseTowerApproachPos(ServerPlayerEntity bot, ServerWorld world,
+                                            WallPoint vertex, SurfaceProfile surfaceProfile,
+                                            int attemptOffset,
+                                            List<ProceduralWallBlock> vertexBlocks) {
         // Tower footprint is vertex ±1 (3×3). Min offset 3 = 1 block clearance from edge.
         int[][] candidates = {
                 {3, 0}, {-3, 0}, {0, 3}, {0, -3},
@@ -4110,7 +4143,12 @@ public final class FortifyVillageSkill implements Skill {
                 continue;
             }
             double distSq = bot.squaredDistanceTo(x + 0.5, y, z + 0.5);
-            double score = exits * 120.0 - distSq;
+            int losReachable = 0;
+            if (vertexBlocks != null && !vertexBlocks.isEmpty()) {
+                losReachable = countReachableWithLOS(world, bot, pos, vertexBlocks);
+                if (losReachable == 0) continue; // reject: can't see any blocks from here
+            }
+            double score = exits * 120.0 + losReachable * 200.0 - distSq;
             if (attemptOffset > 0) {
                 score += i * 6.0;
             }
@@ -5047,6 +5085,29 @@ public final class FortifyVillageSkill implements Skill {
         double dx = pos.getX() + 0.5 - bot.getX();
         double dz = pos.getZ() + 0.5 - bot.getZ();
         return (dx * dx + dz * dz) <= maxDist * maxDist;
+    }
+
+    private boolean hasLineOfSight(ServerWorld world, ServerPlayerEntity bot, Vec3d eye, BlockPos target) {
+        Vec3d targetCenter = Vec3d.ofCenter(target);
+        RaycastContext ctx = new RaycastContext(eye, targetCenter,
+                RaycastContext.ShapeType.COLLIDER, RaycastContext.FluidHandling.NONE, bot);
+        BlockHitResult hit = world.raycast(ctx);
+        if (hit.getType() != HitResult.Type.BLOCK) return true;
+        return hit.getBlockPos().equals(target);
+    }
+
+    private int countReachableWithLOS(ServerWorld world, ServerPlayerEntity bot,
+                                       BlockPos standPos, List<ProceduralWallBlock> vertexBlocks) {
+        Vec3d eye = Vec3d.ofCenter(standPos).add(0, 1.12, 0); // 0.5 + 1.12 = 1.62 eye height
+        int count = 0;
+        for (ProceduralWallBlock block : vertexBlocks) {
+            if (!isActiveFortifyBlock(block)) continue;
+            if (isPlannedBlockSatisfied(block, world.getBlockState(block.worldPos()))) continue;
+            Vec3d blockCenter = Vec3d.ofCenter(block.worldPos());
+            if (eye.squaredDistanceTo(blockCenter) > REACH_DISTANCE_SQ) continue;
+            if (hasLineOfSight(world, bot, eye, block.worldPos())) count++;
+        }
+        return count;
     }
 
     // ── Helpers ─────────────────────────────────────────────────
