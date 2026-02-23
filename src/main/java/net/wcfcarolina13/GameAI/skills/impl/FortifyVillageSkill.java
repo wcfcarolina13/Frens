@@ -2809,9 +2809,18 @@ public final class FortifyVillageSkill implements Skill {
                     }
                 }
 
-                // Walk through the gap
+                // Walk through the gap — use direct impulse toward a point PAST the gap
+                // (walkTowardBlock bails at distSq < 6.0, but feetPos is only 1 block away)
+                BlockPos throughPos = feetPos.add(offset); // 2 blocks from bot in the break direction
+                Vec3d throughVec = Vec3d.ofCenter(throughPos);
                 BlockPos before = bot.getBlockPos();
-                walkTowardBlock(bot, feetPos, 1_200L);
+                long traverseDeadline = System.currentTimeMillis() + 800L;
+                while (System.currentTimeMillis() < traverseDeadline) {
+                    if (!before.equals(bot.getBlockPos())) break; // moved — success
+                    LookController.faceBlock(bot, throughPos);
+                    BotActions.applyMovementInput(bot, throughVec, 0.28D);
+                    sleepQuiet(50);
+                }
                 sleepQuiet(100);
 
                 boolean moved = !before.equals(bot.getBlockPos());
@@ -3666,6 +3675,83 @@ public final class FortifyVillageSkill implements Skill {
                 if (result.success()) {
                     sidePlaced++;
                 }
+            }
+
+            // ── Step-onto-structure: extend reach by stepping onto adjacent solid blocks ──
+            int stepOnGained = 0;
+            List<ProceduralWallBlock> remaining = new ArrayList<>();
+            for (ProceduralWallBlock block : vertexBlocks) {
+                if (!isActiveFortifyBlock(block)) continue;
+                if (isPlannedBlockSatisfied(block, world.getBlockState(block.worldPos()))) continue;
+                remaining.add(block);
+            }
+            if (!remaining.isEmpty() && !SkillManager.shouldAbortSkill(bot)) {
+                BlockPos scaffoldReturn = bot.getBlockPos();
+                for (Direction dir : Direction.Type.HORIZONTAL) {
+                    if (SkillManager.shouldAbortSkill(bot)) break;
+                    if (remaining.isEmpty()) break;
+
+                    BlockPos stepTarget = scaffoldReturn.offset(dir);
+                    BlockState stepState = world.getBlockState(stepTarget);
+                    if (stepState.getCollisionShape(world, stepTarget).isEmpty()) continue;
+                    // Check headroom (2 blocks above step target)
+                    if (!world.getBlockState(stepTarget.up()).isAir()) continue;
+                    if (!world.getBlockState(stepTarget.up(2)).isAir()) continue;
+
+                    // Count new blocks reachable from step target but not from scaffold
+                    int newReachable = 0;
+                    Vec3d stepEye = Vec3d.ofCenter(stepTarget).add(0, 1.62, 0);
+                    for (ProceduralWallBlock b : remaining) {
+                        if (stepEye.squaredDistanceTo(Vec3d.ofCenter(b.worldPos())) <= REACH_DISTANCE_SQ) {
+                            newReachable++;
+                        }
+                    }
+                    if (newReachable == 0) continue;
+
+                    LOGGER.info("[FortifyTower] step-onto-structure dir={} newReachable={}", dir, newReachable);
+
+                    // Step onto the structure block (sneak is already held)
+                    Vec3d stepVec = Vec3d.ofCenter(stepTarget);
+                    BlockPos beforeStep = bot.getBlockPos();
+                    long stepDeadline = System.currentTimeMillis() + 600L;
+                    while (System.currentTimeMillis() < stepDeadline) {
+                        if (!beforeStep.equals(bot.getBlockPos())) break;
+                        LookController.faceBlock(bot, stepTarget);
+                        BotActions.applyMovementInput(bot, stepVec, 0.12D);
+                        sleepQuiet(50);
+                    }
+                    if (beforeStep.equals(bot.getBlockPos())) continue; // couldn't step
+
+                    // Place blocks from new position
+                    Iterator<ProceduralWallBlock> it = remaining.iterator();
+                    while (it.hasNext()) {
+                        ProceduralWallBlock b = it.next();
+                        if (SkillManager.shouldAbortSkill(bot)) break;
+                        if (!isWithinReach(bot, b.worldPos())) continue;
+                        LookController.faceBlock(bot, b.worldPos());
+                        sleepQuiet(BLOCK_PLACE_DELAY_MS);
+                        BotActions.PlaceResult placeResult = tryPlaceBlock(bot, world, b.worldPos(), b.state());
+                        if (placeResult.success()) {
+                            stepOnGained++;
+                            it.remove();
+                        }
+                    }
+
+                    // Return to scaffold position
+                    Vec3d returnVec = Vec3d.ofCenter(scaffoldReturn);
+                    long returnDeadline = System.currentTimeMillis() + 600L;
+                    while (System.currentTimeMillis() < returnDeadline) {
+                        if (bot.getBlockPos().equals(scaffoldReturn)) break;
+                        LookController.faceBlock(bot, scaffoldReturn);
+                        BotActions.applyMovementInput(bot, returnVec, 0.12D);
+                        sleepQuiet(50);
+                    }
+                    if (!bot.getBlockPos().equals(scaffoldReturn)) {
+                        LOGGER.warn("[FortifyTower] failed to return to scaffold at {}, currently at {}",
+                                scaffoldReturn.toShortString(), bot.getBlockPos().toShortString());
+                    }
+                }
+                sidePlaced += stepOnGained;
             }
 
             endScaffoldEdgeHold(bot, scaffoldSneak);
@@ -4736,12 +4822,14 @@ public final class FortifyVillageSkill implements Skill {
             }
         }
 
-        // Strategy 4: Scaffolding as LAST RESORT for elevated blocks still out of reach.
-        // Never scaffold on the first pass; let movement/jump/arc retries run first.
-        // Threshold lowered to verticalDiff >= 2: blocks 2+ above bot need scaffold to
-        // get line-of-sight for placement (lower wall layers block the view from ground).
+        // Strategy 4: Scaffolding for elevated blocks still out of reach.
+        // Two tiers: blocks 4+ above bot are clearly unreachable from ground (jumping
+        // only reaches +2.5), so scaffold immediately on any pass. For marginal cases
+        // (verticalDiff 2-3), wait until pass 2 to let movement/jump/arc retries run first.
         verticalDiff = target.getY() - bot.getBlockPos().getY(); // refresh after walking
-        if (passNumber >= 2 && verticalDiff >= 2 && heightAboveGround > 0 && heightAboveGround <= MAX_SCAFFOLD_HEIGHT) {
+        boolean shouldScaffold = (verticalDiff >= 4 && heightAboveGround > 0 && heightAboveGround <= MAX_SCAFFOLD_HEIGHT)
+                || (passNumber >= 2 && verticalDiff >= 2 && heightAboveGround > 0 && heightAboveGround <= MAX_SCAFFOLD_HEIGHT);
+        if (shouldScaffold) {
             BlockPos scaffoldBase = new BlockPos(target.getX(), bot.getBlockPos().getY(), target.getZ());
             boolean scaffoldBlacklisted = scaffoldFailedPositions != null
                     && scaffoldFailedPositions.contains(scaffoldBase);
