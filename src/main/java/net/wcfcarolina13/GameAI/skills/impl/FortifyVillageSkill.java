@@ -87,6 +87,7 @@ public final class FortifyVillageSkill implements Skill {
     private static final int EDGE_SEGMENT_NO_PROGRESS_STOP = 2;
     private static final int EDGE_SEGMENT_PASS_CAP = 2;
     private static final int MAX_REPOSITION_ATTEMPTS_PER_BATCH = 6;
+    private static final int MAX_BREAK_THROUGHS_PER_WALK = 3;
     private static final int PERIMETER_VERTEX_SKIP = 3;
     private static final int PERIMETER_WALK_SEARCH_RADIUS = 2;
     private static final int MIN_APPROACH_OPEN_EXITS = 2;
@@ -2951,7 +2952,7 @@ public final class FortifyVillageSkill implements Skill {
 
         BlockPos approachPos = new BlockPos(approachX, approachY, approachZ);
         double distSq = bot.squaredDistanceTo(approachX + 0.5, bot.getY(), approachZ + 0.5);
-        if (distSq > 400.0D) { // > 20 blocks away — use proper pathfinding
+        if (distSq > 144.0D) { // > 12 blocks away — use proper pathfinding
             Optional<MovementService.MovementPlan> plan = MovementService.planLootApproach(
                     bot, approachPos, MovementService.MovementOptions.skillLoot());
             if (plan.isPresent() && !SkillManager.shouldAbortSkill(bot)) {
@@ -2961,15 +2962,26 @@ public final class FortifyVillageSkill implements Skill {
                 MovementService.withoutDoorEscape(() ->
                         MovementService.withoutObstructionMining(
                                 () -> MovementService.execute(source, bot, plan.get(), null)));
-                // If still far from approach after pathfinding, try breaking through an obstacle
-                double postNavDistSq = bot.squaredDistanceTo(approachX + 0.5, bot.getY(), approachZ + 0.5);
-                if (postNavDistSq > 25.0D) { // > 5 blocks away still
-                    tryBreakThroughObstacle(bot, world, approachPos);
-                }
-                return; // MovementService already navigated; skip the short-range walkToTarget
             }
+        } else {
+            walkToTarget(source, bot, approachPos, 8_000L);
         }
-        walkToTarget(source, bot, approachPos, 8_000L);
+
+        // Check post-nav distance and attempt recovery if still far
+        double postDistSq = bot.squaredDistanceTo(approachX + 0.5, bot.getY(), approachZ + 0.5);
+        if (postDistSq > 25.0D) { // > 5 blocks away — try breaking through
+            tryBreakThroughObstacle(bot, world, approachPos);
+            postDistSq = bot.squaredDistanceTo(approachX + 0.5, bot.getY(), approachZ + 0.5);
+        }
+        if (postDistSq > 25.0D) { // still far — wider-arc approach
+            int wideX = (int) Math.round(refX + nx * 7);
+            int wideZ = (int) Math.round(refZ + nz * 7);
+            int wideY = safeSurfaceY(surfaceProfile, world, wideX, wideZ);
+            BlockPos widePos = new BlockPos(wideX, wideY, wideZ);
+            LOGGER.info("[FortifyEdge] wider-arc retry via {}", widePos.toShortString());
+            walkToTarget(source, bot, widePos, 6_000L);
+            walkToTarget(source, bot, approachPos, 6_000L);
+        }
     }
 
     /**
@@ -4829,7 +4841,7 @@ public final class FortifyVillageSkill implements Skill {
         double lastDistSq = distSq;
         int stuckTicks = 0;
         boolean scaffoldHold = false;
-        boolean breakThroughAttempted = false;
+        int breakThroughCount = 0;
         try {
             while (System.currentTimeMillis() < deadline) {
                 if (abortFortifyPhase(bot, "walkToTarget", phaseStartMs)) return;
@@ -4837,21 +4849,40 @@ public final class FortifyVillageSkill implements Skill {
                 double currentDistSq = bot.squaredDistanceTo(targetVec);
                 if (currentDistSq < 9.0) return; // close enough
 
-                // Stuck detection: if we haven't moved significantly in 15 ticks (~0.75s), bail
+                // Stuck detection: if we haven't moved significantly in 10 ticks (~0.5s), try recovery
                 if (Math.abs(currentDistSq - lastDistSq) < 0.5) {
                     stuckTicks++;
-                    if (stuckTicks > 15) {
-                        // Try a brief jump to unstick
+                    if (stuckTicks > 10) {
                         BotActions.jump(bot);
                         sleepQuiet(100);
-                        // Last resort: try breaking through one blocking block (max once per walk)
-                        if (!breakThroughAttempted) {
-                            breakThroughAttempted = true;
+                        // Try breaking through obstacle (up to MAX_BREAK_THROUGHS_PER_WALK times)
+                        if (breakThroughCount < MAX_BREAK_THROUGHS_PER_WALK) {
                             ServerWorld w = (ServerWorld) bot.getEntityWorld();
                             if (tryBreakThroughObstacle(bot, w, target)) {
+                                breakThroughCount++;
                                 stuckTicks = 0;
                                 lastDistSq = bot.squaredDistanceTo(targetVec);
-                                continue; // reset and keep walking
+                                continue;
+                            }
+                        }
+                        // Lateral sidestep: move perpendicular to target direction
+                        double toTargetX = targetVec.x - bot.getX();
+                        double toTargetZ = targetVec.z - bot.getZ();
+                        double len = Math.sqrt(toTargetX * toTargetX + toTargetZ * toTargetZ);
+                        if (len > 0.01) {
+                            double perpX = -toTargetZ / len;
+                            double perpZ = toTargetX / len;
+                            // Alternate sides each stuck episode
+                            if (breakThroughCount % 2 == 1) { perpX = -perpX; perpZ = -perpZ; }
+                            BlockPos sideStep = bot.getBlockPos().add(
+                                    (int) Math.round(perpX * 4), 0, (int) Math.round(perpZ * 4));
+                            BlockPos before = bot.getBlockPos();
+                            LOGGER.debug("[FortifyNav] lateral sidestep to {}", sideStep.toShortString());
+                            walkTowardBlock(bot, sideStep, 1_500L);
+                            if (!before.equals(bot.getBlockPos())) {
+                                stuckTicks = 0;
+                                lastDistSq = bot.squaredDistanceTo(targetVec);
+                                continue; // moved laterally, retry toward target
                             }
                         }
                         LOGGER.debug("Walk to {} stuck after {} ticks, giving up", target.toShortString(), stuckTicks);
