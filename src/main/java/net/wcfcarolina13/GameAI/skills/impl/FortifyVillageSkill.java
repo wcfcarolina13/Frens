@@ -2809,18 +2809,15 @@ public final class FortifyVillageSkill implements Skill {
                     }
                 }
 
-                // Walk through the gap — use direct impulse toward a point PAST the gap
-                // (walkTowardBlock bails at distSq < 6.0, but feetPos is only 1 block away)
-                BlockPos throughPos = feetPos.add(offset); // 2 blocks from bot in the break direction
-                Vec3d throughVec = Vec3d.ofCenter(throughPos);
+                // Walk through the gap toward a point 4 blocks past the bot in the break direction.
+                // walkTowardBlock bails at distSq < 6.0, so feetPos (1 block) is too close.
+                // 4 blocks gives distSq >= 16 which reliably runs the walk loop.
+                BlockPos walkTarget = new BlockPos(
+                        botPos.getX() + offset.getX() * 4,
+                        botPos.getY(),
+                        botPos.getZ() + offset.getZ() * 4);
                 BlockPos before = bot.getBlockPos();
-                long traverseDeadline = System.currentTimeMillis() + 800L;
-                while (System.currentTimeMillis() < traverseDeadline) {
-                    if (!before.equals(bot.getBlockPos())) break; // moved — success
-                    LookController.faceBlock(bot, throughPos);
-                    BotActions.applyMovementInput(bot, throughVec, 0.28D);
-                    sleepQuiet(50);
-                }
+                walkTowardBlock(bot, walkTarget, 1_200L);
                 sleepQuiet(100);
 
                 boolean moved = !before.equals(bot.getBlockPos());
@@ -3600,8 +3597,10 @@ public final class FortifyVillageSkill implements Skill {
             return 0;
         }
 
-        // Optimal scaffold Y: puts bot eye level near the upper blocks
-        int optimalY = maxTargetY - 1;
+        // Optimal scaffold Y: puts bot feet at the highest target block level.
+        // This allows stepping onto placed wall blocks at that height, and the
+        // bot's eye (Y+1.62) has downward reach to all lower blocks.
+        int optimalY = maxTargetY;
         int groundY = safeSurfaceY(surfaceProfile, world, vertex.x(), vertex.z());
         if (optimalY <= groundY) {
             return 0; // no benefit from scaffolding
@@ -3710,16 +3709,12 @@ public final class FortifyVillageSkill implements Skill {
 
                     LOGGER.info("[FortifyTower] step-onto-structure dir={} newReachable={}", dir, newReachable);
 
-                    // Step onto the structure block (sneak is already held)
-                    Vec3d stepVec = Vec3d.ofCenter(stepTarget);
+                    // Step onto the structure block (sneak is already held).
+                    // walkTowardBlock bails at distSq<6.0 for adjacent blocks, so walk
+                    // toward a point 4 blocks in the step direction to get sufficient distance.
+                    BlockPos stepWalkTarget = scaffoldReturn.offset(dir, 4);
                     BlockPos beforeStep = bot.getBlockPos();
-                    long stepDeadline = System.currentTimeMillis() + 600L;
-                    while (System.currentTimeMillis() < stepDeadline) {
-                        if (!beforeStep.equals(bot.getBlockPos())) break;
-                        LookController.faceBlock(bot, stepTarget);
-                        BotActions.applyMovementInput(bot, stepVec, 0.12D);
-                        sleepQuiet(50);
-                    }
+                    walkTowardBlock(bot, stepWalkTarget, 600L);
                     if (beforeStep.equals(bot.getBlockPos())) continue; // couldn't step
 
                     // Place blocks from new position
@@ -3737,15 +3732,10 @@ public final class FortifyVillageSkill implements Skill {
                         }
                     }
 
-                    // Return to scaffold position
-                    Vec3d returnVec = Vec3d.ofCenter(scaffoldReturn);
-                    long returnDeadline = System.currentTimeMillis() + 600L;
-                    while (System.currentTimeMillis() < returnDeadline) {
-                        if (bot.getBlockPos().equals(scaffoldReturn)) break;
-                        LookController.faceBlock(bot, scaffoldReturn);
-                        BotActions.applyMovementInput(bot, returnVec, 0.12D);
-                        sleepQuiet(50);
-                    }
+                    // Return to scaffold position — walk toward a point 4 blocks
+                    // past scaffold in the opposite direction to ensure walkTowardBlock runs
+                    BlockPos returnWalkTarget = scaffoldReturn.offset(dir.getOpposite(), 4);
+                    walkTowardBlock(bot, returnWalkTarget, 600L);
                     if (!bot.getBlockPos().equals(scaffoldReturn)) {
                         LOGGER.warn("[FortifyTower] failed to return to scaffold at {}, currently at {}",
                                 scaffoldReturn.toShortString(), bot.getBlockPos().toShortString());
@@ -3774,8 +3764,9 @@ public final class FortifyVillageSkill implements Skill {
 
     /**
      * Pick a scaffold position near a tower vertex. Tries cardinal directions at
-     * distances 2, 3, 4 blocks out, then diagonals. Each "side index" corresponds to
-     * a direction so we don't retry the same direction.
+     * distances 1, 2, 3, 4 blocks out, then diagonals. Distance 1 is preferred
+     * because it places the scaffold adjacent to the tower structure, enabling
+     * step-onto-structure placement for far-side blocks.
      */
     private BlockPos chooseTowerScaffoldPos(ServerWorld world, WallPoint vertex,
                                             SurfaceProfile surfaceProfile,
@@ -3785,8 +3776,8 @@ public final class FortifyVillageSkill implements Skill {
                 {1, 0}, {-1, 0}, {0, 1}, {0, -1},  // cardinal (indices 0-3)
                 {1, 1}, {1, -1}, {-1, 1}, {-1, -1}  // diagonal (indices 4-7)
         };
-        // Try increasing distances: 2, 3, 4 blocks out
-        for (int dist = 2; dist <= 4; dist++) {
+        // Try increasing distances: 1, 2, 3, 4 blocks out (prefer closest)
+        for (int dist = 1; dist <= 4; dist++) {
             for (int i = 0; i < directions.length; i++) {
                 // Encode side as (direction_index * 10 + dist) for uniqueness
                 int sideKey = i * 10 + dist;
