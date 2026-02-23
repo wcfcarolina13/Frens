@@ -77,6 +77,10 @@ public class BotControlScreen extends Screen {
     private boolean draggingScroll;              // scrollbar thumb drag active
     private int scrollGrabOffset;                // mouse Y offset within thumb
 
+    // ── Non-panel widgets (re-rendered outside scissor) ─────────────
+    private ButtonWidget saveButton;
+    private ButtonWidget closeButton;
+
     // ── Owner/helper text for current alias ─────────────────────────────
     private String subtitleText = "";
     private String helperText = "";
@@ -161,7 +165,7 @@ public class BotControlScreen extends Screen {
         // ── Save / Close ────────────────────────────────────────────────
         int btnW = 70;
         int btnGap = 10;
-        ButtonWidget saveButton = ButtonWidget.builder(Text.of("Save"), button -> {
+        saveButton = ButtonWidget.builder(Text.of("Save"), button -> {
             saveSettings();
             if (this.client != null) {
                 this.client.getToastManager().add(SystemToast.create(this.client,
@@ -172,7 +176,7 @@ public class BotControlScreen extends Screen {
         }).dimensions(cx - btnW - btnGap / 2, this.height - 30, btnW, BUTTON_H).build();
         this.addDrawableChild(saveButton);
 
-        ButtonWidget closeButton = ButtonWidget.builder(Text.of("Close"), button -> close())
+        closeButton = ButtonWidget.builder(Text.of("Close"), button -> close())
                 .dimensions(cx + btnGap / 2, this.height - 30, btnW, BUTTON_H).build();
         this.addDrawableChild(closeButton);
     }
@@ -278,9 +282,11 @@ public class BotControlScreen extends Screen {
         settingGroups.add(new SettingGroup("LLM", llm));
     }
 
-    /** Create a compact ON/OFF toggle (no label baked into button text). */
+    /** Create a compact ON/OFF toggle showing just "ON" or "OFF". */
     private SettingEntry makeOnOff(String label, String desc, boolean value, int w) {
-        CyclingButtonWidget<Boolean> btn = CyclingButtonWidget.onOffBuilder(value)
+        CyclingButtonWidget<Boolean> btn = CyclingButtonWidget.<Boolean>builder(
+                        v -> Text.of(v ? "ON" : "OFF"), () -> value)
+                .values(List.of(Boolean.TRUE, Boolean.FALSE))
                 .build(0, 0, w, BUTTON_H, Text.empty(), (b, v) -> {});
         this.addDrawableChild(btn);
         settingWidgets.add(btn);
@@ -358,11 +364,22 @@ public class BotControlScreen extends Screen {
                     lx + 2, subY, COL_HELPER, false);
         }
 
-        // ── Settings panel (dark bordered box) ──────────────────────────
+        // ── Settings panel (dark bordered box + text + scrollbar) ────────
         renderSettingsPanel(context, lx, contentW, mouseX, mouseY);
 
-        // All widgets (global toggles, dropdown, setting buttons, save/close)
+        // ── Render all widgets clipped to the panel ─────────────────────
+        // This makes setting buttons slide smoothly under the panel edge
+        // instead of vanishing abruptly.
+        context.enableScissor(panelX, panelY, panelX + panelW, panelY + panelH);
         super.render(context, mouseX, mouseY, delta);
+        context.disableScissor();
+
+        // ── Re-render non-panel widgets outside scissor ─────────────────
+        worldToggle.render(context, mouseX, mouseY, delta);
+        survivalRecruitmentToggle.render(context, mouseX, mouseY, delta);
+        aliasDropdown.render(context, mouseX, mouseY, delta);
+        saveButton.render(context, mouseX, mouseY, delta);
+        closeButton.render(context, mouseX, mouseY, delta);
 
         // Dropdown on top when open (z-order fix)
         if (aliasDropdown.isOpen()) {
@@ -405,32 +422,35 @@ public class BotControlScreen extends Screen {
                     innerR, lineY + 1, COL_SEC_LINE);
             currentY += SECTION_H;
 
-            for (SettingEntry entry : group.entries) {
-                // Widget visible only if entire button fits inside clip region
+            for (int ei = 0; ei < group.entries.size(); ei++) {
+                SettingEntry entry = group.entries.get(ei);
                 int btnY = currentY + 4;
-                boolean textVisible = currentY + ROW_H > clipT && currentY < clipB;
-                boolean btnVisible = btnY >= clipT && btnY + BUTTON_H <= clipB;
 
-                if (textVisible) {
-                    // Label (near-white, left)
-                    context.drawText(this.textRenderer, entry.label,
-                            innerL + 2, currentY + 4, COL_LABEL, false);
-                    // Description (muted gray, truncated to avoid button)
-                    int descMaxW = innerW - entry.widgetW - SCROLLBAR_W - 12;
-                    String desc = entry.desc;
-                    if (this.textRenderer.getWidth(desc) > descMaxW) {
-                        desc = this.textRenderer.trimToWidth(desc, descMaxW - 6) + "..";
-                    }
-                    context.drawText(this.textRenderer, desc,
-                            innerL + 2,
-                            currentY + 4 + this.textRenderer.fontHeight + 2,
-                            COL_DESC, false);
+                // Row separator (subtle line between rows, not before the first)
+                if (ei > 0) {
+                    context.fill(innerL, currentY, innerR - SCROLLBAR_W - 2,
+                            currentY + 1, 0x20FFFFFF);
                 }
 
+                // Label (near-white, left)
+                context.drawText(this.textRenderer, entry.label,
+                        innerL + 2, currentY + 4, COL_LABEL, false);
+                // Description (muted gray, truncated to avoid button)
+                int descMaxW = innerW - entry.widgetW - SCROLLBAR_W - 12;
+                String desc = entry.desc;
+                if (this.textRenderer.getWidth(desc) > descMaxW) {
+                    desc = this.textRenderer.trimToWidth(desc, descMaxW - 6) + "..";
+                }
+                context.drawText(this.textRenderer, desc,
+                        innerL + 2,
+                        currentY + 4 + this.textRenderer.fontHeight + 2,
+                        COL_DESC, false);
+
                 // Position button right-aligned, leaving room for scrollbar
+                // (always visible — scissor in render() handles clipping)
                 entry.widget.setX(innerR - entry.widgetW - SCROLLBAR_W - 2);
                 entry.widget.setY(btnY);
-                entry.widget.visible = btnVisible;
+                entry.widget.visible = true;
 
                 currentY += ROW_H;
             }
