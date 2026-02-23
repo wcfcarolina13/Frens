@@ -2973,10 +2973,12 @@ public final class FortifyVillageSkill implements Skill {
             walkToTarget(source, bot, approachPos, 8_000L);
         }
 
-        // Check post-nav distance and attempt recovery if still far
+        // After long-range pathfinding, the bot is often near but not adjacent to the wall.
+        // walkToTarget closes the remaining gap with tick-by-tick movement and has built-in
+        // stuck detection that triggers break-through when the bot hits the wall.
         double postDistSq = bot.squaredDistanceTo(approachX + 0.5, bot.getY(), approachZ + 0.5);
-        if (postDistSq > 25.0D) { // > 5 blocks away — try breaking through
-            tryBreakThroughObstacle(bot, world, approachPos);
+        if (postDistSq > 9.0D) { // > 3 blocks — walkToTarget will close the gap
+            walkToTarget(source, bot, approachPos, 8_000L);
             postDistSq = bot.squaredDistanceTo(approachX + 0.5, bot.getY(), approachZ + 0.5);
         }
         if (postDistSq > 25.0D) { // still far — wider-arc approach
@@ -3450,6 +3452,11 @@ public final class FortifyVillageSkill implements Skill {
                     MovementService.withoutDoorEscape(() ->
                             MovementService.withoutObstructionMining(
                                     () -> MovementService.execute(source, bot, plan.get(), null)));
+                }
+                // walkToTarget closes any remaining gap with built-in break-through
+                double postDistSq = bot.squaredDistanceTo(towerApproach.getX() + 0.5, bot.getY(), towerApproach.getZ() + 0.5);
+                if (postDistSq > 9.0D && !SkillManager.shouldAbortSkill(bot)) {
+                    walkToTarget(source, bot, towerApproach, 6_000L);
                 }
             }
         }
