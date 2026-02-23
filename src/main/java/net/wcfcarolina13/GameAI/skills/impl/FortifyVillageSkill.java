@@ -3102,22 +3102,31 @@ public final class FortifyVillageSkill implements Skill {
             return false;
         }
 
-        LOGGER.info("[FortifyGate] Bot inside hull at ({},{}). Routing through gatehouse edge {} " +
-                        "gateCenter={} exit={}",
-                botX, botZ, gateEdgeIdx, gateCenterPos.toShortString(), exitPos.toShortString());
+        // Interior approach: 3 blocks INWARD from gate center (no moat on interior side).
+        // This ensures the bot arrives at surface level where the gate gap is walkable,
+        // rather than at moat level where wall foundations block the path.
+        int interiorX = (int) Math.round(gateCenter.x() - nx * 3);
+        int interiorZ = (int) Math.round(gateCenter.z() - nz * 3);
+        int interiorY = safeSurfaceY(surfaceProfile, world, interiorX, interiorZ);
+        BlockPos interiorPos = new BlockPos(interiorX, interiorY, interiorZ);
 
-        // Step 1: Navigate to gate center via multi-hop (may be 80+ blocks away inside the hull).
-        // Repeat pathfind+walk cycles until close or stuck.
+        LOGGER.info("[FortifyGate] Bot inside hull at ({},{}). Routing through gatehouse edge {} " +
+                        "interior={} gateCenter={} exit={}",
+                botX, botZ, gateEdgeIdx, interiorPos.toShortString(),
+                gateCenterPos.toShortString(), exitPos.toShortString());
+
+        // Step 1: Navigate to interior approach point via multi-hop (may be 80+ blocks away).
+        // This point is inside the hull, no moat, at surface level — safe for pathfinding.
         for (int hop = 0; hop < 3; hop++) {
             if (SkillManager.shouldAbortSkill(bot)) return false;
-            double distToGateSq = bot.squaredDistanceTo(
-                    gateCenter.x() + 0.5, bot.getY(), gateCenter.z() + 0.5);
-            if (distToGateSq <= 25.0D) break; // within 5 blocks — close enough
+            double distSq = bot.squaredDistanceTo(
+                    interiorX + 0.5, bot.getY(), interiorZ + 0.5);
+            if (distSq <= 25.0D) break; // within 5 blocks — close enough
 
-            LOGGER.info("[FortifyGate] hop {} to gate center, dist={}", hop + 1,
-                    String.format("%.0f", Math.sqrt(distToGateSq)));
+            LOGGER.info("[FortifyGate] hop {} to interior approach, dist={}", hop + 1,
+                    String.format("%.0f", Math.sqrt(distSq)));
             Optional<MovementService.MovementPlan> plan = MovementService.planLootApproach(
-                    bot, gateCenterPos, MovementService.MovementOptions.skillLoot());
+                    bot, interiorPos, MovementService.MovementOptions.skillLoot());
             if (plan.isPresent() && !SkillManager.shouldAbortSkill(bot)) {
                 MovementService.withoutDoorEscape(() ->
                         MovementService.withoutObstructionMining(
@@ -3127,15 +3136,15 @@ public final class FortifyVillageSkill implements Skill {
 
             // Close remaining gap with tick-by-tick walk
             double postDist = bot.squaredDistanceTo(
-                    gateCenter.x() + 0.5, bot.getY(), gateCenter.z() + 0.5);
+                    interiorX + 0.5, bot.getY(), interiorZ + 0.5);
             if (postDist > 9.0D) {
-                walkToTarget(source, bot, gateCenterPos, 12_000L);
+                walkToTarget(source, bot, interiorPos, 12_000L);
             }
 
             // Check if we made progress; if not, no point retrying
             double newDistSq = bot.squaredDistanceTo(
-                    gateCenter.x() + 0.5, bot.getY(), gateCenter.z() + 0.5);
-            if (newDistSq >= distToGateSq - 4.0D) {
+                    interiorX + 0.5, bot.getY(), interiorZ + 0.5);
+            if (newDistSq >= distSq - 4.0D) {
                 LOGGER.info("[FortifyGate] hop {} made no progress (dist still {}), stopping hops",
                         hop + 1, String.format("%.0f", Math.sqrt(newDistSq)));
                 break;
@@ -3143,26 +3152,31 @@ public final class FortifyVillageSkill implements Skill {
         }
         if (SkillManager.shouldAbortSkill(bot)) return false;
 
-        // Final close-range approach to gate center
-        double finalDistToGate = bot.squaredDistanceTo(
-                gateCenter.x() + 0.5, bot.getY(), gateCenter.z() + 0.5);
-        if (finalDistToGate > 9.0D) {
-            walkToTarget(source, bot, gateCenterPos, 10_000L);
+        // Final close-range approach to interior point
+        double finalDistToInterior = bot.squaredDistanceTo(
+                interiorX + 0.5, bot.getY(), interiorZ + 0.5);
+        if (finalDistToInterior > 9.0D) {
+            walkToTarget(source, bot, interiorPos, 10_000L);
         }
         if (SkillManager.shouldAbortSkill(bot)) return false;
 
-        // Bail if still far from gate — something is blocking the interior path
-        finalDistToGate = bot.squaredDistanceTo(
-                gateCenter.x() + 0.5, bot.getY(), gateCenter.z() + 0.5);
-        if (finalDistToGate > 100.0D) { // > 10 blocks
-            LOGGER.warn("[FortifyGate] Could not reach gate center (dist={}). Giving up.",
-                    String.format("%.0f", Math.sqrt(finalDistToGate)));
+        // Bail if still far — something is blocking the interior path
+        finalDistToInterior = bot.squaredDistanceTo(
+                interiorX + 0.5, bot.getY(), interiorZ + 0.5);
+        if (finalDistToInterior > 100.0D) { // > 10 blocks
+            LOGGER.warn("[FortifyGate] Could not reach interior approach (dist={}). Giving up.",
+                    String.format("%.0f", Math.sqrt(finalDistToInterior)));
             return false;
         }
 
-        // Step 2: Walk through gate to exit position
-        LOGGER.info("[FortifyGate] Near gate center (dist={}). Walking through gate to exit={}",
-                String.format("%.1f", Math.sqrt(finalDistToGate)), exitPos.toShortString());
+        // Step 2: Walk to gate center (1-3 blocks from interior, through the gap opening)
+        LOGGER.info("[FortifyGate] At interior (dist={}). Walking to gate center={}",
+                String.format("%.1f", Math.sqrt(finalDistToInterior)), gateCenterPos.toShortString());
+        walkToTarget(source, bot, gateCenterPos, 8_000L);
+        if (SkillManager.shouldAbortSkill(bot)) return false;
+
+        // Step 3: Walk through gate to exit position (across the moat bridge)
+        LOGGER.info("[FortifyGate] Walking through gate to exit={}", exitPos.toShortString());
         walkToTarget(source, bot, exitPos, 12_000L);
 
         // Verify we made it outside
@@ -3170,10 +3184,10 @@ public final class FortifyVillageSkill implements Skill {
         int newBotZ = bot.getBlockPos().getZ();
         boolean stillInside = VillageFortificationLayoutService.pointInConvexHull(hull, newBotX, newBotZ);
         if (stillInside) {
-            // Retry: walk a few more blocks along the normal to clear the hull boundary
+            // Retry: walk further along the normal to clear the hull boundary
             LOGGER.info("[FortifyGate] Still inside at ({},{}), extending walk along normal", newBotX, newBotZ);
-            int extX = (int) Math.round(newBotX + nx * 8);
-            int extZ = (int) Math.round(newBotZ + nz * 8);
+            int extX = (int) Math.round(newBotX + nx * 10);
+            int extZ = (int) Math.round(newBotZ + nz * 10);
             int extY = safeSurfaceY(surfaceProfile, world, extX, extZ);
             walkToTarget(source, bot, new BlockPos(extX, extY, extZ), 10_000L);
 
