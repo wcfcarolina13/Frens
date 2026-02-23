@@ -2840,6 +2840,8 @@ public final class FortifyVillageSkill implements Skill {
             }
         }
 
+        LOGGER.info("[FortifyNav] Break-through found no viable candidates at {} toward {}",
+                botPos.toShortString(), target.toShortString());
         return false;
     }
 
@@ -4936,7 +4938,7 @@ public final class FortifyVillageSkill implements Skill {
 
         long deadline = System.currentTimeMillis() + timeoutMs;
         long phaseStartMs = System.currentTimeMillis();
-        double lastDistSq = distSq;
+        BlockPos lastBlockPos = bot.getBlockPos();
         int stuckTicks = 0;
         boolean scaffoldHold = false;
         int breakThroughCount = 0;
@@ -4947,48 +4949,51 @@ public final class FortifyVillageSkill implements Skill {
                 double currentDistSq = bot.squaredDistanceTo(targetVec);
                 if (currentDistSq < 9.0) return; // close enough
 
-                // Stuck detection: if we haven't moved significantly in 10 ticks (~0.5s), try recovery
-                if (Math.abs(currentDistSq - lastDistSq) < 0.5) {
+                // Stuck detection: BlockPos-based — immune to floating-point oscillation
+                // when the bot bounces off walls. If the bot's block position hasn't
+                // changed in 10 ticks (~0.5s), it's stuck.
+                BlockPos currentBlockPos = bot.getBlockPos();
+                if (currentBlockPos.equals(lastBlockPos)) {
                     stuckTicks++;
-                    if (stuckTicks > 10) {
-                        BotActions.jump(bot);
-                        sleepQuiet(100);
-                        // Try breaking through obstacle (up to MAX_BREAK_THROUGHS_PER_WALK times)
-                        if (breakThroughCount < MAX_BREAK_THROUGHS_PER_WALK) {
-                            ServerWorld w = (ServerWorld) bot.getEntityWorld();
-                            if (tryBreakThroughObstacle(bot, w, target)) {
-                                breakThroughCount++;
-                                stuckTicks = 0;
-                                lastDistSq = bot.squaredDistanceTo(targetVec);
-                                continue;
-                            }
-                        }
-                        // Lateral sidestep: move perpendicular to target direction
-                        double toTargetX = targetVec.x - bot.getX();
-                        double toTargetZ = targetVec.z - bot.getZ();
-                        double len = Math.sqrt(toTargetX * toTargetX + toTargetZ * toTargetZ);
-                        if (len > 0.01) {
-                            double perpX = -toTargetZ / len;
-                            double perpZ = toTargetX / len;
-                            // Alternate sides each stuck episode
-                            if (breakThroughCount % 2 == 1) { perpX = -perpX; perpZ = -perpZ; }
-                            BlockPos sideStep = bot.getBlockPos().add(
-                                    (int) Math.round(perpX * 4), 0, (int) Math.round(perpZ * 4));
-                            BlockPos before = bot.getBlockPos();
-                            LOGGER.debug("[FortifyNav] lateral sidestep to {}", sideStep.toShortString());
-                            walkTowardBlock(bot, sideStep, 1_500L);
-                            if (!before.equals(bot.getBlockPos())) {
-                                stuckTicks = 0;
-                                lastDistSq = bot.squaredDistanceTo(targetVec);
-                                continue; // moved laterally, retry toward target
-                            }
-                        }
-                        LOGGER.debug("Walk to {} stuck after {} ticks, giving up", target.toShortString(), stuckTicks);
-                        return;
-                    }
                 } else {
                     stuckTicks = 0;
-                    lastDistSq = currentDistSq;
+                    lastBlockPos = currentBlockPos;
+                }
+                if (stuckTicks > 10) {
+                    BotActions.jump(bot);
+                    sleepQuiet(100);
+                    // Try breaking through obstacle (up to MAX_BREAK_THROUGHS_PER_WALK times)
+                    if (breakThroughCount < MAX_BREAK_THROUGHS_PER_WALK) {
+                        ServerWorld w = (ServerWorld) bot.getEntityWorld();
+                        if (tryBreakThroughObstacle(bot, w, target)) {
+                            breakThroughCount++;
+                            stuckTicks = 0;
+                            lastBlockPos = bot.getBlockPos();
+                            continue;
+                        }
+                    }
+                    // Lateral sidestep: move perpendicular to target direction
+                    double toTargetX = targetVec.x - bot.getX();
+                    double toTargetZ = targetVec.z - bot.getZ();
+                    double len = Math.sqrt(toTargetX * toTargetX + toTargetZ * toTargetZ);
+                    if (len > 0.01) {
+                        double perpX = -toTargetZ / len;
+                        double perpZ = toTargetX / len;
+                        // Alternate sides each stuck episode
+                        if (breakThroughCount % 2 == 1) { perpX = -perpX; perpZ = -perpZ; }
+                        BlockPos sideStep = bot.getBlockPos().add(
+                                (int) Math.round(perpX * 4), 0, (int) Math.round(perpZ * 4));
+                        BlockPos before = bot.getBlockPos();
+                        LOGGER.debug("[FortifyNav] lateral sidestep to {}", sideStep.toShortString());
+                        walkTowardBlock(bot, sideStep, 1_500L);
+                        if (!before.equals(bot.getBlockPos())) {
+                            stuckTicks = 0;
+                            lastBlockPos = bot.getBlockPos();
+                            continue; // moved laterally, retry toward target
+                        }
+                    }
+                    LOGGER.debug("Walk to {} stuck after {} ticks, giving up", target.toShortString(), stuckTicks);
+                    return;
                 }
 
                 ServerWorld world = (ServerWorld) bot.getEntityWorld();
