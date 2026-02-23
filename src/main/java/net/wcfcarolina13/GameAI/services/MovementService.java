@@ -1095,7 +1095,9 @@ public final class MovementService {
         LOGGER.debug("walkSegment timed out near {} remainingDist={}", segment.end(), remaining);
         BotActions.stop(player);
         // Force a small snap forward when very close to planned segment end to avoid infinite loop.
-        if (allowSnap && remaining <= 2.2D) {
+        // Gated behind the per-bot teleport preference so bots with teleport disabled
+        // never snap through walls/obstacles.
+        if (allowSnap && remaining <= 2.2D && SkillPreferences.teleportDuringSkills(player)) {
             LOGGER.warn("walkSegment snap forward to {}", segment.end());
             snapTo(player, segment.end());
             return new SegmentResult(true, true);

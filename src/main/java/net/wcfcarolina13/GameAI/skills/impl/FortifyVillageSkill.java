@@ -3709,12 +3709,19 @@ public final class FortifyVillageSkill implements Skill {
 
                     LOGGER.info("[FortifyTower] step-onto-structure dir={} newReachable={}", dir, newReachable);
 
-                    // Step onto the structure block (sneak is already held).
-                    // walkTowardBlock bails at distSq<6.0 for adjacent blocks, so walk
-                    // toward a point 4 blocks in the step direction to get sufficient distance.
-                    BlockPos stepWalkTarget = scaffoldReturn.offset(dir, 4);
+                    // Step onto the structure block using slow direct impulse (sneak is held).
+                    // DO NOT use walkTowardBlock here — it runs at full speed (0.28D) and
+                    // walks the bot right off the scaffold. Direct impulse at 0.12D is
+                    // slow enough for the sneaking bot to stop at the edge of the block.
+                    Vec3d stepVec = Vec3d.ofCenter(stepTarget);
                     BlockPos beforeStep = bot.getBlockPos();
-                    walkTowardBlock(bot, stepWalkTarget, 600L);
+                    long stepDeadline = System.currentTimeMillis() + 800L;
+                    while (System.currentTimeMillis() < stepDeadline) {
+                        if (!beforeStep.equals(bot.getBlockPos())) break;
+                        LookController.faceBlock(bot, stepTarget);
+                        BotActions.applyMovementInput(bot, stepVec, 0.12D);
+                        sleepQuiet(50);
+                    }
                     if (beforeStep.equals(bot.getBlockPos())) continue; // couldn't step
 
                     // Place blocks from new position
@@ -3732,10 +3739,15 @@ public final class FortifyVillageSkill implements Skill {
                         }
                     }
 
-                    // Return to scaffold position — walk toward a point 4 blocks
-                    // past scaffold in the opposite direction to ensure walkTowardBlock runs
-                    BlockPos returnWalkTarget = scaffoldReturn.offset(dir.getOpposite(), 4);
-                    walkTowardBlock(bot, returnWalkTarget, 600L);
+                    // Return to scaffold position using slow direct impulse
+                    Vec3d returnVec = Vec3d.ofCenter(scaffoldReturn);
+                    long returnDeadline = System.currentTimeMillis() + 800L;
+                    while (System.currentTimeMillis() < returnDeadline) {
+                        if (bot.getBlockPos().equals(scaffoldReturn)) break;
+                        LookController.faceBlock(bot, scaffoldReturn);
+                        BotActions.applyMovementInput(bot, returnVec, 0.12D);
+                        sleepQuiet(50);
+                    }
                     if (!bot.getBlockPos().equals(scaffoldReturn)) {
                         LOGGER.warn("[FortifyTower] failed to return to scaffold at {}, currently at {}",
                                 scaffoldReturn.toShortString(), bot.getBlockPos().toShortString());
