@@ -4,6 +4,7 @@ Historical record and reasoning. `TODO.md` is the source of truth for what’s n
 
 ## 2026-02-22
 - **Bot Controls UI refactor**: Replaced flat all-bots-at-once grid layout with single-bot view. Dropdown selector picks an alias; settings shown vertically in labelled groups (Spawning, Behavior, LLM) with descriptions. Added 8th setting `voicedDialogue` (was missing from old UI). Edits buffered per-alias so switching bots doesn’t lose unsaved changes. Added `isOpen()` and `renderOnTop()` to `DropdownMenuWidget` for z-order/input priority.
+- **Bot Controls shortcut in Admin tab**: Added "Bot Controls >" entry to the Admin tab in `BotPlayerInventoryScreen`, opens the new single-bot config screen directly from the bot interaction UI.
 
 ## 2025-11-19
 - Hardened suffocation recovery: multiple iterations to detect head/feet blockage before damage ticks, throttle alerts, and mine with the correct tool rather than instant breaks. Spawn-in-block checks now run shortly after registration.

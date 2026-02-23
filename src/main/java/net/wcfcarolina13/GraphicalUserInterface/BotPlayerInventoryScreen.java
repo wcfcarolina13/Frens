@@ -203,7 +203,8 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         SKILL_MINING,
         SKILL_STRIPMINE,
         SKILL_ASCENT,
-        SKILL_DESCENT
+        SKILL_DESCENT,
+        OPEN_BOT_CONTROLS
     }
 
     private enum TopicCategory {
@@ -332,7 +333,8 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
                 TopicEntry.admin("Set stage 1", "setstage:1"),
                 TopicEntry.admin("Set stage 2", "setstage:2"),
                 TopicEntry.admin("Set stage 3", "setstage:3"),
-                TopicEntry.admin("Set stage 4", "setstage:4")
+                TopicEntry.admin("Set stage 4", "setstage:4"),
+                new TopicEntry("Bot Controls >", TopicCategory.ADMIN, TopicAction.OPEN_BOT_CONTROLS, false, 0, null)
             );
 
     public BotPlayerInventoryScreen(BotPlayerInventoryScreenHandler handler, PlayerInventory inventory, Text title) {
@@ -2035,6 +2037,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case COMPANION_HOME -> runCompanionHome();
             case OPEN_SPELLS -> openSpellsMenu();
             case OPEN_GUIDE -> openGuideMenu();
+            case OPEN_BOT_CONTROLS -> openBotControls();
             case STOP -> runStop();
             case RESUME -> runResume();
             case FOLLOW -> toggleFollow();
@@ -2938,6 +2941,13 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             return;
         }
         this.client.setScreen(new BotGuideScreen(this, this.botAlias));
+    }
+
+    private void openBotControls() {
+        if (this.client == null) {
+            return;
+        }
+        this.client.setScreen(new BotControlScreen(this));
     }
 
     /**
