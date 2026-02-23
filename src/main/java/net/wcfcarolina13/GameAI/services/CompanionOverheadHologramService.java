@@ -51,6 +51,22 @@ public final class CompanionOverheadHologramService {
     private CompanionOverheadHologramService() {
     }
 
+    /**
+     * Discard all active hologram armor stands and clear tracking state.
+     * Called on server shutdown to prevent orphaned entities persisting to disk.
+     */
+    public static void removeAll() {
+        for (var entry : ACTIVE.values()) {
+            if (entry != null && entry.stand != null && !entry.stand.isRemoved()) {
+                entry.stand.discard();
+            }
+        }
+        ACTIVE.clear();
+        startupSweepDone = false;
+        lastStaleSweepAtMs = 0L;
+        startupSweepStartedAtMs = 0L;
+    }
+
     public static void show(ServerPlayerEntity bot, String line, int durationMs) {
         if (bot == null || bot.isRemoved() || !bot.isAlive()) {
             return;

@@ -506,6 +506,7 @@ public class Frens implements ModInitializer {
         });
 
         ServerLifecycleEvents.SERVER_STOPPING.register(server -> {
+            net.wcfcarolina13.GameAI.services.CompanionOverheadHologramService.removeAll();
             net.wcfcarolina13.GameAI.services.TaskService.resetAll("§cServer stopping; aborting active tasks.");
             for (ServerPlayerEntity bot : server.getPlayerManager().getPlayerList()) {
                 if (!(bot instanceof net.wcfcarolina13.Entity.createFakePlayer)) {
