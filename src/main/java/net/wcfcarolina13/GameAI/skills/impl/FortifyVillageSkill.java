@@ -126,6 +126,9 @@ public final class FortifyVillageSkill implements Skill {
     /** Positions that are part of the current fortification layout — never mine during navigation. */
     private Set<BlockPos> fortificationProtectedPositions = Set.of();
 
+    /** Current fortification layout — set during buildWall/handlePatch, used for gate-routing. */
+    private FortificationLayout currentLayout = null;
+
     private record SurfaceProfile(int referenceSurfaceY, Map<Long, Integer> plannedYByXZ) {}
     private record StartupRecoveryResult(boolean progressMade, int minedCount, boolean snapped, boolean failedNoSafeTile) {}
     private record MoatDigResult(int dugCount, boolean abortedNoSafeTile) {}
@@ -354,6 +357,9 @@ public final class FortifyVillageSkill implements Skill {
         if (layout.allBlocks().isEmpty()) {
             return SkillExecutionResult.failure("Could not regenerate layout from saved hull.");
         }
+
+        this.currentLayout = layout;
+        try {
 
         int grandTotalRepaired = 0;
         int passNumber = 0;
@@ -608,6 +614,10 @@ public final class FortifyVillageSkill implements Skill {
 
         ChatUtils.sendChatMessages(source, "§a[Fortify] Auto-patch complete: " + grandTotalRepaired + " total blocks repaired across " + passNumber + " passes.");
         return SkillExecutionResult.success("Auto-patched " + grandTotalRepaired + " blocks across " + passNumber + " passes.");
+
+        } finally {
+            this.currentLayout = null;
+        }
     }
 
     /**
@@ -940,6 +950,9 @@ public final class FortifyVillageSkill implements Skill {
                                             String wallName, String worldKey,
                                             Set<Integer> completedEdges, int startEdgeIndex,
                                             int priorBlocksPlaced) {
+        this.currentLayout = layout;
+        try {
+
         int totalPlaced = priorBlocksPlaced;
         int edgesCompleted = completedEdges.size();
         int totalEdges = layout.edges().size();
@@ -1204,6 +1217,10 @@ public final class FortifyVillageSkill implements Skill {
                     + " present (" + pct + "%), " + edgesCompleted + "/" + totalEdges
                     + " edges. Use §f/bot fortify patch " + wallName + "§e to repair.");
             return SkillExecutionResult.success("Partial fortification: " + totalPlaced + " blocks, " + pct + "%.");
+        }
+
+        } finally {
+            this.currentLayout = null;
         }
     }
 
@@ -2983,6 +3000,12 @@ public final class FortifyVillageSkill implements Skill {
         int approachY = safeSurfaceY(surfaceProfile, world, approachX, approachZ);
 
         BlockPos approachPos = new BlockPos(approachX, approachY, approachZ);
+
+        // If bot is inside the hull and approach is outside, route through gatehouse first
+        if (navigateThroughGateIfNeeded(source, bot, world, approachPos, surfaceProfile)) {
+            if (SkillManager.shouldAbortSkill(bot)) return;
+        }
+
         double distSq = bot.squaredDistanceTo(approachX + 0.5, bot.getY(), approachZ + 0.5);
         if (distSq > 144.0D) { // > 12 blocks away — use proper pathfinding
             Optional<MovementService.MovementPlan> plan = MovementService.planLootApproach(
@@ -3016,6 +3039,94 @@ public final class FortifyVillageSkill implements Skill {
             walkToTarget(source, bot, widePos, 6_000L);
             walkToTarget(source, bot, approachPos, 6_000L);
         }
+    }
+
+    /**
+     * If the bot is inside the convex hull and the target is outside, route through the
+     * gatehouse opening first to avoid pathfinding into the wall.
+     *
+     * @return true if gate routing was performed (bot should now be outside the hull)
+     */
+    private boolean navigateThroughGateIfNeeded(ServerCommandSource source, ServerPlayerEntity bot,
+                                                 ServerWorld world, BlockPos target,
+                                                 SurfaceProfile surfaceProfile) {
+        FortificationLayout layout = this.currentLayout;
+        if (layout == null) return false;
+
+        List<WallPoint> hull = layout.hullVertices();
+        if (hull.size() < 3) return false;
+
+        int botX = bot.getBlockPos().getX();
+        int botZ = bot.getBlockPos().getZ();
+        boolean botInside = VillageFortificationLayoutService.pointInConvexHull(hull, botX, botZ);
+        if (!botInside) return false;
+
+        boolean targetInside = VillageFortificationLayoutService.pointInConvexHull(
+                hull, target.getX(), target.getZ());
+        if (targetInside) return false;
+
+        // Bot is inside, target is outside — route through gatehouse
+        int gateEdgeIdx = layout.gatehouseEdgeIndex();
+        if (gateEdgeIdx < 0 || gateEdgeIdx >= layout.edges().size()) return false;
+
+        WallEdge gateEdge = layout.edges().get(gateEdgeIdx);
+        List<WallPoint> traced = VillageFortificationLayoutService.traceEdge(gateEdge.start(), gateEdge.end());
+        if (traced.size() < 9) return false; // edge too short for a gatehouse
+
+        // Gate center is at the midpoint of the traced edge (same logic as layout generation)
+        WallPoint gateCenter = traced.get(traced.size() / 2);
+        int gateCenterY = safeSurfaceY(surfaceProfile, world, gateCenter.x(), gateCenter.z());
+        BlockPos gateCenterPos = new BlockPos(gateCenter.x(), gateCenterY, gateCenter.z());
+
+        // Gate exit: 4 blocks along outward normal from gate center
+        double edgeDx = gateEdge.end().x() - gateEdge.start().x();
+        double edgeDz = gateEdge.end().z() - gateEdge.start().z();
+        double edgeLen = Math.sqrt(edgeDx * edgeDx + edgeDz * edgeDz);
+        if (edgeLen < 0.001) return false;
+        double nx = edgeDz / edgeLen;
+        double nz = -edgeDx / edgeLen;
+
+        int exitX = (int) Math.round(gateCenter.x() + nx * 4);
+        int exitZ = (int) Math.round(gateCenter.z() + nz * 4);
+        int exitY = safeSurfaceY(surfaceProfile, world, exitX, exitZ);
+        BlockPos exitPos = new BlockPos(exitX, exitY, exitZ);
+
+        LOGGER.info("[FortifyGate] Bot inside hull at ({},{}). Routing through gatehouse edge {} " +
+                        "gateCenter={} exit={}",
+                botX, botZ, gateEdgeIdx, gateCenterPos.toShortString(), exitPos.toShortString());
+
+        // Step 1: Navigate to gate center (inside hull, no wall in the way)
+        double distToGateSq = bot.squaredDistanceTo(
+                gateCenter.x() + 0.5, bot.getY(), gateCenter.z() + 0.5);
+        if (distToGateSq > 144.0D) {
+            Optional<MovementService.MovementPlan> plan = MovementService.planLootApproach(
+                    bot, gateCenterPos, MovementService.MovementOptions.skillLoot());
+            if (plan.isPresent() && !SkillManager.shouldAbortSkill(bot)) {
+                MovementService.withoutDoorEscape(() ->
+                        MovementService.withoutObstructionMining(
+                                () -> MovementService.execute(source, bot, plan.get(), null)));
+            }
+        }
+        if (SkillManager.shouldAbortSkill(bot)) return false;
+        walkToTarget(source, bot, gateCenterPos, 10_000L);
+        if (SkillManager.shouldAbortSkill(bot)) return false;
+
+        // Step 2: Walk through gate to exit position
+        LOGGER.info("[FortifyGate] Walking through gate to exit={}", exitPos.toShortString());
+        walkToTarget(source, bot, exitPos, 10_000L);
+
+        // Verify we made it outside
+        int newBotX = bot.getBlockPos().getX();
+        int newBotZ = bot.getBlockPos().getZ();
+        boolean stillInside = VillageFortificationLayoutService.pointInConvexHull(hull, newBotX, newBotZ);
+        if (stillInside) {
+            LOGGER.warn("[FortifyGate] Still inside hull after gate routing at ({},{}). " +
+                    "Fallback to normal navigation.", newBotX, newBotZ);
+            return false;
+        }
+
+        LOGGER.info("[FortifyGate] Successfully exited hull at ({},{})", newBotX, newBotZ);
+        return true;
     }
 
     /**
@@ -3468,6 +3579,8 @@ public final class FortifyVillageSkill implements Skill {
         if (distToTowerSq > 400.0D) { // > 20 blocks away
             BlockPos towerApproach = chooseTowerApproachPos(bot, world, vertex, surfaceProfile, 0, vertexBlocks);
             if (towerApproach != null) {
+                navigateThroughGateIfNeeded(source, bot, world, towerApproach, surfaceProfile);
+                if (SkillManager.shouldAbortSkill(bot)) return 0;
                 Optional<MovementService.MovementPlan> plan = MovementService.planLootApproach(
                         bot, towerApproach, MovementService.MovementOptions.skillLoot());
                 if (plan.isPresent() && !SkillManager.shouldAbortSkill(bot)) {
