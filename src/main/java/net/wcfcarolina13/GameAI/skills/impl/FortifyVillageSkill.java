@@ -3078,7 +3078,8 @@ public final class FortifyVillageSkill implements Skill {
         int gateCenterY = safeSurfaceY(surfaceProfile, world, gateCenter.x(), gateCenter.z());
         BlockPos gateCenterPos = new BlockPos(gateCenter.x(), gateCenterY, gateCenter.z());
 
-        // Gate exit: 4 blocks along outward normal from gate center
+        // Gate exit: extend along outward normal until the point is verifiably outside the hull.
+        // On large hulls, 4 blocks may land right on the boundary; we start at 6 and extend if needed.
         double edgeDx = gateEdge.end().x() - gateEdge.start().x();
         double edgeDz = gateEdge.end().z() - gateEdge.start().z();
         double edgeLen = Math.sqrt(edgeDx * edgeDx + edgeDz * edgeDz);
@@ -3086,19 +3087,35 @@ public final class FortifyVillageSkill implements Skill {
         double nx = edgeDz / edgeLen;
         double nz = -edgeDx / edgeLen;
 
-        int exitX = (int) Math.round(gateCenter.x() + nx * 4);
-        int exitZ = (int) Math.round(gateCenter.z() + nz * 4);
-        int exitY = safeSurfaceY(surfaceProfile, world, exitX, exitZ);
-        BlockPos exitPos = new BlockPos(exitX, exitY, exitZ);
+        BlockPos exitPos = null;
+        for (int dist = 6; dist <= 20; dist += 2) {
+            int ex = (int) Math.round(gateCenter.x() + nx * dist);
+            int ez = (int) Math.round(gateCenter.z() + nz * dist);
+            if (!VillageFortificationLayoutService.pointInConvexHull(hull, ex, ez)) {
+                int ey = safeSurfaceY(surfaceProfile, world, ex, ez);
+                exitPos = new BlockPos(ex, ey, ez);
+                break;
+            }
+        }
+        if (exitPos == null) {
+            LOGGER.warn("[FortifyGate] Could not find exit point outside hull along gate normal");
+            return false;
+        }
 
         LOGGER.info("[FortifyGate] Bot inside hull at ({},{}). Routing through gatehouse edge {} " +
                         "gateCenter={} exit={}",
                 botX, botZ, gateEdgeIdx, gateCenterPos.toShortString(), exitPos.toShortString());
 
-        // Step 1: Navigate to gate center (inside hull, no wall in the way)
-        double distToGateSq = bot.squaredDistanceTo(
-                gateCenter.x() + 0.5, bot.getY(), gateCenter.z() + 0.5);
-        if (distToGateSq > 144.0D) {
+        // Step 1: Navigate to gate center via multi-hop (may be 80+ blocks away inside the hull).
+        // Repeat pathfind+walk cycles until close or stuck.
+        for (int hop = 0; hop < 3; hop++) {
+            if (SkillManager.shouldAbortSkill(bot)) return false;
+            double distToGateSq = bot.squaredDistanceTo(
+                    gateCenter.x() + 0.5, bot.getY(), gateCenter.z() + 0.5);
+            if (distToGateSq <= 25.0D) break; // within 5 blocks — close enough
+
+            LOGGER.info("[FortifyGate] hop {} to gate center, dist={}", hop + 1,
+                    String.format("%.0f", Math.sqrt(distToGateSq)));
             Optional<MovementService.MovementPlan> plan = MovementService.planLootApproach(
                     bot, gateCenterPos, MovementService.MovementOptions.skillLoot());
             if (plan.isPresent() && !SkillManager.shouldAbortSkill(bot)) {
@@ -3106,19 +3123,65 @@ public final class FortifyVillageSkill implements Skill {
                         MovementService.withoutObstructionMining(
                                 () -> MovementService.execute(source, bot, plan.get(), null)));
             }
+            if (SkillManager.shouldAbortSkill(bot)) return false;
+
+            // Close remaining gap with tick-by-tick walk
+            double postDist = bot.squaredDistanceTo(
+                    gateCenter.x() + 0.5, bot.getY(), gateCenter.z() + 0.5);
+            if (postDist > 9.0D) {
+                walkToTarget(source, bot, gateCenterPos, 12_000L);
+            }
+
+            // Check if we made progress; if not, no point retrying
+            double newDistSq = bot.squaredDistanceTo(
+                    gateCenter.x() + 0.5, bot.getY(), gateCenter.z() + 0.5);
+            if (newDistSq >= distToGateSq - 4.0D) {
+                LOGGER.info("[FortifyGate] hop {} made no progress (dist still {}), stopping hops",
+                        hop + 1, String.format("%.0f", Math.sqrt(newDistSq)));
+                break;
+            }
         }
         if (SkillManager.shouldAbortSkill(bot)) return false;
-        walkToTarget(source, bot, gateCenterPos, 10_000L);
+
+        // Final close-range approach to gate center
+        double finalDistToGate = bot.squaredDistanceTo(
+                gateCenter.x() + 0.5, bot.getY(), gateCenter.z() + 0.5);
+        if (finalDistToGate > 9.0D) {
+            walkToTarget(source, bot, gateCenterPos, 10_000L);
+        }
         if (SkillManager.shouldAbortSkill(bot)) return false;
 
+        // Bail if still far from gate — something is blocking the interior path
+        finalDistToGate = bot.squaredDistanceTo(
+                gateCenter.x() + 0.5, bot.getY(), gateCenter.z() + 0.5);
+        if (finalDistToGate > 100.0D) { // > 10 blocks
+            LOGGER.warn("[FortifyGate] Could not reach gate center (dist={}). Giving up.",
+                    String.format("%.0f", Math.sqrt(finalDistToGate)));
+            return false;
+        }
+
         // Step 2: Walk through gate to exit position
-        LOGGER.info("[FortifyGate] Walking through gate to exit={}", exitPos.toShortString());
-        walkToTarget(source, bot, exitPos, 10_000L);
+        LOGGER.info("[FortifyGate] Near gate center (dist={}). Walking through gate to exit={}",
+                String.format("%.1f", Math.sqrt(finalDistToGate)), exitPos.toShortString());
+        walkToTarget(source, bot, exitPos, 12_000L);
 
         // Verify we made it outside
         int newBotX = bot.getBlockPos().getX();
         int newBotZ = bot.getBlockPos().getZ();
         boolean stillInside = VillageFortificationLayoutService.pointInConvexHull(hull, newBotX, newBotZ);
+        if (stillInside) {
+            // Retry: walk a few more blocks along the normal to clear the hull boundary
+            LOGGER.info("[FortifyGate] Still inside at ({},{}), extending walk along normal", newBotX, newBotZ);
+            int extX = (int) Math.round(newBotX + nx * 8);
+            int extZ = (int) Math.round(newBotZ + nz * 8);
+            int extY = safeSurfaceY(surfaceProfile, world, extX, extZ);
+            walkToTarget(source, bot, new BlockPos(extX, extY, extZ), 10_000L);
+
+            newBotX = bot.getBlockPos().getX();
+            newBotZ = bot.getBlockPos().getZ();
+            stillInside = VillageFortificationLayoutService.pointInConvexHull(hull, newBotX, newBotZ);
+        }
+
         if (stillInside) {
             LOGGER.warn("[FortifyGate] Still inside hull after gate routing at ({},{}). " +
                     "Fallback to normal navigation.", newBotX, newBotZ);
