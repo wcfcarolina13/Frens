@@ -3092,8 +3092,8 @@ public final class FortifyVillageSkill implements Skill {
             int ex = (int) Math.round(gateCenter.x() + nx * dist);
             int ez = (int) Math.round(gateCenter.z() + nz * dist);
             if (!VillageFortificationLayoutService.pointInConvexHull(hull, ex, ez)) {
-                int ey = safeSurfaceY(surfaceProfile, world, ex, ez);
-                exitPos = new BlockPos(ex, ey, ez);
+                // Use gate center Y — heightmap near the wall is unreliable after moat digging
+                exitPos = new BlockPos(ex, gateCenterY, ez);
                 break;
             }
         }
@@ -3103,12 +3103,11 @@ public final class FortifyVillageSkill implements Skill {
         }
 
         // Interior approach: 3 blocks INWARD from gate center (no moat on interior side).
-        // This ensures the bot arrives at surface level where the gate gap is walkable,
-        // rather than at moat level where wall foundations block the path.
+        // Use gate center Y for all waypoints — the heightmap is unreliable near the wall
+        // after moat digging (returns moat-floor Y instead of surface Y).
         int interiorX = (int) Math.round(gateCenter.x() - nx * 3);
         int interiorZ = (int) Math.round(gateCenter.z() - nz * 3);
-        int interiorY = safeSurfaceY(surfaceProfile, world, interiorX, interiorZ);
-        BlockPos interiorPos = new BlockPos(interiorX, interiorY, interiorZ);
+        BlockPos interiorPos = new BlockPos(interiorX, gateCenterY, interiorZ);
 
         LOGGER.info("[FortifyGate] Bot inside hull at ({},{}). Routing through gatehouse edge {} " +
                         "interior={} gateCenter={} exit={}",
@@ -3188,8 +3187,7 @@ public final class FortifyVillageSkill implements Skill {
             LOGGER.info("[FortifyGate] Still inside at ({},{}), extending walk along normal", newBotX, newBotZ);
             int extX = (int) Math.round(newBotX + nx * 10);
             int extZ = (int) Math.round(newBotZ + nz * 10);
-            int extY = safeSurfaceY(surfaceProfile, world, extX, extZ);
-            walkToTarget(source, bot, new BlockPos(extX, extY, extZ), 10_000L);
+            walkToTarget(source, bot, new BlockPos(extX, gateCenterY, extZ), 10_000L);
 
             newBotX = bot.getBlockPos().getX();
             newBotZ = bot.getBlockPos().getZ();
