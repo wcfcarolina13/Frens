@@ -9,7 +9,7 @@ Address the highest-priority pending issues from the project backlog.
 
 ## P0 — Critical
 
-- [ ] Verify launch after permission predicate fix: Ensure bots can start without the LeveledPermissionPredicate OWNERS crash on 1.21.11
+- [x] Verify launch after permission predicate fix: Ensure bots can start without the LeveledPermissionPredicate OWNERS crash on 1.21.11
 - [ ] Persist bot stats on respawn (verification): Save/load path exists; verify health/XP/hunger restore timing is visible before spawn flow completes
 
 ## P1 — High

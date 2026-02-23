@@ -162,17 +162,8 @@ public class Frens implements ModInitializer {
             return new PermissionResolution(fallback, "permission-ctor-fallback", PermissionPredicate.class.getName(), "ctor");
         }
 
-        PermissionPredicate proxyFallback = (PermissionPredicate) java.lang.reflect.Proxy.newProxyInstance(
-                PermissionPredicate.class.getClassLoader(),
-                new Class<?>[]{PermissionPredicate.class},
-                (proxy, method, args) -> {
-                    if (method.getReturnType() == boolean.class || method.getReturnType() == Boolean.class) {
-                        return Boolean.TRUE;
-                    }
-                    return null;
-                }
-        );
-        return new PermissionResolution(proxyFallback, "permission-proxy-last-resort", PermissionPredicate.class.getName(), "proxy-allow-all");
+        PermissionPredicate ctorLastResort = new PermissionPredicate();
+        return new PermissionResolution(ctorLastResort, "permission-ctor-last-resort", PermissionPredicate.class.getName(), "ctor-direct");
     }
 
     private static PermissionPredicate readStaticPermissionPredicate(Class<?> clazz, String fieldName) {
