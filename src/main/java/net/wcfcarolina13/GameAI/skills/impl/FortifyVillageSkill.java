@@ -3879,9 +3879,10 @@ public final class FortifyVillageSkill implements Skill {
             }
 
             // Pillar up
-            int stepsNeeded = Math.max(0, optimalY - bot.getBlockPos().getY());
+            int startBotY = bot.getBlockPos().getY();
+            int stepsNeeded = Math.max(0, optimalY - startBotY);
             LOGGER.info("[FortifyTower] scaffold pillar attempt side={} botY={} optimalY={} steps={} for tower ({},{})",
-                    sideAttempt, bot.getBlockPos().getY(), optimalY, stepsNeeded, vertex.x(), vertex.z());
+                    sideAttempt, startBotY, optimalY, stepsNeeded, vertex.x(), vertex.z());
             // Engage sneak BEFORE pillaring — prevents bot from walking off the
             // scaffold column if block placement timing is slightly off.
             SneakLockService.acquire(bot.getUuid());
@@ -3889,10 +3890,15 @@ public final class FortifyVillageSkill implements Skill {
 
             ScaffoldService.ScaffoldSession session = ScaffoldService.beginSession(bot);
             boolean pillared = ScaffoldService.pillarToY(session, optimalY);
-            if (!pillared || session.trackedPositions().isEmpty()) {
+            int postPillarY = bot.getBlockPos().getY();
+            // Accept partial success: if the bot gained height and has scaffolds,
+            // it can still reach tower blocks from the elevated position.
+            // Previously, placing 3/4 blocks (1 short of target) → teardown all 3 → waste.
+            boolean usable = pillared || (postPillarY > startBotY && !session.trackedPositions().isEmpty());
+            if (!usable) {
                 LOGGER.info("[FortifyTower] scaffold pillar failed side={} pillared={} tracked={} botY={} for tower ({},{})",
                         sideAttempt, pillared, session.trackedPositions().size(),
-                        bot.getBlockPos().getY(), vertex.x(), vertex.z());
+                        postPillarY, vertex.x(), vertex.z());
                 SneakLockService.release(bot.getUuid());
                 if (!SneakLockService.isLocked(bot.getUuid())) {
                     BotActions.sneak(bot, false);

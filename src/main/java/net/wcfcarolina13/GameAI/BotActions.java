@@ -669,16 +669,15 @@ public final class BotActions {
                 }
                 return new PlaceResult(true, null);
             }
-            PlaceResult fail = new PlaceResult(false, "place-rejected=" + result);
-            if (LOGGER.isDebugEnabled()) {
-                LOGGER.debug("Place failed: bot={} target={} support={} face={} item={} reason={}",
-                        bot.getName().getString(),
-                        target.toShortString(),
-                        support.clickPos().toShortString(),
-                        support.face(),
-                        stack.getItem().getName().getString(),
-                        fail.reason());
-            }
+            // Include context in the reason string so scaffold/tower logs show useful diagnostics
+            // (the obfuscated ActionResult alone, e.g. "class_9857[]", is not actionable)
+            String reason = String.format("place-rejected item=%s target=%s support=%s face=%s placementPos=%s",
+                    stack.getItem().getName().getString(),
+                    target.toShortString(),
+                    support.clickPos().toShortString(),
+                    support.face(),
+                    placementContext.getBlockPos().toShortString());
+            PlaceResult fail = new PlaceResult(false, reason);
             return fail;
         }, 3500L, fallback);
     }
