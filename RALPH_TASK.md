@@ -30,6 +30,24 @@ All P0/P1 checkboxes above marked `[x]` after in-game verification or code fix.
 - Build must pass (`./gradlew build -x test`) after any code changes
 - Commit after completing each criterion
 
+### In-Flight: Fortification Auto-Patch Improvements (user-driven feature)
+
+**Completed:**
+- Gate-routing v5: waypoints use bot's actual Y (not lintel heightmap Y which was 2 blocks off)
+- Gate routing failure caching: skips after 2 consecutive failures, saves 30+s per edge
+- Scaffold pillar fix: handles occupied feet position (stairs/slabs), `tryPlaceBlockAt` diagnostics
+- Expanded SCAFFOLD_BLOCKS: cobblestone, stone added to priority list
+
+**Next improvements (priority order):**
+
+1. **pillarToY partial-success tolerance** — When pillarToY places 3/4 blocks (1 short of target), it reports `pillared=false` and the caller tears down all 3 scaffolds. The bot was at Y=-57, just 1 block below target Y=-56 — close enough to place most tower blocks. Fix: treat "within 1 block of target" as success, or let the caller decide based on actual botY vs targetY.
+
+2. **Scaffold `place-rejected` root cause** — `blockItem.place()` returns non-accepted `ActionResult` (`class_9857[]`) despite passing all pre-checks (occupied, intersect, support, LOS). Need better diagnostics: log the specific item, target pos, support pos/face, and the ActionResult variant. Possible causes: ItemPlacementContext redirecting to an already-filled position, or canPlace() failing due to entity collision.
+
+3. **Gate walk-through XZ alignment** — Bot reaches gate interior approach (dist=1.1) but can't navigate through the 3-block gap. `walkToTarget` approaches at an angle and misses the gap, hitting wall pillars. Fix: add intermediate waypoint at exact gate center XZ, then walk perpendicular along the outward normal. Or use `LookController.faceBlock` + direct impulse for the short 3-6 block gate traversal.
+
+4. **Edge NO_SUPPORT failures** — 6/15 blocks on edge 26 fail with NO_SUPPORT. These are wall blocks without adjacent solid blocks to place against. May need placement ordering (bottom-up, connecting to existing) or temporary support block placement.
+
 ---
 
 ## Ralph Instructions
