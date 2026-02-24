@@ -2787,9 +2787,13 @@ public final class FortifyVillageSkill implements Skill {
             candidateOffsets.add(new BlockPos(-1, 0, Integer.signum(dz)));
         }
 
+        // Diagnostic counters for the "no viable candidates" case
+        int diagAllAir = 0, diagCanBreak = 0, diagReach = 0, diagNoFloor = 0;
+
         // Two passes: first try non-layout blocks, then allow layout blocks
         for (int pass = 0; pass < 2; pass++) {
             boolean allowLayout = (pass == 1);
+            if (pass == 1) { diagAllAir = 0; diagCanBreak = 0; diagReach = 0; diagNoFloor = 0; }
 
             for (BlockPos offset : candidateOffsets) {
                 BlockPos feetPos = botPos.add(offset);
@@ -2798,14 +2802,14 @@ public final class FortifyVillageSkill implements Skill {
 
                 boolean feetBlocking = !world.getBlockState(feetPos).getCollisionShape(world, feetPos).isEmpty();
                 boolean headBlocking = !world.getBlockState(headPos).getCollisionShape(world, headPos).isEmpty();
-                if (!feetBlocking && !headBlocking) continue;
+                if (!feetBlocking && !headBlocking) { diagAllAir++; continue; }
 
                 // Check safety: tier 1 (non-layout) or tier 2 (layout with mandatory replace)
-                if (feetBlocking && !canBreakForNavigation(world, feetPos, allowLayout)) continue;
-                if (headBlocking && !canBreakForNavigation(world, headPos, allowLayout)) continue;
+                if (feetBlocking && !canBreakForNavigation(world, feetPos, allowLayout)) { diagCanBreak++; continue; }
+                if (headBlocking && !canBreakForNavigation(world, headPos, allowLayout)) { diagCanBreak++; continue; }
 
-                if (feetBlocking && !isWithinMiningReach(bot, feetPos)) continue;
-                if (headBlocking && !isWithinMiningReach(bot, headPos)) continue;
+                if (feetBlocking && !isWithinMiningReach(bot, feetPos)) { diagReach++; continue; }
+                if (headBlocking && !isWithinMiningReach(bot, headPos)) { diagReach++; continue; }
 
                 // Overhead is best-effort: mine if blocking AND reachable, soft-skip otherwise
                 boolean overheadBlocking = !world.getBlockState(overheadPos).getCollisionShape(world, overheadPos).isEmpty();
@@ -2815,7 +2819,7 @@ public final class FortifyVillageSkill implements Skill {
 
                 // Must be able to stand on the block below
                 BlockState belowState = world.getBlockState(feetPos.down());
-                if (belowState.getCollisionShape(world, feetPos.down()).isEmpty()) continue;
+                if (belowState.getCollisionShape(world, feetPos.down()).isEmpty()) { diagNoFloor++; continue; }
 
                 boolean isLayoutBreak = (feetBlocking && fortificationProtectedPositions.contains(feetPos))
                         || (headBlocking && fortificationProtectedPositions.contains(headPos))
@@ -2885,8 +2889,10 @@ public final class FortifyVillageSkill implements Skill {
             }
         }
 
-        LOGGER.info("[FortifyNav] Break-through found no viable candidates at {} toward {}",
-                botPos.toShortString(), target.toShortString());
+        LOGGER.info("[FortifyNav] Break-through found no viable candidates at {} toward {} " +
+                        "(allAir={} canBreak={} reach={} noFloor={} offsets={})",
+                botPos.toShortString(), target.toShortString(),
+                diagAllAir, diagCanBreak, diagReach, diagNoFloor, candidateOffsets.size());
         return false;
     }
 
@@ -3046,6 +3052,24 @@ public final class FortifyVillageSkill implements Skill {
     }
 
     /**
+     * Strict interior check: returns true only if the point is strictly inside the hull
+     * (all cross products > 0). Points on the hull boundary (any cross product == 0) return false.
+     * This is needed for gate routing: tower vertices are hull vertices (on boundary) and must
+     * be treated as "outside" so the bot routes through the gate to reach them.
+     */
+    private static boolean pointStrictlyInsideHull(List<WallPoint> hull, int px, int pz) {
+        if (hull.size() < 3) return false;
+        int n = hull.size();
+        for (int i = 0; i < n; i++) {
+            WallPoint a = hull.get(i);
+            WallPoint b = hull.get((i + 1) % n);
+            long cross = (long)(b.x() - a.x()) * (pz - a.z()) - (long)(b.z() - a.z()) * (px - a.x());
+            if (cross <= 0) return false;
+        }
+        return true;
+    }
+
+    /**
      * If the bot is inside the convex hull and the target is outside, route through the
      * gatehouse opening first to avoid pathfinding into the wall.
      *
@@ -3065,9 +3089,11 @@ public final class FortifyVillageSkill implements Skill {
         boolean botInside = VillageFortificationLayoutService.pointInConvexHull(hull, botX, botZ);
         if (!botInside) return false;
 
-        boolean targetInside = VillageFortificationLayoutService.pointInConvexHull(
-                hull, target.getX(), target.getZ());
-        if (targetInside) return false;
+        // Use strict interior check for target: hull boundary points (like tower vertices)
+        // must be treated as "outside" so the bot routes through the gate to reach them.
+        // pointInConvexHull uses cross >= 0 which includes boundary; strict uses cross > 0.
+        boolean targetStrictlyInside = pointStrictlyInsideHull(hull, target.getX(), target.getZ());
+        if (targetStrictlyInside) return false;
 
         // Bot is inside, target is outside — route through gatehouse
         // Skip if gate routing has failed twice already this session — saves 30+ seconds per edge
@@ -3690,6 +3716,8 @@ public final class FortifyVillageSkill implements Skill {
             }
         }
 
+        long towerStartMs = System.currentTimeMillis();
+
         for (int attempt = 1; attempt <= TOWER_LOCAL_MAX_ATTEMPTS; attempt++) {
             if (SkillManager.shouldAbortSkill(bot)) {
                 break;
@@ -3698,6 +3726,14 @@ public final class FortifyVillageSkill implements Skill {
                 break;
             }
             if (isTowerComplete(presentCount, plannedCount)) {
+                break;
+            }
+            // Safety net: if 20 seconds have passed with zero blocks placed, bail out.
+            // Prevents burning 50+ seconds when the bot is stuck against a wall.
+            if (newlyPlaced == 0 && System.currentTimeMillis() - towerStartMs > 20_000L) {
+                LOGGER.info("[FortifyTower] tower {}/{} timed out after {}s with 0 blocks placed, skipping",
+                        vertexOrdinal + 1, totalVertices,
+                        (System.currentTimeMillis() - towerStartMs) / 1000);
                 break;
             }
 
