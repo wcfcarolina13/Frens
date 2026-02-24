@@ -30,7 +30,7 @@ public final class ScaffoldService {
 
     // Blocks suitable for scaffolding (cheap, easily broken)
     public static final List<Item> SCAFFOLD_BLOCKS = List.of(
-            Items.DIRT, Items.COBBLED_DEEPSLATE, Items.NETHERRACK
+            Items.DIRT, Items.COBBLESTONE, Items.COBBLED_DEEPSLATE, Items.STONE, Items.NETHERRACK
     );
 
     private static final int MAX_SCAFFOLD_HEIGHT = 12;
@@ -127,6 +127,29 @@ public final class ScaffoldService {
             BlockPos targetPos = bot.getBlockPos();
             double startY = bot.getY();
 
+            // If feet position is occupied (e.g. standing on stairs), shift target up to air
+            ServerWorld pillarWorld = (ServerWorld) bot.getEntityWorld();
+            var feetState = pillarWorld.getBlockState(targetPos);
+            if (!feetState.isAir() && !feetState.isReplaceable()) {
+                BlockPos adjusted = null;
+                for (int dy = 1; dy <= 2; dy++) {
+                    BlockPos candidate = targetPos.up(dy);
+                    var cs = pillarWorld.getBlockState(candidate);
+                    if (cs.isAir() || cs.isReplaceable()) {
+                        adjusted = candidate;
+                        break;
+                    }
+                }
+                if (adjusted == null) {
+                    LOGGER.info("pillarUp step {}: feet occupied by {} at {}, no air within 2 above — skipping",
+                            i, feetState.getBlock().getName().getString(), targetPos.toShortString());
+                    return false;
+                }
+                LOGGER.info("pillarUp step {}: feet occupied by {}, targeting {} instead",
+                        i, feetState.getBlock().getName().getString(), adjusted.toShortString());
+                targetPos = adjusted;
+            }
+
             // Jump
             BotActions.jump(bot);
 
@@ -144,13 +167,18 @@ public final class ScaffoldService {
 
             // Place scaffold block
             boolean placed = false;
+            String failReason = "";
             for (int attempt = 0; attempt < 3 && !placed; attempt++) {
-                placed = BotActions.placeBlockAt(bot, targetPos, Direction.UP, SCAFFOLD_BLOCKS);
-                if (!placed) sleepQuiet(50L);
+                BotActions.PlaceResult result = BotActions.tryPlaceBlockAt(bot, targetPos, Direction.UP, SCAFFOLD_BLOCKS);
+                placed = result.success();
+                if (!placed) {
+                    failReason = result.reason();
+                    sleepQuiet(50L);
+                }
             }
 
             if (!placed) {
-                LOGGER.warn("Failed to place scaffold block at {}", targetPos.toShortString());
+                LOGGER.warn("Failed to place scaffold block at {} reason={}", targetPos.toShortString(), failReason);
                 return false;
             }
 
@@ -226,6 +254,28 @@ public final class ScaffoldService {
             BlockPos targetPos = bot.getBlockPos();
             double startY = bot.getY();
 
+            // If feet position is occupied (e.g. standing on stairs), shift target up to air
+            var feetState = world.getBlockState(targetPos);
+            if (!feetState.isAir() && !feetState.isReplaceable()) {
+                BlockPos adjusted = null;
+                for (int dy = 1; dy <= 2; dy++) {
+                    BlockPos candidate = targetPos.up(dy);
+                    var cs = world.getBlockState(candidate);
+                    if (cs.isAir() || cs.isReplaceable()) {
+                        adjusted = candidate;
+                        break;
+                    }
+                }
+                if (adjusted == null) {
+                    LOGGER.info("pillarUp step {}/{}: feet occupied by {} at {}, no air within 2 above — skipping",
+                            i, steps, feetState.getBlock().getName().getString(), targetPos.toShortString());
+                    break;
+                }
+                LOGGER.info("pillarUp step {}/{}: feet occupied by {}, targeting {} instead",
+                        i, steps, feetState.getBlock().getName().getString(), adjusted.toShortString());
+                targetPos = adjusted;
+            }
+
             // Check if there's head clearance to jump (2 blocks above)
             BlockPos headSpace = targetPos.up().up();
             if (!world.getBlockState(headSpace).isAir()
@@ -248,13 +298,18 @@ public final class ScaffoldService {
             }
 
             boolean placed = false;
+            String failReason = "";
             for (int attempt = 0; attempt < 3 && !placed; attempt++) {
-                placed = BotActions.placeBlockAt(bot, targetPos, Direction.UP, SCAFFOLD_BLOCKS);
-                if (!placed) sleepQuiet(50L);
+                BotActions.PlaceResult result = BotActions.tryPlaceBlockAt(bot, targetPos, Direction.UP, SCAFFOLD_BLOCKS);
+                placed = result.success();
+                if (!placed) {
+                    failReason = result.reason();
+                    sleepQuiet(50L);
+                }
             }
 
             if (!placed) {
-                LOGGER.info("pillarUp step {}/{}: failed to place at {}", i, steps, targetPos.toShortString());
+                LOGGER.info("pillarUp step {}/{}: failed to place at {} reason={}", i, steps, targetPos.toShortString(), failReason);
                 break;
             }
 
