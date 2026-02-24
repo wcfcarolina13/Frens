@@ -128,6 +128,8 @@ public final class FortifyVillageSkill implements Skill {
 
     /** Current fortification layout — set during buildWall/handlePatch, used for gate-routing. */
     private FortificationLayout currentLayout = null;
+    /** Tracks consecutive gate routing failures to skip repeated attempts within a session. */
+    private int gateRoutingFailures = 0;
 
     private record SurfaceProfile(int referenceSurfaceY, Map<Long, Integer> plannedYByXZ) {}
     private record StartupRecoveryResult(boolean progressMade, int minedCount, boolean snapped, boolean failedNoSafeTile) {}
@@ -359,6 +361,7 @@ public final class FortifyVillageSkill implements Skill {
         }
 
         this.currentLayout = layout;
+        this.gateRoutingFailures = 0;
         try {
 
         int grandTotalRepaired = 0;
@@ -951,6 +954,7 @@ public final class FortifyVillageSkill implements Skill {
                                             Set<Integer> completedEdges, int startEdgeIndex,
                                             int priorBlocksPlaced) {
         this.currentLayout = layout;
+        this.gateRoutingFailures = 0;
         try {
 
         int totalPlaced = priorBlocksPlaced;
@@ -3066,6 +3070,12 @@ public final class FortifyVillageSkill implements Skill {
         if (targetInside) return false;
 
         // Bot is inside, target is outside — route through gatehouse
+        // Skip if gate routing has failed twice already this session — saves 30+ seconds per edge
+        if (gateRoutingFailures >= 2) {
+            LOGGER.info("[FortifyGate] Skipping gate routing (failed {} times this session)", gateRoutingFailures);
+            return false;
+        }
+
         int gateEdgeIdx = layout.gatehouseEdgeIndex();
         if (gateEdgeIdx < 0 || gateEdgeIdx >= layout.edges().size()) return false;
 
@@ -3075,8 +3085,14 @@ public final class FortifyVillageSkill implements Skill {
 
         // Gate center is at the midpoint of the traced edge (same logic as layout generation)
         WallPoint gateCenter = traced.get(traced.size() / 2);
-        int gateCenterY = safeSurfaceY(surfaceProfile, world, gateCenter.x(), gateCenter.z());
-        BlockPos gateCenterPos = new BlockPos(gateCenter.x(), gateCenterY, gateCenter.z());
+
+        // Use the bot's actual Y for all navigation waypoints. safeSurfaceY is unreliable at
+        // the gate center because the heightmap hits the stone brick lintel above the gap,
+        // returning lintel Y instead of walkable ground Y. The Y difference (often 2+ blocks)
+        // inflates 3D distance checks, preventing walkToTarget/walkTowardBlock from ever
+        // considering the bot "arrived" at the waypoint.
+        int navY = bot.getBlockPos().getY();
+        BlockPos gateCenterPos = new BlockPos(gateCenter.x(), navY, gateCenter.z());
 
         // Gate exit: extend along outward normal until the point is verifiably outside the hull.
         // On large hulls, 4 blocks may land right on the boundary; we start at 6 and extend if needed.
@@ -3092,8 +3108,7 @@ public final class FortifyVillageSkill implements Skill {
             int ex = (int) Math.round(gateCenter.x() + nx * dist);
             int ez = (int) Math.round(gateCenter.z() + nz * dist);
             if (!VillageFortificationLayoutService.pointInConvexHull(hull, ex, ez)) {
-                // Use gate center Y — heightmap near the wall is unreliable after moat digging
-                exitPos = new BlockPos(ex, gateCenterY, ez);
+                exitPos = new BlockPos(ex, navY, ez);
                 break;
             }
         }
@@ -3103,11 +3118,9 @@ public final class FortifyVillageSkill implements Skill {
         }
 
         // Interior approach: 3 blocks INWARD from gate center (no moat on interior side).
-        // Use gate center Y for all waypoints — the heightmap is unreliable near the wall
-        // after moat digging (returns moat-floor Y instead of surface Y).
         int interiorX = (int) Math.round(gateCenter.x() - nx * 3);
         int interiorZ = (int) Math.round(gateCenter.z() - nz * 3);
-        BlockPos interiorPos = new BlockPos(interiorX, gateCenterY, interiorZ);
+        BlockPos interiorPos = new BlockPos(interiorX, navY, interiorZ);
 
         LOGGER.info("[FortifyGate] Bot inside hull at ({},{}). Routing through gatehouse edge {} " +
                         "interior={} gateCenter={} exit={}",
@@ -3187,7 +3200,7 @@ public final class FortifyVillageSkill implements Skill {
             LOGGER.info("[FortifyGate] Still inside at ({},{}), extending walk along normal", newBotX, newBotZ);
             int extX = (int) Math.round(newBotX + nx * 10);
             int extZ = (int) Math.round(newBotZ + nz * 10);
-            walkToTarget(source, bot, new BlockPos(extX, gateCenterY, extZ), 10_000L);
+            walkToTarget(source, bot, new BlockPos(extX, bot.getBlockPos().getY(), extZ), 10_000L);
 
             newBotX = bot.getBlockPos().getX();
             newBotZ = bot.getBlockPos().getZ();
@@ -3195,11 +3208,13 @@ public final class FortifyVillageSkill implements Skill {
         }
 
         if (stillInside) {
+            gateRoutingFailures++;
             LOGGER.warn("[FortifyGate] Still inside hull after gate routing at ({},{}). " +
-                    "Fallback to normal navigation.", newBotX, newBotZ);
+                    "Fallback to normal navigation. (failure #{})", newBotX, newBotZ, gateRoutingFailures);
             return false;
         }
 
+        gateRoutingFailures = 0; // reset on success
         LOGGER.info("[FortifyGate] Successfully exited hull at ({},{})", newBotX, newBotZ);
         return true;
     }
