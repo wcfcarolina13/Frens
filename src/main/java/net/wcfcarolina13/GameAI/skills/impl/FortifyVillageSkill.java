@@ -26,6 +26,7 @@ import net.wcfcarolina13.GameAI.services.CompanionOverheadDialogueService;
 import net.wcfcarolina13.GameAI.services.MovementService;
 import net.wcfcarolina13.GameAI.services.SafePositionService;
 import net.wcfcarolina13.GameAI.services.SneakLockService;
+import net.wcfcarolina13.GameAI.services.navigation.VoxelJunctionService;
 import net.wcfcarolina13.PlayerUtils.MiningTool;
 import net.wcfcarolina13.GameAI.services.construction.FortifyExecutionPolicyUtil;
 import net.wcfcarolina13.GameAI.services.construction.FortificationPersistenceService;
@@ -50,6 +51,7 @@ import org.slf4j.LoggerFactory;
 
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ThreadLocalRandom;
 
 /**
  * Skill for autonomously building a defensive wall perimeter around a village.
@@ -102,6 +104,36 @@ public final class FortifyVillageSkill implements Skill {
     private static final int PASS1_ZERO_MOVEMENT_FAIL_THRESHOLD = 3;
     private static final int PASS1_MAX_ATTEMPTS = 2;
     private static final int PASS2_MAX_RECOVERY_ATTEMPTS = 12;
+    private static final int TOWER_LOCAL_REACHABILITY_RADIUS = 16;
+    private static final int TOWER_LOCAL_REACHABILITY_MAX_NODES = 1024;
+    private static final int FORTIFY_CARVE_MAX_BLOCKS_PER_EPISODE = 6;
+    private static final int FORTIFY_CARVE_MAX_BOT_TO_BLOCK_DIST = 6;
+    private static final int FORTIFY_CARVE_MAX_TARGET_TO_BLOCK_DIST = 8;
+    private static final int FORTIFY_CARVE_LOCAL_TARGET_MAX_DIST = 20;
+    private static final long FORTIFY_MEDIUM_REPLAN_BUDGET_MS = 2_500L;
+    private static final int FORTIFY_CLEANUP_REPAIR_STAGE_MAX_DIST = 10;
+    private static final int FORTIFY_SCAFFOLD_LEDGER_RADIUS_XZ = 2;
+    private static final int FORTIFY_SCAFFOLD_LEDGER_RADIUS_Y = 8;
+    private static final int FORTIFY_MANDATORY_REPLACE_RETRIES = 2;
+    private static final long FORTIFY_MANDATORY_REPLACE_RETRY_SLEEP_MS = 60L;
+    private static final long FORTIFY_CLEANUP_BACKOFF_BASE_MS = 250L;
+    private static final long FORTIFY_CLEANUP_BACKOFF_MAX_MS = 1_000L;
+    private static final int FORTIFY_CLEANUP_ACTIVE_RECOVERY_ATTEMPTS = 2;
+    private static final int FORTIFY_CLEANUP_ACTIVE_RECOVERY_MAX_DIST = 8;
+    private static final long FORTIFY_CLEANUP_PROCESS_MIN_INTERVAL_MS = 350L;
+    private static final int FORTIFY_PATCH_SKIP_LOG_SAMPLE_LIMIT = 10;
+    private static final long FORTIFY_ENTOMBMENT_STATE_TTL_MS = 20_000L;
+    private static final long FORTIFY_RECENT_CARVE_SUPPRESS_MS = 20_000L;
+    private static final int FORTIFY_GATE_EXIT_SIDESTEP_NO_PROGRESS_LIMIT = 2;
+    private static final long FORTIFY_SURFACE_ESCAPE_FAIL_TTL_MS = 8_000L;
+    private static final int FORTIFY_SURFACE_ESCAPE_SAME_COLUMN_LIMIT = 2;
+    private static final long FORTIFY_FOOTING_PATCH_COOLDOWN_MS = 400L;
+    private static final int FORTIFY_PRECIpICE_DEFENSE_MIN_DROP = 2;
+    private static final int FORTIFY_FOOTING_PATCH_SCAN_DEPTH = 5;
+    private static final int FORTIFY_TRAP_CARVE_DEPTH_LIMIT = 6;
+    private static final List<Item> FORTIFY_FOOTING_PATCH_MATS = List.of(
+            Items.COBBLESTONE, Items.COBBLED_DEEPSLATE, Items.DIRT
+    );
 
     // Building material fallback lists
     private static final List<Item> STONE_BRICK_FALLBACKS = List.of(
@@ -122,18 +154,770 @@ public final class FortifyVillageSkill implements Skill {
     private static final List<Item> COBBLE_FALLBACKS = List.of(
             Items.COBBLESTONE, Items.COBBLED_DEEPSLATE, Items.STONE, Items.DIRT
     );
+    private static final List<String> CAVITY_DIALOGUES = List.of(
+            "Noted a pocket in the wall—flagging it for you.",
+            "Found a tiny cavity here; it’s safe but needs eyes on.",
+            "Here’s the gap I marked—no mobs, just a small void.",
+            "Spotting the ignored cavity; we can patch later together.",
+            "This nook is harmless, but I’m calling it out for you."
+    );
 
     /** Positions that are part of the current fortification layout — never mine during navigation. */
     private Set<BlockPos> fortificationProtectedPositions = Set.of();
+    /** Cavities deemed safe/ignored for this fortify run (skip reattempts). */
+    private final Set<BlockPos> ignoredCavityPositions = new HashSet<>();
+    /** Ignored cavity log for user reporting. */
+    private final List<String> ignoredCavityNotes = new ArrayList<>();
+
+    /** Recent carve positions to avoid immediate re-carving the same column. */
+    private final Map<BlockPos, Long> recentCarveColumnsMs = new HashMap<>();
+    /** Tracks repeated entombment recovery failures by fortify context + position. */
+    private final Map<String, EntombmentRecoveryState> entombmentRecoveryStates = new HashMap<>();
+    /** Tracks repeated staircase surface-escape failures by XZ column + reference surface. */
+    private final Map<String, SurfaceEscapeRetryState> surfaceEscapeRetryStates = new HashMap<>();
+    /** Simple cooldown to avoid spamming local footing bridge placement attempts. */
+    private long fortifyFootingPatchLastMs = 0L;
+    private BlockPos fortifyFootingPatchLastOrigin = null;
 
     /** Current fortification layout — set during buildWall/handlePatch, used for gate-routing. */
     private FortificationLayout currentLayout = null;
     /** Tracks consecutive gate routing failures to skip repeated attempts within a session. */
     private int gateRoutingFailures = 0;
+    /** Ephemeral fortify nav scope for tower/gate recovery. */
+    private FortifyNavRuntimeScope activeFortifyNavScope = null;
+    private long fortifyMovementEpoch = 0L;
+    private boolean fortifyReplanActive = false;
+    private final List<DeferredCleanupTask> deferredFortifyCleanupQueue = new ArrayList<>();
+    private long deferredFortifyCleanupLastProcessMs = 0L;
+
+    private enum FortifyNavMode {
+        REROUTE_ONLY,
+        CARVE_CORRIDOR
+    }
+
+    private enum FortifyCleanupKind {
+        CARVE_REPAIR,
+        SCAFFOLD_REMOVE
+    }
+
+    private enum CleanupState {
+        PENDING,
+        PARTIAL,
+        DONE,
+        FAILED_QUEUED
+    }
+
+    private enum NavBreakRejectReason {
+        AIR_OR_REPLACEABLE,
+        DIG_BLACKLIST,
+        DOOR,
+        BED,
+        FENCE,
+        FENCE_GATE,
+        WALL,
+        PANE,
+        TRAPDOOR,
+        UNBREAKABLE,
+        BLOCK_ENTITY,
+        FLUID,
+        VILLAGE_ADJACENT,
+        NO_COLLISION,
+        LAYOUT_NOT_ALLOWED,
+        NOT_LAYOUT_BLOCK
+    }
+
+    private enum ReplaceFailureKind {
+        NONE,
+        BOT_OCCUPIES,
+        OUT_OF_REACH,
+        LOS_BLOCKED,
+        NO_MATERIAL,
+        OTHER
+    }
+
+    private enum TowerPillarOutcome {
+        OK,
+        PARTIAL,
+        FAIL
+    }
+
+    private enum TowerStepOutcome {
+        OK,
+        NO_MOVE,
+        OFF_TARGET,
+        FELL
+    }
+
+    private enum TowerReturnOutcome {
+        OK,
+        FAIL
+    }
+
+    private enum TowerScaffoldSideOutcome {
+        PROGRESS,
+        NO_PROGRESS_RECOVERABLE,
+        NO_PROGRESS_HARD
+    }
+
+    private record NavBreakCandidateEval(boolean allowed, NavBreakRejectReason rejectReason) {}
+    private record CavityCheckResult(boolean safe, int airCount, boolean spawnableCell) {}
+    private record DeferredRepair(BlockPos pos, BlockState state, boolean mandatory) {}
+    private record ReplaceBlockResult(boolean success, ReplaceFailureKind failureKind, String reason) {
+        boolean retryable() {
+            return failureKind == ReplaceFailureKind.OUT_OF_REACH
+                    || failureKind == ReplaceFailureKind.LOS_BLOCKED
+                    || failureKind == ReplaceFailureKind.BOT_OCCUPIES
+                    || (failureKind == ReplaceFailureKind.OTHER
+                    && reason != null
+                    && (reason.startsWith("bot-intersects-target")
+                    || reason.startsWith("no-line-of-sight")
+                    || reason.startsWith("out-of-reach")));
+        }
+    }
+    private record TowerStepAttemptResult(TowerStepOutcome outcome, BlockPos expected, BlockPos actual) {}
+    private record TowerReturnAttemptResult(TowerReturnOutcome outcome, BlockPos expected, BlockPos actual) {}
+    private record TowerSummitStepCandidate(BlockPos pos, Direction dir, int newReachable, int score) {}
+    private record TowerSummitRoamResult(int placed, boolean recoverableFailure) {}
+    private record TowerHardResetResult(boolean moved, boolean meaningful) {}
+    private static final class SurfaceEscapeRetryState {
+        private int failures;
+        private long lastFailureMs;
+    }
+    private static final class EntombmentRecoveryState {
+        private final String key;
+        private final BlockPos pos;
+        private final String contextPrefix;
+        private final long epoch;
+        private int noProgressCycles;
+        private int surfaceEscapeFailures;
+        private int scaffoldEscalationFailures;
+        private int breakThroughFailures;
+        private long lastUpdatedMs;
+
+        private EntombmentRecoveryState(String key, BlockPos pos, String contextPrefix, long epoch) {
+            this.key = key;
+            this.pos = pos == null ? null : pos.toImmutable();
+            this.contextPrefix = contextPrefix;
+            this.epoch = epoch;
+            this.lastUpdatedMs = System.currentTimeMillis();
+        }
+    }
+    private static final class DeferredCleanupTask {
+        private final FortifyCleanupKind kind;
+        private final BlockPos pos;
+        private final BlockState originalState;
+        private final boolean mandatory;
+        private final String context;
+        private int attempts;
+        private final long queuedAtMs;
+        private long lastAttemptMs;
+        private long nextEligibleMs;
+        private String lastFailureReason;
+
+        private DeferredCleanupTask(FortifyCleanupKind kind, BlockPos pos, BlockState originalState,
+                                    boolean mandatory, String context) {
+            this.kind = kind;
+            this.pos = pos == null ? null : pos.toImmutable();
+            this.originalState = originalState;
+            this.mandatory = mandatory;
+            this.context = context;
+            this.queuedAtMs = System.currentTimeMillis();
+            this.lastAttemptMs = 0L;
+            this.nextEligibleMs = 0L;
+            this.lastFailureReason = null;
+        }
+    }
+    private record FortifyNavProgressWindow(BlockPos startPos, BlockPos endPos,
+                                            double beforeTargetDistSq, double afterTargetDistSq,
+                                            long elapsedMs) {
+        double targetDeltaBlocks() {
+            return Math.sqrt(Math.max(0.0D, beforeTargetDistSq)) - Math.sqrt(Math.max(0.0D, afterTargetDistSq));
+        }
+        double netDisplacementBlocks() {
+            return startPos == null || endPos == null ? 0.0D : Math.sqrt(startPos.getSquaredDistance(endPos));
+        }
+        boolean meaningful() {
+            return targetDeltaBlocks() >= 1.5D || (netDisplacementBlocks() >= 2.0D && elapsedMs >= 300L);
+        }
+    }
+
+    private static final class FortifyCarveSession {
+        private final List<DeferredRepair> deferredRepairs = new ArrayList<>();
+        private int blocksMined = 0;
+        private final BlockPos target;
+        private final String reason;
+        private boolean completed = false;
+        private boolean crossed = false;
+        private CleanupState cleanupState = CleanupState.PENDING;
+        private BlockPos entryPos = null;
+        private long lastTouchedMs = System.currentTimeMillis();
+
+        private FortifyCarveSession(BlockPos target, String reason) {
+            this.target = target == null ? null : target.toImmutable();
+            this.reason = reason;
+        }
+
+        private boolean canMineMore() {
+            return blocksMined < FORTIFY_CARVE_MAX_BLOCKS_PER_EPISODE;
+        }
+
+        private void touch() {
+            lastTouchedMs = System.currentTimeMillis();
+        }
+    }
+
+    private static final class FortifyNavRuntimeScope {
+        private final String context;
+        private final TowerNavAttemptState towerState;
+        private final WallPoint towerVertex;
+        private final BlockPos primaryTarget;
+        private final boolean towerPatchContext;
+        private final boolean gateContext;
+        private FortifyNavMode navMode;
+        private FortifyCarveSession carveSession;
+        private final long epoch;
+        private int localTrapRejectBursts = 0;
+        private BlockPos lastTrapRejectPos = null;
+        private int sameTrapRejectPosCount = 0;
+
+        private FortifyNavRuntimeScope(String context,
+                                       TowerNavAttemptState towerState,
+                                       WallPoint towerVertex,
+                                       BlockPos primaryTarget,
+                                       boolean towerPatchContext,
+                                       boolean gateContext,
+                                       FortifyNavMode navMode,
+                                       long epoch) {
+            this.context = context;
+            this.towerState = towerState;
+            this.towerVertex = towerVertex;
+            this.primaryTarget = primaryTarget == null ? null : primaryTarget.toImmutable();
+            this.towerPatchContext = towerPatchContext;
+            this.gateContext = gateContext;
+            this.navMode = navMode;
+            this.epoch = epoch;
+        }
+    }
+
+    private static final class TowerNavAttemptState {
+        private final WallPoint vertex;
+        private final Set<BlockPos> failedApproachCandidates = new LinkedHashSet<>();
+        private final Set<BlockPos> failedHardResetCandidates = new LinkedHashSet<>();
+        private BlockPos lastStuckPos = null;
+        private int sameStuckPosCount = 0;
+        private long lastStuckStartMs = 0L;
+        private long noRealProgressSinceMs = 0L;
+        private FortifyNavMode navMode = FortifyNavMode.REROUTE_ONLY;
+        private int villageAdjacentRejectBursts = 0;
+
+        private TowerNavAttemptState(WallPoint vertex) {
+            this.vertex = vertex;
+        }
+
+        private void recordApproachFailure(BlockPos pos) {
+            if (pos != null) {
+                failedApproachCandidates.add(pos.toImmutable());
+                trim(failedApproachCandidates, 8);
+            }
+        }
+
+        private void recordHardResetFailure(BlockPos pos) {
+            if (pos != null) {
+                failedHardResetCandidates.add(pos.toImmutable());
+                trim(failedHardResetCandidates, 8);
+            }
+        }
+
+        private void noteMovement(BlockPos before, BlockPos after) {
+            noteMovement(before, after, false);
+        }
+
+        private void noteMovement(BlockPos before, BlockPos after, boolean meaningfulProgress) {
+            if (before == null || after == null) return;
+            boolean movedFar = before.getSquaredDistance(after) >= 9.0D;
+            if (meaningfulProgress) {
+                noRealProgressSinceMs = 0L;
+                villageAdjacentRejectBursts = 0;
+            }
+            if (movedFar || meaningfulProgress) {
+                failedApproachCandidates.clear();
+                failedHardResetCandidates.clear();
+                lastStuckPos = null;
+                sameStuckPosCount = 0;
+                lastStuckStartMs = 0L;
+            }
+        }
+
+        private int noteStuckPosition(BlockPos pos) {
+            if (pos == null) return 0;
+            BlockPos immutable = pos.toImmutable();
+            if (immutable.equals(lastStuckPos)) {
+                sameStuckPosCount++;
+            } else {
+                lastStuckPos = immutable;
+                sameStuckPosCount = 1;
+                lastStuckStartMs = System.currentTimeMillis();
+            }
+            return sameStuckPosCount;
+        }
+
+        private long stuckElapsedMs() {
+            if (lastStuckStartMs <= 0L) return 0L;
+            return Math.max(0L, System.currentTimeMillis() - lastStuckStartMs);
+        }
+
+        private void noteRealProgress() {
+            noRealProgressSinceMs = 0L;
+            villageAdjacentRejectBursts = 0;
+        }
+
+        private void noteNoRealProgress() {
+            if (noRealProgressSinceMs <= 0L) {
+                noRealProgressSinceMs = System.currentTimeMillis();
+            }
+        }
+
+        private long noRealProgressElapsedMs() {
+            if (noRealProgressSinceMs <= 0L) return 0L;
+            return Math.max(0L, System.currentTimeMillis() - noRealProgressSinceMs);
+        }
+
+        private void noteBreakRejects(Map<NavBreakRejectReason, Integer> counts) {
+            int village = counts == null ? 0 : counts.getOrDefault(NavBreakRejectReason.VILLAGE_ADJACENT, 0);
+            int total = 0;
+            if (counts != null) {
+                for (int v : counts.values()) total += v;
+            }
+            if (village > 0 && total > 0 && village * 100 >= total * 80) {
+                villageAdjacentRejectBursts++;
+            } else {
+                villageAdjacentRejectBursts = Math.max(0, villageAdjacentRejectBursts - 1);
+            }
+        }
+
+        private boolean shouldActivateCarveMode() {
+            return navMode != FortifyNavMode.CARVE_CORRIDOR
+                    && (sameStuckPosCount >= 2
+                    || noRealProgressElapsedMs() >= 3_000L
+                    || villageAdjacentRejectBursts >= 2);
+        }
+
+        private void activateCarveMode() {
+            navMode = FortifyNavMode.CARVE_CORRIDOR;
+        }
+
+        private void resetToRerouteMode() {
+            navMode = FortifyNavMode.REROUTE_ONLY;
+        }
+
+        private static void trim(Set<BlockPos> set, int max) {
+            while (set.size() > max) {
+                Iterator<BlockPos> it = set.iterator();
+                if (!it.hasNext()) break;
+                it.next();
+                it.remove();
+            }
+        }
+    }
+
+    private record TowerNavCandidate(BlockPos pos, double score, int exits, boolean locallyReachable, boolean previouslyFailed) {}
+    private record ApproachCandidateEval(boolean standable, boolean insideFootprint,
+                                         boolean locallyReachable, boolean losZero,
+                                         int exits) {}
+    private record ScaffoldTeardownResult(int trackedSession, int trackedMemory, int reconciledNearby,
+                                          int removed, int alreadyAir, int failedMine, int outOfReach, int queued) {}
+
+    private static final class ScaffoldLedger {
+        private final LinkedHashSet<BlockPos> sessionTracked = new LinkedHashSet<>();
+        private final LinkedHashSet<BlockPos> memoryTracked = new LinkedHashSet<>();
+        private final LinkedHashSet<BlockPos> reconciledNearby = new LinkedHashSet<>();
+
+        private List<BlockPos> allCandidatesTopDown() {
+            LinkedHashSet<BlockPos> all = new LinkedHashSet<>();
+            all.addAll(sessionTracked);
+            all.addAll(memoryTracked);
+            all.addAll(reconciledNearby);
+            List<BlockPos> out = new ArrayList<>(all);
+            out.sort(Comparator.comparingInt(BlockPos::getY).reversed());
+            return out;
+        }
+    }
 
     private record SurfaceProfile(int referenceSurfaceY, Map<Long, Integer> plannedYByXZ) {}
     private record StartupRecoveryResult(boolean progressMade, int minedCount, boolean snapped, boolean failedNoSafeTile) {}
     private record MoatDigResult(int dugCount, boolean abortedNoSafeTile) {}
+
+    private FortifyNavRuntimeScope beginFortifyNavScope(String context,
+                                                        TowerNavAttemptState towerState,
+                                                        WallPoint towerVertex,
+                                                        BlockPos target,
+                                                        boolean towerPatchContext,
+                                                        boolean gateContext) {
+        FortifyNavRuntimeScope prior = activeFortifyNavScope;
+        fortifyMovementEpoch++;
+        FortifyNavMode mode = towerState != null ? towerState.navMode : FortifyNavMode.REROUTE_ONLY;
+        activeFortifyNavScope = new FortifyNavRuntimeScope(
+                context, towerState, towerVertex, target, towerPatchContext, gateContext, mode, fortifyMovementEpoch);
+        return prior;
+    }
+
+    private void endFortifyNavScope(ServerPlayerEntity bot, ServerWorld world, FortifyNavRuntimeScope prior) {
+        FortifyNavRuntimeScope scope = activeFortifyNavScope;
+        try {
+            if (scope != null && scope.carveSession != null) {
+                boolean deferGateFinalize = scope.gateContext && isInsideCurrentFortificationHull(bot);
+                if (deferGateFinalize && !scope.carveSession.deferredRepairs.isEmpty()) {
+                    queueDeferredCarveRepairs(scope, scope.carveSession, new ArrayList<>(scope.carveSession.deferredRepairs));
+                    scope.carveSession.deferredRepairs.clear();
+                    scope.carveSession.cleanupState = CleanupState.FAILED_QUEUED;
+                    LOGGER.info("[FortifyNav] Gate carve finalize deferred ctx={} target={} reason=still-inside-hull queued={}",
+                            scope.context,
+                            scope.carveSession.target != null ? scope.carveSession.target.toShortString() : "n/a",
+                            deferredFortifyCleanupQueue.size());
+                } else {
+                    attemptFinalizeCarveTransaction(bot, world, scope);
+                }
+            }
+            if (scope != null) {
+                boolean skipGateCleanupInsideHull = scope.gateContext && isInsideCurrentFortificationHull(bot);
+                if (!skipGateCleanupInsideHull) {
+                    processDeferredFortifyCleanupQueue(bot, world, scope.context);
+                }
+            }
+            if (scope != null && scope.towerState != null && scope.navMode == FortifyNavMode.CARVE_CORRIDOR) {
+                scope.towerState.resetToRerouteMode();
+            }
+        } finally {
+            activeFortifyNavScope = prior;
+        }
+    }
+
+    private void runWithFortifyEdgeNavScope(ServerPlayerEntity bot, ServerWorld world,
+                                            String context, BlockPos target, Runnable action) {
+        if (action == null) {
+            return;
+        }
+        if (bot == null || world == null || context == null || !context.startsWith("fortify-edge:")) {
+            action.run();
+            return;
+        }
+        FortifyNavRuntimeScope prior = beginFortifyNavScope(context, null, null, target, false, false);
+        try {
+            action.run();
+        } finally {
+            endFortifyNavScope(bot, world, prior);
+        }
+    }
+
+    private void runWithFortifyTowerNavScope(ServerPlayerEntity bot, ServerWorld world,
+                                             String context,
+                                             TowerNavAttemptState towerState,
+                                             WallPoint towerVertex,
+                                             BlockPos target,
+                                             Runnable action) {
+        if (action == null) {
+            return;
+        }
+        if (bot == null || world == null || context == null || !context.startsWith("fortify-tower:")) {
+            action.run();
+            return;
+        }
+        FortifyNavRuntimeScope prior = beginFortifyNavScope(context, towerState, towerVertex, target, true, false);
+        try {
+            action.run();
+        } finally {
+            endFortifyNavScope(bot, world, prior);
+        }
+    }
+
+    private String fortifyContextPrefix(String navContext, FortifyNavRuntimeScope scope) {
+        if (navContext != null) {
+            if (navContext.startsWith("fortify-edge:")) return "fortify-edge";
+            if (navContext.startsWith("fortify-tower:")) return "fortify-tower";
+            if (navContext.startsWith("fortify-gate:")) return "fortify-gate";
+        }
+        if (scope == null || scope.context == null) return null;
+        if (scope.context.startsWith("fortify-edge:")) return "fortify-edge";
+        if (scope.context.startsWith("fortify-tower:")) return "fortify-tower";
+        if (scope.context.startsWith("fortify-gate:")) return "fortify-gate";
+        return null;
+    }
+
+    private String entombmentRecoveryKey(BlockPos pos, String contextPrefix, long epoch) {
+        if (pos == null || contextPrefix == null) return null;
+        return contextPrefix + "|" + pos.getX() + "," + pos.getY() + "," + pos.getZ();
+    }
+
+    private EntombmentRecoveryState getEntombmentRecoveryState(BlockPos pos, String contextPrefix,
+                                                               long epoch, boolean create) {
+        if (pos == null || contextPrefix == null) return null;
+        pruneStaleEntombmentRecoveryStates();
+        String key = entombmentRecoveryKey(pos, contextPrefix, epoch);
+        if (key == null) return null;
+        EntombmentRecoveryState state = entombmentRecoveryStates.get(key);
+        if (state == null && create) {
+            state = new EntombmentRecoveryState(key, pos, contextPrefix, epoch);
+            entombmentRecoveryStates.put(key, state);
+        }
+        if (state != null) {
+            state.lastUpdatedMs = System.currentTimeMillis();
+        }
+        return state;
+    }
+
+    private void pruneStaleEntombmentRecoveryStates() {
+        if (entombmentRecoveryStates.isEmpty()) return;
+        long now = System.currentTimeMillis();
+        Iterator<Map.Entry<String, EntombmentRecoveryState>> it = entombmentRecoveryStates.entrySet().iterator();
+        while (it.hasNext()) {
+            EntombmentRecoveryState state = it.next().getValue();
+            if (state == null) {
+                it.remove();
+                continue;
+            }
+            if (now - state.lastUpdatedMs > FORTIFY_ENTOMBMENT_STATE_TTL_MS) {
+                it.remove();
+            }
+        }
+    }
+
+    private void noteEntombmentSurfaceEscapeFailure(ServerWorld world, BlockPos pos, String navContext) {
+        if (world == null || pos == null) return;
+        FortifyNavRuntimeScope scope = activeFortifyNavScope;
+        String contextPrefix = fortifyContextPrefix(navContext, scope);
+        if (contextPrefix == null || currentLayout == null) return;
+        if (!contextPrefix.startsWith("fortify-")) return;
+        long epoch = scope != null ? scope.epoch : fortifyMovementEpoch;
+        EntombmentRecoveryState state = getEntombmentRecoveryState(pos, contextPrefix, epoch, true);
+        if (state != null) {
+            state.surfaceEscapeFailures++;
+        }
+    }
+
+    private void noteEntombmentNoProgressCycle(ServerWorld world, BlockPos pos, String navContext) {
+        if (world == null || pos == null) return;
+        FortifyNavRuntimeScope scope = activeFortifyNavScope;
+        String contextPrefix = fortifyContextPrefix(navContext, scope);
+        if (contextPrefix == null || currentLayout == null) return;
+        long epoch = scope != null ? scope.epoch : fortifyMovementEpoch;
+        EntombmentRecoveryState state = getEntombmentRecoveryState(pos, contextPrefix, epoch, true);
+        if (state != null) {
+            state.noProgressCycles++;
+        }
+    }
+
+    private boolean hasFortifyPocketNoProgressBurst(ServerWorld world, BlockPos pos, String navContext, int minCycles) {
+        if (world == null || pos == null || minCycles <= 0) return false;
+        FortifyNavRuntimeScope scope = activeFortifyNavScope;
+        String contextPrefix = fortifyContextPrefix(navContext, scope);
+        if (contextPrefix == null || currentLayout == null) return false;
+        long epoch = scope != null ? scope.epoch : fortifyMovementEpoch;
+        EntombmentRecoveryState state = getEntombmentRecoveryState(pos, contextPrefix, epoch, false);
+        return state != null && state.noProgressCycles >= minCycles;
+    }
+
+    private void noteEntombmentBreakFailure(ServerWorld world, BlockPos pos, String navContext) {
+        if (world == null || pos == null) return;
+        FortifyNavRuntimeScope scope = activeFortifyNavScope;
+        String contextPrefix = fortifyContextPrefix(navContext, scope);
+        if (contextPrefix == null || currentLayout == null) return;
+        long epoch = scope != null ? scope.epoch : fortifyMovementEpoch;
+        EntombmentRecoveryState state = getEntombmentRecoveryState(pos, contextPrefix, epoch, true);
+        if (state != null) {
+            state.breakThroughFailures++;
+        }
+    }
+
+    private void noteEntombmentScaffoldFailure(ServerWorld world, BlockPos pos, String navContext) {
+        if (world == null || pos == null) return;
+        FortifyNavRuntimeScope scope = activeFortifyNavScope;
+        String contextPrefix = fortifyContextPrefix(navContext, scope);
+        if (contextPrefix == null || currentLayout == null) return;
+        long epoch = scope != null ? scope.epoch : fortifyMovementEpoch;
+        EntombmentRecoveryState state = getEntombmentRecoveryState(pos, contextPrefix, epoch, true);
+        if (state != null) {
+            state.scaffoldEscalationFailures++;
+        }
+    }
+
+    private void noteEntombmentRecoverySuccess(ServerWorld world, BlockPos before, BlockPos after, String navContext) {
+        if (world == null || before == null || after == null) return;
+        if (before.equals(after)) return;
+        FortifyNavRuntimeScope scope = activeFortifyNavScope;
+        String contextPrefix = fortifyContextPrefix(navContext, scope);
+        if (contextPrefix == null) return;
+        long epoch = scope != null ? scope.epoch : fortifyMovementEpoch;
+        boolean afterStillEntombed = isFortifyEntombmentCandidate(world, after, navContext);
+        int beforeTerrainY = VillageFortificationLayoutService.terrainY(world, before.getX(), before.getZ());
+        int afterTerrainY = VillageFortificationLayoutService.terrainY(world, after.getX(), after.getZ());
+        int beforeDepth = Math.max(0, beforeTerrainY - before.getY());
+        int afterDepth = Math.max(0, afterTerrainY - after.getY());
+        boolean resolvedEntombment = !afterStillEntombed || afterDepth < beforeDepth || before.getSquaredDistance(after) >= 9.0D;
+
+        EntombmentRecoveryState beforeState = getEntombmentRecoveryState(before, contextPrefix, epoch, false);
+        if (beforeState != null) {
+            if (resolvedEntombment) {
+                beforeState.noProgressCycles = 0;
+                beforeState.surfaceEscapeFailures = 0;
+                beforeState.scaffoldEscalationFailures = 0;
+                beforeState.breakThroughFailures = 0;
+            }
+            beforeState.lastUpdatedMs = System.currentTimeMillis();
+        }
+        EntombmentRecoveryState afterState = getEntombmentRecoveryState(after, contextPrefix, epoch, false);
+        if (afterState != null) {
+            if (resolvedEntombment) {
+                afterState.noProgressCycles = 0;
+                afterState.surfaceEscapeFailures = 0;
+                afterState.scaffoldEscalationFailures = 0;
+                afterState.breakThroughFailures = 0;
+            }
+            afterState.lastUpdatedMs = System.currentTimeMillis();
+        }
+    }
+
+    private boolean isAdjacentToCurrentFortificationHull(BlockPos pos) {
+        if (pos == null) return false;
+        if (isInsideCurrentFortificationHull(pos)) return true;
+        for (Direction dir : Direction.Type.HORIZONTAL) {
+            if (isInsideCurrentFortificationHull(pos.offset(dir))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean isFortifyEntombmentCandidate(ServerWorld world, BlockPos pos, String navContext) {
+        if (world == null || pos == null) return false;
+        String contextPrefix = fortifyContextPrefix(navContext, activeFortifyNavScope);
+        if (contextPrefix == null || currentLayout == null) return false;
+        if (!(contextPrefix.equals("fortify-edge") || contextPrefix.equals("fortify-tower"))) return false;
+        int terrainY = VillageFortificationLayoutService.terrainY(world, pos.getX(), pos.getZ());
+        int depth = terrainY - pos.getY();
+        if (depth <= 0 || depth > 3) return false;
+        if (!isTrapLikeCell(world, pos)) return false;
+        return isAdjacentToCurrentFortificationHull(pos);
+    }
+
+    private boolean shouldPreferEntombmentEscape(ServerWorld world, BlockPos pos, String navContext) {
+        if (!isFortifyEntombmentCandidate(world, pos, navContext)) return false;
+        FortifyNavRuntimeScope scope = activeFortifyNavScope;
+        String contextPrefix = fortifyContextPrefix(navContext, scope);
+        long epoch = scope != null ? scope.epoch : fortifyMovementEpoch;
+        EntombmentRecoveryState state = getEntombmentRecoveryState(pos, contextPrefix, epoch, false);
+        if (state == null) return false;
+        return state.surfaceEscapeFailures >= 2
+                || state.noProgressCycles >= 2
+                || state.scaffoldEscalationFailures >= 1
+                || state.breakThroughFailures >= 2;
+    }
+
+    private String surfaceEscapeRetryKey(BlockPos pos, int referenceSurfaceY) {
+        if (pos == null) return null;
+        final int bucketSize = 4; // pocket-level cap (clusters nearby XZ retries)
+        int bucketX = Math.floorDiv(pos.getX(), bucketSize);
+        int bucketZ = Math.floorDiv(pos.getZ(), bucketSize);
+        return referenceSurfaceY + "|" + bucketX + "," + bucketZ;
+    }
+
+    private void pruneSurfaceEscapeRetryStates() {
+        if (surfaceEscapeRetryStates.isEmpty()) return;
+        long now = System.currentTimeMillis();
+        Iterator<Map.Entry<String, SurfaceEscapeRetryState>> it = surfaceEscapeRetryStates.entrySet().iterator();
+        while (it.hasNext()) {
+            Map.Entry<String, SurfaceEscapeRetryState> entry = it.next();
+            if (entry == null || entry.getValue() == null) {
+                it.remove();
+                continue;
+            }
+            SurfaceEscapeRetryState state = entry.getValue();
+            if (now - state.lastFailureMs > FORTIFY_SURFACE_ESCAPE_FAIL_TTL_MS) {
+                it.remove();
+            }
+        }
+    }
+
+    private boolean shouldSkipRepeatedSurfaceEscape(BlockPos pos, int referenceSurfaceY) {
+        String key = surfaceEscapeRetryKey(pos, referenceSurfaceY);
+        if (key == null) return false;
+        pruneSurfaceEscapeRetryStates();
+        SurfaceEscapeRetryState state = surfaceEscapeRetryStates.get(key);
+        if (state == null) return false;
+        return state.failures >= FORTIFY_SURFACE_ESCAPE_SAME_COLUMN_LIMIT
+                && (System.currentTimeMillis() - state.lastFailureMs) <= FORTIFY_SURFACE_ESCAPE_FAIL_TTL_MS;
+    }
+
+    private int getSurfaceEscapeRetryFailureCount(BlockPos pos, int referenceSurfaceY) {
+        String key = surfaceEscapeRetryKey(pos, referenceSurfaceY);
+        if (key == null) return 0;
+        pruneSurfaceEscapeRetryStates();
+        SurfaceEscapeRetryState state = surfaceEscapeRetryStates.get(key);
+        if (state == null) return 0;
+        if ((System.currentTimeMillis() - state.lastFailureMs) > FORTIFY_SURFACE_ESCAPE_FAIL_TTL_MS) {
+            return 0;
+        }
+        return state.failures;
+    }
+
+    private int noteSurfaceEscapeRetryFailure(BlockPos pos, int referenceSurfaceY) {
+        String key = surfaceEscapeRetryKey(pos, referenceSurfaceY);
+        if (key == null) return 0;
+        pruneSurfaceEscapeRetryStates();
+        SurfaceEscapeRetryState state = surfaceEscapeRetryStates.computeIfAbsent(key, ignored -> new SurfaceEscapeRetryState());
+        state.failures++;
+        state.lastFailureMs = System.currentTimeMillis();
+        return state.failures;
+    }
+
+    private void clearSurfaceEscapeRetryState(BlockPos pos, int referenceSurfaceY) {
+        String key = surfaceEscapeRetryKey(pos, referenceSurfaceY);
+        if (key != null) {
+            surfaceEscapeRetryStates.remove(key);
+        }
+    }
+
+    private void pruneRecentCarveColumns() {
+        if (recentCarveColumnsMs.isEmpty()) return;
+        long now = System.currentTimeMillis();
+        recentCarveColumnsMs.entrySet().removeIf(e -> e == null || e.getKey() == null || (now - e.getValue()) > FORTIFY_RECENT_CARVE_SUPPRESS_MS);
+    }
+
+    private boolean isRecentCarveColumnOnCooldown(BlockPos pos) {
+        if (pos == null) return false;
+        pruneRecentCarveColumns();
+        Long ts = recentCarveColumnsMs.get(pos);
+        if (ts == null) return false;
+        return (System.currentTimeMillis() - ts) <= FORTIFY_RECENT_CARVE_SUPPRESS_MS;
+    }
+
+    private boolean isSealedFortifyEntombmentSurfaceEscapeCell(ServerWorld world, BlockPos botPos, int referenceSurfaceY) {
+        if (world == null || botPos == null) return false;
+        int depth = referenceSurfaceY - botPos.getY();
+        if (depth <= 0 || depth > 3) return false;
+        if (!isFortifyEntombmentCandidate(world, botPos, null)) return false;
+        BlockState overhead1 = world.getBlockState(botPos.up());
+        BlockState overhead2 = world.getBlockState(botPos.up(2));
+        boolean blockedOverhead = !overhead1.getCollisionShape(world, botPos.up()).isEmpty()
+                || !overhead2.getCollisionShape(world, botPos.up(2)).isEmpty();
+        if (!blockedOverhead) return false;
+
+        int blockedDirs = 0;
+        for (Direction dir : Direction.Type.HORIZONTAL) {
+            BlockPos nextFeet = botPos.offset(dir).up();
+            if (!canStandAt(world, nextFeet)) {
+                blockedDirs++;
+                continue;
+            }
+            BlockPos nextHead = nextFeet.up();
+            BlockPos nextOver = nextHead.up();
+            boolean nextBlocked = !world.getBlockState(nextHead).getCollisionShape(world, nextHead).isEmpty()
+                    || !world.getBlockState(nextOver).getCollisionShape(world, nextOver).isEmpty();
+            if (nextBlocked) {
+                blockedDirs++;
+            }
+        }
+        return blockedDirs >= 4;
+    }
 
     private static long packXZ(int x, int z) {
         return FortifyExecutionPolicyUtil.packXZ(x, z);
@@ -162,6 +946,10 @@ public final class FortifyVillageSkill implements Skill {
             // /bot fortify list
             if (lower.equals("list")) {
                 return handleList(source, server, world);
+            }
+
+            if (lower.equals("report_cavities") || lower.equals("report cavities")) {
+                return handleReportCavities(source, bot, world);
             }
 
             // /bot fortify name <old> <new>
@@ -364,6 +1152,15 @@ public final class FortifyVillageSkill implements Skill {
         this.gateRoutingFailures = 0;
         try {
 
+        // Populate protected positions so navigation break-through logic in patch mode
+        // can identify fortification blocks (mirrors buildWall setup).
+        Set<BlockPos> layoutPositions = new HashSet<>();
+        for (ProceduralWallBlock b : layout.allBlocks()) {
+            layoutPositions.add(b.worldPos());
+        }
+        this.fortificationProtectedPositions = Collections.unmodifiableSet(layoutPositions);
+        this.ignoredCavityPositions.clear();
+        this.ignoredCavityNotes.clear();
         int grandTotalRepaired = 0;
         int passNumber = 0;
         boolean announcedPatchStart = false;
@@ -391,21 +1188,67 @@ public final class FortifyVillageSkill implements Skill {
 
             List<ProceduralWallBlock> repairList = new ArrayList<>();
             Map<Integer, List<ProceduralWallBlock>> repairByEdge = new LinkedHashMap<>();
+            int interiorTowerSkipped = 0;
+            int safeCavitiesIgnoredThisPass = 0;
+            List<String> interiorTowerSkipSamples = new ArrayList<>();
+            List<String> safeCavitySamples = new ArrayList<>();
             for (ProceduralWallBlock block : layout.allBlocks()) {
                 if (!isActiveFortifyBlock(block)) {
                     continue;
                 }
+                BlockPos pos = block.worldPos();
+                if ((block.type() == WallBlockType.TOWER_BASE
+                        || block.type() == WallBlockType.TOWER_WALL
+                        || block.type() == WallBlockType.TOWER_CAP)
+                        && !isLayoutExteriorReachable(world, pos)) {
+                    ignoredCavityPositions.add(pos.toImmutable());
+                    ignoredCavityNotes.add(pos.toShortString() + " interior tower cell");
+                    interiorTowerSkipped++;
+                    if (interiorTowerSkipSamples.size() < FORTIFY_PATCH_SKIP_LOG_SAMPLE_LIMIT) {
+                        interiorTowerSkipSamples.add(pos.toShortString());
+                        LOGGER.info("[FortifyPatch] Skipping interior tower cell at {}", pos.toShortString());
+                    }
+                    continue;
+                }
+                if (ignoredCavityPositions.contains(pos)) {
+                    continue;
+                }
                 BlockState current = world.getBlockState(block.worldPos());
                 if (current.isAir() || current.isReplaceable()) {
+                    CavityCheckResult cavity = evaluateCavity(world, pos);
+                    if (cavity.safe()) {
+                        ignoredCavityPositions.add(pos.toImmutable());
+                        String note = String.format("%s air=%d spawnable=%s", pos.toShortString(), cavity.airCount(), cavity.spawnableCell());
+                        ignoredCavityNotes.add(note);
+                        safeCavitiesIgnoredThisPass++;
+                        if (safeCavitySamples.size() < FORTIFY_PATCH_SKIP_LOG_SAMPLE_LIMIT) {
+                            safeCavitySamples.add(note);
+                            LOGGER.info("[FortifyPatch] Ignoring safe cavity at {} air={} spawnable={}",
+                                    pos.toShortString(), cavity.airCount(), cavity.spawnableCell());
+                        }
+                        continue;
+                    }
                     repairList.add(block);
                     repairByEdge.computeIfAbsent(block.edgeIndex(), k -> new ArrayList<>()).add(block);
                 }
             }
 
+            if (interiorTowerSkipped > 0) {
+                LOGGER.info("[FortifyPatch] interiorTowerSkipped={} samples={}",
+                        interiorTowerSkipped,
+                        interiorTowerSkipSamples.isEmpty() ? "none" : interiorTowerSkipSamples);
+            }
+            if (safeCavitiesIgnoredThisPass > 0) {
+                LOGGER.info("[FortifyPatch] safeCavitiesIgnored={} samples={}",
+                        safeCavitiesIgnoredThisPass,
+                        safeCavitySamples.isEmpty() ? "none" : safeCavitySamples);
+            }
+
             if (repairList.isEmpty()) {
+                String cavityNote = ignoredCavityPositions.isEmpty() ? "" : " (" + ignoredCavityPositions.size() + " cavities ignored)";
                 String msg = autoRepeat && passNumber > 1
-                        ? "§a[Fortify] Wall '" + wallName + "' is intact after " + (passNumber - 1) + " passes! (" + grandTotalRepaired + " total blocks repaired)"
-                        : "§a[Fortify] Wall '" + wallName + "' is intact! No repairs needed.";
+                        ? "§a[Fortify] Wall '" + wallName + "' is intact after " + (passNumber - 1) + " passes! (" + grandTotalRepaired + " total blocks repaired)" + cavityNote
+                        : "§a[Fortify] Wall '" + wallName + "' is intact! No repairs needed." + cavityNote;
                 ChatUtils.sendChatMessages(source, msg);
                 ScaffoldService.teardownTrackedScaffolds(bot);
                 return SkillExecutionResult.success("Wall intact. " + grandTotalRepaired + " total blocks repaired.");
@@ -460,6 +1303,10 @@ public final class FortifyVillageSkill implements Skill {
 
             int referenceSurfaceY = computeReferenceSurfaceY(bot, layout, world);
             SurfaceProfile surfaceProfile = createSurfaceProfile(layout, referenceSurfaceY);
+
+            if (!SkillManager.shouldAbortSkill(bot)) {
+                runPatchStartPreflightRecovery(source, bot, world, referenceSurfaceY, surfaceProfile);
+            }
 
             // Clean up stray scaffold pillars before repairing
             if (!SkillManager.shouldAbortSkill(bot)) {
@@ -612,11 +1459,26 @@ public final class FortifyVillageSkill implements Skill {
 
         } while (autoRepeat && !SkillManager.shouldAbortSkill(bot));
 
-        // Final scaffold cleanup
+        boolean aborted = SkillManager.shouldAbortSkill(bot);
+        if (aborted) {
+            LOGGER.info("[FortifyAbortCleanup] begin final scaffold teardown");
+        }
         ScaffoldService.teardownTrackedScaffolds(bot);
+        if (aborted) {
+            LOGGER.info("[FortifyAbortCleanup] final scaffold teardown complete");
+        }
 
-        ChatUtils.sendChatMessages(source, "§a[Fortify] Auto-patch complete: " + grandTotalRepaired + " total blocks repaired across " + passNumber + " passes.");
-        return SkillExecutionResult.success("Auto-patched " + grandTotalRepaired + " blocks across " + passNumber + " passes.");
+        String cavitySummary = ignoredCavityPositions.isEmpty()
+                ? ""
+                : " (" + ignoredCavityPositions.size() + " cavities ignored)";
+        if (aborted) {
+            ChatUtils.sendChatMessages(source, "§e[Fortify] Auto-patch aborted after " + passNumber
+                    + " passes; " + grandTotalRepaired + " blocks repaired." + cavitySummary);
+            return SkillExecutionResult.failure("Auto-patch aborted after " + passNumber
+                    + " passes; " + grandTotalRepaired + " blocks repaired." + cavitySummary);
+        }
+        ChatUtils.sendChatMessages(source, "§a[Fortify] Auto-patch complete: " + grandTotalRepaired + " total blocks repaired across " + passNumber + " passes." + cavitySummary);
+        return SkillExecutionResult.success("Auto-patched " + grandTotalRepaired + " blocks across " + passNumber + " passes." + cavitySummary);
 
         } finally {
             this.currentLayout = null;
@@ -714,7 +1576,12 @@ public final class FortifyVillageSkill implements Skill {
             byType.computeIfAbsent(typeName, k -> new int[2]);
             byType.get(typeName)[0]++;
 
-            BlockState current = world.getBlockState(block.worldPos());
+            BlockPos pos = block.worldPos();
+            if (ignoredCavityPositions.contains(pos)) {
+                byType.get(typeName)[1]++;
+                continue;
+            }
+            BlockState current = world.getBlockState(pos);
             if (!current.isAir() && !current.isReplaceable()) {
                 byType.get(typeName)[1]++;
             } else {
@@ -766,6 +1633,31 @@ public final class FortifyVillageSkill implements Skill {
         ChatUtils.sendSystemMessage(source, "§7  Particles: §6orange§7=towers, §9blue§7=walls, §egold§7=gate, §1dark blue§7=moat, §5purple§7=overhang, §cred§7=missing, §agreen§7=hull");
 
         return SkillExecutionResult.success("Status: " + totalPresent + "/" + totalPlanned + " (" + overallPct + "%).");
+    }
+
+    private SkillExecutionResult handleReportCavities(ServerCommandSource source, ServerPlayerEntity bot, ServerWorld world) {
+        if (ignoredCavityPositions.isEmpty()) {
+            ChatUtils.sendChatMessages(source, "§7[Fortify] No ignored cavities recorded this session.");
+            return SkillExecutionResult.success("No ignored cavities recorded.");
+        }
+        ChatUtils.sendChatMessages(source, "§e[Fortify] Ignored cavities: " + ignoredCavityPositions.size());
+        for (String note : ignoredCavityNotes) {
+            ChatUtils.sendSystemMessage(source, "§7  " + note);
+        }
+        boolean nearAny = false;
+        if (bot != null) {
+            BlockPos botPos = bot.getBlockPos();
+            nearAny = ignoredCavityPositions.stream().anyMatch(p -> p.isWithinDistance(botPos, 4.5));
+            if (nearAny) {
+                String line = CAVITY_DIALOGUES.get(ThreadLocalRandom.current().nextInt(CAVITY_DIALOGUES.size()));
+                CompanionOverheadDialogueService.showOverheadLine(bot, line, 4_000, 48.0D, "fortify", "cavity");
+            }
+        }
+        if (currentLayout != null) {
+            FortificationVisualizerService.spawnLayoutParticles(world, currentLayout, ignoredCavityPositions, bot);
+            ChatUtils.sendSystemMessage(source, "§7  Red particles show ignored cavities on the layout.");
+        }
+        return SkillExecutionResult.success("Reported ignored cavities.");
     }
 
     private SkillExecutionResult handleMerge(ServerCommandSource source, ServerPlayerEntity bot,
@@ -975,6 +1867,8 @@ public final class FortifyVillageSkill implements Skill {
             layoutPositions.add(b.worldPos());
         }
         this.fortificationProtectedPositions = Collections.unmodifiableSet(layoutPositions);
+        this.ignoredCavityPositions.clear();
+        this.ignoredCavityNotes.clear();
 
         // Ensure bot starts on solid, open ground — critical for resume from stuck positions
         if (shouldTriggerDepthRecovery(bot.getBlockPos().getY(), referenceSurfaceY)) {
@@ -1621,6 +2515,85 @@ public final class FortifyVillageSkill implements Skill {
                 : new StartupRecoveryResult(false, minedCount, false, true);
     }
 
+    private void runPatchStartPreflightRecovery(ServerCommandSource source,
+                                                ServerPlayerEntity bot,
+                                                ServerWorld world,
+                                                int referenceSurfaceY,
+                                                SurfaceProfile surfaceProfile) {
+        if (bot == null || world == null) {
+            return;
+        }
+        BlockPos start = bot.getBlockPos();
+        int depth = Math.max(0, referenceSurfaceY - start.getY());
+        boolean trapLikeStart = isTrapLikeCell(world, start);
+        if (depth <= 0 && !trapLikeStart) {
+            return;
+        }
+
+        LOGGER.info("[FortifyPatch] preflight-start pos={} refY={} depth={} trapLike={} ctx=fortify-edge:patch-start-preflight",
+                start.toShortString(), referenceSurfaceY, depth, trapLikeStart);
+
+        final boolean[] unwedged = {false};
+        final boolean[] carved = {false};
+        final BlockPos[] carveTargetRef = {null};
+
+        runWithFortifyEdgeNavScope(bot, world, "fortify-edge:patch-start-preflight", start, () -> {
+            if (SkillManager.shouldAbortSkill(bot)) {
+                return;
+            }
+            if (shouldTriggerDepthRecovery(bot.getBlockPos().getY(), referenceSurfaceY)) {
+                escapeIfInHole(bot, world, referenceSurfaceY);
+            }
+
+            if (SkillManager.shouldAbortSkill(bot)) {
+                return;
+            }
+            if (isTrapLikeCell(world, bot.getBlockPos())) {
+                unwedged[0] = tryUnwedgeFromTightSpace(source, bot, world, surfaceProfile, null, "edge-patch-start");
+            }
+
+            if (SkillManager.shouldAbortSkill(bot)) {
+                return;
+            }
+            if (isTrapLikeCell(world, bot.getBlockPos())) {
+                BlockPos safe = SafePositionService.findSafeNear(world, bot.getBlockPos(), 4);
+                BlockPos carveTarget = safe != null ? safe.toImmutable() : bot.getBlockPos().offset(bot.getHorizontalFacing()).toImmutable();
+                carveTargetRef[0] = carveTarget;
+                carved[0] = tryBreakThroughObstacle(bot, world, carveTarget, "fortify-edge:patch-start-preflight");
+            }
+        });
+
+        BlockPos end = bot.getBlockPos();
+        if (!SkillManager.shouldAbortSkill(bot)
+                && (isStandingOnScaffoldBlock(bot, world) || end.getY() > referenceSurfaceY + 1)) {
+            boolean scaffoldHold = beginScaffoldEdgeHold(bot, world, end);
+            int removed = ScaffoldService.teardownTrackedScaffolds(bot);
+            endScaffoldEdgeHold(bot, scaffoldHold);
+            if (removed > 0) {
+                LOGGER.info("[FortifyPatch] preflight-scaffold-teardown removed={} pos={} refY={} onScaffoldBefore={}",
+                        removed,
+                        end.toShortString(),
+                        referenceSurfaceY,
+                        scaffoldHold);
+                end = bot.getBlockPos();
+            }
+        }
+        boolean trapLikeEnd = isTrapLikeCell(world, end);
+        int endDepth = Math.max(0, referenceSurfaceY - end.getY());
+        boolean progress = movedByAtLeast(start, end, 1.0)
+                || (!trapLikeEnd && trapLikeStart)
+                || (depth > 0 && endDepth < depth);
+        LOGGER.info("[FortifyPatch] preflight-end start={} end={} progress={} trapLikeEnd={} depthEnd={} unwedged={} carved={} carveTarget={}",
+                start.toShortString(),
+                end.toShortString(),
+                progress,
+                trapLikeEnd,
+                endDepth,
+                unwedged[0],
+                carved[0],
+                carveTargetRef[0] != null ? carveTargetRef[0].toShortString() : "none");
+    }
+
     private int probeLocalMoatTargets(ServerPlayerEntity bot, ServerWorld world,
                                       Set<BlockPos> remainingTargets, int maxMines) {
         if (remainingTargets == null || remainingTargets.isEmpty() || maxMines <= 0) {
@@ -2039,7 +3012,8 @@ public final class FortifyVillageSkill implements Skill {
                 if (distToSegmentSq > 15 * 15) {
                     BlockPos approachPos = firstBlockPos.withY(
                             safeSurfaceY(surfaceProfile, world, firstBlockPos.getX(), firstBlockPos.getZ()));
-                    walkToTarget(source, bot, approachPos, 5_000L);
+                    runWithFortifyEdgeNavScope(bot, world, "fortify-edge:segment-close", approachPos,
+                            () -> walkToTarget(source, bot, approachPos, 5_000L, "fortify-edge:segment-close"));
                 }
             }
 
@@ -2211,7 +3185,8 @@ public final class FortifyVillageSkill implements Skill {
                         if (repositionAttempt[0] >= MAX_REPOSITION_ATTEMPTS_PER_BATCH) {
                             BlockPos safe = SafePositionService.findSafeNear(world, bot.getBlockPos(), 3);
                             if (safe != null && !safe.equals(bot.getBlockPos())) {
-                                walkToTarget(source, bot, safe, 1_200L);
+                                runWithFortifyEdgeNavScope(bot, world, "fortify-edge:safe-nudge", safe,
+                                        () -> walkToTarget(source, bot, safe, 1_200L, "fortify-edge:safe-nudge"));
                             }
                             repositionAttempt[0] = 0;
                             return;
@@ -2245,13 +3220,26 @@ public final class FortifyVillageSkill implements Skill {
             int noLosCount = report.remainingByReason().getOrDefault(FailureReason.NO_LOS, 0);
             if (!remaining.isEmpty() && noLosCount > 0 && noLosCount >= remaining.size() / 2
                     && !SkillManager.shouldAbortSkill(bot) && countBuildingBlocks(bot) > 0) {
+                int terrainY = VillageFortificationLayoutService.terrainY(world, bot.getBlockPos().getX(), bot.getBlockPos().getZ());
+                int depth = terrainY - bot.getBlockPos().getY();
+                if (shouldPreferEntombmentEscape(world, bot.getBlockPos(), "fortify-edge:segment-scaffold")
+                        || (depth > 0 && depth <= 3 && isTrapLikeCell(world, bot.getBlockPos()) && isAdjacentToCurrentFortificationHull(bot.getBlockPos()))) {
+                    LOGGER.info("[Fortify] Edge {} seg {}: suppress scaffold escalation entombed-local-edge pos={} depth={} failures={}",
+                            edge.index(), currentSegmentOrdinal, bot.getBlockPos().toShortString(), depth, report.remainingByReason());
+                } else {
                 LOGGER.info("[Fortify] Edge {} seg {}: NO_LOS={}/{} — scaffold escalation",
                         edge.index(), currentSegmentOrdinal, noLosCount, remaining.size());
                 totalPlaced += attemptScaffoldEscalation(
                         source, bot, world, remaining, blockMap, surfaceProfile, edge, currentSegmentOrdinal);
+                }
             }
 
             if (report.placedCount() == 0 && report.remainingCount() > 0) {
+                int terrainY = VillageFortificationLayoutService.terrainY(world, bot.getBlockPos().getX(), bot.getBlockPos().getZ());
+                int depth = terrainY - bot.getBlockPos().getY();
+                LOGGER.info("[FortifyEdge] zero-progress segment edge={} seg={}/{} pos={} trapLike={} depth={} failures={}",
+                        edge.index(), segmentOrdinal, blocksBySegment.size(), bot.getBlockPos().toShortString(),
+                        isTrapLikeCell(world, bot.getBlockPos()), depth, report.remainingByReason());
                 segmentNoProgressStreak++;
                 if (shouldStopAfterNoProgressSegments(segmentNoProgressStreak, EDGE_SEGMENT_NO_PROGRESS_STOP)) {
                     LOGGER.info("Edge {} stopping after {} zero-progress segments",
@@ -2305,68 +3293,82 @@ public final class FortifyVillageSkill implements Skill {
 
         BlockPos scaffoldBase = new BlockPos(cx + offX, groundY, cz + offZ);
 
-        // Walk to scaffold base
-        walkToTarget(source, bot, scaffoldBase, 3_000L);
-        if (SkillManager.shouldAbortSkill(bot)) return 0;
-
-        // Calculate how high to pillar: need eye level near the highest remaining block
-        // Bot eye height is at Y + 1.62, reach is ~4.5 blocks
-        int currentY = bot.getBlockPos().getY();
-        int neededY = Math.max(currentY, highestY - 2); // eye at neededY+1.62, reach 4.5 down
-        int pillarSteps = Math.max(2, Math.min(MAX_SCAFFOLD_HEIGHT, neededY - currentY));
-
-        LOGGER.info("[Fortify] Edge {} seg {}: scaffold escalation at ({},{},{}) pillar={} highestTarget={}",
-                edge.index(), segmentOrdinal, scaffoldBase.getX(), scaffoldBase.getY(), scaffoldBase.getZ(),
-                pillarSteps, highestY);
-
-        ScaffoldService.ScaffoldSession elevSession = ScaffoldService.beginSession(bot);
-        boolean pillared = ScaffoldService.pillarToY(elevSession, currentY + pillarSteps);
-
-        int placed = 0;
-        if (pillared || bot.getBlockPos().getY() > currentY) {
-            // Sort remaining by distance to bot so we place nearest first
-            List<BlockPos> sortedRemaining = new ArrayList<>(remaining);
-            sortedRemaining.sort(Comparator.comparingDouble(p -> bot.getBlockPos().getSquaredDistance(p)));
-
-            for (BlockPos pos : sortedRemaining) {
-                if (SkillManager.shouldAbortSkill(bot)) break;
-                if (countBuildingBlocks(bot) == 0) break;
-
-                ProceduralWallBlock block = blockMap.get(pos);
-                if (block == null) continue;
-
-                // Check if already satisfied
-                if (isPlannedBlockSatisfied(block, world.getBlockState(pos))) {
-                    remaining.remove(pos);
-                    continue;
-                }
-
-                // Check reach from elevated position
-                if (!isWithinReach(bot, pos)) continue;
-
-                LookController.faceBlock(bot, pos);
-                sleepQuiet(60);
-                BotActions.PlaceResult result = tryPlaceBlock(bot, world, pos, block.state());
-                if (result.success()) {
-                    remaining.remove(pos);
-                    placed++;
-                    sleepQuiet(BLOCK_PLACE_DELAY_MS);
+        FortifyNavRuntimeScope priorScope = beginFortifyNavScope(
+                "fortify-edge:scaffold-escalation", null, null, scaffoldBase, false, false);
+        try {
+            // Walk to scaffold base
+            walkToTarget(source, bot, scaffoldBase, 3_000L, "fortify-edge:scaffold-escalation");
+            if (isTrapLikeCell(world, bot.getBlockPos())) {
+                boolean nudged = tryPostCarvePocketEscapeToward(bot, world, scaffoldBase);
+                if (nudged) {
+                    LOGGER.info("[Fortify] Edge {} seg {}: scaffold escalation post-carve-escape nudged=true pos={}",
+                            edge.index(), segmentOrdinal, bot.getBlockPos().toShortString());
                 }
             }
+            if (SkillManager.shouldAbortSkill(bot)) return 0;
 
-            LOGGER.info("[Fortify] Edge {} seg {}: scaffold escalation placed={}/{}",
-                    edge.index(), segmentOrdinal, placed, sortedRemaining.size());
-        } else {
-            LOGGER.info("[Fortify] Edge {} seg {}: scaffold escalation pillar failed (Y unchanged)",
-                    edge.index(), segmentOrdinal);
+            // Calculate how high to pillar: need eye level near the highest remaining block
+            // Bot eye height is at Y + 1.62, reach is ~4.5 blocks
+            int currentY = bot.getBlockPos().getY();
+            int neededY = Math.max(currentY, highestY - 2); // eye at neededY+1.62, reach 4.5 down
+            int pillarSteps = Math.max(2, Math.min(MAX_SCAFFOLD_HEIGHT, neededY - currentY));
+
+            LOGGER.info("[Fortify] Edge {} seg {}: scaffold escalation at ({},{},{}) pillar={} highestTarget={}",
+                    edge.index(), segmentOrdinal, scaffoldBase.getX(), scaffoldBase.getY(), scaffoldBase.getZ(),
+                    pillarSteps, highestY);
+
+            ScaffoldService.ScaffoldSession elevSession = ScaffoldService.beginSession(bot);
+            boolean pillared = ScaffoldService.pillarToY(elevSession, currentY + pillarSteps);
+
+            int placed = 0;
+            if (pillared || bot.getBlockPos().getY() > currentY) {
+                // Sort remaining by distance to bot so we place nearest first
+                List<BlockPos> sortedRemaining = new ArrayList<>(remaining);
+                sortedRemaining.sort(Comparator.comparingDouble(p -> bot.getBlockPos().getSquaredDistance(p)));
+
+                for (BlockPos pos : sortedRemaining) {
+                    if (SkillManager.shouldAbortSkill(bot)) break;
+                    if (countBuildingBlocks(bot) == 0) break;
+
+                    ProceduralWallBlock block = blockMap.get(pos);
+                    if (block == null) continue;
+
+                    // Check if already satisfied
+                    if (isPlannedBlockSatisfied(block, world.getBlockState(pos))) {
+                        remaining.remove(pos);
+                        continue;
+                    }
+
+                    // Check reach from elevated position
+                    if (!isWithinReach(bot, pos)) continue;
+
+                    LookController.faceBlock(bot, pos);
+                    sleepQuiet(60);
+                    BotActions.PlaceResult result = tryPlaceBlock(bot, world, pos, block.state());
+                    if (result.success()) {
+                        remaining.remove(pos);
+                        placed++;
+                        sleepQuiet(BLOCK_PLACE_DELAY_MS);
+                    }
+                }
+
+                LOGGER.info("[Fortify] Edge {} seg {}: scaffold escalation placed={}/{}",
+                        edge.index(), segmentOrdinal, placed, sortedRemaining.size());
+            } else {
+                LOGGER.info("[Fortify] Edge {} seg {}: scaffold escalation pillar failed (Y unchanged)",
+                        edge.index(), segmentOrdinal);
+                noteEntombmentScaffoldFailure(world, bot.getBlockPos(), "fortify-edge:scaffold-escalation");
+            }
+
+            // Tear down scaffold
+            int tornDown = ScaffoldService.teardown(elevSession, Collections.emptySet());
+            LOGGER.debug("[Fortify] Edge {} seg {}: scaffold teardown removed={}",
+                    edge.index(), segmentOrdinal, tornDown);
+
+            return placed;
+        } finally {
+            endFortifyNavScope(bot, world, priorScope);
         }
-
-        // Tear down scaffold
-        int tornDown = ScaffoldService.teardown(elevSession, Collections.emptySet());
-        LOGGER.debug("[Fortify] Edge {} seg {}: scaffold teardown removed={}",
-                edge.index(), segmentOrdinal, tornDown);
-
-        return placed;
     }
 
     /** Priority order for placing blocks (lower = placed first). */
@@ -2601,6 +3603,45 @@ public final class FortifyVillageSkill implements Skill {
         }
     }
 
+    private boolean digTemporarySurfaceEscapeRampBlock(ServerPlayerEntity bot, ServerWorld world,
+                                                       BlockPos pos, Set<Item> allowedRampItems) {
+        if (bot == null || world == null || pos == null) {
+            return false;
+        }
+        BlockState state = world.getBlockState(pos);
+        if (state.isAir()) return true;
+
+        if (allowedRampItems != null && !allowedRampItems.isEmpty()) {
+            Item item = state.getBlock().asItem();
+            if (!allowedRampItems.contains(item)) {
+                return false;
+            }
+        }
+
+        if (DIG_BLACKLIST.contains(state.getBlock())) return false;
+        if (state.getBlock() instanceof net.minecraft.block.DoorBlock) return false;
+        if (state.getBlock() instanceof net.minecraft.block.BedBlock) return false;
+        if (state.getBlock() instanceof FenceBlock) return false;
+        if (state.getBlock() instanceof FenceGateBlock) return false;
+        if (state.getBlock() instanceof WallBlock) return false;
+        if (state.getBlock() instanceof PaneBlock) return false;
+        if (state.getBlock() instanceof TrapdoorBlock) return false;
+        if (state.getHardness(world, pos) < 0) return false;
+
+        try {
+            CompletableFuture<String> result = MiningTool.mineBlock(bot, pos);
+            String outcome = awaitMiningOutcome(result, () -> SkillManager.shouldAbortSkill(bot),
+                    DIG_RESULT_TIMEOUT_MS, DIG_RESULT_POLL_MS);
+            if (outcome == null) {
+                return false;
+            }
+            return !outcome.startsWith("⚠️");
+        } catch (Exception e) {
+            LOGGER.debug("digTemporarySurfaceEscapeRampBlock failed at {}: {}", pos.toShortString(), e.getMessage());
+            return false;
+        }
+    }
+
     /**
      * Scans near the fortification perimeter for leftover scaffold pillars and mines them.
      * Detection: for each XZ column near hull vertices and edge midpoints, look for columns
@@ -2716,22 +3757,26 @@ public final class FortifyVillageSkill implements Skill {
      * Rejects village structures, containers, and hazards.
      */
     private boolean isSafeToBreakForNavigation(ServerWorld world, BlockPos pos) {
+        return evaluateNonLayoutBreakForNavigation(world, pos).allowed();
+    }
+
+    private NavBreakCandidateEval evaluateNonLayoutBreakForNavigation(ServerWorld world, BlockPos pos) {
         BlockState state = world.getBlockState(pos);
-        if (state.isAir() || state.isReplaceable()) return false;
-        if (DIG_BLACKLIST.contains(state.getBlock())) return false;
-        if (state.getBlock() instanceof net.minecraft.block.DoorBlock) return false;
-        if (state.getBlock() instanceof net.minecraft.block.BedBlock) return false;
-        if (state.getBlock() instanceof FenceBlock) return false;
-        if (state.getBlock() instanceof FenceGateBlock) return false;
-        if (state.getBlock() instanceof WallBlock) return false;
-        if (state.getBlock() instanceof PaneBlock) return false;
-        if (state.getBlock() instanceof TrapdoorBlock) return false;
-        if (state.getHardness(world, pos) < 0) return false;        // unbreakable
-        if (world.getBlockEntity(pos) != null) return false;         // chests, furnaces, etc.
-        if (!state.getFluidState().isEmpty()) return false;          // lava/water
-        if (isAdjacentToVillageStructure(world, pos, 2)) return false;
-        if (state.getCollisionShape(world, pos).isEmpty()) return false; // must have collision to be blocking
-        return true;
+        if (state.isAir() || state.isReplaceable()) return new NavBreakCandidateEval(false, NavBreakRejectReason.AIR_OR_REPLACEABLE);
+        if (DIG_BLACKLIST.contains(state.getBlock())) return new NavBreakCandidateEval(false, NavBreakRejectReason.DIG_BLACKLIST);
+        if (state.getBlock() instanceof net.minecraft.block.DoorBlock) return new NavBreakCandidateEval(false, NavBreakRejectReason.DOOR);
+        if (state.getBlock() instanceof net.minecraft.block.BedBlock) return new NavBreakCandidateEval(false, NavBreakRejectReason.BED);
+        if (state.getBlock() instanceof FenceBlock) return new NavBreakCandidateEval(false, NavBreakRejectReason.FENCE);
+        if (state.getBlock() instanceof FenceGateBlock) return new NavBreakCandidateEval(false, NavBreakRejectReason.FENCE_GATE);
+        if (state.getBlock() instanceof WallBlock) return new NavBreakCandidateEval(false, NavBreakRejectReason.WALL);
+        if (state.getBlock() instanceof PaneBlock) return new NavBreakCandidateEval(false, NavBreakRejectReason.PANE);
+        if (state.getBlock() instanceof TrapdoorBlock) return new NavBreakCandidateEval(false, NavBreakRejectReason.TRAPDOOR);
+        if (state.getHardness(world, pos) < 0) return new NavBreakCandidateEval(false, NavBreakRejectReason.UNBREAKABLE);
+        if (world.getBlockEntity(pos) != null) return new NavBreakCandidateEval(false, NavBreakRejectReason.BLOCK_ENTITY);
+        if (!state.getFluidState().isEmpty()) return new NavBreakCandidateEval(false, NavBreakRejectReason.FLUID);
+        if (isAdjacentToVillageStructure(world, pos, 2)) return new NavBreakCandidateEval(false, NavBreakRejectReason.VILLAGE_ADJACENT);
+        if (state.getCollisionShape(world, pos).isEmpty()) return new NavBreakCandidateEval(false, NavBreakRejectReason.NO_COLLISION);
+        return new NavBreakCandidateEval(true, null);
     }
 
     /**
@@ -2741,14 +3786,49 @@ public final class FortifyVillageSkill implements Skill {
      * Callers MUST replace these blocks after walking through.
      */
     private boolean isLayoutBlockBreakableForNavigation(ServerWorld world, BlockPos pos) {
-        if (!fortificationProtectedPositions.contains(pos)) return false; // not a layout block
+        return evaluateLayoutBreakForNavigation(world, pos).allowed();
+    }
+
+    private NavBreakCandidateEval evaluateLayoutBreakForNavigation(ServerWorld world, BlockPos pos) {
+        if (!fortificationProtectedPositions.contains(pos)) return new NavBreakCandidateEval(false, NavBreakRejectReason.NOT_LAYOUT_BLOCK);
         BlockState state = world.getBlockState(pos);
-        if (state.isAir() || state.isReplaceable()) return false;
-        if (state.getHardness(world, pos) < 0) return false;
-        if (world.getBlockEntity(pos) != null) return false;
-        if (!state.getFluidState().isEmpty()) return false;
-        if (state.getCollisionShape(world, pos).isEmpty()) return false;
-        return true;
+        if (state.isAir() || state.isReplaceable()) return new NavBreakCandidateEval(false, NavBreakRejectReason.AIR_OR_REPLACEABLE);
+        if (state.getHardness(world, pos) < 0) return new NavBreakCandidateEval(false, NavBreakRejectReason.UNBREAKABLE);
+        if (world.getBlockEntity(pos) != null) return new NavBreakCandidateEval(false, NavBreakRejectReason.BLOCK_ENTITY);
+        if (!state.getFluidState().isEmpty()) return new NavBreakCandidateEval(false, NavBreakRejectReason.FLUID);
+        if (state.getCollisionShape(world, pos).isEmpty()) return new NavBreakCandidateEval(false, NavBreakRejectReason.NO_COLLISION);
+        return new NavBreakCandidateEval(true, null);
+    }
+
+    private NavBreakCandidateEval evaluateBreakForNavigation(ServerWorld world, BlockPos pos, boolean allowLayout) {
+        if (fortificationProtectedPositions.contains(pos)) {
+            if (!allowLayout) {
+                return new NavBreakCandidateEval(false, NavBreakRejectReason.LAYOUT_NOT_ALLOWED);
+            }
+            return evaluateLayoutBreakForNavigation(world, pos);
+        }
+        return evaluateNonLayoutBreakForNavigation(world, pos);
+    }
+
+    private void incrementNavBreakReject(Map<NavBreakRejectReason, Integer> counts, NavBreakCandidateEval eval) {
+        if (counts == null || eval == null || eval.allowed() || eval.rejectReason() == null) {
+            return;
+        }
+        counts.merge(eval.rejectReason(), 1, Integer::sum);
+    }
+
+    private String formatNavBreakRejectSummary(Map<NavBreakRejectReason, Integer> counts) {
+        if (counts == null || counts.isEmpty()) {
+            return "none";
+        }
+        StringBuilder sb = new StringBuilder();
+        boolean first = true;
+        for (Map.Entry<NavBreakRejectReason, Integer> e : counts.entrySet()) {
+            if (!first) sb.append(',');
+            first = false;
+            sb.append(e.getKey().name().toLowerCase(Locale.ROOT)).append('=').append(e.getValue());
+        }
+        return sb.toString();
     }
 
     /**
@@ -2761,72 +3841,268 @@ public final class FortifyVillageSkill implements Skill {
      * Max one break-through per call to prevent tunnel-mining.
      */
     private boolean tryBreakThroughObstacle(ServerPlayerEntity bot, ServerWorld world, BlockPos target) {
+        return tryBreakThroughObstacle(bot, world, target, null);
+    }
+
+    private boolean tryBreakThroughObstacle(ServerPlayerEntity bot, ServerWorld world, BlockPos target, String causeContext) {
         BlockPos botPos = bot.getBlockPos();
+        FortifyNavRuntimeScope scope = activeFortifyNavScope;
 
-        // Determine direction toward target
-        int dx = target.getX() - botPos.getX();
-        int dz = target.getZ() - botPos.getZ();
-
-        // Build candidate directions: primary diagonal, then primary cardinals, then secondary cardinals
-        List<BlockPos> candidateOffsets = new ArrayList<>();
-        if (dx != 0 && dz != 0) {
-            candidateOffsets.add(new BlockPos(Integer.signum(dx), 0, Integer.signum(dz)));
+        // Guardrail: if the bot is already below the local terrain surface, bail to surface
+        // recovery instead of tunneling horizontally underground.
+        int terrainY = VillageFortificationLayoutService.terrainY(world, botPos.getX(), botPos.getZ());
+        if (botPos.getY() < terrainY - 1) {
+            int depth = terrainY - botPos.getY();
+            String effectiveCauseContext = causeContext != null ? causeContext : (scope != null ? scope.context : null);
+            boolean scopeFortifyContext = scope != null && isFortifyCarveContext(scope);
+            boolean inferredFortifyContext = scope == null
+                    && effectiveCauseContext != null
+                    && (effectiveCauseContext.startsWith("fortify-edge:") || effectiveCauseContext.startsWith("fortify-tower:"))
+                    && currentLayout != null;
+            boolean fortifyContext = scopeFortifyContext || inferredFortifyContext;
+            boolean trapLike = isTrapLikeCell(world, botPos);
+            boolean shallowDepth = depth <= 3;
+            boolean trapPocketDepth = depth <= FORTIFY_TRAP_CARVE_DEPTH_LIMIT;
+            boolean insideOrAdjacentHull = isAdjacentToCurrentFortificationHull(botPos);
+            int surfaceEscapePocketFailures = getSurfaceEscapeRetryFailureCount(botPos, terrainY);
+            boolean repeatedSurfaceEscapePocket = shouldSkipRepeatedSurfaceEscape(botPos, terrainY);
+            boolean noProgressPocketBurst = hasFortifyPocketNoProgressBurst(world, botPos, effectiveCauseContext, 2);
+            boolean towerTrapPocketContext = fortifyContext
+                    && effectiveCauseContext != null
+                    && (effectiveCauseContext.startsWith("fortify-tower:approach")
+                    || effectiveCauseContext.startsWith("fortify-tower:local-step-replan")
+                    || effectiveCauseContext.startsWith("fortify-tower:hard-reset")
+                    || effectiveCauseContext.startsWith("fortify-tower:scaffold-base")
+                    || effectiveCauseContext.startsWith("fortify-tower:unwedge"));
+            boolean edgeTrapPocketContext = fortifyContext
+                    && effectiveCauseContext != null
+                    && (effectiveCauseContext.startsWith("fortify-edge:approach")
+                    || effectiveCauseContext.startsWith("fortify-edge:approach-close")
+                    || effectiveCauseContext.startsWith("fortify-edge:approach-retry")
+                    || effectiveCauseContext.startsWith("fortify-edge:unwedge")
+                    || effectiveCauseContext.startsWith("fortify-edge:patch-start-preflight"));
+            boolean towerTrapPocketImmediateOverride = towerTrapPocketContext
+                    && trapLike
+                    && trapPocketDepth
+                    && (depth >= 4 || surfaceEscapePocketFailures >= 1);
+            boolean edgeTrapPocketImmediateOverride = edgeTrapPocketContext
+                    && trapLike
+                    && trapPocketDepth
+                    && surfaceEscapePocketFailures >= 1;
+            boolean towerLocalTrapPocketOverride = fortifyContext
+                    && (towerTrapPocketImmediateOverride
+                    || (towerTrapPocketContext
+                    && trapLike
+                    && trapPocketDepth
+                    && (repeatedSurfaceEscapePocket || noProgressPocketBurst)));
+            boolean edgeLocalTrapPocketOverride = fortifyContext
+                    && (edgeTrapPocketImmediateOverride
+                    || (edgeTrapPocketContext
+                    && trapLike
+                    && trapPocketDepth
+                    && (repeatedSurfaceEscapePocket || noProgressPocketBurst)));
+            boolean fortifyTrapEntombment = fortifyContext
+                    && trapLike
+                    && ((shallowDepth && insideOrAdjacentHull) || towerLocalTrapPocketOverride || edgeLocalTrapPocketOverride);
+            if (fortifyTrapEntombment) {
+                LOGGER.info("[FortifyNav] Bot below surface at {} vs terrainY={} but trap-like fortify entombment detected (depth={} hullAdj={} surfaceEscapeFailures={} repeatedSurfaceEscape={} noProgressBurst={} towerOverride={} edgeOverride={}), allowing emergency carve",
+                        botPos.toShortString(), terrainY, depth, insideOrAdjacentHull,
+                        surfaceEscapePocketFailures,
+                        repeatedSurfaceEscapePocket, noProgressPocketBurst,
+                        towerLocalTrapPocketOverride, edgeLocalTrapPocketOverride);
+            } else {
+                List<String> rejectReasons = new ArrayList<>();
+                if (!fortifyContext) {
+                    rejectReasons.add(scope == null ? "scopeMissing" : "notFortifyContext");
+                }
+                if (!trapLike) rejectReasons.add("notTrapLike");
+                if (!shallowDepth && !towerLocalTrapPocketOverride && !edgeLocalTrapPocketOverride) rejectReasons.add("depthTooHigh");
+                if (!insideOrAdjacentHull && !towerLocalTrapPocketOverride && !edgeLocalTrapPocketOverride) rejectReasons.add("outsideHull");
+                if (surfaceEscapePocketFailures <= 0) rejectReasons.add("noSurfaceEscapeFailures");
+                if (!repeatedSurfaceEscapePocket) rejectReasons.add("noRepeatedSurfaceEscape");
+                if (!noProgressPocketBurst) rejectReasons.add("noProgressBurst");
+                if (rejectReasons.isEmpty()) {
+                    rejectReasons.add("fallbackSurfaceEscape");
+                }
+                BlockPos beforeSurfaceEscape = bot.getBlockPos();
+                ensureOnSurface(bot, world, terrainY);
+                BlockPos afterSurfaceEscape = bot.getBlockPos();
+                boolean escaped = afterSurfaceEscape.getY() >= terrainY - 1 || !beforeSurfaceEscape.equals(afterSurfaceEscape);
+                if (!escaped) {
+                    noteEntombmentSurfaceEscapeFailure(world, beforeSurfaceEscape, causeContext);
+                } else {
+                    noteEntombmentRecoverySuccess(world, beforeSurfaceEscape, afterSurfaceEscape, causeContext);
+                }
+                LOGGER.info("[FortifyNav] Bot below surface at {} vs terrainY={}, invoking surface escape instead of carving rejects={} escaped={} moved={}",
+                        botPos.toShortString(), terrainY, String.join("|", rejectReasons), escaped, !beforeSurfaceEscape.equals(afterSurfaceEscape));
+                return escaped;
+            }
         }
-        if (dx != 0) {
-            candidateOffsets.add(new BlockPos(Integer.signum(dx), 0, 0));
-        }
-        if (dz != 0) {
-            candidateOffsets.add(new BlockPos(0, 0, Integer.signum(dz)));
-        }
-        if (dx != 0) {
-            candidateOffsets.add(new BlockPos(Integer.signum(dx), 0, 1));
-            candidateOffsets.add(new BlockPos(Integer.signum(dx), 0, -1));
-        }
-        if (dz != 0) {
-            candidateOffsets.add(new BlockPos(1, 0, Integer.signum(dz)));
-            candidateOffsets.add(new BlockPos(-1, 0, Integer.signum(dz)));
-        }
+        boolean carveMode = scope != null
+                && scope.navMode == FortifyNavMode.CARVE_CORRIDOR
+                && isCarveEligibleForBreakAttempt(scope, world, botPos, target);
+        FortifyCarveSession carveSession = (scope != null) ? scope.carveSession : null;
+        boolean emergencyTrapSearch = carveMode && isEmergencyTrapEscapeEligible(scope, world, botPos);
+        List<BlockPos> candidateOffsets = buildBreakThroughCandidateOffsets(botPos, target, emergencyTrapSearch);
+        boolean towerExteriorGuard = scope != null && scope.towerPatchContext;
 
         // Diagnostic counters for the "no viable candidates" case
-        int diagAllAir = 0, diagCanBreak = 0, diagReach = 0, diagNoFloor = 0;
+        int diagAllAir = 0, diagCanBreak = 0, diagReach = 0, diagNoFloor = 0, diagRecentCooldown = 0;
+        Map<NavBreakRejectReason, Integer> rejectReasonCounts = new EnumMap<>(NavBreakRejectReason.class);
+
+        boolean allowGateLayoutOverride = scope != null && scope.gateContext && isInsideCurrentFortificationHull(botPos);
+        String replaceContext = scope != null && scope.context != null
+                ? scope.context
+                : (causeContext != null ? causeContext : "fortify-nav");
 
         // Two passes: first try non-layout blocks, then allow layout blocks
         for (int pass = 0; pass < 2; pass++) {
             boolean allowLayout = (pass == 1);
-            if (pass == 1) { diagAllAir = 0; diagCanBreak = 0; diagReach = 0; diagNoFloor = 0; }
+            if (pass == 1) {
+                diagAllAir = 0;
+                diagCanBreak = 0;
+                diagReach = 0;
+                diagNoFloor = 0;
+                diagRecentCooldown = 0;
+                rejectReasonCounts.clear();
+            }
 
             for (BlockPos offset : candidateOffsets) {
                 BlockPos feetPos = botPos.add(offset);
                 BlockPos headPos = feetPos.up();
                 BlockPos overheadPos = headPos.up(); // Y+2: clear overhead for tall walls
 
+                if (isRecentCarveColumnOnCooldown(feetPos)) {
+                    diagRecentCooldown++;
+                    continue;
+                }
+
                 boolean feetBlocking = !world.getBlockState(feetPos).getCollisionShape(world, feetPos).isEmpty();
                 boolean headBlocking = !world.getBlockState(headPos).getCollisionShape(world, headPos).isEmpty();
-                if (!feetBlocking && !headBlocking) { diagAllAir++; continue; }
+                if (!feetBlocking && !headBlocking) {
+                    diagAllAir++;
+                    if (!emergencyTrapSearch) {
+                        continue;
+                    }
+                    if (offset.getY() == 0) {
+                        // Guardrail: in trap carve mode, never count same-level air candidates as break-through success.
+                        // They caused A<->B oscillation and masked the actual tunnel opportunity.
+                        if (!canStandAt(world, feetPos)) {
+                            diagNoFloor++;
+                        }
+                        continue;
+                    }
+                    if (!canStandAt(world, feetPos)) {
+                        diagNoFloor++;
+                        continue;
+                    }
+
+                    BlockPos walkTarget = buildBreakThroughWalkTarget(botPos, offset);
+                    BlockPos before = bot.getBlockPos();
+                    walkTowardBlock(bot, walkTarget, 1_200L);
+                    sleepQuiet(100);
+
+                    boolean moved = !before.equals(bot.getBlockPos());
+                    if (moved && !isMeaningfulTrapEscapeProgress(world, before, bot.getBlockPos(), target)) {
+                        LOGGER.info("[FortifyNav] trap-step false-progress ctx={} before={} after={} target={} offset={}",
+                                scope != null ? scope.context : "n/a",
+                                before.toShortString(),
+                                bot.getBlockPos().toShortString(),
+                                target != null ? target.toShortString() : "n/a",
+                                offset.toShortString());
+                        moved = false;
+                    }
+                    if (moved) {
+                        LOGGER.info("[FortifyNav] Trap step escape success, moved from {} to {}",
+                                before.toShortString(), bot.getBlockPos().toShortString());
+                        if (scope != null && carveMode && scope.carveSession != null) {
+                            scope.carveSession.completed = true;
+                            scope.carveSession.crossed = true;
+                            scope.carveSession.touch();
+                        }
+                        return true;
+                    }
+                    continue;
+                }
+
+                if (emergencyTrapSearch && offset.getY() < 0) {
+                    // Guardrail: "tunneling" means opening through the obstacle in front (wall opening),
+                    // not excavating downward. Step-down is allowed only when already open+standable
+                    // (handled in the all-air branch above), never by mining below the current floor.
+                    continue;
+                }
 
                 // Check safety: tier 1 (non-layout) or tier 2 (layout with mandatory replace)
-                if (feetBlocking && !canBreakForNavigation(world, feetPos, allowLayout)) { diagCanBreak++; continue; }
-                if (headBlocking && !canBreakForNavigation(world, headPos, allowLayout)) { diagCanBreak++; continue; }
+                if (feetBlocking) {
+                    NavBreakCandidateEval feetEval = evaluateBreakForNavigation(world, feetPos, allowLayout);
+                    if (!feetEval.allowed() && allowGateLayoutOverride && fortificationProtectedPositions.contains(feetPos)) {
+                        feetEval = new NavBreakCandidateEval(true, null);
+                    }
+                    if (!feetEval.allowed() && canOverrideVillageAdjacentForCarve(scope, world, botPos, feetPos, target, carveSession, feetEval)) {
+                        feetEval = new NavBreakCandidateEval(true, null);
+                    }
+                    if (towerExteriorGuard && fortificationProtectedPositions.contains(feetPos)
+                            && !isLayoutExteriorReachable(world, feetPos)) {
+                        feetEval = new NavBreakCandidateEval(false, NavBreakRejectReason.LAYOUT_NOT_ALLOWED);
+                    }
+                    if (!feetEval.allowed()) {
+                        diagCanBreak++;
+                        incrementNavBreakReject(rejectReasonCounts, feetEval);
+                        continue;
+                    }
+                }
+                if (headBlocking) {
+                NavBreakCandidateEval headEval = evaluateBreakForNavigation(world, headPos, allowLayout);
+                if (!headEval.allowed() && allowGateLayoutOverride && fortificationProtectedPositions.contains(headPos)) {
+                    headEval = new NavBreakCandidateEval(true, null);
+                }
+                if (!headEval.allowed() && canOverrideVillageAdjacentForCarve(scope, world, botPos, headPos, target, carveSession, headEval)) {
+                    headEval = new NavBreakCandidateEval(true, null);
+                    }
+                    if (towerExteriorGuard && fortificationProtectedPositions.contains(headPos)
+                            && !isLayoutExteriorReachable(world, headPos)) {
+                        headEval = new NavBreakCandidateEval(false, NavBreakRejectReason.LAYOUT_NOT_ALLOWED);
+                    }
+                    if (!headEval.allowed()) {
+                        diagCanBreak++;
+                        incrementNavBreakReject(rejectReasonCounts, headEval);
+                        continue;
+                    }
+                }
 
                 if (feetBlocking && !isWithinMiningReach(bot, feetPos)) { diagReach++; continue; }
                 if (headBlocking && !isWithinMiningReach(bot, headPos)) { diagReach++; continue; }
 
                 // Overhead is best-effort: mine if blocking AND reachable, soft-skip otherwise
                 boolean overheadBlocking = !world.getBlockState(overheadPos).getCollisionShape(world, overheadPos).isEmpty();
+                NavBreakCandidateEval overheadEval = overheadBlocking
+                        ? evaluateBreakForNavigation(world, overheadPos, allowLayout)
+                        : new NavBreakCandidateEval(false, NavBreakRejectReason.AIR_OR_REPLACEABLE);
+                if (overheadBlocking && !overheadEval.allowed() && allowGateLayoutOverride && fortificationProtectedPositions.contains(overheadPos)) {
+                    overheadEval = new NavBreakCandidateEval(true, null);
+                }
+                if (overheadBlocking && !overheadEval.allowed()
+                        && canOverrideVillageAdjacentForCarve(scope, world, botPos, overheadPos, target, carveSession, overheadEval)) {
+                    overheadEval = new NavBreakCandidateEval(true, null);
+                }
+                if (overheadBlocking && towerExteriorGuard && fortificationProtectedPositions.contains(overheadPos)
+                        && !isLayoutExteriorReachable(world, overheadPos)) {
+                    overheadEval = new NavBreakCandidateEval(false, NavBreakRejectReason.LAYOUT_NOT_ALLOWED);
+                }
                 boolean mineOverhead = overheadBlocking
-                        && canBreakForNavigation(world, overheadPos, allowLayout)
+                        && overheadEval.allowed()
                         && isWithinMiningReach(bot, overheadPos);
 
                 // Must be able to stand on the block below
                 BlockState belowState = world.getBlockState(feetPos.down());
                 if (belowState.getCollisionShape(world, feetPos.down()).isEmpty()) { diagNoFloor++; continue; }
 
-                boolean isLayoutBreak = (feetBlocking && fortificationProtectedPositions.contains(feetPos))
+                boolean anyLayoutBreak = (feetBlocking && fortificationProtectedPositions.contains(feetPos))
                         || (headBlocking && fortificationProtectedPositions.contains(headPos))
                         || (mineOverhead && fortificationProtectedPositions.contains(overheadPos));
 
                 LOGGER.info("[FortifyNav] Breaking through {} at {} (head={} overhead={})",
-                        isLayoutBreak ? "WALL" : "obstruction",
+                        anyLayoutBreak ? "WALL" : "obstruction",
                         feetPos.toShortString(),
                         headBlocking ? headPos.toShortString() : "clear",
                         mineOverhead ? overheadPos.toShortString() : "skip");
@@ -2834,66 +4110,966 @@ public final class FortifyVillageSkill implements Skill {
                 BlockState feetOriginal = feetBlocking ? world.getBlockState(feetPos) : null;
                 BlockState headOriginal = headBlocking ? world.getBlockState(headPos) : null;
                 BlockState overheadOriginal = mineOverhead ? world.getBlockState(overheadPos) : null;
+                boolean feetMandatory = feetOriginal != null && fortificationProtectedPositions.contains(feetPos);
+                boolean headMandatory = headOriginal != null && fortificationProtectedPositions.contains(headPos);
+                boolean overheadMandatory = overheadOriginal != null && fortificationProtectedPositions.contains(overheadPos);
+                boolean preferHeadFirstEscapeOrder = emergencyTrapSearch
+                        || (scope != null && scope.towerPatchContext && isTrapLikeCell(world, botPos));
 
-                // Mine top-down: overhead first, then head, then feet
-                if (mineOverhead) {
+                // Emergency entombment escape (learned demo pattern) prefers head-first opening,
+                // then overhead, then feet. This reduces self-trapping while creating a passable slot.
+                boolean overheadMined = false;
+                boolean headMined = true;
+                if (preferHeadFirstEscapeOrder && headBlocking) {
+                    headMined = digBlockForNavigation(bot, world, headPos);
+                } else if (!preferHeadFirstEscapeOrder && mineOverhead) {
                     if (!digBlockForNavigation(bot, world, overheadPos)) {
                         // Soft-skip: overhead failure doesn't reject this candidate
                         mineOverhead = false;
                         overheadOriginal = null;
+                    } else {
+                        overheadMined = true;
                     }
                 }
-                if (headBlocking) {
-                    if (!digBlockForNavigation(bot, world, headPos)) {
-                        if (overheadOriginal != null) {
-                            replaceMinedBlock(bot, world, overheadPos, overheadOriginal, isLayoutBreak);
+                if (!headMined && overheadOriginal != null && overheadMined) {
+                    ReplaceBlockResult rollback = tryReplaceMinedBlock(bot, world, overheadPos, overheadOriginal, overheadMandatory, replaceContext);
+                    if (!rollback.success()) {
+                        queueMandatoryCarveRepairIfNeeded(bot, world, overheadPos, overheadOriginal, overheadMandatory, replaceContext);
+                    }
+                }
+                if (!headMined) {
+                    verifyCarveRepairColumn(bot, world,
+                            feetPos, feetOriginal, feetMandatory,
+                            headPos, headOriginal, headMandatory,
+                            overheadPos, overheadOriginal, overheadMandatory,
+                            replaceContext);
+                    continue;
+                }
+                if (preferHeadFirstEscapeOrder && mineOverhead) {
+                    if (!digBlockForNavigation(bot, world, overheadPos)) {
+                        mineOverhead = false;
+                        overheadOriginal = null;
+                    } else {
+                        overheadMined = true;
+                    }
+                }
+                if (!preferHeadFirstEscapeOrder && headBlocking) {
+                    headMined = digBlockForNavigation(bot, world, headPos);
+                    if (!headMined && overheadOriginal != null && overheadMined) {
+                        ReplaceBlockResult rollback = tryReplaceMinedBlock(bot, world, overheadPos, overheadOriginal, overheadMandatory, replaceContext);
+                        if (!rollback.success()) {
+                            queueMandatoryCarveRepairIfNeeded(bot, world, overheadPos, overheadOriginal, overheadMandatory, replaceContext);
                         }
+                    }
+                    if (!headMined) {
+                        verifyCarveRepairColumn(bot, world,
+                                feetPos, feetOriginal, feetMandatory,
+                                headPos, headOriginal, headMandatory,
+                                overheadPos, overheadOriginal, overheadMandatory,
+                                replaceContext);
                         continue;
                     }
                 }
+
+                boolean feetMined = true;
                 if (feetBlocking) {
-                    if (!digBlockForNavigation(bot, world, feetPos)) {
-                        if (headOriginal != null) {
-                            replaceMinedBlock(bot, world, headPos, headOriginal, isLayoutBreak);
+                    feetMined = digBlockForNavigation(bot, world, feetPos);
+                    if (!feetMined && headOriginal != null && headMined) {
+                        ReplaceBlockResult rollback = tryReplaceMinedBlock(bot, world, headPos, headOriginal, headMandatory, replaceContext);
+                        if (!rollback.success()) {
+                            queueMandatoryCarveRepairIfNeeded(bot, world, headPos, headOriginal, headMandatory, replaceContext);
                         }
-                        if (overheadOriginal != null) {
-                            replaceMinedBlock(bot, world, overheadPos, overheadOriginal, isLayoutBreak);
-                        }
-                        continue;
                     }
+                    if (!feetMined && overheadOriginal != null && overheadMined) {
+                        ReplaceBlockResult rollback = tryReplaceMinedBlock(bot, world, overheadPos, overheadOriginal, overheadMandatory, replaceContext);
+                        if (!rollback.success()) {
+                            queueMandatoryCarveRepairIfNeeded(bot, world, overheadPos, overheadOriginal, overheadMandatory, replaceContext);
+                        }
+                    }
+                }
+                if (!feetMined) {
+                    verifyCarveRepairColumn(bot, world,
+                            feetPos, feetOriginal, feetMandatory,
+                            headPos, headOriginal, headMandatory,
+                            overheadPos, overheadOriginal, overheadMandatory,
+                            replaceContext);
+                    continue;
                 }
 
                 // Walk through the gap toward a point 4 blocks past the bot in the break direction.
                 // walkTowardBlock bails at distSq < 6.0, so feetPos (1 block) is too close.
                 // 4 blocks gives distSq >= 16 which reliably runs the walk loop.
-                BlockPos walkTarget = new BlockPos(
-                        botPos.getX() + offset.getX() * 4,
-                        botPos.getY(),
-                        botPos.getZ() + offset.getZ() * 4);
+                BlockPos walkTarget = buildBreakThroughWalkTarget(botPos, offset);
                 BlockPos before = bot.getBlockPos();
-                walkTowardBlock(bot, walkTarget, 1_200L);
-                sleepQuiet(100);
+                walkTowardBlock(bot, walkTarget, 900L);
+                sleepQuiet(60);
 
                 boolean moved = !before.equals(bot.getBlockPos());
+                if (moved && emergencyTrapSearch && !isMeaningfulTrapEscapeProgress(world, before, bot.getBlockPos(), target)) {
+                    LOGGER.info("[FortifyNav] trap-carve false-progress ctx={} before={} after={} target={} offset={}",
+                            scope != null ? scope.context : "n/a",
+                            before.toShortString(),
+                            bot.getBlockPos().toShortString(),
+                            target != null ? target.toShortString() : "n/a",
+                            offset.toShortString());
+                    moved = false;
+                }
 
-                // Replace mined blocks — mandatory for layout blocks, best-effort otherwise
-                if (feetOriginal != null) replaceMinedBlock(bot, world, feetPos, feetOriginal, isLayoutBreak);
-                if (headOriginal != null) replaceMinedBlock(bot, world, headPos, headOriginal, isLayoutBreak);
-                if (overheadOriginal != null) replaceMinedBlock(bot, world, overheadPos, overheadOriginal, isLayoutBreak);
+                boolean deferRepair = carveMode && scope != null;
+                if (deferRepair) {
+                    deferCarveRepair(scope, feetPos, feetOriginal, feetMandatory);
+                    deferCarveRepair(scope, headPos, headOriginal, headMandatory);
+                    deferCarveRepair(scope, overheadPos, overheadOriginal, overheadMandatory);
+                } else {
+                    // Replace mined blocks — emergency escapes restore from far/upper to near/lower to avoid re-entombing.
+                    boolean replaceTopDown = emergencyTrapSearch || (moved && preferHeadFirstEscapeOrder);
+                    if (replaceTopDown) {
+                        if (overheadOriginal != null) {
+                            ReplaceBlockResult result = tryReplaceMinedBlock(bot, world, overheadPos, overheadOriginal, overheadMandatory, replaceContext);
+                            if (!result.success()) {
+                                queueMandatoryCarveRepairIfNeeded(bot, world, overheadPos, overheadOriginal, overheadMandatory, replaceContext);
+                            }
+                        }
+                        if (headOriginal != null) {
+                            ReplaceBlockResult result = tryReplaceMinedBlock(bot, world, headPos, headOriginal, headMandatory, replaceContext);
+                            if (!result.success()) {
+                                queueMandatoryCarveRepairIfNeeded(bot, world, headPos, headOriginal, headMandatory, replaceContext);
+                            }
+                        }
+                        if (feetOriginal != null) {
+                            ReplaceBlockResult result = tryReplaceMinedBlock(bot, world, feetPos, feetOriginal, feetMandatory, replaceContext);
+                            if (!result.success()) {
+                                queueMandatoryCarveRepairIfNeeded(bot, world, feetPos, feetOriginal, feetMandatory, replaceContext);
+                            }
+                        }
+                    } else {
+                        if (feetOriginal != null) {
+                            ReplaceBlockResult result = tryReplaceMinedBlock(bot, world, feetPos, feetOriginal, feetMandatory, replaceContext);
+                            if (!result.success()) {
+                                queueMandatoryCarveRepairIfNeeded(bot, world, feetPos, feetOriginal, feetMandatory, replaceContext);
+                            }
+                        }
+                        if (headOriginal != null) {
+                            ReplaceBlockResult result = tryReplaceMinedBlock(bot, world, headPos, headOriginal, headMandatory, replaceContext);
+                            if (!result.success()) {
+                                queueMandatoryCarveRepairIfNeeded(bot, world, headPos, headOriginal, headMandatory, replaceContext);
+                            }
+                        }
+                        if (overheadOriginal != null) {
+                            ReplaceBlockResult result = tryReplaceMinedBlock(bot, world, overheadPos, overheadOriginal, overheadMandatory, replaceContext);
+                            if (!result.success()) {
+                                queueMandatoryCarveRepairIfNeeded(bot, world, overheadPos, overheadOriginal, overheadMandatory, replaceContext);
+                            }
+                        }
+                    }
+                }
 
                 if (moved) {
                     LOGGER.info("[FortifyNav] Break-through success, moved from {} to {}",
                             before.toShortString(), bot.getBlockPos().toShortString());
+                    if (scope != null && carveMode && scope.carveSession != null) {
+                        scope.carveSession.completed = true;
+                        scope.carveSession.crossed = true;
+                        scope.carveSession.touch();
+                    }
+                }
+
+                // Ensure all layout blocks mined during this attempt are either replaced immediately
+                // or queued for deferred repair so no hole remains.
+                if (deferRepair && scope != null && scope.carveSession != null && !scope.carveSession.deferredRepairs.isEmpty()) {
+                    queueDeferredCarveRepairs(scope, scope.carveSession, new ArrayList<>(scope.carveSession.deferredRepairs));
+                }
+                verifyCarveRepairColumn(bot, world,
+                        feetPos, feetOriginal, feetMandatory,
+                        headPos, headOriginal, headMandatory,
+                        overheadPos, overheadOriginal, overheadMandatory,
+                        replaceContext);
+
+                // Cooldown this carve column to avoid back-and-forth re-carving.
+                if (feetPos != null) {
+                    recentCarveColumnsMs.put(feetPos.toImmutable(), System.currentTimeMillis());
                 }
                 return moved;
             }
         }
 
+        boolean villageDominated = rejectReasonCounts.getOrDefault(NavBreakRejectReason.VILLAGE_ADJACENT, 0) > 0;
+        boolean trapLike = isTrapLikeCell(world, botPos);
+        if (scope != null && scope.towerState != null) {
+            scope.towerState.noteBreakRejects(rejectReasonCounts);
+            boolean emergencyEligible = isEmergencyTrapEscapeEligible(scope, world, botPos);
+            boolean gateVillageDeadlock = scope.gateContext
+                    && villageDominated
+                    && isCarveEligibleScope(scope, botPos, target);
+            boolean trapEmergencyReady = emergencyEligible && villageDominated
+                    && (scope.towerState.shouldActivateCarveMode()
+                    || scope.towerState.sameStuckPosCount >= 1
+                    || scope.towerState.villageAdjacentRejectBursts >= 1);
+            if (gateVillageDeadlock && scope.navMode != FortifyNavMode.CARVE_CORRIDOR) {
+                scope.towerState.activateCarveMode();
+                scope.navMode = FortifyNavMode.CARVE_CORRIDOR;
+                if (scope.carveSession == null) {
+                    scope.carveSession = new FortifyCarveSession(target, causeContext != null ? causeContext : scope.context);
+                }
+                LOGGER.info("[FortifyNav] gate-carve-activated ctx={} target={} sameStuck={} noRealProgressMs={} villageAdjBursts={}",
+                        scope.context, target.toShortString(),
+                        scope.towerState.sameStuckPosCount,
+                        scope.towerState.noRealProgressElapsedMs(),
+                        scope.towerState.villageAdjacentRejectBursts);
+            } else if (trapEmergencyReady && scope.navMode != FortifyNavMode.CARVE_CORRIDOR) {
+                scope.towerState.activateCarveMode();
+                scope.navMode = FortifyNavMode.CARVE_CORRIDOR;
+                if (scope.carveSession == null) {
+                    scope.carveSession = new FortifyCarveSession(target, causeContext != null ? causeContext : scope.context);
+                }
+                LOGGER.info("[FortifyNav] trap-detected ctx={} pos={} topology={} target={} emergencyEscape=activating sameStuck={} villageAdjBursts={}",
+                        scope.context,
+                        botPos.toShortString(),
+                        VoxelJunctionService.analyzeStandCell(world, botPos).topology(),
+                        target.toShortString(),
+                        scope.towerState.sameStuckPosCount,
+                        scope.towerState.villageAdjacentRejectBursts);
+            } else if (scope.towerState.shouldActivateCarveMode() && isCarveEligibleScope(scope, botPos, target)) {
+                scope.towerState.activateCarveMode();
+                scope.navMode = FortifyNavMode.CARVE_CORRIDOR;
+                if (scope.carveSession == null) {
+                    scope.carveSession = new FortifyCarveSession(target, causeContext != null ? causeContext : scope.context);
+                }
+                LOGGER.info("[FortifyNav] Carve mode activated ctx={} target={} sameStuck={} noRealProgressMs={} villageAdjBursts={}",
+                        scope.context, target.toShortString(),
+                        scope.towerState.sameStuckPosCount,
+                        scope.towerState.noRealProgressElapsedMs(),
+                        scope.towerState.villageAdjacentRejectBursts);
+            } else if (scope.towerState.shouldActivateCarveMode() && !isCarveEligibleScope(scope, botPos, target) && !emergencyEligible) {
+                LOGGER.info("[FortifyNav] Carve mode suppressed ctx={} target={} dist={} (local-only)",
+                        scope.context, target.toShortString(),
+                        String.format(Locale.ROOT, "%.1f", Math.sqrt(botPos.getSquaredDistance(target))));
+            }
+        } else if (scope != null && isFortifyCarveContext(scope)) {
+            if (villageDominated) {
+                if (scope.lastTrapRejectPos != null && scope.lastTrapRejectPos.equals(botPos)) {
+                    scope.sameTrapRejectPosCount++;
+                } else {
+                    scope.lastTrapRejectPos = botPos.toImmutable();
+                    scope.sameTrapRejectPosCount = 1;
+                }
+                if (trapLike) {
+                    scope.localTrapRejectBursts++;
+                } else {
+                    scope.localTrapRejectBursts = Math.max(0, scope.localTrapRejectBursts - 1);
+                }
+            } else {
+                scope.localTrapRejectBursts = Math.max(0, scope.localTrapRejectBursts - 1);
+            }
+
+            boolean emergencyEligible = isEmergencyTrapEscapeEligible(scope, world, botPos);
+            boolean gateVillageDeadlock = scope.gateContext
+                    && villageDominated
+                    && isCarveEligibleScope(scope, botPos, target);
+            if (scope.navMode != FortifyNavMode.CARVE_CORRIDOR && gateVillageDeadlock) {
+                scope.navMode = FortifyNavMode.CARVE_CORRIDOR;
+                if (scope.carveSession == null) {
+                    scope.carveSession = new FortifyCarveSession(target, causeContext != null ? causeContext : scope.context);
+                }
+                LOGGER.info("[FortifyNav] gate-carve-activated ctx={} pos={} topology={} target={} samePos={} villageAdjBursts={}",
+                        scope.context,
+                        botPos.toShortString(),
+                        VoxelJunctionService.analyzeStandCell(world, botPos).topology(),
+                        target.toShortString(),
+                        scope.sameTrapRejectPosCount,
+                        scope.localTrapRejectBursts);
+            } else if (scope.navMode != FortifyNavMode.CARVE_CORRIDOR && emergencyEligible
+                    && villageDominated && (scope.sameTrapRejectPosCount >= 1 || scope.localTrapRejectBursts >= 1)) {
+                scope.navMode = FortifyNavMode.CARVE_CORRIDOR;
+                if (scope.carveSession == null) {
+                    scope.carveSession = new FortifyCarveSession(target, causeContext != null ? causeContext : scope.context);
+                }
+                LOGGER.info("[FortifyNav] trap-detected ctx={} pos={} topology={} target={} emergencyEscape=activating samePos={} villageAdjBursts={}",
+                        scope.context,
+                        botPos.toShortString(),
+                        VoxelJunctionService.analyzeStandCell(world, botPos).topology(),
+                        target.toShortString(),
+                        scope.sameTrapRejectPosCount,
+                        scope.localTrapRejectBursts);
+            }
+        }
+
         LOGGER.info("[FortifyNav] Break-through found no viable candidates at {} toward {} " +
-                        "(allAir={} canBreak={} reach={} noFloor={} offsets={})",
+                        "(allAir={} canBreak={} reach={} noFloor={} recentCooldown={} offsets={} rejectReasons={})",
                 botPos.toShortString(), target.toShortString(),
-                diagAllAir, diagCanBreak, diagReach, diagNoFloor, candidateOffsets.size());
+                diagAllAir, diagCanBreak, diagReach, diagNoFloor, diagRecentCooldown, candidateOffsets.size(),
+                formatNavBreakRejectSummary(rejectReasonCounts));
         return false;
+    }
+
+    private BlockPos buildBreakThroughWalkTarget(BlockPos botPos, BlockPos offset) {
+        if (botPos == null || offset == null) {
+            return botPos;
+        }
+        int maxAbs = Math.max(Math.abs(offset.getX()), Math.abs(offset.getZ()));
+        int scale = maxAbs >= 2 ? 2 : 4;
+        return new BlockPos(
+                botPos.getX() + offset.getX() * scale,
+                botPos.getY() + offset.getY(),
+                botPos.getZ() + offset.getZ() * scale);
+    }
+
+    private boolean isMeaningfulTrapEscapeProgress(ServerWorld world, BlockPos before, BlockPos after, BlockPos target) {
+        if (world == null || before == null || after == null || before.equals(after)) {
+            return false;
+        }
+        VoxelJunctionService.VoxelStandCell beforeCell = VoxelJunctionService.analyzeStandCell(world, before);
+        VoxelJunctionService.VoxelStandCell afterCell = VoxelJunctionService.analyzeStandCell(world, after);
+
+        double netDisp = Math.sqrt(before.getSquaredDistance(after));
+        double distDelta = 0.0D;
+        if (target != null) {
+            distDelta = Math.sqrt(before.getSquaredDistance(target)) - Math.sqrt(after.getSquaredDistance(target));
+        }
+
+        boolean topologyImproved = afterCell.openFaces() > beforeCell.openFaces()
+                || (!isTrapLikeCell(world, after) && isTrapLikeCell(world, before))
+                || (afterCell.topology() != beforeCell.topology()
+                && afterCell.topology() != VoxelJunctionService.CellTopology.POCKET
+                && afterCell.topology() != VoxelJunctionService.CellTopology.DEAD_END);
+
+        if (topologyImproved && netDisp >= 1.0D) {
+            return true;
+        }
+        return distDelta >= 1.5D || netDisp >= 2.0D;
+    }
+
+    private boolean canOverrideVillageAdjacentForCarve(FortifyNavRuntimeScope scope,
+                                                       ServerWorld world,
+                                                       BlockPos botPos,
+                                                       BlockPos blockPos,
+                                                       BlockPos target,
+                                                       FortifyCarveSession carveSession,
+                                                       NavBreakCandidateEval eval) {
+        if (scope == null || blockPos == null || botPos == null || target == null) return false;
+        if (!isFortifyCarveContext(scope)) return false;
+        if (scope.navMode != FortifyNavMode.CARVE_CORRIDOR) return false;
+        boolean emergencyTrap = isEmergencyTrapEscapeEligible(scope, world, botPos);
+        if (!emergencyTrap && !isCarveEligibleScope(scope, botPos, target)) return false;
+        if (carveSession == null || !carveSession.canMineMore()) return false;
+        if (eval == null || eval.allowed() || eval.rejectReason() != NavBreakRejectReason.VILLAGE_ADJACENT) return false;
+        if (botPos.getSquaredDistance(blockPos) > (double) (FORTIFY_CARVE_MAX_BOT_TO_BLOCK_DIST * FORTIFY_CARVE_MAX_BOT_TO_BLOCK_DIST)) {
+            return false;
+        }
+        if (!emergencyTrap
+                && target.getSquaredDistance(blockPos) > (double) (FORTIFY_CARVE_MAX_TARGET_TO_BLOCK_DIST * FORTIFY_CARVE_MAX_TARGET_TO_BLOCK_DIST)) {
+            return false;
+        }
+        return true;
+    }
+
+    private void deferCarveRepair(FortifyNavRuntimeScope scope, BlockPos pos, BlockState originalState, boolean mandatory) {
+        if (scope == null || pos == null || originalState == null) return;
+        if (scope.carveSession == null) {
+            scope.carveSession = new FortifyCarveSession(scope.primaryTarget, scope.context);
+        }
+        FortifyCarveSession session = scope.carveSession;
+        if (session.entryPos == null) {
+            session.entryPos = pos.toImmutable();
+        }
+        session.touch();
+        for (DeferredRepair existing : session.deferredRepairs) {
+            if (existing.pos().equals(pos)) {
+                return;
+            }
+        }
+        if (!session.canMineMore()) {
+            return;
+        }
+        session.deferredRepairs.add(new DeferredRepair(pos.toImmutable(), originalState, mandatory));
+        session.blocksMined++;
+    }
+
+    private boolean isCarveEligibleScope(FortifyNavRuntimeScope scope, BlockPos botPos, BlockPos target) {
+        if (scope == null) return false;
+        if (!isFortifyCarveContext(scope)) return false;
+        String ctx = scope.context == null ? "" : scope.context;
+        if (ctx.contains("long-range")) return false;
+        BlockPos effectiveTarget = target != null ? target : scope.primaryTarget;
+        if (botPos == null || effectiveTarget == null) return false;
+        return botPos.getSquaredDistance(effectiveTarget)
+                <= (double) (FORTIFY_CARVE_LOCAL_TARGET_MAX_DIST * FORTIFY_CARVE_LOCAL_TARGET_MAX_DIST);
+    }
+
+    private boolean isFortifyCarveContext(FortifyNavRuntimeScope scope) {
+        if (scope == null) return false;
+        if (scope.towerPatchContext || scope.gateContext) return true;
+        String ctx = scope.context == null ? "" : scope.context;
+        return ctx.startsWith("fortify-edge:");
+    }
+
+    private boolean isEmergencyTrapEscapeEligible(FortifyNavRuntimeScope scope, ServerWorld world, BlockPos botPos) {
+        if (scope == null || world == null || botPos == null) return false;
+        if (!isFortifyCarveContext(scope)) return false;
+        String ctx = scope.context == null ? "" : scope.context;
+        if (ctx.contains("long-range")) return false;
+        return isTrapLikeCell(world, botPos);
+    }
+
+    private boolean isCarveEligibleForBreakAttempt(FortifyNavRuntimeScope scope, ServerWorld world, BlockPos botPos, BlockPos target) {
+        return isCarveEligibleScope(scope, botPos, target) || isEmergencyTrapEscapeEligible(scope, world, botPos);
+    }
+
+    private List<BlockPos> buildBreakThroughCandidateOffsets(BlockPos botPos, BlockPos target, boolean emergencyTrapSearch) {
+        LinkedHashSet<BlockPos> offsets = new LinkedHashSet<>();
+        if (botPos != null && target != null) {
+            int dx = target.getX() - botPos.getX();
+            int dz = target.getZ() - botPos.getZ();
+            int sx = Integer.signum(dx);
+            int sz = Integer.signum(dz);
+            
+            if (sx != 0 && sz != 0) {
+                offsets.add(new BlockPos(sx, 0, sz));
+            }
+            if (sx != 0) {
+                offsets.add(new BlockPos(sx, 0, 0));
+            }
+            if (sz != 0) {
+                offsets.add(new BlockPos(0, 0, sz));
+            }
+            
+            // Add sideways offsets that still make progress along the major axis
+            if (Math.abs(dx) >= Math.abs(dz) && sx != 0) {
+                offsets.add(new BlockPos(sx, 0, 1));
+                offsets.add(new BlockPos(sx, 0, -1));
+            } else if (sz != 0) {
+                offsets.add(new BlockPos(1, 0, sz));
+                offsets.add(new BlockPos(-1, 0, sz));
+            }
+        }
+        if (emergencyTrapSearch) {
+            int[][] emergency = {
+                    {1, 0}, {-1, 0}, {0, 1}, {0, -1},
+                    {1, 1}, {1, -1}, {-1, 1}, {-1, -1},
+                    {2, 0}, {-2, 0}, {0, 2}, {0, -2},
+                    {2, 1}, {2, -1}, {-2, 1}, {-2, -1},
+                    {1, 2}, {-1, 2}, {1, -2}, {-1, -2}
+            };
+            for (int[] e : emergency) {
+                offsets.add(new BlockPos(e[0], 0, e[1]));
+            }
+
+            // Guardrail: allow step-up / step-down trap exits, but only for immediate neighbors.
+            // This fixes dead-end pockets where same-Y candidates have no floor without reintroducing
+            // the broken remote support-column behavior.
+            List<BlockPos> verticalVariants = new ArrayList<>();
+            for (BlockPos base : new ArrayList<>(offsets)) {
+                if (base.getY() != 0) continue;
+                if (Math.max(Math.abs(base.getX()), Math.abs(base.getZ())) > 1) continue;
+                verticalVariants.add(new BlockPos(base.getX(), -1, base.getZ()));
+                verticalVariants.add(new BlockPos(base.getX(), 1, base.getZ()));
+            }
+            for (BlockPos v : verticalVariants) {
+                offsets.add(v);
+            }
+        }
+        return new ArrayList<>(offsets);
+    }
+
+    private void queueDeferredCleanupTask(FortifyCleanupKind kind,
+                                          BlockPos pos,
+                                          BlockState originalState,
+                                          boolean mandatory,
+                                          String context) {
+        if (kind == null || pos == null) return;
+        for (DeferredCleanupTask task : deferredFortifyCleanupQueue) {
+            if (task == null) continue;
+            if (task.kind == kind && pos.equals(task.pos)) {
+                return;
+            }
+        }
+        deferredFortifyCleanupQueue.add(new DeferredCleanupTask(kind, pos, originalState, mandatory, context));
+    }
+
+    private void queueDeferredCarveRepairs(FortifyNavRuntimeScope scope, FortifyCarveSession session, List<DeferredRepair> unresolved) {
+        if (scope == null || session == null || unresolved == null || unresolved.isEmpty()) return;
+        for (DeferredRepair repair : unresolved) {
+            if (repair == null || repair.pos() == null || repair.state() == null) continue;
+            queueDeferredCleanupTask(FortifyCleanupKind.CARVE_REPAIR, repair.pos(), repair.state(), repair.mandatory(), scope.context);
+        }
+    }
+
+    private void noteDeferredCleanupSkip(DeferredCleanupTask task, String reason) {
+        if (task == null) return;
+        task.attempts++;
+        task.lastAttemptMs = System.currentTimeMillis();
+        task.lastFailureReason = reason;
+        long multiplier = 1L << Math.min(2, Math.max(0, task.attempts - 1));
+        long delay = Math.min(FORTIFY_CLEANUP_BACKOFF_MAX_MS, FORTIFY_CLEANUP_BACKOFF_BASE_MS * multiplier);
+        task.nextEligibleMs = task.lastAttemptMs + delay;
+    }
+
+    private void noteDeferredCleanupImmediateRetry(DeferredCleanupTask task, String reason) {
+        if (task == null) return;
+        task.attempts++;
+        task.lastAttemptMs = System.currentTimeMillis();
+        task.lastFailureReason = reason;
+        task.nextEligibleMs = 0L;
+    }
+
+    private void noteDeferredCleanupResolved(DeferredCleanupTask task) {
+        if (task == null) return;
+        task.lastAttemptMs = System.currentTimeMillis();
+        task.lastFailureReason = null;
+        task.nextEligibleMs = 0L;
+    }
+
+    private static void incrementCleanupReason(Map<String, Integer> counts, String reason) {
+        if (counts == null || reason == null || reason.isBlank()) return;
+        counts.merge(reason, 1, Integer::sum);
+    }
+
+    private static String formatCleanupReasonSummary(Map<String, Integer> counts) {
+        if (counts == null || counts.isEmpty()) return "none";
+        StringBuilder sb = new StringBuilder();
+        boolean first = true;
+        for (Map.Entry<String, Integer> e : counts.entrySet()) {
+            if (!first) sb.append(',');
+            first = false;
+            sb.append(e.getKey()).append('=').append(e.getValue());
+        }
+        return sb.toString();
+    }
+
+    private boolean tryRecoverTowardDeferredCleanup(ServerPlayerEntity bot, ServerWorld world, DeferredCleanupTask task) {
+        if (bot == null || world == null || task == null || task.pos == null) return false;
+        if (task.kind != FortifyCleanupKind.SCAFFOLD_REMOVE && task.kind != FortifyCleanupKind.CARVE_REPAIR) return false;
+        if (task.attempts < FORTIFY_CLEANUP_ACTIVE_RECOVERY_ATTEMPTS) return false;
+        double distSq = bot.getBlockPos().getSquaredDistance(task.pos);
+        if (distSq > (double) (FORTIFY_CLEANUP_ACTIVE_RECOVERY_MAX_DIST * FORTIFY_CLEANUP_ACTIVE_RECOVERY_MAX_DIST)) {
+            return false;
+        }
+        BlockPos before = bot.getBlockPos();
+        walkTowardBlock(bot, task.pos, 700L);
+        if (!before.equals(bot.getBlockPos())) {
+            LOGGER.info("[FortifyCleanup] active-recovery moved toward {} pos={} from={} to={}",
+                    task.kind, task.pos.toShortString(), before.toShortString(), bot.getBlockPos().toShortString());
+            return true;
+        }
+        return false;
+    }
+
+    private boolean isForcedDeferredCleanupContext(String context) {
+        if (context == null) return false;
+        return context.equals("scaffold-teardown")
+                || context.startsWith("fortify-gate:post-success")
+                || context.startsWith("fortifyabort")
+                || context.startsWith("fortify-abort");
+    }
+
+    private boolean shouldAllowDeferredCleanupActiveRecovery(String context) {
+        if (context == null) return false;
+        return context.equals("scaffold-teardown")
+                || context.startsWith("fortify-gate:post-success")
+                || context.startsWith("fortifyabort")
+                || context.startsWith("fortify-abort");
+    }
+
+    private boolean isTrapLikeCell(ServerWorld world, BlockPos pos) {
+        if (world == null || pos == null) return false;
+        VoxelJunctionService.VoxelStandCell cell = VoxelJunctionService.analyzeStandCell(world, pos);
+        return cell.topology() == VoxelJunctionService.CellTopology.POCKET
+                || cell.topology() == VoxelJunctionService.CellTopology.DEAD_END
+                || cell.openFaces() <= 1;
+    }
+
+    private boolean isInsideCurrentFortificationHull(ServerPlayerEntity bot) {
+        return bot != null && isInsideCurrentFortificationHull(bot.getBlockPos());
+    }
+
+    private boolean isInsideCurrentFortificationHull(BlockPos pos) {
+        if (pos == null || currentLayout == null) return false;
+        List<WallPoint> hull = currentLayout.hullVertices();
+        if (hull == null || hull.size() < 3) return false;
+        return VillageFortificationLayoutService.pointInConvexHull(hull, pos.getX(), pos.getZ());
+    }
+
+    private boolean isLayoutExteriorReachable(ServerWorld world, BlockPos pos) {
+        if (world == null || pos == null) return true;
+        if (!fortificationProtectedPositions.contains(pos)) return true;
+        if (!isInsideCurrentFortificationHull(pos)) return true;
+        for (Direction dir : Direction.Type.HORIZONTAL) {
+            BlockPos neighbor = pos.offset(dir);
+            if (!isInsideCurrentFortificationHull(neighbor)) {
+                BlockState ns = world.getBlockState(neighbor);
+                if (ns.isAir() || ns.isReplaceable() || ns.getCollisionShape(world, neighbor).isEmpty()) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private CavityCheckResult evaluateCavity(ServerWorld world, BlockPos center) {
+        if (world == null || center == null) return new CavityCheckResult(false, 0, false);
+        int airCount = 0;
+        boolean spawnable = false;
+        for (int dx = -1; dx <= 1; dx++) {
+            for (int dy = -1; dy <= 1; dy++) {
+                for (int dz = -1; dz <= 1; dz++) {
+                    BlockPos p = center.add(dx, dy, dz);
+                    BlockState state = world.getBlockState(p);
+                    boolean open = state.isAir() || state.isReplaceable();
+                    if (open) {
+                        airCount++;
+                        BlockPos below = p.down();
+                        BlockState belowState = world.getBlockState(below);
+                        boolean solidFloor = !belowState.getCollisionShape(world, below).isEmpty();
+                        BlockState headState = world.getBlockState(p.up());
+                        boolean headOpen = headState.isAir() || headState.isReplaceable();
+                        if (solidFloor && headOpen) {
+                            spawnable = true;
+                        }
+                    }
+                }
+            }
+        }
+        boolean safe = !spawnable;
+        return new CavityCheckResult(safe, airCount, spawnable);
+    }
+
+    private boolean wouldRepairSealCurrentExit(ServerPlayerEntity bot, ServerWorld world, BlockPos repairPos) {
+        if (bot == null || world == null || repairPos == null) return false;
+        BlockPos botPos = bot.getBlockPos();
+        if (botPos.equals(repairPos) || botPos.up().equals(repairPos)) {
+            return true;
+        }
+        int dx = Math.abs(repairPos.getX() - botPos.getX());
+        int dz = Math.abs(repairPos.getZ() - botPos.getZ());
+        int dy = Math.abs(repairPos.getY() - botPos.getY());
+        if (dx > 1 || dz > 1 || dy > 2) {
+            return false;
+        }
+        int exitsBefore = countOpenExits(world, botPos, null);
+        int exitsAfter = countOpenExits(world, botPos, repairPos);
+        if (exitsAfter > exitsBefore) {
+            return false;
+        }
+        if (exitsAfter <= 1 && exitsAfter < exitsBefore) {
+            return true;
+        }
+        return isTrapLikeCell(world, botPos) && exitsAfter <= 1;
+    }
+
+    private boolean shouldDeferCarveFinalize(FortifyNavRuntimeScope scope, ServerPlayerEntity bot, ServerWorld world) {
+        if (scope == null || scope.carveSession == null || bot == null || world == null) return false;
+        if (scope.carveSession.deferredRepairs.isEmpty()) return false;
+        String ctx = scope.context == null ? "" : scope.context;
+        if (!ctx.startsWith("fortify-tower:scaffold-base")) {
+            return false;
+        }
+        if (!scope.carveSession.crossed && !scope.carveSession.completed) {
+            return false;
+        }
+        if (scope.primaryTarget != null && bot.getBlockPos().getSquaredDistance(scope.primaryTarget) > 25.0D) {
+            return true;
+        }
+        if (isTrapLikeCell(world, bot.getBlockPos())) {
+            return true;
+        }
+        for (DeferredRepair repair : scope.carveSession.deferredRepairs) {
+            if (repair == null || repair.pos() == null) continue;
+            if (world.getBlockState(repair.pos()).isAir() && wouldRepairSealCurrentExit(bot, world, repair.pos())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private void attemptFinalizeCarveTransaction(ServerPlayerEntity bot, ServerWorld world, FortifyNavRuntimeScope scope) {
+        if (scope == null || scope.carveSession == null) return;
+        FortifyCarveSession session = scope.carveSession;
+        if (session.deferredRepairs.isEmpty()) return;
+
+        List<DeferredRepair> pending = new ArrayList<>();
+        for (DeferredRepair repair : session.deferredRepairs) {
+            if (repair == null || repair.pos() == null || repair.state() == null) continue;
+            // Already restored or filled by something else.
+            if (!world.getBlockState(repair.pos()).isAir()) continue;
+            pending.add(repair);
+        }
+        if (pending.isEmpty()) {
+            session.deferredRepairs.clear();
+            session.cleanupState = CleanupState.DONE;
+            LOGGER.info("[FortifyNav] Carve repair ctx={} target={} mined={} state={} queued=0 (nothing pending)",
+                    scope.context,
+                    session.target != null ? session.target.toShortString() : "n/a",
+                    session.blocksMined,
+                    session.cleanupState);
+            return;
+        }
+
+        if (shouldDeferCarveFinalize(scope, bot, world)) {
+            queueDeferredCarveRepairs(scope, session, pending);
+            session.deferredRepairs.clear();
+            session.cleanupState = CleanupState.FAILED_QUEUED;
+            LOGGER.info("[FortifyNav] Carve finalize deferred ctx={} target={} pending={} reason=still-trapped queued={} topology={} dist={}",
+                    scope.context,
+                    session.target != null ? session.target.toShortString() : "n/a",
+                    pending.size(),
+                    pending.size(),
+                    VoxelJunctionService.analyzeStandCell(world, bot.getBlockPos()).topology(),
+                    scope.primaryTarget != null
+                            ? String.format(Locale.ROOT, "%.1f", Math.sqrt(bot.getBlockPos().getSquaredDistance(scope.primaryTarget)))
+                            : "n/a");
+            return;
+        }
+
+        BlockPos botPos = bot.getBlockPos();
+        int reachableCount = 0;
+        double minDist = Double.POSITIVE_INFINITY;
+        BlockPos nearest = null;
+        Vec3d eye = bot.getEyePos();
+        for (DeferredRepair repair : pending) {
+            BlockPos pos = repair.pos();
+            double dist = Math.sqrt(botPos.getSquaredDistance(pos));
+            if (dist < minDist) {
+                minDist = dist;
+                nearest = pos;
+            }
+            if (isWithinReach(bot, pos) && hasLineOfSight(world, bot, eye, pos)
+                    && !botPos.equals(pos) && !botPos.up().equals(pos)) {
+                reachableCount++;
+            }
+        }
+
+        if (reachableCount < pending.size() && nearest != null && minDist <= FORTIFY_CLEANUP_REPAIR_STAGE_MAX_DIST) {
+            // Try a short reposition before giving up and queueing cleanup.
+            BlockPos beforeStage = bot.getBlockPos();
+            walkTowardBlock(bot, nearest, 900L);
+            if (!beforeStage.equals(bot.getBlockPos())) {
+                botPos = bot.getBlockPos();
+                eye = bot.getEyePos();
+                reachableCount = 0;
+                minDist = Double.POSITIVE_INFINITY;
+                for (DeferredRepair repair : pending) {
+                    BlockPos pos = repair.pos();
+                    double dist = Math.sqrt(botPos.getSquaredDistance(pos));
+                    if (dist < minDist) minDist = dist;
+                    if (isWithinReach(bot, pos) && hasLineOfSight(world, bot, eye, pos)
+                            && !botPos.equals(pos) && !botPos.up().equals(pos)) {
+                        reachableCount++;
+                    }
+                }
+            }
+        }
+
+        LOGGER.info("[FortifyNav] Carve repair posture ctx={} target={} pending={} reachable={} minDist={} crossed={} completed={}",
+                scope.context,
+                session.target != null ? session.target.toShortString() : "n/a",
+                pending.size(),
+                reachableCount,
+                minDist == Double.POSITIVE_INFINITY ? "n/a" : String.format(Locale.ROOT, "%.1f", minDist),
+                session.crossed, session.completed);
+
+        int repaired = 0;
+        List<DeferredRepair> unresolved = new ArrayList<>();
+        pending.sort((a, b) -> {
+            boolean aSeal = wouldRepairSealCurrentExit(bot, world, a != null ? a.pos() : null);
+            boolean bSeal = wouldRepairSealCurrentExit(bot, world, b != null ? b.pos() : null);
+            if (aSeal != bSeal) return aSeal ? 1 : -1; // seal-risk repairs last
+            BlockPos botPosSort = bot.getBlockPos();
+            double aDist = a == null || a.pos() == null ? Double.NEGATIVE_INFINITY : botPosSort.getSquaredDistance(a.pos());
+            double bDist = b == null || b.pos() == null ? Double.NEGATIVE_INFINITY : botPosSort.getSquaredDistance(b.pos());
+            return Double.compare(bDist, aDist); // farther repairs first
+        });
+        for (DeferredRepair repair : pending) {
+            BlockPos pos = repair.pos();
+            if (!world.getBlockState(pos).isAir()) {
+                continue;
+            }
+            if (wouldRepairSealCurrentExit(bot, world, pos)) {
+                unresolved.add(repair);
+                LOGGER.info("[FortifyNav] Carve repair skip pos={} reason=seal-risk exitsAfter<=1", pos.toShortString());
+                continue;
+            }
+            if (bot.getBlockPos().equals(pos) || bot.getBlockPos().up().equals(pos)) {
+                unresolved.add(repair);
+                continue;
+            }
+            if (!isWithinReach(bot, pos) || !hasLineOfSight(world, bot, bot.getEyePos(), pos)) {
+                unresolved.add(repair);
+                continue;
+            }
+            ReplaceBlockResult replaceResult = tryReplaceMinedBlock(bot, world, pos, repair.state(), repair.mandatory(), scope.context);
+            if (!world.getBlockState(pos).isAir()) {
+                repaired++;
+            } else {
+                if (!replaceResult.success() && repair.mandatory()) {
+                    queueMandatoryCarveRepairIfNeeded(bot, world, pos, repair.state(), true, scope.context);
+                }
+                unresolved.add(repair);
+            }
+        }
+
+        int queued = 0;
+        if (!unresolved.isEmpty()) {
+            queueDeferredCarveRepairs(scope, session, unresolved);
+            queued = unresolved.size();
+        }
+        session.deferredRepairs.clear();
+        if (queued == 0) {
+            session.cleanupState = CleanupState.DONE;
+        } else if (repaired > 0) {
+            session.cleanupState = CleanupState.PARTIAL;
+        } else {
+            session.cleanupState = CleanupState.FAILED_QUEUED;
+        }
+        LOGGER.info("[FortifyNav] Carve repair ctx={} target={} mined={} repaired={} queued={} state={} completed={}",
+                scope.context,
+                session.target != null ? session.target.toShortString() : "n/a",
+                session.blocksMined, repaired, queued, session.cleanupState, session.completed);
+    }
+
+    private void processDeferredFortifyCleanupQueue(ServerPlayerEntity bot, ServerWorld world, String context) {
+        if (bot == null || world == null || deferredFortifyCleanupQueue.isEmpty()) {
+            return;
+        }
+        if ((SkillManager.shouldAbortSkill(bot) || bot.isRemoved()) && !isForcedDeferredCleanupContext(context)) {
+            return;
+        }
+        long now = System.currentTimeMillis();
+        boolean forcePass = isForcedDeferredCleanupContext(context);
+        if (!forcePass && (now - deferredFortifyCleanupLastProcessMs) < FORTIFY_CLEANUP_PROCESS_MIN_INTERVAL_MS) {
+            return;
+        }
+        deferredFortifyCleanupLastProcessMs = now;
+        boolean allowActiveRecoveryMovement = shouldAllowDeferredCleanupActiveRecovery(context);
+        int started = deferredFortifyCleanupQueue.size();
+        int repaired = 0;
+        int removedScaffold = 0;
+        int alreadyResolved = 0;
+        int skipped = 0;
+        int sealRiskSkips = 0;
+        Map<String, Integer> skipReasons = new LinkedHashMap<>();
+        for (Iterator<DeferredCleanupTask> it = deferredFortifyCleanupQueue.iterator(); it.hasNext(); ) {
+            DeferredCleanupTask task = it.next();
+            if (task == null || task.pos == null) {
+                it.remove();
+                continue;
+            }
+            if (task.nextEligibleMs > now) {
+                skipped++;
+                incrementCleanupReason(skipReasons, "backoffDeferred");
+                continue;
+            }
+            BlockPos pos = task.pos;
+            if (task.kind == FortifyCleanupKind.CARVE_REPAIR) {
+                if (task.originalState == null) {
+                    it.remove();
+                    continue;
+                }
+                if (!world.getBlockState(pos).isAir()) {
+                    noteDeferredCleanupResolved(task);
+                    alreadyResolved++;
+                    it.remove();
+                    continue;
+                }
+                if (wouldRepairSealCurrentExit(bot, world, pos)) {
+                    noteDeferredCleanupSkip(task, "sealRisk");
+                    skipped++;
+                    sealRiskSkips++;
+                    incrementCleanupReason(skipReasons, "sealRisk");
+                    continue;
+                }
+                if (!isWithinReach(bot, pos)) {
+                    boolean recovered = allowActiveRecoveryMovement && tryRecoverTowardDeferredCleanup(bot, world, task);
+                    if (recovered && isWithinReach(bot, pos)) {
+                        now = System.currentTimeMillis();
+                    } else {
+                        noteDeferredCleanupSkip(task, allowActiveRecoveryMovement ? "blockedReach" : "blockedReachNoMove");
+                        skipped++;
+                        incrementCleanupReason(skipReasons, allowActiveRecoveryMovement ? "blockedReach" : "blockedReachNoMove");
+                        continue;
+                    }
+                }
+                if (!hasLineOfSight(world, bot, bot.getEyePos(), pos)) {
+                    boolean recovered = allowActiveRecoveryMovement && tryRecoverTowardDeferredCleanup(bot, world, task);
+                    if (!recovered || !hasLineOfSight(world, bot, bot.getEyePos(), pos)) {
+                        noteDeferredCleanupSkip(task, allowActiveRecoveryMovement ? "blockedLOS" : "blockedLOSNoMove");
+                        skipped++;
+                        incrementCleanupReason(skipReasons, allowActiveRecoveryMovement ? "blockedLOS" : "blockedLOSNoMove");
+                        continue;
+                    }
+                }
+                ReplaceBlockResult replace = tryReplaceMinedBlock(bot, world, pos, task.originalState, task.mandatory,
+                        task.context != null ? task.context : context);
+                if (!world.getBlockState(pos).isAir()) {
+                    noteDeferredCleanupImmediateRetry(task, null);
+                    noteDeferredCleanupResolved(task);
+                    repaired++;
+                    it.remove();
+                } else {
+                    noteDeferredCleanupSkip(task, "replaceFail");
+                    skipped++;
+                    incrementCleanupReason(skipReasons, "replaceFail");
+                }
+                continue;
+            }
+
+            // Scaffold removal cleanup
+            BlockState current = world.getBlockState(pos);
+            if (current.isAir() || !ScaffoldService.SCAFFOLD_BLOCKS.contains(current.getBlock().asItem())) {
+                ScaffoldService.getScaffoldMemory(bot).remove(pos);
+                noteDeferredCleanupResolved(task);
+                alreadyResolved++;
+                it.remove();
+                continue;
+            }
+            if (!isWithinMiningReach(bot, pos)) {
+                boolean recovered = allowActiveRecoveryMovement && tryRecoverTowardDeferredCleanup(bot, world, task);
+                if (recovered && isWithinMiningReach(bot, pos)) {
+                    now = System.currentTimeMillis();
+                } else {
+                    noteDeferredCleanupSkip(task, allowActiveRecoveryMovement ? "blockedReach" : "blockedReachNoMove");
+                    skipped++;
+                    incrementCleanupReason(skipReasons, allowActiveRecoveryMovement ? "blockedReach" : "blockedReachNoMove");
+                    continue;
+                }
+            }
+            if (!hasLineOfSight(world, bot, bot.getEyePos(), pos)) {
+                boolean recovered = allowActiveRecoveryMovement && tryRecoverTowardDeferredCleanup(bot, world, task);
+                if (!recovered || !hasLineOfSight(world, bot, bot.getEyePos(), pos)) {
+                    noteDeferredCleanupSkip(task, allowActiveRecoveryMovement ? "blockedLOS" : "blockedLOSNoMove");
+                    skipped++;
+                    incrementCleanupReason(skipReasons, allowActiveRecoveryMovement ? "blockedLOS" : "blockedLOSNoMove");
+                    continue;
+                }
+            }
+            LookController.faceBlock(bot, pos);
+            sleepQuiet(30L);
+            boolean mined = digBlock(bot, world, pos);
+            BlockState after = world.getBlockState(pos);
+            if (mined && (after.isAir() || !ScaffoldService.SCAFFOLD_BLOCKS.contains(after.getBlock().asItem()))) {
+                noteDeferredCleanupImmediateRetry(task, null);
+                ScaffoldService.getScaffoldMemory(bot).remove(pos);
+                noteDeferredCleanupResolved(task);
+                removedScaffold++;
+                it.remove();
+            } else if (after.isAir() || !ScaffoldService.SCAFFOLD_BLOCKS.contains(after.getBlock().asItem())) {
+                noteDeferredCleanupImmediateRetry(task, null);
+                ScaffoldService.getScaffoldMemory(bot).remove(pos);
+                noteDeferredCleanupResolved(task);
+                alreadyResolved++;
+                it.remove();
+            } else {
+                noteDeferredCleanupSkip(task, "digFailed");
+                skipped++;
+                incrementCleanupReason(skipReasons, "digFailed");
+                continue;
+            }
+        }
+
+        if (started > 0) {
+            LOGGER.info("[FortifyCleanup] queue-process ctx={} started={} repaired={} scaffoldRemoved={} alreadyResolved={} skipped={} sealRiskSkips={} remaining={} reasons={}",
+                    context, started, repaired, removedScaffold, alreadyResolved, skipped, sealRiskSkips,
+                    deferredFortifyCleanupQueue.size(), formatCleanupReasonSummary(skipReasons));
+        }
     }
 
     /**
@@ -2902,10 +5078,7 @@ public final class FortifyVillageSkill implements Skill {
      * When {@code allowLayout} is true, layout blocks also pass (for wall traversal).
      */
     private boolean canBreakForNavigation(ServerWorld world, BlockPos pos, boolean allowLayout) {
-        if (fortificationProtectedPositions.contains(pos)) {
-            return allowLayout && isLayoutBlockBreakableForNavigation(world, pos);
-        }
-        return isSafeToBreakForNavigation(world, pos);
+        return evaluateBreakForNavigation(world, pos, allowLayout).allowed();
     }
 
     /** Mine a single block for navigation break-through. Thin wrapper around MiningTool. */
@@ -2923,24 +5096,27 @@ public final class FortifyVillageSkill implements Skill {
         }
     }
 
-    /**
-     * Replace a mined block. For layout blocks ({@code mandatory=true}), uses the
-     * wall material fallback lists and logs a warning on failure so auto-patch can
-     * repair it. For non-layout blocks, best-effort with common materials.
-     */
-    private void replaceMinedBlock(ServerPlayerEntity bot, ServerWorld world, BlockPos pos,
-                                   BlockState originalState, boolean mandatory) {
-        // Don't replace if something is already there
-        if (!world.getBlockState(pos).isAir()) return;
-        // Don't replace if the bot is occupying the position
-        if (bot.getBlockPos().equals(pos) || bot.getBlockPos().up().equals(pos)) return;
+    private ReplaceFailureKind classifyReplaceFailureKind(String reason) {
+        if (reason == null || reason.isBlank()) return ReplaceFailureKind.OTHER;
+        if (reason.startsWith("bot-intersects-target")) return ReplaceFailureKind.BOT_OCCUPIES;
+        if (reason.startsWith("out-of-reach")) return ReplaceFailureKind.OUT_OF_REACH;
+        if (reason.startsWith("no-line-of-sight")) return ReplaceFailureKind.LOS_BLOCKED;
+        if (reason.startsWith("no-block-item-available")) return ReplaceFailureKind.NO_MATERIAL;
+        return ReplaceFailureKind.OTHER;
+    }
+
+    private ReplaceBlockResult tryReplaceMinedBlock(ServerPlayerEntity bot, ServerWorld world, BlockPos pos,
+                                                    BlockState originalState, boolean mandatory, String context) {
+        if (bot == null || world == null || pos == null || originalState == null) {
+            return new ReplaceBlockResult(false, ReplaceFailureKind.OTHER, "invalid-args");
+        }
+        if (!world.getBlockState(pos).isAir()) {
+            return new ReplaceBlockResult(true, ReplaceFailureKind.NONE, null);
+        }
 
         Item originalItem = originalState.getBlock().asItem();
-
-        // For layout (wall) blocks, use the broad wall material fallback list
         List<Item> replacements;
         if (mandatory) {
-            // Try original first, then all stone-brick fallbacks (the primary wall material)
             Set<Item> seen = new LinkedHashSet<>();
             if (originalItem != Items.AIR) seen.add(originalItem);
             seen.addAll(STONE_BRICK_FALLBACKS);
@@ -2952,15 +5128,79 @@ public final class FortifyVillageSkill implements Skill {
             replacements = List.of(Items.COBBLESTONE, Items.STONE, Items.DIRT);
         }
 
-        BotActions.PlaceResult result = BotActions.tryPlaceBlockAt(bot, pos, Direction.UP, replacements);
-        if (result.success()) {
-            LOGGER.info("[FortifyNav] Replaced mined block at {}", pos.toShortString());
-        } else if (mandatory) {
-            LOGGER.warn("[FortifyNav] FAILED to replace wall block at {} — auto-patch should repair",
-                    pos.toShortString());
-        } else {
-            LOGGER.debug("[FortifyNav] Could not replace block at {} (no suitable material)", pos.toShortString());
+        int attempts = mandatory ? (1 + FORTIFY_MANDATORY_REPLACE_RETRIES) : 1;
+        ReplaceBlockResult last = new ReplaceBlockResult(false, ReplaceFailureKind.OTHER, "not-attempted");
+        for (int attempt = 1; attempt <= attempts; attempt++) {
+            if (bot.getBoundingBox().intersects(new net.minecraft.util.math.Box(pos))) {
+                BlockPos safe = SafePositionService.findSafeNear(world, bot.getBlockPos(), 2);
+                if (safe != null && !safe.equals(bot.getBlockPos())) {
+                    walkToTarget(bot.getCommandSource(), bot, safe, 1000L);
+                }
+            }
+
+            BotActions.PlaceResult place = BotActions.tryPlaceBlockAt(bot, pos, Direction.UP, replacements, false);
+            if (place.success()) {
+                LOGGER.info("[FortifyNav] Replaced mined block at {}", pos.toShortString());
+                return new ReplaceBlockResult(true, ReplaceFailureKind.NONE, null);
+            }
+            ReplaceFailureKind kind = classifyReplaceFailureKind(place.reason());
+            last = new ReplaceBlockResult(false, kind, place.reason());
+
+            boolean finalAttempt = attempt >= attempts;
+            if (!finalAttempt && mandatory && last.retryable()) {
+                LookController.faceBlock(bot, pos);
+                if (kind == ReplaceFailureKind.OUT_OF_REACH
+                        && bot.getBlockPos().getSquaredDistance(pos)
+                        <= (double) (FORTIFY_CLEANUP_REPAIR_STAGE_MAX_DIST * FORTIFY_CLEANUP_REPAIR_STAGE_MAX_DIST)) {
+                    walkTowardBlock(bot, pos, 500L);
+                } else {
+                    BotActions.stop(bot);
+                }
+                sleepQuiet(FORTIFY_MANDATORY_REPLACE_RETRY_SLEEP_MS);
+                if (!world.getBlockState(pos).isAir()) {
+                    return new ReplaceBlockResult(true, ReplaceFailureKind.NONE, null);
+                }
+            }
         }
+
+        String ctx = context == null ? "fortify-nav" : context;
+        if (mandatory) {
+            LOGGER.warn("[FortifyNav] replace-fail ctx={} pos={} mandatory=true reason={}",
+                    ctx, pos.toShortString(), last.reason());
+        } else {
+            LOGGER.debug("[FortifyNav] replace-fail ctx={} pos={} mandatory=false reason={}",
+                    ctx, pos.toShortString(), last.reason());
+        }
+        return last;
+    }
+
+    private void queueMandatoryCarveRepairIfNeeded(ServerPlayerEntity bot, ServerWorld world,
+                                                   BlockPos pos, BlockState originalState,
+                                                   boolean mandatory, String context) {
+        if (!mandatory || pos == null || originalState == null) return;
+        if (world != null && !world.getBlockState(pos).isAir()) return;
+        String ctx = context == null ? "fortify-nav" : context;
+        queueDeferredCleanupTask(FortifyCleanupKind.CARVE_REPAIR, pos, originalState, true, ctx);
+    }
+
+    private void verifyCarveRepairColumn(ServerPlayerEntity bot, ServerWorld world,
+                                         BlockPos feetPos, BlockState feetOriginal, boolean feetMandatory,
+                                         BlockPos headPos, BlockState headOriginal, boolean headMandatory,
+                                         BlockPos overheadPos, BlockState overheadOriginal, boolean overheadMandatory,
+                                         String context) {
+        queueMandatoryCarveRepairIfNeeded(bot, world, feetPos, feetOriginal, feetMandatory, context);
+        queueMandatoryCarveRepairIfNeeded(bot, world, headPos, headOriginal, headMandatory, context);
+        queueMandatoryCarveRepairIfNeeded(bot, world, overheadPos, overheadOriginal, overheadMandatory, context);
+    }
+
+    /**
+     * Replace a mined block. For layout blocks ({@code mandatory=true}), uses the
+     * wall material fallback lists and logs a warning on failure so auto-patch can
+     * repair it. For non-layout blocks, best-effort with common materials.
+     */
+    private boolean replaceMinedBlock(ServerPlayerEntity bot, ServerWorld world, BlockPos pos,
+                                      BlockState originalState, boolean mandatory) {
+        return tryReplaceMinedBlock(bot, world, pos, originalState, mandatory, "fortify-nav").success();
     }
 
     // ── Navigation ──────────────────────────────────────────────
@@ -2997,7 +5237,9 @@ public final class FortifyVillageSkill implements Skill {
         double edgeDz = edge.end().z() - edge.start().z();
         double edgeLen = Math.sqrt(edgeDx * edgeDx + edgeDz * edgeDz);
         if (edgeLen < 0.001) {
-            walkToTarget(source, bot, new BlockPos(refX, bot.getBlockPos().getY(), refZ), 15_000L);
+            BlockPos fallback = new BlockPos(refX, bot.getBlockPos().getY(), refZ);
+            runWithFortifyEdgeNavScope(bot, world, "fortify-edge:approach-fallback", fallback,
+                    () -> walkToTarget(source, bot, fallback, 15_000L, "fortify-edge:approach-fallback"));
             return;
         }
 
@@ -3029,7 +5271,8 @@ public final class FortifyVillageSkill implements Skill {
                                 () -> MovementService.execute(source, bot, plan.get(), null)));
             }
         } else {
-            walkToTarget(source, bot, approachPos, 8_000L);
+            runWithFortifyEdgeNavScope(bot, world, "fortify-edge:approach", approachPos,
+                    () -> walkToTarget(source, bot, approachPos, 8_000L, "fortify-edge:approach"));
         }
 
         // After long-range pathfinding, the bot is often near but not adjacent to the wall.
@@ -3037,7 +5280,8 @@ public final class FortifyVillageSkill implements Skill {
         // stuck detection that triggers break-through when the bot hits the wall.
         double postDistSq = bot.squaredDistanceTo(approachX + 0.5, bot.getY(), approachZ + 0.5);
         if (postDistSq > 9.0D) { // > 3 blocks — walkToTarget will close the gap
-            walkToTarget(source, bot, approachPos, 8_000L);
+            runWithFortifyEdgeNavScope(bot, world, "fortify-edge:approach-close", approachPos,
+                    () -> walkToTarget(source, bot, approachPos, 8_000L, "fortify-edge:approach-close"));
             postDistSq = bot.squaredDistanceTo(approachX + 0.5, bot.getY(), approachZ + 0.5);
         }
         if (postDistSq > 25.0D) { // still far — wider-arc approach
@@ -3046,8 +5290,10 @@ public final class FortifyVillageSkill implements Skill {
             int wideY = safeSurfaceY(surfaceProfile, world, wideX, wideZ);
             BlockPos widePos = new BlockPos(wideX, wideY, wideZ);
             LOGGER.info("[FortifyEdge] wider-arc retry via {}", widePos.toShortString());
-            walkToTarget(source, bot, widePos, 6_000L);
-            walkToTarget(source, bot, approachPos, 6_000L);
+            runWithFortifyEdgeNavScope(bot, world, "fortify-edge:wide-arc", widePos,
+                    () -> walkToTarget(source, bot, widePos, 6_000L, "fortify-edge:wide-arc"));
+            runWithFortifyEdgeNavScope(bot, world, "fortify-edge:approach-retry", approachPos,
+                    () -> walkToTarget(source, bot, approachPos, 6_000L, "fortify-edge:approach-retry"));
         }
     }
 
@@ -3089,6 +5335,15 @@ public final class FortifyVillageSkill implements Skill {
         boolean botInside = VillageFortificationLayoutService.pointInConvexHull(hull, botX, botZ);
         if (!botInside) return false;
 
+        BlockPos botPos = bot.getBlockPos();
+        int botTerrainY = VillageFortificationLayoutService.terrainY(world, botX, botZ);
+        int botDepth = Math.max(0, botTerrainY - botPos.getY());
+        if (botDepth >= 2 && isTrapLikeCell(world, botPos)) {
+            LOGGER.info("[FortifyGate] suppress gate route: trapped-below-surface pos={} depth={} target={}",
+                    botPos.toShortString(), botDepth, target.toShortString());
+            return false;
+        }
+
         // Use strict interior check for target: hull boundary points (like tower vertices)
         // must be treated as "outside" so the bot routes through the gate to reach them.
         // pointInConvexHull uses cross >= 0 which includes boundary; strict uses cross > 0.
@@ -3100,6 +5355,32 @@ public final class FortifyVillageSkill implements Skill {
         if (gateRoutingFailures >= 2) {
             LOGGER.info("[FortifyGate] Skipping gate routing (failed {} times this session)", gateRoutingFailures);
             return false;
+        }
+        if (activeFortifyNavScope != null && activeFortifyNavScope.towerPatchContext) {
+            double localTargetDistSq = bot.getBlockPos().getSquaredDistance(target);
+            boolean localTrap = activeFortifyNavScope.towerState != null
+                    && (activeFortifyNavScope.towerState.sameStuckPosCount >= 1
+                    || activeFortifyNavScope.towerState.noRealProgressElapsedMs() > 0L);
+            if (localTrap && localTargetDistSq <= 400.0D) {
+                LOGGER.info("[FortifyGate] Suppressing gate route for local tower patch target={} dist={} (prefer local reroute/carve)",
+                        target.toShortString(), String.format(Locale.ROOT, "%.1f", Math.sqrt(localTargetDistSq)));
+                return false;
+            }
+        }
+        if (activeFortifyNavScope != null
+                && !activeFortifyNavScope.gateContext
+                && !activeFortifyNavScope.towerPatchContext
+                && isFortifyCarveContext(activeFortifyNavScope)) {
+            double localTargetDistSq = bot.getBlockPos().getSquaredDistance(target);
+            boolean entombedLocalEdge = localTargetDistSq <= 625.0D
+                    && shouldPreferEntombmentEscape(world, bot.getBlockPos(), activeFortifyNavScope.context);
+            if (entombedLocalEdge) {
+                LOGGER.info("[FortifyGate] suppress gate route: entombed-local-edge pos={} target={} dist={}",
+                        bot.getBlockPos().toShortString(),
+                        target.toShortString(),
+                        String.format(Locale.ROOT, "%.1f", Math.sqrt(localTargetDistSq)));
+                return false;
+            }
         }
 
         int gateEdgeIdx = layout.gatehouseEdgeIndex();
@@ -3176,7 +5457,13 @@ public final class FortifyVillageSkill implements Skill {
             double postDist = bot.squaredDistanceTo(
                     interiorX + 0.5, bot.getY(), interiorZ + 0.5);
             if (postDist > 9.0D) {
-                walkToTarget(source, bot, interiorPos, 12_000L);
+                FortifyNavRuntimeScope prior = beginFortifyNavScope("fortify-gate:interior-hop", activeFortifyNavScope != null ? activeFortifyNavScope.towerState : null,
+                        activeFortifyNavScope != null ? activeFortifyNavScope.towerVertex : null, interiorPos, false, true);
+                try {
+                    walkToTarget(source, bot, interiorPos, 12_000L, "fortify-gate:interior-hop");
+                } finally {
+                    endFortifyNavScope(bot, world, prior);
+                }
             }
 
             // Check if we made progress; if not, no point retrying
@@ -3194,7 +5481,13 @@ public final class FortifyVillageSkill implements Skill {
         double finalDistToInterior = bot.squaredDistanceTo(
                 interiorX + 0.5, bot.getY(), interiorZ + 0.5);
         if (finalDistToInterior > 9.0D) {
-            walkToTarget(source, bot, interiorPos, 10_000L);
+            FortifyNavRuntimeScope prior = beginFortifyNavScope("fortify-gate:interior-final", activeFortifyNavScope != null ? activeFortifyNavScope.towerState : null,
+                    activeFortifyNavScope != null ? activeFortifyNavScope.towerVertex : null, interiorPos, false, true);
+            try {
+                walkToTarget(source, bot, interiorPos, 10_000L, "fortify-gate:interior-final");
+            } finally {
+                endFortifyNavScope(bot, world, prior);
+            }
         }
         if (SkillManager.shouldAbortSkill(bot)) return false;
 
@@ -3210,12 +5503,24 @@ public final class FortifyVillageSkill implements Skill {
         // Step 2: Walk to gate center (1-3 blocks from interior, through the gap opening)
         LOGGER.info("[FortifyGate] At interior (dist={}). Walking to gate center={}",
                 String.format("%.1f", Math.sqrt(finalDistToInterior)), gateCenterPos.toShortString());
-        walkToTarget(source, bot, gateCenterPos, 8_000L);
+        FortifyNavRuntimeScope gateCenterScope = beginFortifyNavScope("fortify-gate:center", activeFortifyNavScope != null ? activeFortifyNavScope.towerState : null,
+                activeFortifyNavScope != null ? activeFortifyNavScope.towerVertex : null, gateCenterPos, false, true);
+        try {
+            walkToTarget(source, bot, gateCenterPos, 8_000L, "fortify-gate:center");
+        } finally {
+            endFortifyNavScope(bot, world, gateCenterScope);
+        }
         if (SkillManager.shouldAbortSkill(bot)) return false;
 
         // Step 3: Walk through gate to exit position (across the moat bridge)
         LOGGER.info("[FortifyGate] Walking through gate to exit={}", exitPos.toShortString());
-        walkToTarget(source, bot, exitPos, 12_000L);
+        FortifyNavRuntimeScope gateExitScope = beginFortifyNavScope("fortify-gate:exit", activeFortifyNavScope != null ? activeFortifyNavScope.towerState : null,
+                activeFortifyNavScope != null ? activeFortifyNavScope.towerVertex : null, exitPos, false, true);
+        try {
+            walkToTarget(source, bot, exitPos, 12_000L, "fortify-gate:exit");
+        } finally {
+            endFortifyNavScope(bot, world, gateExitScope);
+        }
 
         // Verify we made it outside
         int newBotX = bot.getBlockPos().getX();
@@ -3237,12 +5542,80 @@ public final class FortifyVillageSkill implements Skill {
             gateRoutingFailures++;
             LOGGER.warn("[FortifyGate] Still inside hull after gate routing at ({},{}). " +
                     "Fallback to normal navigation. (failure #{})", newBotX, newBotZ, gateRoutingFailures);
-            return false;
+            // Last resort: attempt a controlled carve along gate normal through layout blocks only
+            boolean carved = gateExitClearCorridor(source, bot, world, gateCenterPos, exitPos);
+            if (!carved) {
+                return false;
+            }
         }
 
+        if (!deferredFortifyCleanupQueue.isEmpty()) {
+            processDeferredFortifyCleanupQueue(bot, world, "fortify-gate:post-success");
+        }
         gateRoutingFailures = 0; // reset on success
         LOGGER.info("[FortifyGate] Successfully exited hull at ({},{})", newBotX, newBotZ);
         return true;
+    }
+
+    /**
+     * As a last resort when gate routing leaves the bot inside the hull, clear a 1x3 column
+     * along the gate outward normal (gate center → exit) through fortification layout blocks only.
+     * Mines feet/head/overhead, walks through, then replaces any mined layout blocks.
+     */
+    private boolean gateExitClearCorridor(ServerCommandSource source, ServerPlayerEntity bot, ServerWorld world,
+                                          BlockPos gateCenterPos, BlockPos exitPos) {
+        if (bot == null || world == null || gateCenterPos == null || exitPos == null) return false;
+        if (currentLayout == null) return false;
+
+        // Direction from gate center to exit (outward normal)
+        int dx = Integer.signum(exitPos.getX() - gateCenterPos.getX());
+        int dz = Integer.signum(exitPos.getZ() - gateCenterPos.getZ());
+        if (dx == 0 && dz == 0) return false;
+
+        BlockPos start = bot.getBlockPos();
+        List<BlockPos> mined = new ArrayList<>();
+
+        for (int step = 0; step < 4; step++) { // up to 3 blocks out (inclusive of 0)
+            BlockPos columnBase = gateCenterPos.add(dx * step, 0, dz * step);
+            for (int dy = 0; dy <= 2; dy++) {
+                BlockPos pos = columnBase.up(dy);
+                if (!fortificationProtectedPositions.contains(pos)) continue;
+                BlockState state = world.getBlockState(pos);
+                if (state.getCollisionShape(world, pos).isEmpty()) continue;
+                if (!isWithinMiningReach(bot, pos)) continue;
+                if (digBlockForNavigation(bot, world, pos)) {
+                    mined.add(pos.toImmutable());
+                }
+            }
+        }
+
+        BlockPos walkTarget = exitPos;
+        walkToTarget(source, bot, walkTarget, 3_500L, "fortify-gate:carve-exit");
+
+        // Replace mined blocks (mandatory — they are layout blocks)
+        for (BlockPos pos : mined) {
+            BlockState original = currentLayoutBlockState(pos);
+            if (original != null) {
+                replaceMinedBlock(bot, world, pos, original, true);
+            }
+        }
+
+        boolean outside = !isInsideCurrentFortificationHull(bot);
+        if (outside) {
+            LOGGER.info("[FortifyGate] Carve-exit cleared {} blocks and exited hull", mined.size());
+        } else {
+            LOGGER.warn("[FortifyGate] Carve-exit failed to exit hull (moved={} mined={})",
+                    !start.equals(bot.getBlockPos()), mined.size());
+        }
+        return outside;
+    }
+
+    private BlockState currentLayoutBlockState(BlockPos pos) {
+        if (currentLayout == null || pos == null) return null;
+        for (ProceduralWallBlock b : currentLayout.allBlocks()) {
+            if (pos.equals(b.worldPos())) return b.state();
+        }
+        return null;
     }
 
     /**
@@ -3286,7 +5659,9 @@ public final class FortifyVillageSkill implements Skill {
         int targetY = safeSurfaceY(surfaceProfile, world, targetX, targetZ);
 
         LOGGER.debug("Repositioning to mode {} at ({},{},{})", mode, targetX, targetY, targetZ);
-        walkToTarget(source, bot, new BlockPos(targetX, targetY, targetZ), 5_000L);
+        BlockPos repositionTarget = new BlockPos(targetX, targetY, targetZ);
+        runWithFortifyEdgeNavScope(bot, world, "fortify-edge:reposition", repositionTarget,
+                () -> walkToTarget(source, bot, repositionTarget, 5_000L, "fortify-edge:reposition"));
     }
 
     /**
@@ -3688,14 +6063,28 @@ public final class FortifyVillageSkill implements Skill {
         int noProgressAttempts = 0;
         BlockPos lastAttemptPos = null;
         int stagnantAttemptStreak = 0;
+        int hardResetNoProgressStreak = 0;
+        TowerNavAttemptState towerNavState = new TowerNavAttemptState(vertex);
 
         // Long-range navigation: if bot is far from this tower, use MovementService
         // to get to the general area before starting short-range local approach retries.
         double distToTowerSq = bot.squaredDistanceTo(vertex.x() + 0.5, bot.getY(), vertex.z() + 0.5);
         if (distToTowerSq > 400.0D) { // > 20 blocks away
-            BlockPos towerApproach = chooseTowerApproachPos(bot, world, vertex, surfaceProfile, 0, vertexBlocks);
+            BlockPos towerApproach = chooseTowerApproachPos(bot, world, vertex, surfaceProfile, 0, vertexBlocks, towerNavState);
             if (towerApproach != null) {
-                navigateThroughGateIfNeeded(source, bot, world, towerApproach, surfaceProfile);
+                // Avoid huge gate detours for near-local tower patch recovery; prefer local reroute/carve.
+                if (distToTowerSq > 625.0D) { // > 25 blocks
+                    FortifyNavRuntimeScope priorGateScope = beginFortifyNavScope(
+                            "fortify-tower:pre-gate", towerNavState, vertex, towerApproach, true, false);
+                    try {
+                        navigateThroughGateIfNeeded(source, bot, world, towerApproach, surfaceProfile);
+                    } finally {
+                        endFortifyNavScope(bot, world, priorGateScope);
+                    }
+                } else {
+                    LOGGER.info("[FortifyTower] skipping pre-gate route for local tower target {} dist={}",
+                            towerApproach.toShortString(), String.format(Locale.ROOT, "%.1f", Math.sqrt(distToTowerSq)));
+                }
                 if (SkillManager.shouldAbortSkill(bot)) return 0;
                 Optional<MovementService.MovementPlan> plan = MovementService.planLootApproach(
                         bot, towerApproach, MovementService.MovementOptions.skillLoot());
@@ -3711,7 +6100,9 @@ public final class FortifyVillageSkill implements Skill {
                 // walkToTarget closes any remaining gap with built-in break-through
                 double postDistSq = bot.squaredDistanceTo(towerApproach.getX() + 0.5, bot.getY(), towerApproach.getZ() + 0.5);
                 if (postDistSq > 9.0D && !SkillManager.shouldAbortSkill(bot)) {
-                    walkToTarget(source, bot, towerApproach, 6_000L);
+                    runWithFortifyTowerNavScope(bot, world, "fortify-tower:long-range-close",
+                            towerNavState, vertex, towerApproach,
+                            () -> walkToTarget(source, bot, towerApproach, 6_000L, "fortify-tower:long-range-close"));
                 }
             }
         }
@@ -3738,24 +6129,44 @@ public final class FortifyVillageSkill implements Skill {
             }
 
             forceExitTowerFootprint(source, bot, world, vertex, surfaceProfile, attempt - 1);
-            BlockPos towerApproach = chooseTowerApproachPos(bot, world, vertex, surfaceProfile, attempt - 1, vertexBlocks);
+            BlockPos towerApproach = chooseTowerApproachPos(bot, world, vertex, surfaceProfile, attempt - 1, vertexBlocks, towerNavState);
             boolean approached = moveToTowerApproach(
-                    source, bot, world, towerApproach, surfaceProfile,
-                    taskPrefix + ":" + vertexOrdinal + ":approach-" + attempt);
+                    source, bot, world, vertex, towerApproach, surfaceProfile,
+                    taskPrefix + ":" + vertexOrdinal + ":approach-" + attempt,
+                    towerNavState);
 
             if (!approached) {
-                boolean hardReset = tryTowerHardResetPosition(
-                        source, bot, world, vertex, surfaceProfile, attempt + vertexOrdinal);
-                if (hardReset) {
-                    noProgressAttempts = Math.max(0, noProgressAttempts - 1);
+                TowerHardResetResult hardReset = tryTowerHardResetPositionDetailed(
+                        source, bot, world, vertex, surfaceProfile, attempt + vertexOrdinal, towerNavState);
+                if (hardReset.moved()) {
+                    if (hardReset.meaningful()) {
+                        noProgressAttempts = Math.max(0, noProgressAttempts - 1);
+                        hardResetNoProgressStreak = 0;
+                    } else {
+                        hardResetNoProgressStreak++;
+                        LOGGER.info("[FortifyTower] hard-reset movement was non-meaningful tower=({}, {}) streak={}/{}",
+                                vertex.x(), vertex.z(), hardResetNoProgressStreak, TOWER_HARD_RESET_NO_PROGRESS_LIMIT);
+                        if (hardResetNoProgressStreak >= TOWER_HARD_RESET_NO_PROGRESS_LIMIT) {
+                            LOGGER.info("[FortifyTower] skipping remaining local retries for tower ({},{}) due to repeated non-meaningful hard resets",
+                                    vertex.x(), vertex.z());
+                            break;
+                        }
+                    }
                     continue;
                 }
+                hardResetNoProgressStreak++;
                 noProgressAttempts++;
                 if (noProgressAttempts >= TOWER_LOCAL_NO_PROGRESS_LIMIT) {
                     break;
                 }
+                if (hardResetNoProgressStreak >= TOWER_HARD_RESET_NO_PROGRESS_LIMIT) {
+                    LOGGER.info("[FortifyTower] aborting local retries for tower ({},{}) due to hard-reset no-progress streak",
+                            vertex.x(), vertex.z());
+                    break;
+                }
                 continue;
             }
+            hardResetNoProgressStreak = 0;
 
             BlockPos botPos = bot.getBlockPos();
             if (Math.abs(botPos.getX() - vertex.x()) <= 1 && Math.abs(botPos.getZ() - vertex.z()) <= 1) {
@@ -3790,8 +6201,13 @@ public final class FortifyVillageSkill implements Skill {
                 noProgressAttempts++;
                 tryUnwedgeFromTightSpace(source, bot, world, surfaceProfile, towerApproach,
                         taskPrefix + ":" + vertexOrdinal + ":no-progress-" + attempt);
-                if (tryTowerHardResetPosition(source, bot, world, vertex, surfaceProfile, attempt + vertexOrdinal)) {
+                TowerHardResetResult hardReset = tryTowerHardResetPositionDetailed(
+                        source, bot, world, vertex, surfaceProfile, attempt + vertexOrdinal, towerNavState);
+                if (hardReset.moved() && hardReset.meaningful()) {
                     noProgressAttempts = Math.max(0, noProgressAttempts - 1);
+                    hardResetNoProgressStreak = 0;
+                } else {
+                    hardResetNoProgressStreak++;
                 }
             }
 
@@ -3799,9 +6215,14 @@ public final class FortifyVillageSkill implements Skill {
             if (lastAttemptPos != null && lastAttemptPos.equals(attemptPos) && gained == 0) {
                 stagnantAttemptStreak++;
                 if (stagnantAttemptStreak >= 2) {
-                    if (tryTowerHardResetPosition(source, bot, world, vertex, surfaceProfile,
-                            attempt + vertexOrdinal + stagnantAttemptStreak)) {
+                    TowerHardResetResult hardReset = tryTowerHardResetPositionDetailed(
+                            source, bot, world, vertex, surfaceProfile,
+                            attempt + vertexOrdinal + stagnantAttemptStreak, towerNavState);
+                    if (hardReset.moved() && hardReset.meaningful()) {
                         noProgressAttempts = Math.max(0, noProgressAttempts - 1);
+                        hardResetNoProgressStreak = 0;
+                    } else {
+                        hardResetNoProgressStreak++;
                     }
                 }
             } else {
@@ -3816,6 +6237,11 @@ public final class FortifyVillageSkill implements Skill {
             if (noProgressAttempts >= TOWER_LOCAL_NO_PROGRESS_LIMIT) {
                 break;
             }
+            if (hardResetNoProgressStreak >= TOWER_HARD_RESET_NO_PROGRESS_LIMIT) {
+                LOGGER.info("[FortifyTower] ending local tower retries early tower=({}, {}) hardResetNoProgressStreak={}",
+                        vertex.x(), vertex.z(), hardResetNoProgressStreak);
+                break;
+            }
         }
 
         // ── Scaffold phase: reach upper tower layers from elevated position ──
@@ -3825,8 +6251,21 @@ public final class FortifyVillageSkill implements Skill {
                 && countBuildingBlocks(bot) > 0) {
             int scaffoldGained = executeTowerScaffoldPhase(
                     source, bot, world, vertex, vertexBlocks, surfaceProfile,
-                    vertexOrdinal, totalVertices, plannedCount, referenceSurfaceY);
+                    vertexOrdinal, totalVertices, plannedCount, referenceSurfaceY, towerNavState);
             newlyPlaced += scaffoldGained;
+        }
+
+        if (newlyPlaced == 0 && !isTowerComplete(countPresentBlocks(world, vertexBlocks), plannedCount)) {
+            int terrainY = VillageFortificationLayoutService.terrainY(world, bot.getBlockPos().getX(), bot.getBlockPos().getZ());
+            int depth = terrainY - bot.getBlockPos().getY();
+            LOGGER.info("[FortifyTower] zero-progress tower vertex={}/{} pos=({}, {}) botPos={} trapLike={} depth={} noProgressAttempts={} sameStuckPosCount={}",
+                    vertexOrdinal + 1, totalVertices,
+                    vertex.x(), vertex.z(),
+                    bot.getBlockPos().toShortString(),
+                    isTrapLikeCell(world, bot.getBlockPos()),
+                    depth,
+                    noProgressAttempts,
+                    towerNavState != null ? towerNavState.sameStuckPosCount : 0);
         }
 
         return newlyPlaced;
@@ -3836,6 +6275,13 @@ public final class FortifyVillageSkill implements Skill {
 
     private static final long TOWER_SCAFFOLD_TIME_BUDGET_MS = 60_000L;
     private static final int TOWER_SCAFFOLD_MAX_SIDES = 6;
+    private static final long TOWER_SCAFFOLD_STEP_TIMEOUT_MS = 900L;
+    private static final long TOWER_SCAFFOLD_RETURN_TIMEOUT_MS = 900L;
+    private static final int TOWER_TOP_VERIFY_MAX_ATTEMPTS = 4;
+    private static final long TOWER_SCAFFOLD_RECENTER_TIMEOUT_MS = 320L;
+    private static final double TOWER_SCAFFOLD_RECENTER_TOLERANCE_SQ = 0.14D * 0.14D;
+    private static final int TOWER_SCAFFOLD_NO_HEADROOM_SAME_POS_LIMIT = 2;
+    private static final int TOWER_HARD_RESET_NO_PROGRESS_LIMIT = 3;
 
     /**
      * Scaffold phase for incomplete towers: pillar up on cardinal sides and place
@@ -3850,7 +6296,8 @@ public final class FortifyVillageSkill implements Skill {
                                           int vertexOrdinal,
                                           int totalVertices,
                                           int plannedCount,
-                                          int referenceSurfaceY) {
+                                          int referenceSurfaceY,
+                                          TowerNavAttemptState towerNavState) {
         int presentCount = countPresentBlocks(world, vertexBlocks);
         if (isTowerComplete(presentCount, plannedCount)) {
             return 0;
@@ -3883,9 +6330,34 @@ public final class FortifyVillageSkill implements Skill {
                 presentCount, plannedCount, optimalY);
         showOverhead(bot, "Scaffolding tower " + (vertexOrdinal + 1) + "/" + totalVertices);
 
+        if (towerNavState != null && towerNavState.sameStuckPosCount >= 1 && towerNavState.noRealProgressElapsedMs() >= 2_000L) {
+            FortifyNavRuntimeScope prior = beginFortifyNavScope("fortify-tower:scaffold-pre-escape", towerNavState, vertex, bot.getBlockPos(), true, false);
+            try {
+                if (towerNavState.navMode != FortifyNavMode.CARVE_CORRIDOR) {
+                    towerNavState.activateCarveMode();
+                    if (activeFortifyNavScope != null) activeFortifyNavScope.navMode = FortifyNavMode.CARVE_CORRIDOR;
+                    if (activeFortifyNavScope != null && activeFortifyNavScope.carveSession == null) {
+                        activeFortifyNavScope.carveSession = new FortifyCarveSession(bot.getBlockPos(), "tower-scaffold-pre-escape");
+                    }
+                    LOGGER.info("[FortifyTower] scaffold pre-escape activating carve mode for tower ({},{})",
+                            vertex.x(), vertex.z());
+                }
+                BlockPos escape = chooseTowerEscapePos(bot, world, vertex, surfaceProfile, 3);
+                if (escape != null) {
+                    walkToTarget(source, bot, escape, 2_000L, "fortify-tower:scaffold-pre-escape");
+                }
+            } finally {
+                endFortifyNavScope(bot, world, prior);
+            }
+            if (towerNavState.sameStuckPosCount >= 1 && bot.getBlockPos().getSquaredDistance(new BlockPos(vertex.x(), bot.getBlockPos().getY(), vertex.z())) > 25.0D) {
+                towerNavState.noteRealProgress();
+            }
+        }
+
         long phaseStart = System.currentTimeMillis();
         int totalGained = 0;
         Set<Integer> triedSides = new HashSet<>();
+        Map<BlockPos, Integer> repeatedNoHeadroomByPos = new HashMap<>();
 
         for (int sideAttempt = 0; sideAttempt < TOWER_SCAFFOLD_MAX_SIDES; sideAttempt++) {
             if (SkillManager.shouldAbortSkill(bot)) break;
@@ -3900,18 +6372,92 @@ public final class FortifyVillageSkill implements Skill {
 
             // Navigate to scaffold base
             forceExitTowerFootprint(source, bot, world, vertex, surfaceProfile, sideAttempt);
-            walkToTarget(source, bot, scaffoldBase, 3_000L);
+            FortifyNavRuntimeScope scaffoldScope = beginFortifyNavScope("fortify-tower:scaffold-base", towerNavState, vertex, scaffoldBase, true, false);
+            try {
+                walkToTarget(source, bot, scaffoldBase, 3_000L, "fortify-tower:scaffold-base");
+            } finally {
+                endFortifyNavScope(bot, world, scaffoldScope);
+            }
             double distSq = bot.squaredDistanceTo(scaffoldBase.getX() + 0.5, scaffoldBase.getY(), scaffoldBase.getZ() + 0.5);
             if (distSq > 9.0) {
                 walkTowardBlock(bot, scaffoldBase, 2_000L);
                 distSq = bot.squaredDistanceTo(scaffoldBase.getX() + 0.5, scaffoldBase.getY(), scaffoldBase.getZ() + 0.5);
+            }
+            if (distSq <= 25.0D && isTrapLikeCell(world, bot.getBlockPos())) {
+                boolean nudged = tryPostCarvePocketEscapeToward(bot, world, scaffoldBase);
+                if (nudged) {
+                    distSq = bot.squaredDistanceTo(scaffoldBase.getX() + 0.5, scaffoldBase.getY(), scaffoldBase.getZ() + 0.5);
+                    LOGGER.info("[FortifyTower] scaffold-base post-carve-escape side={} nudged=true dist={}",
+                            sideAttempt, String.format(Locale.ROOT, "%.1f", Math.sqrt(distSq)));
+                }
             }
 
             // If we're too far from the scaffold base, skip this side
             if (distSq > 16.0) {
                 LOGGER.info("[FortifyTower] scaffold base unreachable side={} dist={} for tower ({},{})",
                         sideAttempt, String.format("%.1f", Math.sqrt(distSq)), vertex.x(), vertex.z());
+                if (towerNavState != null) {
+                    towerNavState.noteNoRealProgress();
+                }
+                if (towerNavState != null && towerNavState.sameStuckPosCount >= 1 && towerNavState.noRealProgressElapsedMs() >= 3_000L) {
+                    LOGGER.info("[FortifyTower] skipping remaining scaffold sides for tower ({},{}) due to repeated local trap",
+                            vertex.x(), vertex.z());
+                    break;
+                }
                 continue;
+            }
+
+            TowerScaffoldSideOutcome sideOutcome = TowerScaffoldSideOutcome.NO_PROGRESS_HARD;
+            boolean recoverableScaffoldFailure = false;
+
+            int localTerrainY = VillageFortificationLayoutService.terrainY(world, bot.getBlockPos().getX(), bot.getBlockPos().getZ());
+            if (bot.getBlockPos().getY() < localTerrainY - 1) {
+                LOGGER.info("[FortifyTower] scaffold-base launch-precheck below-surface pos={} terrainY={} tower=({}, {})",
+                        bot.getBlockPos().toShortString(), localTerrainY, vertex.x(), vertex.z());
+                final int surfaceYForPrecheck = localTerrainY;
+                runWithFortifyTowerNavScope(bot, world, "fortify-tower:scaffold-base-surface-precheck",
+                        towerNavState, vertex, scaffoldBase,
+                        () -> ensureOnSurface(bot, world, surfaceYForPrecheck));
+                recoverableScaffoldFailure = true;
+            }
+            BlockPos launchPrecheckPos = bot.getBlockPos().toImmutable();
+            localTerrainY = VillageFortificationLayoutService.terrainY(world, launchPrecheckPos.getX(), launchPrecheckPos.getZ());
+            int launchDepth = Math.max(0, localTerrainY - launchPrecheckPos.getY());
+            boolean launchBelowSurface = launchPrecheckPos.getY() < localTerrainY - 1;
+
+            if (!canStandAt(world, launchPrecheckPos)) {
+                LOGGER.info("[FortifyTower] scaffold-base launch-precheck invalid-stand pos={} tower=({}, {})",
+                        launchPrecheckPos.toShortString(), vertex.x(), vertex.z());
+                noteEntombmentScaffoldFailure(world, launchPrecheckPos, "fortify-tower:scaffold-base");
+                if (towerNavState != null) towerNavState.noteNoRealProgress();
+                recoverableScaffoldFailure = true;
+                continue;
+            }
+            if (!hasTowerPillarLaunchHeadroom(world, launchPrecheckPos)) {
+                LOGGER.info("[FortifyTower] scaffold-base launch-precheck no-headroom pos={} tower=({}, {})",
+                        launchPrecheckPos.toShortString(), vertex.x(), vertex.z());
+                noteEntombmentScaffoldFailure(world, launchPrecheckPos, "fortify-tower:scaffold-base");
+                if (towerNavState != null) towerNavState.noteNoRealProgress();
+                int repeatCount = repeatedNoHeadroomByPos.merge(launchPrecheckPos, 1, Integer::sum);
+                if (launchBelowSurface && launchDepth >= 2 && repeatCount >= TOWER_SCAFFOLD_NO_HEADROOM_SAME_POS_LIMIT) {
+                    LOGGER.info("[FortifyTower] scaffold-base launch-precheck aborting scaffold phase tower=({}, {}) pos={} depth={} repeatedNoHeadroom={}",
+                            vertex.x(), vertex.z(), launchPrecheckPos.toShortString(), launchDepth, repeatCount);
+                    break;
+                }
+                recoverableScaffoldFailure = true;
+                continue;
+            }
+            repeatedNoHeadroomByPos.remove(launchPrecheckPos);
+            if (isTrapLikeCell(world, launchPrecheckPos)) {
+                boolean nudged = tryPostCarvePocketEscapeToward(bot, world, scaffoldBase);
+                if (!nudged && isTrapLikeCell(world, bot.getBlockPos())) {
+                    LOGGER.info("[FortifyTower] scaffold-base launch-precheck trap-like pos={} tower=({}, {})",
+                            bot.getBlockPos().toShortString(), vertex.x(), vertex.z());
+                    noteEntombmentScaffoldFailure(world, bot.getBlockPos(), "fortify-tower:scaffold-base");
+                    if (towerNavState != null) towerNavState.noteNoRealProgress();
+                    recoverableScaffoldFailure = true;
+                    continue;
+                }
             }
 
             // Pillar up
@@ -3927,6 +6473,11 @@ public final class FortifyVillageSkill implements Skill {
             ScaffoldService.ScaffoldSession session = ScaffoldService.beginSession(bot);
             boolean pillared = ScaffoldService.pillarToY(session, optimalY);
             int postPillarY = bot.getBlockPos().getY();
+            TowerPillarOutcome pillarOutcome = pillared
+                    ? TowerPillarOutcome.OK
+                    : (postPillarY > startBotY && !session.trackedPositions().isEmpty()
+                    ? TowerPillarOutcome.PARTIAL
+                    : TowerPillarOutcome.FAIL);
             // Accept partial success: if the bot gained height and has scaffolds,
             // it can still reach tower blocks from the elevated position.
             // Previously, placing 3/4 blocks (1 short of target) → teardown all 3 → waste.
@@ -3940,6 +6491,7 @@ public final class FortifyVillageSkill implements Skill {
                     BotActions.sneak(bot, false);
                 }
                 teardownScaffoldSurvival(bot, world, session);
+                sideOutcome = TowerScaffoldSideOutcome.NO_PROGRESS_RECOVERABLE;
                 continue;
             }
 
@@ -3963,7 +6515,7 @@ public final class FortifyVillageSkill implements Skill {
                 }
             }
 
-            // ── Step-onto-structure: extend reach by stepping onto adjacent solid blocks ──
+            // ── Step-onto-structure: extend reach by sneaking onto intended tower top surface ──
             int stepOnGained = 0;
             List<ProceduralWallBlock> remaining = new ArrayList<>();
             for (ProceduralWallBlock block : vertexBlocks) {
@@ -3971,89 +6523,83 @@ public final class FortifyVillageSkill implements Skill {
                 if (isPlannedBlockSatisfied(block, world.getBlockState(block.worldPos()))) continue;
                 remaining.add(block);
             }
+            TowerStepAttemptResult stepResult = null;
+            TowerReturnAttemptResult returnResult = null;
+            BlockPos scaffoldReturn = bot.getBlockPos();
             if (!remaining.isEmpty() && !SkillManager.shouldAbortSkill(bot)) {
-                BlockPos scaffoldReturn = bot.getBlockPos();
-                for (Direction dir : Direction.Type.HORIZONTAL) {
-                    if (SkillManager.shouldAbortSkill(bot)) break;
-                    if (remaining.isEmpty()) break;
-
-                    BlockPos stepTarget = scaffoldReturn.offset(dir);
-                    BlockState stepState = world.getBlockState(stepTarget);
-                    if (stepState.getCollisionShape(world, stepTarget).isEmpty()) continue;
-                    // Check headroom (2 blocks above step target)
-                    if (!world.getBlockState(stepTarget.up()).isAir()) continue;
-                    if (!world.getBlockState(stepTarget.up(2)).isAir()) continue;
-
-                    // Count new blocks reachable from step target but not from scaffold
-                    int newReachable = 0;
-                    Vec3d stepEye = Vec3d.ofCenter(stepTarget).add(0, 1.62, 0);
-                    for (ProceduralWallBlock b : remaining) {
-                        if (stepEye.squaredDistanceTo(Vec3d.ofCenter(b.worldPos())) <= REACH_DISTANCE_SQ) {
-                            newReachable++;
+                TowerSummitStepCandidate summitCandidate =
+                        chooseTowerSummitStepCandidate(world, vertex, scaffoldReturn, remaining);
+                if (summitCandidate != null) {
+                    LOGGER.info("[FortifyTower] step-onto-structure dir={} target={} newReachable={} score={}",
+                            summitCandidate.dir(), summitCandidate.pos().toShortString(),
+                            summitCandidate.newReachable(), summitCandidate.score());
+                    stepResult = attemptSneakStepToTowerSurface(bot, world, vertex, scaffoldReturn, summitCandidate);
+                    if (stepResult.outcome() == TowerStepOutcome.OK) {
+                        stepOnGained += placeReachableTowerBlocksFromCurrentSummit(bot, world, remaining);
+                        if (!remaining.isEmpty() && !SkillManager.shouldAbortSkill(bot)) {
+                            TowerSummitRoamResult roamResult = roamTowerSummitForPlacements(
+                                    bot, world, vertex, scaffoldReturn, remaining, 4);
+                            stepOnGained += roamResult.placed();
+                            if (roamResult.recoverableFailure()) {
+                                recoverableScaffoldFailure = true;
+                            }
                         }
-                    }
-                    if (newReachable == 0) continue;
-
-                    LOGGER.info("[FortifyTower] step-onto-structure dir={} newReachable={}", dir, newReachable);
-
-                    // Step onto the structure block using slow direct impulse (sneak is held).
-                    // DO NOT use walkTowardBlock here — it runs at full speed (0.28D) and
-                    // walks the bot right off the scaffold. Direct impulse at 0.12D is
-                    // slow enough for the sneaking bot to stop at the edge of the block.
-                    Vec3d stepVec = Vec3d.ofCenter(stepTarget);
-                    BlockPos beforeStep = bot.getBlockPos();
-                    long stepDeadline = System.currentTimeMillis() + 800L;
-                    while (System.currentTimeMillis() < stepDeadline) {
-                        if (!beforeStep.equals(bot.getBlockPos())) break;
-                        LookController.faceBlock(bot, stepTarget);
-                        BotActions.applyMovementInput(bot, stepVec, 0.12D);
-                        sleepQuiet(50);
-                    }
-                    if (beforeStep.equals(bot.getBlockPos())) continue; // couldn't step
-
-                    // Place blocks from new position
-                    Iterator<ProceduralWallBlock> it = remaining.iterator();
-                    while (it.hasNext()) {
-                        ProceduralWallBlock b = it.next();
-                        if (SkillManager.shouldAbortSkill(bot)) break;
-                        if (!isWithinReach(bot, b.worldPos())) continue;
-                        LookController.faceBlock(bot, b.worldPos());
-                        sleepQuiet(BLOCK_PLACE_DELAY_MS);
-                        BotActions.PlaceResult placeResult = tryPlaceBlock(bot, world, b.worldPos(), b.state());
-                        if (placeResult.success()) {
-                            stepOnGained++;
-                            it.remove();
+                        returnResult = attemptSneakReturnToScaffold(bot, scaffoldReturn);
+                        if (returnResult.outcome() != TowerReturnOutcome.OK) {
+                            recoverableScaffoldFailure = true;
                         }
-                    }
-
-                    // Return to scaffold position using slow direct impulse
-                    Vec3d returnVec = Vec3d.ofCenter(scaffoldReturn);
-                    long returnDeadline = System.currentTimeMillis() + 800L;
-                    while (System.currentTimeMillis() < returnDeadline) {
-                        if (bot.getBlockPos().equals(scaffoldReturn)) break;
-                        LookController.faceBlock(bot, scaffoldReturn);
-                        BotActions.applyMovementInput(bot, returnVec, 0.12D);
-                        sleepQuiet(50);
-                    }
-                    if (!bot.getBlockPos().equals(scaffoldReturn)) {
-                        LOGGER.warn("[FortifyTower] failed to return to scaffold at {}, currently at {}",
-                                scaffoldReturn.toShortString(), bot.getBlockPos().toShortString());
+                    } else if (stepResult.outcome() != TowerStepOutcome.NO_MOVE) {
+                        recoverableScaffoldFailure = true;
                     }
                 }
                 sidePlaced += stepOnGained;
             }
 
+            boolean fellDuringSummit = stepResult != null && stepResult.outcome() == TowerStepOutcome.FELL;
+            boolean offTargetSummit = stepResult != null && stepResult.outcome() == TowerStepOutcome.OFF_TARGET;
+            boolean returnFailed = returnResult != null && returnResult.outcome() == TowerReturnOutcome.FAIL;
+            boolean needsFallRecoveryCleanup = fellDuringSummit || offTargetSummit || returnFailed;
+            int topVerifyPlaced = 0;
+            if (!needsFallRecoveryCleanup) {
+                topVerifyPlaced = verifyAndPlaceTowerTopLayer(bot, world, vertexBlocks);
+                sidePlaced += topVerifyPlaced;
+            }
+            if (needsFallRecoveryCleanup) {
+                LOGGER.info("[FortifyTower] tower-scaffold-fall-recovery transition tower=({}, {}) step={} return={} current={}",
+                        vertex.x(), vertex.z(),
+                        stepResult != null ? stepResult.outcome() : TowerStepOutcome.NO_MOVE,
+                        returnResult != null ? returnResult.outcome() : TowerReturnOutcome.OK,
+                        bot.getBlockPos().toShortString());
+            }
+
+            // Keep sneak through pillar/step/place/return and release only once we transition into cleanup.
             endScaffoldEdgeHold(bot, scaffoldSneak);
 
-            // Tear down scaffold blocks (top-down, survival mining)
-            teardownScaffoldSurvival(bot, world, session);
+            ScaffoldTeardownResult teardownResult = needsFallRecoveryCleanup
+                    ? recoverAndTeardownScaffoldColumn(source, bot, world, session, "tower-side-" + sideAttempt)
+                    : teardownScaffoldSurvival(bot, world, session);
+
+            boolean gainedUsableScaffoldHeight = postPillarY > startBotY && !session.trackedPositions().isEmpty();
+
+            if (sidePlaced > 0) {
+                sideOutcome = TowerScaffoldSideOutcome.PROGRESS;
+            } else if (recoverableScaffoldFailure
+                    || pillarOutcome == TowerPillarOutcome.FAIL
+                    || needsFallRecoveryCleanup
+                    || teardownResult.queued() > 0
+                    || gainedUsableScaffoldHeight) {
+                sideOutcome = TowerScaffoldSideOutcome.NO_PROGRESS_RECOVERABLE;
+            } else {
+                sideOutcome = TowerScaffoldSideOutcome.NO_PROGRESS_HARD;
+            }
 
             totalGained += sidePlaced;
-            LOGGER.info("[FortifyTower] scaffold side={} placed={} for tower {}/{} ({},{})",
-                    sideAttempt, sidePlaced, vertexOrdinal + 1, totalVertices, vertex.x(), vertex.z());
+            LOGGER.info("[FortifyTower] scaffold side={} placed={} topVerify={} outcome={} teardownRemoved={} teardownQueued={} for tower {}/{} ({},{})",
+                    sideAttempt, sidePlaced, topVerifyPlaced, sideOutcome,
+                    teardownResult.removed(), teardownResult.queued(),
+                    vertexOrdinal + 1, totalVertices, vertex.x(), vertex.z());
 
-            // Progress guard: if a side placed nothing, stop trying more sides
-            if (sidePlaced == 0) {
+            if (sidePlaced == 0 && sideOutcome == TowerScaffoldSideOutcome.NO_PROGRESS_HARD) {
                 break;
             }
         }
@@ -4108,26 +6654,597 @@ public final class FortifyVillageSkill implements Skill {
         return null;
     }
 
+    private boolean hasTowerPillarLaunchHeadroom(ServerWorld world, BlockPos feetPos) {
+        if (world == null || feetPos == null) return false;
+        BlockPos head = feetPos.up(2);
+        BlockPos head2 = feetPos.up(3);
+        BlockState h1 = world.getBlockState(head);
+        BlockState h2 = world.getBlockState(head2);
+        return h1.getCollisionShape(world, head).isEmpty()
+                && h2.getCollisionShape(world, head2).isEmpty();
+    }
+
+    private TowerSummitStepCandidate chooseTowerSummitStepCandidate(ServerWorld world,
+                                                                    WallPoint vertex,
+                                                                    BlockPos scaffoldReturn,
+                                                                    List<ProceduralWallBlock> remaining) {
+        if (world == null || vertex == null || scaffoldReturn == null || remaining == null || remaining.isEmpty()) {
+            return null;
+        }
+        int maxRemainingY = Integer.MIN_VALUE;
+        for (ProceduralWallBlock block : remaining) {
+            if (block == null) continue;
+            maxRemainingY = Math.max(maxRemainingY, block.worldPos().getY());
+        }
+        TowerSummitStepCandidate best = null;
+        Set<BlockPos> seenCandidates = new HashSet<>();
+        for (VoxelJunctionService.VoxelTransition transition : VoxelJunctionService.transitionsFrom(world, scaffoldReturn)) {
+            if (transition == null || transition.requiresCarve()) continue;
+            BlockPos candidatePos = transition.to();
+            if (candidatePos == null || !seenCandidates.add(candidatePos.toImmutable())) {
+                continue;
+            }
+            if (Math.abs(candidatePos.getY() - scaffoldReturn.getY()) > 1) {
+                continue;
+            }
+            if (!isInsideTowerFootprint(candidatePos, vertex)) {
+                continue;
+            }
+            if (!canStandAt(world, candidatePos)) {
+                continue;
+            }
+            BlockPos supportPos = candidatePos.down();
+            BlockState supportState = world.getBlockState(supportPos);
+            if (supportState.getCollisionShape(world, supportPos).isEmpty()) {
+                continue;
+            }
+            Direction dir = horizontalDirectionToward(scaffoldReturn, candidatePos);
+            if (dir == null) {
+                continue;
+            }
+            int newReachable = 0;
+            int topReachable = 0;
+            int score = 0;
+            Vec3d stepEye = Vec3d.ofCenter(candidatePos).add(0, 1.62, 0);
+            Vec3d perchEye = Vec3d.ofCenter(scaffoldReturn).add(0, 1.62, 0);
+            for (ProceduralWallBlock b : remaining) {
+                if (b == null) continue;
+                Vec3d targetCenter = Vec3d.ofCenter(b.worldPos());
+                boolean fromPerch = perchEye.squaredDistanceTo(targetCenter) <= REACH_DISTANCE_SQ;
+                boolean fromStep = stepEye.squaredDistanceTo(targetCenter) <= REACH_DISTANCE_SQ;
+                if (fromStep && !fromPerch) {
+                    newReachable++;
+                    if (b.worldPos().getY() >= maxRemainingY - 1) {
+                        topReachable++;
+                    }
+                }
+            }
+            if (newReachable == 0) {
+                continue;
+            }
+            score += topReachable * 100;
+            score += newReachable * 20;
+            score += countOpenExits(world, candidatePos, null) * 5;
+            if (hasOneStepReturnToScaffold(world, candidatePos, scaffoldReturn)) {
+                score += 25;
+            } else {
+                score -= 30;
+            }
+            score += switch (transition.kind()) {
+                case CARDINAL -> 20;
+                case STEP_UP -> 15;
+                case STEP_DOWN -> 8;
+                case NARROW_GAP -> 5;
+                case REQUIRES_CARVE -> -50;
+            };
+            if (best == null || score > best.score()) {
+                best = new TowerSummitStepCandidate(candidatePos, dir, newReachable, score);
+            }
+        }
+        return best;
+    }
+
+    private int placeReachableTowerBlocksFromCurrentSummit(ServerPlayerEntity bot,
+                                                           ServerWorld world,
+                                                           List<ProceduralWallBlock> remaining) {
+        if (bot == null || world == null || remaining == null || remaining.isEmpty()) {
+            return 0;
+        }
+        int placed = 0;
+        Iterator<ProceduralWallBlock> it = remaining.iterator();
+        while (it.hasNext()) {
+            ProceduralWallBlock b = it.next();
+            if (SkillManager.shouldAbortSkill(bot)) break;
+            if (b == null || !isWithinReach(bot, b.worldPos())) continue;
+            LookController.faceBlock(bot, b.worldPos());
+            sleepQuiet(BLOCK_PLACE_DELAY_MS);
+            BotActions.PlaceResult placeResult = tryPlaceBlock(bot, world, b.worldPos(), b.state());
+            if (placeResult.success()) {
+                placed++;
+                it.remove();
+            }
+        }
+        return placed;
+    }
+
+    private TowerSummitRoamResult roamTowerSummitForPlacements(ServerPlayerEntity bot,
+                                                               ServerWorld world,
+                                                               WallPoint vertex,
+                                                               BlockPos scaffoldReturn,
+                                                               List<ProceduralWallBlock> remaining,
+                                                               int maxMoves) {
+        if (bot == null || world == null || vertex == null || scaffoldReturn == null || remaining == null || remaining.isEmpty()) {
+            return new TowerSummitRoamResult(0, false);
+        }
+        int placed = 0;
+        boolean recoverableFailure = false;
+        Set<BlockPos> visited = new HashSet<>();
+        visited.add(bot.getBlockPos().toImmutable());
+        for (int move = 0; move < Math.max(0, maxMoves) && !remaining.isEmpty() && !SkillManager.shouldAbortSkill(bot); move++) {
+            BlockPos current = bot.getBlockPos();
+            BlockPos bestNext = null;
+            int bestScore = Integer.MIN_VALUE;
+            for (VoxelJunctionService.VoxelTransition transition : VoxelJunctionService.transitionsFrom(world, current)) {
+                if (transition == null || transition.requiresCarve()) continue;
+                BlockPos candidate = transition.to();
+                if (candidate == null) continue;
+                if (visited.contains(candidate)) continue;
+                if (!isInsideTowerFootprint(candidate, vertex)) continue;
+                if (!canStandAt(world, candidate)) continue;
+                if (Math.abs(candidate.getY() - scaffoldReturn.getY()) > 1) continue;
+                int score = countSummitReachableBlocks(bot, candidate, remaining) * 20;
+                if (score <= 0) continue;
+                if (hasOneStepReturnToScaffold(world, candidate, scaffoldReturn)) score += 20;
+                score += switch (transition.kind()) {
+                    case CARDINAL -> 10;
+                    case STEP_UP -> 8;
+                    case STEP_DOWN -> 4;
+                    case NARROW_GAP -> 2;
+                    case REQUIRES_CARVE -> -50;
+                };
+                if (score > bestScore) {
+                    bestScore = score;
+                    bestNext = candidate.toImmutable();
+                }
+            }
+            if (bestNext == null) {
+                break;
+            }
+            TowerStepAttemptResult moveResult = attemptSneakMoveOnTowerSurface(bot, world, vertex, scaffoldReturn, bestNext, "tower-step-sweep");
+            if (moveResult.outcome() != TowerStepOutcome.OK) {
+                if (moveResult.outcome() != TowerStepOutcome.NO_MOVE) {
+                    recoverableFailure = true;
+                }
+                break;
+            }
+            visited.add(bot.getBlockPos().toImmutable());
+            placed += placeReachableTowerBlocksFromCurrentSummit(bot, world, remaining);
+        }
+        return new TowerSummitRoamResult(placed, recoverableFailure);
+    }
+
+    private int countSummitReachableBlocks(ServerPlayerEntity bot, BlockPos standPos, List<ProceduralWallBlock> remaining) {
+        if (bot == null || standPos == null || remaining == null || remaining.isEmpty()) {
+            return 0;
+        }
+        Vec3d eye = Vec3d.ofCenter(standPos).add(0, 1.62, 0);
+        int count = 0;
+        for (ProceduralWallBlock b : remaining) {
+            if (b == null) continue;
+            if (eye.squaredDistanceTo(Vec3d.ofCenter(b.worldPos())) <= REACH_DISTANCE_SQ) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    private Direction horizontalDirectionToward(BlockPos from, BlockPos to) {
+        if (from == null || to == null) return null;
+        int dx = Integer.compare(to.getX(), from.getX());
+        int dz = Integer.compare(to.getZ(), from.getZ());
+        if (dx == 1 && dz == 0) return Direction.EAST;
+        if (dx == -1 && dz == 0) return Direction.WEST;
+        if (dx == 0 && dz == 1) return Direction.SOUTH;
+        if (dx == 0 && dz == -1) return Direction.NORTH;
+        return null;
+    }
+
+    private boolean hasOneStepReturnToScaffold(ServerWorld world, BlockPos from, BlockPos scaffoldReturn) {
+        if (world == null || from == null || scaffoldReturn == null) {
+            return false;
+        }
+        for (VoxelJunctionService.VoxelTransition transition : VoxelJunctionService.transitionsFrom(world, from)) {
+            if (transition == null || transition.requiresCarve()) continue;
+            BlockPos to = transition.to();
+            if (to == null) continue;
+            if (sameBlockColumnWithinOneY(to, scaffoldReturn) || to.equals(scaffoldReturn)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private TowerStepAttemptResult attemptSneakStepToTowerSurface(ServerPlayerEntity bot,
+                                                                  ServerWorld world,
+                                                                  WallPoint vertex,
+                                                                  BlockPos scaffoldReturn,
+                                                                  TowerSummitStepCandidate candidate) {
+        if (bot == null || world == null || vertex == null || scaffoldReturn == null || candidate == null) {
+            return new TowerStepAttemptResult(TowerStepOutcome.NO_MOVE, null, bot != null ? bot.getBlockPos() : null);
+        }
+        BlockPos expected = candidate.pos();
+        BlockPos before = bot.getBlockPos();
+        Vec3d stepVec = Vec3d.ofCenter(expected);
+        settleSneakStepOnBlockCenter(bot, scaffoldReturn, TOWER_SCAFFOLD_RECENTER_TIMEOUT_MS);
+        long deadline = System.currentTimeMillis() + TOWER_SCAFFOLD_STEP_TIMEOUT_MS;
+        int stableTicksOnExpected = 0;
+        while (System.currentTimeMillis() < deadline) {
+            BlockPos current = bot.getBlockPos();
+            if (sameBlockColumnWithinOneY(current, expected)) {
+                stableTicksOnExpected++;
+                if (stableTicksOnExpected >= 2) {
+                    break;
+                }
+                sleepQuiet(35L);
+                continue;
+            }
+            stableTicksOnExpected = 0;
+            LookController.faceBlock(bot, expected);
+            double horizDist = horizontalDistanceToCenter(bot, expected);
+            double impulse = horizDist > 0.55D ? 0.12D : 0.08D;
+            BotActions.applyMovementInput(bot, stepVec, impulse);
+            sleepQuiet(40L);
+        }
+        BlockPos after = bot.getBlockPos();
+        TowerStepOutcome outcome;
+        if (sameBlockColumnWithinOneY(after, expected)) {
+            settleSneakStepOnBlockCenter(bot, after, Math.min(220L, TOWER_SCAFFOLD_RECENTER_TIMEOUT_MS));
+            after = bot.getBlockPos();
+            outcome = TowerStepOutcome.OK;
+        } else if (after.equals(before)) {
+            outcome = TowerStepOutcome.NO_MOVE;
+        } else if (after.getY() < scaffoldReturn.getY() - 1 || !isInsideTowerFootprint(after, vertex)) {
+            outcome = TowerStepOutcome.FELL;
+        } else {
+            outcome = TowerStepOutcome.OFF_TARGET;
+        }
+        LOGGER.info("[FortifyTower] tower-step-out result={} expected={} actual={} dir={} newReachable={}",
+                outcome,
+                expected != null ? expected.toShortString() : "n/a",
+                after != null ? after.toShortString() : "n/a",
+                candidate.dir(),
+                candidate.newReachable());
+        return new TowerStepAttemptResult(outcome, expected, after);
+    }
+
+    private TowerStepAttemptResult attemptSneakMoveOnTowerSurface(ServerPlayerEntity bot,
+                                                                  ServerWorld world,
+                                                                  WallPoint vertex,
+                                                                  BlockPos scaffoldReturn,
+                                                                  BlockPos expected,
+                                                                  String logLabel) {
+        if (bot == null || world == null || vertex == null || scaffoldReturn == null || expected == null) {
+            return new TowerStepAttemptResult(TowerStepOutcome.NO_MOVE, expected, bot != null ? bot.getBlockPos() : null);
+        }
+        BlockPos before = bot.getBlockPos();
+        Vec3d stepVec = Vec3d.ofCenter(expected);
+        settleSneakStepOnBlockCenter(bot, before, Math.min(220L, TOWER_SCAFFOLD_RECENTER_TIMEOUT_MS));
+        long deadline = System.currentTimeMillis() + TOWER_SCAFFOLD_STEP_TIMEOUT_MS;
+        int stableTicksOnExpected = 0;
+        while (System.currentTimeMillis() < deadline) {
+            BlockPos current = bot.getBlockPos();
+            if (sameBlockColumnWithinOneY(current, expected)) {
+                stableTicksOnExpected++;
+                if (stableTicksOnExpected >= 2) break;
+                sleepQuiet(35L);
+                continue;
+            }
+            stableTicksOnExpected = 0;
+            LookController.faceBlock(bot, expected);
+            double horizDist = horizontalDistanceToCenter(bot, expected);
+            double impulse = horizDist > 0.55D ? 0.11D : 0.07D;
+            BotActions.applyMovementInput(bot, stepVec, impulse);
+            sleepQuiet(40L);
+        }
+        BlockPos after = bot.getBlockPos();
+        TowerStepOutcome outcome;
+        if (sameBlockColumnWithinOneY(after, expected)) {
+            settleSneakStepOnBlockCenter(bot, after, Math.min(220L, TOWER_SCAFFOLD_RECENTER_TIMEOUT_MS));
+            outcome = TowerStepOutcome.OK;
+        } else if (after.equals(before)) {
+            outcome = TowerStepOutcome.NO_MOVE;
+        } else if (after.getY() < scaffoldReturn.getY() - 1 || !isInsideTowerFootprint(after, vertex)) {
+            outcome = TowerStepOutcome.FELL;
+        } else {
+            outcome = TowerStepOutcome.OFF_TARGET;
+        }
+        LOGGER.info("[FortifyTower] {} result={} expected={} actual={}",
+                logLabel, outcome, expected.toShortString(), after.toShortString());
+        return new TowerStepAttemptResult(outcome, expected, after);
+    }
+
+    private TowerReturnAttemptResult attemptSneakReturnToScaffold(ServerPlayerEntity bot, BlockPos scaffoldReturn) {
+        if (bot == null || scaffoldReturn == null) {
+            return new TowerReturnAttemptResult(TowerReturnOutcome.FAIL, scaffoldReturn, bot != null ? bot.getBlockPos() : null);
+        }
+        settleSneakStepOnBlockCenter(bot, bot.getBlockPos(), Math.min(200L, TOWER_SCAFFOLD_RECENTER_TIMEOUT_MS));
+        Vec3d returnVec = Vec3d.ofCenter(scaffoldReturn);
+        long deadline = System.currentTimeMillis() + TOWER_SCAFFOLD_RETURN_TIMEOUT_MS;
+        int stableTicksOnReturn = 0;
+        while (System.currentTimeMillis() < deadline) {
+            if (sameBlockColumnWithinOneY(bot.getBlockPos(), scaffoldReturn)) {
+                stableTicksOnReturn++;
+                if (stableTicksOnReturn >= 2) {
+                    break;
+                }
+                sleepQuiet(35L);
+                continue;
+            }
+            stableTicksOnReturn = 0;
+            LookController.faceBlock(bot, scaffoldReturn);
+            double horizDist = horizontalDistanceToCenter(bot, scaffoldReturn);
+            double impulse = horizDist > 0.55D ? 0.12D : 0.08D;
+            BotActions.applyMovementInput(bot, returnVec, impulse);
+            sleepQuiet(40L);
+        }
+        settleSneakStepOnBlockCenter(bot, scaffoldReturn, Math.min(220L, TOWER_SCAFFOLD_RECENTER_TIMEOUT_MS));
+        BlockPos after = bot.getBlockPos();
+        TowerReturnOutcome outcome = sameBlockColumnWithinOneY(after, scaffoldReturn) ? TowerReturnOutcome.OK : TowerReturnOutcome.FAIL;
+        LOGGER.info("[FortifyTower] tower-step-back result={} expected={} actual={}",
+                outcome, scaffoldReturn.toShortString(), after.toShortString());
+        return new TowerReturnAttemptResult(outcome, scaffoldReturn, after);
+    }
+
+    private boolean sameBlockColumnWithinOneY(BlockPos a, BlockPos b) {
+        if (a == null || b == null) return false;
+        return a.getX() == b.getX()
+                && a.getZ() == b.getZ()
+                && Math.abs(a.getY() - b.getY()) <= 1;
+    }
+
+    private double horizontalDistanceToCenter(ServerPlayerEntity bot, BlockPos targetBlock) {
+        if (bot == null || targetBlock == null) return Double.POSITIVE_INFINITY;
+        Vec3d center = Vec3d.ofCenter(targetBlock);
+        double dx = center.x - bot.getX();
+        double dz = center.z - bot.getZ();
+        return Math.sqrt(dx * dx + dz * dz);
+    }
+
+    private void settleSneakStepOnBlockCenter(ServerPlayerEntity bot, BlockPos standPos, long timeoutMs) {
+        if (bot == null || standPos == null) return;
+        if (!sameBlockColumnWithinOneY(bot.getBlockPos(), standPos)) return;
+        Vec3d center = Vec3d.ofCenter(standPos);
+        long deadline = System.currentTimeMillis() + Math.max(80L, timeoutMs);
+        while (System.currentTimeMillis() < deadline) {
+            if (SkillManager.shouldAbortSkill(bot)) {
+                BotActions.stop(bot);
+                return;
+            }
+            if (!sameBlockColumnWithinOneY(bot.getBlockPos(), standPos)) {
+                return;
+            }
+            double dx = center.x - bot.getX();
+            double dz = center.z - bot.getZ();
+            double distSq = dx * dx + dz * dz;
+            if (distSq <= TOWER_SCAFFOLD_RECENTER_TOLERANCE_SQ) {
+                BotActions.stop(bot);
+                return;
+            }
+            BotActions.applyMovementInput(bot, new Vec3d(center.x, bot.getY(), center.z), 0.07D);
+            sleepQuiet(30L);
+        }
+        BotActions.stop(bot);
+    }
+
+    private int verifyAndPlaceTowerTopLayer(ServerPlayerEntity bot,
+                                            ServerWorld world,
+                                            List<ProceduralWallBlock> vertexBlocks) {
+        if (bot == null || world == null || vertexBlocks == null || vertexBlocks.isEmpty()) {
+            return 0;
+        }
+        List<ProceduralWallBlock> remaining = new ArrayList<>();
+        int maxY = Integer.MIN_VALUE;
+        for (ProceduralWallBlock block : vertexBlocks) {
+            if (block == null || !isActiveFortifyBlock(block)) continue;
+            if (isPlannedBlockSatisfied(block, world.getBlockState(block.worldPos()))) continue;
+            remaining.add(block);
+            maxY = Math.max(maxY, block.worldPos().getY());
+        }
+        if (remaining.isEmpty()) {
+            return 0;
+        }
+        int topY = maxY;
+        remaining.sort(Comparator
+                .comparingInt((ProceduralWallBlock b) -> b.worldPos().getY() >= topY - 1 ? 0 : 1)
+                .thenComparingInt((ProceduralWallBlock b) -> -b.worldPos().getY())
+                .thenComparingDouble(b -> bot.getBlockPos().getSquaredDistance(b.worldPos())));
+        int placed = 0;
+        int attempted = 0;
+        for (ProceduralWallBlock block : remaining) {
+            if (SkillManager.shouldAbortSkill(bot)) break;
+            if (!isWithinReach(bot, block.worldPos())) continue;
+            if (attempted >= TOWER_TOP_VERIFY_MAX_ATTEMPTS) break;
+            attempted++;
+            LookController.faceBlock(bot, block.worldPos());
+            sleepQuiet(BLOCK_PLACE_DELAY_MS);
+            BotActions.PlaceResult placeResult = tryPlaceBlock(bot, world, block.worldPos(), block.state());
+            if (placeResult.success()) {
+                placed++;
+            }
+        }
+        if (attempted > 0) {
+            LOGGER.info("[FortifyTower] tower-top-verify remainingTopLayerCount={} placed={} attempts={}",
+                    remaining.stream().filter(b -> b.worldPos().getY() >= topY - 1).count(),
+                    placed, attempted);
+        }
+        return placed;
+    }
+
+    private ScaffoldTeardownResult recoverAndTeardownScaffoldColumn(ServerCommandSource source,
+                                                                    ServerPlayerEntity bot,
+                                                                    ServerWorld world,
+                                                                    ScaffoldService.ScaffoldSession session,
+                                                                    String context) {
+        if (bot == null || world == null) {
+            return new ScaffoldTeardownResult(0, 0, 0, 0, 0, 0, 0, 0);
+        }
+        LinkedHashSet<BlockPos> tracked = new LinkedHashSet<>();
+        if (session != null) {
+            tracked.addAll(session.trackedPositions());
+        }
+        tracked.addAll(ScaffoldService.getScaffoldMemory(bot));
+        BlockPos focus = null;
+        double bestDist = Double.POSITIVE_INFINITY;
+        for (BlockPos pos : tracked) {
+            if (pos == null) continue;
+            double dist = bot.getBlockPos().getSquaredDistance(pos);
+            if (dist < bestDist) {
+                bestDist = dist;
+                focus = pos;
+            }
+        }
+        if (focus != null && (!isWithinMiningReach(bot, focus) || !hasLineOfSight(world, bot, bot.getEyePos(), focus))) {
+            BlockPos bestStand = null;
+            double bestStandScore = Double.POSITIVE_INFINITY;
+            for (int dx = -2; dx <= 2; dx++) {
+                for (int dz = -2; dz <= 2; dz++) {
+                    for (int dy = -1; dy <= 1; dy++) {
+                        BlockPos candidate = focus.add(dx, dy, dz);
+                        if (!canStandAt(world, candidate)) continue;
+                        double score = candidate.getSquaredDistance(focus) + bot.getBlockPos().getSquaredDistance(candidate) * 0.25D;
+                        if (score < bestStandScore) {
+                            bestStandScore = score;
+                            bestStand = candidate;
+                        }
+                    }
+                }
+            }
+            if (bestStand != null && !bestStand.equals(bot.getBlockPos())) {
+                LOGGER.info("[FortifyTower] tower-scaffold-fall-recovery moving ctx={} from={} to={} focus={}",
+                        context,
+                        bot.getBlockPos().toShortString(),
+                        bestStand.toShortString(),
+                        focus.toShortString());
+                walkToTarget(source, bot, bestStand, 1_500L, "fortify-tower:scaffold-recover");
+                if (!bot.getBlockPos().equals(bestStand)) {
+                    walkTowardBlock(bot, bestStand, 900L);
+                }
+            }
+        }
+        ScaffoldTeardownResult result = teardownScaffoldSurvival(bot, world, session);
+        LOGGER.info("[FortifyTower] tower-scaffold-fall-recovery result ctx={} removed={} queued={} failedMine={} outOfReach={}",
+                context, result.removed(), result.queued(), result.failedMine(), result.outOfReach());
+        return result;
+    }
+
     /**
      * Mine tracked scaffold blocks top-down. Each block mined drops the bot 1 block
      * (no fall damage from scaffold height). Uses digBlock() for survival-mode mining.
      */
-    private void teardownScaffoldSurvival(ServerPlayerEntity bot, ServerWorld world,
-                                          ScaffoldService.ScaffoldSession session) {
-        if (session == null || session.trackedPositions().isEmpty()) return;
+    private ScaffoldLedger buildScaffoldLedger(ServerPlayerEntity bot, ServerWorld world,
+                                               ScaffoldService.ScaffoldSession session) {
+        ScaffoldLedger ledger = new ScaffoldLedger();
+        if (bot == null || world == null) {
+            return ledger;
+        }
+        if (session != null) {
+            for (BlockPos pos : session.trackedPositions()) {
+                if (pos != null) ledger.sessionTracked.add(pos.toImmutable());
+            }
+        }
 
-        // Sort top-down for safe descent
-        List<BlockPos> toRemove = new ArrayList<>(session.trackedPositions());
-        toRemove.sort(Comparator.comparingInt(BlockPos::getY).reversed());
+        BlockPos botPos = bot.getBlockPos();
+        for (BlockPos pos : new ArrayList<>(ScaffoldService.getScaffoldMemory(bot))) {
+            if (pos == null) continue;
+            if (Math.abs(pos.getX() - botPos.getX()) <= 6
+                    && Math.abs(pos.getZ() - botPos.getZ()) <= 6
+                    && Math.abs(pos.getY() - botPos.getY()) <= 16) {
+                ledger.memoryTracked.add(pos.toImmutable());
+            }
+        }
+
+        // Do not infer scaffold candidates from nearby material scans. Scaffold blocks must be
+        // explicitly tagged (session/memory tracked) or we risk tearing up terrain/walls made
+        // from common scaffold materials (dirt/cobble/stone), especially below the bot.
+        return ledger;
+    }
+
+    private ScaffoldTeardownResult teardownScaffoldSurvival(ServerPlayerEntity bot, ServerWorld world,
+                                                            ScaffoldService.ScaffoldSession session) {
+        if (bot == null || world == null) {
+            return new ScaffoldTeardownResult(0, 0, 0, 0, 0, 0, 0, 0);
+        }
+
+        ScaffoldLedger ledger = buildScaffoldLedger(bot, world, session);
+        List<BlockPos> toRemove = ledger.allCandidatesTopDown();
+        if (toRemove.isEmpty()) {
+            LOGGER.info("[FortifyScaffold] teardown tracked=0 removed=0 queued=0 (no candidates)");
+            return new ScaffoldTeardownResult(0, 0, 0, 0, 0, 0, 0, 0);
+        }
+
+        Set<BlockPos> memory = ScaffoldService.getScaffoldMemory(bot);
+        int removed = 0;
+        int alreadyAir = 0;
+        int failedMine = 0;
+        int outOfReach = 0;
+        int queued = 0;
 
         for (BlockPos pos : toRemove) {
             if (SkillManager.shouldAbortSkill(bot)) break;
             BlockState state = world.getBlockState(pos);
-            if (state.isAir()) continue;
+            if (state.isAir()) {
+                alreadyAir++;
+                memory.remove(pos);
+                continue;
+            }
+            if (!ScaffoldService.SCAFFOLD_BLOCKS.contains(state.getBlock().asItem())) {
+                memory.remove(pos);
+                continue;
+            }
+            if (!isWithinMiningReach(bot, pos)) {
+                outOfReach++;
+                queued++;
+                queueDeferredCleanupTask(FortifyCleanupKind.SCAFFOLD_REMOVE, pos, null, false, "scaffold-teardown");
+                continue;
+            }
+            if (!hasLineOfSight(world, bot, bot.getEyePos(), pos)) {
+                queued++;
+                queueDeferredCleanupTask(FortifyCleanupKind.SCAFFOLD_REMOVE, pos, null, false, "scaffold-teardown");
+                continue;
+            }
             LookController.faceBlock(bot, pos);
             sleepQuiet(50L);
-            digBlock(bot, world, pos);
+            boolean mined = digBlock(bot, world, pos);
+            BlockState after = world.getBlockState(pos);
+            boolean cleared = after.isAir() || !ScaffoldService.SCAFFOLD_BLOCKS.contains(after.getBlock().asItem());
+            if (mined && cleared) {
+                removed++;
+                memory.remove(pos);
+            } else if (cleared) {
+                alreadyAir++;
+                memory.remove(pos);
+            } else {
+                failedMine++;
+                queued++;
+                queueDeferredCleanupTask(FortifyCleanupKind.SCAFFOLD_REMOVE, pos, null, false, "scaffold-teardown");
+            }
         }
+
+        ScaffoldTeardownResult result = new ScaffoldTeardownResult(
+                ledger.sessionTracked.size(),
+                ledger.memoryTracked.size(),
+                ledger.reconciledNearby.size(),
+                removed, alreadyAir, failedMine, outOfReach, queued);
+        LOGGER.info("[FortifyScaffold] teardown trackedSession={} trackedMemory={} reconciledNearby={} removed={} alreadyAir={} failedMine={} outOfReach={} queued={}",
+                result.trackedSession(), result.trackedMemory(), result.reconciledNearby(),
+                result.removed(), result.alreadyAir(), result.failedMine(), result.outOfReach(), result.queued());
+        if ((result.trackedSession() + result.trackedMemory()) > 0
+                && result.removed() == 0 && result.queued() == 0 && result.alreadyAir() == 0) {
+            LOGGER.warn("[FortifyScaffold] teardown produced no removals despite tracked scaffolds (session={} memory={})",
+                    result.trackedSession(), result.trackedMemory());
+        }
+        processDeferredFortifyCleanupQueue(bot, world, "scaffold-teardown");
+        return result;
     }
 
     private void forceExitTowerFootprint(ServerCommandSource source,
@@ -4151,7 +7268,9 @@ public final class FortifyVillageSkill implements Skill {
 
         LOGGER.info("[FortifyTower] forced-footprint-exit from={} to={} tower=({}, {})",
                 botPos.toShortString(), escape.toShortString(), vertex.x(), vertex.z());
-        walkToTarget(source, bot, escape, 1_500L);
+        runWithFortifyTowerNavScope(bot, world, "fortify-tower:forced-footprint-exit",
+                null, vertex, escape,
+                () -> walkToTarget(source, bot, escape, 1_500L, "fortify-tower:forced-footprint-exit"));
         if (isInsideTowerFootprint(bot.getBlockPos(), vertex)) {
             walkTowardBlock(bot, escape, 1_000L);
             if (isInsideTowerFootprint(bot.getBlockPos(), vertex)) {
@@ -4215,75 +7334,94 @@ public final class FortifyVillageSkill implements Skill {
                                               WallPoint vertex,
                                               SurfaceProfile surfaceProfile,
                                               int attemptOffset) {
+        return tryTowerHardResetPositionDetailed(source, bot, world, vertex, surfaceProfile, attemptOffset, null).moved();
+    }
+
+    private boolean tryTowerHardResetPosition(ServerCommandSource source,
+                                              ServerPlayerEntity bot,
+                                              ServerWorld world,
+                                              WallPoint vertex,
+                                              SurfaceProfile surfaceProfile,
+                                              int attemptOffset,
+                                              TowerNavAttemptState navState) {
+        return tryTowerHardResetPositionDetailed(source, bot, world, vertex, surfaceProfile, attemptOffset, navState).moved();
+    }
+
+    private TowerHardResetResult tryTowerHardResetPositionDetailed(ServerCommandSource source,
+                                                                   ServerPlayerEntity bot,
+                                                                   ServerWorld world,
+                                                                   WallPoint vertex,
+                                                                   SurfaceProfile surfaceProfile,
+                                                                   int attemptOffset,
+                                                                   TowerNavAttemptState navState) {
         BlockPos start = bot.getBlockPos();
-        BlockPos best = null;
-        double bestScore = Double.NEGATIVE_INFINITY;
-        int ringStart = 3 + Math.floorMod(attemptOffset, 2);
-
-        for (int r = ringStart; r <= 7; r++) {
-            for (int dx = -r; dx <= r; dx++) {
-                for (int dz = -r; dz <= r; dz++) {
-                    if (Math.max(Math.abs(dx), Math.abs(dz)) != r) {
-                        continue;
-                    }
-                    int x = vertex.x() + dx;
-                    int z = vertex.z() + dz;
-                    int baseY = safeSurfaceY(surfaceProfile, world, x, z);
-                    int[] yCandidates = {baseY, baseY + 1, start.getY(), start.getY() + 1};
-                    for (int y : yCandidates) {
-                        BlockPos candidate = new BlockPos(x, y, z);
-                        if (!canStandAt(world, candidate)) {
-                            continue;
-                        }
-                        if (isInsideTowerFootprint(candidate, vertex)) {
-                            continue;
-                        }
-                        int exits = countOpenExits(world, candidate, null);
-                        if (exits < 3) {
-                            continue;
-                        }
-                        double distFromTowerSq = Math.pow(candidate.getX() - vertex.x(), 2) + Math.pow(candidate.getZ() - vertex.z(), 2);
-                        if (distFromTowerSq < 9.0D) {
-                            continue;
-                        }
-                        double score = exits * 140.0 + distFromTowerSq * 16.0 - start.getSquaredDistance(candidate) * 4.5;
-                        if (Math.abs(dx) > 0 && Math.abs(dz) > 0) {
-                            score += 20.0;
-                        }
-                        if (score > bestScore) {
-                            bestScore = score;
-                            best = candidate;
-                        }
-                    }
-                }
-            }
-            if (best != null) {
-                break;
-            }
-        }
-
+        TowerNavCandidate bestCandidate = selectReachableTowerHardResetCandidate(
+                bot, world, vertex, surfaceProfile, attemptOffset, navState);
+        BlockPos best = bestCandidate != null ? bestCandidate.pos() : null;
         if (best == null) {
             best = chooseTowerEscapePos(bot, world, vertex, surfaceProfile, attemptOffset + 9);
+            if (best != null) {
+                LOGGER.info("[FortifyTower] hard-reset-select tower=({}, {}) fallback={} reason=escape-pos",
+                        vertex.x(), vertex.z(), best.toShortString());
+            }
         }
         if (best == null || best.equals(start)) {
-            return false;
+            if (navState != null && best != null) {
+                navState.recordHardResetFailure(best);
+            }
+            return new TowerHardResetResult(false, false);
         }
 
+        if (bestCandidate != null) {
+            LOGGER.info("[FortifyTower] hard-reset-select tower=({}, {}) pos={} score={} exits={} locallyReachable={} prevFailed={}",
+                    vertex.x(), vertex.z(), best.toShortString(),
+                    String.format(Locale.ROOT, "%.1f", bestCandidate.score()),
+                    bestCandidate.exits(), bestCandidate.locallyReachable(), bestCandidate.previouslyFailed());
+        }
         LOGGER.info("[FortifyTower] hard-reset tower=({}, {}) from={} to={}",
                 vertex.x(), vertex.z(), start.toShortString(), best.toShortString());
-        walkToTarget(source, bot, best, 2_300L);
+        double beforeTargetDistSq = bot.getBlockPos().getSquaredDistance(best);
+        long hardResetStartMs = System.currentTimeMillis();
+        FortifyNavRuntimeScope priorScope = beginFortifyNavScope(
+                "fortify-tower:hard-reset", navState, vertex, best, true, false);
+        try {
+            walkToTarget(source, bot, best, 2_300L, "fortify-tower:hard-reset");
+        } finally {
+            endFortifyNavScope(bot, world, priorScope);
+        }
         if (start.equals(bot.getBlockPos())) {
             walkTowardBlock(bot, best, 1_000L);
         }
-        return !start.equals(bot.getBlockPos());
+        FortifyNavProgressWindow progress = new FortifyNavProgressWindow(
+                start, bot.getBlockPos(), beforeTargetDistSq, bot.getBlockPos().getSquaredDistance(best),
+                System.currentTimeMillis() - hardResetStartMs);
+        boolean moved = !start.equals(bot.getBlockPos());
+        boolean meaningful = progress.meaningful();
+        if (!moved && navState != null) {
+            navState.recordHardResetFailure(best);
+            navState.noteNoRealProgress();
+        } else if (navState != null) {
+            navState.noteMovement(start, bot.getBlockPos(), meaningful);
+            if (meaningful) navState.noteRealProgress(); else navState.noteNoRealProgress();
+            if (!meaningful) {
+                navState.recordHardResetFailure(best);
+            }
+        }
+        LOGGER.info("[FortifyTower] hard-reset-result tower=({}, {}) target={} moved={} meaningful={} distDelta={} netDisp={}",
+                vertex.x(), vertex.z(), best.toShortString(), moved, meaningful,
+                String.format(Locale.ROOT, "%.1f", progress.targetDeltaBlocks()),
+                String.format(Locale.ROOT, "%.1f", progress.netDisplacementBlocks()));
+        return new TowerHardResetResult(moved, meaningful);
     }
 
     private boolean moveToTowerApproach(ServerCommandSource source,
                                         ServerPlayerEntity bot,
                                         ServerWorld world,
+                                        WallPoint vertex,
                                         BlockPos towerApproach,
                                         SurfaceProfile surfaceProfile,
-                                        String context) {
+                                        String context,
+                                        TowerNavAttemptState navState) {
         if (towerApproach == null) {
             return false;
         }
@@ -4299,9 +7437,25 @@ public final class FortifyVillageSkill implements Skill {
                 return false;
             }
 
+            BlockPos cycleStart = bot.getBlockPos();
+            double beforeTargetDistSq = bot.squaredDistanceTo(approachVec);
+            long cycleStartMs = System.currentTimeMillis();
+            FortifyNavRuntimeScope priorScope = beginFortifyNavScope(
+                    "fortify-tower:approach", navState, vertex, towerApproach, true, false);
             long walkBudgetMs = bot.squaredDistanceTo(approachVec) > 196.0D ? 2_200L : 1_200L;
-            walkToTarget(source, bot, towerApproach, walkBudgetMs);
+            try {
+                walkToTarget(source, bot, towerApproach, walkBudgetMs, "fortify-tower:approach");
+            } finally {
+                endFortifyNavScope(bot, world, priorScope);
+            }
             if (bot.squaredDistanceTo(approachVec) <= 9.0D) {
+                FortifyNavProgressWindow progress = new FortifyNavProgressWindow(
+                        cycleStart, bot.getBlockPos(), beforeTargetDistSq, bot.squaredDistanceTo(approachVec),
+                        System.currentTimeMillis() - cycleStartMs);
+                if (navState != null) {
+                    navState.noteMovement(cycleStart, bot.getBlockPos(), progress.meaningful());
+                    if (progress.meaningful()) navState.noteRealProgress(); else navState.noteNoRealProgress();
+                }
                 return true;
             }
 
@@ -4316,18 +7470,79 @@ public final class FortifyVillageSkill implements Skill {
             if (!unwedged) {
                 BlockPos safe = SafePositionService.findSafeNear(world, bot.getBlockPos(), 2 + attempt);
                 if (safe != null && !safe.equals(bot.getBlockPos())) {
-                    walkToTarget(source, bot, safe, 900L);
+                    runWithFortifyTowerNavScope(bot, world, "fortify-tower:approach-safe-nudge",
+                            navState, vertex, safe,
+                            () -> walkToTarget(source, bot, safe, 900L, "fortify-tower:approach-safe-nudge"));
                 }
             }
 
             if (bot.squaredDistanceTo(approachVec) > 9.0D) {
                 walkTowardBlock(bot, towerApproach, 900L + (attempt * 300L));
             }
+            BlockPos cycleEnd = bot.getBlockPos();
+            FortifyNavProgressWindow progress = new FortifyNavProgressWindow(
+                    cycleStart, cycleEnd, beforeTargetDistSq, bot.squaredDistanceTo(approachVec),
+                    System.currentTimeMillis() - cycleStartMs);
+            boolean movedThisCycle = !cycleStart.equals(cycleEnd);
+            boolean meaningfulProgress = progress.meaningful();
+            int samePosCount = 0;
+            if (navState != null) {
+                if (meaningfulProgress) {
+                    navState.noteMovement(cycleStart, cycleEnd, true);
+                    navState.noteRealProgress();
+                } else {
+                    navState.noteNoRealProgress();
+                    samePosCount = navState.noteStuckPosition(cycleEnd);
+                    LOGGER.info("[FortifyTower] approach-stuck tower=({}, {}) pos={} target={} samePosCount={} elapsedMs={} attempt={}",
+                            vertex.x(), vertex.z(), cycleEnd.toShortString(), towerApproach.toShortString(),
+                            samePosCount, navState.stuckElapsedMs(), attempt + 1);
+                }
+            }
+
+            if (bot.squaredDistanceTo(approachVec) > 9.0D
+                    && (!meaningfulProgress || samePosCount >= 2)) {
+                BlockPos replanTarget = towerApproach;
+                if (!isLocallyReachableStandPos(world, bot.getBlockPos(), towerApproach,
+                        new BlockPos(vertex.x(), bot.getBlockPos().getY(), vertex.z()),
+                        TOWER_LOCAL_REACHABILITY_RADIUS)) {
+                    BlockPos staging = chooseReachableTowerPatchStagingPos(bot, world, vertex, towerApproach, surfaceProfile, navState);
+                    if (staging != null) {
+                        replanTarget = staging;
+                    }
+                }
+                boolean replanned = attemptTowerMediumRangeReplan(source, bot, world, replanTarget,
+                        "tower=(" + vertex.x() + "," + vertex.z() + ") " + context + " attempt=" + (attempt + 1),
+                        vertex, navState);
+                if (replanned && navState != null) {
+                    double postReplanDistSq = bot.squaredDistanceTo(approachVec);
+                    FortifyNavProgressWindow postReplanProgress = new FortifyNavProgressWindow(
+                            cycleStart, bot.getBlockPos(), beforeTargetDistSq, postReplanDistSq,
+                            System.currentTimeMillis() - cycleStartMs);
+                    navState.noteMovement(cycleStart, bot.getBlockPos(), postReplanProgress.meaningful());
+                    if (postReplanProgress.meaningful()) navState.noteRealProgress(); else navState.noteNoRealProgress();
+                }
+                if (bot.squaredDistanceTo(approachVec) <= 16.0D) {
+                    return true;
+                }
+            }
+
+            LOGGER.info("[FortifyTower] approach-cycle tower=({}, {}) attempt={} target={} moved={} meaningful={} dist={} distDelta={} netDisp={}",
+                    vertex.x(), vertex.z(), attempt + 1, towerApproach.toShortString(), movedThisCycle, meaningfulProgress,
+                    String.format(Locale.ROOT, "%.1f", Math.sqrt(bot.squaredDistanceTo(approachVec))),
+                    String.format(Locale.ROOT, "%.1f", progress.targetDeltaBlocks()),
+                    String.format(Locale.ROOT, "%.1f", progress.netDisplacementBlocks()));
             if (bot.squaredDistanceTo(approachVec) <= 16.0D) {
+                if (navState != null) {
+                    navState.noteMovement(cycleStart, bot.getBlockPos(), meaningfulProgress);
+                    if (meaningfulProgress) navState.noteRealProgress(); else navState.noteNoRealProgress();
+                }
                 return true;
             }
         }
 
+        if (navState != null) {
+            navState.recordApproachFailure(towerApproach);
+        }
         return false;
     }
 
@@ -4350,19 +7565,35 @@ public final class FortifyVillageSkill implements Skill {
 
     private BlockPos chooseTowerApproachPos(ServerPlayerEntity bot, ServerWorld world,
                                             WallPoint vertex, SurfaceProfile surfaceProfile) {
-        return chooseTowerApproachPos(bot, world, vertex, surfaceProfile, 0, null);
+        return chooseTowerApproachPos(bot, world, vertex, surfaceProfile, 0, null, null);
     }
 
     private BlockPos chooseTowerApproachPos(ServerPlayerEntity bot, ServerWorld world,
                                             WallPoint vertex, SurfaceProfile surfaceProfile,
                                             int attemptOffset) {
-        return chooseTowerApproachPos(bot, world, vertex, surfaceProfile, attemptOffset, null);
+        return chooseTowerApproachPos(bot, world, vertex, surfaceProfile, attemptOffset, null, null);
+    }
+
+    private BlockPos chooseTowerApproachPos(ServerPlayerEntity bot, ServerWorld world,
+                                            WallPoint vertex, SurfaceProfile surfaceProfile,
+                                            int attemptOffset,
+                                            List<ProceduralWallBlock> vertexBlocks,
+                                            TowerNavAttemptState navState) {
+        return selectReachableTowerApproach(bot, world, vertex, surfaceProfile, attemptOffset, vertexBlocks, navState);
     }
 
     private BlockPos chooseTowerApproachPos(ServerPlayerEntity bot, ServerWorld world,
                                             WallPoint vertex, SurfaceProfile surfaceProfile,
                                             int attemptOffset,
                                             List<ProceduralWallBlock> vertexBlocks) {
+        return chooseTowerApproachPos(bot, world, vertex, surfaceProfile, attemptOffset, vertexBlocks, null);
+    }
+
+    private BlockPos selectReachableTowerApproach(ServerPlayerEntity bot, ServerWorld world,
+                                                  WallPoint vertex, SurfaceProfile surfaceProfile,
+                                                  int attemptOffset,
+                                                  List<ProceduralWallBlock> vertexBlocks,
+                                                  TowerNavAttemptState navState) {
         // Tower footprint is vertex ±1 (3×3). Min offset 3 = 1 block clearance from edge.
         int[][] candidates = {
                 {3, 0}, {-3, 0}, {0, 3}, {0, -3},
@@ -4371,53 +7602,375 @@ public final class FortifyVillageSkill implements Skill {
                 {4, 0}, {-4, 0}, {0, 4}, {0, -4}
         };
 
-        BlockPos best = null;
-        double bestScore = Double.NEGATIVE_INFINITY;
+        Set<BlockPos> locallyReachable = computeLocalReachableStandPositions(
+                world, bot.getBlockPos(), new BlockPos(vertex.x(), bot.getBlockPos().getY(), vertex.z()),
+                TOWER_LOCAL_REACHABILITY_RADIUS, bot.getBlockPos().getY() - 1, bot.getBlockPos().getY() + 2,
+                TOWER_LOCAL_REACHABILITY_MAX_NODES);
+
+        List<TowerNavCandidate> preferredCandidates = new ArrayList<>();
+        List<TowerNavCandidate> shallowRetryCandidates = new ArrayList<>();
+        List<TowerNavCandidate> shallowFallbackCandidates = new ArrayList<>();
+        List<TowerNavCandidate> deepFallbackCandidates = new ArrayList<>();
+        int badHeadroomOrStand = 0;
+        int noFloor = 0;
+        int insideFootprint = 0;
+        int notLocallyReachable = 0;
+        int losZero = 0;
+        int lowExits = 0;
+        int tooDeep = 0;
         int startIndex = Math.floorMod(attemptOffset, candidates.length);
         for (int i = 0; i < candidates.length; i++) {
             int[] c = candidates[(startIndex + i) % candidates.length];
             int x = vertex.x() + c[0];
             int z = vertex.z() + c[1];
-            int y = safeSurfaceY(surfaceProfile, world, x, z);
-            BlockPos pos = new BlockPos(x, y, z);
-            if (!canStandAt(world, pos)) {
-                continue;
+            int safeY = safeSurfaceY(surfaceProfile, world, x, z);
+            LinkedHashSet<Integer> yCandidates = new LinkedHashSet<>();
+            for (int dy = -2; dy <= 2; dy++) yCandidates.add(safeY + dy);
+            for (int dy = -1; dy <= 1; dy++) yCandidates.add(bot.getBlockPos().getY() + dy);
+            BlockPos safeCol = SafePositionService.findSafeColumn(world, new BlockPos(x, safeY, z), -3, 3);
+            if (safeCol != null) yCandidates.add(safeCol.getY());
+
+            for (int y : yCandidates) {
+                BlockPos pos = new BlockPos(x, y, z);
+                BlockState feet = world.getBlockState(pos);
+                BlockState head = world.getBlockState(pos.up());
+                BlockState below = world.getBlockState(pos.down());
+                boolean feetClear = feet.isAir() || feet.isReplaceable();
+                boolean headClear = head.isAir() || head.isReplaceable();
+                boolean support = !below.isAir() && !below.isReplaceable();
+                if (!(feetClear && headClear && support)) {
+                    if (!support) noFloor++; else badHeadroomOrStand++;
+                    continue;
+                }
+                if (isInsideTowerFootprint(pos, vertex)) {
+                    insideFootprint++;
+                    continue;
+                }
+                int exits = countOpenExits(world, pos, null);
+                if (exits < MIN_APPROACH_OPEN_EXITS) {
+                    lowExits++;
+                    continue;
+                }
+                boolean locallyReachableCandidate = isLocallyReachableStandPos(locallyReachable, pos);
+                if (!locallyReachableCandidate) {
+                    notLocallyReachable++;
+                }
+                int depthBelowSurface = Math.max(0, safeY - y);
+                if (depthBelowSurface > 1) {
+                    tooDeep++;
+                }
+                double distSq = bot.squaredDistanceTo(x + 0.5, y, z + 0.5);
+                int losReachable = 0;
+                if (vertexBlocks != null && !vertexBlocks.isEmpty()) {
+                    losReachable = countReachableWithLOS(world, bot, pos, vertexBlocks);
+                    if (losReachable == 0) {
+                        losZero++;
+                        continue;
+                    }
+                }
+                double score = exits * 120.0 + losReachable * 200.0 - distSq;
+                score -= depthBelowSurface * 220.0;
+                if (depthBelowSurface > 1) {
+                    score -= 1_800.0 + (depthBelowSurface - 1) * 500.0;
+                }
+                if (!locallyReachableCandidate) {
+                    score -= 900.0;
+                }
+                if (attemptOffset > 0) {
+                    score += i * 6.0;
+                }
+                boolean previouslyFailed = navState != null && navState.failedApproachCandidates.contains(pos);
+                if (previouslyFailed) {
+                    score -= 200.0;
+                }
+                TowerNavCandidate candidate = new TowerNavCandidate(pos, score, exits, locallyReachableCandidate, previouslyFailed);
+                boolean shallowEnough = depthBelowSurface <= 1;
+                if (shallowEnough && locallyReachableCandidate && !previouslyFailed) {
+                    preferredCandidates.add(candidate);
+                } else if (shallowEnough && locallyReachableCandidate) {
+                    shallowRetryCandidates.add(candidate);
+                } else if (shallowEnough) {
+                    shallowFallbackCandidates.add(candidate);
+                } else {
+                    deepFallbackCandidates.add(candidate);
+                }
             }
-            int exits = countOpenExits(world, pos, null);
-            if (exits < MIN_APPROACH_OPEN_EXITS) {
-                continue;
-            }
-            double distSq = bot.squaredDistanceTo(x + 0.5, y, z + 0.5);
-            int losReachable = 0;
-            if (vertexBlocks != null && !vertexBlocks.isEmpty()) {
-                losReachable = countReachableWithLOS(world, bot, pos, vertexBlocks);
-                if (losReachable == 0) continue; // reject: can't see any blocks from here
-            }
-            double score = exits * 120.0 + losReachable * 200.0 - distSq;
-            if (attemptOffset > 0) {
-                score += i * 6.0;
-            }
-            if (score > bestScore) {
-                bestScore = score;
-                best = pos;
-            }
+        }
+
+        TowerNavCandidate best = chooseBestTowerNavCandidate(preferredCandidates);
+        if (best == null) {
+            best = chooseBestTowerNavCandidate(shallowRetryCandidates);
+        }
+        if (best == null) {
+            best = chooseBestTowerNavCandidate(shallowFallbackCandidates);
+        }
+        if (best == null) {
+            best = chooseBestTowerNavCandidate(deepFallbackCandidates);
         }
 
         if (best != null) {
-            return best;
+            int bestSurfaceY = safeSurfaceY(surfaceProfile, world, best.pos().getX(), best.pos().getZ());
+            int bestDepth = Math.max(0, bestSurfaceY - best.pos().getY());
+            LOGGER.info("[FortifyTower] approach-select tower=({}, {}) pos={} score={} exits={} locallyReachable={} prevFailed={} depth={}",
+                    vertex.x(), vertex.z(), best.pos().toShortString(),
+                    String.format(Locale.ROOT, "%.1f", best.score()),
+                    best.exits(), best.locallyReachable(), best.previouslyFailed(), bestDepth);
+            return best.pos();
         }
         int y = safeSurfaceY(surfaceProfile, world, vertex.x(), vertex.z());
-        return new BlockPos(vertex.x(), y, vertex.z());
+        BlockPos fallback = new BlockPos(vertex.x(), y, vertex.z());
+        LOGGER.info("[FortifyTower] approach-select tower=({}, {}) fallback={} reason=no-standable-candidate bad_headroom={} no_floor={} inside_footprint={} not_locally_reachable={} los_zero={} low_exits={} too_deep={}",
+                vertex.x(), vertex.z(), fallback.toShortString(),
+                badHeadroomOrStand, noFloor, insideFootprint, notLocallyReachable, losZero, lowExits, tooDeep);
+        return fallback;
     }
 
     private boolean canStandAt(ServerWorld world, BlockPos pos) {
-        BlockState feet = world.getBlockState(pos);
-        BlockState head = world.getBlockState(pos.up());
-        BlockState below = world.getBlockState(pos.down());
-        boolean feetClear = feet.isAir() || feet.isReplaceable();
-        boolean headClear = head.isAir() || head.isReplaceable();
-        boolean hasSupport = !below.isAir() && !below.isReplaceable();
-        return feetClear && headClear && hasSupport;
+        return VoxelJunctionService.isStandable(world, pos);
+    }
+
+    private TowerNavCandidate chooseBestTowerNavCandidate(List<TowerNavCandidate> candidates) {
+        if (candidates == null || candidates.isEmpty()) {
+            return null;
+        }
+        TowerNavCandidate best = null;
+        for (TowerNavCandidate c : candidates) {
+            if (c == null) continue;
+            if (best == null || c.score() > best.score()) {
+                best = c;
+            }
+        }
+        return best;
+    }
+
+    private Set<BlockPos> computeLocalReachableStandPositions(ServerWorld world,
+                                                              BlockPos start,
+                                                              BlockPos areaCenter,
+                                                              int horizRadius,
+                                                              int minY,
+                                                              int maxY,
+                                                              int maxNodes) {
+        return VoxelJunctionService.computeReachableStandCells(
+                world, start, areaCenter, horizRadius, minY, maxY, maxNodes,
+                seed -> SafePositionService.findSafeNear(world, seed, 2));
+    }
+
+    private boolean isLocallyReachableStandPos(Set<BlockPos> reachable, BlockPos candidate) {
+        if (candidate == null || reachable == null || reachable.isEmpty()) {
+            return false;
+        }
+        if (reachable.contains(candidate)) {
+            return true;
+        }
+        for (int dy = -1; dy <= 1; dy++) {
+            BlockPos probe = candidate.add(0, dy, 0);
+            if (reachable.contains(probe)) return true;
+            for (Direction dir : Direction.Type.HORIZONTAL) {
+                if (reachable.contains(probe.offset(dir))) return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean isLocallyReachableStandPos(ServerWorld world, BlockPos start, BlockPos candidate,
+                                               BlockPos areaCenter, int horizRadius) {
+        if (world == null || start == null || candidate == null || areaCenter == null) {
+            return false;
+        }
+        Set<BlockPos> reachable = computeLocalReachableStandPositions(
+                world, start, areaCenter, horizRadius, start.getY() - 1, start.getY() + 2,
+                TOWER_LOCAL_REACHABILITY_MAX_NODES);
+        return isLocallyReachableStandPos(reachable, candidate);
+    }
+
+    private TowerNavCandidate selectReachableTowerHardResetCandidate(ServerPlayerEntity bot,
+                                                                     ServerWorld world,
+                                                                     WallPoint vertex,
+                                                                     SurfaceProfile surfaceProfile,
+                                                                     int attemptOffset,
+                                                                     TowerNavAttemptState navState) {
+        BlockPos start = bot.getBlockPos();
+        int ringStart = 3 + Math.floorMod(attemptOffset, 2);
+        Set<BlockPos> locallyReachable = computeLocalReachableStandPositions(
+                world, start, new BlockPos(vertex.x(), start.getY(), vertex.z()),
+                TOWER_LOCAL_REACHABILITY_RADIUS + 2, start.getY() - 1, start.getY() + 2,
+                TOWER_LOCAL_REACHABILITY_MAX_NODES);
+
+        for (int r = ringStart; r <= 7; r++) {
+            List<TowerNavCandidate> reachableRing = new ArrayList<>();
+            List<TowerNavCandidate> fallbackRing = new ArrayList<>();
+            for (int dx = -r; dx <= r; dx++) {
+                for (int dz = -r; dz <= r; dz++) {
+                    if (Math.max(Math.abs(dx), Math.abs(dz)) != r) {
+                        continue;
+                    }
+                    int x = vertex.x() + dx;
+                    int z = vertex.z() + dz;
+                    int baseY = safeSurfaceY(surfaceProfile, world, x, z);
+                    int[] yCandidates = {baseY, baseY + 1, start.getY(), start.getY() + 1};
+                    for (int y : yCandidates) {
+                        BlockPos candidate = new BlockPos(x, y, z);
+                        if (!canStandAt(world, candidate)) continue;
+                        if (isInsideTowerFootprint(candidate, vertex)) continue;
+                        int exits = countOpenExits(world, candidate, null);
+                        if (exits < 3) continue;
+                        double distFromTowerSq = Math.pow(candidate.getX() - vertex.x(), 2)
+                                + Math.pow(candidate.getZ() - vertex.z(), 2);
+                        if (distFromTowerSq < 9.0D) continue;
+                        boolean locallyReachableCandidate = isLocallyReachableStandPos(locallyReachable, candidate);
+                        boolean prevFailed = navState != null && navState.failedHardResetCandidates.contains(candidate);
+                        double score = exits * 140.0 + distFromTowerSq * 16.0 - start.getSquaredDistance(candidate) * 4.5;
+                        if (Math.abs(dx) > 0 && Math.abs(dz) > 0) score += 20.0;
+                        if (prevFailed) score -= 220.0;
+                        TowerNavCandidate t = new TowerNavCandidate(candidate, score, exits, locallyReachableCandidate, prevFailed);
+                        if (locallyReachableCandidate && !prevFailed) {
+                            reachableRing.add(t);
+                        } else {
+                            fallbackRing.add(t);
+                        }
+                    }
+                }
+            }
+            TowerNavCandidate bestReachable = chooseBestTowerNavCandidate(reachableRing);
+            if (bestReachable != null) {
+                return bestReachable;
+            }
+            TowerNavCandidate bestFallback = chooseBestTowerNavCandidate(fallbackRing);
+            if (bestFallback != null) {
+                return bestFallback;
+            }
+        }
+        return null;
+    }
+
+    private BlockPos chooseReachableTowerPatchStagingPos(ServerPlayerEntity bot,
+                                                         ServerWorld world,
+                                                         WallPoint vertex,
+                                                         BlockPos towerApproach,
+                                                         SurfaceProfile surfaceProfile,
+                                                         TowerNavAttemptState navState) {
+        if (bot == null || world == null || towerApproach == null || vertex == null) {
+            return null;
+        }
+        BlockPos start = bot.getBlockPos();
+        Set<BlockPos> reachable = computeLocalReachableStandPositions(
+                world, start, new BlockPos(vertex.x(), start.getY(), vertex.z()),
+                TOWER_LOCAL_REACHABILITY_RADIUS + 2, start.getY() - 1, start.getY() + 2,
+                TOWER_LOCAL_REACHABILITY_MAX_NODES);
+        BlockPos best = null;
+        double bestScore = Double.NEGATIVE_INFINITY;
+        for (int r = 2; r <= 6; r++) {
+            for (int dx = -r; dx <= r; dx++) {
+                for (int dz = -r; dz <= r; dz++) {
+                    if (Math.max(Math.abs(dx), Math.abs(dz)) != r) continue;
+                    int x = towerApproach.getX() + dx;
+                    int z = towerApproach.getZ() + dz;
+                    int baseY = safeSurfaceY(surfaceProfile, world, x, z);
+                    int[] yCandidates = {baseY, start.getY(), baseY + 1};
+                    for (int y : yCandidates) {
+                        BlockPos candidate = new BlockPos(x, y, z);
+                        if (!canStandAt(world, candidate)) continue;
+                        if (isInsideTowerFootprint(candidate, vertex)) continue;
+                        if (!isLocallyReachableStandPos(reachable, candidate)) continue;
+                        if (navState != null && navState.failedHardResetCandidates.contains(candidate)) continue;
+                        int exits = countOpenExits(world, candidate, null);
+                        if (exits < 2) continue;
+                        double score = exits * 100.0;
+                        score -= candidate.getSquaredDistance(towerApproach) * 8.0;
+                        score -= start.getSquaredDistance(candidate) * 2.5;
+                        if (candidate.getSquaredDistance(towerApproach) < start.getSquaredDistance(towerApproach)) {
+                            score += 60.0;
+                        }
+                        if (score > bestScore) {
+                            bestScore = score;
+                            best = candidate;
+                        }
+                    }
+                }
+            }
+            if (best != null) break;
+        }
+        if (best != null) {
+            LOGGER.info("[FortifyTower] staging-select tower=({}, {}) target={} staging={}",
+                    vertex.x(), vertex.z(), towerApproach.toShortString(), best.toShortString());
+        }
+        return best;
+    }
+
+    private boolean attemptTowerMediumRangeReplan(ServerCommandSource source,
+                                                  ServerPlayerEntity bot,
+                                                  ServerWorld world,
+                                                  BlockPos target,
+                                                  String reason,
+                                                  WallPoint towerVertex,
+                                                  TowerNavAttemptState towerState) {
+        if (source == null || bot == null || world == null || target == null) {
+            return false;
+        }
+        BlockPos before = bot.getBlockPos();
+        double distSq = bot.squaredDistanceTo(target.getX() + 0.5, bot.getY(), target.getZ() + 0.5);
+        if (distSq < 16.0D || distSq > 400.0D) { // fortify patch local only (<=20 blocks)
+            return false;
+        }
+        if (fortifyReplanActive) {
+            LOGGER.info("[FortifyTower] medium-replan skipped target={} reason={} nested-replan-active",
+                    target.toShortString(), reason);
+            return false;
+        }
+
+        // Prefer local stepping for very close targets; avoids long blocking MovementService calls.
+        if (distSq <= 144.0D) { // <= 12 blocks
+            LOGGER.info("[FortifyTower] medium-replan using local-step target={} reason={}",
+                    target.toShortString(), reason);
+            BlockPos beforeLocal = bot.getBlockPos();
+            runWithFortifyTowerNavScope(bot, world, "fortify-tower:local-step-replan",
+                    towerState, towerVertex, target,
+                    () -> walkToTarget(source, bot, target, 1_500L, "fortify-tower:local-step-replan"));
+            FortifyNavProgressWindow localProgress = new FortifyNavProgressWindow(
+                    beforeLocal, bot.getBlockPos(), beforeLocal.getSquaredDistance(target),
+                    bot.getBlockPos().getSquaredDistance(target), 1_500L);
+            return localProgress.meaningful();
+        }
+
+        Optional<MovementService.MovementPlan> plan = MovementService.planLootApproach(
+                bot, target, MovementService.MovementOptions.skillLoot());
+        if (plan.isEmpty()) {
+            LOGGER.info("[FortifyTower] medium-replan skipped target={} reason={} no-plan",
+                    target.toShortString(), reason);
+            return false;
+        }
+        LOGGER.info("[FortifyTower] medium-replan target={} reason={} dist={}",
+                target.toShortString(), reason, String.format(Locale.ROOT, "%.1f", Math.sqrt(distSq)));
+        long epoch = ++fortifyMovementEpoch;
+        long startMs = System.currentTimeMillis();
+        fortifyReplanActive = true;
+        try {
+            MovementService.withoutDoorEscape(() ->
+                    MovementService.withoutObstructionMining(
+                            () -> MovementService.execute(source, bot, plan.get(), null)));
+        } finally {
+            fortifyReplanActive = false;
+        }
+        long elapsed = System.currentTimeMillis() - startMs;
+        if (epoch != fortifyMovementEpoch) {
+            LOGGER.info("[FortifyTower] medium-replan ignored target={} reason={} stale-epoch", target.toShortString(), reason);
+            return false;
+        }
+        boolean moved = !before.equals(bot.getBlockPos());
+        FortifyNavProgressWindow progress = new FortifyNavProgressWindow(
+                before, bot.getBlockPos(), before.getSquaredDistance(target),
+                bot.getBlockPos().getSquaredDistance(target), elapsed);
+        if (moved) {
+            runWithFortifyTowerNavScope(bot, world, "fortify-tower:post-replan",
+                    towerState, towerVertex, target,
+                    () -> walkToTarget(source, bot, target, 1_200L, "fortify-tower:post-replan"));
+        }
+        if (elapsed > FORTIFY_MEDIUM_REPLAN_BUDGET_MS && !progress.meaningful()) {
+            LOGGER.info("[FortifyTower] medium-replan over-budget target={} elapsedMs={} meaningful=false",
+                    target.toShortString(), elapsed);
+            return false;
+        }
+        return progress.meaningful();
     }
 
     private boolean tryNaturalStepUpTowardTarget(ServerPlayerEntity bot, ServerWorld world, BlockPos target) {
@@ -4458,12 +8011,65 @@ public final class FortifyVillageSkill implements Skill {
             return false;
         }
         BlockPos before = bot.getBlockPos();
-        walkToTarget(source, bot, waypoint, 1_400L);
+        String scopeCtx = activeFortifyNavScope != null ? activeFortifyNavScope.context : null;
+        if (scopeCtx != null && scopeCtx.startsWith("fortify-edge:")) {
+            runWithFortifyEdgeNavScope(bot, world, "fortify-edge:wide-arc-reach", waypoint,
+                    () -> walkToTarget(source, bot, waypoint, 1_400L, "fortify-edge:wide-arc-reach"));
+        } else if (scopeCtx != null && scopeCtx.startsWith("fortify-tower:")) {
+            TowerNavAttemptState towerState = activeFortifyNavScope != null ? activeFortifyNavScope.towerState : null;
+            WallPoint towerVertex = activeFortifyNavScope != null ? activeFortifyNavScope.towerVertex : null;
+            runWithFortifyTowerNavScope(bot, world, "fortify-tower:wide-arc-reach",
+                    towerState, towerVertex, waypoint,
+                    () -> walkToTarget(source, bot, waypoint, 1_400L, "fortify-tower:wide-arc-reach"));
+        } else {
+            walkToTarget(source, bot, waypoint, 1_400L);
+        }
         if (!before.equals(bot.getBlockPos())) {
             return true;
         }
         walkTowardBlock(bot, waypoint, 900L);
         return !before.equals(bot.getBlockPos());
+    }
+
+    private boolean tryPostCarvePocketEscapeToward(ServerPlayerEntity bot, ServerWorld world, BlockPos target) {
+        if (bot == null || world == null) return false;
+        BlockPos start = bot.getBlockPos();
+        VoxelJunctionService.VoxelStandCell startCell = VoxelJunctionService.analyzeStandCell(world, start);
+        if (startCell.openFaces() > 1 && startCell.topology() != VoxelJunctionService.CellTopology.POCKET
+                && startCell.topology() != VoxelJunctionService.CellTopology.DEAD_END) {
+            return false;
+        }
+
+        BlockPos best = null;
+        double bestScore = Double.NEGATIVE_INFINITY;
+        for (VoxelJunctionService.VoxelTransition t : VoxelJunctionService.transitionsFrom(world, start)) {
+            if (t == null || t.requiresCarve() || t.to() == null) continue;
+            BlockPos candidate = t.to();
+            if (!canStandAt(world, candidate)) continue;
+            VoxelJunctionService.VoxelStandCell cell = VoxelJunctionService.analyzeStandCell(world, candidate);
+            double score = cell.openFaces() * 120.0;
+            score -= start.getSquaredDistance(candidate) * 3.0;
+            if (target != null) {
+                score -= candidate.getSquaredDistance(target) * 0.8;
+                if (candidate.getSquaredDistance(target) < start.getSquaredDistance(target)) {
+                    score += 75.0;
+                }
+            }
+            if (cell.topology() == VoxelJunctionService.CellTopology.OPENING) score += 80.0;
+            if (cell.topology() == VoxelJunctionService.CellTopology.CORRIDOR) score += 40.0;
+            if (score > bestScore) {
+                bestScore = score;
+                best = candidate;
+            }
+        }
+
+        if (best == null || best.equals(start)) {
+            return false;
+        }
+        LOGGER.info("[FortifyNav] post-carve escape nudge from={} to={} target={}",
+                start.toShortString(), best.toShortString(), target != null ? target.toShortString() : "n/a");
+        walkTowardBlock(bot, best, 900L);
+        return !start.equals(bot.getBlockPos());
     }
 
     private BlockPos chooseWideArcReachWaypoint(ServerPlayerEntity bot, ServerWorld world, BlockPos target) {
@@ -4716,7 +8322,32 @@ public final class FortifyVillageSkill implements Skill {
         BlockPos before = bot.getBlockPos();
         LOGGER.debug("Unwedge: context={} from={} to={} exitsBefore={}", context, before.toShortString(),
                 best.toShortString(), exits);
-        walkToTarget(source, bot, best, 2_500L);
+        String navCtx = null;
+        if (context != null) {
+            if (context.startsWith("edge-")) {
+                navCtx = "fortify-edge:unwedge";
+            } else if (context.startsWith("fortify-tower") || context.contains("tower")) {
+                navCtx = "fortify-tower:unwedge";
+            }
+        }
+        if (navCtx != null && navCtx.startsWith("fortify-edge:")) {
+            final String edgeNavCtx = navCtx;
+            final BlockPos edgeBest = best;
+            runWithFortifyEdgeNavScope(bot, world, edgeNavCtx, best,
+                    () -> walkToTarget(source, bot, edgeBest, 2_500L, edgeNavCtx));
+        } else if (navCtx != null && navCtx.startsWith("fortify-tower:")) {
+            FortifyNavRuntimeScope scope = activeFortifyNavScope;
+            TowerNavAttemptState towerState = scope != null ? scope.towerState : null;
+            WallPoint towerVertex = scope != null ? scope.towerVertex : null;
+            final String towerNavCtx = navCtx;
+            final BlockPos towerBest = best;
+            runWithFortifyTowerNavScope(bot, world, towerNavCtx, towerState, towerVertex, towerBest,
+                    () -> walkToTarget(source, bot, towerBest, 2_500L, towerNavCtx));
+        } else if (navCtx != null) {
+            walkToTarget(source, bot, best, 2_500L, navCtx);
+        } else {
+            walkToTarget(source, bot, best, 2_500L);
+        }
         BlockPos after = bot.getBlockPos();
         int exitsAfter = countOpenExits(world, after, null);
         double movedSq = before.getSquaredDistance(after);
@@ -4730,7 +8361,7 @@ public final class FortifyVillageSkill implements Skill {
         }
         // Last resort: if still stuck, try breaking through toward the unwedge target
         if (!meaningful) {
-            if (tryBreakThroughObstacle(bot, world, best)) {
+            if (tryBreakThroughObstacle(bot, world, best, navCtx != null ? navCtx : context)) {
                 return true;
             }
         }
@@ -4839,6 +8470,213 @@ public final class FortifyVillageSkill implements Skill {
         return forcedSolidPos != null && forcedSolidPos.equals(testPos);
     }
 
+    private boolean isFortifyPrecipiceDefenseContext(String navContext) {
+        if (navContext == null) return false;
+        return navContext.startsWith("fortify-edge:")
+                || navContext.startsWith("fortify-tower:");
+    }
+
+    private int airDropDepth(ServerWorld world, BlockPos pos, int maxDepth) {
+        if (world == null || pos == null || maxDepth <= 0) return 0;
+        int depth = 0;
+        BlockPos cursor = pos;
+        for (int i = 0; i < maxDepth; i++) {
+            BlockState st = world.getBlockState(cursor);
+            if (!(st.isAir() || st.isReplaceable())) {
+                break;
+            }
+            depth++;
+            cursor = cursor.down();
+        }
+        return depth;
+    }
+
+    private boolean hasDangerousFortifyPrecipiceAhead(ServerPlayerEntity bot, ServerWorld world,
+                                                      BlockPos target, String navContext) {
+        if (bot == null || world == null || target == null) return false;
+        if (!isFortifyPrecipiceDefenseContext(navContext)) return false;
+        BlockPos botPos = bot.getBlockPos();
+        Direction forward = dominantHorizontalDirection(botPos, target);
+        BlockPos front = botPos.offset(forward);
+        int frontDrop = airDropDepth(world, front.down(), FORTIFY_FOOTING_PATCH_SCAN_DEPTH);
+        if (frontDrop >= FORTIFY_PRECIpICE_DEFENSE_MIN_DROP) {
+            return true;
+        }
+        Direction left = forward.rotateYCounterclockwise();
+        Direction right = forward.rotateYClockwise();
+        int leftDrop = airDropDepth(world, botPos.offset(left).down(), FORTIFY_FOOTING_PATCH_SCAN_DEPTH);
+        int rightDrop = airDropDepth(world, botPos.offset(right).down(), FORTIFY_FOOTING_PATCH_SCAN_DEPTH);
+        return leftDrop >= (FORTIFY_PRECIpICE_DEFENSE_MIN_DROP + 1)
+                || rightDrop >= (FORTIFY_PRECIpICE_DEFENSE_MIN_DROP + 1);
+    }
+
+    private boolean tryPatchFortifyFootingNearWorksite(ServerPlayerEntity bot, ServerWorld world,
+                                                       BlockPos target, String navContext, String reason) {
+        if (bot == null || world == null || target == null) return false;
+        if (!isFortifyPrecipiceDefenseContext(navContext)) return false;
+
+        long now = System.currentTimeMillis();
+        BlockPos origin = bot.getBlockPos();
+        if (fortifyFootingPatchLastOrigin != null
+                && fortifyFootingPatchLastOrigin.getSquaredDistance(origin) <= 4.0D
+                && (now - fortifyFootingPatchLastMs) < FORTIFY_FOOTING_PATCH_COOLDOWN_MS) {
+            return false;
+        }
+
+        Direction forward = dominantHorizontalDirection(origin, target);
+        Direction left = forward.rotateYCounterclockwise();
+        Direction right = forward.rotateYClockwise();
+        LinkedHashSet<BlockPos> supportCandidates = new LinkedHashSet<>();
+        supportCandidates.add(origin.down());
+        supportCandidates.add(origin.offset(forward).down());
+        supportCandidates.add(origin.offset(forward, 2).down());
+        supportCandidates.add(origin.offset(left).down());
+        supportCandidates.add(origin.offset(right).down());
+        supportCandidates.add(origin.offset(forward).offset(left).down());
+        supportCandidates.add(origin.offset(forward).offset(right).down());
+
+        int placed = 0;
+        for (BlockPos supportPos : supportCandidates) {
+            if (supportPos == null) continue;
+            if (fortificationProtectedPositions.contains(supportPos)) continue;
+            BlockState state = world.getBlockState(supportPos);
+            if (!(state.isAir() || state.isReplaceable())) continue;
+
+            int dropDepth = airDropDepth(world, supportPos, FORTIFY_FOOTING_PATCH_SCAN_DEPTH);
+            if (dropDepth < FORTIFY_PRECIpICE_DEFENSE_MIN_DROP && !supportPos.equals(origin.down())) {
+                continue;
+            }
+
+            BlockPos standFeet = supportPos.up();
+            BlockPos standHead = standFeet.up();
+            BlockState feetState = world.getBlockState(standFeet);
+            BlockState headState = world.getBlockState(standHead);
+            boolean feetClear = feetState.isAir() || feetState.isReplaceable() || standFeet.equals(origin);
+            boolean headClear = headState.isAir() || headState.isReplaceable();
+            if (!feetClear || !headClear) continue;
+
+            LookController.faceBlock(bot, supportPos);
+            BotActions.PlaceResult place = BotActions.tryPlaceBlockAt(bot, supportPos, Direction.UP, FORTIFY_FOOTING_PATCH_MATS);
+            if (place.success()) {
+                placed++;
+                LOGGER.info("[FortifyNav] footing-bridge placed pos={} reason={} ctx={} dropDepth={} origin={} target={}",
+                        supportPos.toShortString(),
+                        reason != null ? reason : "none",
+                        navContext,
+                        dropDepth,
+                        origin.toShortString(),
+                        target.toShortString());
+                if (placed >= 2) break;
+            }
+        }
+
+        if (placed > 0) {
+            fortifyFootingPatchLastMs = now;
+            fortifyFootingPatchLastOrigin = origin.toImmutable();
+            return true;
+        }
+        return false;
+    }
+
+    private boolean isFortifyEscapeContext(String contextTag) {
+        if (activeFortifyNavScope != null && isFortifyCarveContext(activeFortifyNavScope)) {
+            return true;
+        }
+        if (contextTag == null) {
+            return false;
+        }
+        return contextTag.startsWith("fortify-edge:") || contextTag.startsWith("fortify-tower:");
+    }
+
+    private int countEscapeShaftBlockers(ServerPlayerEntity bot, ServerWorld world, int stepsToClimb) {
+        if (bot == null || world == null) return 0;
+        int planned = Math.max(1, Math.min(MAX_SCAFFOLD_HEIGHT, stepsToClimb));
+        int maxDy = Math.max(3, planned + 3);
+        int blockers = 0;
+        BlockPos botPos = bot.getBlockPos();
+        for (int dy = 2; dy <= maxDy; dy++) {
+            BlockPos pos = botPos.up(dy);
+            BlockState state = world.getBlockState(pos);
+            if (state.isAir() || state.isReplaceable()) {
+                continue;
+            }
+            blockers++;
+        }
+        return blockers;
+    }
+
+    private int clearEscapeShaftHeadroom(ServerPlayerEntity bot, ServerWorld world, int stepsToClimb, String contextTag) {
+        if (bot == null || world == null) return 0;
+        boolean fortifyCtx = isFortifyEscapeContext(contextTag);
+        int planned = Math.max(1, Math.min(MAX_SCAFFOLD_HEIGHT, stepsToClimb));
+        int maxDy = Math.max(3, planned + 3);
+        int cleared = 0;
+        BlockPos botPos = bot.getBlockPos();
+        for (int dy = 2; dy <= maxDy; dy++) {
+            if (SkillManager.shouldAbortSkill(bot)) {
+                break;
+            }
+            BlockPos pos = botPos.up(dy);
+            BlockState state = world.getBlockState(pos);
+            if (state.isAir() || state.isReplaceable()) continue;
+            if (state.getHardness(world, pos) < 0) continue;
+
+            boolean dug = false;
+            if (fortifyCtx && isWithinMiningReach(bot, pos)) {
+                NavBreakCandidateEval eval = evaluateBreakForNavigation(world, pos, true);
+                if (eval.allowed()) {
+                    dug = digBlockForNavigation(bot, world, pos);
+                }
+            }
+            if (!dug) {
+                dug = digBlock(bot, world, pos);
+            }
+            if (dug) {
+                cleared++;
+                sleepQuiet(60);
+            }
+        }
+        return cleared;
+    }
+
+    private int clearImmediateOverheadForEscape(ServerPlayerEntity bot, ServerWorld world) {
+        return clearEscapeShaftHeadroom(bot, world, 1, null);
+    }
+
+    private boolean tryPillarEscapeFirst(ServerPlayerEntity bot, ServerWorld world,
+                                         int referenceSurfaceY, String contextTag) {
+        if (bot == null || world == null) return false;
+        int remaining = referenceSurfaceY - bot.getBlockPos().getY();
+        if (remaining <= 0 || remaining > MAX_SCAFFOLD_HEIGHT) {
+            return false;
+        }
+
+        int shaftBlockersBefore = countEscapeShaftBlockers(bot, world, remaining + 1);
+        int cleared = clearEscapeShaftHeadroom(bot, world, remaining + 1, contextTag);
+        boolean pillared = ScaffoldService.pillarUp(bot, remaining + 1, true);
+        if (!pillared) {
+            int extraCleared = clearEscapeShaftHeadroom(bot, world, remaining + 1, contextTag);
+            if (extraCleared > 0) {
+                cleared += extraCleared;
+                pillared = ScaffoldService.pillarUp(bot, remaining + 1, true);
+            }
+        }
+
+        int shaftBlockersAfter = countEscapeShaftBlockers(bot, world, Math.max(1, referenceSurfaceY - bot.getBlockPos().getY() + 1));
+        boolean progress = bot.getBlockPos().getY() > (referenceSurfaceY - remaining);
+        LOGGER.info("[FortifyNav] pillar-first-escape ctx={} refY={} pos={} remaining={} clearedOverhead={} shaftBlockersBefore={} shaftBlockersAfter={} pillared={} progress={}",
+                contextTag != null ? contextTag : "none",
+                referenceSurfaceY,
+                bot.getBlockPos().toShortString(),
+                remaining,
+                cleared,
+                shaftBlockersBefore,
+                shaftBlockersAfter,
+                pillared,
+                progress);
+        return pillared || progress;
+    }
+
     // ── Hole escape ──────────────────────────────────────────────
 
     /**
@@ -4871,10 +8709,28 @@ public final class FortifyVillageSkill implements Skill {
             return;
         }
         BlockPos botPos = bot.getBlockPos();
+        BlockPos startPos = botPos.toImmutable();
         int depth = referenceSurfaceY - botPos.getY();
         if (depth <= 0) return; // at or above surface
 
-        LOGGER.info("Bot below surface by {} blocks at {} (surfaceY={}), building staircase ramp",
+        if (shouldSkipRepeatedSurfaceEscape(botPos, referenceSurfaceY)) {
+            noteEntombmentSurfaceEscapeFailure(world, botPos, activeFortifyNavScope != null ? activeFortifyNavScope.context : null);
+            LOGGER.info("[FortifyNav] surface escape skipped repeated-fail pos={} surfaceY={} depth={} ctx={}",
+                    botPos.toShortString(), referenceSurfaceY, depth,
+                    activeFortifyNavScope != null ? activeFortifyNavScope.context : "none");
+            return;
+        }
+
+        if (isSealedFortifyEntombmentSurfaceEscapeCell(world, botPos, referenceSurfaceY)) {
+            noteEntombmentSurfaceEscapeFailure(world, botPos, null);
+            LOGGER.info("[FortifyNav] surface escape rejected sealed-entombment pos={} depth={} ctx={}",
+                    botPos.toShortString(),
+                    depth,
+                    activeFortifyNavScope != null ? activeFortifyNavScope.context : "none");
+            return;
+        }
+
+        LOGGER.info("Bot below surface by {} blocks at {} (surfaceY={}), building pillar to escape",
                 depth, botPos.toShortString(), referenceSurfaceY);
 
         // Strategy 1: Shallow (1 block) — just jump
@@ -4890,122 +8746,30 @@ public final class FortifyVillageSkill implements Skill {
             if (bot.getBlockPos().getY() >= referenceSurfaceY) return;
         }
 
-        // Strategy 2: Build a staircase ramp upward.
-        // Pick the best direction: check 4 cardinal directions for open air above surface level.
-        // Prefer directions where the terrain is higher (i.e. not another moat column).
-        int[][] dirs = {{1,0},{-1,0},{0,1},{0,-1}};
-        int bestDirIdx = 0;
-        int bestScore = Integer.MIN_VALUE;
-        for (int d = 0; d < dirs.length; d++) {
-            if (abortFortifyPhase(bot, "escapeIfInHole:direction-scan", phaseStartMs)) {
+        // Strategy 2: Pillar up
+        String escapeCtx = activeFortifyNavScope != null ? activeFortifyNavScope.context : "surface-escape";
+        if (tryPillarEscapeFirst(bot, world, referenceSurfaceY, escapeCtx)) {
+            BlockPos afterPillar = bot.getBlockPos();
+            if (afterPillar.getY() >= referenceSurfaceY - 1) {
+                clearSurfaceEscapeRetryState(startPos, referenceSurfaceY);
+                clearSurfaceEscapeRetryState(afterPillar, referenceSurfaceY);
+                noteEntombmentRecoverySuccess(world, startPos, afterPillar, escapeCtx);
                 return;
             }
-            int tx = botPos.getX() + dirs[d][0] * 2;
-            int tz = botPos.getZ() + dirs[d][1] * 2;
-            // Check what's at the reference surface level in this direction
-            BlockPos surfCheck = new BlockPos(tx, referenceSurfaceY + 1, tz);
-            int score = 0;
-            if (world.getBlockState(surfCheck).isAir()) score += 5; // open air at surface = great
-            if (world.getBlockState(surfCheck.up()).isAir()) score += 3;
-            // Prefer directions where there's solid ground at surface level
-            BlockPos groundCheck = new BlockPos(tx, referenceSurfaceY, tz);
-            if (!world.getBlockState(groundCheck).isAir()) score += 2;
-            if (score > bestScore) {
-                bestScore = score;
-                bestDirIdx = d;
-            }
-        }
-        int stepDx = dirs[bestDirIdx][0];
-        int stepDz = dirs[bestDirIdx][1];
-
-        LOGGER.info("Escape direction: dx={}, dz={} (score={}), building {} steps up",
-                stepDx, stepDz, bestScore, depth);
-
-        List<Item> rampMats = List.of(Items.DIRT, Items.COBBLESTONE, Items.COBBLED_DEEPSLATE);
-        int maxSteps = depth + 2;
-        int currentX = botPos.getX();
-        int currentY = botPos.getY();
-        int currentZ = botPos.getZ();
-
-        for (int step = 0; step < maxSteps; step++) {
-            if (abortFortifyPhase(bot, "escapeIfInHole:stair-step", phaseStartMs)) {
-                return;
-            }
-            if (currentY >= referenceSurfaceY) break;
-
-            // Clear headroom: mine the 2 blocks above the current position
-            BlockPos stepPos = new BlockPos(currentX, currentY, currentZ);
-            for (int above = 1; above <= 2; above++) {
-                if (abortFortifyPhase(bot, "escapeIfInHole:clear-headroom", phaseStartMs)) {
-                    return;
-                }
-                BlockPos clearPos = stepPos.up(above);
-                BlockState clearState = world.getBlockState(clearPos);
-                if (!clearState.isAir() && clearState.getHardness(world, clearPos) >= 0) {
-                    digBlock(bot, world, clearPos);
-                }
-            }
-
-            // Place a block under our feet if standing on air
-            BlockPos feetBlock = new BlockPos(currentX, currentY - 1, currentZ);
-            BlockState feetState = world.getBlockState(feetBlock);
-            if (feetState.isAir() || feetState.isReplaceable()) {
-                BotActions.tryPlaceBlockAt(bot, feetBlock, Direction.UP, rampMats);
-            }
-
-            // Next step: one block forward + one block up
-            int nextX = currentX + stepDx;
-            int nextZ = currentZ + stepDz;
-            int nextY = currentY + 1;
-
-            // Place the next stair step block
-            BlockPos nextStep = new BlockPos(nextX, nextY - 1, nextZ);
-            if (world.getBlockState(nextStep).isAir() || world.getBlockState(nextStep).isReplaceable()) {
-                BotActions.tryPlaceBlockAt(bot, nextStep, Direction.UP, rampMats);
-            }
-
-            // Clear headroom above the next step
-            for (int above = 0; above <= 2; above++) {
-                if (abortFortifyPhase(bot, "escapeIfInHole:clear-next-headroom", phaseStartMs)) {
-                    return;
-                }
-                BlockPos clearPos = new BlockPos(nextX, nextY + above, nextZ);
-                BlockState clearState = world.getBlockState(clearPos);
-                if (!clearState.isAir() && clearState.getHardness(world, clearPos) >= 0) {
-                    digBlock(bot, world, clearPos);
-                }
-            }
-
-            // Walk onto the next step
-            BotActions.jump(bot);
-            sleepQuiet(200);
-            walkTowardBlock(bot, new BlockPos(nextX, nextY, nextZ), 800L);
-
-            currentX = nextX;
-            currentY = nextY;
-            currentZ = nextZ;
         }
 
-        // Verify escape
+        // If pillar failed, note failure
         botPos = bot.getBlockPos();
-        if (botPos.getY() >= referenceSurfaceY) {
-            LOGGER.info("Escaped hole via staircase ramp to {}", botPos.toShortString());
-            // Walk 3 more blocks in the escape direction to move AWAY from the moat edge
-            // so the bot doesn't immediately fall back in
-            BlockPos safePos = new BlockPos(
-                    botPos.getX() + stepDx * 3,
-                    referenceSurfaceY,
-                    botPos.getZ() + stepDz * 3);
-            if (abortFortifyPhase(bot, "escapeIfInHole:post-escape-walk", phaseStartMs)) {
-                return;
+        if (botPos.getY() < referenceSurfaceY) {
+            int sameColumnFailures = noteSurfaceEscapeRetryFailure(startPos, referenceSurfaceY);
+            if (!startPos.equals(botPos)
+                    && !Objects.equals(surfaceEscapeRetryKey(startPos, referenceSurfaceY),
+                    surfaceEscapeRetryKey(botPos, referenceSurfaceY))) {
+                noteSurfaceEscapeRetryFailure(botPos, referenceSurfaceY);
             }
-            walkTowardBlock(bot, safePos, 1500L);
-        } else {
-            LOGGER.warn("Staircase escape incomplete, bot at {} vs surfaceY={}", botPos.toShortString(), referenceSurfaceY);
-            int remaining = referenceSurfaceY - botPos.getY();
-            if (remaining > 0 && remaining <= MAX_SCAFFOLD_HEIGHT) {
-                ScaffoldService.pillarUp(bot, remaining + 1, true);
-            }
+            LOGGER.warn("Pillar escape incomplete, bot at {} vs surfaceY={} pocketFailures={}",
+                    botPos.toShortString(), referenceSurfaceY, sameColumnFailures);
+            noteEntombmentSurfaceEscapeFailure(world, botPos, activeFortifyNavScope != null ? activeFortifyNavScope.context : null);
         }
     }
 
@@ -5194,6 +8958,20 @@ public final class FortifyVillageSkill implements Skill {
                     scaffoldHold = beginScaffoldEdgeHold(bot, world, target);
                 }
 
+                String activeNavCtx = activeFortifyNavScope != null ? activeFortifyNavScope.context : null;
+                if (hasDangerousFortifyPrecipiceAhead(bot, world, target, activeNavCtx)) {
+                    boolean patched = tryPatchFortifyFootingNearWorksite(bot, world, target, activeNavCtx, "precipice-defense:walkToward");
+                    if (!patched) {
+                        BotActions.stop(bot);
+                        sleepQuiet(50);
+                        stuckTicks++;
+                        if (stuckTicks >= 2) return;
+                        continue;
+                    }
+                    sleepQuiet(50);
+                    continue;
+                }
+
                 // Apply movement FIRST, then check stuck on subsequent ticks
                 LookController.faceBlock(bot, target);
                 double impulse = onScaffold ? 0.12D : 0.28D;
@@ -5218,12 +8996,95 @@ public final class FortifyVillageSkill implements Skill {
     }
 
     /**
+     * Stuck recovery for local navigation: deliberately back up, then bias toward a wider
+     * side lane before resuming toward the target. Uses only local movement (no A*).
+     */
+    private boolean tryBacktrackArcWalkRecovery(ServerPlayerEntity bot, ServerWorld world,
+                                                BlockPos target, int attemptOrdinal) {
+        if (bot == null || world == null || target == null) {
+            return false;
+        }
+
+        BlockPos start = bot.getBlockPos();
+        Direction toward = dominantHorizontalDirection(start, target);
+        Direction back = toward.getOpposite();
+        Direction sideA = back.rotateYClockwise();
+        Direction sideB = back.rotateYCounterclockwise();
+        if ((attemptOrdinal & 1) == 0) {
+            Direction tmp = sideA;
+            sideA = sideB;
+            sideB = tmp;
+        }
+
+        int[][] offsets = new int[][]{
+                {back.getOffsetX() * 3, back.getOffsetZ() * 3},
+                {back.getOffsetX() * 2 + sideA.getOffsetX() * 2, back.getOffsetZ() * 2 + sideA.getOffsetZ() * 2},
+                {back.getOffsetX() * 2 + sideB.getOffsetX() * 2, back.getOffsetZ() * 2 + sideB.getOffsetZ() * 2},
+                {back.getOffsetX() * 4 + sideA.getOffsetX(), back.getOffsetZ() * 4 + sideA.getOffsetZ()},
+                {back.getOffsetX() * 4 + sideB.getOffsetX(), back.getOffsetZ() * 4 + sideB.getOffsetZ()}
+        };
+        int[] yOffsets = new int[]{0, 1, -1};
+
+        BlockPos backup = null;
+        double bestScore = Double.NEGATIVE_INFINITY;
+        for (int[] off : offsets) {
+            for (int dy : yOffsets) {
+                BlockPos candidate = start.add(off[0], dy, off[1]);
+                if (!canStandAt(world, candidate)) {
+                    continue;
+                }
+                int exits = countOpenExits(world, candidate, null);
+                if (exits < 2) {
+                    continue;
+                }
+                double score = exits * 140.0;
+                score -= start.getSquaredDistance(candidate) * 6.0;
+                score -= candidate.getSquaredDistance(target) * 0.45;
+                if (dy == 0) {
+                    score += 12.0;
+                }
+                if (score > bestScore) {
+                    bestScore = score;
+                    backup = candidate;
+                }
+            }
+        }
+
+        if (backup == null) {
+            return false;
+        }
+
+        LOGGER.debug("[FortifyNav] backtrack-arc backup {}", backup.toShortString());
+        walkTowardBlock(bot, backup, 1_100L);
+        if (start.equals(bot.getBlockPos())) {
+            return false;
+        }
+
+        BlockPos arcWaypoint = chooseWideArcReachWaypoint(bot, world, target);
+        if (arcWaypoint != null && !arcWaypoint.equals(bot.getBlockPos())) {
+            LOGGER.debug("[FortifyNav] backtrack-arc waypoint {}", arcWaypoint.toShortString());
+            BlockPos beforeArc = bot.getBlockPos();
+            walkTowardBlock(bot, arcWaypoint, 1_100L);
+            if (!beforeArc.equals(bot.getBlockPos())) {
+                return true;
+            }
+        }
+
+        return !start.equals(bot.getBlockPos());
+    }
+
+    /**
      * Walk toward a target position using tick-based impulse movement.
      * Pure tick-based — does NOT fall back to A* pathfinding, which can hang
      * in door-escape loops near village structures. Individual block placement
      * uses ensureCanReachBlockWithEffort for fine-grained precision.
      */
     private void walkToTarget(ServerCommandSource source, ServerPlayerEntity bot, BlockPos target, long timeoutMs) {
+        walkToTarget(source, bot, target, timeoutMs, null);
+    }
+
+    private void walkToTarget(ServerCommandSource source, ServerPlayerEntity bot, BlockPos target,
+                              long timeoutMs, String navContext) {
         Vec3d targetVec = Vec3d.ofCenter(target);
         double distSq = bot.squaredDistanceTo(targetVec);
         if (distSq < 9.0) return; // already within 3 blocks
@@ -5234,6 +9095,13 @@ public final class FortifyVillageSkill implements Skill {
         int stuckTicks = 0;
         boolean scaffoldHold = false;
         int breakThroughCount = 0;
+        int stuckRecoveryAttempts = 0;
+        boolean microPathAttempted = navContext != null && navContext.startsWith("fortify-gate"); // skip micro-path for gates
+        boolean allowBreakThrough = navContext == null || !navContext.startsWith("fortify-gate");
+        boolean gateContext = navContext != null && navContext.startsWith("fortify-gate:");
+        boolean gateExitContext = navContext != null && navContext.startsWith("fortify-gate:exit");
+        int gateSidestepNoProgressBursts = 0;
+        int stuckThreshold = (navContext != null && navContext.startsWith("fortify-gate")) ? 1 : 5; // far faster gate carve decision
         try {
             while (System.currentTimeMillis() < deadline) {
                 if (abortFortifyPhase(bot, "walkToTarget", phaseStartMs)) return;
@@ -5251,43 +9119,236 @@ public final class FortifyVillageSkill implements Skill {
                     stuckTicks = 0;
                     lastBlockPos = currentBlockPos;
                 }
-                if (stuckTicks > 10) {
+                if (stuckTicks > stuckThreshold) {
+                    stuckRecoveryAttempts++;
                     BotActions.jump(bot);
                     sleepQuiet(100);
+                    boolean recovered = false;
+                    boolean pathTried = false;
+                    boolean breakTried = false;
+                    boolean sidestepTried = false;
+                    boolean arcTried = false;
+                    boolean breakSuppressed = false;
+                    boolean sidestepSuppressed = false;
+                    boolean arcSuppressed = false;
+                    String recoveryResult = "no-progress";
+                    ServerWorld recoveryWorld = (ServerWorld) bot.getEntityWorld();
+                    BlockPos recoveryStart = bot.getBlockPos();
+                    int recoveryTerrainY = VillageFortificationLayoutService.terrainY(recoveryWorld, recoveryStart.getX(), recoveryStart.getZ());
+                    int recoveryDepth = Math.max(0, recoveryTerrainY - recoveryStart.getY());
+                    boolean recoveryTrapLike = isTrapLikeCell(recoveryWorld, recoveryStart);
+                    boolean entombmentMode = shouldPreferEntombmentEscape(recoveryWorld, recoveryStart, navContext);
+                    boolean repeatedSurfaceEscapePocket = shouldSkipRepeatedSurfaceEscape(recoveryStart, recoveryTerrainY);
+                    boolean noProgressPocketBurst = hasFortifyPocketNoProgressBurst(recoveryWorld, recoveryStart, navContext, 1);
+                    boolean towerStepupLoopMode = navContext != null
+                            && (navContext.startsWith("fortify-tower:approach")
+                            || navContext.startsWith("fortify-tower:local-step-replan"))
+                            && recoveryTrapLike
+                            && recoveryDepth >= 2
+                            && (repeatedSurfaceEscapePocket || noProgressPocketBurst);
+                    boolean edgeStepupLoopMode = navContext != null
+                            && (navContext.startsWith("fortify-edge:approach")
+                            || navContext.startsWith("fortify-edge:approach-close")
+                            || navContext.startsWith("fortify-edge:approach-retry"))
+                            && recoveryTrapLike
+                            && recoveryDepth >= 1
+                            && (repeatedSurfaceEscapePocket || noProgressPocketBurst);
+                    boolean carvePreferredMode = entombmentMode || towerStepupLoopMode || edgeStepupLoopMode;
+                    String recoveryModeLabel = entombmentMode
+                            ? "entombment_escape"
+                            : (towerStepupLoopMode ? "tower_pocket_escape"
+                            : (edgeStepupLoopMode ? "edge_pocket_escape" : "normal"));
+                    FortifyNavRuntimeScope recoveryScope = activeFortifyNavScope;
+                    if (towerStepupLoopMode) {
+                        LOGGER.info("[FortifyTower] walk-recovery stepup-loop-detected ctx={} pos={} target={} depth={} trapLike={} surfaceY={}",
+                                navContext, recoveryStart.toShortString(), target.toShortString(),
+                                recoveryDepth, recoveryTrapLike, recoveryTerrainY);
+                    }
+                    if (edgeStepupLoopMode) {
+                        LOGGER.info("[FortifyEdge] walk-recovery stepup-loop-detected ctx={} pos={} target={} depth={} trapLike={} surfaceY={} repeatedSurfaceEscape={} noProgressBurst={}",
+                                navContext, recoveryStart.toShortString(), target.toShortString(),
+                                recoveryDepth, recoveryTrapLike, recoveryTerrainY,
+                                repeatedSurfaceEscapePocket, noProgressPocketBurst);
+                    }
+                    LOGGER.info("[FortifyNav] stuck-recovery-start ctx={} pos={} target={} scopePresent={} scopeCtx={} trapLike={} belowSurfaceDepth={} recoveryMode={} suppress[path={},break={},sidestep={},arc={}]",
+                            navContext != null ? navContext : "none",
+                            recoveryStart.toShortString(),
+                            target.toShortString(),
+                            recoveryScope != null,
+                            recoveryScope != null ? recoveryScope.context : "none",
+                            recoveryTrapLike,
+                            recoveryDepth,
+                            recoveryModeLabel,
+                            carvePreferredMode,
+                            false,
+                            carvePreferredMode,
+                            carvePreferredMode);
+
+                    if (!recovered && isFortifyPrecipiceDefenseContext(navContext)
+                            && tryPatchFortifyFootingNearWorksite(bot, recoveryWorld, target, navContext, "stuck-recovery")) {
+                        recovered = true;
+                        recoveryResult = "bridge-footing";
+                        stuckTicks = 0;
+                        lastBlockPos = bot.getBlockPos();
+                        noteEntombmentRecoverySuccess(recoveryWorld, recoveryStart, bot.getBlockPos(), navContext);
+                        continue;
+                    }
+
+                    // Try a short-range path plan before destructive recovery.
+                    if (!microPathAttempted && !carvePreferredMode) {
+                        Optional<MovementService.MovementPlan> microPlan = MovementService.planLootApproach(
+                                bot, target, MovementService.MovementOptions.skillLoot());
+                        microPathAttempted = true;
+                        if (microPlan.isPresent()) {
+                            pathTried = true;
+                            MovementService.MovementResult microResult = MovementService.withoutDoorEscape(() ->
+                                    MovementService.withoutObstructionMining(
+                                            () -> MovementService.execute(source, bot, microPlan.get(), false, true, true, false)));
+                            double postPathDistSq = bot.squaredDistanceTo(targetVec);
+                            if (microResult.success() &&
+                                    (postPathDistSq < currentDistSq - 4.0D || !bot.getBlockPos().equals(lastBlockPos))) {
+                                recovered = true;
+                                recoveryResult = "micro-path";
+                                stuckTicks = 0;
+                                lastBlockPos = bot.getBlockPos();
+                                noteEntombmentRecoverySuccess(recoveryWorld, recoveryStart, bot.getBlockPos(), navContext);
+                                continue;
+                            }
+                        }
+                    }
+
                     // Try breaking through obstacle (up to MAX_BREAK_THROUGHS_PER_WALK times)
-                    if (breakThroughCount < MAX_BREAK_THROUGHS_PER_WALK) {
-                        ServerWorld w = (ServerWorld) bot.getEntityWorld();
-                        if (tryBreakThroughObstacle(bot, w, target)) {
+                    if (allowBreakThrough && breakThroughCount < MAX_BREAK_THROUGHS_PER_WALK) {
+                        breakTried = true;
+                        ServerWorld w = recoveryWorld;
+                        if (tryBreakThroughObstacle(bot, w, target, navContext)) {
                             breakThroughCount++;
                             stuckTicks = 0;
                             lastBlockPos = bot.getBlockPos();
+                            recovered = true;
+                            recoveryResult = "carved";
+                            noteEntombmentRecoverySuccess(recoveryWorld, recoveryStart, bot.getBlockPos(), navContext);
                             continue;
+                        }
+                        if (carvePreferredMode) {
+                            noteEntombmentBreakFailure(recoveryWorld, recoveryStart, navContext);
+                        }
+                        if (!recovered && activeFortifyNavScope != null
+                                && activeFortifyNavScope.navMode == FortifyNavMode.CARVE_CORRIDOR
+                                && isCarveEligibleForBreakAttempt(activeFortifyNavScope, w, bot.getBlockPos(), target)
+                                && activeFortifyNavScope.carveSession != null
+                                && activeFortifyNavScope.carveSession.canMineMore()) {
+                            if (tryBreakThroughObstacle(bot, w, target, navContext + ":carve")) {
+                                breakThroughCount++;
+                                stuckTicks = 0;
+                                lastBlockPos = bot.getBlockPos();
+                                recovered = true;
+                                recoveryResult = "carved";
+                                noteEntombmentRecoverySuccess(recoveryWorld, recoveryStart, bot.getBlockPos(), navContext);
+                                continue;
+                            }
+                            if (carvePreferredMode) {
+                                noteEntombmentBreakFailure(recoveryWorld, recoveryStart, navContext + ":carve");
+                            }
                         }
                         // Count failed attempts too — prevents endless "no viable candidates"
                         // cycling when the bot is stuck far from any wall
                         breakThroughCount++;
+                    } else if (!allowBreakThrough) {
+                        breakSuppressed = true;
                     }
-                    // Lateral sidestep: move perpendicular to target direction
-                    double toTargetX = targetVec.x - bot.getX();
-                    double toTargetZ = targetVec.z - bot.getZ();
-                    double len = Math.sqrt(toTargetX * toTargetX + toTargetZ * toTargetZ);
-                    if (len > 0.01) {
-                        double perpX = -toTargetZ / len;
-                        double perpZ = toTargetX / len;
-                        // Alternate sides each stuck episode
-                        if (breakThroughCount % 2 == 1) { perpX = -perpX; perpZ = -perpZ; }
-                        BlockPos sideStep = bot.getBlockPos().add(
-                                (int) Math.round(perpX * 4), 0, (int) Math.round(perpZ * 4));
-                        BlockPos before = bot.getBlockPos();
-                        LOGGER.debug("[FortifyNav] lateral sidestep to {}", sideStep.toShortString());
-                        walkTowardBlock(bot, sideStep, 1_500L);
-                        if (!before.equals(bot.getBlockPos())) {
-                            stuckTicks = 0;
-                            lastBlockPos = bot.getBlockPos();
-                            continue; // moved laterally, retry toward target
+                    if (!recovered && !carvePreferredMode && !(gateContext && gateSidestepNoProgressBursts >= FORTIFY_GATE_EXIT_SIDESTEP_NO_PROGRESS_LIMIT)) {
+                        // Lateral sidestep: move perpendicular to target direction
+                        sidestepTried = true;
+                        double toTargetX = targetVec.x - bot.getX();
+                        double toTargetZ = targetVec.z - bot.getZ();
+                        double len = Math.sqrt(toTargetX * toTargetX + toTargetZ * toTargetZ);
+                        if (len > 0.01) {
+                            double perpX = -toTargetZ / len;
+                            double perpZ = toTargetX / len;
+                            // Alternate sides each stuck episode
+                            if (stuckRecoveryAttempts % 2 == 1) { perpX = -perpX; perpZ = -perpZ; }
+                            BlockPos sideStep = bot.getBlockPos().add(
+                                    (int) Math.round(perpX * 4), 0, (int) Math.round(perpZ * 4));
+                            BlockPos before = bot.getBlockPos();
+                            LOGGER.debug("[FortifyNav] lateral sidestep to {}", sideStep.toShortString());
+                            walkTowardBlock(bot, sideStep, 1_500L);
+                            if (!before.equals(bot.getBlockPos())) {
+                                if (gateContext) {
+                                    double sidestepGain = Math.sqrt(Math.max(0.0D, currentDistSq))
+                                            - Math.sqrt(Math.max(0.0D, bot.squaredDistanceTo(targetVec)));
+                                    if (sidestepGain < 0.75D) {
+                                        gateSidestepNoProgressBursts++;
+                                        recoveryResult = "sidestep-no-progress";
+                                    } else {
+                                        gateSidestepNoProgressBursts = 0;
+                                        recovered = true;
+                                        recoveryResult = "sidestep";
+                                    }
+                                } else {
+                                    recovered = true;
+                                    recoveryResult = "sidestep";
+                                }
+                            }
                         }
+                    } else if (!recovered) {
+                        sidestepSuppressed = true;
                     }
-                    LOGGER.debug("Walk to {} stuck after {} ticks, giving up", target.toShortString(), stuckTicks);
+                    if (!recovered && !carvePreferredMode) {
+                        ServerWorld w = recoveryWorld;
+                        arcTried = true;
+                        recovered = tryBacktrackArcWalkRecovery(bot, w, target, stuckRecoveryAttempts);
+                        if (recovered) {
+                            if (gateContext) {
+                                gateSidestepNoProgressBursts = 0;
+                            }
+                            recoveryResult = "arc";
+                        }
+                    } else if (!recovered) {
+                        arcSuppressed = true;
+                    }
+                    if (!recovered && carvePreferredMode && recoveryDepth > 0 && recoveryTrapLike) {
+                        recoveryResult = "surface-escape-failed";
+                    }
+                    if (navContext != null && navContext.startsWith("fortify-tower")) {
+                        LOGGER.info("[FortifyTower] walk-recovery ctx={} target={} attempt={} pathTried={} breakTried={} sidestepTried={} arcTried={} moved={}",
+                                navContext, target.toShortString(), stuckRecoveryAttempts,
+                                pathTried, breakTried, sidestepTried, arcTried, recovered);
+                    }
+                    LOGGER.info("[FortifyNav] stuck-recovery-end ctx={} pos={} target={} scopePresent={} scopeCtx={} trapLike={} belowSurfaceDepth={} recoveryMode={} tried[path={},break={},sidestep={},arc={}] suppressed[break={},sidestep={},arc={}] result={} moved={}",
+                            navContext != null ? navContext : "none",
+                            recoveryStart.toShortString(),
+                            target.toShortString(),
+                            activeFortifyNavScope != null,
+                            activeFortifyNavScope != null ? activeFortifyNavScope.context : "none",
+                            recoveryTrapLike,
+                            recoveryDepth,
+                            recoveryModeLabel,
+                            pathTried, breakTried, sidestepTried, arcTried,
+                            breakSuppressed, sidestepSuppressed, arcSuppressed,
+                            recoveryResult,
+                            recovered);
+                    if (recovered) {
+                        if (gateContext && !Objects.equals(recoveryResult, "sidestep")) {
+                            gateSidestepNoProgressBursts = 0;
+                        }
+                        stuckTicks = 0;
+                        lastBlockPos = bot.getBlockPos();
+                        noteEntombmentRecoverySuccess(recoveryWorld, recoveryStart, bot.getBlockPos(), navContext);
+                        continue;
+                    }
+                    noteEntombmentNoProgressCycle(recoveryWorld, recoveryStart, navContext);
+                    int maxRecoveryAttempts = (towerStepupLoopMode || edgeStepupLoopMode) ? 1 : 4;
+                    if (stuckRecoveryAttempts < maxRecoveryAttempts) {
+                        LOGGER.debug("[FortifyNav] local recovery attempt {} failed at {}, retrying",
+                                stuckRecoveryAttempts, bot.getBlockPos().toShortString());
+                        stuckTicks = 0;
+                        lastBlockPos = bot.getBlockPos();
+                        sleepQuiet(100);
+                        continue;
+                    }
+                    LOGGER.debug("Walk to {} stuck after {} recovery attempts, giving up",
+                            target.toShortString(), stuckRecoveryAttempts);
                     return;
                 }
 
@@ -5295,6 +9356,22 @@ public final class FortifyVillageSkill implements Skill {
                 boolean onScaffold = isStandingOnScaffoldBlock(bot, world);
                 if (onScaffold && !scaffoldHold) {
                     scaffoldHold = beginScaffoldEdgeHold(bot, world, target);
+                }
+
+                if (hasDangerousFortifyPrecipiceAhead(bot, world, target, navContext)) {
+                    boolean patched = tryPatchFortifyFootingNearWorksite(bot, world, target, navContext, "precipice-defense");
+                    if (!patched) {
+                        LOGGER.info("[FortifyNav] precipice-defense hold ctx={} pos={} target={}",
+                                navContext != null ? navContext : "none",
+                                bot.getBlockPos().toShortString(),
+                                target.toShortString());
+                        BotActions.stop(bot);
+                        stuckTicks = Math.max(stuckTicks, stuckThreshold + 1);
+                        sleepQuiet(50);
+                        continue;
+                    }
+                    sleepQuiet(50);
+                    continue;
                 }
 
                 LookController.faceBlock(bot, target);
@@ -5308,8 +9385,14 @@ public final class FortifyVillageSkill implements Skill {
             endScaffoldEdgeHold(bot, scaffoldHold);
         }
 
-        LOGGER.debug("Walk to {} timed out at dist={}", target.toShortString(),
-                Math.sqrt(bot.squaredDistanceTo(targetVec)));
+        if (navContext != null && navContext.startsWith("fortify-tower")) {
+            LOGGER.info("[FortifyTower] walk-timeout ctx={} target={} dist={}",
+                    navContext, target.toShortString(),
+                    String.format(Locale.ROOT, "%.1f", Math.sqrt(bot.squaredDistanceTo(targetVec))));
+        } else {
+            LOGGER.debug("Walk to {} timed out at dist={}", target.toShortString(),
+                    Math.sqrt(bot.squaredDistanceTo(targetVec)));
+        }
     }
 
     private boolean moveToReachBlock(ServerCommandSource source, ServerPlayerEntity bot, BlockPos target) {
@@ -5437,6 +9520,9 @@ public final class FortifyVillageSkill implements Skill {
     private boolean isPlannedBlockSatisfied(ProceduralWallBlock planned, BlockState current) {
         if (planned == null || current == null) {
             return false;
+        }
+        if (ignoredCavityPositions.contains(planned.worldPos())) {
+            return true;
         }
         BlockState desired = planned.state();
         if (current.equals(desired)) {
