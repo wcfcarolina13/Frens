@@ -589,6 +589,10 @@ public final class BotActions {
     }
 
     public static PlaceResult tryPlaceBlockAt(ServerPlayerEntity bot, BlockPos target, Direction face, List<Item> prioritizedBlocks) {
+        return tryPlaceBlockAt(bot, target, face, prioritizedBlocks, false);
+    }
+
+    public static PlaceResult tryPlaceBlockAt(ServerPlayerEntity bot, BlockPos target, Direction face, List<Item> prioritizedBlocks, boolean allowIntersecting) {
         PlaceResult fallback = new PlaceResult(false, "timeout-or-thread-error");
         return callOnServerThread(bot, () -> {
             ServerWorld world = bot.getCommandSource().getWorld();
@@ -619,10 +623,12 @@ public final class BotActions {
             }
 
             // Avoid placing while standing inside the target
-            if (bot.getBoundingBox().intersects(new net.minecraft.util.math.Box(target))) {
+            boolean isIntersecting = bot.getBoundingBox().intersects(new net.minecraft.util.math.Box(target));
+            boolean allowJumpPillar = false;
+            if (isIntersecting) {
                 // Allow jump-pillaring: if the bot is airborne and placing into its current foot block,
                 // vanilla collision resolution will move the player upward instead of trapping them.
-                boolean allowJumpPillar = !bot.isOnGround()
+                allowJumpPillar = !bot.isOnGround()
                         && target.equals(bot.getBlockPos())
                         && bot.getY() > target.getY() + 0.05D;
                 // Also allow placing into the block below the current foot block while airborne
@@ -633,7 +639,7 @@ public final class BotActions {
                             && target.equals(below)
                             && bot.getY() > below.getY() + 0.05D;
                 }
-                if (!allowJumpPillar) {
+                if (!allowJumpPillar && !allowIntersecting) {
                     return new PlaceResult(false, "bot-intersects-target");
                 }
             }
@@ -657,7 +663,11 @@ public final class BotActions {
 
             BlockHitResult hit = computePlacementHit(world, bot, support);
             if (hit == null) {
-                return new PlaceResult(false, "no-line-of-sight-to-support support=" + support.clickPos().toShortString() + " face=" + support.face());
+                if (allowIntersecting || (isIntersecting && allowJumpPillar)) {
+                    hit = new BlockHitResult(Vec3d.ofCenter(support.clickPos()), support.face(), support.clickPos(), false);
+                } else {
+                    return new PlaceResult(false, "no-line-of-sight-to-support support=" + support.clickPos().toShortString() + " face=" + support.face());
+                }
             }
             ItemUsageContext usage = new ItemUsageContext(bot, Hand.MAIN_HAND, hit);
             ItemPlacementContext placementContext = new ItemPlacementContext(usage);
@@ -679,6 +689,48 @@ public final class BotActions {
                     placementContext.getBlockPos().toShortString());
             PlaceResult fail = new PlaceResult(false, reason);
             return fail;
+        }, 3500L, fallback);
+    }
+
+    /**
+     * Force-place a block at the given position using {@code world.setBlockState()},
+     * bypassing vanilla placement validation (entity collision, etc.).
+     * <p>Only use for repair operations where we know the block must exist
+     * (e.g., carve repairs after breaking wall blocks for navigation).
+     */
+    public static PlaceResult forceReplaceBlock(ServerPlayerEntity bot, BlockPos target, List<Item> prioritizedBlocks) {
+        PlaceResult fallback = new PlaceResult(false, "timeout-or-thread-error");
+        return callOnServerThread(bot, () -> {
+            ServerWorld world = bot.getCommandSource().getWorld();
+            if (world == null || target == null) {
+                return new PlaceResult(false, "no-world-or-target");
+            }
+            if (!world.getBlockState(target).isAir()) {
+                return new PlaceResult(true, null); // already filled
+            }
+            int slot = findPreferredBlockItemSlot(bot, prioritizedBlocks);
+            if (slot == -1) {
+                return new PlaceResult(false, "no-block-item-available");
+            }
+            PlayerInventory inventory = bot.getInventory();
+            slot = ensureHotbarAccess(bot, inventory, slot);
+            ItemStack stack = inventory.getStack(slot);
+            if (!(stack.getItem() instanceof BlockItem blockItem)) {
+                return new PlaceResult(false, "selected-item-not-block");
+            }
+            selectHotbarSlot(bot, slot);
+
+            BlockState stateToPlace = blockItem.getBlock().getDefaultState();
+            boolean placed = world.setBlockState(target, stateToPlace);
+            if (placed) {
+                stack.decrement(1);
+                if (stack.isEmpty()) {
+                    inventory.setStack(slot, ItemStack.EMPTY);
+                }
+                bot.swingHand(Hand.MAIN_HAND, true);
+                return new PlaceResult(true, null);
+            }
+            return new PlaceResult(false, "setBlockState-rejected");
         }, 3500L, fallback);
     }
 

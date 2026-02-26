@@ -4750,10 +4750,10 @@ public final class FortifyVillageSkill implements Skill {
         if (exitsAfter > exitsBefore) {
             return false;
         }
-        if (exitsAfter <= 1 && exitsAfter < exitsBefore) {
+        if (exitsAfter == 0 && exitsAfter < exitsBefore) {
             return true;
         }
-        return isTrapLikeCell(world, botPos) && exitsAfter <= 1;
+        return isTrapLikeCell(world, botPos) && exitsAfter == 0;
     }
 
     private boolean shouldDeferCarveFinalize(FortifyNavRuntimeScope scope, ServerPlayerEntity bot, ServerWorld world) {
@@ -5161,6 +5161,18 @@ public final class FortifyVillageSkill implements Skill {
                     return new ReplaceBlockResult(true, ReplaceFailureKind.NONE, null);
                 }
             }
+        }
+
+        // Fallback: bypass vanilla placement with direct setBlockState for mandatory repairs.
+        // This handles cases where blockItem.place() rejects placement due to entity collision
+        // even though the bot has stepped out of the target block.
+        if (mandatory && world.getBlockState(pos).isAir()) {
+            BotActions.PlaceResult forced = BotActions.forceReplaceBlock(bot, pos, replacements);
+            if (forced.success() || !world.getBlockState(pos).isAir()) {
+                LOGGER.info("[FortifyNav] Force-replaced mined block at {} (bypassed vanilla placement)", pos.toShortString());
+                return new ReplaceBlockResult(true, ReplaceFailureKind.NONE, null);
+            }
+            LOGGER.warn("[FortifyNav] Force-replace also failed pos={} reason={}", pos.toShortString(), forced.reason());
         }
 
         String ctx = context == null ? "fortify-nav" : context;
