@@ -119,7 +119,7 @@ public final class FortifyVillageSkill implements Skill {
     private static final long FORTIFY_CLEANUP_BACKOFF_BASE_MS = 250L;
     private static final long FORTIFY_CLEANUP_BACKOFF_MAX_MS = 1_000L;
     private static final int FORTIFY_CLEANUP_ACTIVE_RECOVERY_ATTEMPTS = 2;
-    private static final int FORTIFY_CLEANUP_ACTIVE_RECOVERY_MAX_DIST = 8;
+    private static final int FORTIFY_CLEANUP_ACTIVE_RECOVERY_MAX_DIST = 12;
     private static final long FORTIFY_CLEANUP_PROCESS_MIN_INTERVAL_MS = 350L;
     private static final int FORTIFY_PATCH_SKIP_LOG_SAMPLE_LIMIT = 10;
     private static final long FORTIFY_ENTOMBMENT_STATE_TTL_MS = 20_000L;
@@ -187,6 +187,8 @@ public final class FortifyVillageSkill implements Skill {
     private FortifyNavRuntimeScope activeFortifyNavScope = null;
     private long fortifyMovementEpoch = 0L;
     private boolean fortifyReplanActive = false;
+    /** Tower vertices that yielded zero progress in the current auto-patch session — skip on next pass. */
+    private final Set<Long> zeroProgressTowerVertices = new HashSet<>();
     private final List<DeferredCleanupTask> deferredFortifyCleanupQueue = new ArrayList<>();
     private long deferredFortifyCleanupLastProcessMs = 0L;
 
@@ -403,6 +405,8 @@ public final class FortifyVillageSkill implements Skill {
         private final WallPoint vertex;
         private final Set<BlockPos> failedApproachCandidates = new LinkedHashSet<>();
         private final Set<BlockPos> failedHardResetCandidates = new LinkedHashSet<>();
+        /** Positions where pillar escape has failed below surface — used to bail faster on revisit. */
+        private final Set<BlockPos> failedSubSurfacePositions = new LinkedHashSet<>();
         private BlockPos lastStuckPos = null;
         private int sameStuckPosCount = 0;
         private long lastStuckStartMs = 0L;
@@ -426,6 +430,17 @@ public final class FortifyVillageSkill implements Skill {
                 failedHardResetCandidates.add(pos.toImmutable());
                 trim(failedHardResetCandidates, 8);
             }
+        }
+
+        private void recordSubSurfaceFailure(BlockPos pos) {
+            if (pos != null) {
+                failedSubSurfacePositions.add(pos.toImmutable());
+                trim(failedSubSurfacePositions, 12);
+            }
+        }
+
+        private boolean isKnownSubSurfaceFailure(BlockPos pos) {
+            return pos != null && failedSubSurfacePositions.contains(pos);
         }
 
         private void noteMovement(BlockPos before, BlockPos after) {
@@ -1504,6 +1519,7 @@ public final class FortifyVillageSkill implements Skill {
             if (countBuildingBlocks(bot) == 0) break;
 
             WallPoint vertex = towerVertices.get(vi);
+            long vertexKey = ((long) vertex.x() << 32) | (vertex.z() & 0xFFFFFFFFL);
             List<ProceduralWallBlock> vertexRepairs = byVertex.getOrDefault(vi, List.of());
             int plannedCount = countActivePlannedBlocks(vertexRepairs);
             if (plannedCount <= 0) {
@@ -1512,6 +1528,13 @@ public final class FortifyVillageSkill implements Skill {
             int presentBefore = countPresentBlocks(world, vertexRepairs);
             int missingBefore = Math.max(0, plannedCount - presentBefore);
             if (missingBefore <= 0) {
+                continue;
+            }
+
+            // Skip towers that had zero progress on a previous pass
+            if (zeroProgressTowerVertices.contains(vertexKey)) {
+                LOGGER.info("[FortifyTower] Skipping previously-stuck tower ({}, {}) — zero progress in earlier pass",
+                        vertex.x(), vertex.z());
                 continue;
             }
 
@@ -1538,6 +1561,14 @@ public final class FortifyVillageSkill implements Skill {
                 ChatUtils.sendSystemMessage(source, String.format(
                         "§7    Tower patch incomplete at (%d, %d): %d/%d present.",
                         vertex.x(), vertex.z(), presentAfter, plannedCount));
+            }
+
+            // Track zero-progress vertices so we skip them on the next auto-patch pass
+            if (placed == 0) {
+                zeroProgressTowerVertices.add(vertexKey);
+            } else {
+                // Clear the blacklist entry if we made any progress
+                zeroProgressTowerVertices.remove(vertexKey);
             }
 
         }
@@ -4664,10 +4695,9 @@ public final class FortifyVillageSkill implements Skill {
 
     private boolean shouldAllowDeferredCleanupActiveRecovery(String context) {
         if (context == null) return false;
-        return context.equals("scaffold-teardown")
-                || context.startsWith("fortify-gate:post-success")
-                || context.startsWith("fortifyabort")
-                || context.startsWith("fortify-abort");
+        // Allow active recovery for all fortify-related contexts — the bot should
+        // always attempt to walk toward unreachable repair items when possible.
+        return context.startsWith("fortify") || context.startsWith("scaffold");
     }
 
     private boolean isTrapLikeCell(ServerWorld world, BlockPos pos) {
@@ -4885,7 +4915,7 @@ public final class FortifyVillageSkill implements Skill {
             }
             if (wouldRepairSealCurrentExit(bot, world, pos)) {
                 unresolved.add(repair);
-                LOGGER.info("[FortifyNav] Carve repair skip pos={} reason=seal-risk exitsAfter<=1", pos.toShortString());
+                LOGGER.info("[FortifyNav] Carve repair skip pos={} reason=seal-risk exitsAfter=0", pos.toShortString());
                 continue;
             }
             if (bot.getBlockPos().equals(pos) || bot.getBlockPos().up().equals(pos)) {
@@ -4959,6 +4989,14 @@ public final class FortifyVillageSkill implements Skill {
                 continue;
             }
             BlockPos pos = task.pos;
+            // Proximity skip: don't attempt items that are very far away — just defer them.
+            // The bot will pick them up when it's closer on a future pass.
+            double distSqToItem = bot.getBlockPos().getSquaredDistance(pos);
+            if (distSqToItem > 256.0D) { // > 16 blocks away
+                skipped++;
+                incrementCleanupReason(skipReasons, "tooFar");
+                continue;
+            }
             if (task.kind == FortifyCleanupKind.CARVE_REPAIR) {
                 if (task.originalState == null) {
                     it.remove();
@@ -6131,12 +6169,17 @@ public final class FortifyVillageSkill implements Skill {
             if (isTowerComplete(presentCount, plannedCount)) {
                 break;
             }
-            // Safety net: if 20 seconds have passed with zero blocks placed, bail out.
-            // Prevents burning 50+ seconds when the bot is stuck against a wall.
-            if (newlyPlaced == 0 && System.currentTimeMillis() - towerStartMs > 20_000L) {
-                LOGGER.info("[FortifyTower] tower {}/{} timed out after {}s with 0 blocks placed, skipping",
+            // Safety net: bail out after a time budget with zero blocks placed.
+            // If the bot is at a known failed sub-surface position, use a shorter budget (8s)
+            // to avoid burning 20+ seconds revisiting the same stuck trap.
+            boolean atKnownBadPos = towerNavState != null
+                    && towerNavState.isKnownSubSurfaceFailure(bot.getBlockPos());
+            long zeroBudgetMs = atKnownBadPos ? 8_000L : 20_000L;
+            if (newlyPlaced == 0 && System.currentTimeMillis() - towerStartMs > zeroBudgetMs) {
+                LOGGER.info("[FortifyTower] tower {}/{} timed out after {}s with 0 blocks placed{}, skipping",
                         vertexOrdinal + 1, totalVertices,
-                        (System.currentTimeMillis() - towerStartMs) / 1000);
+                        (System.currentTimeMillis() - towerStartMs) / 1000,
+                        atKnownBadPos ? " (known bad sub-surface pos)" : "");
                 break;
             }
 
@@ -7630,6 +7673,10 @@ public final class FortifyVillageSkill implements Skill {
         int losZero = 0;
         int lowExits = 0;
         int tooDeep = 0;
+        // Track best clearable-headroom candidate for fallback when all normal candidates fail.
+        // These are positions with floor support where we could mine the feet/head blocks.
+        BlockPos bestClearableHeadroomPos = null;
+        double bestClearableHeadroomScore = Double.NEGATIVE_INFINITY;
         int startIndex = Math.floorMod(attemptOffset, candidates.length);
         for (int i = 0; i < candidates.length; i++) {
             int[] c = candidates[(startIndex + i) % candidates.length];
@@ -7651,7 +7698,27 @@ public final class FortifyVillageSkill implements Skill {
                 boolean headClear = head.isAir() || head.isReplaceable();
                 boolean support = !below.isAir() && !below.isReplaceable();
                 if (!(feetClear && headClear && support)) {
-                    if (!support) noFloor++; else badHeadroomOrStand++;
+                    if (!support) {
+                        noFloor++;
+                    } else {
+                        badHeadroomOrStand++;
+                        // Track clearable headroom candidates: has floor, but feet/head need mining.
+                        // Only consider if blocks are mineable (hardness >= 0, not bedrock etc.).
+                        boolean feetMineable = feetClear || (feet.getHardness(world, pos) >= 0);
+                        boolean headMineable = headClear || (head.getHardness(world, pos.up()) >= 0);
+                        if (feetMineable && headMineable && !isInsideTowerFootprint(pos, vertex)) {
+                            int safeYH = safeSurfaceY(surfaceProfile, world, pos.getX(), pos.getZ());
+                            int depthH = Math.max(0, safeYH - y);
+                            if (depthH <= 1) {
+                                double distSqH = bot.squaredDistanceTo(pos.getX() + 0.5, y, pos.getZ() + 0.5);
+                                double scoreH = -distSqH - depthH * 220.0;
+                                if (scoreH > bestClearableHeadroomScore) {
+                                    bestClearableHeadroomScore = scoreH;
+                                    bestClearableHeadroomPos = pos;
+                                }
+                            }
+                        }
+                    }
                     continue;
                 }
                 if (isInsideTowerFootprint(pos, vertex)) {
@@ -7728,6 +7795,29 @@ public final class FortifyVillageSkill implements Skill {
                     String.format(Locale.ROOT, "%.1f", best.score()),
                     best.exits(), best.locallyReachable(), best.previouslyFailed(), bestDepth);
             return best.pos();
+        }
+        // Headroom-clearing fallback: if all candidates were rejected due to bad headroom,
+        // try to mine the obstructing blocks at the best clearable position.
+        if (bestClearableHeadroomPos != null) {
+            BlockPos clearPos = bestClearableHeadroomPos;
+            BlockState clFeet = world.getBlockState(clearPos);
+            BlockState clHead = world.getBlockState(clearPos.up());
+            boolean cleared = false;
+            if (!clFeet.isAir() && !clFeet.isReplaceable() && clFeet.getHardness(world, clearPos) >= 0) {
+                digBlock(bot, world, clearPos);
+                sleepQuiet(80);
+                cleared = true;
+            }
+            if (!clHead.isAir() && !clHead.isReplaceable() && clHead.getHardness(world, clearPos.up()) >= 0) {
+                digBlock(bot, world, clearPos.up());
+                sleepQuiet(80);
+                cleared = true;
+            }
+            if (cleared) {
+                LOGGER.info("[FortifyTower] approach-select tower=({}, {}) cleared-headroom at {} bad_headroom={} no_floor={}",
+                        vertex.x(), vertex.z(), clearPos.toShortString(), badHeadroomOrStand, noFloor);
+                return clearPos;
+            }
         }
         int y = safeSurfaceY(surfaceProfile, world, vertex.x(), vertex.z());
         BlockPos fallback = new BlockPos(vertex.x(), y, vertex.z());
@@ -8686,6 +8776,85 @@ public final class FortifyVillageSkill implements Skill {
                 shaftBlockersAfter,
                 pillared,
                 progress);
+
+        // Horizontal escape fallback: if vertical pillar failed and shaft still has blockers,
+        // try mining sideways 1-2 blocks into a cardinal direction that has fewer overhead blockers,
+        // then retry pillar from the new position.
+        if (!pillared && !progress && shaftBlockersAfter > 0) {
+            BlockPos startPos = bot.getBlockPos();
+            int bestBlockers = shaftBlockersAfter;
+            Direction bestDir = null;
+            for (Direction dir : Direction.Type.HORIZONTAL) {
+                BlockPos adjacent = startPos.offset(dir);
+                // Check if we can stand there (feet + head clear, floor support)
+                BlockState adjFeet = world.getBlockState(adjacent);
+                BlockState adjHead = world.getBlockState(adjacent.up());
+                BlockState adjBelow = world.getBlockState(adjacent.down());
+                boolean canStand = (adjFeet.isAir() || adjFeet.isReplaceable())
+                        && (adjHead.isAir() || adjHead.isReplaceable())
+                        && !adjBelow.isAir();
+                if (canStand) {
+                    // Already standable — count shaft blockers above this position
+                    int adjRemaining = Math.max(1, referenceSurfaceY - adjacent.getY() + 1);
+                    int adjBlockers = 0;
+                    for (int dy = 2; dy <= Math.max(3, adjRemaining + 3); dy++) {
+                        BlockState st = world.getBlockState(adjacent.up(dy));
+                        if (!st.isAir() && !st.isReplaceable()) adjBlockers++;
+                    }
+                    if (adjBlockers < bestBlockers) {
+                        bestBlockers = adjBlockers;
+                        bestDir = dir;
+                    }
+                } else {
+                    // Can we MAKE it standable by mining feet and head?
+                    boolean feetMineable = adjFeet.getHardness(world, adjacent) >= 0 && !adjFeet.isAir();
+                    boolean headMineable = adjHead.getHardness(world, adjacent.up()) >= 0 && !adjHead.isAir();
+                    if ((adjFeet.isAir() || feetMineable) && (adjHead.isAir() || headMineable) && !adjBelow.isAir()) {
+                        // Count blockers in this adjacent shaft
+                        int adjRemaining = Math.max(1, referenceSurfaceY - adjacent.getY() + 1);
+                        int adjBlockers = 0;
+                        for (int dy = 2; dy <= Math.max(3, adjRemaining + 3); dy++) {
+                            BlockState st = world.getBlockState(adjacent.up(dy));
+                            if (!st.isAir() && !st.isReplaceable()) adjBlockers++;
+                        }
+                        if (adjBlockers < bestBlockers) {
+                            bestBlockers = adjBlockers;
+                            bestDir = dir;
+                        }
+                    }
+                }
+            }
+            if (bestDir != null) {
+                BlockPos target = startPos.offset(bestDir);
+                LOGGER.info("[FortifyNav] pillar-escape-horizontal dir={} from={} to={} shaftBlockers={}->{}",
+                        bestDir, startPos.toShortString(), target.toShortString(), shaftBlockersAfter, bestBlockers);
+                // Mine into the adjacent position
+                BlockState tFeet = world.getBlockState(target);
+                if (!tFeet.isAir() && tFeet.getHardness(world, target) >= 0) {
+                    digBlock(bot, world, target);
+                    sleepQuiet(80);
+                }
+                BlockState tHead = world.getBlockState(target.up());
+                if (!tHead.isAir() && tHead.getHardness(world, target.up()) >= 0) {
+                    digBlock(bot, world, target.up());
+                    sleepQuiet(80);
+                }
+                // Walk into the adjacent position
+                walkTowardBlock(bot, target, 800L);
+                sleepQuiet(100);
+                // Retry pillar from the new position
+                int newRemaining = Math.max(1, referenceSurfaceY - bot.getBlockPos().getY());
+                if (newRemaining > 0 && newRemaining <= MAX_SCAFFOLD_HEIGHT) {
+                    clearEscapeShaftHeadroom(bot, world, newRemaining + 1, contextTag);
+                    boolean retryPillared = ScaffoldService.pillarUp(bot, newRemaining + 1, true);
+                    boolean retryProgress = bot.getBlockPos().getY() > startPos.getY();
+                    LOGGER.info("[FortifyNav] pillar-escape-horizontal-retry pos={} pillared={} progress={}",
+                            bot.getBlockPos().toShortString(), retryPillared, retryProgress);
+                    if (retryPillared || retryProgress) return true;
+                }
+            }
+        }
+
         return pillared || progress;
     }
 
@@ -8782,6 +8951,11 @@ public final class FortifyVillageSkill implements Skill {
             LOGGER.warn("Pillar escape incomplete, bot at {} vs surfaceY={} pocketFailures={}",
                     botPos.toShortString(), referenceSurfaceY, sameColumnFailures);
             noteEntombmentSurfaceEscapeFailure(world, botPos, activeFortifyNavScope != null ? activeFortifyNavScope.context : null);
+            // Record this below-surface failure so the tower approach blacklists it on revisit
+            if (activeFortifyNavScope != null && activeFortifyNavScope.towerState != null) {
+                activeFortifyNavScope.towerState.recordSubSurfaceFailure(startPos);
+                activeFortifyNavScope.towerState.recordSubSurfaceFailure(botPos);
+            }
         }
     }
 
@@ -9101,7 +9275,12 @@ public final class FortifyVillageSkill implements Skill {
         double distSq = bot.squaredDistanceTo(targetVec);
         if (distSq < 9.0) return; // already within 3 blocks
 
-        long deadline = System.currentTimeMillis() + timeoutMs;
+        // Scale timeout with distance: at least 400ms per block of distance, minimum 2s.
+        // Prevents premature timeout on long-range walks (e.g. 100+ blocks with a 3s cap).
+        double distBlocks = Math.sqrt(distSq);
+        long scaledTimeout = Math.max(timeoutMs, Math.max(2_000L, (long) (distBlocks * 400.0)));
+
+        long deadline = System.currentTimeMillis() + scaledTimeout;
         long phaseStartMs = System.currentTimeMillis();
         BlockPos lastBlockPos = bot.getBlockPos();
         int stuckTicks = 0;
