@@ -32,12 +32,12 @@ All P0/P1 checkboxes above marked `[x]` after in-game verification or code fix.
 
 ### In-Flight: FortifyVillageSkill Refactoring — Phase 1 Complete, Phase 2 Blocked
 
-**Completed (commit `2ee2253`):**
-- Extracted `FortifyEntombmentHelper.java` (411 lines) from `FortifyVillageSkill.java`
-- Removed 308 lines from the skill (now 9593 lines, was 9901)
-- Helper owns: `EntombmentRecoveryState`, `SurfaceEscapeRetryState` inner types; 4 constants; 3 state maps; 21 extracted methods
-- Context update hooks wired in `beginFortifyNavScope()`, `endFortifyNavScope()`, and 4 `currentLayout` assignment sites
-- Build verified: `./gradlew build -x test` → BUILD SUCCESSFUL
+**Completed (commit `2ee2253` + `38a3526`):**
+- Extracted `FortifyEntombmentHelper.java` (411 lines) — pure state tracking, 21 methods, no skill dependencies
+- Extracted `FortifySkillTypes.java` (~300 lines) — 9 enums, 16 records, 5 inner classes
+  - Enums: `FortifyNavMode`, `FortifyCleanupKind`, `CleanupState`, `NavBreakRejectReason`, `ReplaceFailureKind`, `TowerPillarOutcome`, `TowerStepOutcome`, `TowerReturnOutcome`, `TowerScaffoldSideOutcome`
+  - Classes: `DeferredCleanupTask`, `FortifyCarveSession`, `FortifyNavRuntimeScope`, `TowerNavAttemptState`, `ScaffoldLedger`
+- Skill is now 9246 lines (was 9901 — reduced by 655 lines across both commits)
 
 **Why Phase 2 is blocked:**
 - Cleanup, tower, gate, and nav sections are deeply coupled — most methods call 5–15 other private skill methods (`walkToTarget`, `digBlock`, `sleepQuiet`, carve sessions, protected positions, nav scopes)
