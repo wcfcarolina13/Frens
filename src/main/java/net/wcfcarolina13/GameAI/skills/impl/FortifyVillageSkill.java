@@ -67,7 +67,7 @@ import java.util.concurrent.ThreadLocalRandom;
  *   /bot fortify name <old> <new>    — rename a saved wall
  *   /bot fortify merge <name>        — merge current village into existing wall
  */
-public final class FortifyVillageSkill implements Skill {
+public final class FortifyVillageSkill implements Skill, FortifySkillOps.FortifyNavOps {
 
     private static final Logger LOGGER = LoggerFactory.getLogger("skill-fortify-village");
     private static final double REACH_DISTANCE_SQ = 20.25D;
@@ -121,13 +121,7 @@ public final class FortifyVillageSkill implements Skill {
 
     private static final int FORTIFY_GATE_EXIT_SIDESTEP_NO_PROGRESS_LIMIT = 2;
 
-    private static final long FORTIFY_FOOTING_PATCH_COOLDOWN_MS = 400L;
-    private static final int FORTIFY_PRECIpICE_DEFENSE_MIN_DROP = 2;
-    private static final int FORTIFY_FOOTING_PATCH_SCAN_DEPTH = 5;
     private static final int FORTIFY_TRAP_CARVE_DEPTH_LIMIT = 6;
-    private static final List<Item> FORTIFY_FOOTING_PATCH_MATS = List.of(
-            Items.COBBLESTONE, Items.COBBLED_DEEPSLATE, Items.DIRT
-    );
 
     private static final List<String> CAVITY_DIALOGUES = List.of(
             "Noted a pocket in the wall—flagging it for you.",
@@ -146,9 +140,6 @@ public final class FortifyVillageSkill implements Skill {
 
     /** Entombment recovery, surface-escape retry, and carve-column cooldown tracking. */
     private final FortifyEntombmentHelper entombmentHelper = new FortifyEntombmentHelper();
-    /** Simple cooldown to avoid spamming local footing bridge placement attempts. */
-    private long fortifyFootingPatchLastMs = 0L;
-    private BlockPos fortifyFootingPatchLastOrigin = null;
 
     /** Current fortification layout — set during buildWall/handlePatch, used for gate-routing. */
     private FortificationLayout currentLayout = null;
@@ -164,7 +155,13 @@ public final class FortifyVillageSkill implements Skill {
     private final FortifyCleanupHelper cleanupHelper = new FortifyCleanupHelper();
     /** Layout query helper: block satisfaction, material fallbacks, edge ordering. */
     private final FortifyLayoutHelper layoutHelper = new FortifyLayoutHelper(ignoredCavityPositions);
+    /** Escape/precipice-defense helper: hole escape, footing patches, shaft clearing. */
+    private final FortifyEscapeHelper escapeHelper = new FortifyEscapeHelper(this, entombmentHelper, () -> fortificationProtectedPositions);
 
+    @Override
+    public FortifyNavRuntimeScope getActiveFortifyNavScope() {
+        return activeFortifyNavScope;
+    }
 
     private FortifyNavRuntimeScope beginFortifyNavScope(String context,
                                                         TowerNavAttemptState towerState,
@@ -2275,7 +2272,8 @@ public final class FortifyVillageSkill implements Skill {
      * {@code bot.squaredDistanceTo(blockCenter) <= 20.25} (reach = 4.5 blocks from feet).
      * This is more generous than the eye-based isWithinReach() for blocks below the bot.
      */
-    private boolean isWithinMiningReach(ServerPlayerEntity bot, BlockPos pos) {
+    @Override
+    public boolean isWithinMiningReach(ServerPlayerEntity bot, BlockPos pos) {
         return bot.squaredDistanceTo(pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5) <= 20.25;
     }
 
@@ -2903,7 +2901,8 @@ public final class FortifyVillageSkill implements Skill {
      * blocks with negative hardness (unbreakable). Returns true if the block
      * was successfully removed or was already air.
      */
-    private boolean digBlock(ServerPlayerEntity bot, ServerWorld world, BlockPos pos) {
+    @Override
+    public boolean digBlock(ServerPlayerEntity bot, ServerWorld world, BlockPos pos) {
         BlockState state = world.getBlockState(pos);
         if (state.isAir()) return true;
         if (DIG_BLACKLIST.contains(state.getBlock())) return false;
@@ -3131,7 +3130,8 @@ public final class FortifyVillageSkill implements Skill {
         return new NavBreakCandidateEval(true, null);
     }
 
-    private NavBreakCandidateEval evaluateBreakForNavigation(ServerWorld world, BlockPos pos, boolean allowLayout) {
+    @Override
+    public NavBreakCandidateEval evaluateBreakForNavigation(ServerWorld world, BlockPos pos, boolean allowLayout) {
         if (fortificationProtectedPositions.contains(pos)) {
             if (!allowLayout) {
                 return new NavBreakCandidateEval(false, NavBreakRejectReason.LAYOUT_NOT_ALLOWED);
@@ -3827,7 +3827,8 @@ public final class FortifyVillageSkill implements Skill {
                 <= (double) (FORTIFY_CARVE_LOCAL_TARGET_MAX_DIST * FORTIFY_CARVE_LOCAL_TARGET_MAX_DIST);
     }
 
-    private boolean isFortifyCarveContext(FortifyNavRuntimeScope scope) {
+    @Override
+    public boolean isFortifyCarveContext(FortifyNavRuntimeScope scope) {
         if (scope == null) return false;
         if (scope.towerPatchContext || scope.gateContext) return true;
         String ctx = scope.context == null ? "" : scope.context;
@@ -4338,7 +4339,8 @@ public final class FortifyVillageSkill implements Skill {
     }
 
     /** Mine a single block for navigation break-through. Thin wrapper around MiningTool. */
-    private boolean digBlockForNavigation(ServerPlayerEntity bot, ServerWorld world, BlockPos pos) {
+    @Override
+    public boolean digBlockForNavigation(ServerPlayerEntity bot, ServerWorld world, BlockPos pos) {
         try {
             LookController.faceBlock(bot, pos);
             sleepQuiet(50);
@@ -7545,7 +7547,8 @@ public final class FortifyVillageSkill implements Skill {
         return removed;
     }
 
-    private boolean beginScaffoldEdgeHold(ServerPlayerEntity bot, ServerWorld world, BlockPos focusPos) {
+    @Override
+    public boolean beginScaffoldEdgeHold(ServerPlayerEntity bot, ServerWorld world, BlockPos focusPos) {
         if (bot == null || world == null) {
             return false;
         }
@@ -7560,7 +7563,8 @@ public final class FortifyVillageSkill implements Skill {
         return true;
     }
 
-    private void endScaffoldEdgeHold(ServerPlayerEntity bot, boolean held) {
+    @Override
+    public void endScaffoldEdgeHold(ServerPlayerEntity bot, boolean held) {
         if (!held || bot == null) {
             return;
         }
@@ -7737,15 +7741,7 @@ public final class FortifyVillageSkill implements Skill {
     }
 
     private Direction dominantHorizontalDirection(BlockPos from, BlockPos to) {
-        if (from == null || to == null) {
-            return Direction.NORTH;
-        }
-        int dx = to.getX() - from.getX();
-        int dz = to.getZ() - from.getZ();
-        if (Math.abs(dx) >= Math.abs(dz)) {
-            return dx >= 0 ? Direction.EAST : Direction.WEST;
-        }
-        return dz >= 0 ? Direction.SOUTH : Direction.NORTH;
+        return FortifyEscapeHelper.dominantHorizontalDirection(from, to);
     }
 
     private int countOpenExits(ServerWorld world, BlockPos center, BlockPos forcedSolidPos) {
@@ -7792,412 +7788,73 @@ public final class FortifyVillageSkill implements Skill {
     }
 
     private boolean isFortifyPrecipiceDefenseContext(String navContext) {
-        if (navContext == null) return false;
-        return navContext.startsWith("fortify-edge:")
-                || navContext.startsWith("fortify-tower:");
-    }
-
-    private int airDropDepth(ServerWorld world, BlockPos pos, int maxDepth) {
-        if (world == null || pos == null || maxDepth <= 0) return 0;
-        int depth = 0;
-        BlockPos cursor = pos;
-        for (int i = 0; i < maxDepth; i++) {
-            BlockState st = world.getBlockState(cursor);
-            if (!(st.isAir() || st.isReplaceable())) {
-                break;
-            }
-            depth++;
-            cursor = cursor.down();
-        }
-        return depth;
+        return escapeHelper.isFortifyPrecipiceDefenseContext(navContext);
     }
 
     private boolean hasDangerousFortifyPrecipiceAhead(ServerPlayerEntity bot, ServerWorld world,
                                                       BlockPos target, String navContext) {
-        if (bot == null || world == null || target == null) return false;
-        if (!isFortifyPrecipiceDefenseContext(navContext)) return false;
-        BlockPos botPos = bot.getBlockPos();
-        Direction forward = dominantHorizontalDirection(botPos, target);
-        BlockPos front = botPos.offset(forward);
-        int frontDrop = airDropDepth(world, front.down(), FORTIFY_FOOTING_PATCH_SCAN_DEPTH);
-        if (frontDrop >= FORTIFY_PRECIpICE_DEFENSE_MIN_DROP) {
-            return true;
-        }
-        Direction left = forward.rotateYCounterclockwise();
-        Direction right = forward.rotateYClockwise();
-        int leftDrop = airDropDepth(world, botPos.offset(left).down(), FORTIFY_FOOTING_PATCH_SCAN_DEPTH);
-        int rightDrop = airDropDepth(world, botPos.offset(right).down(), FORTIFY_FOOTING_PATCH_SCAN_DEPTH);
-        return leftDrop >= (FORTIFY_PRECIpICE_DEFENSE_MIN_DROP + 1)
-                || rightDrop >= (FORTIFY_PRECIpICE_DEFENSE_MIN_DROP + 1);
+        return escapeHelper.hasDangerousFortifyPrecipiceAhead(bot, world, target, navContext);
     }
 
     private boolean tryPatchFortifyFootingNearWorksite(ServerPlayerEntity bot, ServerWorld world,
                                                        BlockPos target, String navContext, String reason) {
-        if (bot == null || world == null || target == null) return false;
-        if (!isFortifyPrecipiceDefenseContext(navContext)) return false;
-
-        long now = System.currentTimeMillis();
-        BlockPos origin = bot.getBlockPos();
-        if (fortifyFootingPatchLastOrigin != null
-                && fortifyFootingPatchLastOrigin.getSquaredDistance(origin) <= 4.0D
-                && (now - fortifyFootingPatchLastMs) < FORTIFY_FOOTING_PATCH_COOLDOWN_MS) {
-            return false;
-        }
-
-        Direction forward = dominantHorizontalDirection(origin, target);
-        Direction left = forward.rotateYCounterclockwise();
-        Direction right = forward.rotateYClockwise();
-        LinkedHashSet<BlockPos> supportCandidates = new LinkedHashSet<>();
-        supportCandidates.add(origin.down());
-        supportCandidates.add(origin.offset(forward).down());
-        supportCandidates.add(origin.offset(forward, 2).down());
-        supportCandidates.add(origin.offset(left).down());
-        supportCandidates.add(origin.offset(right).down());
-        supportCandidates.add(origin.offset(forward).offset(left).down());
-        supportCandidates.add(origin.offset(forward).offset(right).down());
-
-        int placed = 0;
-        for (BlockPos supportPos : supportCandidates) {
-            if (supportPos == null) continue;
-            if (fortificationProtectedPositions.contains(supportPos)) continue;
-            BlockState state = world.getBlockState(supportPos);
-            if (!(state.isAir() || state.isReplaceable())) continue;
-
-            int dropDepth = airDropDepth(world, supportPos, FORTIFY_FOOTING_PATCH_SCAN_DEPTH);
-            if (dropDepth < FORTIFY_PRECIpICE_DEFENSE_MIN_DROP && !supportPos.equals(origin.down())) {
-                continue;
-            }
-
-            BlockPos standFeet = supportPos.up();
-            BlockPos standHead = standFeet.up();
-            BlockState feetState = world.getBlockState(standFeet);
-            BlockState headState = world.getBlockState(standHead);
-            boolean feetClear = feetState.isAir() || feetState.isReplaceable() || standFeet.equals(origin);
-            boolean headClear = headState.isAir() || headState.isReplaceable();
-            if (!feetClear || !headClear) continue;
-
-            LookController.faceBlock(bot, supportPos);
-            BotActions.PlaceResult place = BotActions.tryPlaceBlockAt(bot, supportPos, Direction.UP, FORTIFY_FOOTING_PATCH_MATS);
-            if (place.success()) {
-                placed++;
-                LOGGER.info("[FortifyNav] footing-bridge placed pos={} reason={} ctx={} dropDepth={} origin={} target={}",
-                        supportPos.toShortString(),
-                        reason != null ? reason : "none",
-                        navContext,
-                        dropDepth,
-                        origin.toShortString(),
-                        target.toShortString());
-                if (placed >= 2) break;
-            }
-        }
-
-        if (placed > 0) {
-            fortifyFootingPatchLastMs = now;
-            fortifyFootingPatchLastOrigin = origin.toImmutable();
-            return true;
-        }
-        return false;
+        return escapeHelper.tryPatchFortifyFootingNearWorksite(bot, world, target, navContext, reason);
     }
 
     private boolean isFortifyEscapeContext(String contextTag) {
-        if (activeFortifyNavScope != null && isFortifyCarveContext(activeFortifyNavScope)) {
-            return true;
-        }
-        if (contextTag == null) {
-            return false;
-        }
-        return contextTag.startsWith("fortify-edge:") || contextTag.startsWith("fortify-tower:");
+        return escapeHelper.isFortifyEscapeContext(contextTag);
     }
 
     private int countEscapeShaftBlockers(ServerPlayerEntity bot, ServerWorld world, int stepsToClimb) {
-        if (bot == null || world == null) return 0;
-        int planned = Math.max(1, Math.min(MAX_SCAFFOLD_HEIGHT, stepsToClimb));
-        int maxDy = Math.max(3, planned + 3);
-        int blockers = 0;
-        BlockPos botPos = bot.getBlockPos();
-        for (int dy = 2; dy <= maxDy; dy++) {
-            BlockPos pos = botPos.up(dy);
-            BlockState state = world.getBlockState(pos);
-            if (state.isAir() || state.isReplaceable()) {
-                continue;
-            }
-            blockers++;
-        }
-        return blockers;
+        return escapeHelper.countEscapeShaftBlockers(bot, world, stepsToClimb);
     }
 
     private int clearEscapeShaftHeadroom(ServerPlayerEntity bot, ServerWorld world, int stepsToClimb, String contextTag) {
-        if (bot == null || world == null) return 0;
-        boolean fortifyCtx = isFortifyEscapeContext(contextTag);
-        int planned = Math.max(1, Math.min(MAX_SCAFFOLD_HEIGHT, stepsToClimb));
-        int maxDy = Math.max(3, planned + 3);
-        int cleared = 0;
-        BlockPos botPos = bot.getBlockPos();
-        for (int dy = 2; dy <= maxDy; dy++) {
-            if (SkillManager.shouldAbortSkill(bot)) {
-                break;
-            }
-            BlockPos pos = botPos.up(dy);
-            BlockState state = world.getBlockState(pos);
-            if (state.isAir() || state.isReplaceable()) continue;
-            if (state.getHardness(world, pos) < 0) continue;
-
-            boolean dug = false;
-            if (fortifyCtx && isWithinMiningReach(bot, pos)) {
-                NavBreakCandidateEval eval = evaluateBreakForNavigation(world, pos, true);
-                if (eval.allowed()) {
-                    dug = digBlockForNavigation(bot, world, pos);
-                }
-            }
-            if (!dug) {
-                dug = digBlock(bot, world, pos);
-            }
-            if (dug) {
-                cleared++;
-                sleepQuiet(60);
-            }
-        }
-        return cleared;
+        return escapeHelper.clearEscapeShaftHeadroom(bot, world, stepsToClimb, contextTag);
     }
 
     private int clearImmediateOverheadForEscape(ServerPlayerEntity bot, ServerWorld world) {
-        return clearEscapeShaftHeadroom(bot, world, 1, null);
+        return escapeHelper.clearImmediateOverheadForEscape(bot, world);
     }
 
     private boolean tryPillarEscapeFirst(ServerPlayerEntity bot, ServerWorld world,
                                          int referenceSurfaceY, String contextTag) {
-        if (bot == null || world == null) return false;
-        int remaining = referenceSurfaceY - bot.getBlockPos().getY();
-        if (remaining <= 0 || remaining > MAX_SCAFFOLD_HEIGHT) {
-            return false;
-        }
-
-        int shaftBlockersBefore = countEscapeShaftBlockers(bot, world, remaining + 1);
-        int cleared = clearEscapeShaftHeadroom(bot, world, remaining + 1, contextTag);
-        boolean pillared = ScaffoldService.pillarUp(bot, remaining + 1, true);
-        if (!pillared) {
-            int extraCleared = clearEscapeShaftHeadroom(bot, world, remaining + 1, contextTag);
-            if (extraCleared > 0) {
-                cleared += extraCleared;
-                pillared = ScaffoldService.pillarUp(bot, remaining + 1, true);
-            }
-        }
-
-        int shaftBlockersAfter = countEscapeShaftBlockers(bot, world, Math.max(1, referenceSurfaceY - bot.getBlockPos().getY() + 1));
-        boolean progress = bot.getBlockPos().getY() > (referenceSurfaceY - remaining);
-        LOGGER.info("[FortifyNav] pillar-first-escape ctx={} refY={} pos={} remaining={} clearedOverhead={} shaftBlockersBefore={} shaftBlockersAfter={} pillared={} progress={}",
-                contextTag != null ? contextTag : "none",
-                referenceSurfaceY,
-                bot.getBlockPos().toShortString(),
-                remaining,
-                cleared,
-                shaftBlockersBefore,
-                shaftBlockersAfter,
-                pillared,
-                progress);
-
-        // Horizontal escape fallback: if vertical pillar failed and shaft still has blockers,
-        // try mining sideways 1-2 blocks into a cardinal direction that has fewer overhead blockers,
-        // then retry pillar from the new position.
-        if (!pillared && !progress && shaftBlockersAfter > 0) {
-            BlockPos startPos = bot.getBlockPos();
-            int bestBlockers = shaftBlockersAfter;
-            Direction bestDir = null;
-            for (Direction dir : Direction.Type.HORIZONTAL) {
-                BlockPos adjacent = startPos.offset(dir);
-                // Check if we can stand there (feet + head clear, floor support)
-                BlockState adjFeet = world.getBlockState(adjacent);
-                BlockState adjHead = world.getBlockState(adjacent.up());
-                BlockState adjBelow = world.getBlockState(adjacent.down());
-                boolean canStand = (adjFeet.isAir() || adjFeet.isReplaceable())
-                        && (adjHead.isAir() || adjHead.isReplaceable())
-                        && !adjBelow.isAir();
-                if (canStand) {
-                    // Already standable — count shaft blockers above this position
-                    int adjRemaining = Math.max(1, referenceSurfaceY - adjacent.getY() + 1);
-                    int adjBlockers = 0;
-                    for (int dy = 2; dy <= Math.max(3, adjRemaining + 3); dy++) {
-                        BlockState st = world.getBlockState(adjacent.up(dy));
-                        if (!st.isAir() && !st.isReplaceable()) adjBlockers++;
-                    }
-                    if (adjBlockers < bestBlockers) {
-                        bestBlockers = adjBlockers;
-                        bestDir = dir;
-                    }
-                } else {
-                    // Can we MAKE it standable by mining feet and head?
-                    boolean feetMineable = adjFeet.getHardness(world, adjacent) >= 0 && !adjFeet.isAir();
-                    boolean headMineable = adjHead.getHardness(world, adjacent.up()) >= 0 && !adjHead.isAir();
-                    if ((adjFeet.isAir() || feetMineable) && (adjHead.isAir() || headMineable) && !adjBelow.isAir()) {
-                        // Count blockers in this adjacent shaft
-                        int adjRemaining = Math.max(1, referenceSurfaceY - adjacent.getY() + 1);
-                        int adjBlockers = 0;
-                        for (int dy = 2; dy <= Math.max(3, adjRemaining + 3); dy++) {
-                            BlockState st = world.getBlockState(adjacent.up(dy));
-                            if (!st.isAir() && !st.isReplaceable()) adjBlockers++;
-                        }
-                        if (adjBlockers < bestBlockers) {
-                            bestBlockers = adjBlockers;
-                            bestDir = dir;
-                        }
-                    }
-                }
-            }
-            if (bestDir != null) {
-                BlockPos target = startPos.offset(bestDir);
-                LOGGER.info("[FortifyNav] pillar-escape-horizontal dir={} from={} to={} shaftBlockers={}->{}",
-                        bestDir, startPos.toShortString(), target.toShortString(), shaftBlockersAfter, bestBlockers);
-                // Mine into the adjacent position
-                BlockState tFeet = world.getBlockState(target);
-                if (!tFeet.isAir() && tFeet.getHardness(world, target) >= 0) {
-                    digBlock(bot, world, target);
-                    sleepQuiet(80);
-                }
-                BlockState tHead = world.getBlockState(target.up());
-                if (!tHead.isAir() && tHead.getHardness(world, target.up()) >= 0) {
-                    digBlock(bot, world, target.up());
-                    sleepQuiet(80);
-                }
-                // Walk into the adjacent position
-                walkTowardBlock(bot, target, 800L);
-                sleepQuiet(100);
-                // Retry pillar from the new position
-                int newRemaining = Math.max(1, referenceSurfaceY - bot.getBlockPos().getY());
-                if (newRemaining > 0 && newRemaining <= MAX_SCAFFOLD_HEIGHT) {
-                    clearEscapeShaftHeadroom(bot, world, newRemaining + 1, contextTag);
-                    boolean retryPillared = ScaffoldService.pillarUp(bot, newRemaining + 1, true);
-                    boolean retryProgress = bot.getBlockPos().getY() > startPos.getY();
-                    LOGGER.info("[FortifyNav] pillar-escape-horizontal-retry pos={} pillared={} progress={}",
-                            bot.getBlockPos().toShortString(), retryPillared, retryProgress);
-                    if (retryPillared || retryProgress) return true;
-                }
-            }
-        }
-
-        return pillared || progress;
+        return escapeHelper.tryPillarEscapeFirst(this, bot, world, referenceSurfaceY, contextTag);
     }
 
     // ── Hole escape ──────────────────────────────────────────────
 
     /**
-     * If the bot is stuck below terrain level (e.g. in a moat hole it just dug),
-     * escape back to terrain level. Tries strategies in order:
-     *   1. Jump (shallow holes with headroom)
-     *   2. Mine block above head if blocked, then jump
-     *   3. Walk horizontally toward open ground at terrain level
-     */
-    /**
      * Escape from a hole/moat using heightmap terrain Y.
-     * Only works when the heightmap hasn't been altered by moat digging at this XZ.
      */
-    private void escapeIfInHole(ServerPlayerEntity bot, ServerWorld world) {
-        int terrainY = VillageFortificationLayoutService.terrainY(world, bot.getBlockPos().getX(), bot.getBlockPos().getZ());
-        escapeIfInHole(bot, world, terrainY);
+    @Override
+    public void escapeIfInHole(ServerPlayerEntity bot, ServerWorld world) {
+        escapeHelper.escapeIfInHole(this, bot, world);
     }
 
     /**
      * Escape from a hole/moat below the given reference surface Y.
-     * Uses referenceSurfaceY instead of terrainY() because the heightmap changes
-     * after moat digging — the bot needs to know the ORIGINAL surface level.
-     *
-     * Strategy: builds a diagonal staircase ramp upward by placing blocks and
-     * clearing headroom, one step at a time, until at or above referenceSurfaceY.
      */
-    private void escapeIfInHole(ServerPlayerEntity bot, ServerWorld world, int referenceSurfaceY) {
-        long phaseStartMs = System.currentTimeMillis();
-        if (abortFortifyPhase(bot, "escapeIfInHole:entry", phaseStartMs)) {
-            return;
-        }
-        BlockPos botPos = bot.getBlockPos();
-        BlockPos startPos = botPos.toImmutable();
-        int depth = referenceSurfaceY - botPos.getY();
-        if (depth <= 0) return; // at or above surface
-
-        if (entombmentHelper.shouldSkipRepeatedSurfaceEscape(botPos, referenceSurfaceY)) {
-            entombmentHelper.noteEntombmentSurfaceEscapeFailure(world, botPos, activeFortifyNavScope != null ? activeFortifyNavScope.context : null);
-            LOGGER.info("[FortifyNav] surface escape skipped repeated-fail pos={} surfaceY={} depth={} ctx={}",
-                    botPos.toShortString(), referenceSurfaceY, depth,
-                    activeFortifyNavScope != null ? activeFortifyNavScope.context : "none");
-            return;
-        }
-
-        if (entombmentHelper.isSealedFortifyEntombmentSurfaceEscapeCell(world, botPos, referenceSurfaceY)) {
-            entombmentHelper.noteEntombmentSurfaceEscapeFailure(world, botPos, null);
-            LOGGER.info("[FortifyNav] surface escape rejected sealed-entombment pos={} depth={} ctx={}",
-                    botPos.toShortString(),
-                    depth,
-                    activeFortifyNavScope != null ? activeFortifyNavScope.context : "none");
-            return;
-        }
-
-        LOGGER.info("Bot below surface by {} blocks at {} (surfaceY={}), building pillar to escape",
-                depth, botPos.toShortString(), referenceSurfaceY);
-
-        // Strategy 1: Shallow (1 block) — just jump
-        if (depth == 1) {
-            BlockPos headBlock = botPos.up(2);
-            BlockState headState = world.getBlockState(headBlock);
-            if (!headState.isAir() && headState.getHardness(world, headBlock) >= 0) {
-                digBlock(bot, world, headBlock);
-                sleepQuiet(100);
-            }
-            BotActions.jump(bot);
-            sleepQuiet(400);
-            if (bot.getBlockPos().getY() >= referenceSurfaceY) return;
-        }
-
-        // Strategy 2: Pillar up
-        String escapeCtx = activeFortifyNavScope != null ? activeFortifyNavScope.context : "surface-escape";
-        if (tryPillarEscapeFirst(bot, world, referenceSurfaceY, escapeCtx)) {
-            BlockPos afterPillar = bot.getBlockPos();
-            if (afterPillar.getY() >= referenceSurfaceY - 1) {
-                entombmentHelper.clearSurfaceEscapeRetryState(startPos, referenceSurfaceY);
-                entombmentHelper.clearSurfaceEscapeRetryState(afterPillar, referenceSurfaceY);
-                entombmentHelper.noteEntombmentRecoverySuccess(world, startPos, afterPillar, escapeCtx);
-                return;
-            }
-        }
-
-        // If pillar failed, note failure
-        botPos = bot.getBlockPos();
-        if (botPos.getY() < referenceSurfaceY) {
-            int sameColumnFailures = entombmentHelper.noteSurfaceEscapeRetryFailure(startPos, referenceSurfaceY);
-            if (!startPos.equals(botPos)
-                    && !Objects.equals(entombmentHelper.surfaceEscapeRetryKey(startPos, referenceSurfaceY),
-                    entombmentHelper.surfaceEscapeRetryKey(botPos, referenceSurfaceY))) {
-                entombmentHelper.noteSurfaceEscapeRetryFailure(botPos, referenceSurfaceY);
-            }
-            LOGGER.warn("Pillar escape incomplete, bot at {} vs surfaceY={} pocketFailures={}",
-                    botPos.toShortString(), referenceSurfaceY, sameColumnFailures);
-            entombmentHelper.noteEntombmentSurfaceEscapeFailure(world, botPos, activeFortifyNavScope != null ? activeFortifyNavScope.context : null);
-            // Record this below-surface failure so the tower approach blacklists it on revisit
-            if (activeFortifyNavScope != null && activeFortifyNavScope.towerState != null) {
-                activeFortifyNavScope.towerState.recordSubSurfaceFailure(startPos);
-                activeFortifyNavScope.towerState.recordSubSurfaceFailure(botPos);
-            }
-        }
+    @Override
+    public void escapeIfInHole(ServerPlayerEntity bot, ServerWorld world, int referenceSurfaceY) {
+        escapeHelper.escapeIfInHole(this, bot, world, referenceSurfaceY);
     }
 
     /**
      * Ensure the bot is standing on solid ground at the reference surface level.
      * Called at the start of buildWall to handle resume from stuck positions (e.g. in moat).
      */
-    private void ensureOnSurface(ServerPlayerEntity bot, ServerWorld world, int referenceSurfaceY) {
-        BlockPos botPos = bot.getBlockPos();
-        if (botPos.getY() >= referenceSurfaceY) return;
-
-        LOGGER.info("Bot is below surface at {}, Y={} vs surfaceY={}, building ramp to escape",
-                botPos.toShortString(), botPos.getY(), referenceSurfaceY);
-
-        escapeIfInHole(bot, world, referenceSurfaceY);
+    @Override
+    public void ensureOnSurface(ServerPlayerEntity bot, ServerWorld world, int referenceSurfaceY) {
+        escapeHelper.ensureOnSurface(this, bot, world, referenceSurfaceY);
     }
 
     /**
      * Ensure the bot is standing on solid ground (heightmap-based, for non-moat contexts).
      */
-    private void ensureOnSurface(ServerPlayerEntity bot, ServerWorld world) {
-        int terrainY = VillageFortificationLayoutService.terrainY(world, bot.getBlockPos().getX(), bot.getBlockPos().getZ());
-        ensureOnSurface(bot, world, terrainY);
+    @Override
+    public void ensureOnSurface(ServerPlayerEntity bot, ServerWorld world) {
+        escapeHelper.ensureOnSurface(this, bot, world);
     }
 
     // ── Movement & reach ────────────────────────────────────────
@@ -8212,21 +7869,24 @@ public final class FortifyVillageSkill implements Skill {
      *   3. Local lateral/jump/arc maneuvers to avoid self-trap corners
      *   4. Scaffolding only as bounded last resort (pass 2+)
      */
-    private boolean ensureCanReachBlockWithEffort(ServerCommandSource source, ServerPlayerEntity bot,
+    @Override
+    public boolean ensureCanReachBlockWithEffort(ServerCommandSource source, ServerPlayerEntity bot,
                                                    ServerWorld world, BlockPos target,
                                                    int heightAboveGround, int passNumber) {
         int fallbackSurfaceY = VillageFortificationLayoutService.terrainY(world, bot.getBlockPos().getX(), bot.getBlockPos().getZ());
         return ensureCanReachBlockWithEffort(source, bot, world, target, heightAboveGround, passNumber, fallbackSurfaceY, null);
     }
 
-    private boolean ensureCanReachBlockWithEffort(ServerCommandSource source, ServerPlayerEntity bot,
+    @Override
+    public boolean ensureCanReachBlockWithEffort(ServerCommandSource source, ServerPlayerEntity bot,
                                                    ServerWorld world, BlockPos target,
                                                    int heightAboveGround, int passNumber,
                                                    int referenceSurfaceY) {
         return ensureCanReachBlockWithEffort(source, bot, world, target, heightAboveGround, passNumber, referenceSurfaceY, null);
     }
 
-    private boolean ensureCanReachBlockWithEffort(ServerCommandSource source, ServerPlayerEntity bot,
+    @Override
+    public boolean ensureCanReachBlockWithEffort(ServerCommandSource source, ServerPlayerEntity bot,
                                                    ServerWorld world, BlockPos target,
                                                    int heightAboveGround, int passNumber,
                                                    int referenceSurfaceY,
@@ -8341,7 +8001,8 @@ public final class FortifyVillageSkill implements Skill {
      * Simple tick-based walk toward a block position. No pathfinding,
      * no door handling — just face and walk. Fast bail on stuck.
      */
-    private void walkTowardBlock(ServerPlayerEntity bot, BlockPos target, long timeoutMs) {
+    @Override
+    public void walkTowardBlock(ServerPlayerEntity bot, BlockPos target, long timeoutMs) {
         Vec3d targetVec = Vec3d.ofCenter(target);
         long deadline = System.currentTimeMillis() + timeoutMs;
         long phaseStartMs = System.currentTimeMillis();
@@ -8484,11 +8145,13 @@ public final class FortifyVillageSkill implements Skill {
      * in door-escape loops near village structures. Individual block placement
      * uses ensureCanReachBlockWithEffort for fine-grained precision.
      */
-    private void walkToTarget(ServerCommandSource source, ServerPlayerEntity bot, BlockPos target, long timeoutMs) {
+    @Override
+    public void walkToTarget(ServerCommandSource source, ServerPlayerEntity bot, BlockPos target, long timeoutMs) {
         walkToTarget(source, bot, target, timeoutMs, null);
     }
 
-    private void walkToTarget(ServerCommandSource source, ServerPlayerEntity bot, BlockPos target,
+    @Override
+    public void walkToTarget(ServerCommandSource source, ServerPlayerEntity bot, BlockPos target,
                               long timeoutMs, String navContext) {
         Vec3d targetVec = Vec3d.ofCenter(target);
         double distSq = bot.squaredDistanceTo(targetVec);
@@ -8821,7 +8484,8 @@ public final class FortifyVillageSkill implements Skill {
         return result.success();
     }
 
-    private boolean isWithinReach(ServerPlayerEntity bot, BlockPos pos) {
+    @Override
+    public boolean isWithinReach(ServerPlayerEntity bot, BlockPos pos) {
         Vec3d eye = bot.getEyePos();
         double distSq = eye.squaredDistanceTo(Vec3d.ofCenter(pos));
         return distSq <= REACH_DISTANCE_SQ;
@@ -8833,7 +8497,8 @@ public final class FortifyVillageSkill implements Skill {
         return (dx * dx + dz * dz) <= maxDist * maxDist;
     }
 
-    private boolean hasLineOfSight(ServerWorld world, ServerPlayerEntity bot, Vec3d eye, BlockPos target) {
+    @Override
+    public boolean hasLineOfSight(ServerWorld world, ServerPlayerEntity bot, Vec3d eye, BlockPos target) {
         Vec3d targetCenter = Vec3d.ofCenter(target);
         RaycastContext ctx = new RaycastContext(eye, targetCenter,
                 RaycastContext.ShapeType.COLLIDER, RaycastContext.FluidHandling.NONE, bot);
@@ -8918,7 +8583,8 @@ public final class FortifyVillageSkill implements Skill {
         return FortifyExecutionPolicyUtil.awaitFutureResult(future, abortCheck, timeoutMs, pollIntervalMs);
     }
 
-    private boolean abortFortifyPhase(ServerPlayerEntity bot, String phase, long phaseStartMs) {
+    @Override
+    public boolean abortFortifyPhase(ServerPlayerEntity bot, String phase, long phaseStartMs) {
         if (!SkillManager.shouldAbortSkill(bot)) {
             return false;
         }
@@ -8928,12 +8594,14 @@ public final class FortifyVillageSkill implements Skill {
     }
 
     /** Show a transient overhead hologram for in-progress fortify status. */
-    private void showOverhead(ServerPlayerEntity bot, String text) {
+    @Override
+    public void showOverhead(ServerPlayerEntity bot, String text) {
         CompanionOverheadDialogueService.showOverheadLine(
                 bot, text, 4_000, 48.0D, "fortify", null);
     }
 
-    private void sleepQuiet(long ms) {
+    @Override
+    public void sleepQuiet(long ms) {
         try {
             Thread.sleep(ms);
         } catch (InterruptedException ignored) {
