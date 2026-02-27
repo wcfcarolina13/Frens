@@ -9,6 +9,7 @@ import net.wcfcarolina13.Entity.createFakePlayer;
 import net.wcfcarolina13.FilingSystem.ManualConfig;
 import net.wcfcarolina13.GameAI.services.SurvivalRecruitmentService;
 import net.wcfcarolina13.GameAI.services.WizardTomeGrantService;
+import net.wcfcarolina13.GameAI.services.LearningModeService;
 import net.wcfcarolina13.network.CompanionQuestStatePayload;
 import net.wcfcarolina13.network.RecruitmentPromptPayload;
 
@@ -183,6 +184,9 @@ public final class RecruitmentAdminNetworkManager {
                 if (perm) {
                     out.add("Permanent companion unlocked (required for companion spells/commands).");
                 }
+            }
+            case "learning_status", "learning_start", "learning_stop_success", "learning_stop_fail", "learning_stop_abort" -> {
+                out.addAll(LearningModeService.handleAdminAction(server, player, action, botAlias));
             }
             default -> {
                 out.add("Unknown action: '" + action + "'.");

@@ -6,6 +6,7 @@ import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
+import net.minecraft.util.math.Vec3d;
 import net.wcfcarolina13.GameAI.BotActions;
 import net.wcfcarolina13.GameAI.skills.SkillManager;
 import org.slf4j.Logger;
@@ -36,6 +37,14 @@ public final class ScaffoldService {
     private static final int MAX_SCAFFOLD_HEIGHT = 12;
     private static final long JUMP_TIMEOUT_MS = 800L;
     private static final long LAND_TIMEOUT_MS = 1200L;
+    private static final long PILLAR_INTERSECT_RETRY_SLEEP_MS = 35L;
+    private static final long PILLAR_RECENTER_TIMEOUT_MS = 260L;
+    private static final long PILLAR_PLACE_WINDOW_MAX_MS = 560L;
+    private static final long PILLAR_PLACE_LOOP_SLEEP_MS = 25L;
+    private static final double PILLAR_RECENTER_TOLERANCE_SQ = 0.14D * 0.14D;
+    private static final double PILLAR_RECENTER_MAX_DRIFT_SQ = 0.72D * 0.72D;
+    private static final double PILLAR_PLACE_MIN_RISE = 0.28D;
+    private static final double PILLAR_PLACE_PREFERRED_RISE = 0.52D;
 
     private ScaffoldService() {}
 
@@ -74,6 +83,8 @@ public final class ScaffoldService {
      * This allows multiple bots to build simultaneously without interference.
      */
     private static final Map<UUID, Set<BlockPos>> scaffoldMemory = new HashMap<>();
+
+    private record ScaffoldPlaceAttemptResult(boolean success, BlockPos placedPos, String reason) {}
 
     public static ScaffoldSession beginSession(ServerPlayerEntity bot) {
         return new ScaffoldSession(bot);
@@ -123,6 +134,7 @@ public final class ScaffoldService {
                 LOGGER.warn("Not on ground for pillar step {}", i);
                 return false;
             }
+            stabilizePillarStance(bot, PILLAR_RECENTER_TIMEOUT_MS);
 
             BlockPos targetPos = bot.getBlockPos();
             double startY = bot.getY();
@@ -161,26 +173,21 @@ public final class ScaffoldService {
 
             // Wait for good placement window (near apex of jump)
             if (!waitForJumpPlaceWindow(bot, startY, 600L)) {
-                BotActions.stop(bot);
-                return false;
-            }
-
-            // Place scaffold block
-            boolean placed = false;
-            String failReason = "";
-            for (int attempt = 0; attempt < 3 && !placed; attempt++) {
-                BotActions.PlaceResult result = BotActions.tryPlaceBlockAt(bot, targetPos, Direction.UP, SCAFFOLD_BLOCKS);
-                placed = result.success();
-                if (!placed) {
-                    failReason = result.reason();
-                    sleepQuiet(50L);
+                if (bot.isOnGround()) {
+                    BotActions.stop(bot);
+                    return false;
                 }
             }
 
-            if (!placed) {
-                LOGGER.warn("Failed to place scaffold block at {} reason={}", targetPos.toShortString(), failReason);
+            // Place scaffold block (adaptive retry across the jump window; more tolerant of
+            // timing variance and early/late attempts than a single apex-only click)
+            ScaffoldPlaceAttemptResult placement = tryPlaceScaffoldAcrossJumpWindow(bot, pillarWorld, targetPos, startY, PILLAR_PLACE_WINDOW_MAX_MS);
+            if (!placement.success()) {
+                LOGGER.warn("Failed to place scaffold block at {} reason={}",
+                        targetPos.toShortString(), placement.reason());
                 return false;
             }
+            targetPos = placement.placedPos() != null ? placement.placedPos() : targetPos;
 
             // Track scaffold for later removal
             if (trackForTeardown) {
@@ -250,6 +257,7 @@ public final class ScaffoldService {
                 LOGGER.info("pillarUp step {}/{}: not on ground (Y={})", i, steps, bot.getY());
                 break;
             }
+            stabilizePillarStance(bot, PILLAR_RECENTER_TIMEOUT_MS);
 
             BlockPos targetPos = bot.getBlockPos();
             double startY = bot.getY();
@@ -293,25 +301,19 @@ public final class ScaffoldService {
 
             if (!waitForJumpPlaceWindow(bot, startY, 600L)) {
                 LOGGER.info("pillarUp step {}/{}: missed place window", i, steps);
-                BotActions.stop(bot);
-                break;
-            }
-
-            boolean placed = false;
-            String failReason = "";
-            for (int attempt = 0; attempt < 3 && !placed; attempt++) {
-                BotActions.PlaceResult result = BotActions.tryPlaceBlockAt(bot, targetPos, Direction.UP, SCAFFOLD_BLOCKS);
-                placed = result.success();
-                if (!placed) {
-                    failReason = result.reason();
-                    sleepQuiet(50L);
+                if (bot.isOnGround()) {
+                    BotActions.stop(bot);
+                    break;
                 }
             }
 
-            if (!placed) {
-                LOGGER.info("pillarUp step {}/{}: failed to place at {} reason={}", i, steps, targetPos.toShortString(), failReason);
+            ScaffoldPlaceAttemptResult placement = tryPlaceScaffoldAcrossJumpWindow(bot, world, targetPos, startY, PILLAR_PLACE_WINDOW_MAX_MS);
+            if (!placement.success()) {
+                LOGGER.info("pillarUp step {}/{}: failed to place at {} reason={}",
+                        i, steps, targetPos.toShortString(), placement.reason());
                 break;
             }
+            targetPos = placement.placedPos() != null ? placement.placedPos() : targetPos;
 
             positions.add(targetPos.toImmutable());
             if (!waitForYIncrease(bot, targetPos.getY(), 1000L)) {
@@ -484,13 +486,190 @@ public final class ScaffoldService {
             sleepQuiet(20L);
             double currentY = bot.getY();
             
-            // Wait until we're at least 0.5 blocks up and velocity is slowing
-            if (currentY > startY + 0.5 && currentY <= lastY + 0.05) {
+            // Broad "ready to place" window: either near-apex (rise slowing) or already high enough.
+            if (currentY > startY + PILLAR_PLACE_PREFERRED_RISE && currentY <= lastY + 0.10) {
+                return true; // Near apex
+            }
+            if (currentY > startY + (PILLAR_PLACE_PREFERRED_RISE + 0.18D)) {
                 return true; // Near apex
             }
             lastY = currentY;
         }
-        return true;
+        double currentY = bot.getY();
+        boolean stillAirborneHighEnough = !bot.isOnGround() && currentY > startY + PILLAR_PLACE_MIN_RISE;
+        if (!stillAirborneHighEnough) {
+            LOGGER.debug("pillarUp: missed jump place window startY={} currentY={} onGround={}",
+                    String.format(Locale.ROOT, "%.2f", startY),
+                    String.format(Locale.ROOT, "%.2f", currentY),
+                    bot.isOnGround());
+        }
+        return stillAirborneHighEnough;
+    }
+
+    private static boolean isIntersectTargetReason(String reason) {
+        return reason != null && reason.startsWith("bot-intersects-target");
+    }
+
+    private static boolean isHardScaffoldPlaceFailure(String reason) {
+        if (reason == null) return false;
+        return reason.startsWith("no-block-item-available")
+                || reason.startsWith("selected-item-not-block")
+                || reason.startsWith("no-world-or-target");
+    }
+
+    private static boolean isRetryableScaffoldPlaceFailure(String reason) {
+        if (reason == null) return true;
+        return isIntersectTargetReason(reason)
+                || reason.startsWith("timeout")
+                || reason.startsWith("out-of-reach")
+                || reason.startsWith("no-line-of-sight")
+                || reason.startsWith("place-rejected")
+                || reason.startsWith("no-solid-support")
+                || reason.startsWith("occupied=");
+    }
+
+    private static BlockPos recomputePillarTarget(ServerWorld world, ServerPlayerEntity bot, BlockPos currentTarget) {
+        if (world == null || bot == null) return currentTarget;
+        List<BlockPos> candidates = new ArrayList<>();
+        BlockPos feet = bot.getBlockPos();
+        candidates.add(feet);
+        candidates.add(feet.down());
+        if (currentTarget != null) {
+            candidates.add(currentTarget);
+            candidates.add(currentTarget.down());
+        }
+        for (BlockPos candidate : candidates) {
+            if (candidate == null) continue;
+            var state = world.getBlockState(candidate);
+            if (state.isAir() || state.isReplaceable()) {
+                return candidate.toImmutable();
+            }
+        }
+        return currentTarget;
+    }
+
+    private static ScaffoldPlaceAttemptResult tryPlaceScaffoldWithAdaptiveTarget(ServerPlayerEntity bot,
+                                                                                 ServerWorld world,
+                                                                                 BlockPos initialTarget,
+                                                                                 int maxAttempts) {
+        BlockPos targetPos = initialTarget;
+        String lastReason = "unknown";
+        for (int attempt = 0; attempt < Math.max(1, maxAttempts); attempt++) {
+            BotActions.PlaceResult result = BotActions.tryPlaceBlockAt(bot, targetPos, Direction.UP, SCAFFOLD_BLOCKS);
+            if (result.success()) {
+                return new ScaffoldPlaceAttemptResult(true, targetPos, null);
+            }
+            lastReason = result.reason();
+            if (isIntersectTargetReason(lastReason)) {
+                sleepQuiet(PILLAR_INTERSECT_RETRY_SLEEP_MS);
+                BlockPos recomputed = recomputePillarTarget(world, bot, targetPos);
+                if (recomputed != null && !recomputed.equals(targetPos)) {
+                    LOGGER.debug("pillarUp adaptive retry: retarget {} -> {} after {}", 
+                            targetPos.toShortString(), recomputed.toShortString(), lastReason);
+                    targetPos = recomputed;
+                }
+            } else {
+                sleepQuiet(50L);
+            }
+        }
+        return new ScaffoldPlaceAttemptResult(false, targetPos, lastReason);
+    }
+
+    private static ScaffoldPlaceAttemptResult tryPlaceScaffoldAcrossJumpWindow(ServerPlayerEntity bot,
+                                                                               ServerWorld world,
+                                                                               BlockPos initialTarget,
+                                                                               double startY,
+                                                                               long maxWaitMs) {
+        if (bot == null || world == null || initialTarget == null) {
+            return new ScaffoldPlaceAttemptResult(false, initialTarget, "no-world-or-target");
+        }
+        long start = System.currentTimeMillis();
+        double lastY = bot.getY();
+        BlockPos targetPos = initialTarget.toImmutable();
+        String lastReason = "no-attempt";
+        int attempts = 0;
+
+        while ((System.currentTimeMillis() - start) < Math.max(120L, maxWaitMs)) {
+            if (SkillManager.shouldAbortSkill(bot)) {
+                BotActions.stop(bot);
+                return new ScaffoldPlaceAttemptResult(false, targetPos, "aborted");
+            }
+            double currentY = bot.getY();
+            double rise = currentY - startY;
+            boolean descending = currentY <= lastY + 0.02D;
+            boolean readyForFirstAttempt = rise >= PILLAR_PLACE_MIN_RISE
+                    && (descending || rise >= PILLAR_PLACE_PREFERRED_RISE || (System.currentTimeMillis() - start) > 150L);
+            boolean readyForRetryAttempt = rise >= 0.12D;
+            if (attempts == 0 ? !readyForFirstAttempt : !readyForRetryAttempt) {
+                if (bot.isOnGround() && rise < 0.12D) {
+                    break;
+                }
+                lastY = currentY;
+                sleepQuiet(15L);
+                continue;
+            }
+
+            attempts++;
+            ScaffoldPlaceAttemptResult attempt = tryPlaceScaffoldWithAdaptiveTarget(bot, world, targetPos, attempts == 1 ? 2 : 1);
+            targetPos = attempt.placedPos() != null ? attempt.placedPos() : targetPos;
+            if (attempt.success()) {
+                return attempt;
+            }
+
+            lastReason = attempt.reason();
+            if (isHardScaffoldPlaceFailure(lastReason)) {
+                return new ScaffoldPlaceAttemptResult(false, targetPos, lastReason);
+            }
+            if (!isRetryableScaffoldPlaceFailure(lastReason)) {
+                return new ScaffoldPlaceAttemptResult(false, targetPos, lastReason);
+            }
+            BlockPos checkPos = targetPos;
+            boolean becameScaffold = SCAFFOLD_BLOCKS.stream()
+                    .anyMatch(item -> item.equals(world.getBlockState(checkPos).getBlock().asItem()));
+            if (becameScaffold) {
+                return new ScaffoldPlaceAttemptResult(true, targetPos, "placed-detected-after-retry");
+            }
+            if (bot.isOnGround() && attempts >= 1) {
+                break;
+            }
+            lastY = currentY;
+            sleepQuiet(PILLAR_PLACE_LOOP_SLEEP_MS);
+        }
+        return new ScaffoldPlaceAttemptResult(false, targetPos, lastReason);
+    }
+
+    private static void stabilizePillarStance(ServerPlayerEntity bot, long timeoutMs) {
+        if (bot == null || !bot.isOnGround()) {
+            return;
+        }
+        BlockPos stand = bot.getBlockPos();
+        Vec3d center = Vec3d.ofCenter(stand);
+        long start = System.currentTimeMillis();
+        while ((System.currentTimeMillis() - start) < Math.max(80L, timeoutMs)) {
+            if (SkillManager.shouldAbortSkill(bot)) {
+                BotActions.stop(bot);
+                return;
+            }
+            if (!bot.isOnGround()) {
+                return;
+            }
+            if (!bot.getBlockPos().equals(stand)) {
+                return;
+            }
+            double dx = center.x - bot.getX();
+            double dz = center.z - bot.getZ();
+            double offsetSq = dx * dx + dz * dz;
+            if (offsetSq <= PILLAR_RECENTER_TOLERANCE_SQ) {
+                BotActions.stop(bot);
+                return;
+            }
+            if (offsetSq > PILLAR_RECENTER_MAX_DRIFT_SQ) {
+                return;
+            }
+            BotActions.applyMovementInput(bot, new Vec3d(center.x, bot.getY(), center.z), 0.08D);
+            sleepQuiet(30L);
+        }
+        BotActions.stop(bot);
     }
 
     private static boolean waitForYIncrease(ServerPlayerEntity bot, int targetBlockY, long maxWaitMs) {

@@ -321,6 +321,12 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
                 new TopicEntry("Baritone Pathfinder", TopicCategory.ADMIN, TopicAction.BARITONE_PATHFINDER, true, 0, null),
                 // ── Items ──
                 TopicEntry.admin("Give Wizard's Tome", "give_wizard_tome"),
+                // ── Learning mode ──
+                TopicEntry.admin("Learning status", "learning_status"),
+                TopicEntry.admin("Learning start", "learning_start"),
+                TopicEntry.admin("Learning stop (Success)", "learning_stop_success"),
+                TopicEntry.admin("Learning stop (Fail)", "learning_stop_fail"),
+                TopicEntry.admin("Learning stop (Abort)", "learning_stop_abort"),
                 // ── Recruitment ──
                 TopicEntry.admin("Recruit status", "recruit_status"),
                 TopicEntry.admin("Enable recruit", "recruit_enable"),

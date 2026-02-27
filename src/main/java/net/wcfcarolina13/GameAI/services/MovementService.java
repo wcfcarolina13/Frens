@@ -2068,6 +2068,18 @@ public final class MovementService {
     /**
      * Small, iterative pursuit toward a static target. Stops once within reachSq.
      */
+    public static boolean executeStuckRecoveryHeuristics(ServerPlayerEntity bot, BlockPos target, String label, boolean allowMineObstruction) {
+        if (tryOpenDoorToward(bot, target)) return true;
+        if (tryTraverseDoorway(bot, target, label)) return true;
+        if (tryDoorSubgoalToward(bot, target, label)) return true;
+        if (tryDoorEscapeToward(bot, target, null, label)) return true;
+        if (tryStepUpToward(bot, target, label)) return true;
+        if (tryLocalUnstick(bot, target, label)) return true;
+        if (trySidestepAround(bot, target)) return true;
+        if (allowMineObstruction && tryMineObstructionToward(bot, target, label)) return true;
+        return false;
+    }
+
     public static boolean nudgeTowardUntilClose(ServerPlayerEntity bot,
                                                 BlockPos target,
                                                 double reachSq,
@@ -2121,38 +2133,8 @@ public final class MovementService {
                     if (allowAssists && (noProgress == 4 || noProgress == 6)) {
                         BotActions.stop(bot);
 
-                        if (tryOpenDoorToward(bot, target)) {
-                            best = Double.MAX_VALUE;
-                            noProgress = 0;
-                            continue;
-                        }
-                        if (tryTraverseDoorway(bot, target, label + "-nudge")) {
-                            best = Double.MAX_VALUE;
-                            noProgress = 0;
-                            continue;
-                        }
-                        if (tryDoorEscapeToward(bot, target, null, label + "-nudge")) {
-                            best = Double.MAX_VALUE;
-                            noProgress = 0;
-                            continue;
-                        }
-                        if (tryStepUpToward(bot, target, label + "-nudge")) {
-                            best = Double.MAX_VALUE;
-                            noProgress = 0;
-                            continue;
-                        }
-                        if (tryLocalUnstick(bot, target, label + "-nudge")) {
-                            best = Double.MAX_VALUE;
-                            noProgress = 0;
-                            continue;
-                        }
-                        if (trySidestepAround(bot, target)) {
-                            best = Double.MAX_VALUE;
-                            noProgress = 0;
-                            continue;
-                        }
-                        // Only as a late resort (and only during tasks) clear a safe obstruction.
-                        if (noProgress >= 6 && tryMineObstructionToward(bot, target, label + "-nudge")) {
+                        boolean allowMine = noProgress >= 6;
+                        if (executeStuckRecoveryHeuristics(bot, target, label + "-nudge", allowMine)) {
                             best = Double.MAX_VALUE;
                             noProgress = 0;
                             continue;
@@ -2293,46 +2275,7 @@ public final class MovementService {
             if (nowDist + 0.02D >= best) {
                 stagnant++;
                 if (stagnant == 4) {
-                    // First: if we're blocked by a closed door, open it.
-                    if (tryOpenDoorToward(bot, target)) {
-                        stagnant = 0;
-                        best = Double.MAX_VALUE;
-                        sameBlockSteps = 0;
-                        continue;
-                    }
-                    // If the door is already open but we're not getting through, commit to stepping through the doorway.
-                    if (tryTraverseDoorway(bot, target, label)) {
-                        stagnant = 0;
-                        best = Double.MAX_VALUE;
-                        sameBlockSteps = 0;
-                        continue;
-                    }
-                    // If the target is around a corner, the blocking door may not be on the ray to the target.
-                    if (tryDoorSubgoalToward(bot, target, label)) {
-                        stagnant = 0;
-                        best = Double.MAX_VALUE;
-                        sameBlockSteps = 0;
-                        continue;
-                    }
-                    if (tryDoorEscapeToward(bot, target, null, label)) {
-                        stagnant = 0;
-                        best = Double.MAX_VALUE;
-                        sameBlockSteps = 0;
-                        continue;
-                    }
-                    if (tryStepUpToward(bot, target, label)) {
-                        stagnant = 0;
-                        best = Double.MAX_VALUE;
-                        sameBlockSteps = 0;
-                        continue;
-                    }
-                    if (tryMineObstructionToward(bot, target, label)) {
-                        stagnant = 0;
-                        best = Double.MAX_VALUE;
-                        sameBlockSteps = 0;
-                        continue;
-                    }
-                    if (tryLocalUnstick(bot, target, label)) {
+                    if (executeStuckRecoveryHeuristics(bot, target, label, true)) {
                         stagnant = 0;
                         best = Double.MAX_VALUE;
                         sameBlockSteps = 0;
@@ -2350,25 +2293,7 @@ public final class MovementService {
 
             if (sameBlockSteps >= STUCK_SAME_BLOCK_STEPS_TRIGGER && stagnant >= STUCK_STAGNANT_STEPS_TRIGGER) {
                 BotActions.stop(bot);
-                if (tryStepUpToward(bot, target, label + "-stuck")) {
-                    stagnant = 0;
-                    best = Double.MAX_VALUE;
-                    sameBlockSteps = 0;
-                    continue;
-                }
-                if (tryDoorEscapeToward(bot, target, null, label + "-stuck")) {
-                    stagnant = 0;
-                    best = Double.MAX_VALUE;
-                    sameBlockSteps = 0;
-                    continue;
-                }
-                if (tryMineObstructionToward(bot, target, label + "-stuck")) {
-                    stagnant = 0;
-                    best = Double.MAX_VALUE;
-                    sameBlockSteps = 0;
-                    continue;
-                }
-                if (tryLocalUnstick(bot, target, label + "-stuck")) {
+                if (executeStuckRecoveryHeuristics(bot, target, label + "-stuck", true)) {
                     stagnant = 0;
                     best = Double.MAX_VALUE;
                     sameBlockSteps = 0;

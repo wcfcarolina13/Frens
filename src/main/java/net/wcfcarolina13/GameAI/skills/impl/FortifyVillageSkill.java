@@ -122,11 +122,9 @@ public final class FortifyVillageSkill implements Skill {
     private static final int FORTIFY_CLEANUP_ACTIVE_RECOVERY_MAX_DIST = 12;
     private static final long FORTIFY_CLEANUP_PROCESS_MIN_INTERVAL_MS = 350L;
     private static final int FORTIFY_PATCH_SKIP_LOG_SAMPLE_LIMIT = 10;
-    private static final long FORTIFY_ENTOMBMENT_STATE_TTL_MS = 20_000L;
-    private static final long FORTIFY_RECENT_CARVE_SUPPRESS_MS = 20_000L;
+
     private static final int FORTIFY_GATE_EXIT_SIDESTEP_NO_PROGRESS_LIMIT = 2;
-    private static final long FORTIFY_SURFACE_ESCAPE_FAIL_TTL_MS = 8_000L;
-    private static final int FORTIFY_SURFACE_ESCAPE_SAME_COLUMN_LIMIT = 2;
+
     private static final long FORTIFY_FOOTING_PATCH_COOLDOWN_MS = 400L;
     private static final int FORTIFY_PRECIpICE_DEFENSE_MIN_DROP = 2;
     private static final int FORTIFY_FOOTING_PATCH_SCAN_DEPTH = 5;
@@ -169,12 +167,8 @@ public final class FortifyVillageSkill implements Skill {
     /** Ignored cavity log for user reporting. */
     private final List<String> ignoredCavityNotes = new ArrayList<>();
 
-    /** Recent carve positions to avoid immediate re-carving the same column. */
-    private final Map<BlockPos, Long> recentCarveColumnsMs = new HashMap<>();
-    /** Tracks repeated entombment recovery failures by fortify context + position. */
-    private final Map<String, EntombmentRecoveryState> entombmentRecoveryStates = new HashMap<>();
-    /** Tracks repeated staircase surface-escape failures by XZ column + reference surface. */
-    private final Map<String, SurfaceEscapeRetryState> surfaceEscapeRetryStates = new HashMap<>();
+    /** Entombment recovery, surface-escape retry, and carve-column cooldown tracking. */
+    private final FortifyEntombmentHelper entombmentHelper = new FortifyEntombmentHelper();
     /** Simple cooldown to avoid spamming local footing bridge placement attempts. */
     private long fortifyFootingPatchLastMs = 0L;
     private BlockPos fortifyFootingPatchLastOrigin = null;
@@ -281,29 +275,6 @@ public final class FortifyVillageSkill implements Skill {
     private record TowerSummitStepCandidate(BlockPos pos, Direction dir, int newReachable, int score) {}
     private record TowerSummitRoamResult(int placed, boolean recoverableFailure) {}
     private record TowerHardResetResult(boolean moved, boolean meaningful) {}
-    private static final class SurfaceEscapeRetryState {
-        private int failures;
-        private long lastFailureMs;
-    }
-    private static final class EntombmentRecoveryState {
-        private final String key;
-        private final BlockPos pos;
-        private final String contextPrefix;
-        private final long epoch;
-        private int noProgressCycles;
-        private int surfaceEscapeFailures;
-        private int scaffoldEscalationFailures;
-        private int breakThroughFailures;
-        private long lastUpdatedMs;
-
-        private EntombmentRecoveryState(String key, BlockPos pos, String contextPrefix, long epoch) {
-            this.key = key;
-            this.pos = pos == null ? null : pos.toImmutable();
-            this.contextPrefix = contextPrefix;
-            this.epoch = epoch;
-            this.lastUpdatedMs = System.currentTimeMillis();
-        }
-    }
     private static final class DeferredCleanupTask {
         private final FortifyCleanupKind kind;
         private final BlockPos pos;
@@ -573,6 +544,8 @@ public final class FortifyVillageSkill implements Skill {
         FortifyNavMode mode = towerState != null ? towerState.navMode : FortifyNavMode.REROUTE_ONLY;
         activeFortifyNavScope = new FortifyNavRuntimeScope(
                 context, towerState, towerVertex, target, towerPatchContext, gateContext, mode, fortifyMovementEpoch);
+        entombmentHelper.updateScope(context, fortifyMovementEpoch);
+        entombmentHelper.updateMovementEpoch(fortifyMovementEpoch);
         return prior;
     }
 
@@ -604,6 +577,7 @@ public final class FortifyVillageSkill implements Skill {
             }
         } finally {
             activeFortifyNavScope = prior;
+            entombmentHelper.updateScope(prior != null ? prior.context : null, prior != null ? prior.epoch : 0L);
         }
     }
 
@@ -646,292 +620,7 @@ public final class FortifyVillageSkill implements Skill {
     }
 
     private String fortifyContextPrefix(String navContext, FortifyNavRuntimeScope scope) {
-        if (navContext != null) {
-            if (navContext.startsWith("fortify-edge:")) return "fortify-edge";
-            if (navContext.startsWith("fortify-tower:")) return "fortify-tower";
-            if (navContext.startsWith("fortify-gate:")) return "fortify-gate";
-        }
-        if (scope == null || scope.context == null) return null;
-        if (scope.context.startsWith("fortify-edge:")) return "fortify-edge";
-        if (scope.context.startsWith("fortify-tower:")) return "fortify-tower";
-        if (scope.context.startsWith("fortify-gate:")) return "fortify-gate";
-        return null;
-    }
-
-    private String entombmentRecoveryKey(BlockPos pos, String contextPrefix, long epoch) {
-        if (pos == null || contextPrefix == null) return null;
-        return contextPrefix + "|" + pos.getX() + "," + pos.getY() + "," + pos.getZ();
-    }
-
-    private EntombmentRecoveryState getEntombmentRecoveryState(BlockPos pos, String contextPrefix,
-                                                               long epoch, boolean create) {
-        if (pos == null || contextPrefix == null) return null;
-        pruneStaleEntombmentRecoveryStates();
-        String key = entombmentRecoveryKey(pos, contextPrefix, epoch);
-        if (key == null) return null;
-        EntombmentRecoveryState state = entombmentRecoveryStates.get(key);
-        if (state == null && create) {
-            state = new EntombmentRecoveryState(key, pos, contextPrefix, epoch);
-            entombmentRecoveryStates.put(key, state);
-        }
-        if (state != null) {
-            state.lastUpdatedMs = System.currentTimeMillis();
-        }
-        return state;
-    }
-
-    private void pruneStaleEntombmentRecoveryStates() {
-        if (entombmentRecoveryStates.isEmpty()) return;
-        long now = System.currentTimeMillis();
-        Iterator<Map.Entry<String, EntombmentRecoveryState>> it = entombmentRecoveryStates.entrySet().iterator();
-        while (it.hasNext()) {
-            EntombmentRecoveryState state = it.next().getValue();
-            if (state == null) {
-                it.remove();
-                continue;
-            }
-            if (now - state.lastUpdatedMs > FORTIFY_ENTOMBMENT_STATE_TTL_MS) {
-                it.remove();
-            }
-        }
-    }
-
-    private void noteEntombmentSurfaceEscapeFailure(ServerWorld world, BlockPos pos, String navContext) {
-        if (world == null || pos == null) return;
-        FortifyNavRuntimeScope scope = activeFortifyNavScope;
-        String contextPrefix = fortifyContextPrefix(navContext, scope);
-        if (contextPrefix == null || currentLayout == null) return;
-        if (!contextPrefix.startsWith("fortify-")) return;
-        long epoch = scope != null ? scope.epoch : fortifyMovementEpoch;
-        EntombmentRecoveryState state = getEntombmentRecoveryState(pos, contextPrefix, epoch, true);
-        if (state != null) {
-            state.surfaceEscapeFailures++;
-        }
-    }
-
-    private void noteEntombmentNoProgressCycle(ServerWorld world, BlockPos pos, String navContext) {
-        if (world == null || pos == null) return;
-        FortifyNavRuntimeScope scope = activeFortifyNavScope;
-        String contextPrefix = fortifyContextPrefix(navContext, scope);
-        if (contextPrefix == null || currentLayout == null) return;
-        long epoch = scope != null ? scope.epoch : fortifyMovementEpoch;
-        EntombmentRecoveryState state = getEntombmentRecoveryState(pos, contextPrefix, epoch, true);
-        if (state != null) {
-            state.noProgressCycles++;
-        }
-    }
-
-    private boolean hasFortifyPocketNoProgressBurst(ServerWorld world, BlockPos pos, String navContext, int minCycles) {
-        if (world == null || pos == null || minCycles <= 0) return false;
-        FortifyNavRuntimeScope scope = activeFortifyNavScope;
-        String contextPrefix = fortifyContextPrefix(navContext, scope);
-        if (contextPrefix == null || currentLayout == null) return false;
-        long epoch = scope != null ? scope.epoch : fortifyMovementEpoch;
-        EntombmentRecoveryState state = getEntombmentRecoveryState(pos, contextPrefix, epoch, false);
-        return state != null && state.noProgressCycles >= minCycles;
-    }
-
-    private void noteEntombmentBreakFailure(ServerWorld world, BlockPos pos, String navContext) {
-        if (world == null || pos == null) return;
-        FortifyNavRuntimeScope scope = activeFortifyNavScope;
-        String contextPrefix = fortifyContextPrefix(navContext, scope);
-        if (contextPrefix == null || currentLayout == null) return;
-        long epoch = scope != null ? scope.epoch : fortifyMovementEpoch;
-        EntombmentRecoveryState state = getEntombmentRecoveryState(pos, contextPrefix, epoch, true);
-        if (state != null) {
-            state.breakThroughFailures++;
-        }
-    }
-
-    private void noteEntombmentScaffoldFailure(ServerWorld world, BlockPos pos, String navContext) {
-        if (world == null || pos == null) return;
-        FortifyNavRuntimeScope scope = activeFortifyNavScope;
-        String contextPrefix = fortifyContextPrefix(navContext, scope);
-        if (contextPrefix == null || currentLayout == null) return;
-        long epoch = scope != null ? scope.epoch : fortifyMovementEpoch;
-        EntombmentRecoveryState state = getEntombmentRecoveryState(pos, contextPrefix, epoch, true);
-        if (state != null) {
-            state.scaffoldEscalationFailures++;
-        }
-    }
-
-    private void noteEntombmentRecoverySuccess(ServerWorld world, BlockPos before, BlockPos after, String navContext) {
-        if (world == null || before == null || after == null) return;
-        if (before.equals(after)) return;
-        FortifyNavRuntimeScope scope = activeFortifyNavScope;
-        String contextPrefix = fortifyContextPrefix(navContext, scope);
-        if (contextPrefix == null) return;
-        long epoch = scope != null ? scope.epoch : fortifyMovementEpoch;
-        boolean afterStillEntombed = isFortifyEntombmentCandidate(world, after, navContext);
-        int beforeTerrainY = VillageFortificationLayoutService.terrainY(world, before.getX(), before.getZ());
-        int afterTerrainY = VillageFortificationLayoutService.terrainY(world, after.getX(), after.getZ());
-        int beforeDepth = Math.max(0, beforeTerrainY - before.getY());
-        int afterDepth = Math.max(0, afterTerrainY - after.getY());
-        boolean resolvedEntombment = !afterStillEntombed || afterDepth < beforeDepth || before.getSquaredDistance(after) >= 9.0D;
-
-        EntombmentRecoveryState beforeState = getEntombmentRecoveryState(before, contextPrefix, epoch, false);
-        if (beforeState != null) {
-            if (resolvedEntombment) {
-                beforeState.noProgressCycles = 0;
-                beforeState.surfaceEscapeFailures = 0;
-                beforeState.scaffoldEscalationFailures = 0;
-                beforeState.breakThroughFailures = 0;
-            }
-            beforeState.lastUpdatedMs = System.currentTimeMillis();
-        }
-        EntombmentRecoveryState afterState = getEntombmentRecoveryState(after, contextPrefix, epoch, false);
-        if (afterState != null) {
-            if (resolvedEntombment) {
-                afterState.noProgressCycles = 0;
-                afterState.surfaceEscapeFailures = 0;
-                afterState.scaffoldEscalationFailures = 0;
-                afterState.breakThroughFailures = 0;
-            }
-            afterState.lastUpdatedMs = System.currentTimeMillis();
-        }
-    }
-
-    private boolean isAdjacentToCurrentFortificationHull(BlockPos pos) {
-        if (pos == null) return false;
-        if (isInsideCurrentFortificationHull(pos)) return true;
-        for (Direction dir : Direction.Type.HORIZONTAL) {
-            if (isInsideCurrentFortificationHull(pos.offset(dir))) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private boolean isFortifyEntombmentCandidate(ServerWorld world, BlockPos pos, String navContext) {
-        if (world == null || pos == null) return false;
-        String contextPrefix = fortifyContextPrefix(navContext, activeFortifyNavScope);
-        if (contextPrefix == null || currentLayout == null) return false;
-        if (!(contextPrefix.equals("fortify-edge") || contextPrefix.equals("fortify-tower"))) return false;
-        int terrainY = VillageFortificationLayoutService.terrainY(world, pos.getX(), pos.getZ());
-        int depth = terrainY - pos.getY();
-        if (depth <= 0 || depth > 3) return false;
-        if (!isTrapLikeCell(world, pos)) return false;
-        return isAdjacentToCurrentFortificationHull(pos);
-    }
-
-    private boolean shouldPreferEntombmentEscape(ServerWorld world, BlockPos pos, String navContext) {
-        if (!isFortifyEntombmentCandidate(world, pos, navContext)) return false;
-        FortifyNavRuntimeScope scope = activeFortifyNavScope;
-        String contextPrefix = fortifyContextPrefix(navContext, scope);
-        long epoch = scope != null ? scope.epoch : fortifyMovementEpoch;
-        EntombmentRecoveryState state = getEntombmentRecoveryState(pos, contextPrefix, epoch, false);
-        if (state == null) return false;
-        return state.surfaceEscapeFailures >= 2
-                || state.noProgressCycles >= 2
-                || state.scaffoldEscalationFailures >= 1
-                || state.breakThroughFailures >= 2;
-    }
-
-    private String surfaceEscapeRetryKey(BlockPos pos, int referenceSurfaceY) {
-        if (pos == null) return null;
-        final int bucketSize = 4; // pocket-level cap (clusters nearby XZ retries)
-        int bucketX = Math.floorDiv(pos.getX(), bucketSize);
-        int bucketZ = Math.floorDiv(pos.getZ(), bucketSize);
-        return referenceSurfaceY + "|" + bucketX + "," + bucketZ;
-    }
-
-    private void pruneSurfaceEscapeRetryStates() {
-        if (surfaceEscapeRetryStates.isEmpty()) return;
-        long now = System.currentTimeMillis();
-        Iterator<Map.Entry<String, SurfaceEscapeRetryState>> it = surfaceEscapeRetryStates.entrySet().iterator();
-        while (it.hasNext()) {
-            Map.Entry<String, SurfaceEscapeRetryState> entry = it.next();
-            if (entry == null || entry.getValue() == null) {
-                it.remove();
-                continue;
-            }
-            SurfaceEscapeRetryState state = entry.getValue();
-            if (now - state.lastFailureMs > FORTIFY_SURFACE_ESCAPE_FAIL_TTL_MS) {
-                it.remove();
-            }
-        }
-    }
-
-    private boolean shouldSkipRepeatedSurfaceEscape(BlockPos pos, int referenceSurfaceY) {
-        String key = surfaceEscapeRetryKey(pos, referenceSurfaceY);
-        if (key == null) return false;
-        pruneSurfaceEscapeRetryStates();
-        SurfaceEscapeRetryState state = surfaceEscapeRetryStates.get(key);
-        if (state == null) return false;
-        return state.failures >= FORTIFY_SURFACE_ESCAPE_SAME_COLUMN_LIMIT
-                && (System.currentTimeMillis() - state.lastFailureMs) <= FORTIFY_SURFACE_ESCAPE_FAIL_TTL_MS;
-    }
-
-    private int getSurfaceEscapeRetryFailureCount(BlockPos pos, int referenceSurfaceY) {
-        String key = surfaceEscapeRetryKey(pos, referenceSurfaceY);
-        if (key == null) return 0;
-        pruneSurfaceEscapeRetryStates();
-        SurfaceEscapeRetryState state = surfaceEscapeRetryStates.get(key);
-        if (state == null) return 0;
-        if ((System.currentTimeMillis() - state.lastFailureMs) > FORTIFY_SURFACE_ESCAPE_FAIL_TTL_MS) {
-            return 0;
-        }
-        return state.failures;
-    }
-
-    private int noteSurfaceEscapeRetryFailure(BlockPos pos, int referenceSurfaceY) {
-        String key = surfaceEscapeRetryKey(pos, referenceSurfaceY);
-        if (key == null) return 0;
-        pruneSurfaceEscapeRetryStates();
-        SurfaceEscapeRetryState state = surfaceEscapeRetryStates.computeIfAbsent(key, ignored -> new SurfaceEscapeRetryState());
-        state.failures++;
-        state.lastFailureMs = System.currentTimeMillis();
-        return state.failures;
-    }
-
-    private void clearSurfaceEscapeRetryState(BlockPos pos, int referenceSurfaceY) {
-        String key = surfaceEscapeRetryKey(pos, referenceSurfaceY);
-        if (key != null) {
-            surfaceEscapeRetryStates.remove(key);
-        }
-    }
-
-    private void pruneRecentCarveColumns() {
-        if (recentCarveColumnsMs.isEmpty()) return;
-        long now = System.currentTimeMillis();
-        recentCarveColumnsMs.entrySet().removeIf(e -> e == null || e.getKey() == null || (now - e.getValue()) > FORTIFY_RECENT_CARVE_SUPPRESS_MS);
-    }
-
-    private boolean isRecentCarveColumnOnCooldown(BlockPos pos) {
-        if (pos == null) return false;
-        pruneRecentCarveColumns();
-        Long ts = recentCarveColumnsMs.get(pos);
-        if (ts == null) return false;
-        return (System.currentTimeMillis() - ts) <= FORTIFY_RECENT_CARVE_SUPPRESS_MS;
-    }
-
-    private boolean isSealedFortifyEntombmentSurfaceEscapeCell(ServerWorld world, BlockPos botPos, int referenceSurfaceY) {
-        if (world == null || botPos == null) return false;
-        int depth = referenceSurfaceY - botPos.getY();
-        if (depth <= 0 || depth > 3) return false;
-        if (!isFortifyEntombmentCandidate(world, botPos, null)) return false;
-        BlockState overhead1 = world.getBlockState(botPos.up());
-        BlockState overhead2 = world.getBlockState(botPos.up(2));
-        boolean blockedOverhead = !overhead1.getCollisionShape(world, botPos.up()).isEmpty()
-                || !overhead2.getCollisionShape(world, botPos.up(2)).isEmpty();
-        if (!blockedOverhead) return false;
-
-        int blockedDirs = 0;
-        for (Direction dir : Direction.Type.HORIZONTAL) {
-            BlockPos nextFeet = botPos.offset(dir).up();
-            if (!canStandAt(world, nextFeet)) {
-                blockedDirs++;
-                continue;
-            }
-            BlockPos nextHead = nextFeet.up();
-            BlockPos nextOver = nextHead.up();
-            boolean nextBlocked = !world.getBlockState(nextHead).getCollisionShape(world, nextHead).isEmpty()
-                    || !world.getBlockState(nextOver).getCollisionShape(world, nextOver).isEmpty();
-            if (nextBlocked) {
-                blockedDirs++;
-            }
-        }
-        return blockedDirs >= 4;
+        return FortifyEntombmentHelper.fortifyContextPrefix(navContext, scope != null ? scope.context : null);
     }
 
     private static long packXZ(int x, int z) {
@@ -1164,6 +853,7 @@ public final class FortifyVillageSkill implements Skill {
         }
 
         this.currentLayout = layout;
+        entombmentHelper.updateLayout(layout);
         this.gateRoutingFailures = 0;
         try {
 
@@ -1490,6 +1180,7 @@ public final class FortifyVillageSkill implements Skill {
 
         } finally {
             this.currentLayout = null;
+            entombmentHelper.updateLayout(null);
         }
     }
 
@@ -1870,6 +1561,7 @@ public final class FortifyVillageSkill implements Skill {
                                             Set<Integer> completedEdges, int startEdgeIndex,
                                             int priorBlocksPlaced) {
         this.currentLayout = layout;
+        entombmentHelper.updateLayout(layout);
         this.gateRoutingFailures = 0;
         try {
 
@@ -2148,6 +1840,7 @@ public final class FortifyVillageSkill implements Skill {
 
         } finally {
             this.currentLayout = null;
+            entombmentHelper.updateLayout(null);
         }
     }
 
@@ -3251,8 +2944,8 @@ public final class FortifyVillageSkill implements Skill {
                     && !SkillManager.shouldAbortSkill(bot) && countBuildingBlocks(bot) > 0) {
                 int terrainY = VillageFortificationLayoutService.terrainY(world, bot.getBlockPos().getX(), bot.getBlockPos().getZ());
                 int depth = terrainY - bot.getBlockPos().getY();
-                if (shouldPreferEntombmentEscape(world, bot.getBlockPos(), "fortify-edge:segment-scaffold")
-                        || (depth > 0 && depth <= 3 && isTrapLikeCell(world, bot.getBlockPos()) && isAdjacentToCurrentFortificationHull(bot.getBlockPos()))) {
+                if (entombmentHelper.shouldPreferEntombmentEscape(world, bot.getBlockPos(), "fortify-edge:segment-scaffold")
+                        || (depth > 0 && depth <= 3 && isTrapLikeCell(world, bot.getBlockPos()) && entombmentHelper.isAdjacentToCurrentFortificationHull(bot.getBlockPos()))) {
                     LOGGER.info("[Fortify] Edge {} seg {}: suppress scaffold escalation entombed-local-edge pos={} depth={} failures={}",
                             edge.index(), currentSegmentOrdinal, bot.getBlockPos().toShortString(), depth, report.remainingByReason());
                 } else {
@@ -3386,7 +3079,7 @@ public final class FortifyVillageSkill implements Skill {
             } else {
                 LOGGER.info("[Fortify] Edge {} seg {}: scaffold escalation pillar failed (Y unchanged)",
                         edge.index(), segmentOrdinal);
-                noteEntombmentScaffoldFailure(world, bot.getBlockPos(), "fortify-edge:scaffold-escalation");
+                entombmentHelper.noteEntombmentScaffoldFailure(world, bot.getBlockPos(), "fortify-edge:scaffold-escalation");
             }
 
             // Tear down scaffold
@@ -3892,10 +3585,10 @@ public final class FortifyVillageSkill implements Skill {
             boolean trapLike = isTrapLikeCell(world, botPos);
             boolean shallowDepth = depth <= 3;
             boolean trapPocketDepth = depth <= FORTIFY_TRAP_CARVE_DEPTH_LIMIT;
-            boolean insideOrAdjacentHull = isAdjacentToCurrentFortificationHull(botPos);
-            int surfaceEscapePocketFailures = getSurfaceEscapeRetryFailureCount(botPos, terrainY);
-            boolean repeatedSurfaceEscapePocket = shouldSkipRepeatedSurfaceEscape(botPos, terrainY);
-            boolean noProgressPocketBurst = hasFortifyPocketNoProgressBurst(world, botPos, effectiveCauseContext, 2);
+            boolean insideOrAdjacentHull = entombmentHelper.isAdjacentToCurrentFortificationHull(botPos);
+            int surfaceEscapePocketFailures = entombmentHelper.getSurfaceEscapeRetryFailureCount(botPos, terrainY);
+            boolean repeatedSurfaceEscapePocket = entombmentHelper.shouldSkipRepeatedSurfaceEscape(botPos, terrainY);
+            boolean noProgressPocketBurst = entombmentHelper.hasFortifyPocketNoProgressBurst(world, botPos, effectiveCauseContext, 2);
             boolean towerTrapPocketContext = fortifyContext
                     && effectiveCauseContext != null
                     && (effectiveCauseContext.startsWith("fortify-tower:approach")
@@ -3958,9 +3651,9 @@ public final class FortifyVillageSkill implements Skill {
                 BlockPos afterSurfaceEscape = bot.getBlockPos();
                 boolean escaped = afterSurfaceEscape.getY() >= terrainY - 1 || !beforeSurfaceEscape.equals(afterSurfaceEscape);
                 if (!escaped) {
-                    noteEntombmentSurfaceEscapeFailure(world, beforeSurfaceEscape, causeContext);
+                    entombmentHelper.noteEntombmentSurfaceEscapeFailure(world, beforeSurfaceEscape, causeContext);
                 } else {
-                    noteEntombmentRecoverySuccess(world, beforeSurfaceEscape, afterSurfaceEscape, causeContext);
+                    entombmentHelper.noteEntombmentRecoverySuccess(world, beforeSurfaceEscape, afterSurfaceEscape, causeContext);
                 }
                 LOGGER.info("[FortifyNav] Bot below surface at {} vs terrainY={}, invoking surface escape instead of carving rejects={} escaped={} moved={}",
                         botPos.toShortString(), terrainY, String.join("|", rejectReasons), escaped, !beforeSurfaceEscape.equals(afterSurfaceEscape));
@@ -4001,7 +3694,7 @@ public final class FortifyVillageSkill implements Skill {
                 BlockPos headPos = feetPos.up();
                 BlockPos overheadPos = headPos.up(); // Y+2: clear overhead for tall walls
 
-                if (isRecentCarveColumnOnCooldown(feetPos)) {
+                if (entombmentHelper.isRecentCarveColumnOnCooldown(feetPos)) {
                     diagRecentCooldown++;
                     continue;
                 }
@@ -4316,7 +4009,7 @@ public final class FortifyVillageSkill implements Skill {
 
                 // Cooldown this carve column to avoid back-and-forth re-carving.
                 if (feetPos != null) {
-                    recentCarveColumnsMs.put(feetPos.toImmutable(), System.currentTimeMillis());
+                    entombmentHelper.noteRecentCarveColumn(feetPos);
                 }
                 return moved;
             }
@@ -5422,7 +5115,7 @@ public final class FortifyVillageSkill implements Skill {
                 && isFortifyCarveContext(activeFortifyNavScope)) {
             double localTargetDistSq = bot.getBlockPos().getSquaredDistance(target);
             boolean entombedLocalEdge = localTargetDistSq <= 625.0D
-                    && shouldPreferEntombmentEscape(world, bot.getBlockPos(), activeFortifyNavScope.context);
+                    && entombmentHelper.shouldPreferEntombmentEscape(world, bot.getBlockPos(), activeFortifyNavScope.context);
             if (entombedLocalEdge) {
                 LOGGER.info("[FortifyGate] suppress gate route: entombed-local-edge pos={} target={} dist={}",
                         bot.getBlockPos().toShortString(),
@@ -6482,7 +6175,7 @@ public final class FortifyVillageSkill implements Skill {
             if (!canStandAt(world, launchPrecheckPos)) {
                 LOGGER.info("[FortifyTower] scaffold-base launch-precheck invalid-stand pos={} tower=({}, {})",
                         launchPrecheckPos.toShortString(), vertex.x(), vertex.z());
-                noteEntombmentScaffoldFailure(world, launchPrecheckPos, "fortify-tower:scaffold-base");
+                entombmentHelper.noteEntombmentScaffoldFailure(world, launchPrecheckPos, "fortify-tower:scaffold-base");
                 if (towerNavState != null) towerNavState.noteNoRealProgress();
                 recoverableScaffoldFailure = true;
                 continue;
@@ -6490,7 +6183,7 @@ public final class FortifyVillageSkill implements Skill {
             if (!hasTowerPillarLaunchHeadroom(world, launchPrecheckPos)) {
                 LOGGER.info("[FortifyTower] scaffold-base launch-precheck no-headroom pos={} tower=({}, {})",
                         launchPrecheckPos.toShortString(), vertex.x(), vertex.z());
-                noteEntombmentScaffoldFailure(world, launchPrecheckPos, "fortify-tower:scaffold-base");
+                entombmentHelper.noteEntombmentScaffoldFailure(world, launchPrecheckPos, "fortify-tower:scaffold-base");
                 if (towerNavState != null) towerNavState.noteNoRealProgress();
                 int repeatCount = repeatedNoHeadroomByPos.merge(launchPrecheckPos, 1, Integer::sum);
                 if (launchBelowSurface && launchDepth >= 2 && repeatCount >= TOWER_SCAFFOLD_NO_HEADROOM_SAME_POS_LIMIT) {
@@ -6507,7 +6200,7 @@ public final class FortifyVillageSkill implements Skill {
                 if (!nudged && isTrapLikeCell(world, bot.getBlockPos())) {
                     LOGGER.info("[FortifyTower] scaffold-base launch-precheck trap-like pos={} tower=({}, {})",
                             bot.getBlockPos().toShortString(), vertex.x(), vertex.z());
-                    noteEntombmentScaffoldFailure(world, bot.getBlockPos(), "fortify-tower:scaffold-base");
+                    entombmentHelper.noteEntombmentScaffoldFailure(world, bot.getBlockPos(), "fortify-tower:scaffold-base");
                     if (towerNavState != null) towerNavState.noteNoRealProgress();
                     recoverableScaffoldFailure = true;
                     continue;
@@ -8893,16 +8586,16 @@ public final class FortifyVillageSkill implements Skill {
         int depth = referenceSurfaceY - botPos.getY();
         if (depth <= 0) return; // at or above surface
 
-        if (shouldSkipRepeatedSurfaceEscape(botPos, referenceSurfaceY)) {
-            noteEntombmentSurfaceEscapeFailure(world, botPos, activeFortifyNavScope != null ? activeFortifyNavScope.context : null);
+        if (entombmentHelper.shouldSkipRepeatedSurfaceEscape(botPos, referenceSurfaceY)) {
+            entombmentHelper.noteEntombmentSurfaceEscapeFailure(world, botPos, activeFortifyNavScope != null ? activeFortifyNavScope.context : null);
             LOGGER.info("[FortifyNav] surface escape skipped repeated-fail pos={} surfaceY={} depth={} ctx={}",
                     botPos.toShortString(), referenceSurfaceY, depth,
                     activeFortifyNavScope != null ? activeFortifyNavScope.context : "none");
             return;
         }
 
-        if (isSealedFortifyEntombmentSurfaceEscapeCell(world, botPos, referenceSurfaceY)) {
-            noteEntombmentSurfaceEscapeFailure(world, botPos, null);
+        if (entombmentHelper.isSealedFortifyEntombmentSurfaceEscapeCell(world, botPos, referenceSurfaceY)) {
+            entombmentHelper.noteEntombmentSurfaceEscapeFailure(world, botPos, null);
             LOGGER.info("[FortifyNav] surface escape rejected sealed-entombment pos={} depth={} ctx={}",
                     botPos.toShortString(),
                     depth,
@@ -8931,9 +8624,9 @@ public final class FortifyVillageSkill implements Skill {
         if (tryPillarEscapeFirst(bot, world, referenceSurfaceY, escapeCtx)) {
             BlockPos afterPillar = bot.getBlockPos();
             if (afterPillar.getY() >= referenceSurfaceY - 1) {
-                clearSurfaceEscapeRetryState(startPos, referenceSurfaceY);
-                clearSurfaceEscapeRetryState(afterPillar, referenceSurfaceY);
-                noteEntombmentRecoverySuccess(world, startPos, afterPillar, escapeCtx);
+                entombmentHelper.clearSurfaceEscapeRetryState(startPos, referenceSurfaceY);
+                entombmentHelper.clearSurfaceEscapeRetryState(afterPillar, referenceSurfaceY);
+                entombmentHelper.noteEntombmentRecoverySuccess(world, startPos, afterPillar, escapeCtx);
                 return;
             }
         }
@@ -8941,15 +8634,15 @@ public final class FortifyVillageSkill implements Skill {
         // If pillar failed, note failure
         botPos = bot.getBlockPos();
         if (botPos.getY() < referenceSurfaceY) {
-            int sameColumnFailures = noteSurfaceEscapeRetryFailure(startPos, referenceSurfaceY);
+            int sameColumnFailures = entombmentHelper.noteSurfaceEscapeRetryFailure(startPos, referenceSurfaceY);
             if (!startPos.equals(botPos)
-                    && !Objects.equals(surfaceEscapeRetryKey(startPos, referenceSurfaceY),
-                    surfaceEscapeRetryKey(botPos, referenceSurfaceY))) {
-                noteSurfaceEscapeRetryFailure(botPos, referenceSurfaceY);
+                    && !Objects.equals(entombmentHelper.surfaceEscapeRetryKey(startPos, referenceSurfaceY),
+                    entombmentHelper.surfaceEscapeRetryKey(botPos, referenceSurfaceY))) {
+                entombmentHelper.noteSurfaceEscapeRetryFailure(botPos, referenceSurfaceY);
             }
             LOGGER.warn("Pillar escape incomplete, bot at {} vs surfaceY={} pocketFailures={}",
                     botPos.toShortString(), referenceSurfaceY, sameColumnFailures);
-            noteEntombmentSurfaceEscapeFailure(world, botPos, activeFortifyNavScope != null ? activeFortifyNavScope.context : null);
+            entombmentHelper.noteEntombmentSurfaceEscapeFailure(world, botPos, activeFortifyNavScope != null ? activeFortifyNavScope.context : null);
             // Record this below-surface failure so the tower approach blacklists it on revisit
             if (activeFortifyNavScope != null && activeFortifyNavScope.towerState != null) {
                 activeFortifyNavScope.towerState.recordSubSurfaceFailure(startPos);
@@ -9335,9 +9028,9 @@ public final class FortifyVillageSkill implements Skill {
                     int recoveryTerrainY = VillageFortificationLayoutService.terrainY(recoveryWorld, recoveryStart.getX(), recoveryStart.getZ());
                     int recoveryDepth = Math.max(0, recoveryTerrainY - recoveryStart.getY());
                     boolean recoveryTrapLike = isTrapLikeCell(recoveryWorld, recoveryStart);
-                    boolean entombmentMode = shouldPreferEntombmentEscape(recoveryWorld, recoveryStart, navContext);
-                    boolean repeatedSurfaceEscapePocket = shouldSkipRepeatedSurfaceEscape(recoveryStart, recoveryTerrainY);
-                    boolean noProgressPocketBurst = hasFortifyPocketNoProgressBurst(recoveryWorld, recoveryStart, navContext, 1);
+                    boolean entombmentMode = entombmentHelper.shouldPreferEntombmentEscape(recoveryWorld, recoveryStart, navContext);
+                    boolean repeatedSurfaceEscapePocket = entombmentHelper.shouldSkipRepeatedSurfaceEscape(recoveryStart, recoveryTerrainY);
+                    boolean noProgressPocketBurst = entombmentHelper.hasFortifyPocketNoProgressBurst(recoveryWorld, recoveryStart, navContext, 1);
                     boolean towerStepupLoopMode = navContext != null
                             && (navContext.startsWith("fortify-tower:approach")
                             || navContext.startsWith("fortify-tower:local-step-replan"))
@@ -9388,7 +9081,7 @@ public final class FortifyVillageSkill implements Skill {
                         recoveryResult = "bridge-footing";
                         stuckTicks = 0;
                         lastBlockPos = bot.getBlockPos();
-                        noteEntombmentRecoverySuccess(recoveryWorld, recoveryStart, bot.getBlockPos(), navContext);
+                        entombmentHelper.noteEntombmentRecoverySuccess(recoveryWorld, recoveryStart, bot.getBlockPos(), navContext);
                         continue;
                     }
 
@@ -9409,7 +9102,7 @@ public final class FortifyVillageSkill implements Skill {
                                 recoveryResult = "micro-path";
                                 stuckTicks = 0;
                                 lastBlockPos = bot.getBlockPos();
-                                noteEntombmentRecoverySuccess(recoveryWorld, recoveryStart, bot.getBlockPos(), navContext);
+                                entombmentHelper.noteEntombmentRecoverySuccess(recoveryWorld, recoveryStart, bot.getBlockPos(), navContext);
                                 continue;
                             }
                         }
@@ -9425,11 +9118,11 @@ public final class FortifyVillageSkill implements Skill {
                             lastBlockPos = bot.getBlockPos();
                             recovered = true;
                             recoveryResult = "carved";
-                            noteEntombmentRecoverySuccess(recoveryWorld, recoveryStart, bot.getBlockPos(), navContext);
+                            entombmentHelper.noteEntombmentRecoverySuccess(recoveryWorld, recoveryStart, bot.getBlockPos(), navContext);
                             continue;
                         }
                         if (carvePreferredMode) {
-                            noteEntombmentBreakFailure(recoveryWorld, recoveryStart, navContext);
+                            entombmentHelper.noteEntombmentBreakFailure(recoveryWorld, recoveryStart, navContext);
                         }
                         if (!recovered && activeFortifyNavScope != null
                                 && activeFortifyNavScope.navMode == FortifyNavMode.CARVE_CORRIDOR
@@ -9442,11 +9135,11 @@ public final class FortifyVillageSkill implements Skill {
                                 lastBlockPos = bot.getBlockPos();
                                 recovered = true;
                                 recoveryResult = "carved";
-                                noteEntombmentRecoverySuccess(recoveryWorld, recoveryStart, bot.getBlockPos(), navContext);
+                                entombmentHelper.noteEntombmentRecoverySuccess(recoveryWorld, recoveryStart, bot.getBlockPos(), navContext);
                                 continue;
                             }
                             if (carvePreferredMode) {
-                                noteEntombmentBreakFailure(recoveryWorld, recoveryStart, navContext + ":carve");
+                                entombmentHelper.noteEntombmentBreakFailure(recoveryWorld, recoveryStart, navContext + ":carve");
                             }
                         }
                         // Count failed attempts too — prevents endless "no viable candidates"
@@ -9532,10 +9225,10 @@ public final class FortifyVillageSkill implements Skill {
                         }
                         stuckTicks = 0;
                         lastBlockPos = bot.getBlockPos();
-                        noteEntombmentRecoverySuccess(recoveryWorld, recoveryStart, bot.getBlockPos(), navContext);
+                        entombmentHelper.noteEntombmentRecoverySuccess(recoveryWorld, recoveryStart, bot.getBlockPos(), navContext);
                         continue;
                     }
-                    noteEntombmentNoProgressCycle(recoveryWorld, recoveryStart, navContext);
+                    entombmentHelper.noteEntombmentNoProgressCycle(recoveryWorld, recoveryStart, navContext);
                     int maxRecoveryAttempts = (towerStepupLoopMode || edgeStepupLoopMode) ? 1 : 4;
                     if (stuckRecoveryAttempts < maxRecoveryAttempts) {
                         LOGGER.debug("[FortifyNav] local recovery attempt {} failed at {}, retrying",

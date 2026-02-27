@@ -74,12 +74,18 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 import net.fabricmc.fabric.api.event.player.UseEntityCallback;
 import net.fabricmc.fabric.api.event.player.UseBlockCallback;
+import net.fabricmc.fabric.api.event.player.UseItemCallback;
+import net.fabricmc.fabric.api.event.player.AttackBlockCallback;
+import net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents;
 import net.minecraft.screen.ScreenHandlerType;
 import net.minecraft.util.Identifier;
 import net.minecraft.registry.Registry;
 import net.minecraft.registry.Registries;
 import net.minecraft.resource.featuretoggle.FeatureFlags;
 import net.wcfcarolina13.items.ModItems;
+import net.wcfcarolina13.GameAI.services.LearningModeService;
+import net.wcfcarolina13.network.LearningInputSamplePayload;
+import net.wcfcarolina13.network.LearningSessionStatusPayload;
 
 public class Frens implements ModInitializer {
 
@@ -358,6 +364,9 @@ public class Frens implements ModInitializer {
             if (!(player instanceof net.minecraft.server.network.ServerPlayerEntity serverPlayer)) return net.minecraft.util.ActionResult.PASS;
             if (!(world instanceof net.minecraft.server.world.ServerWorld serverWorld)) return net.minecraft.util.ActionResult.PASS;
 
+            // Learning mode: record player block interactions (best-effort, non-consuming).
+            LearningModeService.onUseBlock(serverPlayer, serverWorld, hand, hitResult);
+
             // Survival recruitment: interacting with a bell or a bed counts as a trigger.
             // Don't consume the action; just record it.
             if (hand == net.minecraft.util.Hand.MAIN_HAND) {
@@ -386,6 +395,32 @@ public class Frens implements ModInitializer {
             }
             return net.wcfcarolina13.GameAI.services.CompanionResurrectionService
                     .tryHandleUseBlock(serverPlayer, serverWorld, hand, hitResult.getBlockPos());
+        });
+
+        UseItemCallback.EVENT.register((player, world, hand) -> {
+            if (world == null || world.isClient()) return net.minecraft.util.ActionResult.PASS;
+            if (player instanceof net.minecraft.server.network.ServerPlayerEntity serverPlayer
+                    && world instanceof net.minecraft.server.world.ServerWorld serverWorld) {
+                LearningModeService.onUseItem(serverPlayer, serverWorld, hand);
+            }
+            return net.minecraft.util.ActionResult.PASS;
+        });
+
+        AttackBlockCallback.EVENT.register((player, world, hand, pos, direction) -> {
+            if (world == null || world.isClient()) return net.minecraft.util.ActionResult.PASS;
+            if (player instanceof net.minecraft.server.network.ServerPlayerEntity serverPlayer
+                    && world instanceof net.minecraft.server.world.ServerWorld serverWorld) {
+                LearningModeService.onAttackBlock(serverPlayer, serverWorld, hand, pos, direction);
+            }
+            return net.minecraft.util.ActionResult.PASS;
+        });
+
+        PlayerBlockBreakEvents.AFTER.register((world, player, pos, state, blockEntity) -> {
+            if (world == null || world.isClient()) return;
+            if (player instanceof net.minecraft.server.network.ServerPlayerEntity serverPlayer
+                    && world instanceof net.minecraft.server.world.ServerWorld serverWorld) {
+                LearningModeService.onBlockBreakAfter(serverPlayer, serverWorld, pos, state);
+            }
         });
 
         LOGGER.info("Hello Fabric world!");
@@ -448,6 +483,8 @@ public class Frens implements ModInitializer {
         PayloadTypeRegistry.playS2C().register(net.wcfcarolina13.network.RecruitmentAdminStatusPayload.ID, net.wcfcarolina13.network.RecruitmentAdminStatusPayload.CODEC);
         PayloadTypeRegistry.playC2S().register(net.wcfcarolina13.network.BotTaskPeekRequestPayload.ID, net.wcfcarolina13.network.BotTaskPeekRequestPayload.CODEC);
         PayloadTypeRegistry.playS2C().register(net.wcfcarolina13.network.BotTaskPeekStatusPayload.ID, net.wcfcarolina13.network.BotTaskPeekStatusPayload.CODEC);
+        PayloadTypeRegistry.playC2S().register(LearningInputSamplePayload.ID, LearningInputSamplePayload.CODEC);
+        PayloadTypeRegistry.playS2C().register(LearningSessionStatusPayload.ID, LearningSessionStatusPayload.CODEC);
 
         net.wcfcarolina13.network.BaseNetworkManager.registerReceiversOnce();
         net.wcfcarolina13.network.CraftingHistoryNetworkManager.registerReceiversOnce();
@@ -457,6 +494,7 @@ public class Frens implements ModInitializer {
         net.wcfcarolina13.network.CompanionQuestNetworkManager.registerReceiversOnce();
         net.wcfcarolina13.network.RecruitmentAdminNetworkManager.registerReceiversOnce();
         net.wcfcarolina13.network.BotTaskPeekNetworkManager.registerReceiversOnce();
+        LearningModeService.registerReceiversOnce();
 
         modCommandRegistry.register();
         configCommand.register();
@@ -508,6 +546,7 @@ public class Frens implements ModInitializer {
         });
 
         ServerLifecycleEvents.SERVER_STOPPING.register(server -> {
+            LearningModeService.onServerStopping(server);
             net.wcfcarolina13.GameAI.services.CompanionOverheadHologramService.removeAll();
             net.wcfcarolina13.GameAI.services.TaskService.resetAll("§cServer stopping; aborting active tasks.");
             for (ServerPlayerEntity bot : server.getPlayerManager().getPlayerList()) {
@@ -576,6 +615,7 @@ public class Frens implements ModInitializer {
 
         ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> {
             ServerPlayerEntity player = handler.player;
+            LearningModeService.onPlayerDisconnect(player);
             BotPersistenceService.onBotDisconnect(player);
             if (!(player instanceof net.wcfcarolina13.Entity.createFakePlayer) && !server.isDedicated()) {
                 BotPersistenceService.saveBotsBeforeShutdown(server);
@@ -584,6 +624,9 @@ public class Frens implements ModInitializer {
 
         // Register damage event to handle suffocation immediately
         ServerLivingEntityEvents.ALLOW_DAMAGE.register((entity, source, amount) -> {
+            if (entity instanceof ServerPlayerEntity realPlayer && !(realPlayer instanceof net.wcfcarolina13.Entity.createFakePlayer)) {
+                LearningModeService.onPlayerDamage(realPlayer, source, amount);
+            }
             if (entity instanceof ServerPlayerEntity serverPlayer && BotEventHandler.isRegisteredBot(serverPlayer)) {
                 // Notify mood manager of damage (triggers STRESSED state)
                 BotMoodManager.noteDamage(serverPlayer);
@@ -707,6 +750,7 @@ public class Frens implements ModInitializer {
         ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.ElytraFlightService::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.GhastFireballDeflectService::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.CompanionOverheadHologramService::onServerTick);
+        ServerTickEvents.END_SERVER_TICK.register(LearningModeService::onServerTick);
 
         ServerMessageEvents.CHAT_MESSAGE.register((message, sender, params) -> {
             String raw = message.getContent().getString();

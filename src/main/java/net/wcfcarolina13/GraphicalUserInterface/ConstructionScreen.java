@@ -31,6 +31,7 @@ public class ConstructionScreen extends Screen {
             new ConstructionEntry("build defensive_wall_corner", "Wall Corner", "L-shaped corner piece", "defensive_wall_corner"),
             new ConstructionEntry("build defensive_gatehouse", "Gatehouse", "Archway with pillars", "defensive_gatehouse"),
             // Village fortification
+            new ConstructionEntry("fortify report_cavities", "Fortify: Report Cavities", "Show ignored cavity markers for current wall", null),
             new ConstructionEntry("fortify", "Fortify Village", "Defensive wall around nearby village", null),
             // Utility
             new ConstructionEntry("build bridge", "Bridge", "9-block bridge with railings", "bridge"),

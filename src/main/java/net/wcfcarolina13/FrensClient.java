@@ -50,6 +50,8 @@ import net.wcfcarolina13.network.OpenConfigPayload;
 import net.wcfcarolina13.network.RecruitmentAdminStatusPayload;
 import net.wcfcarolina13.network.BotTaskPeekRequestPayload;
 import net.wcfcarolina13.network.BotTaskPeekStatusPayload;
+import net.wcfcarolina13.network.LearningInputSamplePayload;
+import net.wcfcarolina13.network.LearningSessionStatusPayload;
 import net.wcfcarolina13.items.ModItems;
 import org.lwjgl.glfw.GLFW;
 
@@ -131,6 +133,13 @@ public class FrensClient implements ClientModInitializer {
     private static long lookedAtBotPeekLastRequestMs = 0L;
     private static BotTaskPeekStatusPayload lookedAtBotStatus = null;
     private static long lookedAtBotStatusAtMs = 0L;
+
+    // Learning mode client telemetry stream state (server-authoritative).
+    private static boolean learningInputStreamActive = false;
+    private static long learningInputSessionToken = 0L;
+    private static int learningInputTickHz = 0;
+    private static long learningInputLastSentMs = 0L;
+    private static int learningInputSampleSeq = 0;
 
     // While the hotkey overlay is visible, keep the player's selected slot locked so number-key
     // selections do not leak through to vanilla hotbar switching.
@@ -399,8 +408,12 @@ public class FrensClient implements ClientModInitializer {
                 modeSelectionAutoOpenPending = false;
                 modeSelectionOpenedThisConnection = false;
                 spellHintFirstScanDone = false;
+                learningInputStreamActive = false;
+                learningInputSessionToken = 0L;
+                learningInputTickHz = 0;
                 return;
             }
+            tickLearningInputTelemetry(client);
             if (client.currentScreen != null) {
                 return;
             }
@@ -666,6 +679,10 @@ public class FrensClient implements ClientModInitializer {
             });
         });
 
+        ClientPlayNetworking.registerGlobalReceiver(LearningSessionStatusPayload.ID, (payload, context) -> {
+            context.client().execute(() -> applyLearningSessionStatus(payload));
+        });
+
         HudRenderCallback.EVENT.register((context, tickDelta) -> resetTopTipLayout(context));
         HudRenderCallback.EVENT.register((context, tickDelta) -> renderResumeDecisionHint(context));
         HudRenderCallback.EVENT.register((context, tickDelta) -> renderLeashButton(context));
@@ -686,6 +703,60 @@ public class FrensClient implements ClientModInitializer {
         topTipLeftY = TOP_TIP_MARGIN;
         topTipCenterY = TOP_TIP_MARGIN;
         topTipRightY = TOP_TIP_MARGIN;
+    }
+
+    private static void applyLearningSessionStatus(LearningSessionStatusPayload payload) {
+        if (payload == null) {
+            learningInputStreamActive = false;
+            learningInputSessionToken = 0L;
+            learningInputTickHz = 0;
+            return;
+        }
+        learningInputStreamActive = payload.active();
+        learningInputSessionToken = payload.sessionToken();
+        learningInputTickHz = Math.max(0, payload.tickHz());
+        learningInputLastSentMs = 0L;
+        learningInputSampleSeq = 0;
+    }
+
+    private static void tickLearningInputTelemetry(MinecraftClient client) {
+        if (!learningInputStreamActive || learningInputSessionToken <= 0L) {
+            return;
+        }
+        if (client == null || client.player == null || client.getNetworkHandler() == null) {
+            return;
+        }
+        if (!ClientPlayNetworking.canSend(LearningInputSamplePayload.ID)) {
+            return;
+        }
+        int hz = Math.max(2, Math.min(20, learningInputTickHz > 0 ? learningInputTickHz : 20));
+        long minIntervalMs = Math.max(25L, 1000L / hz);
+        long now = System.currentTimeMillis();
+        if (now - learningInputLastSentMs < minIntervalMs) {
+            return;
+        }
+
+        int flags = 0;
+        if (client.options.forwardKey.isPressed()) flags |= (1 << 0);
+        if (client.options.backKey.isPressed()) flags |= (1 << 1);
+        if (client.options.leftKey.isPressed()) flags |= (1 << 2);
+        if (client.options.rightKey.isPressed()) flags |= (1 << 3);
+        if (client.options.jumpKey.isPressed()) flags |= (1 << 4);
+        if (client.options.sneakKey.isPressed()) flags |= (1 << 5);
+        if (client.options.sprintKey.isPressed()) flags |= (1 << 6);
+        if (client.options.useKey.isPressed()) flags |= (1 << 7);
+        if (client.options.attackKey.isPressed()) flags |= (1 << 8);
+
+        LearningInputSamplePayload payload = new LearningInputSamplePayload(
+                learningInputSessionToken,
+                ++learningInputSampleSeq,
+                flags,
+                client.player.getInventory().getSelectedSlot(),
+                client.player.getYaw(),
+                client.player.getPitch()
+        );
+        ClientPlayNetworking.send(payload);
+        learningInputLastSentMs = now;
     }
 
     private static int reserveTopTipY(TopTipLane lane, int tipHeight) {
