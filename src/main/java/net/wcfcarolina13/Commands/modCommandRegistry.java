@@ -451,6 +451,34 @@ public class modCommandRegistry {
                                         })
                                 )
                         )
+                        .then(literal("forceplace")
+                                .then(CommandManager.argument("value", StringArgumentType.word())
+                                        .suggests((ctx, builder) -> {
+                                            builder.suggest("on"); builder.suggest("off");
+                                            return builder.buildFuture();
+                                        })
+                                        .executes(context -> {
+                                            String raw = StringArgumentType.getString(context, "value");
+                                            Boolean val = parseToggle(raw);
+                                            if (val == null) {
+                                                context.getSource().sendFeedback(
+                                                        () -> Text.literal("Usage: /bot config forceplace <on|off>"), false);
+                                                return 0;
+                                            }
+                                            Frens.CONFIG.setFortifyForcePlaceEnabled(val);
+                                            Frens.CONFIG.save();
+                                            boolean enabled = val;
+                                            context.getSource().sendFeedback(
+                                                    () -> Text.literal("Fortify force-place: " + (enabled ? "enabled" : "disabled")), true);
+                                            return 1;
+                                        }))
+                                .executes(context -> {
+                                    boolean current = Frens.CONFIG.isFortifyForcePlaceEnabled();
+                                    context.getSource().sendFeedback(
+                                            () -> Text.literal("Fortify force-place: " + (current ? "enabled" : "disabled")), false);
+                                    return 1;
+                                })
+                        )
                         .then(literal("walk")
                                 .then(CommandManager.argument("bot", EntityArgumentType.player())
                                         .then(CommandManager.argument("till", IntegerArgumentType.integer())

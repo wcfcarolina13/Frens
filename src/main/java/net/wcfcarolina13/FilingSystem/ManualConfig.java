@@ -52,6 +52,7 @@ public class ManualConfig {
     private boolean gameplayTipsEnabled = true;
     private boolean idleHobbiesAnywhereEnabled = false;
     private boolean baritonePathfinderEnabled = false;
+    private boolean fortifyForcePlaceEnabled = false;
     private Map<String, BotControlSettings> botControls = new HashMap<>();
     // Seed-agnostic, bot-persistent quest continuity (non-power progression).
     private Map<String, BotQuestMemory> botQuestMemory = new HashMap<>();
@@ -428,6 +429,9 @@ public class ManualConfig {
 
     public boolean isBaritonePathfinderEnabled() { return baritonePathfinderEnabled; }
     public void setBaritonePathfinderEnabled(boolean v) { this.baritonePathfinderEnabled = v; }
+
+    public boolean isFortifyForcePlaceEnabled() { return fortifyForcePlaceEnabled; }
+    public void setFortifyForcePlaceEnabled(boolean v) { this.fortifyForcePlaceEnabled = v; }
 
     public Map<String, BotControlSettings> getBotControls() {
         if (botControls == null) {

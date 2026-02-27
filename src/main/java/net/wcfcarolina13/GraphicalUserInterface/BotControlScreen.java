@@ -57,6 +57,7 @@ public class BotControlScreen extends Screen {
     // ── Global toggles ──────────────────────────────────────────────────
     private CyclingButtonWidget<Boolean> worldToggle;
     private CyclingButtonWidget<Boolean> survivalRecruitmentToggle;
+    private CyclingButtonWidget<Boolean> forcePlaceToggle;
 
     // ── Bot selector ────────────────────────────────────────────────────
     private DropdownMenuWidget aliasDropdown;
@@ -132,6 +133,15 @@ public class BotControlScreen extends Screen {
         survivalRecruitmentToggle.setTooltip(Tooltip.of(Text.of(
                 "When ON: bots won't spawn until you find a village and recruit.")));
         this.addDrawableChild(survivalRecruitmentToggle);
+
+        y += BUTTON_H + 4;
+        boolean forcePlace = Frens.CONFIG.isFortifyForcePlaceEnabled();
+        forcePlaceToggle = CyclingButtonWidget.onOffBuilder(forcePlace)
+                .build(lx, y, contentW, BUTTON_H,
+                        Text.of("Fortify Force-Place"), (b, v) -> {});
+        forcePlaceToggle.setTooltip(Tooltip.of(Text.of(
+                "When ON: bots will force-place edge blocks that have no valid line-of-sight. Bypasses vanilla placement rules.")));
+        this.addDrawableChild(forcePlaceToggle);
 
         // ── Alias list & dropdown ───────────────────────────────────────
         y += BUTTON_H + 10;
@@ -317,6 +327,7 @@ public class BotControlScreen extends Screen {
         ManualConfig config = Frens.CONFIG;
         config.setDefaultLlmWorldEnabled(worldToggle.getValue());
         config.setSurvivalRecruitmentMode(survivalRecruitmentToggle.getValue());
+        config.setFortifyForcePlaceEnabled(forcePlaceToggle.getValue());
 
         for (Map.Entry<String, SettingsSnapshot> entry : dirtySettings.entrySet()) {
             ManualConfig.BotControlSettings s = config.getOrCreateBotControl(entry.getKey());

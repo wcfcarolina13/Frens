@@ -21,6 +21,7 @@ import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.RaycastContext;
 import net.wcfcarolina13.ChatUtils.ChatUtils;
 import net.wcfcarolina13.Entity.LookController;
+import net.wcfcarolina13.Frens;
 import net.wcfcarolina13.GameAI.BotActions;
 import net.wcfcarolina13.GameAI.services.CompanionOverheadDialogueService;
 import net.wcfcarolina13.GameAI.services.MovementService;
@@ -2762,6 +2763,29 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
             }
 
             if (bestCandidate == null) {
+                if (Frens.CONFIG.isFortifyForcePlaceEnabled()) {
+                    int forcePlaced = 0;
+                    for (BlockPos pos : new ArrayList<>(remaining)) {
+                        if (countBuildingBlocks(bot) == 0) break;
+                        ProceduralWallBlock block = blockMap.get(pos);
+                        if (block == null) continue;
+                        if (isPlannedBlockSatisfied(block, world.getBlockState(pos))) {
+                            remaining.remove(pos);
+                            continue;
+                        }
+                        Item targetItem = block.state().getBlock().asItem();
+                        List<Item> materials = List.of(targetItem, Items.COBBLESTONE, Items.STONE);
+                        BotActions.PlaceResult result = BotActions.forceReplaceBlock(bot, pos, materials);
+                        if (result.success()) {
+                            remaining.remove(pos);
+                            placed++;
+                            forcePlaced++;
+                        }
+                    }
+                    LOGGER.info("[Fortify] Edge {} seg {}: force-placed {} blocks (non-vanilla, no LOS candidate found)",
+                            edge.index(), segmentOrdinal, forcePlaced);
+                    return placed;
+                }
                 LOGGER.info("[Fortify] Edge {} seg {}: scaffold escalation — no candidate with clear overhead",
                         edge.index(), segmentOrdinal);
                 return placed;
@@ -2821,6 +2845,32 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
 
                 LOGGER.info("[Fortify] Edge {} seg {}: scaffold escalation placed={}/{}",
                         edge.index(), segmentOrdinal, placed, remainingBlocks.size());
+
+                // Force-place any remaining blocks that vanilla placement couldn't reach
+                if (!remaining.isEmpty() && Frens.CONFIG.isFortifyForcePlaceEnabled()) {
+                    int forcePlaced = 0;
+                    for (BlockPos pos : new ArrayList<>(remaining)) {
+                        if (countBuildingBlocks(bot) == 0) break;
+                        ProceduralWallBlock block = blockMap.get(pos);
+                        if (block == null) continue;
+                        if (isPlannedBlockSatisfied(block, world.getBlockState(pos))) {
+                            remaining.remove(pos);
+                            continue;
+                        }
+                        Item targetItem = block.state().getBlock().asItem();
+                        List<Item> materials = List.of(targetItem, Items.COBBLESTONE, Items.STONE);
+                        BotActions.PlaceResult result = BotActions.forceReplaceBlock(bot, pos, materials);
+                        if (result.success()) {
+                            remaining.remove(pos);
+                            placed++;
+                            forcePlaced++;
+                        }
+                    }
+                    if (forcePlaced > 0) {
+                        LOGGER.info("[Fortify] Edge {} seg {}: force-placed {} remaining blocks (non-vanilla, post-scaffold)",
+                                edge.index(), segmentOrdinal, forcePlaced);
+                    }
+                }
             } else {
                 LOGGER.info("[Fortify] Edge {} seg {}: scaffold escalation pillar failed (Y unchanged)",
                         edge.index(), segmentOrdinal);
