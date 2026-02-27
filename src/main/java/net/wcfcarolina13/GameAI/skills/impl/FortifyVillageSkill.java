@@ -1331,34 +1331,27 @@ public final class FortifyVillageSkill implements Skill {
                 }
             }
 
-            // Sort edges by proximity to bot (nearest first) to minimize travel
-            BlockPos botPos = bot.getBlockPos();
-            List<Map.Entry<Integer, List<ProceduralWallBlock>>> sortedEdges = new ArrayList<>(repairByEdge.entrySet());
-            sortedEdges.sort(Comparator.comparingDouble(entry -> {
-                int edgeIdx = entry.getKey();
-                if (edgeIdx == -1) {
-                    double avgX = 0, avgZ = 0;
-                    for (ProceduralWallBlock b : entry.getValue()) {
-                        avgX += b.worldPos().getX();
-                        avgZ += b.worldPos().getZ();
-                    }
-                    avgX /= entry.getValue().size();
-                    avgZ /= entry.getValue().size();
-                    return Math.pow(botPos.getX() - avgX, 2) + Math.pow(botPos.getZ() - avgZ, 2);
-                }
-                if (edgeIdx >= 0 && edgeIdx < layout.edges().size()) {
-                    WallEdge e = layout.edges().get(edgeIdx);
-                    double midX = (e.start().x() + e.end().x()) / 2.0;
-                    double midZ = (e.start().z() + e.end().z()) / 2.0;
-                    return Math.pow(botPos.getX() - midX, 2) + Math.pow(botPos.getZ() - midZ, 2);
-                }
-                return Double.MAX_VALUE;
-            }));
+            // Greedy nearest-neighbor: pick the closest remaining edge/tower each iteration
+            // using the bot's current position (which changes as it moves around the perimeter).
+            List<Map.Entry<Integer, List<ProceduralWallBlock>>> remainingEdges = new ArrayList<>(repairByEdge.entrySet());
 
             int passRepaired = 0;
             int edgesPatched = 0;
 
-            for (Map.Entry<Integer, List<ProceduralWallBlock>> entry : sortedEdges) {
+            while (!remainingEdges.isEmpty()) {
+                // Re-pick nearest to bot's CURRENT position each iteration
+                BlockPos botPos = bot.getBlockPos();
+                int nearestIdx = 0;
+                double nearestDistSq = Double.MAX_VALUE;
+                for (int ri = 0; ri < remainingEdges.size(); ri++) {
+                    Map.Entry<Integer, List<ProceduralWallBlock>> candidate = remainingEdges.get(ri);
+                    double distSq = patchEdgeDistanceSq(botPos, candidate.getKey(), candidate.getValue(), layout);
+                    if (distSq < nearestDistSq) {
+                        nearestDistSq = distSq;
+                        nearestIdx = ri;
+                    }
+                }
+                Map.Entry<Integer, List<ProceduralWallBlock>> entry = remainingEdges.remove(nearestIdx);
                 if (SkillManager.shouldAbortSkill(bot)) break;
                 if (countBuildingBlocks(bot) == 0) {
                     showOverhead(bot, "Out of blocks. " + passRepaired + " repaired this pass.");
@@ -2061,8 +2054,10 @@ public final class FortifyVillageSkill implements Skill {
             escapeIfInHole(bot, world, referenceSurfaceY);
         }
         long phaseBStartMs = System.currentTimeMillis();
+        Set<Integer> edgesVisited = new HashSet<>(completedEdges);
 
-        for (int ei : edgeBuildOrder) {
+        int ei;
+        while ((ei = pickNearestRemainingEdge(bot, layout, edgesVisited)) >= 0) {
 
             if (SkillManager.shouldAbortSkill(bot)) {
                 saveAndReport(source, server, worldKey, wallName, ei, totalPlaced, "Aborted");
@@ -2113,7 +2108,10 @@ public final class FortifyVillageSkill implements Skill {
                 }
             }
 
-            if (countBuildingBlocks(bot) == 0 && ei < totalEdges - 1) {
+            // Mark this edge as visited so pickNearestRemainingEdge moves on
+            edgesVisited.add(ei);
+
+            if (countBuildingBlocks(bot) == 0 && edgesVisited.size() < totalEdges) {
                 return handleOutOfBlocks(source, server, worldKey, wallName, ei + 1, totalPlaced);
             }
         }
@@ -9697,6 +9695,64 @@ public final class FortifyVillageSkill implements Skill {
             }
         }
         return order;
+    }
+
+    /**
+     * Greedy nearest-neighbor edge selection: pick the remaining edge whose midpoint
+     * is closest to the bot's current position.  Returns -1 if no edges remain.
+     */
+    private int pickNearestRemainingEdge(ServerPlayerEntity bot, FortificationLayout layout,
+                                         Set<Integer> visited) {
+        int totalEdges = layout.edges().size();
+        BlockPos botPos = bot.getBlockPos();
+        int nearest = -1;
+        double nearestDistSq = Double.MAX_VALUE;
+        for (int i = 0; i < totalEdges; i++) {
+            if (visited.contains(i)) continue;
+            WallEdge edge = layout.edges().get(i);
+            double midX = (edge.start().x() + edge.end().x()) / 2.0;
+            double midZ = (edge.start().z() + edge.end().z()) / 2.0;
+            double dx = botPos.getX() - midX;
+            double dz = botPos.getZ() - midZ;
+            double distSq = dx * dx + dz * dz;
+            if (distSq < nearestDistSq) {
+                nearestDistSq = distSq;
+                nearest = i;
+            }
+        }
+        return nearest;
+    }
+
+    /**
+     * Compute squared distance from a position to an edge/tower group used in patch mode.
+     * For tower blocks (edgeIdx == -1), uses average position of the blocks.
+     * For wall edges, uses the edge midpoint.
+     */
+    private static double patchEdgeDistanceSq(BlockPos botPos, int edgeIdx,
+                                               List<ProceduralWallBlock> blocks,
+                                               FortificationLayout layout) {
+        if (edgeIdx == -1) {
+            if (blocks.isEmpty()) return Double.MAX_VALUE;
+            double avgX = 0, avgZ = 0;
+            for (ProceduralWallBlock b : blocks) {
+                avgX += b.worldPos().getX();
+                avgZ += b.worldPos().getZ();
+            }
+            avgX /= blocks.size();
+            avgZ /= blocks.size();
+            double dx = botPos.getX() - avgX;
+            double dz = botPos.getZ() - avgZ;
+            return dx * dx + dz * dz;
+        }
+        if (edgeIdx >= 0 && edgeIdx < layout.edges().size()) {
+            WallEdge e = layout.edges().get(edgeIdx);
+            double midX = (e.start().x() + e.end().x()) / 2.0;
+            double midZ = (e.start().z() + e.end().z()) / 2.0;
+            double dx = botPos.getX() - midX;
+            double dz = botPos.getZ() - midZ;
+            return dx * dx + dz * dz;
+        }
+        return Double.MAX_VALUE;
     }
 
     private static boolean isMoatRelatedType(WallBlockType type) {
