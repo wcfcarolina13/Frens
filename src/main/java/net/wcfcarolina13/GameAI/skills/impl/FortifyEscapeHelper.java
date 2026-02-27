@@ -247,6 +247,14 @@ final class FortifyEscapeHelper {
                 NavBreakCandidateEval eval = ops.evaluateBreakForNavigation(world, pos, true);
                 if (eval.allowed()) {
                     dug = ops.digBlockForNavigation(bot, world, pos);
+                } else if (dy <= 3) {
+                    // Immediate headroom (1-2 blocks above head): the bot MUST clear these
+                    // to escape entombment. By-pass nav-break rejection and use navigation
+                    // dig which skips village-structure adjacency checks that would otherwise
+                    // prevent clearing the bot's own fortification blocks near villages.
+                    LOGGER.info("[FortifyNav] escape-shaft forcing dig at {} dy={} (nav-break rejected)",
+                            pos.toShortString(), dy);
+                    dug = ops.digBlockForNavigation(bot, world, pos);
                 }
             }
             if (!dug) {
@@ -288,6 +296,36 @@ final class FortifyEscapeHelper {
             if (extraCleared > 0) {
                 cleared += extraCleared;
                 pillared = ScaffoldService.pillarUp(bot, remaining + 1, true);
+            }
+        }
+        // Force-pillar fallback: when vanilla placement is rejected (entity collision, etc.)
+        // but overhead is clear, use world.setBlockState to place a block at the bot's feet
+        // and jump on it. Repeats until surface is reached or max attempts exceeded.
+        if (!pillared && countEscapeShaftBlockers(bot, world, remaining + 1) == 0) {
+            int forcePillarSteps = Math.min(remaining + 1, MAX_SCAFFOLD_HEIGHT);
+            int forceGained = 0;
+            for (int step = 0; step < forcePillarSteps; step++) {
+                BlockPos feetPos = bot.getBlockPos();
+                if (feetPos.getY() >= referenceSurfaceY) break;
+                if (SkillManager.shouldAbortSkill(bot)) break;
+                // Jump first, then place at the feet position while airborne
+                BotActions.jump(bot);
+                ops.sleepQuiet(120);
+                BotActions.PlaceResult forced = BotActions.forceReplaceBlock(
+                        bot, feetPos, ScaffoldService.SCAFFOLD_BLOCKS);
+                if (forced.success()) {
+                    forceGained++;
+                    ops.sleepQuiet(300); // wait to land on the new block
+                } else {
+                    ops.sleepQuiet(200);
+                    break;
+                }
+            }
+            if (forceGained > 0) {
+                LOGGER.info("[FortifyNav] pillar-force-placed steps={} from={} to={} ctx={}",
+                        forceGained, bot.getBlockPos().toShortString(),
+                        bot.getBlockPos().toShortString(), contextTag);
+                pillared = bot.getBlockPos().getY() > (referenceSurfaceY - remaining);
             }
         }
 

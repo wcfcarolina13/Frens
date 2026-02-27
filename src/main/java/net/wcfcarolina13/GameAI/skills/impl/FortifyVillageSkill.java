@@ -5337,6 +5337,10 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
         int hardResetNoProgressStreak = 0;
         TowerNavAttemptState towerNavState = new TowerNavAttemptState(vertex);
 
+        // Track overall time for the entire tower vertex (approach + local placement + scaffold).
+        // Prevents a single stuck tower from monopolizing the session.
+        long towerOverallStartMs = System.currentTimeMillis();
+
         // Long-range navigation: if bot is far from this tower, use MovementService
         // to get to the general area before starting short-range local approach retries.
         double distToTowerSq = bot.squaredDistanceTo(vertex.x() + 0.5, bot.getY(), vertex.z() + 0.5);
@@ -5388,6 +5392,15 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
                 break;
             }
             if (isTowerComplete(presentCount, plannedCount)) {
+                break;
+            }
+            // Overall time cap: includes approach navigation + local placement.
+            // Prevents a single tower from monopolizing the session (approach alone can take 15-20s).
+            long overallElapsedMs = System.currentTimeMillis() - towerOverallStartMs;
+            if (overallElapsedMs > TOWER_VERTEX_TIME_BUDGET_MS) {
+                LOGGER.info("[FortifyTower] tower {}/{} hit overall time budget ({}s) placed={}, aborting",
+                        vertexOrdinal + 1, totalVertices,
+                        overallElapsedMs / 1000, newlyPlaced);
                 break;
             }
             // Safety net: bail out after a time budget with zero blocks placed.
@@ -5524,7 +5537,8 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
         presentCount = countPresentBlocks(world, vertexBlocks);
         if (!isTowerComplete(presentCount, plannedCount)
                 && !SkillManager.shouldAbortSkill(bot)
-                && countBuildingBlocks(bot) > 0) {
+                && countBuildingBlocks(bot) > 0
+                && (System.currentTimeMillis() - towerOverallStartMs) < TOWER_VERTEX_TIME_BUDGET_MS) {
             int scaffoldGained = executeTowerScaffoldPhase(
                     source, bot, world, vertex, vertexBlocks, surfaceProfile,
                     vertexOrdinal, totalVertices, plannedCount, referenceSurfaceY, towerNavState);
