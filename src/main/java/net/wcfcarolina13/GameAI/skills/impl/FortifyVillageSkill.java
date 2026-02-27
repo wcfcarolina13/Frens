@@ -115,11 +115,8 @@ public final class FortifyVillageSkill implements Skill {
     private static final int FORTIFY_SCAFFOLD_LEDGER_RADIUS_Y = 8;
     private static final int FORTIFY_MANDATORY_REPLACE_RETRIES = 2;
     private static final long FORTIFY_MANDATORY_REPLACE_RETRY_SLEEP_MS = 60L;
-    private static final long FORTIFY_CLEANUP_BACKOFF_BASE_MS = 250L;
-    private static final long FORTIFY_CLEANUP_BACKOFF_MAX_MS = 1_000L;
     private static final int FORTIFY_CLEANUP_ACTIVE_RECOVERY_ATTEMPTS = 2;
     private static final int FORTIFY_CLEANUP_ACTIVE_RECOVERY_MAX_DIST = 12;
-    private static final long FORTIFY_CLEANUP_PROCESS_MIN_INTERVAL_MS = 350L;
     private static final int FORTIFY_PATCH_SKIP_LOG_SAMPLE_LIMIT = 10;
 
     private static final int FORTIFY_GATE_EXIT_SIDESTEP_NO_PROGRESS_LIMIT = 2;
@@ -182,8 +179,8 @@ public final class FortifyVillageSkill implements Skill {
     private boolean fortifyReplanActive = false;
     /** Tower vertices that yielded zero progress in the current auto-patch session — skip on next pass. */
     private final Set<Long> zeroProgressTowerVertices = new HashSet<>();
-    private final List<DeferredCleanupTask> deferredFortifyCleanupQueue = new ArrayList<>();
-    private long deferredFortifyCleanupLastProcessMs = 0L;
+    /** Deferred cleanup queue, throttle state, and task-state helpers. */
+    private final FortifyCleanupHelper cleanupHelper = new FortifyCleanupHelper();
 
 
     private FortifyNavRuntimeScope beginFortifyNavScope(String context,
@@ -208,13 +205,13 @@ public final class FortifyVillageSkill implements Skill {
             if (scope != null && scope.carveSession != null) {
                 boolean deferGateFinalize = scope.gateContext && isInsideCurrentFortificationHull(bot);
                 if (deferGateFinalize && !scope.carveSession.deferredRepairs.isEmpty()) {
-                    queueDeferredCarveRepairs(scope, scope.carveSession, new ArrayList<>(scope.carveSession.deferredRepairs));
+                    cleanupHelper.queueCarveRepairs(scope, scope.carveSession, new ArrayList<>(scope.carveSession.deferredRepairs));
                     scope.carveSession.deferredRepairs.clear();
                     scope.carveSession.cleanupState = CleanupState.FAILED_QUEUED;
                     LOGGER.info("[FortifyNav] Gate carve finalize deferred ctx={} target={} reason=still-inside-hull queued={}",
                             scope.context,
                             scope.carveSession.target != null ? scope.carveSession.target.toShortString() : "n/a",
-                            deferredFortifyCleanupQueue.size());
+                            cleanupHelper.queue.size());
                 } else {
                     attemptFinalizeCarveTransaction(bot, world, scope);
                 }
@@ -3652,7 +3649,7 @@ public final class FortifyVillageSkill implements Skill {
                 // Ensure all layout blocks mined during this attempt are either replaced immediately
                 // or queued for deferred repair so no hole remains.
                 if (deferRepair && scope != null && scope.carveSession != null && !scope.carveSession.deferredRepairs.isEmpty()) {
-                    queueDeferredCarveRepairs(scope, scope.carveSession, new ArrayList<>(scope.carveSession.deferredRepairs));
+                    cleanupHelper.queueCarveRepairs(scope, scope.carveSession, new ArrayList<>(scope.carveSession.deferredRepairs));
                 }
                 verifyCarveRepairColumn(bot, world,
                         feetPos, feetOriginal, feetMandatory,
@@ -3946,71 +3943,6 @@ public final class FortifyVillageSkill implements Skill {
         return new ArrayList<>(offsets);
     }
 
-    private void queueDeferredCleanupTask(FortifyCleanupKind kind,
-                                          BlockPos pos,
-                                          BlockState originalState,
-                                          boolean mandatory,
-                                          String context) {
-        if (kind == null || pos == null) return;
-        for (DeferredCleanupTask task : deferredFortifyCleanupQueue) {
-            if (task == null) continue;
-            if (task.kind == kind && pos.equals(task.pos)) {
-                return;
-            }
-        }
-        deferredFortifyCleanupQueue.add(new DeferredCleanupTask(kind, pos, originalState, mandatory, context));
-    }
-
-    private void queueDeferredCarveRepairs(FortifyNavRuntimeScope scope, FortifyCarveSession session, List<DeferredRepair> unresolved) {
-        if (scope == null || session == null || unresolved == null || unresolved.isEmpty()) return;
-        for (DeferredRepair repair : unresolved) {
-            if (repair == null || repair.pos() == null || repair.state() == null) continue;
-            queueDeferredCleanupTask(FortifyCleanupKind.CARVE_REPAIR, repair.pos(), repair.state(), repair.mandatory(), scope.context);
-        }
-    }
-
-    private void noteDeferredCleanupSkip(DeferredCleanupTask task, String reason) {
-        if (task == null) return;
-        task.attempts++;
-        task.lastAttemptMs = System.currentTimeMillis();
-        task.lastFailureReason = reason;
-        long multiplier = 1L << Math.min(2, Math.max(0, task.attempts - 1));
-        long delay = Math.min(FORTIFY_CLEANUP_BACKOFF_MAX_MS, FORTIFY_CLEANUP_BACKOFF_BASE_MS * multiplier);
-        task.nextEligibleMs = task.lastAttemptMs + delay;
-    }
-
-    private void noteDeferredCleanupImmediateRetry(DeferredCleanupTask task, String reason) {
-        if (task == null) return;
-        task.attempts++;
-        task.lastAttemptMs = System.currentTimeMillis();
-        task.lastFailureReason = reason;
-        task.nextEligibleMs = 0L;
-    }
-
-    private void noteDeferredCleanupResolved(DeferredCleanupTask task) {
-        if (task == null) return;
-        task.lastAttemptMs = System.currentTimeMillis();
-        task.lastFailureReason = null;
-        task.nextEligibleMs = 0L;
-    }
-
-    private static void incrementCleanupReason(Map<String, Integer> counts, String reason) {
-        if (counts == null || reason == null || reason.isBlank()) return;
-        counts.merge(reason, 1, Integer::sum);
-    }
-
-    private static String formatCleanupReasonSummary(Map<String, Integer> counts) {
-        if (counts == null || counts.isEmpty()) return "none";
-        StringBuilder sb = new StringBuilder();
-        boolean first = true;
-        for (Map.Entry<String, Integer> e : counts.entrySet()) {
-            if (!first) sb.append(',');
-            first = false;
-            sb.append(e.getKey()).append('=').append(e.getValue());
-        }
-        return sb.toString();
-    }
-
     private boolean tryRecoverTowardDeferredCleanup(ServerPlayerEntity bot, ServerWorld world, DeferredCleanupTask task) {
         if (bot == null || world == null || task == null || task.pos == null) return false;
         if (task.kind != FortifyCleanupKind.SCAFFOLD_REMOVE && task.kind != FortifyCleanupKind.CARVE_REPAIR) return false;
@@ -4029,20 +3961,6 @@ public final class FortifyVillageSkill implements Skill {
         return false;
     }
 
-    private boolean isForcedDeferredCleanupContext(String context) {
-        if (context == null) return false;
-        return context.equals("scaffold-teardown")
-                || context.startsWith("fortify-gate:post-success")
-                || context.startsWith("fortifyabort")
-                || context.startsWith("fortify-abort");
-    }
-
-    private boolean shouldAllowDeferredCleanupActiveRecovery(String context) {
-        if (context == null) return false;
-        // Allow active recovery for all fortify-related contexts — the bot should
-        // always attempt to walk toward unreachable repair items when possible.
-        return context.startsWith("fortify") || context.startsWith("scaffold");
-    }
 
     private boolean isTrapLikeCell(ServerWorld world, BlockPos pos) {
         if (world == null || pos == null) return false;
@@ -4179,7 +4097,7 @@ public final class FortifyVillageSkill implements Skill {
         }
 
         if (shouldDeferCarveFinalize(scope, bot, world)) {
-            queueDeferredCarveRepairs(scope, session, pending);
+            cleanupHelper.queueCarveRepairs(scope, session, pending);
             session.deferredRepairs.clear();
             session.cleanupState = CleanupState.FAILED_QUEUED;
             LOGGER.info("[FortifyNav] Carve finalize deferred ctx={} target={} pending={} reason=still-trapped queued={} topology={} dist={}",
@@ -4283,7 +4201,7 @@ public final class FortifyVillageSkill implements Skill {
 
         int queued = 0;
         if (!unresolved.isEmpty()) {
-            queueDeferredCarveRepairs(scope, session, unresolved);
+            cleanupHelper.queueCarveRepairs(scope, session, unresolved);
             queued = unresolved.size();
         }
         session.deferredRepairs.clear();
@@ -4301,27 +4219,24 @@ public final class FortifyVillageSkill implements Skill {
     }
 
     private void processDeferredFortifyCleanupQueue(ServerPlayerEntity bot, ServerWorld world, String context) {
-        if (bot == null || world == null || deferredFortifyCleanupQueue.isEmpty()) {
+        if (bot == null || world == null || cleanupHelper.queue.isEmpty()) {
             return;
         }
-        if ((SkillManager.shouldAbortSkill(bot) || bot.isRemoved()) && !isForcedDeferredCleanupContext(context)) {
+        if ((SkillManager.shouldAbortSkill(bot) || bot.isRemoved()) && !cleanupHelper.isForcedContext(context)) {
             return;
         }
+        boolean forcePass = cleanupHelper.isForcedContext(context);
+        if (cleanupHelper.checkAndUpdateThrottle(forcePass)) return;
         long now = System.currentTimeMillis();
-        boolean forcePass = isForcedDeferredCleanupContext(context);
-        if (!forcePass && (now - deferredFortifyCleanupLastProcessMs) < FORTIFY_CLEANUP_PROCESS_MIN_INTERVAL_MS) {
-            return;
-        }
-        deferredFortifyCleanupLastProcessMs = now;
-        boolean allowActiveRecoveryMovement = shouldAllowDeferredCleanupActiveRecovery(context);
-        int started = deferredFortifyCleanupQueue.size();
+        boolean allowActiveRecoveryMovement = cleanupHelper.allowActiveRecovery(context);
+        int started = cleanupHelper.queue.size();
         int repaired = 0;
         int removedScaffold = 0;
         int alreadyResolved = 0;
         int skipped = 0;
         int sealRiskSkips = 0;
         Map<String, Integer> skipReasons = new LinkedHashMap<>();
-        for (Iterator<DeferredCleanupTask> it = deferredFortifyCleanupQueue.iterator(); it.hasNext(); ) {
+        for (Iterator<DeferredCleanupTask> it = cleanupHelper.queue.iterator(); it.hasNext(); ) {
             DeferredCleanupTask task = it.next();
             if (task == null || task.pos == null) {
                 it.remove();
@@ -4329,7 +4244,7 @@ public final class FortifyVillageSkill implements Skill {
             }
             if (task.nextEligibleMs > now) {
                 skipped++;
-                incrementCleanupReason(skipReasons, "backoffDeferred");
+                FortifyCleanupHelper.incrementReason(skipReasons, "backoffDeferred");
                 continue;
             }
             BlockPos pos = task.pos;
@@ -4338,7 +4253,7 @@ public final class FortifyVillageSkill implements Skill {
             double distSqToItem = bot.getBlockPos().getSquaredDistance(pos);
             if (distSqToItem > 256.0D) { // > 16 blocks away
                 skipped++;
-                incrementCleanupReason(skipReasons, "tooFar");
+                FortifyCleanupHelper.incrementReason(skipReasons, "tooFar");
                 continue;
             }
             if (task.kind == FortifyCleanupKind.CARVE_REPAIR) {
@@ -4347,16 +4262,16 @@ public final class FortifyVillageSkill implements Skill {
                     continue;
                 }
                 if (!world.getBlockState(pos).isAir()) {
-                    noteDeferredCleanupResolved(task);
+                    cleanupHelper.noteResolved(task);
                     alreadyResolved++;
                     it.remove();
                     continue;
                 }
                 if (wouldRepairSealCurrentExit(bot, world, pos)) {
-                    noteDeferredCleanupSkip(task, "sealRisk");
+                    cleanupHelper.noteSkip(task, "sealRisk");
                     skipped++;
                     sealRiskSkips++;
-                    incrementCleanupReason(skipReasons, "sealRisk");
+                    FortifyCleanupHelper.incrementReason(skipReasons, "sealRisk");
                     continue;
                 }
                 if (!isWithinReach(bot, pos)) {
@@ -4364,32 +4279,32 @@ public final class FortifyVillageSkill implements Skill {
                     if (recovered && isWithinReach(bot, pos)) {
                         now = System.currentTimeMillis();
                     } else {
-                        noteDeferredCleanupSkip(task, allowActiveRecoveryMovement ? "blockedReach" : "blockedReachNoMove");
+                        cleanupHelper.noteSkip(task, allowActiveRecoveryMovement ? "blockedReach" : "blockedReachNoMove");
                         skipped++;
-                        incrementCleanupReason(skipReasons, allowActiveRecoveryMovement ? "blockedReach" : "blockedReachNoMove");
+                        FortifyCleanupHelper.incrementReason(skipReasons, allowActiveRecoveryMovement ? "blockedReach" : "blockedReachNoMove");
                         continue;
                     }
                 }
                 if (!hasLineOfSight(world, bot, bot.getEyePos(), pos)) {
                     boolean recovered = allowActiveRecoveryMovement && tryRecoverTowardDeferredCleanup(bot, world, task);
                     if (!recovered || !hasLineOfSight(world, bot, bot.getEyePos(), pos)) {
-                        noteDeferredCleanupSkip(task, allowActiveRecoveryMovement ? "blockedLOS" : "blockedLOSNoMove");
+                        cleanupHelper.noteSkip(task, allowActiveRecoveryMovement ? "blockedLOS" : "blockedLOSNoMove");
                         skipped++;
-                        incrementCleanupReason(skipReasons, allowActiveRecoveryMovement ? "blockedLOS" : "blockedLOSNoMove");
+                        FortifyCleanupHelper.incrementReason(skipReasons, allowActiveRecoveryMovement ? "blockedLOS" : "blockedLOSNoMove");
                         continue;
                     }
                 }
                 ReplaceBlockResult replace = tryReplaceMinedBlock(bot, world, pos, task.originalState, task.mandatory,
                         task.context != null ? task.context : context);
                 if (!world.getBlockState(pos).isAir()) {
-                    noteDeferredCleanupImmediateRetry(task, null);
-                    noteDeferredCleanupResolved(task);
+                    cleanupHelper.noteImmediateRetry(task, null);
+                    cleanupHelper.noteResolved(task);
                     repaired++;
                     it.remove();
                 } else {
-                    noteDeferredCleanupSkip(task, "replaceFail");
+                    cleanupHelper.noteSkip(task, "replaceFail");
                     skipped++;
-                    incrementCleanupReason(skipReasons, "replaceFail");
+                    FortifyCleanupHelper.incrementReason(skipReasons, "replaceFail");
                 }
                 continue;
             }
@@ -4398,7 +4313,7 @@ public final class FortifyVillageSkill implements Skill {
             BlockState current = world.getBlockState(pos);
             if (current.isAir() || !ScaffoldService.SCAFFOLD_BLOCKS.contains(current.getBlock().asItem())) {
                 ScaffoldService.getScaffoldMemory(bot).remove(pos);
-                noteDeferredCleanupResolved(task);
+                cleanupHelper.noteResolved(task);
                 alreadyResolved++;
                 it.remove();
                 continue;
@@ -4408,18 +4323,18 @@ public final class FortifyVillageSkill implements Skill {
                 if (recovered && isWithinMiningReach(bot, pos)) {
                     now = System.currentTimeMillis();
                 } else {
-                    noteDeferredCleanupSkip(task, allowActiveRecoveryMovement ? "blockedReach" : "blockedReachNoMove");
+                    cleanupHelper.noteSkip(task, allowActiveRecoveryMovement ? "blockedReach" : "blockedReachNoMove");
                     skipped++;
-                    incrementCleanupReason(skipReasons, allowActiveRecoveryMovement ? "blockedReach" : "blockedReachNoMove");
+                    FortifyCleanupHelper.incrementReason(skipReasons, allowActiveRecoveryMovement ? "blockedReach" : "blockedReachNoMove");
                     continue;
                 }
             }
             if (!hasLineOfSight(world, bot, bot.getEyePos(), pos)) {
                 boolean recovered = allowActiveRecoveryMovement && tryRecoverTowardDeferredCleanup(bot, world, task);
                 if (!recovered || !hasLineOfSight(world, bot, bot.getEyePos(), pos)) {
-                    noteDeferredCleanupSkip(task, allowActiveRecoveryMovement ? "blockedLOS" : "blockedLOSNoMove");
+                    cleanupHelper.noteSkip(task, allowActiveRecoveryMovement ? "blockedLOS" : "blockedLOSNoMove");
                     skipped++;
-                    incrementCleanupReason(skipReasons, allowActiveRecoveryMovement ? "blockedLOS" : "blockedLOSNoMove");
+                    FortifyCleanupHelper.incrementReason(skipReasons, allowActiveRecoveryMovement ? "blockedLOS" : "blockedLOSNoMove");
                     continue;
                 }
             }
@@ -4428,21 +4343,21 @@ public final class FortifyVillageSkill implements Skill {
             boolean mined = digBlock(bot, world, pos);
             BlockState after = world.getBlockState(pos);
             if (mined && (after.isAir() || !ScaffoldService.SCAFFOLD_BLOCKS.contains(after.getBlock().asItem()))) {
-                noteDeferredCleanupImmediateRetry(task, null);
+                cleanupHelper.noteImmediateRetry(task, null);
                 ScaffoldService.getScaffoldMemory(bot).remove(pos);
-                noteDeferredCleanupResolved(task);
+                cleanupHelper.noteResolved(task);
                 removedScaffold++;
                 it.remove();
             } else if (after.isAir() || !ScaffoldService.SCAFFOLD_BLOCKS.contains(after.getBlock().asItem())) {
-                noteDeferredCleanupImmediateRetry(task, null);
+                cleanupHelper.noteImmediateRetry(task, null);
                 ScaffoldService.getScaffoldMemory(bot).remove(pos);
-                noteDeferredCleanupResolved(task);
+                cleanupHelper.noteResolved(task);
                 alreadyResolved++;
                 it.remove();
             } else {
-                noteDeferredCleanupSkip(task, "digFailed");
+                cleanupHelper.noteSkip(task, "digFailed");
                 skipped++;
-                incrementCleanupReason(skipReasons, "digFailed");
+                FortifyCleanupHelper.incrementReason(skipReasons, "digFailed");
                 continue;
             }
         }
@@ -4450,7 +4365,7 @@ public final class FortifyVillageSkill implements Skill {
         if (started > 0) {
             LOGGER.info("[FortifyCleanup] queue-process ctx={} started={} repaired={} scaffoldRemoved={} alreadyResolved={} skipped={} sealRiskSkips={} remaining={} reasons={}",
                     context, started, repaired, removedScaffold, alreadyResolved, skipped, sealRiskSkips,
-                    deferredFortifyCleanupQueue.size(), formatCleanupReasonSummary(skipReasons));
+                    cleanupHelper.queue.size(), FortifyCleanupHelper.formatReasonSummary(skipReasons));
         }
     }
 
@@ -4575,7 +4490,7 @@ public final class FortifyVillageSkill implements Skill {
         if (!mandatory || pos == null || originalState == null) return;
         if (world != null && !world.getBlockState(pos).isAir()) return;
         String ctx = context == null ? "fortify-nav" : context;
-        queueDeferredCleanupTask(FortifyCleanupKind.CARVE_REPAIR, pos, originalState, true, ctx);
+        cleanupHelper.queue(FortifyCleanupKind.CARVE_REPAIR, pos, originalState, true, ctx);
     }
 
     private void verifyCarveRepairColumn(ServerPlayerEntity bot, ServerWorld world,
@@ -4944,7 +4859,7 @@ public final class FortifyVillageSkill implements Skill {
             }
         }
 
-        if (!deferredFortifyCleanupQueue.isEmpty()) {
+        if (!cleanupHelper.queue.isEmpty()) {
             processDeferredFortifyCleanupQueue(bot, world, "fortify-gate:post-success");
         }
         gateRoutingFailures = 0; // reset on success
@@ -6604,12 +6519,12 @@ public final class FortifyVillageSkill implements Skill {
             if (!isWithinMiningReach(bot, pos)) {
                 outOfReach++;
                 queued++;
-                queueDeferredCleanupTask(FortifyCleanupKind.SCAFFOLD_REMOVE, pos, null, false, "scaffold-teardown");
+                cleanupHelper.queue(FortifyCleanupKind.SCAFFOLD_REMOVE, pos, null, false, "scaffold-teardown");
                 continue;
             }
             if (!hasLineOfSight(world, bot, bot.getEyePos(), pos)) {
                 queued++;
-                queueDeferredCleanupTask(FortifyCleanupKind.SCAFFOLD_REMOVE, pos, null, false, "scaffold-teardown");
+                cleanupHelper.queue(FortifyCleanupKind.SCAFFOLD_REMOVE, pos, null, false, "scaffold-teardown");
                 continue;
             }
             LookController.faceBlock(bot, pos);
@@ -6626,7 +6541,7 @@ public final class FortifyVillageSkill implements Skill {
             } else {
                 failedMine++;
                 queued++;
-                queueDeferredCleanupTask(FortifyCleanupKind.SCAFFOLD_REMOVE, pos, null, false, "scaffold-teardown");
+                cleanupHelper.queue(FortifyCleanupKind.SCAFFOLD_REMOVE, pos, null, false, "scaffold-teardown");
             }
         }
 
