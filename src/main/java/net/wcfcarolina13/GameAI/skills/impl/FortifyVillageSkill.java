@@ -5202,9 +5202,10 @@ public final class FortifyVillageSkill implements Skill {
         }
 
         // Fallback: bypass vanilla placement with direct setBlockState for mandatory repairs.
-        // This handles cases where blockItem.place() rejects placement due to entity collision
-        // even though the bot has stepped out of the target block.
-        if (mandatory && world.getBlockState(pos).isAir()) {
+        // This handles cases where blockItem.place() rejects placement due to entity collision,
+        // line-of-sight issues, or worker-thread read races on block state.
+        // Note: forceReplaceBlock has its own server-thread isAir() guard, so no outer check needed.
+        if (mandatory) {
             BotActions.PlaceResult forced = BotActions.forceReplaceBlock(bot, pos, replacements);
             if (forced.success() || !world.getBlockState(pos).isAir()) {
                 LOGGER.info("[FortifyNav] Force-replaced mined block at {} (bypassed vanilla placement)", pos.toShortString());
@@ -9289,6 +9290,7 @@ public final class FortifyVillageSkill implements Skill {
         int stuckRecoveryAttempts = 0;
         boolean microPathAttempted = navContext != null && navContext.startsWith("fortify-gate"); // skip micro-path for gates
         boolean allowBreakThrough = navContext == null || !navContext.startsWith("fortify-gate");
+        boolean gateBreakEscalated = false; // track if we've escalated gate exit to allow break-through
         boolean gateContext = navContext != null && navContext.startsWith("fortify-gate:");
         boolean gateExitContext = navContext != null && navContext.startsWith("fortify-gate:exit");
         int gateSidestepNoProgressBursts = 0;
@@ -9312,6 +9314,13 @@ public final class FortifyVillageSkill implements Skill {
                 }
                 if (stuckTicks > stuckThreshold) {
                     stuckRecoveryAttempts++;
+                    // Escalate gate-exit to allow break-through after repeated failures
+                    // rather than circling indefinitely via arc recovery
+                    if (gateExitContext && !gateBreakEscalated && stuckRecoveryAttempts >= 6) {
+                        allowBreakThrough = true;
+                        gateBreakEscalated = true;
+                        LOGGER.info("[FortifyNav] Gate-exit escalation: enabling break-through after {} stuck cycles", stuckRecoveryAttempts);
+                    }
                     BotActions.jump(bot);
                     sleepQuiet(100);
                     boolean recovered = false;

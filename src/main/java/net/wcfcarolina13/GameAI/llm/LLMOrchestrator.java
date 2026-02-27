@@ -55,8 +55,11 @@ public final class LLMOrchestrator {
     }
 
     public static void setBotEnabled(UUID botId, boolean enabled) {
-        BOT_TOGGLES.put(botId, enabled);
-        LOGGER.info("LLM bot toggle for {} set to {}", botId, enabled);
+        Boolean prev = BOT_TOGGLES.put(botId, enabled);
+        // Only log when the value actually changes to avoid flooding from repeated calls.
+        if (prev == null || prev != enabled) {
+            LOGGER.info("LLM bot toggle for {} set to {}", botId, enabled);
+        }
     }
 
     public static boolean handleChat(ServerPlayerEntity bot,
