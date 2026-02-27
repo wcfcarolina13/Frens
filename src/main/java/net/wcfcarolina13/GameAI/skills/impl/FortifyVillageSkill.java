@@ -2569,9 +2569,11 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
                     report.remainingCount(),
                     report.remainingByReason());
 
-            // ── Scaffold escalation: if NO_LOS dominates remaining failures, pillar up and retry ──
+            // ── Scaffold escalation: if LOS/reach failures dominate, pillar up and retry ──
             int noLosCount = report.remainingByReason().getOrDefault(FailureReason.NO_LOS, 0);
-            if (!remaining.isEmpty() && noLosCount > 0 && noLosCount >= remaining.size() / 2
+            int oorCount = report.remainingByReason().getOrDefault(FailureReason.OUT_OF_REACH, 0);
+            int escalatableCount = noLosCount + oorCount;
+            if (!remaining.isEmpty() && escalatableCount > 0 && escalatableCount >= remaining.size() / 2
                     && !SkillManager.shouldAbortSkill(bot) && countBuildingBlocks(bot) > 0) {
                 int terrainY = VillageFortificationLayoutService.terrainY(world, bot.getBlockPos().getX(), bot.getBlockPos().getZ());
                 int depth = terrainY - bot.getBlockPos().getY();
@@ -2580,8 +2582,8 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
                     LOGGER.info("[Fortify] Edge {} seg {}: suppress scaffold escalation entombed-local-edge pos={} depth={} failures={}",
                             edge.index(), currentSegmentOrdinal, bot.getBlockPos().toShortString(), depth, report.remainingByReason());
                 } else {
-                LOGGER.info("[Fortify] Edge {} seg {}: NO_LOS={}/{} — scaffold escalation",
-                        edge.index(), currentSegmentOrdinal, noLosCount, remaining.size());
+                LOGGER.info("[Fortify] Edge {} seg {}: NO_LOS={} OOR={} escalatable={}/{} — scaffold escalation",
+                        edge.index(), currentSegmentOrdinal, noLosCount, oorCount, escalatableCount, remaining.size());
                 totalPlaced += attemptScaffoldEscalation(
                         source, bot, world, remaining, blockMap, surfaceProfile, edge, currentSegmentOrdinal);
                 }
@@ -2608,8 +2610,13 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
     }
 
     /**
-     * Scaffold escalation for edge segments where NO_LOS dominates.
-     * Pillar up near remaining blocks, place from elevation, then tear down.
+     * Scaffold escalation for edge segments where LOS/reach failures dominate.
+     * <p>Strategy order:
+     * <ol>
+     *   <li>Lateral repositioning for ground-level targets (cheaper than scaffolding)</li>
+     *   <li>Multi-candidate scaffold position selection with overhead clearance validation</li>
+     *   <li>Pillar up from best position, place from elevation, tear down</li>
+     * </ol>
      */
     private int attemptScaffoldEscalation(
             ServerCommandSource source, ServerPlayerEntity bot, ServerWorld world,
@@ -2619,36 +2626,150 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
         if (remaining.isEmpty()) return 0;
 
         // Compute centroid of remaining blocks
-        int sumX = 0, sumZ = 0, highestY = Integer.MIN_VALUE;
+        int sumX = 0, sumZ = 0, highestY = Integer.MIN_VALUE, lowestY = Integer.MAX_VALUE;
         for (BlockPos pos : remaining) {
             sumX += pos.getX();
             sumZ += pos.getZ();
             if (pos.getY() > highestY) highestY = pos.getY();
+            if (pos.getY() < lowestY) lowestY = pos.getY();
         }
         int cx = sumX / remaining.size();
         int cz = sumZ / remaining.size();
-        int groundY = safeSurfaceY(surfaceProfile, world, cx, cz);
 
-        // Find scaffold position: offset 2 blocks toward bot from centroid (inside the wall)
-        BlockPos botPos = bot.getBlockPos();
-        int dx = botPos.getX() - cx;
-        int dz = botPos.getZ() - cz;
-        double len = Math.sqrt(dx * dx + dz * dz);
-        int offX, offZ;
-        if (len > 0.5) {
-            offX = (int) Math.round(2.0 * dx / len);
-            offZ = (int) Math.round(2.0 * dz / len);
-        } else {
-            // Bot is right at centroid — offset toward edge anchor direction
-            offX = 0;
-            offZ = 2;
+        // Build ProceduralWallBlock list for countReachableWithLOS scoring
+        List<ProceduralWallBlock> remainingBlocks = new ArrayList<>();
+        for (BlockPos pos : remaining) {
+            ProceduralWallBlock b = blockMap.get(pos);
+            if (b != null) remainingBlocks.add(b);
         }
 
-        BlockPos scaffoldBase = new BlockPos(cx + offX, groundY, cz + offZ);
-
         FortifyNavRuntimeScope priorScope = beginFortifyNavScope(
-                "fortify-edge:scaffold-escalation", null, null, scaffoldBase, false, false);
+                "fortify-edge:scaffold-escalation", null, null, new BlockPos(cx, bot.getBlockPos().getY(), cz), false, false);
         try {
+            int placed = 0;
+
+            // ── Phase 1: Lateral repositioning for ground-level targets ──────────
+            // If all remaining targets are near bot eye level, try placing from
+            // different horizontal angles BEFORE scaffolding — pillaring up often
+            // worsens the LOS angle for support faces at/below the bot.
+            int currentY = bot.getBlockPos().getY();
+            boolean targetsNearGroundLevel = highestY <= currentY + 2;
+            if (targetsNearGroundLevel && !remaining.isEmpty()) {
+                BlockPos botPos = bot.getBlockPos();
+                double dxC = cx - botPos.getX();
+                double dzC = cz - botPos.getZ();
+                // Try positions perpendicular to the bot→centroid axis, 2-3 blocks out
+                Direction[] perpDirs;
+                if (Math.abs(dxC) >= Math.abs(dzC)) {
+                    perpDirs = new Direction[]{Direction.NORTH, Direction.SOUTH};
+                } else {
+                    perpDirs = new Direction[]{Direction.EAST, Direction.WEST};
+                }
+
+                for (Direction dir : perpDirs) {
+                    if (remaining.isEmpty() || SkillManager.shouldAbortSkill(bot)) break;
+                    BlockPos lateralPos = new BlockPos(cx, currentY, cz).offset(dir, 2);
+                    walkToTarget(source, bot, lateralPos, 2_000L, "fortify-edge:lateral-reposition");
+                    if (SkillManager.shouldAbortSkill(bot)) break;
+
+                    for (BlockPos pos : new ArrayList<>(remaining)) {
+                        if (SkillManager.shouldAbortSkill(bot)) break;
+                        if (countBuildingBlocks(bot) == 0) break;
+                        ProceduralWallBlock block = blockMap.get(pos);
+                        if (block == null) continue;
+                        if (isPlannedBlockSatisfied(block, world.getBlockState(pos))) {
+                            remaining.remove(pos);
+                            continue;
+                        }
+                        if (!isWithinReach(bot, pos)) continue;
+                        LookController.faceBlock(bot, pos);
+                        sleepQuiet(50);
+                        BotActions.PlaceResult result = tryPlaceBlock(bot, world, pos, block.state());
+                        if (result.success()) {
+                            remaining.remove(pos);
+                            placed++;
+                            sleepQuiet(BLOCK_PLACE_DELAY_MS);
+                        }
+                    }
+                }
+
+                if (placed > 0 || remaining.isEmpty()) {
+                    LOGGER.info("[Fortify] Edge {} seg {}: lateral-reposition placed={}/{} remaining={}",
+                            edge.index(), segmentOrdinal, placed, remainingBlocks.size(), remaining.size());
+                    if (remaining.isEmpty()) return placed;
+                }
+            }
+
+            // ── Phase 2: Multi-candidate scaffold position selection ─────────────
+            // Generate several candidate positions and score them by overhead clearance
+            // and predicted LOS coverage from the elevated eye position.
+            BlockPos botPos = bot.getBlockPos();
+            int dx = botPos.getX() - cx;
+            int dz = botPos.getZ() - cz;
+            double len = Math.sqrt(dx * dx + dz * dz);
+            int botOffX, botOffZ;
+            if (len > 0.5) {
+                botOffX = (int) Math.round(2.0 * dx / len);
+                botOffZ = (int) Math.round(2.0 * dz / len);
+            } else {
+                botOffX = 0;
+                botOffZ = 2;
+            }
+
+            int groundY = safeSurfaceY(surfaceProfile, world, cx, cz);
+            int neededY = Math.max(groundY, highestY - 2);
+            int pillarSteps = Math.max(2, Math.min(MAX_SCAFFOLD_HEIGHT, neededY - groundY));
+
+            // Build candidate list: toward-bot, plus 4 cardinal offsets from centroid
+            List<BlockPos> candidates = new ArrayList<>();
+            candidates.add(new BlockPos(cx + botOffX, groundY, cz + botOffZ));
+            for (Direction dir : Direction.Type.HORIZONTAL) {
+                int candX = cx + dir.getOffsetX() * 2;
+                int candZ = cz + dir.getOffsetZ() * 2;
+                int candY = safeSurfaceY(surfaceProfile, world, candX, candZ);
+                BlockPos cand = new BlockPos(candX, candY, candZ);
+                if (!candidates.contains(cand)) candidates.add(cand);
+            }
+
+            // Score each candidate: overhead clearance (required), then LOS coverage from
+            // simulated elevated position, then distance from bot.
+            BlockPos bestCandidate = null;
+            int bestScore = -1;
+            for (BlockPos cand : candidates) {
+                // Check overhead clearance for pillarSteps blocks above
+                boolean overheadClear = true;
+                int candPillar = Math.max(2, Math.min(MAX_SCAFFOLD_HEIGHT, Math.max(cand.getY(), highestY - 2) - cand.getY()));
+                for (int dy = 1; dy <= candPillar + 1; dy++) {
+                    BlockPos above = cand.up(dy);
+                    net.minecraft.block.BlockState st = world.getBlockState(above);
+                    if (!st.isAir() && !st.isReplaceable()) {
+                        overheadClear = false;
+                        break;
+                    }
+                }
+                if (!overheadClear) continue;
+
+                // Score by LOS coverage from simulated elevated eye position
+                BlockPos elevatedStand = cand.up(candPillar);
+                int losCount = countReachableWithLOS(world, bot, elevatedStand, remainingBlocks);
+                // Tie-break by proximity to bot (closer = fewer walk ticks)
+                int distPenalty = (int) (cand.getSquaredDistance(botPos) / 10.0);
+                int score = losCount * 100 - distPenalty;
+                if (losCount > bestScore || (losCount == bestScore && score > (bestScore * 100))) {
+                    bestCandidate = cand;
+                    bestScore = losCount;
+                }
+            }
+
+            if (bestCandidate == null) {
+                LOGGER.info("[Fortify] Edge {} seg {}: scaffold escalation — no candidate with clear overhead",
+                        edge.index(), segmentOrdinal);
+                return placed;
+            }
+
+            BlockPos scaffoldBase = bestCandidate;
+            int scaffoldPillar = Math.max(2, Math.min(MAX_SCAFFOLD_HEIGHT, Math.max(scaffoldBase.getY(), highestY - 2) - scaffoldBase.getY()));
+
             // Walk to scaffold base
             walkToTarget(source, bot, scaffoldBase, 3_000L, "fortify-edge:scaffold-escalation");
             if (isTrapLikeCell(world, bot.getBlockPos())) {
@@ -2658,22 +2779,15 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
                             edge.index(), segmentOrdinal, bot.getBlockPos().toShortString());
                 }
             }
-            if (SkillManager.shouldAbortSkill(bot)) return 0;
+            if (SkillManager.shouldAbortSkill(bot)) return placed;
 
-            // Calculate how high to pillar: need eye level near the highest remaining block
-            // Bot eye height is at Y + 1.62, reach is ~4.5 blocks
-            int currentY = bot.getBlockPos().getY();
-            int neededY = Math.max(currentY, highestY - 2); // eye at neededY+1.62, reach 4.5 down
-            int pillarSteps = Math.max(2, Math.min(MAX_SCAFFOLD_HEIGHT, neededY - currentY));
-
-            LOGGER.info("[Fortify] Edge {} seg {}: scaffold escalation at ({},{},{}) pillar={} highestTarget={}",
+            LOGGER.info("[Fortify] Edge {} seg {}: scaffold escalation at ({},{},{}) pillar={} highestTarget={} losScore={}",
                     edge.index(), segmentOrdinal, scaffoldBase.getX(), scaffoldBase.getY(), scaffoldBase.getZ(),
-                    pillarSteps, highestY);
+                    scaffoldPillar, highestY, bestScore);
 
             ScaffoldService.ScaffoldSession elevSession = ScaffoldService.beginSession(bot);
-            boolean pillared = ScaffoldService.pillarToY(elevSession, currentY + pillarSteps);
+            boolean pillared = ScaffoldService.pillarToY(elevSession, bot.getBlockPos().getY() + scaffoldPillar);
 
-            int placed = 0;
             if (pillared || bot.getBlockPos().getY() > currentY) {
                 // Sort remaining by distance to bot so we place nearest first
                 List<BlockPos> sortedRemaining = new ArrayList<>(remaining);
@@ -2706,7 +2820,7 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
                 }
 
                 LOGGER.info("[Fortify] Edge {} seg {}: scaffold escalation placed={}/{}",
-                        edge.index(), segmentOrdinal, placed, sortedRemaining.size());
+                        edge.index(), segmentOrdinal, placed, remainingBlocks.size());
             } else {
                 LOGGER.info("[Fortify] Edge {} seg {}: scaffold escalation pillar failed (Y unchanged)",
                         edge.index(), segmentOrdinal);
@@ -8500,8 +8614,11 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
 
     @Override
     public boolean isWithinReach(ServerPlayerEntity bot, BlockPos pos) {
-        Vec3d eye = bot.getEyePos();
-        double distSq = eye.squaredDistanceTo(Vec3d.ofCenter(pos));
+        // Use feet position to match BotActions.tryPlaceBlockAt() which gates on
+        // bot.squaredDistanceTo() (feet-based). Using eye position here created a
+        // mismatch where blocks passed this pre-check but failed actual placement
+        // with "out-of-reach" — especially for blocks below the bot.
+        double distSq = bot.squaredDistanceTo(pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5);
         return distSq <= REACH_DISTANCE_SQ;
     }
 
