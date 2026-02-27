@@ -30,23 +30,23 @@ All P0/P1 checkboxes above marked `[x]` after in-game verification or code fix.
 - Build must pass (`./gradlew build -x test`) after any code changes
 - Commit after completing each criterion
 
-### In-Flight: Fortification Auto-Patch Improvements (user-driven feature)
+### In-Flight: FortifyVillageSkill Refactoring — Phase 1 Complete, Phase 2 Blocked
 
-**Completed:**
-- Gate-routing v5: waypoints use bot's actual Y (not lintel heightmap Y which was 2 blocks off)
-- Gate routing failure caching: skips after 2 consecutive failures, saves 30+s per edge
-- Scaffold pillar fix: handles occupied feet position (stairs/slabs), `tryPlaceBlockAt` diagnostics
-- Expanded SCAFFOLD_BLOCKS: cobblestone, stone added to priority list
+**Completed (commit `2ee2253`):**
+- Extracted `FortifyEntombmentHelper.java` (411 lines) from `FortifyVillageSkill.java`
+- Removed 308 lines from the skill (now 9593 lines, was 9901)
+- Helper owns: `EntombmentRecoveryState`, `SurfaceEscapeRetryState` inner types; 4 constants; 3 state maps; 21 extracted methods
+- Context update hooks wired in `beginFortifyNavScope()`, `endFortifyNavScope()`, and 4 `currentLayout` assignment sites
+- Build verified: `./gradlew build -x test` → BUILD SUCCESSFUL
 
-**Next improvements (priority order):**
+**Why Phase 2 is blocked:**
+- Cleanup, tower, gate, and nav sections are deeply coupled — most methods call 5–15 other private skill methods (`walkToTarget`, `digBlock`, `sleepQuiet`, carve sessions, protected positions, nav scopes)
+- Entombment was uniquely extractable as pure state-tracking with no outgoing calls to other skill methods
+- Remaining sections would need a `FortifySharedContext` shared-state object or a `FortifySkillContext` callback interface (~15 methods) before they can be split
 
-1. **pillarToY partial-success tolerance** — When pillarToY places 3/4 blocks (1 short of target), it reports `pillared=false` and the caller tears down all 3 scaffolds. The bot was at Y=-57, just 1 block below target Y=-56 — close enough to place most tower blocks. Fix: treat "within 1 block of target" as success, or let the caller decide based on actual botY vs targetY.
-
-2. **Scaffold `place-rejected` root cause** — `blockItem.place()` returns non-accepted `ActionResult` (`class_9857[]`) despite passing all pre-checks (occupied, intersect, support, LOS). Need better diagnostics: log the specific item, target pos, support pos/face, and the ActionResult variant. Possible causes: ItemPlacementContext redirecting to an already-filled position, or canPlace() failing due to entity collision.
-
-3. **Gate walk-through XZ alignment** — Bot reaches gate interior approach (dist=1.1) but can't navigate through the 3-block gap. `walkToTarget` approaches at an angle and misses the gap, hitting wall pillars. Fix: add intermediate waypoint at exact gate center XZ, then walk perpendicular along the outward normal. Or use `LookController.faceBlock` + direct impulse for the short 3-6 block gate traversal.
-
-4. **Edge NO_SUPPORT failures** — 6/15 blocks on edge 26 fail with NO_SUPPORT. These are wall blocks without adjacent solid blocks to place against. May need placement ordering (bottom-up, connecting to existing) or temporary support block placement.
+**Next step when resuming refactoring:**
+- Design `FortifySharedContext` (mutable shared state struct) or `FortifySkillContext` callback interface
+- Decide which approach, then extract one section (suggest cleanup or tower first as most self-contained after nav refs are abstracted)
 
 ---
 
