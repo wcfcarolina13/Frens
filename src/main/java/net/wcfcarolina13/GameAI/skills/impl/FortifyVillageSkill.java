@@ -129,25 +129,6 @@ public final class FortifyVillageSkill implements Skill {
             Items.COBBLESTONE, Items.COBBLED_DEEPSLATE, Items.DIRT
     );
 
-    // Building material fallback lists
-    private static final List<Item> STONE_BRICK_FALLBACKS = List.of(
-            Items.STONE_BRICKS, Items.COBBLESTONE, Items.STONE,
-            Items.COBBLED_DEEPSLATE, Items.ANDESITE, Items.DIRT
-    );
-    private static final List<Item> OAK_LOG_FALLBACKS = List.of(
-            Items.OAK_LOG, Items.SPRUCE_LOG, Items.BIRCH_LOG,
-            Items.JUNGLE_LOG, Items.COBBLESTONE, Items.DIRT
-    );
-    private static final List<Item> CHISELED_FALLBACKS = List.of(
-            Items.CHISELED_STONE_BRICKS, Items.STONE_BRICKS, Items.COBBLESTONE, Items.DIRT
-    );
-    private static final List<Item> SLAB_FALLBACKS = List.of(
-            Items.STONE_BRICK_SLAB, Items.COBBLESTONE_SLAB, Items.STONE_SLAB,
-            Items.COBBLESTONE, Items.DIRT
-    );
-    private static final List<Item> COBBLE_FALLBACKS = List.of(
-            Items.COBBLESTONE, Items.COBBLED_DEEPSLATE, Items.STONE, Items.DIRT
-    );
     private static final List<String> CAVITY_DIALOGUES = List.of(
             "Noted a pocket in the wall—flagging it for you.",
             "Found a tiny cavity here; it’s safe but needs eyes on.",
@@ -181,6 +162,8 @@ public final class FortifyVillageSkill implements Skill {
     private final Set<Long> zeroProgressTowerVertices = new HashSet<>();
     /** Deferred cleanup queue, throttle state, and task-state helpers. */
     private final FortifyCleanupHelper cleanupHelper = new FortifyCleanupHelper();
+    /** Layout query helper: block satisfaction, material fallbacks, edge ordering. */
+    private final FortifyLayoutHelper layoutHelper = new FortifyLayoutHelper(ignoredCavityPositions);
 
 
     private FortifyNavRuntimeScope beginFortifyNavScope(String context,
@@ -685,7 +668,7 @@ public final class FortifyVillageSkill implements Skill {
                 double nearestDistSq = Double.MAX_VALUE;
                 for (int ri = 0; ri < remainingEdges.size(); ri++) {
                     Map.Entry<Integer, List<ProceduralWallBlock>> candidate = remainingEdges.get(ri);
-                    double distSq = patchEdgeDistanceSq(botPos, candidate.getKey(), candidate.getValue(), layout);
+                    double distSq = FortifyLayoutHelper.patchEdgeDistanceSq(botPos, candidate.getKey(), candidate.getValue(), layout);
                     if (distSq < nearestDistSq) {
                         nearestDistSq = distSq;
                         nearestIdx = ri;
@@ -1224,8 +1207,8 @@ public final class FortifyVillageSkill implements Skill {
         int referenceSurfaceY = computeReferenceSurfaceY(bot, layout, world);
         SurfaceProfile surfaceProfile = createSurfaceProfile(layout, referenceSurfaceY);
         boolean resumedRun = startEdgeIndex != 0 || priorBlocksPlaced > 0 || !completedEdges.isEmpty();
-        int edgeStartIndex = chooseEdgeStartIndex(bot, layout, completedEdges, startEdgeIndex);
-        List<Integer> edgeBuildOrder = orderedRemainingEdges(layout, completedEdges, edgeStartIndex);
+        int edgeStartIndex = layoutHelper.chooseEdgeStartIndex(bot, layout, completedEdges, startEdgeIndex);
+        List<Integer> edgeBuildOrder = layoutHelper.orderedRemainingEdges(layout, completedEdges, edgeStartIndex);
 
         // Populate layout positions so break-through navigation knows which blocks to protect
         Set<BlockPos> layoutPositions = new HashSet<>();
@@ -1399,7 +1382,7 @@ public final class FortifyVillageSkill implements Skill {
         Set<Integer> edgesVisited = new HashSet<>(completedEdges);
 
         int ei;
-        while ((ei = pickNearestRemainingEdge(bot, layout, edgesVisited)) >= 0) {
+        while ((ei = layoutHelper.pickNearestRemainingEdge(bot, layout, edgesVisited)) >= 0) {
 
             if (SkillManager.shouldAbortSkill(bot)) {
                 saveAndReport(source, server, worldKey, wallName, ei, totalPlaced, "Aborted");
@@ -2862,7 +2845,7 @@ public final class FortifyVillageSkill implements Skill {
         }
 
         Item targetItem = targetState.getBlock().asItem();
-        List<Item> candidates = buildCandidateList(targetItem);
+        List<Item> candidates = layoutHelper.buildCandidateList(targetItem);
 
         boolean hasAny = false;
         for (Item candidate : candidates) {
@@ -2879,30 +2862,6 @@ public final class FortifyVillageSkill implements Skill {
         }
 
         return BotActions.tryPlaceBlockAt(bot, pos, Direction.UP, candidates);
-    }
-
-    private List<Item> buildCandidateList(Item primary) {
-        if (primary == Items.STONE_BRICKS || primary == Items.STONE_BRICK_STAIRS) {
-            return new ArrayList<>(STONE_BRICK_FALLBACKS);
-        }
-        if (primary == Items.STONE_BRICK_SLAB || primary == Items.COBBLESTONE_SLAB
-                || primary == Items.STONE_SLAB) {
-            return new ArrayList<>(SLAB_FALLBACKS);
-        }
-        if (primary == Items.CHISELED_STONE_BRICKS) {
-            return new ArrayList<>(CHISELED_FALLBACKS);
-        }
-        if (primary == Items.OAK_LOG) {
-            return new ArrayList<>(OAK_LOG_FALLBACKS);
-        }
-        if (primary == Items.COBBLESTONE || primary == Items.COBBLED_DEEPSLATE) {
-            return new ArrayList<>(COBBLE_FALLBACKS);
-        }
-        List<Item> list = new ArrayList<>();
-        list.add(primary);
-        list.add(Items.COBBLESTONE);
-        list.add(Items.DIRT);
-        return list;
     }
 
     private boolean fillGroundUnder(ServerPlayerEntity bot, ServerWorld world, BlockPos pos) {
@@ -4416,8 +4375,8 @@ public final class FortifyVillageSkill implements Skill {
         if (mandatory) {
             Set<Item> seen = new LinkedHashSet<>();
             if (originalItem != Items.AIR) seen.add(originalItem);
-            seen.addAll(STONE_BRICK_FALLBACKS);
-            seen.addAll(COBBLE_FALLBACKS);
+            seen.addAll(FortifyLayoutHelper.STONE_BRICK_FALLBACKS);
+            seen.addAll(FortifyLayoutHelper.COBBLE_FALLBACKS);
             replacements = new ArrayList<>(seen);
         } else if (originalItem != Items.AIR) {
             replacements = List.of(originalItem, Items.COBBLESTONE, Items.STONE, Items.DIRT);
@@ -8899,199 +8858,22 @@ public final class FortifyVillageSkill implements Skill {
 
     // ── Helpers ─────────────────────────────────────────────────
 
-    private int chooseEdgeStartIndex(ServerPlayerEntity bot, FortificationLayout layout,
-                                     Set<Integer> completedEdges, int savedEdgeIndex) {
-        int totalEdges = layout.edges().size();
-        if (totalEdges <= 0) {
-            return 0;
-        }
-
-        if (savedEdgeIndex >= 0 && savedEdgeIndex < totalEdges && !completedEdges.contains(savedEdgeIndex)) {
-            return savedEdgeIndex;
-        }
-
-        if (savedEdgeIndex >= 0 && savedEdgeIndex < totalEdges) {
-            for (int i = 1; i <= totalEdges; i++) {
-                int idx = (savedEdgeIndex + i) % totalEdges;
-                if (!completedEdges.contains(idx)) {
-                    return idx;
-                }
-            }
-        }
-
-        BlockPos botPos = bot.getBlockPos();
-        int nearest = -1;
-        double nearestDistSq = Double.MAX_VALUE;
-        for (int i = 0; i < totalEdges; i++) {
-            if (completedEdges.contains(i)) {
-                continue;
-            }
-            WallEdge edge = layout.edges().get(i);
-            double midX = (edge.start().x() + edge.end().x()) / 2.0;
-            double midZ = (edge.start().z() + edge.end().z()) / 2.0;
-            double dx = botPos.getX() - midX;
-            double dz = botPos.getZ() - midZ;
-            double distSq = dx * dx + dz * dz;
-            if (distSq < nearestDistSq) {
-                nearestDistSq = distSq;
-                nearest = i;
-            }
-        }
-        return nearest >= 0 ? nearest : 0;
-    }
-
-    private List<Integer> orderedRemainingEdges(FortificationLayout layout,
-                                                Set<Integer> completedEdges,
-                                                int startEdgeIndex) {
-        int totalEdges = layout.edges().size();
-        if (totalEdges <= 0) {
-            return List.of();
-        }
-        int start = Math.floorMod(startEdgeIndex, totalEdges);
-        List<Integer> order = new ArrayList<>(totalEdges);
-        for (int i = 0; i < totalEdges; i++) {
-            int idx = (start + i) % totalEdges;
-            if (!completedEdges.contains(idx)) {
-                order.add(idx);
-            }
-        }
-        return order;
-    }
-
-    /**
-     * Greedy nearest-neighbor edge selection: pick the remaining edge whose midpoint
-     * is closest to the bot's current position.  Returns -1 if no edges remain.
-     */
-    private int pickNearestRemainingEdge(ServerPlayerEntity bot, FortificationLayout layout,
-                                         Set<Integer> visited) {
-        int totalEdges = layout.edges().size();
-        BlockPos botPos = bot.getBlockPos();
-        int nearest = -1;
-        double nearestDistSq = Double.MAX_VALUE;
-        for (int i = 0; i < totalEdges; i++) {
-            if (visited.contains(i)) continue;
-            WallEdge edge = layout.edges().get(i);
-            double midX = (edge.start().x() + edge.end().x()) / 2.0;
-            double midZ = (edge.start().z() + edge.end().z()) / 2.0;
-            double dx = botPos.getX() - midX;
-            double dz = botPos.getZ() - midZ;
-            double distSq = dx * dx + dz * dz;
-            if (distSq < nearestDistSq) {
-                nearestDistSq = distSq;
-                nearest = i;
-            }
-        }
-        return nearest;
-    }
-
-    /**
-     * Compute squared distance from a position to an edge/tower group used in patch mode.
-     * For tower blocks (edgeIdx == -1), uses average position of the blocks.
-     * For wall edges, uses the edge midpoint.
-     */
-    private static double patchEdgeDistanceSq(BlockPos botPos, int edgeIdx,
-                                               List<ProceduralWallBlock> blocks,
-                                               FortificationLayout layout) {
-        if (edgeIdx == -1) {
-            if (blocks.isEmpty()) return Double.MAX_VALUE;
-            double avgX = 0, avgZ = 0;
-            for (ProceduralWallBlock b : blocks) {
-                avgX += b.worldPos().getX();
-                avgZ += b.worldPos().getZ();
-            }
-            avgX /= blocks.size();
-            avgZ /= blocks.size();
-            double dx = botPos.getX() - avgX;
-            double dz = botPos.getZ() - avgZ;
-            return dx * dx + dz * dz;
-        }
-        if (edgeIdx >= 0 && edgeIdx < layout.edges().size()) {
-            WallEdge e = layout.edges().get(edgeIdx);
-            double midX = (e.start().x() + e.end().x()) / 2.0;
-            double midZ = (e.start().z() + e.end().z()) / 2.0;
-            double dx = botPos.getX() - midX;
-            double dz = botPos.getZ() - midZ;
-            return dx * dx + dz * dz;
-        }
-        return Double.MAX_VALUE;
-    }
-
-    private static boolean isMoatRelatedType(WallBlockType type) {
-        return type == WallBlockType.MOAT_DIG
-                || type == WallBlockType.MOAT_FLOOR
-                || type == WallBlockType.MOAT_INNER_FACE
-                || type == WallBlockType.MOAT_OVERHANG
-                || type == WallBlockType.EXTERIOR_CLEAR;
-    }
-
     private boolean isActiveFortifyBlock(ProceduralWallBlock block) {
-        if (block == null) {
-            return false;
-        }
-        if (!ENABLE_MOAT_STAGE && isMoatRelatedType(block.type())) {
-            return false;
-        }
-        return true;
+        return layoutHelper.isActiveFortifyBlock(block);
     }
 
     private boolean isPlannedBlockSatisfied(ProceduralWallBlock planned, BlockState current) {
-        if (planned == null || current == null) {
-            return false;
-        }
-        if (ignoredCavityPositions.contains(planned.worldPos())) {
-            return true;
-        }
-        BlockState desired = planned.state();
-        if (current.equals(desired)) {
-            return true;
-        }
-        if (current.isAir() || current.isReplaceable()) {
-            return false;
-        }
-        if (desired.isAir()) {
-            return current.isAir();
-        }
-
-        // Foundation/tower-base blocks: any solid non-air block satisfies the requirement.
-        // The terrain (grass, dirt, stone) already provides the structural base the wall needs.
-        if (planned.type() == WallBlockType.FOUNDATION || planned.type() == WallBlockType.TOWER_BASE) {
-            return true; // existing solid block serves as foundation
-        }
-
-        Item desiredItem = desired.getBlock().asItem();
-        Item currentItem = current.getBlock().asItem();
-        if (currentItem == Items.AIR) {
-            return false;
-        }
-        List<Item> candidates = buildCandidateList(desiredItem);
-        return candidates.contains(currentItem);
+        return layoutHelper.isPlannedBlockSatisfied(planned, current);
     }
 
     /** Compute per-edge planned block counts from a layout. */
     private Map<Integer, Integer> computeEdgePlannedCounts(FortificationLayout layout) {
-        Map<Integer, Integer> counts = new HashMap<>();
-        for (ProceduralWallBlock block : layout.allBlocks()) {
-            if (!isActiveFortifyBlock(block)) {
-                continue;
-            }
-            counts.merge(block.edgeIndex(), 1, Integer::sum);
-        }
-        return counts;
+        return layoutHelper.computeEdgePlannedCounts(layout);
     }
 
     /** Count how many planned blocks are satisfied by desired/fallback material state. */
     private int countPresentBlocks(ServerWorld world, List<ProceduralWallBlock> allBlocks) {
-        int count = 0;
-        for (ProceduralWallBlock block : allBlocks) {
-            if (!isActiveFortifyBlock(block)) {
-                continue;
-            }
-            BlockState current = world.getBlockState(block.worldPos());
-            if (isPlannedBlockSatisfied(block, current)) {
-                count++;
-            }
-        }
-        return count;
+        return layoutHelper.countPresentBlocks(world, allBlocks);
     }
 
     private int countBuildingBlocks(ServerPlayerEntity bot) {
