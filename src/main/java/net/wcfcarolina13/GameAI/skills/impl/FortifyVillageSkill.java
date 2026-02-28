@@ -381,12 +381,8 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
 
         SavedFortification saved = opt.get();
 
-        // Already-complete guard
-        if (saved.isMoatComplete()) {
-            ChatUtils.sendChatMessages(source, "§a[Fortify] Moat for '" + wallName + "' is already marked complete. Use `/bot fortify status" 
-                    + (wallName.contains(" ") ? "" : " " + wallName) + "` to inspect.");
-            return SkillExecutionResult.success("Moat already complete for '" + wallName + "'.");
-        }
+        // Moat dig is idempotent — always re-run (skips already-air blocks).
+        // Previous runs may have used a different width, so allow re-execution.
 
         // Regenerate layout from saved hull + surface profile
         List<WallPoint> hullVertices = saved.getHullWallPoints();
