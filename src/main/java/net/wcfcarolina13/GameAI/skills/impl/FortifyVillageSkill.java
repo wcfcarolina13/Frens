@@ -1599,6 +1599,7 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
         int dug = 0;
         int consecutiveFailures = 0;
         long deadline = System.currentTimeMillis() + MOAT_PASS2_TIME_BUDGET_MS;
+        Set<BlockPos> unreachable = new HashSet<>();
 
         LOGGER.info("[Moat] nearest-first: {} total, {} already air, {} to dig",
                 totalBlocks, alreadyAir, remaining.size());
@@ -1617,8 +1618,12 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
             BlockPos nearest = null;
             double nearestDistSq = Double.MAX_VALUE;
             for (BlockPos p : remaining) {
+                if (unreachable.contains(p)) continue;
                 double d = botPos.getSquaredDistance(p);
-                if (d < nearestDistSq) {
+                // Prefer higher blocks (top-down bias) if horizontal distance is similar
+                double score = d - p.getY(); 
+                if (score < nearestDistSq) {
+                    nearestDistSq = score;
                     nearestDistSq = d;
                     nearest = p;
                 }
@@ -1660,6 +1665,7 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
 
             if (minedThisStop > 0) {
                 consecutiveFailures = 0;
+                unreachable.clear();
                 if ((dug % 50) < minedThisStop || dug == minedThisStop) {
                     LOGGER.info("[Moat] progress: {}/{} dug, {} remaining",
                             dug + alreadyAir, totalBlocks, remaining.size());
@@ -1667,6 +1673,7 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
                 }
             } else {
                 consecutiveFailures++;
+                unreachable.add(nearest);
                 LOGGER.info("[Moat] no blocks mined at stop #{}, botPos=({},{},{}), target=({},{},{}), distSq={}",
                         consecutiveFailures,
                         bot.getBlockPos().getX(), bot.getBlockPos().getY(), bot.getBlockPos().getZ(),
@@ -2389,11 +2396,35 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
         );
         MovementService.MovementResult result = MovementService.withoutDoorEscape(
                 () -> MovementService.execute(source, bot, plan, false));
-        if (!result.success()) {
-            // Fast local fallback to avoid long DIRECT-path churn.
-            walkTowardBlock(bot, approach, 1_500L);
-            LOGGER.debug("moveToDigPosition: movement to {} via {} incomplete: {}",
-                    target.toShortString(), approach.toShortString(), result.detail());
+
+        // DIRECT mode arrival tolerance is 9.0 (3 blocks), but we need precise positioning for trench Line-of-Sight
+        if (!bot.getBlockPos().equals(approach)) {
+            // Force precision alignment
+            long tightenDeadline = System.currentTimeMillis() + 1_500L;
+            Vec3d approachVec = Vec3d.ofBottomCenter(approach);
+            int stuck = 0;
+            double lastDist = Double.MAX_VALUE;
+            while (System.currentTimeMillis() < tightenDeadline && !SkillManager.shouldAbortSkill(bot)) {
+                if (bot.getBlockPos().equals(approach)) break;
+                double dist = bot.squaredDistanceTo(approachVec);
+                if (dist < 0.8) break; // close enough to center
+                
+                LookController.faceBlock(bot, approach);
+                BotActions.applyMovementInput(bot, approachVec, 0.28D);
+                if (bot.isOnGround() && bot.horizontalCollision) {
+                    BotActions.jump(bot);
+                }
+                sleepQuiet(50);
+                
+                if (Math.abs(lastDist - dist) < 0.1) stuck++;
+                else stuck = 0;
+                
+                if (stuck > 4) break; // 200ms stuck
+                lastDist = dist;
+            }
+            if (!bot.getBlockPos().equals(approach)) {
+                LOGGER.debug("moveToDigPosition: tightening approach to {} incomplete", approach.toShortString());
+            }
         }
 
         if (bot.squaredDistanceTo(approach.getX() + 0.5, bot.getY(), approach.getZ() + 0.5) > 9.0) {
