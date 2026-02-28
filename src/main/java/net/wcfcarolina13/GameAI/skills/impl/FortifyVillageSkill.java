@@ -437,7 +437,8 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
         if (!allDigBlocks.isEmpty()) {
             showOverhead(bot, "Digging moat (" + allDigBlocks.size() + " blocks)...");
 
-            List<BlockPos> perimeterPath = buildPerimeterPath(layout, world, surfaceProfile);
+            // Walk at offset +3 (along moat line) so diagonal-normal edges stay within reach.
+            List<BlockPos> perimeterPath = buildPerimeterPath(layout, world, surfaceProfile, 3);
             Set<BlockPos> startupTargets = collectExistingDigTargets(world, allDigBlocks);
             if (shouldTriggerDepthRecovery(bot.getBlockPos().getY(), referenceSurfaceY)) {
                 StartupRecoveryResult startupRecovery = runStartupRecovery(
@@ -1666,10 +1667,9 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
                     failedMoves = 0;
                 }
 
-                int botY = bot.getBlockPos().getY();
-                int maxMineY = shouldTriggerDepthRecovery(botY, referenceSurfaceY)
-                        ? referenceSurfaceY
-                        : botY;
+                // For moat digging, allow mining up to surfaceY + 5 (exterior clear goes to +4).
+                // The reach check already limits actual range.
+                int maxMineY = referenceSurfaceY + 5;
                 Iterator<BlockPos> it = remaining.iterator();
                 while (it.hasNext()) {
                     if (SkillManager.shouldAbortSkill(bot)) break;
@@ -1693,9 +1693,10 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
                     }
                 }
 
-                if (stepsThisAttempt % 20 == 0) {
-                    LOGGER.info("Moat dig pass 1 attempt {}: {}/{} blocks cleared ({}/{} steps walked)",
-                            pass1AttemptsUsed, dug, totalDigBlocks, stepsThisAttempt, perimeterPath.size());
+                if (stepsThisAttempt % 20 == 0 || (stepsThisAttempt <= 2 && pass1MinedCount == 0)) {
+                    LOGGER.info("Moat dig pass 1 attempt {}: {}/{} blocks cleared ({}/{} steps walked) botPos=({},{},{}) maxMineY={}",
+                            pass1AttemptsUsed, dug, totalDigBlocks, stepsThisAttempt, perimeterPath.size(),
+                            bot.getBlockPos().getX(), bot.getBlockPos().getY(), bot.getBlockPos().getZ(), maxMineY);
                 }
             }
 
@@ -2198,6 +2199,15 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
      * Uses traceEdge (Bresenham) for each hull edge, with terrain Y lookup.
      */
     private List<BlockPos> buildPerimeterPath(FortificationLayout layout, ServerWorld world, SurfaceProfile surfaceProfile) {
+        return buildPerimeterPath(layout, world, surfaceProfile, 1);
+    }
+
+    /**
+     * Build walk path at the given offset from the wall line in the outward normal direction.
+     * <p>Offset 1 = one block outside wall (default for wall building).
+     * Offset 3 = along moat line (ensures diagonal-normal edges stay within mining reach).
+     */
+    private List<BlockPos> buildPerimeterPath(FortificationLayout layout, ServerWorld world, SurfaceProfile surfaceProfile, int walkOffset) {
         List<BlockPos> path = new ArrayList<>();
         List<WallEdge> edges = layout.edges();
         BlockPos previous = null;
@@ -2221,11 +2231,11 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
             endExclusive = Math.max(start, endExclusive - PERIMETER_VERTEX_SKIP);
 
             // Skip first/last points near vertices to avoid tower corners,
-            // and walk one block outside the wall line.
+            // and walk at the given offset outside the wall line.
             for (int j = start; j < endExclusive; j++) {
                 WallPoint wp = traced.get(j);
-                int walkX = wp.x() + normalX;
-                int walkZ = wp.z() + normalZ;
+                int walkX = wp.x() + normalX * walkOffset;
+                int walkZ = wp.z() + normalZ * walkOffset;
                 BlockPos walkPos = choosePerimeterWalkPos(world, surfaceProfile, walkX, walkZ, previous);
                 if (path.isEmpty() || !path.get(path.size() - 1).equals(walkPos)) {
                     path.add(walkPos);
