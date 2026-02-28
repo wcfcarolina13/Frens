@@ -42,9 +42,6 @@ final class FortifyLayoutHelper {
             Items.COBBLESTONE, Items.COBBLED_DEEPSLATE, Items.STONE, Items.DIRT
     );
 
-    // Temporary focus mode: disable moat/clearance work and build only fortification structures.
-    private static final boolean ENABLE_MOAT_STAGE = false;
-
     private final Set<BlockPos> ignoredCavityPositions;
 
     FortifyLayoutHelper(Set<BlockPos> ignoredCavityPositions) {
@@ -91,7 +88,8 @@ final class FortifyLayoutHelper {
         if (block == null) {
             return false;
         }
-        if (!ENABLE_MOAT_STAGE && isMoatRelatedType(block.type())) {
+        // Moat blocks are handled by the separate FortifyMoatSkill
+        if (isMoatRelatedType(block.type())) {
             return false;
         }
         return true;

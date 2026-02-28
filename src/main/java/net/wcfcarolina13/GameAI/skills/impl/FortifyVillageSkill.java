@@ -73,8 +73,6 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
     private static final Logger LOGGER = LoggerFactory.getLogger("skill-fortify-village");
     private static final double REACH_DISTANCE_SQ = 20.25D;
     private static final int BLOCK_PLACE_DELAY_MS = 50;
-    // Temporary focus mode: disable moat/clearance work and build only fortification structures.
-    private static final boolean ENABLE_MOAT_STAGE = false;
     private static final int MAX_SCAFFOLD_HEIGHT = 8;
     private static final long MAX_BUILD_TIME_MS = 30 * 60_000L; // 30 minute cap
     private static final long PHASE_B_TIME_BUDGET_MS = 30 * 60_000L;
@@ -320,10 +318,32 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
                 return handlePatch(source, bot, world, server, wallName);
             }
 
-            // /bot fortify status <name>
+            // /bot fortify status [name]
+            if (lower.equals("status")) {
+                String wallName = findNearestWallName(server, world, bot.getBlockPos());
+                if (wallName == null) {
+                    return SkillExecutionResult.failure("No saved walls found. Build one first with `/bot fortify`.");
+                }
+                ChatUtils.sendSystemMessage(source, "§7[Fortify] Auto-detected nearest wall: §f" + wallName);
+                return handleStatus(source, bot, world, server, wallName);
+            }
             if (lower.startsWith("status ")) {
                 String wallName = args.trim().substring(7).trim();
                 return handleStatus(source, bot, world, server, wallName);
+            }
+
+            // /bot fortify moat [name]
+            if (lower.equals("moat")) {
+                String wallName = findNearestWallName(server, world, bot.getBlockPos());
+                if (wallName == null) {
+                    return SkillExecutionResult.failure("No saved walls found. Build one first with `/bot fortify`.");
+                }
+                ChatUtils.sendSystemMessage(source, "§7[Fortify] Auto-detected nearest wall: §f" + wallName);
+                return executeMoat(source, bot, world, server, wallName);
+            }
+            if (lower.startsWith("moat ")) {
+                String wallName = args.trim().substring(5).trim();
+                return executeMoat(source, bot, world, server, wallName);
             }
 
             // /bot fortify merge [name]
@@ -346,6 +366,136 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
     }
 
     // ── Command handlers ────────────────────────────────────────
+
+    /**
+     * Public entry point for the moat skill. Loads a saved wall, regenerates its layout,
+     * and executes the moat dig + placement phase independently of the wall build.
+     */
+    public SkillExecutionResult executeMoat(ServerCommandSource source, ServerPlayerEntity bot,
+                                             ServerWorld world, MinecraftServer server, String wallName) {
+        String worldKey = FortificationPersistenceService.serverWorldKey(server, world);
+        Optional<SavedFortification> opt = FortificationPersistenceService.load(server, worldKey, wallName);
+        if (opt.isEmpty()) {
+            return SkillExecutionResult.failure("No saved wall named '" + wallName + "'. Use `/bot fortify list` to see saved walls.");
+        }
+
+        SavedFortification saved = opt.get();
+
+        // Regenerate layout from saved hull + surface profile
+        List<WallPoint> hullVertices = saved.getHullWallPoints();
+        VillageFortificationLayoutService.SurfaceProfile savedProfile =
+                VillageFortificationLayoutService.SurfaceProfile.fromSaved(saved.getSurfaceProfile());
+        FortificationLayout layout = VillageFortificationLayoutService.generateLayoutFromHull(
+                hullVertices, world, saved.getCenter(), savedProfile);
+
+        if (layout.allBlocks().isEmpty()) {
+            return SkillExecutionResult.failure("Could not regenerate layout from saved hull.");
+        }
+
+        this.currentLayout = layout;
+        entombmentHelper.updateLayout(layout);
+        this.gateRoutingFailures = 0;
+        try {
+
+        // Populate protected positions (wall blocks should not be mined during moat digging)
+        Set<BlockPos> layoutPositions = new HashSet<>();
+        for (ProceduralWallBlock b : layout.allBlocks()) {
+            layoutPositions.add(b.worldPos());
+        }
+        this.fortificationProtectedPositions = Collections.unmodifiableSet(layoutPositions);
+        this.ignoredCavityPositions.clear();
+        this.ignoredCavityNotes.clear();
+
+        int referenceSurfaceY = computeReferenceSurfaceY(bot, layout, world);
+        SurfaceProfile surfaceProfile = createSurfaceProfile(layout, referenceSurfaceY);
+
+        // Ensure bot starts on solid, open ground
+        if (shouldTriggerDepthRecovery(bot.getBlockPos().getY(), referenceSurfaceY)) {
+            ensureOnSurface(bot, world, referenceSurfaceY);
+        }
+
+        // Collect every MOAT_DIG + EXTERIOR_CLEAR block from all edges
+        List<ProceduralWallBlock> allDigBlocks = new ArrayList<>();
+        Set<BlockPos> wallPositions = new HashSet<>();
+        for (ProceduralWallBlock b : layout.allBlocks()) {
+            if (b.type() == WallBlockType.MOAT_DIG || b.type() == WallBlockType.EXTERIOR_CLEAR) {
+                allDigBlocks.add(b);
+            } else {
+                wallPositions.add(b.worldPos());
+            }
+        }
+
+        // Filter out already-air blocks, densify, filter again
+        allDigBlocks.removeIf(b -> world.getBlockState(b.worldPos()).isAir());
+        allDigBlocks = densifyMoatDigTargets(allDigBlocks, wallPositions);
+        allDigBlocks.removeIf(b -> world.getBlockState(b.worldPos()).isAir());
+
+        int totalDug = 0;
+        if (!allDigBlocks.isEmpty()) {
+            showOverhead(bot, "Digging moat (" + allDigBlocks.size() + " blocks)...");
+
+            List<BlockPos> perimeterPath = buildPerimeterPath(layout, world, surfaceProfile);
+            Set<BlockPos> startupTargets = collectExistingDigTargets(world, allDigBlocks);
+            if (shouldTriggerDepthRecovery(bot.getBlockPos().getY(), referenceSurfaceY)) {
+                StartupRecoveryResult startupRecovery = runStartupRecovery(
+                        source, bot, world, referenceSurfaceY, surfaceProfile,
+                        perimeterPath, startupTargets, "moat-startup");
+                if (startupRecovery.failedNoSafeTile()) {
+                    ChatUtils.sendChatMessages(source, "§c[Fortify] Stuck at moat start; no safe recovery position.");
+                    return SkillExecutionResult.success("Stuck at moat start.");
+                }
+            }
+
+            MoatDigResult digResult = digAllMoatBlocks(
+                    source, bot, world, allDigBlocks,
+                    referenceSurfaceY, surfaceProfile, perimeterPath);
+            totalDug = digResult.dugCount();
+
+            LOGGER.info("[Fortify] Moat dig phase complete: {} blocks cleared", totalDug);
+            if (digResult.abortedNoSafeTile()) {
+                ChatUtils.sendChatMessages(source, "§c[Fortify] Stuck during moat phase.");
+                return SkillExecutionResult.success("Stuck during moat phase. " + totalDug + " blocks cleared.");
+            }
+        } else {
+            ChatUtils.sendChatMessages(source, "§a[Fortify] No moat blocks to dig — moat already complete.");
+        }
+
+        // Place moat structural blocks: MOAT_FLOOR, MOAT_INNER_FACE, MOAT_OVERHANG
+        List<ProceduralWallBlock> moatPlaceBlocks = new ArrayList<>();
+        for (ProceduralWallBlock b : layout.allBlocks()) {
+            if (b.type() == WallBlockType.MOAT_FLOOR
+                    || b.type() == WallBlockType.MOAT_INNER_FACE
+                    || b.type() == WallBlockType.MOAT_OVERHANG) {
+                if (!isPlannedBlockSatisfied(b, world.getBlockState(b.worldPos()))) {
+                    moatPlaceBlocks.add(b);
+                }
+            }
+        }
+
+        int totalPlaced = 0;
+        if (!moatPlaceBlocks.isEmpty()) {
+            showOverhead(bot, "Placing moat structures (" + moatPlaceBlocks.size() + " blocks)...");
+            // Sort by placement priority then distance
+            moatPlaceBlocks.sort(Comparator.comparingInt((ProceduralWallBlock b) -> placePriority(b.type()))
+                    .thenComparingDouble(b -> bot.squaredDistanceTo(Vec3d.ofCenter(b.worldPos()))));
+            totalPlaced = buildBlockList(source, bot, world, moatPlaceBlocks);
+            LOGGER.info("[Fortify] Moat placement phase complete: {} blocks placed", totalPlaced);
+        }
+
+        // Mark moat complete in persistence
+        FortificationPersistenceService.setMoatComplete(server, worldKey, wallName, true);
+
+        String summary = String.format("Moat complete for '%s'. %d blocks dug, %d blocks placed.",
+                wallName, totalDug, totalPlaced);
+        ChatUtils.sendChatMessages(source, "§a[Fortify] " + summary);
+        showOverhead(bot, "Moat done!");
+        return SkillExecutionResult.success(summary);
+
+        } finally {
+            this.currentLayout = null;
+            entombmentHelper.updateLayout(null);
+        }
+    }
 
     private SkillExecutionResult handleList(ServerCommandSource source, MinecraftServer server, ServerWorld world) {
         String worldKey = FortificationPersistenceService.serverWorldKey(server, world);
@@ -1298,77 +1448,11 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
         }
 
         // ══════════════════════════════════════════════════════════════
-        // PHASE A: Dig ALL moats across all remaining edges in one sweep
+        // PHASE A: Moat dig — now a separate skill (FortifyMoatSkill).
+        // Wall build skips moat/clearance work unconditionally.
         // ══════════════════════════════════════════════════════════════
-        if (ENABLE_MOAT_STAGE) {
-            // Collect every MOAT_DIG + EXTERIOR_CLEAR block from remaining edges
-            List<ProceduralWallBlock> allDigBlocks = new ArrayList<>();
-            Set<BlockPos> protectedPositions = new HashSet<>();
-            for (int ei : edgeBuildOrder) {
-                for (ProceduralWallBlock b : layout.blocksForEdge(ei)) {
-                    if (b.type() == WallBlockType.MOAT_DIG || b.type() == WallBlockType.EXTERIOR_CLEAR) {
-                        allDigBlocks.add(b);
-                    } else {
-                        protectedPositions.add(b.worldPos());
-                    }
-                }
-            }
-
-            // Filter out already-air blocks before sorting
-            allDigBlocks.removeIf(b -> world.getBlockState(b.worldPos()).isAir());
-            allDigBlocks = densifyMoatDigTargets(allDigBlocks, protectedPositions);
-            allDigBlocks.removeIf(b -> world.getBlockState(b.worldPos()).isAir());
-
-            if (!allDigBlocks.isEmpty()) {
-                showOverhead(bot, "Digging moat (" + allDigBlocks.size() + " blocks)...");
-
-                List<BlockPos> perimeterPath = buildPerimeterPath(layout, world, surfaceProfile);
-                Set<BlockPos> startupTargets = collectExistingDigTargets(world, allDigBlocks);
-                if (shouldTriggerDepthRecovery(bot.getBlockPos().getY(), referenceSurfaceY)) {
-                    StartupRecoveryResult startupRecovery = runStartupRecovery(
-                            source,
-                            bot,
-                            world,
-                            referenceSurfaceY,
-                            surfaceProfile,
-                            perimeterPath,
-                            startupTargets,
-                            "startup"
-                    );
-                    if (startupRecovery.failedNoSafeTile()) {
-                        saveAndReport(source, server, worldKey, wallName, startEdgeIndex, totalPlaced,
-                                "Stuck at fortify start; no safe recovery position");
-                        return SkillExecutionResult.success("Stuck at fortify start; no safe recovery position. Progress saved.");
-                    }
-                }
-
-                MoatDigResult digResult = digAllMoatBlocks(
-                        source,
-                        bot,
-                        world,
-                        allDigBlocks,
-                        referenceSurfaceY,
-                        surfaceProfile,
-                        perimeterPath
-                );
-                totalPlaced += digResult.dugCount();
-
-                LOGGER.info("Moat dig phase complete: {} blocks cleared", digResult.dugCount());
-                if (digResult.abortedNoSafeTile()) {
-                    saveAndReport(source, server, worldKey, wallName, startEdgeIndex, totalPlaced,
-                            "Stuck during moat phase; no safe recovery position");
-                    return SkillExecutionResult.success("Stuck during moat phase; no safe recovery position. Progress saved.");
-                }
-
-                if (SkillManager.shouldAbortSkill(bot)) {
-                    saveAndReport(source, server, worldKey, wallName, startEdgeIndex, totalPlaced, "Aborted");
-                    return SkillExecutionResult.success("Aborted. Progress saved as '" + wallName + "'.");
-                }
-            }
-        } else {
-            LOGGER.info("[Fortify] Moat stage disabled by configuration; skipping moat and clearance work.");
-            showOverhead(bot, "Building walls and towers...");
-        }
+        LOGGER.info("[Fortify] Moat stage is now a separate skill; skipping moat and clearance work.");
+        showOverhead(bot, "Building walls and towers...");
 
         // ══════════════════════════════════════════════════════════════
         // PHASE B: Place ALL wall blocks, edge by edge

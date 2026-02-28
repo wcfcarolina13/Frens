@@ -52,6 +52,8 @@ public final class FortificationPersistenceService {
         int lastEdgeIndex;
         int totalBlocksPlaced;
         boolean complete;
+        /** Whether the moat phase has been completed independently. Null-safe for old saves. */
+        boolean moatComplete;
         /** Per-edge planned block counts (edgeIndex -> total planned). Null-safe for old saves. */
         Map<Integer, Integer> edgePlannedCounts;
         /** Per-edge actual placed block counts (edgeIndex -> blocks confirmed placed). Null-safe for old saves. */
@@ -68,6 +70,7 @@ public final class FortificationPersistenceService {
         public int getLastEdgeIndex() { return lastEdgeIndex; }
         public int getTotalBlocksPlaced() { return totalBlocksPlaced; }
         public boolean isComplete() { return complete; }
+        public boolean isMoatComplete() { return moatComplete; }
         public Map<Integer, Integer> getEdgePlannedCounts() { return edgePlannedCounts != null ? edgePlannedCounts : Map.of(); }
         public Map<Integer, Integer> getEdgeActualCounts() { return edgeActualCounts != null ? edgeActualCounts : Map.of(); }
         public Map<String, Integer> getSurfaceProfile() { return surfaceProfile; }
@@ -243,6 +246,21 @@ public final class FortificationPersistenceService {
             SavedFortification fort = wd.fortifications.get(normKey(name));
             if (fort == null) return;
             fort.complete = true;
+        }
+        flush();
+    }
+
+    /**
+     * Mark a fortification's moat as complete.
+     */
+    public static void setMoatComplete(MinecraftServer server, String worldKey, String name, boolean moatComplete) {
+        ensureLoaded();
+        synchronized (LOCK) {
+            WorldData wd = DATA.worlds.get(worldKey);
+            if (wd == null) return;
+            SavedFortification fort = wd.fortifications.get(normKey(name));
+            if (fort == null) return;
+            fort.moatComplete = moatComplete;
         }
         flush();
     }

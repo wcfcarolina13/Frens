@@ -14,6 +14,7 @@ import net.wcfcarolina13.GameAI.skills.impl.DirtShovelSkill;
 import net.wcfcarolina13.GameAI.skills.impl.DropSweepSkill;
 import net.wcfcarolina13.GameAI.skills.impl.FeedAnimalsSkill;
 import net.wcfcarolina13.GameAI.skills.impl.FishingSkill;
+import net.wcfcarolina13.GameAI.skills.impl.FortifyMoatSkill;
 import net.wcfcarolina13.GameAI.skills.impl.FortifyVillageSkill;
 import net.wcfcarolina13.GameAI.skills.impl.FlowerPickSkill;
 import net.wcfcarolina13.GameAI.skills.impl.HuntSkill;
@@ -70,6 +71,7 @@ public final class SkillManager {
         register(new LeafLitterSkill());
         register(new MushroomForageSkill());
         register(new FortifyVillageSkill());
+        register(new FortifyMoatSkill());
         DebugFileLogger.log("SkillManager.staticInit end");
     }
 
@@ -81,6 +83,11 @@ public final class SkillManager {
             DebugFileLogger.log("SkillManager.register " + skill.name());
         }
         SKILLS.put(skill.name(), skill);
+    }
+
+    /** Look up a registered skill by name, or null if not found. */
+    public static Skill getSkill(String name) {
+        return SKILLS.get(name);
     }
 
     public static SkillExecutionResult runSkill(String name, SkillContext context) {
