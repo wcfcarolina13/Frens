@@ -381,6 +381,13 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
 
         SavedFortification saved = opt.get();
 
+        // Already-complete guard
+        if (saved.isMoatComplete()) {
+            ChatUtils.sendChatMessages(source, "§a[Fortify] Moat for '" + wallName + "' is already marked complete. Use `/bot fortify status" 
+                    + (wallName.contains(" ") ? "" : " " + wallName) + "` to inspect.");
+            return SkillExecutionResult.success("Moat already complete for '" + wallName + "'.");
+        }
+
         // Regenerate layout from saved hull + surface profile
         List<WallPoint> hullVertices = saved.getHullWallPoints();
         VillageFortificationLayoutService.SurfaceProfile savedProfile =
@@ -456,8 +463,14 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
                 ChatUtils.sendChatMessages(source, "§c[Fortify] Stuck during moat phase.");
                 return SkillExecutionResult.success("Stuck during moat phase. " + totalDug + " blocks cleared.");
             }
+
+            // Abort gate between dig and place phases
+            if (SkillManager.shouldAbortSkill(bot)) {
+                ChatUtils.sendChatMessages(source, "§e[Fortify] Moat aborted after dig phase. " + totalDug + " blocks cleared.");
+                return SkillExecutionResult.success("Moat aborted after dig phase. " + totalDug + " blocks cleared.");
+            }
         } else {
-            ChatUtils.sendChatMessages(source, "§a[Fortify] No moat blocks to dig — moat already complete.");
+            ChatUtils.sendChatMessages(source, "§a[Fortify] No moat blocks to dig — moat already clear.");
         }
 
         // Place moat structural blocks: MOAT_FLOOR, MOAT_INNER_FACE, MOAT_OVERHANG
@@ -474,6 +487,13 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
 
         int totalPlaced = 0;
         if (!moatPlaceBlocks.isEmpty()) {
+            // Resource check before placement
+            if (countBuildingBlocks(bot) == 0) {
+                ChatUtils.sendChatMessages(source, "§c[Fortify] Out of building blocks for moat structures. "
+                        + totalDug + " blocks dug, " + moatPlaceBlocks.size() + " structural blocks still needed.");
+                return SkillExecutionResult.success("Moat dig done (" + totalDug + ") but out of blocks for placement.");
+            }
+
             showOverhead(bot, "Placing moat structures (" + moatPlaceBlocks.size() + " blocks)...");
             // Sort by placement priority then distance
             moatPlaceBlocks.sort(Comparator.comparingInt((ProceduralWallBlock b) -> placePriority(b.type()))
@@ -494,6 +514,7 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
         } finally {
             this.currentLayout = null;
             entombmentHelper.updateLayout(null);
+            ScaffoldService.teardownTrackedScaffolds(bot);
         }
     }
 
@@ -522,8 +543,9 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
             } else {
                 status = "§e[" + f.getCompletedEdges().size() + " edges done]";
             }
-            ChatUtils.sendSystemMessage(source, String.format("§7  %s %s — center (%d,%d,%d), %d blocks placed",
-                    f.getName(), status,
+            String moatTag = f.isMoatComplete() ? " §b[MOAT]" : "";
+            ChatUtils.sendSystemMessage(source, String.format("§7  %s %s%s — center (%d,%d,%d), %d blocks placed",
+                    f.getName(), status, moatTag,
                     f.getCenter().getX(), f.getCenter().getY(), f.getCenter().getZ(),
                     f.getTotalBlocksPlaced()));
         }
@@ -1091,9 +1113,10 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
 
         // Overall summary
         String overallColor = overallPct >= 95 ? "§a" : overallPct >= 50 ? "§e" : "§c";
+        String moatLabel = saved.isMoatComplete() ? " §b[MOAT DONE]" : "";
         ChatUtils.sendChatMessages(source, "§a[Fortify] Status for '" + wallName + "': "
                 + overallColor + totalPresent + "/" + totalPlanned + " (" + overallPct + "%)§a"
-                + (saved.isComplete() ? " §a[MARKED COMPLETE]" : ""));
+                + (saved.isComplete() ? " §a[MARKED COMPLETE]" : "") + moatLabel);
 
         // Per-type summary
         for (Map.Entry<String, int[]> entry : byType.entrySet()) {
