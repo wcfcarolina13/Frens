@@ -1645,7 +1645,7 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
                         continue;
                     }
 
-                    if (!isWithinMiningReach(bot, pos)) continue;
+                    if (!isWithinMiningReach(bot, pos) || !hasLineOfSight(world, bot, bot.getEyePos(), pos)) continue;
 
                     LookController.faceBlock(bot, pos);
                     sleepQuiet(50);
