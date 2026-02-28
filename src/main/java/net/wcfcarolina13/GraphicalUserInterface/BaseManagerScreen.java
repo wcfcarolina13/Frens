@@ -129,8 +129,13 @@ public class BaseManagerScreen extends Screen {
         this.addDrawableChild(ButtonWidget.builder(Text.literal("Auto Patch"), (btn) -> sendAutoPatchWall())
                 .dimensions(cx - 36, btnY4, 70, 20)
                 .build());
-        this.addDrawableChild(ButtonWidget.builder(Text.literal("Close"), (btn) -> close())
+        this.addDrawableChild(ButtonWidget.builder(Text.literal("Dig Moat"), (btn) -> sendDigMoat())
                 .dimensions(cx + 38, btnY4, 70, 20)
+                .build());
+
+        int btnY5 = btnY4 + CONTROL_ROW_DY;
+        this.addDrawableChild(ButtonWidget.builder(Text.literal("Close"), (btn) -> close())
+                .dimensions(cx - 35, btnY5, 70, 20)
                 .build());
 
         requestRefresh();
@@ -257,6 +262,18 @@ public class BaseManagerScreen extends Screen {
         close();
     }
 
+    private void sendDigMoat() {
+        BaseDto selected = getSelected();
+        if (selected == null || !selected.isWall() || selected.label == null || selected.label.isBlank()) {
+            return;
+        }
+        MinecraftClient mc = this.client;
+        if (mc != null && mc.player != null) {
+            mc.player.networkHandler.sendChatCommand("bot fortify moat " + selected.label);
+        }
+        close();
+    }
+
     private BaseDto getSelected() {
         List<BaseDto> bases = getBasesSnapshot();
         if (selectedIndex < 0 || selectedIndex >= bases.size()) {
@@ -320,7 +337,7 @@ public class BaseManagerScreen extends Screen {
         context.drawCenteredTextWithShadow(this.textRenderer, this.title, cx, 10, 0xFFFFFF);
 
         Rect list = listRect();
-        String hint = "Tip: Select a base/wall, then use buttons. Walls support Resume, Patch & Status.";
+        String hint = "Tip: Select a wall, then use Resume, Patch, Status, or Dig Moat.";
         context.drawCenteredTextWithShadow(this.textRenderer, Text.literal(hint), cx, list.bottom() + 6, 0xFFB0B0B0);
     }
 
@@ -372,8 +389,8 @@ public class BaseManagerScreen extends Screen {
     private Rect listRect() {
         int cx = this.width / 2;
         int x = cx - 110;
-        // Below the 4th button row (+ a small gap). Prevents list background from overlapping controls.
-        int y = TOP_Y + (CONTROL_ROW_DY * 4) + BUTTON_H + LIST_TOP_GAP;
+        // Below the 5th button row (+ a small gap). Prevents list background from overlapping controls.
+        int y = TOP_Y + (CONTROL_ROW_DY * 5) + BUTTON_H + LIST_TOP_GAP;
         int w = 220;
         int h = Math.max(LIST_MIN_H, this.height - y - LIST_BOTTOM_MARGIN);
         return new Rect(x, y, w, h);
