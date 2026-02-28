@@ -39,11 +39,11 @@ public class VillageFortificationLayoutService {
     /** Tower height (5 wall rows + cap). */
     private static final int TOWER_HEIGHT = 6;
     /** Moat width (blocks outward from inner face). */
-    private static final int MOAT_WIDTH = 3;
+    private static final int MOAT_WIDTH = 1;
     /** Moat depth (blocks below terrain). */
     private static final int MOAT_DEPTH = 3;
     /** Exterior clearance distance (blocks beyond moat). */
-    private static final int EXTERIOR_CLEAR_DIST = 2;
+    private static final int EXTERIOR_CLEAR_DIST = 1;
 
     /** Blocks commonly found in village structures. */
     private static final Set<Block> VILLAGE_STRUCTURE_BLOCKS;
@@ -734,7 +734,8 @@ public class VillageFortificationLayoutService {
                     if (j >= 0 && j < traced.size()) {
                         WallPoint gp = traced.get(j);
                         // Generate moat floor at terrain level across gate gap (bridge)
-                        for (int moatOff = 1; moatOff <= MOAT_WIDTH + 1; moatOff++) {
+                        // Covers inner face (+1) through end of moat ditch (+2+MOAT_WIDTH)
+                        for (int moatOff = 1; moatOff <= 2 + MOAT_WIDTH; moatOff++) {
                             int mx = gp.x() + normalX * moatOff;
                             int mz = gp.z() + normalZ * moatOff;
                             if (!isInFootprint(structureFootprint, mx, mz)) {
@@ -867,8 +868,9 @@ public class VillageFortificationLayoutService {
                     WallBlockType.MOAT_OVERHANG, edgeIndex));
         }
 
-        // === Moat ditch (offsets +2..+4 along normal): dig air + cobble floor ===
-        for (int moatOff = 2; moatOff <= 1 + MOAT_WIDTH; moatOff++) {
+        // === Moat ditch (offsets +3..+(2+MOAT_WIDTH) along normal): dig air + cobble floor ===
+        // Starts at offset 3 (beyond overhang at +2) to avoid digging out the spider guard.
+        for (int moatOff = 3; moatOff <= 2 + MOAT_WIDTH; moatOff++) {
             int mx = point.x() + normalX * moatOff;
             int mz = point.z() + normalZ * moatOff;
             if (isInFootprint(structureFootprint, mx, mz)) continue;
@@ -885,8 +887,9 @@ public class VillageFortificationLayoutService {
                     WallBlockType.MOAT_FLOOR, edgeIndex));
         }
 
-        // === Exterior clearance (offsets +5..+6 along normal): break blocks Y-1..Y+4 ===
-        for (int clearOff = 2 + MOAT_WIDTH; clearOff < 2 + MOAT_WIDTH + EXTERIOR_CLEAR_DIST; clearOff++) {
+        // === Exterior clearance (beyond moat ditch): break blocks Y-1..Y+4 ===
+        int clearStart = 3 + MOAT_WIDTH;
+        for (int clearOff = clearStart; clearOff < clearStart + EXTERIOR_CLEAR_DIST; clearOff++) {
             int cx = point.x() + normalX * clearOff;
             int cz = point.z() + normalZ * clearOff;
             if (isInFootprint(structureFootprint, cx, cz)) continue;
