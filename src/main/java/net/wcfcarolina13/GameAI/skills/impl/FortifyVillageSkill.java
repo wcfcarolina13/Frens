@@ -437,29 +437,9 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
         if (!allDigBlocks.isEmpty()) {
             showOverhead(bot, "Digging moat (" + allDigBlocks.size() + " blocks)...");
 
-            // Walk at offset +3 (along moat line) so diagonal-normal edges stay within reach.
-            List<BlockPos> perimeterPath = buildPerimeterPath(layout, world, surfaceProfile, 3);
-            Set<BlockPos> startupTargets = collectExistingDigTargets(world, allDigBlocks);
-            if (shouldTriggerDepthRecovery(bot.getBlockPos().getY(), referenceSurfaceY)) {
-                StartupRecoveryResult startupRecovery = runStartupRecovery(
-                        source, bot, world, referenceSurfaceY, surfaceProfile,
-                        perimeterPath, startupTargets, "moat-startup");
-                if (startupRecovery.failedNoSafeTile()) {
-                    ChatUtils.sendChatMessages(source, "§c[Fortify] Stuck at moat start; no safe recovery position.");
-                    return SkillExecutionResult.success("Stuck at moat start.");
-                }
-            }
-
-            MoatDigResult digResult = digAllMoatBlocks(
-                    source, bot, world, allDigBlocks,
-                    referenceSurfaceY, surfaceProfile, perimeterPath);
-            totalDug = digResult.dugCount();
+            totalDug = digMoatNearestFirst(source, bot, world, allDigBlocks, referenceSurfaceY, surfaceProfile);
 
             LOGGER.info("[Fortify] Moat dig phase complete: {} blocks cleared", totalDug);
-            if (digResult.abortedNoSafeTile()) {
-                ChatUtils.sendChatMessages(source, "§c[Fortify] Stuck during moat phase.");
-                return SkillExecutionResult.success("Stuck during moat phase. " + totalDug + " blocks cleared.");
-            }
 
             // Abort gate between dig and place phases
             if (SkillManager.shouldAbortSkill(bot)) {
@@ -1597,6 +1577,109 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
     }
 
     // ── Moat digging (unified across all edges) ─────────────────
+
+    // ── Simple nearest-first moat dig ──────────────────────────
+
+    /**
+     * Dig moat blocks using a simple nearest-first approach:
+     * 1. Filter already-air blocks
+     * 2. Find nearest remaining solid block to the bot
+     * 3. Walk there via moveToDigPosition, mine everything reachable
+     * 4. Repeat until done or time budget exhausted
+     *
+     * This is intentionally simple — no perimeter walk, no complex recovery.
+     * Designed to work well when continuing a partially-dug moat.
+     */
+    private int digMoatNearestFirst(ServerCommandSource source, ServerPlayerEntity bot,
+                                     ServerWorld world, List<ProceduralWallBlock> allDigBlocks,
+                                     int referenceSurfaceY, SurfaceProfile surfaceProfile) {
+        Set<BlockPos> remaining = collectExistingDigTargets(world, allDigBlocks);
+        int totalBlocks = allDigBlocks.size();
+        int alreadyAir = totalBlocks - remaining.size();
+        int dug = 0;
+        int consecutiveFailures = 0;
+        long deadline = System.currentTimeMillis() + MOAT_PASS2_TIME_BUDGET_MS;
+
+        LOGGER.info("[Moat] nearest-first: {} total, {} already air, {} to dig",
+                totalBlocks, alreadyAir, remaining.size());
+
+        while (!remaining.isEmpty()
+                && !SkillManager.shouldAbortSkill(bot)
+                && System.currentTimeMillis() < deadline
+                && consecutiveFailures < 12) {
+
+            // Prune blocks that became air since last check
+            remaining.removeIf(p -> world.getBlockState(p).isAir());
+            if (remaining.isEmpty()) break;
+
+            // Find nearest remaining block
+            BlockPos botPos = bot.getBlockPos();
+            BlockPos nearest = null;
+            double nearestDistSq = Double.MAX_VALUE;
+            for (BlockPos p : remaining) {
+                double d = botPos.getSquaredDistance(p);
+                if (d < nearestDistSq) {
+                    nearestDistSq = d;
+                    nearest = p;
+                }
+            }
+            if (nearest == null) break;
+
+            // Move to dig position near the target
+            moveToDigPosition(source, bot, world, nearest, surfaceProfile);
+
+            // Mine everything within reach from current position
+            int minedThisStop = 0;
+            boolean madeProgress = true;
+            while (madeProgress && !SkillManager.shouldAbortSkill(bot)) {
+                madeProgress = false;
+                Iterator<BlockPos> it = remaining.iterator();
+                while (it.hasNext()) {
+                    if (SkillManager.shouldAbortSkill(bot)) break;
+                    BlockPos pos = it.next();
+
+                    if (world.getBlockState(pos).isAir()) {
+                        it.remove();
+                        dug++;
+                        madeProgress = true;
+                        continue;
+                    }
+
+                    if (!isWithinMiningReach(bot, pos)) continue;
+
+                    LookController.faceBlock(bot, pos);
+                    sleepQuiet(50);
+                    if (digBlock(bot, world, pos)) {
+                        it.remove();
+                        dug++;
+                        minedThisStop++;
+                        madeProgress = true;
+                    }
+                }
+            }
+
+            if (minedThisStop > 0) {
+                consecutiveFailures = 0;
+                if ((dug % 50) < minedThisStop || dug == minedThisStop) {
+                    LOGGER.info("[Moat] progress: {}/{} dug, {} remaining",
+                            dug + alreadyAir, totalBlocks, remaining.size());
+                    showOverhead(bot, "Moat: " + (dug + alreadyAir) + "/" + totalBlocks);
+                }
+            } else {
+                consecutiveFailures++;
+                LOGGER.info("[Moat] no blocks mined at stop #{}, botPos=({},{},{}), target=({},{},{}), distSq={}",
+                        consecutiveFailures,
+                        bot.getBlockPos().getX(), bot.getBlockPos().getY(), bot.getBlockPos().getZ(),
+                        nearest.getX(), nearest.getY(), nearest.getZ(), String.format("%.1f", nearestDistSq));
+            }
+        }
+
+        if (!remaining.isEmpty()) {
+            LOGGER.warn("[Moat] {} blocks could not be mined (unreachable or timed out)", remaining.size());
+        }
+        LOGGER.info("[Moat] nearest-first complete: {}/{} dug", dug + alreadyAir, totalBlocks);
+        return dug;
+    }
 
     /**
      * Dig all moat/exterior-clear blocks using a radial stripmine pattern:
