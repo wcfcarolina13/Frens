@@ -77,6 +77,9 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
     private static final long MAX_BUILD_TIME_MS = 30 * 60_000L; // 30 minute cap
     private static final long PHASE_B_TIME_BUDGET_MS = 30 * 60_000L;
     private static final long MOAT_PASS2_TIME_BUDGET_MS = 12 * 60_000L;
+    private static final long MOAT_CLEANUP_TIME_BUDGET_MS = 6 * 60_000L;
+    private static final int MOAT_CLEANUP_NO_PROGRESS_LIMIT = 12;
+    private static final int MOAT_CLEANUP_TARGET_FAIL_CAP = 3;
     private static final int MAX_PASSES_PER_EDGE = 6;
     private static final int PATCH_MAX_EDGE_PASSES = 3;
     private static final int PATCH_NO_PROGRESS_PASSES = 2;
@@ -434,12 +437,26 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
         allDigBlocks.removeIf(b -> world.getBlockState(b.worldPos()).isAir());
 
         int totalDug = 0;
+        int remainingAfterDig = 0;
         if (!allDigBlocks.isEmpty()) {
             showOverhead(bot, "Digging moat (" + allDigBlocks.size() + " blocks)...");
 
-            // Build a simple walking path around the perimeter offset 2 blocks out
-            List<BlockPos> path = buildPerimeterPath(layout, world, surfaceProfile, 2);
-            totalDug = digMoatSimplePerimeterWalk(source, bot, world, allDigBlocks, path);
+            // Build a moat walk path with corner coverage enabled.
+            List<BlockPos> path = buildPerimeterPath(layout, world, surfaceProfile, 2, 0);
+            MoatDigResult moatDigResult = digMoatSimplePerimeterWalk(
+                    source,
+                    bot,
+                    world,
+                    allDigBlocks,
+                    referenceSurfaceY,
+                    surfaceProfile,
+                    path
+            );
+            totalDug = moatDigResult.dugCount();
+            remainingAfterDig = countRemainingDigTargets(world, allDigBlocks);
+            LOGGER.info("[Fortify] Moat dig phase complete: {} blocks cleared, {} remaining",
+                    totalDug, remainingAfterDig);
+
             if (SkillManager.shouldAbortSkill(bot)) {
                 ChatUtils.sendChatMessages(source, "§e[Fortify] Moat aborted after dig phase. " + totalDug + " blocks cleared.");
                 return SkillExecutionResult.success("Moat aborted after dig phase. " + totalDug + " blocks cleared.");
@@ -461,7 +478,10 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
         }
 
         int totalPlaced = 0;
-        if (!moatPlaceBlocks.isEmpty()) {
+        if (remainingAfterDig > 0) {
+            ChatUtils.sendSystemMessage(source, "§e[Fortify] Skipping moat structure placement until dig cleanup finishes ("
+                + remainingAfterDig + " blocks still need digging).");
+        } else if (!moatPlaceBlocks.isEmpty()) {
             // Resource check before placement
             if (countBuildingBlocks(bot) == 0) {
                 ChatUtils.sendChatMessages(source, "§c[Fortify] Out of building blocks for moat structures. "
@@ -477,13 +497,21 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
             LOGGER.info("[Fortify] Moat placement phase complete: {} blocks placed", totalPlaced);
         }
 
-        // Mark moat complete in persistence
-        FortificationPersistenceService.setMoatComplete(server, worldKey, wallName, true);
+        boolean moatComplete = remainingAfterDig == 0;
+        FortificationPersistenceService.setMoatComplete(server, worldKey, wallName, moatComplete);
 
-        String summary = String.format("Moat complete for '%s'. %d blocks dug, %d blocks placed.",
+        String summary;
+        if (moatComplete) {
+            summary = String.format("Moat complete for '%s'. %d blocks dug, %d blocks placed.",
                 wallName, totalDug, totalPlaced);
-        ChatUtils.sendChatMessages(source, "§a[Fortify] " + summary);
-        showOverhead(bot, "Moat done!");
+            ChatUtils.sendChatMessages(source, "§a[Fortify] " + summary);
+            showOverhead(bot, "Moat done!");
+        } else {
+            summary = String.format("Moat partially complete for '%s'. %d blocks dug, %d remaining, %d blocks placed.",
+                wallName, totalDug, remainingAfterDig, totalPlaced);
+            ChatUtils.sendChatMessages(source, "§e[Fortify] " + summary);
+            showOverhead(bot, "Moat partial: " + remainingAfterDig + " left");
+        }
         return SkillExecutionResult.success(summary);
 
         } finally {
@@ -1576,26 +1604,36 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
 
     // ── Moat digging (unified across all edges) ─────────────────
 
-    // ── Simple nearest-first moat dig ──────────────────────────
+    // ── Simple perimeter moat dig + cleanup pass ──────────────
 
     /**
-     * Dig moat blocks using a simple nearest-first approach:
-     * 1. Filter already-air blocks
-     * 2. Find nearest remaining solid block to the bot
-     * 3. Walk there via moveToDigPosition, mine everything reachable
-     * 4. Repeat until done or time budget exhausted
-     *
-     * This is intentionally simple — no perimeter walk, no complex recovery.
-     * Designed to work well when continuing a partially-dug moat.
+     * Dig moat blocks with a straightforward two-step loop:
+     * <ol>
+     *   <li>Walk perimeter waypoints and mine all reachable targets at each stop.</li>
+     *   <li>Run a bounded direct cleanup pass on leftover targets.</li>
+     * </ol>
      */
-    private int digMoatSimplePerimeterWalk(ServerCommandSource source, ServerPlayerEntity bot,
-                                           ServerWorld world, List<ProceduralWallBlock> allDigBlocks,
-                                           List<BlockPos> perimeterPath) {
+    private MoatDigResult digMoatSimplePerimeterWalk(ServerCommandSource source, ServerPlayerEntity bot,
+                                                     ServerWorld world, List<ProceduralWallBlock> allDigBlocks,
+                                                     int referenceSurfaceY, SurfaceProfile surfaceProfile,
+                                                     List<BlockPos> perimeterPath) {
+
+        if (allDigBlocks == null || allDigBlocks.isEmpty()) {
+            return new MoatDigResult(0, false);
+        }
+        if (perimeterPath == null || perimeterPath.isEmpty()) {
+            LOGGER.warn("[Moat] simple-perimeter: no path nodes available, skipping moat dig pass");
+            return new MoatDigResult(0, false);
+        }
 
         int totalBlocks = allDigBlocks.size();
         Set<BlockPos> remaining = collectExistingDigTargets(world, allDigBlocks);
         int alreadyAir = totalBlocks - remaining.size();
-        int dug = 0;
+        int dug = alreadyAir;
+
+        if (remaining.isEmpty()) {
+            return new MoatDigResult(dug, false);
+        }
 
         LOGGER.info("[Moat] simple-perimeter: {} total, {} already air, {} to dig",
                 totalBlocks, alreadyAir, remaining.size());
@@ -1605,50 +1643,85 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
                 break;
             }
 
+            if (shouldTriggerDepthRecovery(bot.getBlockPos().getY(), referenceSurfaceY)) {
+                ensureOnSurface(bot, world, referenceSurfaceY);
+            }
+
             BlockPos walkPos = perimeterPath.get(i);
-            // Walk to the next perimeter node
             walkToTarget(source, bot, walkPos, 6_000L);
 
-            // Mine anything reachable from this spot
-            boolean madeProgress = true;
-            while (madeProgress && !SkillManager.shouldAbortSkill(bot)) {
-                madeProgress = false;
-                Iterator<BlockPos> it = remaining.iterator();
-                while (it.hasNext()) {
-                    if (SkillManager.shouldAbortSkill(bot)) break;
-                    BlockPos targetPos = it.next();
+            int minedThisStop;
+            do {
+                minedThisStop = mineReachableMoatTargets(bot, world, remaining);
+                dug += minedThisStop;
+            } while (minedThisStop > 0 && !SkillManager.shouldAbortSkill(bot));
 
-                    if (world.getBlockState(targetPos).isAir()) {
-                        it.remove();
-                        dug++;
-                        madeProgress = true;
-                        continue;
-                    }
+            if (i % 10 == 0 || i == perimeterPath.size() - 1) {
+                showOverhead(bot, "Moat: " + dug + "/" + totalBlocks);
+            }
+        }
 
-                    if (!isWithinMiningReach(bot, targetPos) || !hasLineOfSight(world, bot, bot.getEyePos(), targetPos)) {
-                        continue;
-                    }
+        if (!remaining.isEmpty() && !SkillManager.shouldAbortSkill(bot)) {
+            LOGGER.info("[Moat] cleanup-pass start: {} remaining after perimeter walk", remaining.size());
+            Map<BlockPos, Integer> failCounts = new HashMap<>();
+            int noProgressLoops = 0;
+            int attemptBudget = Math.max(64, remaining.size() * 3);
+            long cleanupDeadline = System.currentTimeMillis() + Math.min(MOAT_PASS2_TIME_BUDGET_MS, MOAT_CLEANUP_TIME_BUDGET_MS);
 
-                    LookController.faceBlock(bot, targetPos);
-                    sleepQuiet(50);
-                    if (digBlock(bot, world, targetPos)) {
-                        it.remove();
-                        dug++;
-                        madeProgress = true;
-                    }
+            while (!remaining.isEmpty()
+                    && !SkillManager.shouldAbortSkill(bot)
+                    && attemptBudget-- > 0
+                    && System.currentTimeMillis() < cleanupDeadline) {
+                if (shouldTriggerDepthRecovery(bot.getBlockPos().getY(), referenceSurfaceY)) {
+                    ensureOnSurface(bot, world, referenceSurfaceY);
+                }
+
+                List<BlockPos> ordered = orderMoatDirectTargets(new ArrayList<>(remaining), bot.getBlockPos());
+                if (ordered.isEmpty()) {
+                    break;
+                }
+
+                BlockPos target = ordered.get(0);
+                if (world.getBlockState(target).isAir()) {
+                    remaining.remove(target);
+                    dug++;
+                    noProgressLoops = 0;
+                    continue;
+                }
+
+                moveToDigPosition(source, bot, world, target, surfaceProfile);
+
+                int mined = mineReachableMoatTargets(bot, world, remaining);
+                dug += mined;
+                if (mined > 0) {
+                    noProgressLoops = 0;
+                    failCounts.remove(target);
+                    continue;
+                }
+
+                int failures = failCounts.merge(target, 1, Integer::sum);
+                if (failures >= MOAT_CLEANUP_TARGET_FAIL_CAP) {
+                    remaining.remove(target);
+                    LOGGER.debug("[Moat] cleanup-pass pruning repeatedly blocked target {} after {} failures",
+                            target.toShortString(), failures);
+                }
+
+                noProgressLoops++;
+                if (noProgressLoops >= MOAT_CLEANUP_NO_PROGRESS_LIMIT) {
+                    LOGGER.warn("[Moat] cleanup-pass bounded stop after {} no-progress attempts ({} remaining)",
+                            noProgressLoops, remaining.size());
+                    break;
                 }
             }
 
-            if (i % 10 == 0 || i == perimeterPath.size() - 1) {
-                showOverhead(bot, "Moat: " + (dug + alreadyAir) + "/" + totalBlocks);
-            }
+            LOGGER.info("[Moat] cleanup-pass end: {} remaining", remaining.size());
         }
 
         if (!remaining.isEmpty()) {
             LOGGER.warn("[Moat] {} blocks could not be mined after full perimeter walk", remaining.size());
         }
-        
-        return dug;
+
+        return new MoatDigResult(dug, false);
     }
 
     /**
@@ -1962,6 +2035,61 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
         return new LinkedHashSet<>(ordered);
     }
 
+    private int countRemainingDigTargets(ServerWorld world, List<ProceduralWallBlock> allDigBlocks) {
+        return collectExistingDigTargets(world, allDigBlocks).size();
+    }
+
+    private int mineReachableMoatTargets(ServerPlayerEntity bot, ServerWorld world, Set<BlockPos> remaining) {
+        if (remaining == null || remaining.isEmpty()) {
+            return 0;
+        }
+
+        int minedOrResolved = 0;
+        List<BlockPos> candidates = new ArrayList<>();
+        List<BlockPos> staleAir = new ArrayList<>();
+        for (BlockPos pos : remaining) {
+            if (world.getBlockState(pos).isAir()) {
+                staleAir.add(pos);
+                continue;
+            }
+            if (isWithinMiningReach(bot, pos) && hasLineOfSight(world, bot, bot.getEyePos(), pos)) {
+                candidates.add(pos);
+            }
+        }
+
+        for (BlockPos pos : staleAir) {
+            if (remaining.remove(pos)) {
+                minedOrResolved++;
+            }
+        }
+
+        BlockPos botPos = bot.getBlockPos();
+        candidates.sort(Comparator
+                .comparingInt(BlockPos::getY)
+                .thenComparingDouble(pos -> botPos.getSquaredDistance(pos)));
+
+        for (BlockPos pos : candidates) {
+            if (SkillManager.shouldAbortSkill(bot) || !remaining.contains(pos)) {
+                continue;
+            }
+
+            if (world.getBlockState(pos).isAir()) {
+                remaining.remove(pos);
+                minedOrResolved++;
+                continue;
+            }
+
+            LookController.faceBlock(bot, pos);
+            sleepQuiet(50);
+            if (digBlock(bot, world, pos)) {
+                remaining.remove(pos);
+                minedOrResolved++;
+            }
+        }
+
+        return minedOrResolved;
+    }
+
     private int nearestPathIndex(ServerPlayerEntity bot, List<BlockPos> path) {
         int startIdx = 0;
         double bestStartDist = Double.MAX_VALUE;
@@ -2252,7 +2380,7 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
      * Uses traceEdge (Bresenham) for each hull edge, with terrain Y lookup.
      */
     private List<BlockPos> buildPerimeterPath(FortificationLayout layout, ServerWorld world, SurfaceProfile surfaceProfile) {
-        return buildPerimeterPath(layout, world, surfaceProfile, 1);
+        return buildPerimeterPath(layout, world, surfaceProfile, 1, PERIMETER_VERTEX_SKIP);
     }
 
     /**
@@ -2261,9 +2389,15 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
      * Offset 3 = along moat line (ensures diagonal-normal edges stay within mining reach).
      */
     private List<BlockPos> buildPerimeterPath(FortificationLayout layout, ServerWorld world, SurfaceProfile surfaceProfile, int walkOffset) {
+        return buildPerimeterPath(layout, world, surfaceProfile, walkOffset, PERIMETER_VERTEX_SKIP);
+    }
+
+    private List<BlockPos> buildPerimeterPath(FortificationLayout layout, ServerWorld world,
+                                              SurfaceProfile surfaceProfile, int walkOffset, int vertexSkip) {
         List<BlockPos> path = new ArrayList<>();
         List<WallEdge> edges = layout.edges();
         BlockPos previous = null;
+        int effectiveVertexSkip = Math.max(0, vertexSkip);
 
         for (int i = 0; i < edges.size(); i++) {
             WallEdge edge = edges.get(i);
@@ -2279,9 +2413,9 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
                 normalZ = (int) Math.round(-edgeDx / edgeLen);
             }
 
-            int start = Math.min(PERIMETER_VERTEX_SKIP, traced.size());
+            int start = Math.min(effectiveVertexSkip, traced.size());
             int endExclusive = (i < edges.size() - 1) ? traced.size() - 1 : traced.size();
-            endExclusive = Math.max(start, endExclusive - PERIMETER_VERTEX_SKIP);
+            endExclusive = Math.max(start, endExclusive - effectiveVertexSkip);
 
             // Skip first/last points near vertices to avoid tower corners,
             // and walk at the given offset outside the wall line.
