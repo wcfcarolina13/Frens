@@ -533,3 +533,7 @@ Historical record and reasoning. `TODO.md` is the source of truth for what’s n
 - **Shelter Hovel (Efficiency & Logic)**:
     - Implemented a "Smart Ring Walk": Bot now skips ring positions that do not have any reachable missing blocks, drastically reducing time spent pathfinding around the perimeter.
     - Optimized Roof Build Order: Bot now builds the roof from the outer edges inward (using wall support) rather than trying to place floating blocks in the center first.
+
+- **Moat/Survival**: Add `hasLineOfSight` check to nearest-first algorithm to stop remote mining through dirt walls
+
+- **Moat/Nav**: Add unreachable block skipping and micro-movement alignment to fix 'finished' infinite loops

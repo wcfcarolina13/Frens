@@ -437,11 +437,9 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
         if (!allDigBlocks.isEmpty()) {
             showOverhead(bot, "Digging moat (" + allDigBlocks.size() + " blocks)...");
 
-            totalDug = digMoatNearestFirst(source, bot, world, allDigBlocks, referenceSurfaceY, surfaceProfile);
-
-            LOGGER.info("[Fortify] Moat dig phase complete: {} blocks cleared", totalDug);
-
-            // Abort gate between dig and place phases
+            // Build a simple walking path around the perimeter offset 2 blocks out
+            List<BlockPos> path = buildPerimeterPath(layout, world, surfaceProfile, 2);
+            totalDug = digMoatSimplePerimeterWalk(source, bot, world, allDigBlocks, path);
             if (SkillManager.shouldAbortSkill(bot)) {
                 ChatUtils.sendChatMessages(source, "§e[Fortify] Moat aborted after dig phase. " + totalDug + " blocks cleared.");
                 return SkillExecutionResult.success("Moat aborted after dig phase. " + totalDug + " blocks cleared.");
@@ -1590,101 +1588,66 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
      * This is intentionally simple — no perimeter walk, no complex recovery.
      * Designed to work well when continuing a partially-dug moat.
      */
-    private int digMoatNearestFirst(ServerCommandSource source, ServerPlayerEntity bot,
-                                     ServerWorld world, List<ProceduralWallBlock> allDigBlocks,
-                                     int referenceSurfaceY, SurfaceProfile surfaceProfile) {
-        Set<BlockPos> remaining = collectExistingDigTargets(world, allDigBlocks);
+    private int digMoatSimplePerimeterWalk(ServerCommandSource source, ServerPlayerEntity bot,
+                                           ServerWorld world, List<ProceduralWallBlock> allDigBlocks,
+                                           List<BlockPos> perimeterPath) {
+
         int totalBlocks = allDigBlocks.size();
+        Set<BlockPos> remaining = collectExistingDigTargets(world, allDigBlocks);
         int alreadyAir = totalBlocks - remaining.size();
         int dug = 0;
-        int consecutiveFailures = 0;
-        long deadline = System.currentTimeMillis() + MOAT_PASS2_TIME_BUDGET_MS;
-        Set<BlockPos> unreachable = new HashSet<>();
 
-        LOGGER.info("[Moat] nearest-first: {} total, {} already air, {} to dig",
+        LOGGER.info("[Moat] simple-perimeter: {} total, {} already air, {} to dig",
                 totalBlocks, alreadyAir, remaining.size());
 
-        while (!remaining.isEmpty()
-                && !SkillManager.shouldAbortSkill(bot)
-                && System.currentTimeMillis() < deadline
-                && consecutiveFailures < 12) {
-
-            // Prune blocks that became air since last check
-            remaining.removeIf(p -> world.getBlockState(p).isAir());
-            if (remaining.isEmpty()) break;
-
-            // Find nearest remaining block
-            BlockPos botPos = bot.getBlockPos();
-            BlockPos nearest = null;
-            double nearestDistSq = Double.MAX_VALUE;
-            for (BlockPos p : remaining) {
-                if (unreachable.contains(p)) continue;
-                double d = botPos.getSquaredDistance(p);
-                // Prefer higher blocks (top-down bias) if horizontal distance is similar
-                double score = d - p.getY(); 
-                if (score < nearestDistSq) {
-                    nearestDistSq = score;
-                    nearestDistSq = d;
-                    nearest = p;
-                }
+        for (int i = 0; i < perimeterPath.size(); i++) {
+            if (SkillManager.shouldAbortSkill(bot) || remaining.isEmpty()) {
+                break;
             }
-            if (nearest == null) break;
 
-            // Move to dig position near the target
-            moveToDigPosition(source, bot, world, nearest, surfaceProfile);
+            BlockPos walkPos = perimeterPath.get(i);
+            // Walk to the next perimeter node
+            walkToTarget(source, bot, walkPos, 6_000L);
 
-            // Mine everything within reach from current position
-            int minedThisStop = 0;
+            // Mine anything reachable from this spot
             boolean madeProgress = true;
             while (madeProgress && !SkillManager.shouldAbortSkill(bot)) {
                 madeProgress = false;
                 Iterator<BlockPos> it = remaining.iterator();
                 while (it.hasNext()) {
                     if (SkillManager.shouldAbortSkill(bot)) break;
-                    BlockPos pos = it.next();
+                    BlockPos targetPos = it.next();
 
-                    if (world.getBlockState(pos).isAir()) {
+                    if (world.getBlockState(targetPos).isAir()) {
                         it.remove();
                         dug++;
                         madeProgress = true;
                         continue;
                     }
 
-                    if (!isWithinMiningReach(bot, pos) || !hasLineOfSight(world, bot, bot.getEyePos(), pos)) continue;
+                    if (!isWithinMiningReach(bot, targetPos) || !hasLineOfSight(world, bot, bot.getEyePos(), targetPos)) {
+                        continue;
+                    }
 
-                    LookController.faceBlock(bot, pos);
+                    LookController.faceBlock(bot, targetPos);
                     sleepQuiet(50);
-                    if (digBlock(bot, world, pos)) {
+                    if (digBlock(bot, world, targetPos)) {
                         it.remove();
                         dug++;
-                        minedThisStop++;
                         madeProgress = true;
                     }
                 }
             }
 
-            if (minedThisStop > 0) {
-                consecutiveFailures = 0;
-                unreachable.clear();
-                if ((dug % 50) < minedThisStop || dug == minedThisStop) {
-                    LOGGER.info("[Moat] progress: {}/{} dug, {} remaining",
-                            dug + alreadyAir, totalBlocks, remaining.size());
-                    showOverhead(bot, "Moat: " + (dug + alreadyAir) + "/" + totalBlocks);
-                }
-            } else {
-                consecutiveFailures++;
-                unreachable.add(nearest);
-                LOGGER.info("[Moat] no blocks mined at stop #{}, botPos=({},{},{}), target=({},{},{}), distSq={}",
-                        consecutiveFailures,
-                        bot.getBlockPos().getX(), bot.getBlockPos().getY(), bot.getBlockPos().getZ(),
-                        nearest.getX(), nearest.getY(), nearest.getZ(), String.format("%.1f", nearestDistSq));
+            if (i % 10 == 0 || i == perimeterPath.size() - 1) {
+                showOverhead(bot, "Moat: " + (dug + alreadyAir) + "/" + totalBlocks);
             }
         }
 
         if (!remaining.isEmpty()) {
-            LOGGER.warn("[Moat] {} blocks could not be mined (unreachable or timed out)", remaining.size());
+            LOGGER.warn("[Moat] {} blocks could not be mined after full perimeter walk", remaining.size());
         }
-        LOGGER.info("[Moat] nearest-first complete: {}/{} dug", dug + alreadyAir, totalBlocks);
+        
         return dug;
     }
 
