@@ -112,6 +112,11 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
     private static final long QUICK_HOVER_TOOLTIP_DELAY_MS = 1800L;
     private long lastBotSwitchHintAtMs = 0L;
 
+    // Warning flash state for gated bot switching (too far / no spell item).
+    private String switchWarningText = null;
+    private long switchWarningExpireMs = 0L;
+    private static final long SWITCH_WARNING_DURATION_MS = 2000L;
+
     // Skills list scroll (always used for the small panel; also used for overlay when Skills tab is selected).
     private int skillScrollIndex;
     // Dialogue list scroll (only used for overlay when Dialogue tab is selected).
@@ -578,10 +583,15 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             return;
         }
         boolean canSwitch = layout.canSwitch();
+        boolean warningActive = switchWarningText != null && System.currentTimeMillis() < switchWarningExpireMs;
         int labelFill = overlayStyle ? 0xFF171717 : 0xCC171717;
         int labelBorder = overlayStyle ? 0xFF2A2A2A : 0xFF000000;
         if (!canSwitch) {
             labelFill = overlayStyle ? 0xFF141414 : 0xCC141414;
+        }
+        if (warningActive) {
+            labelFill = 0xCC2A0808;
+            labelBorder = 0xFF550000;
         }
 
         context.fill(layout.labelRect().x, layout.labelRect().y, layout.labelRect().right(), layout.labelRect().bottom(), labelFill);
@@ -593,10 +603,18 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         drawSwitchButton(context, layout.prevRect(), "<", canSwitch, mouseX, mouseY);
         drawSwitchButton(context, layout.nextRect(), ">", canSwitch, mouseX, mouseY);
 
-        String label = elideToWidth(switchLabel(layout), Math.max(1, layout.labelRect().w - 4));
+        String label;
+        int color;
+        if (warningActive) {
+            boolean bright = ((System.currentTimeMillis() / 300L) % 2) == 0;
+            label = elideToWidth(switchWarningText, Math.max(1, layout.labelRect().w - 4));
+            color = bright ? 0xFFFF5555 : 0xFFAA3333;
+        } else {
+            label = elideToWidth(switchLabel(layout), Math.max(1, layout.labelRect().w - 4));
+            color = canSwitch ? COLOR_TEXT_PARCHMENT : COLOR_TEXT_DISABLED;
+        }
         int textX = layout.labelRect().x + (layout.labelRect().w - this.textRenderer.getWidth(label)) / 2;
         int textY = layout.labelRect().y + Math.max(1, (layout.labelRect().h - this.textRenderer.fontHeight) / 2);
-        int color = canSwitch ? COLOR_TEXT_PARCHMENT : COLOR_TEXT_DISABLED;
         context.drawText(this.textRenderer, label, textX, textY, color, false);
     }
 
@@ -656,6 +674,12 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         String targetAlias = aliases.get(nextIndex);
         if (targetAlias == null || targetAlias.isBlank() || targetAlias.equalsIgnoreCase(botAlias)) {
             showBotSwitchUnavailableHint();
+            return false;
+        }
+        // Gated switching: verify proximity, spell item, or admin status.
+        String blockReason = canSwitchToBot(targetAlias);
+        if (blockReason != null) {
+            showBotSwitchBlockedWarning(blockReason);
             return false;
         }
         sendChatCommand("bot open " + formatBotTarget(targetAlias));
@@ -2656,6 +2680,56 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         // Spells are normally cast at an Enchanting Table. A later-stage quest reward (Wizard's Tome)
         // can allow access anywhere. An Eye of Ender can grant limited, cooldown-gated access.
         return isNearEnchantingTable(client, 4) || hasSpellbookToken(client) || hasEyeOfEnderToken(client);
+    }
+
+    /**
+     * Determines whether the player can switch to the given bot alias.
+     * Returns {@code null} if switching is allowed, or a reason string if blocked.
+     *
+     * Allowed if: admin, has Wizard's Tome / near enchanting table (full spell access),
+     * or within 8 blocks of the target bot entity.
+     * Goat Horn and Eye of Ender do NOT grant switch access.
+     */
+    private String canSwitchToBot(String alias) {
+        if (alias == null || alias.isBlank()) {
+            return "Invalid bot";
+        }
+        if (alias.equalsIgnoreCase(botAlias)) {
+            return null;
+        }
+        if (isAdminUser()) {
+            return null;
+        }
+        MinecraftClient client = MinecraftClient.getInstance();
+        if (client != null && (hasSpellbookToken(client) || isNearEnchantingTable(client, 4))) {
+            return null;
+        }
+        if (client != null && client.player != null && client.world != null) {
+            for (AbstractClientPlayerEntity p : client.world.getPlayers()) {
+                if (p == null) continue;
+                String name = p.getName() != null ? p.getName().getString() : "";
+                if (name.equalsIgnoreCase(alias)) {
+                    if (client.player.squaredDistanceTo(p) <= 64.0) {
+                        return null;
+                    }
+                    return "Too far from " + alias;
+                }
+            }
+            return "Too far from " + alias;
+        }
+        return "Cannot switch right now";
+    }
+
+    private void showBotSwitchBlockedWarning(String reason) {
+        long now = System.currentTimeMillis();
+        switchWarningText = reason;
+        switchWarningExpireMs = now + SWITCH_WARNING_DURATION_MS;
+        if (this.client != null && this.client.player != null) {
+            if (now - lastBotSwitchHintAtMs >= BOT_SWITCH_HINT_COOLDOWN_MS) {
+                lastBotSwitchHintAtMs = now;
+                this.client.player.sendMessage(Text.literal(reason).styled(s -> s.withColor(0xFF5555)), true);
+            }
+        }
     }
 
     private boolean hasEyeOfEnderToken(MinecraftClient client) {
