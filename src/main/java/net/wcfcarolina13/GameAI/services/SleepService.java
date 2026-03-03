@@ -168,6 +168,13 @@ public final class SleepService {
                 }
 
                 BotHomeService.recordLastSleep(bot, bed.foot.toImmutable());
+                // Set the vanilla spawn point so the bot respawns at this bed on death.
+                net.minecraft.world.WorldProperties.SpawnPoint sp =
+                        net.minecraft.world.WorldProperties.SpawnPoint.create(
+                                world.getRegistryKey(), bed.foot.toImmutable(), 0f, 0f);
+                bot.setSpawnPoint(
+                        new net.minecraft.server.network.ServerPlayerEntity.Respawn(sp, false),
+                        false);
                 ChatUtils.sendSystemMessage(source, bot.getName().getString() + " is sleeping.");
                 return BedUseResult.SUCCESS;
             }

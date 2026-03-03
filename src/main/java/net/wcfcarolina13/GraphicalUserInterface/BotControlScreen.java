@@ -222,7 +222,7 @@ public class BotControlScreen extends Screen {
     // ════════════════════════════════════════════════════════════════════
 
     private record SettingsSnapshot(
-            boolean autoSpawn, String spawnMode, String gameMode,
+            boolean autoRespawnOnDeath, String spawnMode, String gameMode,
             boolean teleportDuringSkills, boolean pauseOnFullInventory,
             boolean teleportDuringDropSweep, boolean llmEnabled,
             boolean voicedDialogue) {}
@@ -258,7 +258,7 @@ public class BotControlScreen extends Screen {
         SettingsSnapshot snap = dirtySettings.get(selectedAlias);
         ManualConfig.BotControlSettings cfg =
                 Frens.CONFIG.getOrCreateBotControl(selectedAlias);
-        boolean autoSpawn  = snap != null ? snap.autoSpawn  : cfg.isAutoSpawn();
+        boolean autoRespawn = snap != null ? snap.autoRespawnOnDeath : cfg.isAutoRespawnOnDeath();
         String  spawnMode  = snap != null ? snap.spawnMode  : cfg.getSpawnMode();
         String  gameMode   = snap != null ? snap.gameMode   : cfg.getGameMode();
         boolean teleSkills = snap != null ? snap.teleportDuringSkills : cfg.isTeleportDuringSkills();
@@ -269,7 +269,7 @@ public class BotControlScreen extends Screen {
 
         // ── Spawning ────────────────────────────────────────────────────
         List<SettingEntry> spawning = new ArrayList<>();
-        spawning.add(makeOnOff("Auto Spawn", "Spawn this bot automatically at login.", autoSpawn, TOGGLE_W));
+        spawning.add(makeOnOff("Auto Respawn", "Respawn on death (skip resurrection ritual).", autoRespawn, TOGGLE_W));
         spawning.add(makeString("Spawn Mode", "Training = sandboxed. Play = full AI.",
                 spawnMode, "training", "play",
                 v -> Text.of("play".equals(v) ? "Play" : "Training"), WIDE_TOGGLE_W));
@@ -332,7 +332,7 @@ public class BotControlScreen extends Screen {
         for (Map.Entry<String, SettingsSnapshot> entry : dirtySettings.entrySet()) {
             ManualConfig.BotControlSettings s = config.getOrCreateBotControl(entry.getKey());
             SettingsSnapshot v = entry.getValue();
-            s.setAutoSpawn(v.autoSpawn);
+            s.setAutoRespawnOnDeath(v.autoRespawnOnDeath);
             s.setSpawnMode(v.spawnMode);
             s.setGameMode(v.gameMode);
             s.setTeleportDuringSkills(v.teleportDuringSkills);

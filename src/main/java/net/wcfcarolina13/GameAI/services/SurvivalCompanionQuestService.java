@@ -515,7 +515,8 @@ public final class SurvivalCompanionQuestService {
         try {
             ManualConfig.BotControlSettings ctrl = Frens.CONFIG.getOrCreateBotControl(alias);
             if (ctrl != null) {
-                ctrl.setAutoSpawn(true);
+                // Server-start auto-spawn is now implicit (no toggle).
+                // Just ensure spawn mode is "play" for permanent companions.
                 ctrl.setSpawnMode("play");
                 Frens.CONFIG.save();
             }

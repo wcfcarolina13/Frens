@@ -1831,62 +1831,38 @@ public class modCommandRegistry {
                 }
             }
             if (existingBot != null) {
-                LOGGER.info("spawnBot: existing bot {} found, aborting active tasks", botName);
-                TaskService.forceAbort(existingBot.getUuid(), "§cSpawning bot '" + botName + "'.");
-
-                // IMPORTANT: avoid spawning a duplicate fake player with the same UUID (causes “Force-added player with duplicate UUID”
-                // and can lead to commands targeting a different in-memory instance than the one you see).
-                ServerWorld targetWorld = server.getWorld(dimType);
-                if (targetWorld == null) {
-                    LOGGER.error("spawnBot: world {} missing; cannot reposition existing bot {}", dimType.getValue(), botName);
-                    ChatUtils.sendSystemMessage(serverSource, "Error: world not available for spawning " + botName + ".");
-                    return;
-                }
                 if (!(existingBot instanceof createFakePlayer)) {
                     ChatUtils.sendSystemMessage(serverSource,
                             "Error: A real player named '" + botName + "' is online; cannot spawn a bot with that name.");
                     return;
                 }
-
-                isTrainingMode = "training".equalsIgnoreCase(normalizedSpawnMode);
-
-                existingBot.teleport(targetWorld, pos.x, pos.y, pos.z, java.util.Set.of(), (float) facing.y, (float) facing.x, true);
-                Objects.requireNonNull(existingBot.getAttributeInstance(EntityAttributes.KNOCKBACK_RESISTANCE)).setBaseValue(0.0);
-                existingBot.interactionManager.changeGameMode(mode);
-                RespawnHandler.registerRespawnListener(existingBot);
-                BotEventHandler.registerBot(existingBot);
-                ServerPlayerEntity owner = context.getSource().getEntity() instanceof ServerPlayerEntity player ? player : null;
-                if (owner != null) {
-                    Frens.CONFIG.ensureOwner(botName, owner.getUuid(), owner.getName().getString());
-                }
-                AutoFaceEntity.startAutoFace(existingBot);
-
-                BotEventHandler.rememberSpawn(targetWorld, pos, facing.y, facing.x);
-                LOGGER.info("spawnBot: repositioned existing bot {} at {} (mode={})", botName, spawnPos.toShortString(), normalizedSpawnMode);
-
-                // If an admin force-spawns a play bot before recruitment, treat the world as recruited to avoid UI/gating confusion.
-                if (isAdminLikeSpawnMode(normalizedSpawnMode)
-                        && SurvivalRecruitmentService.isEnabled(server)
-                        && !SurvivalRecruitmentService.isWorldRecruited(server)
-                        && Frens.CONFIG != null) {
-                    ManualConfig.SurvivalRecruitmentState updated = Frens.CONFIG.getOrCreateSurvivalRecruitmentState(server.getSaveProperties().getLevelName());
-                    updated.setBotAlias(botName);
-                    updated.setRecruited(true);
-                    ServerPlayerEntity issuer = context.getSource().getEntity() instanceof ServerPlayerEntity p ? p : null;
-                    if (issuer != null) {
-                        updated.setRecruitedByUuid(issuer.getUuidAsString());
-                        updated.setRecruitedByName(issuer.getName().getString());
-                    }
-                    updated.setRecruitedAtEpochMs(System.currentTimeMillis());
-                    Frens.CONFIG.save();
-                    for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
-                        if (p != null && !(p instanceof createFakePlayer)) {
-                            SurvivalRecruitmentService.sendRecruitmentState(p);
-                            ServerPlayNetworking.send(p, new RecruitmentPromptPayload(false, botName));
-                        }
-                    }
-                }
+                // A bot with this alias is already active — reject the duplicate.
+                ChatUtils.sendSystemMessage(serverSource,
+                        "A bot named '" + botName + "' is already active. Use a different name, or /bot stop " + botName + " first.");
                 return;
+            }
+
+            // If an admin force-spawns a bot before recruitment, treat the world as recruited.
+            if (isAdminLikeSpawnMode(normalizedSpawnMode)
+                    && SurvivalRecruitmentService.isEnabled(server)
+                    && !SurvivalRecruitmentService.isWorldRecruited(server)
+                    && Frens.CONFIG != null) {
+                ManualConfig.SurvivalRecruitmentState updated = Frens.CONFIG.getOrCreateSurvivalRecruitmentState(server.getSaveProperties().getLevelName());
+                updated.setBotAlias(botName);
+                updated.setRecruited(true);
+                ServerPlayerEntity issuer = context.getSource().getEntity() instanceof ServerPlayerEntity p ? p : null;
+                if (issuer != null) {
+                    updated.setRecruitedByUuid(issuer.getUuidAsString());
+                    updated.setRecruitedByName(issuer.getName().getString());
+                }
+                updated.setRecruitedAtEpochMs(System.currentTimeMillis());
+                Frens.CONFIG.save();
+                for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
+                    if (p != null && !(p instanceof createFakePlayer)) {
+                        SurvivalRecruitmentService.sendRecruitmentState(p);
+                        ServerPlayNetworking.send(p, new RecruitmentPromptPayload(false, botName));
+                    }
+                }
             }
 
             if ("training".equalsIgnoreCase(normalizedSpawnMode)) {
@@ -1925,6 +1901,14 @@ public class modCommandRegistry {
                     ServerPlayerEntity owner = context.getSource().getEntity() instanceof ServerPlayerEntity player ? player : null;
                     if (owner != null) {
                         Frens.CONFIG.ensureOwner(botName, owner.getUuid(), owner.getName().getString());
+                    }
+                    // Training bots auto-respawn on death by default.
+                    {
+                        ManualConfig.BotControlSettings ctrl = Frens.CONFIG.getOrCreateBotControl(botName);
+                        if (ctrl != null) {
+                            ctrl.setSpawnMode("training");
+                            ctrl.setAutoRespawnOnDeath(true);
+                        }
                     }
 
                     AutoFaceEntity.startAutoFace(bot);
@@ -1978,6 +1962,16 @@ public class modCommandRegistry {
                     ServerPlayerEntity owner = context.getSource().getEntity() instanceof ServerPlayerEntity player ? player : null;
                     if (owner != null) {
                         Frens.CONFIG.ensureOwner(botName, owner.getUuid(), owner.getName().getString());
+                    }
+                    // Admin/questing bots: set spawn mode and auto-respawn default.
+                    {
+                        ManualConfig.BotControlSettings ctrl = Frens.CONFIG.getOrCreateBotControl(botName);
+                        if (ctrl != null) {
+                            ctrl.setSpawnMode(normalizedSpawnMode);
+                            if (isAdminLikeSpawnMode(normalizedSpawnMode)) {
+                                ctrl.setAutoRespawnOnDeath(true);
+                            }
+                        }
                     }
 
                     ollamaClient.botName = botName; // set the bot's name.

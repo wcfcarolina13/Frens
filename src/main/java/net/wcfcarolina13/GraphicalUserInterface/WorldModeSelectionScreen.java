@@ -106,7 +106,7 @@ public class WorldModeSelectionScreen extends Screen {
         int textY = panelY + 36;
         List<OrderedText> lines = this.textRenderer.wrapLines(
                 Text.literal("Questing: Go to a village, interact with villager/bell/bed, then initiate contact to recruit.\n"
-                + "Admin: Spawn bot directly with /bot spawn <name> admin. Spells/commands work without recruitment."),
+                + "Admin: Use /bot spawn <name> admin to create companions. Each needs a unique name. You can add more anytime."),
                 panelW - 14
         );
         for (OrderedText line : lines) {

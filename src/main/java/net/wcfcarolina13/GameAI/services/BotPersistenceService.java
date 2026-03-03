@@ -210,10 +210,23 @@ public final class BotPersistenceService {
         BotInventoryStorageService.delete(bot);
 
         // Survival recruitment: record companion death (for resurrection gating) and clear world-position snapshot.
+        // If autoRespawnOnDeath is enabled for this bot, skip death-gating so the bot vanilla-respawns normally.
+        boolean autoRespawn = false;
         try {
-            SurvivalRecruitmentService.noteCompanionDeath(server, bot);
-        } catch (Throwable t) {
-            LOGGER.debug("Failed to note companion death for {}: {}", bot.getName().getString(), t.getMessage());
+            String alias = bot.getName().getString();
+            ManualConfig.BotControlSettings ctrl = Frens.CONFIG != null
+                    ? Frens.CONFIG.getEffectiveBotControl(alias) : null;
+            if (ctrl != null) {
+                autoRespawn = ctrl.isAutoRespawnOnDeath();
+            }
+        } catch (Throwable ignored) {}
+
+        if (!autoRespawn) {
+            try {
+                SurvivalRecruitmentService.noteCompanionDeath(server, bot);
+            } catch (Throwable t) {
+                LOGGER.debug("Failed to note companion death for {}: {}", bot.getName().getString(), t.getMessage());
+            }
         }
         try {
             BotWorldStateService.clearState(server, bot.getName().getString());

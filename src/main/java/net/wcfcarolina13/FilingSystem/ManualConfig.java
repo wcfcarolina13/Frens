@@ -712,7 +712,10 @@ public class ManualConfig {
     }
 
     public static class BotControlSettings {
+        /** @deprecated Legacy field kept for JSON backward compat; no longer drives any behavior. */
+        @Deprecated @SuppressWarnings("unused")
         private boolean autoSpawn;
+        private Boolean autoRespawnOnDeath;  // null = use mode-based default
         private String spawnMode = "training";
         private String gameMode = "survival";
         private boolean teleportDuringSkills = true;
@@ -721,12 +724,38 @@ public class ManualConfig {
         private boolean llmEnabled = true;
         private boolean voicedDialogue = true;
 
+        /** @deprecated Use {@link #isAutoRespawnOnDeath()} instead. Kept for JSON compat. */
+        @Deprecated
         public boolean isAutoSpawn() {
             return autoSpawn;
         }
 
+        /** @deprecated No-op. Kept for JSON compat. */
+        @Deprecated
         public void setAutoSpawn(boolean autoSpawn) {
             this.autoSpawn = autoSpawn;
+        }
+
+        /**
+         * Whether this bot should automatically respawn on death (skip resurrection ritual).
+         * If the explicit value has not been set, derives a default from the spawn mode:
+         * admin/training → true, questing/play → false.
+         */
+        public boolean isAutoRespawnOnDeath() {
+            if (autoRespawnOnDeath != null) {
+                return autoRespawnOnDeath;
+            }
+            // Mode-based default: admin/training bots auto-respawn; questing/play bots require ritual.
+            String mode = getSpawnMode();
+            return !"play".equalsIgnoreCase(mode);
+        }
+
+        public void setAutoRespawnOnDeath(Boolean autoRespawnOnDeath) {
+            this.autoRespawnOnDeath = autoRespawnOnDeath;
+        }
+
+        public Boolean getRawAutoRespawnOnDeath() {
+            return autoRespawnOnDeath;
         }
 
         public String getSpawnMode() {

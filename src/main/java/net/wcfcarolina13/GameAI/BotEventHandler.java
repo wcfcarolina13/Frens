@@ -1043,19 +1043,83 @@ public class BotEventHandler {
         registerBot(bot);
         BotStuckService.resetBot(bot.getUuid());
 
-        ServerPlayerEntity escortPlayer = findEscortPlayer(bot);
-        Vec3d target = escortPlayer != null
-                ? new Vec3d(escortPlayer.getX(), escortPlayer.getY(), escortPlayer.getZ())
-                : BotStuckService.getLastSafePosition(bot.getUuid());
         MinecraftServer srv = bot.getCommandSource().getServer();
         ServerWorld botWorld = bot.getCommandSource().getWorld();
         ServerWorld destinationWorld = botWorld;
+        Vec3d target = null;
 
-        if (escortPlayer != null) {
-            destinationWorld = escortPlayer.getCommandSource().getWorld();
-            BotStuckService.setLastSafePosition(bot.getUuid(), new Vec3d(escortPlayer.getX(), escortPlayer.getY(), escortPlayer.getZ()));
+        // ── Checkpoint-based fallback chain ──────────────────────────
+        // 1. Vanilla spawn point (set by sleeping in bed)
+        net.minecraft.server.network.ServerPlayerEntity.Respawn respawnInfo = bot.getRespawn();
+        BlockPos bedSpawn = null;
+        RegistryKey<World> bedDimKey = null;
+        if (respawnInfo != null && respawnInfo.respawnData() != null) {
+            bedSpawn = respawnInfo.respawnData().getPos();
+            bedDimKey = respawnInfo.respawnData().getDimension();
+        }
+        if (bedSpawn != null && srv != null && bedDimKey != null) {
+            ServerWorld bedWorld = srv.getWorld(bedDimKey);
+            if (bedWorld != null) {
+                destinationWorld = bedWorld;
+                target = new Vec3d(bedSpawn.getX() + 0.5, bedSpawn.getY() + 0.1, bedSpawn.getZ() + 0.5);
+            }
         }
 
+        // 2. Recruitment anchor (questing mode) or BotSpawn config position (admin/training)
+        if (target == null && srv != null) {
+            String alias = bot.getName().getString();
+            // Try recruitment anchor first (questing mode companions)
+            try {
+                if (net.wcfcarolina13.GameAI.services.SurvivalRecruitmentService.isEnabled(srv)) {
+                    net.wcfcarolina13.FilingSystem.ManualConfig.SurvivalRecruitmentState st =
+                            net.wcfcarolina13.GameAI.services.SurvivalRecruitmentService.getState(srv);
+                    if (st != null && st.isCompanionAnchorSet()) {
+                        BlockPos anchorPos = BlockPos.fromLong(st.getCompanionAnchorPos());
+                        String anchorDim = st.getCompanionAnchorDimension();
+                        if (anchorDim != null) {
+                            net.minecraft.util.Identifier dimId = net.minecraft.util.Identifier.tryParse(anchorDim);
+                            if (dimId != null) {
+                                RegistryKey<World> key = RegistryKey.of(RegistryKeys.WORLD, dimId);
+                                ServerWorld anchorWorld = srv.getWorld(key);
+                                if (anchorWorld != null) {
+                                    destinationWorld = anchorWorld;
+                                    target = new Vec3d(anchorPos.getX() + 0.5, anchorPos.getY() + 0.1, anchorPos.getZ() + 0.5);
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (Throwable ignored) {}
+
+            // Fall back to BotSpawn config position (admin/training bots, or if no anchor)
+            if (target == null && net.wcfcarolina13.Frens.CONFIG != null) {
+                net.wcfcarolina13.FilingSystem.ManualConfig.BotSpawn spawn =
+                        net.wcfcarolina13.Frens.CONFIG.getBotSpawn(alias);
+                if (spawn != null && spawn.dimension() != null) {
+                    net.minecraft.util.Identifier dimId = net.minecraft.util.Identifier.tryParse(spawn.dimension());
+                    if (dimId != null) {
+                        RegistryKey<World> key = RegistryKey.of(RegistryKeys.WORLD, dimId);
+                        ServerWorld spawnWorld = srv.getWorld(key);
+                        if (spawnWorld != null) {
+                            destinationWorld = spawnWorld;
+                            target = new Vec3d(spawn.x(), spawn.y(), spawn.z());
+                        }
+                    }
+                }
+            }
+        }
+
+        // 3. World spawn point (last resort)
+        if (target == null && srv != null) {
+            ServerWorld overworld = srv.getOverworld();
+            if (overworld != null) {
+                BlockPos worldSpawn = resolveSpawnPoint(overworld);
+                destinationWorld = overworld;
+                target = new Vec3d(worldSpawn.getX() + 0.5, worldSpawn.getY() + 0.1, worldSpawn.getZ() + 0.5);
+            }
+        }
+
+        // Absolute fallback
         if (target == null) {
             BlockPos anchor = bot.getBlockPos().up(2);
             target = new Vec3d(anchor.getX() + 0.5, anchor.getY(), anchor.getZ() + 0.5);
@@ -1064,13 +1128,10 @@ public class BotEventHandler {
         if (destinationWorld != null && destinationWorld != botWorld) {
             bot.teleport(destinationWorld, target.x, target.y, target.z,
                     EnumSet.noneOf(PositionFlag.class),
-                    escortPlayer != null ? escortPlayer.getYaw() : bot.getYaw(),
-                    escortPlayer != null ? escortPlayer.getPitch() : bot.getPitch(),
-                    true);
+                    bot.getYaw(), bot.getPitch(), true);
         } else {
             bot.refreshPositionAndAngles(target.x, target.y, target.z,
-                    escortPlayer != null ? escortPlayer.getYaw() : bot.getYaw(),
-                    escortPlayer != null ? escortPlayer.getPitch() : bot.getPitch());
+                    bot.getYaw(), bot.getPitch());
         }
 
         bot.setVelocity(Vec3d.ZERO);
@@ -1084,7 +1145,8 @@ public class BotEventHandler {
         TaskService.forceAbort(bot.getUuid(), "§cTask aborted due to bot respawn.");
         setExternalOverrideActive(false);
         setMode(bot, Mode.IDLE);
-        setAssistAllies(bot, true);        if (destinationWorld != null) {
+        setAssistAllies(bot, true);
+        if (destinationWorld != null) {
             rememberSpawn(destinationWorld, target, bot.getYaw(), bot.getPitch());
         }
 

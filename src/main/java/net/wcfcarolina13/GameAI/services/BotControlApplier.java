@@ -93,8 +93,17 @@ public final class BotControlApplier {
             if (alias == null || alias.equalsIgnoreCase("default")) {
                 continue;
             }
+            // Auto-spawn is now implicit for all bots that have saved spawn data
+            // matching the current world.  The old per-bot autoSpawn toggle is no longer checked.
             ManualConfig.BotControlSettings settings = entry.getValue();
-            if (!settings.isAutoSpawn()) {
+            // Must have saved spawn data to auto-spawn; skip bots that only have config but no position.
+            ManualConfig.BotSpawn spawn = Frens.CONFIG.getBotSpawn(alias);
+            if (spawn == null) {
+                continue;
+            }
+            // Skip auto-spawn if bot was saved in a different world
+            if (spawn.levelName() != null && !spawn.levelName().isBlank()
+                    && !spawn.levelName().equals(server.getSaveProperties().getLevelName())) {
                 continue;
             }
             ServerPlayerEntity existing = server.getPlayerManager().getPlayer(alias);
@@ -106,22 +115,14 @@ public final class BotControlApplier {
             Runnable task = () -> {
                 CommandDispatcher<ServerCommandSource> dispatcher = server.getCommandManager().getDispatcher();
                 ServerCommandSource source = server.getCommandSource().withSilent().withPermissions(net.wcfcarolina13.Frens.OPERATOR_PERMISSIONS);
-                ManualConfig.BotSpawn spawn = Frens.CONFIG.getBotSpawn(alias);
-                if (spawn != null) {
-                    // Skip auto-spawn if bot was saved in a different world
-                    if (spawn.levelName() != null && !spawn.levelName().isBlank()
-                            && !spawn.levelName().equals(server.getSaveProperties().getLevelName())) {
-                        return;
-                    }
-                    Identifier id = Identifier.tryParse(spawn.dimension());
-                    if (id != null) {
-                        RegistryKey<World> key = RegistryKey.of(RegistryKeys.WORLD, id);
-                        ServerWorld targetWorld = server.getWorld(key);
-                        if (targetWorld != null) {
-                            source = source.withWorld(targetWorld)
-                                    .withPosition(new Vec3d(spawn.x(), spawn.y(), spawn.z()))
-                                    .withRotation(new Vec2f(spawn.yaw(), spawn.pitch()));
-                        }
+                Identifier id = Identifier.tryParse(spawn.dimension());
+                if (id != null) {
+                    RegistryKey<World> key = RegistryKey.of(RegistryKeys.WORLD, id);
+                    ServerWorld targetWorld = server.getWorld(key);
+                    if (targetWorld != null) {
+                        source = source.withWorld(targetWorld)
+                                .withPosition(new Vec3d(spawn.x(), spawn.y(), spawn.z()))
+                                .withRotation(new Vec2f(spawn.yaw(), spawn.pitch()));
                     }
                 }
                 try {
