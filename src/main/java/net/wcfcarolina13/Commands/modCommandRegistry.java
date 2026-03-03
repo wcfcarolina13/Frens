@@ -2080,8 +2080,20 @@ public class modCommandRegistry {
                     }
                     } catch (NoClassDefFoundError | UnsatisfiedLinkError e) {
                         LOGGER.warn("[Frens] LLM runtime not available (build without -PaiEnabled?). Bot {} will run without LLM.", botName);
+                        llmActive = false; // runtime missing → treat as non-LLM so fallback starts the behaviour loop
                     }
                     } // end if (llmActive)
+
+                    // ── Always start the behaviour loop ──
+                    // When LLM is active AND the provider init thread launched successfully,
+                    // that thread calls startAutoFace after the provider connects.
+                    // When LLM is disabled, classes are missing, or the catch fired,
+                    // we must start it here so the bot can follow, fight, etc.
+                    // startAutoFace() calls stopAutoFace() internally, so a double-start
+                    // from the LLM thread is harmless.
+                    if (!llmActive) {
+                        AutoFaceEntity.startAutoFace(bot);
+                    }
 
                 } else {
                     LOGGER.error("spawnBot: play bot {} was not found after createFake", botName);

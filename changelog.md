@@ -2,6 +2,7 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 ## 2026-03-03
+- **Fix bot unresponsive after spawn (startAutoFace never called)**: When LLM is enabled by default but runtime classes are absent (non-LLM build), the `NoClassDefFoundError` catch in `spawnBot()` fired but left `llmActive = true`, causing the `if (!llmActive) { startAutoFace(bot); }` fallback to be skipped. Bot spawned but had no behavior loop — couldn't follow, fight, or respond to any command. Fix: set `llmActive = false` in the catch block so the fallback starts the behavior loop. Affects admin/questing/play spawns and auto-spawn on server start. Training mode and respawns were unaffected.
 - **Security hardening (ownership enforcement + respawn safety)**: Audit-driven security fixes across 6 files:
   - **CompanionCommunicationPolicy.java**: Added `isAllowedToControl(actor, botAlias)` centralized ownership gate — ops always pass, un-owned bots accessible to all, owned bots restricted to recorded owner UUID. Overload accepts bot entity directly.
   - **InventoryAccessPolicy.java**: Replaced placeholder TODO with real ownership check — calls `CompanionCommunicationPolicy.isAllowedToControl()` before the proximity check. Non-owners can no longer open bot inventories.

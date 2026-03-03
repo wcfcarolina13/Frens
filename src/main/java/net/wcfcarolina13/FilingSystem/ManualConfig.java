@@ -774,7 +774,12 @@ public class ManualConfig {
                 return;
             }
             String normalized = spawnMode.trim().toLowerCase();
-            this.spawnMode = normalized.equals("play") ? "play" : "training";
+            // Preserve the actual mode (admin, questing, training, play).
+            // Legacy 'play' is kept as-is for backward compat.
+            switch (normalized) {
+                case "admin", "questing", "training", "play" -> this.spawnMode = normalized;
+                default -> this.spawnMode = "training";
+            }
         }
 
         public String getGameMode() {
