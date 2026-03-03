@@ -10,6 +10,7 @@ import net.minecraft.client.gui.Click;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.widget.ButtonWidget;
 import net.minecraft.client.gui.widget.TextFieldWidget;
+import net.minecraft.client.gui.tooltip.Tooltip;
 import net.minecraft.text.Text;
 import net.minecraft.util.math.MathHelper;
 import net.wcfcarolina13.network.BaseClaimWallPayload;
@@ -68,11 +69,20 @@ public class BaseManagerScreen extends Screen {
 
     // Layout constants (keep in sync with init() / listRect()).
     private static final int TOP_Y = 28;
-    private static final int CONTROL_ROW_DY = 24;
+    private static final int SECTION_LABEL_H = 14;
+    private static final int SECTION_GAP = 6;
     private static final int BUTTON_H = 20;
+    private static final int BUTTON_ROW_GAP = 2;
     private static final int LIST_TOP_GAP = 6;
     private static final int LIST_BOTTOM_MARGIN = 32;
     private static final int LIST_MIN_H = 60;
+
+    /** Tracks the Y coordinate after all button rows for list positioning. */
+    private int controlsBottomY;
+
+    /** Section header labels to draw (populated in init). */
+    private final java.util.List<int[]> sectionHeaders = new java.util.ArrayList<>(); // [x, y, color], text stored separately
+    private final java.util.List<String> sectionHeaderTexts = new java.util.ArrayList<>();
 
     public BaseManagerScreen(Screen parent) {
         this(parent, "");
@@ -86,88 +96,86 @@ public class BaseManagerScreen extends Screen {
 
     @Override
     protected void init() {
+        sectionHeaders.clear();
+        sectionHeaderTexts.clear();
         int cx = this.width / 2;
-        int top = TOP_Y;
+        int y = TOP_Y;
+        int colW = 70;
+        int leftX = cx - 110;
+        int midX = cx - 36;
+        int rightX = cx + 38;
 
-        this.nameField = new TextFieldWidget(this.textRenderer, cx - 110, top, 220, 18, Text.literal("Base name"));
+        // ── Text field ──────────────────────────────────────────────────
+        this.nameField = new TextFieldWidget(this.textRenderer, leftX, y, 220, 18, Text.literal("Base name"));
         this.nameField.setMaxLength(64);
         this.addDrawableChild(this.nameField);
+        y += 22;
 
-        int btnY = top + CONTROL_ROW_DY;
-        this.addDrawableChild(ButtonWidget.builder(Text.literal("Refresh"), (btn) -> requestRefresh())
-                .dimensions(cx - 110, btnY, 70, 20)
-                .build());
-        this.addDrawableChild(ButtonWidget.builder(Text.literal("Set here"), (btn) -> sendSetHere())
-                .dimensions(cx - 36, btnY, 70, 20)
-                .build());
-        this.addDrawableChild(ButtonWidget.builder(Text.literal("Remove"), (btn) -> sendRemoveSelected())
-                .dimensions(cx + 38, btnY, 70, 20)
-                .build());
+        // ── Section 1: Base Management ──────────────────────────────────
+        addSectionHeader(leftX, y, "\u2302 Base Management", 0xFFE6D7A3);
+        y += SECTION_LABEL_H;
 
-        int btnY2 = btnY + CONTROL_ROW_DY;
-        this.addDrawableChild(ButtonWidget.builder(Text.literal("Rename"), (btn) -> sendRenameSelected())
-                .dimensions(cx - 110, btnY2, 70, 20)
-                .build());
-        this.addDrawableChild(ButtonWidget.builder(Text.literal("Set Home"), (btn) -> sendSetHomeSelected())
-                .dimensions(cx - 36, btnY2, 70, 20)
-                .build());
-        this.addDrawableChild(ButtonWidget.builder(Text.literal("Go To Base"), (btn) -> sendGoToSelected())
-                .dimensions(cx + 38, btnY2, 70, 20)
-                .build());
+        addBtn(leftX, y, colW, "Set here",   "Save your current position as a named base (type name above first)",     () -> sendSetHere());
+        addBtn(midX,  y, colW, "Rename",     "Rename the selected base (type new name above, select base below)",       () -> sendRenameSelected());
+        addBtn(rightX,y, colW, "Remove",     "Delete the selected base permanently",                                    () -> sendRemoveSelected());
+        y += BUTTON_H + BUTTON_ROW_GAP;
 
-        int btnY3 = btnY2 + CONTROL_ROW_DY;
-        this.addDrawableChild(ButtonWidget.builder(Text.literal("Fortify New"), (btn) -> sendFortifyNew())
-                .dimensions(cx - 110, btnY3, 70, 20)
-                .build());
-        this.addDrawableChild(ButtonWidget.builder(Text.literal("Resume Wall"), (btn) -> sendResumeWall())
-                .dimensions(cx - 36, btnY3, 70, 20)
-                .build());
-        this.addDrawableChild(ButtonWidget.builder(Text.literal("Patch Wall"), (btn) -> sendPatchWall())
-                .dimensions(cx + 38, btnY3, 70, 20)
-                .build());
+        addBtn(leftX, y, colW, "Set Home",   "Mark the selected base as this bot's home (where it returns at sunset)",  () -> sendSetHomeSelected());
+        addBtn(midX,  y, colW, "Go To Base", "Send the bot to walk to the selected base",                               () -> sendGoToSelected());
+        addBtn(rightX,y, colW, "Refresh",    "Reload the base list from the server",                                    () -> requestRefresh());
+        y += BUTTON_H + SECTION_GAP;
 
-        int btnY4 = btnY3 + CONTROL_ROW_DY;
-        this.addDrawableChild(ButtonWidget.builder(Text.literal("Wall Status"), (btn) -> sendWallStatus())
-                .dimensions(cx - 110, btnY4, 70, 20)
-                .build());
-        this.addDrawableChild(ButtonWidget.builder(Text.literal("Auto Patch"), (btn) -> sendAutoPatchWall())
-                .dimensions(cx - 36, btnY4, 70, 20)
-                .build());
-        this.addDrawableChild(ButtonWidget.builder(Text.literal("Dig Moat"), (btn) -> sendDigMoat())
-                .dimensions(cx + 38, btnY4, 70, 20)
-                .build());
+        // ── Section 2: Fortification ────────────────────────────────────
+        addSectionHeader(leftX, y, "\u2694 Fortification", 0xFFD4A3E6);
+        y += SECTION_LABEL_H;
 
-        int btnY5 = btnY4 + CONTROL_ROW_DY;
-        this.addDrawableChild(ButtonWidget.builder(Text.literal("Drift Check"), (btn) -> sendDriftCheckWall())
-            .dimensions(cx - 110, btnY5, 70, 20)
-            .build());
-        this.addDrawableChild(ButtonWidget.builder(Text.literal("Expand Wall"), (btn) -> sendExpandWall())
-            .dimensions(cx - 36, btnY5, 70, 20)
-            .build());
-        this.addDrawableChild(ButtonWidget.builder(Text.literal("Claim Wall"), (btn) -> sendClaimWall())
-            .dimensions(cx + 38, btnY5, 70, 20)
-            .build());
+        addBtn(leftX, y, colW, "Fortify New",  "Start building a new wall around the nearest village",                  () -> sendFortifyNew());
+        addBtn(midX,  y, colW, "Resume Wall",  "Resume building an unfinished wall (select a wall below)",              () -> sendResumeWall());
+        addBtn(rightX,y, colW, "Patch Wall",   "Repair damaged or missing blocks in the selected wall",                 () -> sendPatchWall());
+        y += BUTTON_H + BUTTON_ROW_GAP;
 
-        int btnY6 = btnY5 + CONTROL_ROW_DY;
-        this.addDrawableChild(ButtonWidget.builder(Text.literal("Unclaim"), (btn) -> sendUnclaimWall())
-            .dimensions(cx - 110, btnY6, 70, 20)
-            .build());
-        this.addDrawableChild(ButtonWidget.builder(Text.literal("Permit"), (btn) -> sendPermitWallAccess())
-            .dimensions(cx - 36, btnY6, 70, 20)
-            .build());
-        this.addDrawableChild(ButtonWidget.builder(Text.literal("Revoke"), (btn) -> sendRevokeWallAccess())
-            .dimensions(cx + 38, btnY6, 70, 20)
-            .build());
+        addBtn(leftX, y, colW, "Auto Patch",   "Like Patch, but automatically repeats until the wall is fully repaired",() -> sendAutoPatchWall());
+        addBtn(midX,  y, colW, "Wall Status",  "Show completion % and missing block breakdown for the selected wall",   () -> sendWallStatus());
+        addBtn(rightX,y, colW, "Dig Moat",     "Dig a defensive moat around the selected wall perimeter",               () -> sendDigMoat());
+        y += BUTTON_H + BUTTON_ROW_GAP;
 
-        int btnY7 = btnY6 + CONTROL_ROW_DY;
-        this.addDrawableChild(ButtonWidget.builder(Text.literal("Refresh"), (btn) -> requestRefresh())
-            .dimensions(cx - 110, btnY7, 70, 20)
-            .build());
-        this.addDrawableChild(ButtonWidget.builder(Text.literal("Close"), (btn) -> close())
-            .dimensions(cx + 38, btnY7, 70, 20)
-                .build());
+        addBtn(leftX, y, colW, "Drift Check",  "Check if the village center has moved away from the wall",              () -> sendDriftCheckWall());
+        addBtn(midX,  y, colW, "Expand Wall",  "Expand the selected wall to cover newly detected village boundaries",   () -> sendExpandWall());
+        y += BUTTON_H + SECTION_GAP;
 
+        // ── Section 3: Ownership & Access ───────────────────────────────
+        addSectionHeader(leftX, y, "\uD83D\uDD11 Ownership", 0xFFA3E6B4);
+        y += SECTION_LABEL_H;
+
+        addBtn(leftX, y, colW, "Claim Wall",   "Claim ownership of the selected wall (ties it to your player)",         () -> sendClaimWall());
+        addBtn(midX,  y, colW, "Unclaim",      "Release ownership of the selected wall so anyone can claim it",         () -> sendUnclaimWall());
+        y += BUTTON_H + BUTTON_ROW_GAP;
+
+        addBtn(leftX, y, colW, "Permit",       "Grant another player build access to your wall (type their name above)",() -> sendPermitWallAccess());
+        addBtn(midX,  y, colW, "Revoke",       "Remove a player's build access from your wall (type their name above)", () -> sendRevokeWallAccess());
+        y += BUTTON_H + SECTION_GAP;
+
+        // ── Footer ─────────────────────────────────────────────────────
+        addBtn(rightX, y, colW, "Close",       "Close this screen and return to the inventory",                          () -> close());
+        y += BUTTON_H + 4;
+
+        controlsBottomY = y;
         requestRefresh();
+    }
+
+    /** Adds a section header label to be drawn later. */
+    private void addSectionHeader(int x, int y, String text, int color) {
+        sectionHeaders.add(new int[]{x, y, color});
+        sectionHeaderTexts.add(text);
+    }
+
+    /** Convenience: creates a button with tooltip and adds it as a child. */
+    private void addBtn(int x, int y, int w, String label, String tooltip, Runnable action) {
+        ButtonWidget btn = ButtonWidget.builder(Text.literal(label), b -> action.run())
+                .dimensions(x, y, w, BUTTON_H)
+                .build();
+        btn.setTooltip(Tooltip.of(Text.literal(tooltip)));
+        this.addDrawableChild(btn);
     }
 
     private void requestRefresh() {
@@ -426,15 +434,20 @@ public class BaseManagerScreen extends Screen {
 
     @Override
     public void render(DrawContext context, int mouseX, int mouseY, float delta) {
-        // super.render() draws (our overridden) renderBackground first, then child widgets.
         super.render(context, mouseX, mouseY, delta);
 
         int cx = this.width / 2;
         context.drawCenteredTextWithShadow(this.textRenderer, this.title, cx, 10, 0xFFFFFF);
 
-        Rect list = listRect();
-        String hint = "Tip: Select a wall. Use Claim/Permit/Revoke for ownership access control.";
-        context.drawCenteredTextWithShadow(this.textRenderer, Text.literal(hint), cx, list.bottom() + 6, 0xFFB0B0B0);
+        // Draw section headers
+        for (int i = 0; i < sectionHeaders.size(); i++) {
+            int[] hdr = sectionHeaders.get(i);
+            String text = sectionHeaderTexts.get(i);
+            context.drawTextWithShadow(this.textRenderer, text, hdr[0], hdr[1] + 2, hdr[2]);
+            // Subtle separator line under the label
+            int lineW = this.textRenderer.getWidth(text);
+            context.fill(hdr[0], hdr[1] + SECTION_LABEL_H - 2, hdr[0] + lineW, hdr[1] + SECTION_LABEL_H - 1, (hdr[2] & 0x00FFFFFF) | 0x44000000);
+        }
     }
 
     @Override
@@ -486,8 +499,7 @@ public class BaseManagerScreen extends Screen {
     private Rect listRect() {
         int cx = this.width / 2;
         int x = cx - 110;
-        // Below the 7th button row (+ a small gap). Prevents list background from overlapping controls.
-        int y = TOP_Y + (CONTROL_ROW_DY * 7) + BUTTON_H + LIST_TOP_GAP;
+        int y = controlsBottomY + LIST_TOP_GAP;
         int w = 220;
         int h = Math.max(LIST_MIN_H, this.height - y - LIST_BOTTOM_MARGIN);
         return new Rect(x, y, w, h);
