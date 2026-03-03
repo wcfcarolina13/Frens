@@ -1731,7 +1731,7 @@ public class FrensClient implements ClientModInitializer {
             alias = "Bot";
         }
         String guideKey = getGuideHotkeyDisplayName();
-        String line = "Looking at " + alias + ". Right-click to open menu • [" + guideKey + "] opens Guide";
+        String line = "Looking at " + alias + ". Right-click to open menu • Press " + guideKey + " for Guide";
 
         int w = client.textRenderer.getWidth(line);
         int x = (context.getScaledWindowWidth() - w) / 2;
