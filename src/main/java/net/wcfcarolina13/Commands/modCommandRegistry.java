@@ -1974,14 +1974,19 @@ public class modCommandRegistry {
                         }
                     }
 
-                    ollamaClient.botName = botName; // set the bot's name.
+                    // ── LLM initialization (only when LLM is enabled AND runtime classes are available) ──
+                    boolean llmActive = false;
+                    if (Frens.CONFIG != null) {
+                        ManualConfig.BotControlSettings llmCtrl = Frens.CONFIG.getEffectiveBotControl(botName);
+                        llmActive = llmCtrl != null && llmCtrl.isLlmEnabled();
+                    }
 
-                    DebugToggleService.debug(LOGGER, "Set bot's username to {}", botName);
-
+                    if (llmActive) {
                     String llmProvider = System.getProperty("frens.llmMode", System.getProperty("aiplayer.llmMode", "ollama"));
 
                     DebugToggleService.debug(LOGGER, "Using provider: {}", llmProvider);
 
+                    try {
                     switch (llmProvider) {
                         case "openai", "gpt", "google", "gemini", "anthropic", "claude", "xAI", "xai", "grok", "custom" -> {
                             LLMClient llmClient = LLMClientFactory.createClient(llmProvider);
@@ -2017,6 +2022,7 @@ public class modCommandRegistry {
                         }
 
                         case "ollama" -> {
+                            ollamaClient.botName = botName;
                             ChatUtils.sendSystemMessage(serverSource,
                                     "Please wait while " + botName + " connects to the language model.");
                             ollamaClient.initializeOllamaClient();
@@ -2044,6 +2050,7 @@ public class modCommandRegistry {
 
                         default -> {
                             LOGGER.warn("Unsupported provider detected: {}. Defaulting to Ollama client", llmProvider);
+                            ollamaClient.botName = botName;
                             ChatUtils.sendSystemMessage(serverSource,
                                     "Warning! Unsupported provider detected. Defaulting to Ollama client");
                             ChatUtils.sendSystemMessage(serverSource,
@@ -2071,6 +2078,10 @@ public class modCommandRegistry {
                             }, "Ollama-Init-" + botName).start();
                         }
                     }
+                    } catch (NoClassDefFoundError | UnsatisfiedLinkError e) {
+                        LOGGER.warn("[Frens] LLM runtime not available (build without -PaiEnabled?). Bot {} will run without LLM.", botName);
+                    }
+                    } // end if (llmActive)
 
                 } else {
                     LOGGER.error("spawnBot: play bot {} was not found after createFake", botName);
