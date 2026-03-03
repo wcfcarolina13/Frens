@@ -112,10 +112,14 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
     private static final long QUICK_HOVER_TOOLTIP_DELAY_MS = 1800L;
     private long lastBotSwitchHintAtMs = 0L;
 
-    // Warning flash state for gated bot switching (too far / no spell item).
-    private String switchWarningText = null;
-    private long switchWarningExpireMs = 0L;
-    private static final long SWITCH_WARNING_DURATION_MS = 2000L;
+    // Browse state for scrolling past blocked bots in the switcher.
+    private int switchBrowseOffset = 0;
+    private String switchBrowsedBlockedAlias = null;
+
+    // Save/restore cursor position across bot-switch screen transitions.
+    private static double savedSwitchCursorX = -1;
+    private static double savedSwitchCursorY = -1;
+    private boolean cursorRestorePending = false;
 
     // Skills list scroll (always used for the small panel; also used for overlay when Skills tab is selected).
     private int skillScrollIndex;
@@ -383,10 +387,22 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         this.playerInventoryTitleX = SECTION_WIDTH + BLOCK_GAP + 8;
         this.playerInventoryTitleY = 6;
         this.botAlias = extractAlias(title.getString());
+        if (savedSwitchCursorX >= 0) {
+            cursorRestorePending = true;
+        }
     }
 
     @Override
     protected void drawBackground(DrawContext context, float delta, int mouseX, int mouseY) {
+        if (cursorRestorePending) {
+            cursorRestorePending = false;
+            if (this.client != null) {
+                long window = this.client.getWindow().getHandle();
+                GLFW.glfwSetCursorPos(window, savedSwitchCursorX, savedSwitchCursorY);
+            }
+            savedSwitchCursorX = -1;
+            savedSwitchCursorY = -1;
+        }
         int x = (this.width - this.backgroundWidth) / 2;
         int y = (this.height - this.backgroundHeight) / 2;
         context.drawTexture(RenderPipelines.GUI_TEXTURED, BACKGROUND_TEXTURE, x, y, 0f, 0f,
@@ -583,15 +599,15 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             return;
         }
         boolean canSwitch = layout.canSwitch();
-        boolean warningActive = switchWarningText != null && System.currentTimeMillis() < switchWarningExpireMs;
+        boolean blocked = switchBrowsedBlockedAlias != null;
         int labelFill = overlayStyle ? 0xFF171717 : 0xCC171717;
         int labelBorder = overlayStyle ? 0xFF2A2A2A : 0xFF000000;
         if (!canSwitch) {
             labelFill = overlayStyle ? 0xFF141414 : 0xCC141414;
         }
-        if (warningActive) {
-            labelFill = 0xCC2A0808;
-            labelBorder = 0xFF550000;
+        if (blocked) {
+            labelFill = 0xCC1E1508;
+            labelBorder = 0xFF3D3018;
         }
 
         context.fill(layout.labelRect().x, layout.labelRect().y, layout.labelRect().right(), layout.labelRect().bottom(), labelFill);
@@ -605,10 +621,16 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
 
         String label;
         int color;
-        if (warningActive) {
-            boolean bright = ((System.currentTimeMillis() / 300L) % 2) == 0;
-            label = elideToWidth(switchWarningText, Math.max(1, layout.labelRect().w - 4));
-            color = bright ? 0xFFFF5555 : 0xFFAA3333;
+        if (blocked) {
+            String blockedName = switchBrowsedBlockedAlias;
+            int aliasCount = layout.aliases() != null ? layout.aliases().size() : 0;
+            int browseIdx = layout.aliases() != null
+                    ? indexOfAliasIgnoreCase(layout.aliases(), blockedName) : -1;
+            if (browseIdx >= 0 && aliasCount > 1) {
+                blockedName = blockedName + " (" + (browseIdx + 1) + "/" + aliasCount + ")";
+            }
+            label = elideToWidth("\u26A0 " + blockedName, Math.max(1, layout.labelRect().w - 4));
+            color = 0xFFD4A843;
         } else {
             label = elideToWidth(switchLabel(layout), Math.max(1, layout.labelRect().w - 4));
             color = canSwitch ? COLOR_TEXT_PARCHMENT : COLOR_TEXT_DISABLED;
@@ -670,18 +692,37 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             return false;
         }
         int baseIndex = layout.currentIndex() >= 0 ? layout.currentIndex() : 0;
-        int nextIndex = Math.floorMod(baseIndex + (direction < 0 ? -1 : 1), aliases.size());
+        int effectiveIndex = Math.floorMod(baseIndex + switchBrowseOffset, aliases.size());
+        int nextIndex = Math.floorMod(effectiveIndex + (direction < 0 ? -1 : 1), aliases.size());
         String targetAlias = aliases.get(nextIndex);
-        if (targetAlias == null || targetAlias.isBlank() || targetAlias.equalsIgnoreCase(botAlias)) {
+        if (targetAlias == null || targetAlias.isBlank()) {
             showBotSwitchUnavailableHint();
             return false;
+        }
+        // Scrolled back to current bot — reset browse state.
+        if (targetAlias.equalsIgnoreCase(botAlias)) {
+            switchBrowseOffset = 0;
+            switchBrowsedBlockedAlias = null;
+            return true;
         }
         // Gated switching: verify proximity, spell item, or admin status.
         String blockReason = canSwitchToBot(targetAlias);
         if (blockReason != null) {
+            switchBrowseOffset = Math.floorMod(nextIndex - baseIndex, aliases.size());
+            switchBrowsedBlockedAlias = targetAlias;
             showBotSwitchBlockedWarning(blockReason);
-            return false;
+            return true;
         }
+        // Allowed — save cursor position before screen transition, then switch.
+        if (this.client != null) {
+            long window = this.client.getWindow().getHandle();
+            double[] xBuf = new double[1], yBuf = new double[1];
+            GLFW.glfwGetCursorPos(window, xBuf, yBuf);
+            savedSwitchCursorX = xBuf[0];
+            savedSwitchCursorY = yBuf[0];
+        }
+        switchBrowseOffset = 0;
+        switchBrowsedBlockedAlias = null;
         sendChatCommand("bot open " + formatBotTarget(targetAlias));
         return true;
     }
@@ -2721,13 +2762,11 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
     }
 
     private void showBotSwitchBlockedWarning(String reason) {
-        long now = System.currentTimeMillis();
-        switchWarningText = reason;
-        switchWarningExpireMs = now + SWITCH_WARNING_DURATION_MS;
         if (this.client != null && this.client.player != null) {
+            long now = System.currentTimeMillis();
             if (now - lastBotSwitchHintAtMs >= BOT_SWITCH_HINT_COOLDOWN_MS) {
                 lastBotSwitchHintAtMs = now;
-                this.client.player.sendMessage(Text.literal(reason).styled(s -> s.withColor(0xFF5555)), true);
+                this.client.player.sendMessage(Text.literal(reason).styled(s -> s.withColor(0xFFAA00)), true);
             }
         }
     }
