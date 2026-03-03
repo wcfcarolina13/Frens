@@ -172,6 +172,34 @@ public final class CompanionCommunicationPolicy {
         }
     }
 
+    // ─────── Ownership gate ───────
+
+    /**
+     * Returns true if {@code actor} is allowed to control the bot identified by
+     * {@code botAlias}.  Operators always pass.  Otherwise the actor's UUID must
+     * match the recorded {@link ManualConfig.BotOwnership} for the alias, or no
+     * owner is recorded yet (first-spawner-wins still applies at spawn time, but
+     * an un-owned bot is controllable by anyone).
+     */
+    public static boolean isAllowedToControl(ServerPlayerEntity actor, String botAlias) {
+        if (actor == null || botAlias == null || botAlias.isBlank()) return false;
+        if (Frens.isOperator(actor)) return true;
+        if (Frens.CONFIG == null) return true;               // no config → can't enforce
+        ManualConfig.BotOwnership o = Frens.CONFIG.getOwner(botAlias);
+        if (o == null || o.ownerUuid() == null || o.ownerUuid().isBlank()) return true; // un-owned
+        try {
+            return actor.getUuid().equals(UUID.fromString(o.ownerUuid()));
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
+    }
+
+    /** Convenience: resolve alias from the bot entity itself. */
+    public static boolean isAllowedToControl(ServerPlayerEntity actor, ServerPlayerEntity bot) {
+        if (bot == null) return false;
+        return isAllowedToControl(actor, bot.getName().getString());
+    }
+
     private static boolean isNearEnchantingTable(ServerPlayerEntity player, int radius) {
         if (player == null) {
             return false;

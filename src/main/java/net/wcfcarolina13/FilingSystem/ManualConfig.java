@@ -177,15 +177,20 @@ public class ManualConfig {
         });
     }
 
+    /** Lock object for save/load serialization — prevents concurrent writes corrupting the JSON. */
+    private static final Object SAVE_LOCK = new Object();
+
     /**
      * Saves the current configuration to the settings.json5 file.
      */
     public void save() {
-        Gson gson = new GsonBuilder().setPrettyPrinting().create();
-        try (FileWriter writer = new FileWriter(FILE_PATH)) {
-            gson.toJson(this, writer);
-        } catch (IOException e) {
-            LOGGER.error("Failed to save config file: {}", e.getMessage());
+        synchronized (SAVE_LOCK) {
+            Gson gson = new GsonBuilder().setPrettyPrinting().create();
+            try (FileWriter writer = new FileWriter(FILE_PATH)) {
+                gson.toJson(this, writer);
+            } catch (IOException e) {
+                LOGGER.error("Failed to save config file: {}", e.getMessage());
+            }
         }
     }
 

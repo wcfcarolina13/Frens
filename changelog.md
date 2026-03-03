@@ -2,6 +2,12 @@
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 ## 2026-03-03
+- **Security hardening (ownership enforcement + respawn safety)**: Audit-driven security fixes across 6 files:
+  - **CompanionCommunicationPolicy.java**: Added `isAllowedToControl(actor, botAlias)` centralized ownership gate — ops always pass, un-owned bots accessible to all, owned bots restricted to recorded owner UUID. Overload accepts bot entity directly.
+  - **InventoryAccessPolicy.java**: Replaced placeholder TODO with real ownership check — calls `CompanionCommunicationPolicy.isAllowedToControl()` before the proximity check. Non-owners can no longer open bot inventories.
+  - **BaseNetworkManager.java**: Network payload handlers (BaseSetHome, BaseGoTo) now enforce ownership — `resolveControlledBot()` accepts requesting player and rejects non-owners. Import added for `CompanionCommunicationPolicy`. Read-only list path passes null (no ownership gate for viewing).
+  - **BotEventHandler.java**: Replaced 3 silent `catch (Throwable ignored) {}` blocks (tier 2 recruitment anchor, tier 4a owner_bed, tier 4b saved_base) with `LOGGER.warn()` calls that include the throwable. Fixed saved_base failsafe world lookup: now always looks up bases in the Overworld (where the UI restricts them) instead of `bot.getEntityWorld()` (which may be the death dimension).
+  - **ManualConfig.java**: Added `synchronized(SAVE_LOCK)` around `save()` method to prevent concurrent config writes from corrupting the JSON file.
 - **Respawn hardening (bed validation + failsafe chain + safe-surface guarantees)**: Hardened the bot respawn system to mirror vanilla Minecraft's bed destruction/obstruction handling. 6 files changed:
   - **SafePositionService.java**: Added `validateBedSpawn(world, bedPos)` — checks bed block still exists (`instanceof BedBlock`) and has safe standing room within 2 blocks. Added `findSafeSurface(world, base, fallbackRadius, heightmapRadius)` — combines spiral search with heightmap scan when underground/void.
   - **ManualConfig.java**: Added `failsafeSpawnMode` field to `BotControlSettings` with 3 values: `owner_bed`, `world_spawn` (default), `saved_base`. Getter normalizes invalid values.

@@ -1101,7 +1101,9 @@ public class BotEventHandler {
                         }
                     }
                 }
-            } catch (Throwable ignored) {}
+            } catch (Throwable t) {
+                LOGGER.warn("[Frens] Respawn for {}: recruitment anchor lookup failed", alias, t);
+            }
         }
 
         // 3. BotSpawn config position (admin/training bots) — with safe-surface validation
@@ -1161,19 +1163,24 @@ public class BotEventHandler {
                     if (target == null) {
                         LOGGER.info("[Frens] Respawn for {}: failsafe=owner_bed but owner offline or bed gone, falling through.", alias);
                     }
-                } catch (Throwable ignored) {}
+                } catch (Throwable t) {
+                    LOGGER.warn("[Frens] Respawn for {}: owner_bed failsafe lookup failed", alias, t);
+                }
             }
 
             // 4b. Saved base (bot's preferred home base)
+            //     Bases are restricted to the Overworld by the UI, so always look there
+            //     regardless of which dimension the bot died in.
             if (target == null && "saved_base".equals(failsafeMode)) {
                 try {
                     java.util.Optional<String> baseLabel = BotHomeService.getPreferredHomeBaseLabel(bot);
-                    if (baseLabel.isPresent() && bot.getEntityWorld() instanceof ServerWorld sw) {
-                        java.util.Optional<BlockPos> basePos = BotHomeService.getBaseByLabel(srv, sw, baseLabel.get());
+                    ServerWorld overworld = srv.getOverworld();
+                    if (baseLabel.isPresent() && overworld != null) {
+                        java.util.Optional<BlockPos> basePos = BotHomeService.getBaseByLabel(srv, overworld, baseLabel.get());
                         if (basePos.isPresent()) {
-                            BlockPos safeBase = SafePositionService.findSafeSurface(sw, basePos.get(), 5, 10);
+                            BlockPos safeBase = SafePositionService.findSafeSurface(overworld, basePos.get(), 5, 10);
                             if (safeBase != null) {
-                                destinationWorld = sw;
+                                destinationWorld = overworld;
                                 target = new Vec3d(safeBase.getX() + 0.5, safeBase.getY() + 0.1, safeBase.getZ() + 0.5);
                                 respawnLog = "saved base '" + baseLabel.get() + "' near " + basePos.get().toShortString();
                             }
@@ -1182,7 +1189,9 @@ public class BotEventHandler {
                     if (target == null) {
                         LOGGER.info("[Frens] Respawn for {}: failsafe=saved_base but no preferred base set or obstructed, falling through.", alias);
                     }
-                } catch (Throwable ignored) {}
+                } catch (Throwable t) {
+                    LOGGER.warn("[Frens] Respawn for {}: saved_base failsafe lookup failed", alias, t);
+                }
             }
         }
 

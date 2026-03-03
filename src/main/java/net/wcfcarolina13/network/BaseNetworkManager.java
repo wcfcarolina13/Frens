@@ -15,6 +15,7 @@ import net.wcfcarolina13.Entity.createFakePlayer;
 import net.wcfcarolina13.FilingSystem.ManualConfig;
 import net.wcfcarolina13.GameAI.BotEventHandler;
 import net.wcfcarolina13.GameAI.services.BotHomeService;
+import net.wcfcarolina13.GameAI.services.CompanionCommunicationPolicy;
 import net.wcfcarolina13.GameAI.services.construction.FortificationPersistenceService;
 
 import java.util.ArrayList;
@@ -142,9 +143,9 @@ public final class BaseNetworkManager {
                     }
                     String botAlias = sanitizeBotAlias(payload != null ? payload.botAlias() : null);
                     String label = payload != null ? payload.label() : null;
-                    ServerPlayerEntity bot = resolveControlledBot(player.getCommandSource().getServer(), botAlias);
+                    ServerPlayerEntity bot = resolveControlledBot(player.getCommandSource().getServer(), botAlias, player);
                     if (bot == null) {
-                        ChatUtils.sendSystemMessage(player.getCommandSource(), "Bot '" + botAlias + "' is not available.");
+                        ChatUtils.sendSystemMessage(player.getCommandSource(), "Bot '" + botAlias + "' is not available (or you don't own it).");
                         return;
                     }
                     if (!(bot.getEntityWorld() instanceof ServerWorld botWorld)
@@ -173,9 +174,9 @@ public final class BaseNetworkManager {
                     }
                     String botAlias = sanitizeBotAlias(payload != null ? payload.botAlias() : null);
                     String label = payload != null ? payload.label() : null;
-                    ServerPlayerEntity bot = resolveControlledBot(player.getCommandSource().getServer(), botAlias);
+                    ServerPlayerEntity bot = resolveControlledBot(player.getCommandSource().getServer(), botAlias, player);
                     if (bot == null) {
-                        ChatUtils.sendSystemMessage(player.getCommandSource(), "Bot '" + botAlias + "' is not available.");
+                        ChatUtils.sendSystemMessage(player.getCommandSource(), "Bot '" + botAlias + "' is not available (or you don't own it).");
                         return;
                     }
                     if (!(bot.getEntityWorld() instanceof ServerWorld botWorld)
@@ -428,7 +429,7 @@ public final class BaseNetworkManager {
         }
 
         String homeLabel = null;
-        ServerPlayerEntity selectedBot = resolveControlledBot(player.getCommandSource().getServer(), botAliasContext);
+        ServerPlayerEntity selectedBot = resolveControlledBot(player.getCommandSource().getServer(), botAliasContext, null);
         if (selectedBot != null) {
             homeLabel = BotHomeService.getPreferredHomeBaseLabel(selectedBot).orElse(null);
         }
@@ -496,7 +497,12 @@ public final class BaseNetworkManager {
         return raw.trim();
     }
 
-    private static ServerPlayerEntity resolveControlledBot(MinecraftServer server, String alias) {
+    /**
+     * Resolve a bot by alias.  When {@code requestingPlayer} is non-null,
+     * ownership is enforced: the player must own the bot (or be an operator).
+     */
+    private static ServerPlayerEntity resolveControlledBot(MinecraftServer server, String alias,
+                                                           ServerPlayerEntity requestingPlayer) {
         if (server == null || alias == null || alias.isBlank()) {
             return null;
         }
@@ -520,6 +526,11 @@ public final class BaseNetworkManager {
             return null;
         }
         if (!BotEventHandler.isRegisteredBot(bot)) {
+            return null;
+        }
+        // Ownership gate: requestingPlayer (when provided) must own or be op
+        if (requestingPlayer != null
+                && !CompanionCommunicationPolicy.isAllowedToControl(requestingPlayer, bot)) {
             return null;
         }
         return bot;
