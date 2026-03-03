@@ -32,6 +32,7 @@ import org.slf4j.LoggerFactory;
 import net.wcfcarolina13.GameAI.services.MovementService;
 import net.wcfcarolina13.GameAI.services.SneakLockService;
 import net.wcfcarolina13.GameAI.services.BotArrowRecoveryService;
+import net.wcfcarolina13.GameAI.services.BotTerritoryAuthorizationService;
 import net.wcfcarolina13.GameAI.services.FoodConsumptionConfirmationService;
 import net.wcfcarolina13.GameAI.services.HotbarLockService;
 
@@ -558,6 +559,11 @@ public final class BotActions {
                 return false;
             }
 
+            var auth = BotTerritoryAuthorizationService.authorizeBlockMutation(bot, world, target);
+            if (!auth.allowed()) {
+                return false;
+            }
+
             BlockState stateToPlace = blockItem.getBlock().getDefaultState();
             if (!stateToPlace.canPlaceAt(world, target)) {
                 return false;
@@ -598,6 +604,11 @@ public final class BotActions {
             ServerWorld world = bot.getCommandSource().getWorld();
             if (world == null || target == null) {
                 return new PlaceResult(false, "no-world-or-target");
+            }
+
+            var auth = BotTerritoryAuthorizationService.authorizeBlockMutation(bot, world, target);
+            if (!auth.allowed()) {
+                return new PlaceResult(false, "claim-denied " + auth.reason());
             }
 
             double distSq = bot.squaredDistanceTo(target.getX() + 0.5, target.getY() + 0.5, target.getZ() + 0.5);
@@ -705,6 +716,12 @@ public final class BotActions {
             if (world == null || target == null) {
                 return new PlaceResult(false, "no-world-or-target");
             }
+
+            var auth = BotTerritoryAuthorizationService.authorizeBlockMutation(bot, world, target);
+            if (!auth.allowed()) {
+                return new PlaceResult(false, "claim-denied " + auth.reason());
+            }
+
             if (!world.getBlockState(target).isAir()) {
                 return new PlaceResult(true, null); // already filled
             }
@@ -971,6 +988,10 @@ public final class BotActions {
     }
 
     private static boolean breakBlock(ServerWorld world, BlockPos pos, ServerPlayerEntity bot, boolean forceBreak) {
+        var auth = BotTerritoryAuthorizationService.authorizeBlockMutation(bot, world, pos);
+        if (!auth.allowed()) {
+            return false;
+        }
         if (!canBreak(world, pos, bot, forceBreak)) {
             return false;
         }
@@ -1771,6 +1792,13 @@ public final class BotActions {
     }
 
     public static boolean useHoe(ServerPlayerEntity bot, BlockPos targetPos) {
+        if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
+            return false;
+        }
+        var auth = BotTerritoryAuthorizationService.authorizeBlockMutation(bot, world, targetPos);
+        if (!auth.allowed()) {
+            return false;
+        }
         int hoeSlot = findHoeSlot(bot);
         if (hoeSlot == -1) {
             return false; // No hoe found

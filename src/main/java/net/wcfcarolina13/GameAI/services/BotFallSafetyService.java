@@ -193,6 +193,13 @@ public final class BotFallSafetyService {
         if (bot == null || supportPos == null) {
             return false;
         }
+        if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
+            return false;
+        }
+        var auth = BotTerritoryAuthorizationService.authorizeBlockMutation(bot, world, supportPos.up());
+        if (!auth.allowed()) {
+            return false;
+        }
         ItemStack stack = bot.getMainHandStack();
         if (stack.isEmpty() || !stack.isOf(Items.WATER_BUCKET)) {
             return false;

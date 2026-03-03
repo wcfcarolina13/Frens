@@ -10,17 +10,19 @@ import net.wcfcarolina13.FilingSystem.ManualConfig;
 import net.wcfcarolina13.GameAI.services.SurvivalRecruitmentService;
 import net.wcfcarolina13.GameAI.services.WizardTomeGrantService;
 import net.wcfcarolina13.GameAI.services.LearningModeService;
-import net.wcfcarolina13.network.CompanionQuestStatePayload;
-import net.wcfcarolina13.network.RecruitmentPromptPayload;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /** Server-side operator-only actions for survival recruitment state. */
 public final class RecruitmentAdminNetworkManager {
 
     private static volatile boolean REGISTERED = false;
+    private static final Map<String, Long> RECRUIT_MODE_SWITCH_CONFIRM_UNTIL_MS = new ConcurrentHashMap<>();
+    private static final long RECRUIT_MODE_SWITCH_CONFIRM_WINDOW_MS = 12_000L;
 
     private RecruitmentAdminNetworkManager() {
     }
@@ -60,6 +62,7 @@ public final class RecruitmentAdminNetworkManager {
         }
 
         String action = payload != null && payload.action() != null ? payload.action().trim().toLowerCase(Locale.ROOT) : "";
+        int payloadIntArg = payload != null ? payload.intArg() : 0;
         String worldKey = worldKey(server);
         ManualConfig.SurvivalRecruitmentState st = SurvivalRecruitmentService.getState(server);
 
@@ -67,7 +70,7 @@ public final class RecruitmentAdminNetworkManager {
 
         switch (action) {
             case "give_wizard_tome" -> {
-                int granted = WizardTomeGrantService.grant(player, Math.max(1, payload.intArg()));
+                int granted = WizardTomeGrantService.grant(player, Math.max(1, payloadIntArg));
                 if (granted <= 0) {
                     out.add("Could not grant Wizard's Tome (player unavailable).");
                 } else {
@@ -127,26 +130,44 @@ public final class RecruitmentAdminNetworkManager {
                 out.add("Recruitment reset for world '" + (worldKey == null ? "default" : worldKey) + "'.");
                 out.add("Recruited=false; stage=0; permanent=false; anchor cleared.");
             }
-            case "enable" -> {
-                SurvivalRecruitmentService.setWorldMode(server, true, player.getName().getString());
+            case "enable", "disable" -> {
+                boolean enabled = "enable".equals(action);
+                String targetWorldMode = enabled ? "questing" : "admin";
+                String currentWorldMode = st != null ? st.getSelectedWorldMode() : null;
+                boolean shouldWarnAboutSwitch = st != null
+                        && st.isModeSelectionDone()
+                        && currentWorldMode != null
+                        && !currentWorldMode.isBlank()
+                        && !currentWorldMode.equalsIgnoreCase(targetWorldMode);
+                if (shouldWarnAboutSwitch) {
+                    String confirmKey = (worldKey + ":" + player.getUuidAsString() + "->" + targetWorldMode)
+                            .toLowerCase(Locale.ROOT);
+                    long now = System.currentTimeMillis();
+                    Long confirmUntil = RECRUIT_MODE_SWITCH_CONFIRM_UNTIL_MS.get(confirmKey);
+                    if (confirmUntil == null || confirmUntil < now) {
+                        RECRUIT_MODE_SWITCH_CONFIRM_UNTIL_MS.put(confirmKey, now + RECRUIT_MODE_SWITCH_CONFIRM_WINDOW_MS);
+                        out.add("Warning: switching world mode from '" + currentWorldMode + "' to '" + targetWorldMode
+                                + "' may cause future questline/build progression conflicts.");
+                        out.add("Press '" + (enabled ? "Enable recruit" : "Disable recruit")
+                                + "' again within 12 seconds to confirm.");
+                        break;
+                    }
+                    RECRUIT_MODE_SWITCH_CONFIRM_UNTIL_MS.remove(confirmKey);
+                }
+
+                SurvivalRecruitmentService.setWorldMode(server, enabled, player.getName().getString());
+                ManualConfig.SurvivalRecruitmentState updated = SurvivalRecruitmentService.getState(server);
+                String currentAlias = updated != null ? updated.getBotAlias() : botAlias;
                 for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
                     if (p == null || p.isRemoved() || (p instanceof createFakePlayer)) {
                         continue;
                     }
                     SurvivalRecruitmentService.sendRecruitmentState(p);
-                }
-                out.add("Survival recruitment mode: enabled");
-            }
-            case "disable" -> {
-                SurvivalRecruitmentService.setWorldMode(server, false, player.getName().getString());
-                for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
-                    if (p == null || p.isRemoved() || (p instanceof createFakePlayer)) {
-                        continue;
+                    if (!enabled) {
+                        ServerPlayNetworking.send(p, new RecruitmentPromptPayload(false, currentAlias));
                     }
-                    SurvivalRecruitmentService.sendRecruitmentState(p);
-                    ServerPlayNetworking.send(p, new RecruitmentPromptPayload(false, st.getBotAlias()));
                 }
-                out.add("Survival recruitment mode: disabled");
+                out.add("Survival recruitment mode: " + (enabled ? "enabled" : "disabled"));
             }
             case "setstage" -> {
                 if (!SurvivalRecruitmentService.isEnabled(server)) {
@@ -159,7 +180,7 @@ public final class RecruitmentAdminNetworkManager {
                     break;
                 }
 
-                int stage = payload.intArg();
+                int stage = payloadIntArg;
                 st.setCompanionQuestStage(stage);
                 // Keep consistent with SurvivalCompanionQuestService:
                 // stage >= 4 means the companion becomes permanent.
@@ -219,6 +240,13 @@ public final class RecruitmentAdminNetworkManager {
         }
         out.add("Mode selection done: " + st.isModeSelectionDone()
                 + " (selected=" + (st.getSelectedWorldMode() == null ? "unset" : st.getSelectedWorldMode()) + ")");
+        Map<String, String> delegates = st.getModeSelectionDelegatesByUuid();
+        out.add("Mode delegates: " + delegates.size());
+        if (!delegates.isEmpty()) {
+            List<String> names = new ArrayList<>(delegates.values());
+            names.sort(String.CASE_INSENSITIVE_ORDER);
+            out.add("Delegated players: " + String.join(", ", names));
+        }
 
         out.add("Recruited: " + st.isRecruited() + " (botAlias=" + st.getBotAlias() + ")");
         if (st.isRecruited()) {

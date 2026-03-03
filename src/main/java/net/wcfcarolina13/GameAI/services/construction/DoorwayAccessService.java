@@ -12,6 +12,7 @@ import net.minecraft.util.math.Direction;
 import net.wcfcarolina13.Entity.LookController;
 import net.wcfcarolina13.GameAI.BotActions;
 import net.wcfcarolina13.GameAI.services.MovementService;
+import net.wcfcarolina13.GameAI.services.BotTerritoryAuthorizationService;
 import net.wcfcarolina13.GameAI.skills.SkillManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -300,6 +301,10 @@ public final class DoorwayAccessService {
         // Use world.breakBlock for server-side breaking
         BlockState state = world.getBlockState(pos);
         if (!state.isAir()) {
+            var auth = BotTerritoryAuthorizationService.authorizeBlockMutation(bot, world, pos);
+            if (!auth.allowed()) {
+                return false;
+            }
             boolean broke = world.breakBlock(pos, true, bot);
             if (broke) {
                 LOGGER.debug("Cleared block at {}", pos.toShortString());

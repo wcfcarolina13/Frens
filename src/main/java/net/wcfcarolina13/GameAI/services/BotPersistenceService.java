@@ -528,6 +528,7 @@ public final class BotPersistenceService {
         }
         String dimensionId = world.getRegistryKey().getValue().toString();
         ManualConfig.BotSpawn spawn = new ManualConfig.BotSpawn(
+                server.getSaveProperties().getLevelName(),
                 dimensionId,
                 bot.getX(),
                 bot.getY(),

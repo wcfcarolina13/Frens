@@ -39,6 +39,33 @@ final class BotUtilityCommands {
                                 .executes(context -> modCommandRegistry.executeZoneRemove(context,
                                         StringArgumentType.getString(context, "label"))))
                 )
+                .then(CommandManager.literal("permit")
+                        .then(CommandManager.argument("label", StringArgumentType.string())
+                                .then(CommandManager.argument("owner", StringArgumentType.word())
+                                        .executes(context -> modCommandRegistry.executeZonePermit(context,
+                                                StringArgumentType.getString(context, "label"),
+                                                StringArgumentType.getString(context, "owner")))))
+                )
+                .then(CommandManager.literal("revoke")
+                        .then(CommandManager.argument("label", StringArgumentType.string())
+                                .then(CommandManager.argument("owner", StringArgumentType.word())
+                                        .executes(context -> modCommandRegistry.executeZoneRevoke(context,
+                                                StringArgumentType.getString(context, "label"),
+                                                StringArgumentType.getString(context, "owner")))))
+                )
+                .then(CommandManager.literal("mode")
+                        .then(CommandManager.argument("label", StringArgumentType.string())
+                                .then(CommandManager.argument("mode", StringArgumentType.word())
+                                        .suggests((ctx, builder) -> {
+                                            builder.suggest("owner_only");
+                                            builder.suggest("allowlist");
+                                            builder.suggest("public");
+                                            return builder.buildFuture();
+                                        })
+                                        .executes(context -> modCommandRegistry.executeZoneMode(context,
+                                                StringArgumentType.getString(context, "label"),
+                                                StringArgumentType.getString(context, "mode")))))
+                )
                 .then(CommandManager.literal("list")
                         .executes(modCommandRegistry::executeZoneList)
                 );

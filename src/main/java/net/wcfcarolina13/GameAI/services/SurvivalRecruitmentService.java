@@ -118,6 +118,21 @@ public final class SurvivalRecruitmentService {
         return getState(server).isRecruited();
     }
 
+    public static boolean canChooseWorldMode(ServerPlayerEntity player) {
+        if (player == null || player.isRemoved()) {
+            return false;
+        }
+        if (Frens.hasBotCommandPermission(player.getCommandSource())) {
+            return true;
+        }
+        MinecraftServer server = player.getCommandSource().getServer();
+        if (server == null || Frens.CONFIG == null) {
+            return false;
+        }
+        ManualConfig.SurvivalRecruitmentState st = getState(server);
+        return st != null && st.canDelegateChooseWorldMode(player.getUuidAsString());
+    }
+
     public static void sendRecruitmentState(ServerPlayerEntity player) {
         if (player == null || player.isRemoved()) {
             return;
@@ -130,7 +145,7 @@ public final class SurvivalRecruitmentService {
         }
         boolean recruited = st != null && st.isRecruited();
         String alias = st != null ? st.getBotAlias() : "Jake";
-        boolean canChooseMode = Frens.hasBotCommandPermission(player.getCommandSource());
+        boolean canChooseMode = canChooseWorldMode(player);
         boolean modeSelectionRequired = canChooseMode && (st == null || !st.isModeSelectionDone() || st.getSelectedWorldMode() == null);
         ServerPlayNetworking.send(player, new RecruitmentStatePayload(
                 enabled,
@@ -171,7 +186,7 @@ public final class SurvivalRecruitmentService {
         if (server == null || Frens.CONFIG == null) {
             return;
         }
-        if (!Frens.hasBotCommandPermission(player.getCommandSource())) {
+        if (!canChooseWorldMode(player)) {
             ChatUtils.sendSystemMessage(player.getCommandSource(), "You are not allowed to change world mode.");
             sendRecruitmentState(player);
             return;
@@ -184,7 +199,7 @@ public final class SurvivalRecruitmentService {
             ChatUtils.sendSystemMessage(player.getCommandSource(), "To begin: go to a village, interact with villager/bell/bed, then initiate contact.");
         } else {
             ChatUtils.sendSystemMessage(player.getCommandSource(), "World mode set to Admin.");
-            ChatUtils.sendSystemMessage(player.getCommandSource(), "Spawn a bot with /bot spawn <name> play.");
+            ChatUtils.sendSystemMessage(player.getCommandSource(), "Spawn a bot with /bot spawn <name> admin.");
         }
 
         ManualConfig.SurvivalRecruitmentState st = getState(server);

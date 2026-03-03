@@ -138,7 +138,7 @@ The bot inventory Conversation overlay includes Admin tools.
 
 ### Operator requirement
 
-Most admin actions are **operator-only** on the server. Even if the client UI shows a button, the server may reject it if you are not an operator.
+Most admin actions are **operator-only** on the server. The client now hides most admin-only topics for guests, but server checks still remain authoritative.
 
 ### Set quest stage
 
@@ -151,6 +151,53 @@ Stage 4 should set the companion to **Permanent** immediately.
 ### Useful admin checks
 
 - **Admin → Status**: shows recruited/permanent/stage/anchor state for the world.
+
+---
+
+## Multi-bot inventory switching (QoL)
+
+If you have multiple companions, you can switch between them quickly from the inventory/actions UI:
+
+- Open a companion inventory (`/bot open <alias>` or right-click companion).
+- In that screen, press `[` / `]` for previous/next companion.
+- Or click `<` / `>` in the switch chip (stats row / expanded overlay header).
+
+Notes:
+
+- Switching uses `/bot open <alias>` behind the scenes.
+- Server-side permission checks still apply (ownership/operator rules).
+- If there is no other available companion target, the UI now shows a short hint instead of silently doing nothing.
+
+---
+
+## Protected Zone Governance (Quick Tips)
+
+If your settlement keeps getting accidentally modified (or you want shared ownership rules), use protected zones.
+
+### Core zone commands
+
+- `/bot zone protect <radius> [label]`
+  - Creates a protected zone centered on the block you are looking at.
+- `/bot zone list`
+  - Shows zone center, radius, owner, access mode, and permit count.
+- `/bot zone remove <label>`
+  - Removes a zone (owner or operator).
+
+### Access control commands
+
+- `/bot zone mode <label> <owner_only|allowlist|public>`
+- `/bot zone permit <label> <owner>`
+- `/bot zone revoke <label> <owner>`
+
+`<owner>` can be a player name, UUID, or a bot alias owner.
+
+### Mode behavior
+
+- `owner_only`: only the zone owner can authorize bot edits inside the zone.
+- `allowlist`: owner plus explicitly permitted owners.
+- `public`: everyone can authorize bot edits.
+
+> Tip: for multiplayer co-op bases, `allowlist` + explicit `permit` entries is the safest default.
 
 ---
 

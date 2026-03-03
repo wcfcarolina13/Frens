@@ -67,10 +67,14 @@ public final class MountedLeafClearingService {
             if (!world.getBlockState(leaf).isIn(BlockTags.LEAVES)) {
                 continue;
             }
-            if (ProtectedZoneService.isProtected(leaf, world, null)) {
+            if (ProtectedZoneService.isProtected(leaf, world, BotTerritoryAuthorizationService.resolveBotOwnerUuid(bot))) {
                 continue;
             }
             if (TreeDetector.isNearHumanBlocks(world, leaf, 3)) {
+                continue;
+            }
+            var auth = BotTerritoryAuthorizationService.authorizeBlockMutation(bot, world, leaf);
+            if (!auth.allowed()) {
                 continue;
             }
             if (bot.squaredDistanceTo(Vec3d.ofCenter(leaf)) > LEAF_REACH_SQ) {

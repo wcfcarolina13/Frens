@@ -1689,13 +1689,17 @@ public final class ReturnBaseStuckService {
         if (bot == null || world == null || pos == null) {
             return false;
         }
+        var auth = BotTerritoryAuthorizationService.authorizeBlockMutation(bot, world, pos);
+        if (!auth.allowed()) {
+            return false;
+        }
         BlockState state = world.getBlockState(pos);
         if (state.isAir() || state.isReplaceable()) {
             return false;
         }
 
         // Respect protected zones and avoid griefing player structures/storage.
-        if (ProtectedZoneService.isProtected(pos, world, null)) {
+        if (ProtectedZoneService.isProtected(pos, world, BotTerritoryAuthorizationService.resolveBotOwnerUuid(bot))) {
             return false;
         }
         // Avoid mining near obvious human constructions (doors/planks/etc.).
@@ -1824,6 +1828,10 @@ public final class ReturnBaseStuckService {
         
         server.execute(() -> {
             try {
+                var auth = BotTerritoryAuthorizationService.authorizeBlockMutation(bot, world, target);
+                if (!auth.allowed()) {
+                    return;
+                }
                 boolean started = bot.interactionManager.tryBreakBlock(target);
                 startedBreaking.set(started);
                 if (started) {
@@ -1862,6 +1870,10 @@ public final class ReturnBaseStuckService {
             CountDownLatch latch2 = new CountDownLatch(1);
             server.execute(() -> {
                 try {
+                    var auth = BotTerritoryAuthorizationService.authorizeBlockMutation(bot, world, target);
+                    if (!auth.allowed()) {
+                        return;
+                    }
                     bot.interactionManager.tryBreakBlock(target);
                     bot.swingHand(Hand.MAIN_HAND, true);
                 } finally {

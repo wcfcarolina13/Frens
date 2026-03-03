@@ -108,6 +108,11 @@ public final class BotControlApplier {
                 ServerCommandSource source = server.getCommandSource().withSilent().withPermissions(net.wcfcarolina13.Frens.OPERATOR_PERMISSIONS);
                 ManualConfig.BotSpawn spawn = Frens.CONFIG.getBotSpawn(alias);
                 if (spawn != null) {
+                    // Skip auto-spawn if bot was saved in a different world
+                    if (spawn.levelName() != null && !spawn.levelName().isBlank()
+                            && !spawn.levelName().equals(server.getSaveProperties().getLevelName())) {
+                        return;
+                    }
                     Identifier id = Identifier.tryParse(spawn.dimension());
                     if (id != null) {
                         RegistryKey<World> key = RegistryKey.of(RegistryKeys.WORLD, id);

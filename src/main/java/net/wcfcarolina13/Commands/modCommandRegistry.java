@@ -190,6 +190,7 @@ public class modCommandRegistry {
             Items.BLAST_FURNACE,
             Items.SMOKER
     );
+        private static final Map<String, Long> RECRUIT_MODE_SWITCH_CONFIRM_UNTIL_MS = new ConcurrentHashMap<>();
 
 
     public record BotStopTask(MinecraftServer server, ServerCommandSource botSource,
@@ -1377,6 +1378,30 @@ public class modCommandRegistry {
 	                            .then(literal("status")
 	                                .executes(context -> executeRecruitStatus(context))
                             )
+                                .then(literal("mode_access")
+                                    .then(literal("status")
+                                        .executes(context -> executeRecruitModeAccessStatus(context))
+                                    )
+                                    .then(literal("allow")
+                                        .then(CommandManager.argument("player", EntityArgumentType.player())
+                                            .executes(context -> executeRecruitModeAccessAllow(
+                                                    context,
+                                                    EntityArgumentType.getPlayer(context, "player"),
+                                                    true))
+                                        )
+                                    )
+                                    .then(literal("revoke")
+                                        .then(CommandManager.argument("player", EntityArgumentType.player())
+                                            .executes(context -> executeRecruitModeAccessAllow(
+                                                    context,
+                                                    EntityArgumentType.getPlayer(context, "player"),
+                                                    false))
+                                        )
+                                    )
+                                    .then(literal("clear")
+                                        .executes(context -> executeRecruitModeAccessClear(context))
+                                    )
+                                )
                             .then(literal("reset")
                                 .executes(context -> executeRecruitReset(context))
                             )
@@ -1407,6 +1432,23 @@ public class modCommandRegistry {
             case "survival", "s" -> GameMode.SURVIVAL;
             default -> null;
         };
+    }
+
+    private static String normalizeSpawnModeOrNull(String rawMode) {
+        if (rawMode == null) {
+            return null;
+        }
+        String mode = rawMode.trim().toLowerCase(Locale.ROOT);
+        return switch (mode) {
+            case "admin", "play" -> "admin";
+            case "questing", "quest" -> "questing";
+            case "training", "train" -> "training";
+            default -> null;
+        };
+    }
+
+    private static boolean isAdminLikeSpawnMode(String normalizedMode) {
+        return "admin".equalsIgnoreCase(normalizedMode) || "questing".equalsIgnoreCase(normalizedMode);
     }
 
     private static ServerPlayerEntity getIssuerOrNull(CommandContext<ServerCommandSource> context) {
@@ -1440,6 +1482,13 @@ public class modCommandRegistry {
         ChatUtils.sendSystemMessage(context.getSource(), "World key: " + (worldKey == null ? "default" : worldKey));
         ChatUtils.sendSystemMessage(context.getSource(), "Mode selection done: " + st.isModeSelectionDone()
                 + " (selected=" + (st.getSelectedWorldMode() == null ? "unset" : st.getSelectedWorldMode()) + ")");
+        Map<String, String> delegates = st.getModeSelectionDelegatesByUuid();
+        ChatUtils.sendSystemMessage(context.getSource(), "Mode delegates: " + delegates.size());
+        if (!delegates.isEmpty()) {
+            List<String> names = new ArrayList<>(delegates.values());
+            names.sort(String.CASE_INSENSITIVE_ORDER);
+            ChatUtils.sendSystemMessage(context.getSource(), "Delegate names: " + String.join(", ", names));
+        }
         ChatUtils.sendSystemMessage(context.getSource(), "Recruited: " + st.isRecruited() + " (botAlias=" + st.getBotAlias() + ")");
         if (st.isRecruited()) {
             String by = (st.getRecruitedByName() == null || st.getRecruitedByName().isBlank()) ? "unknown" : st.getRecruitedByName();
@@ -1461,6 +1510,94 @@ public class modCommandRegistry {
         return 1;
     }
 
+    private static int executeRecruitModeAccessStatus(CommandContext<ServerCommandSource> context) {
+        if (!hasOperatorPermissions(context)) {
+            ChatUtils.sendSystemMessage(context.getSource(), "You must be an operator to use /bot recruit.");
+            return 0;
+        }
+        MinecraftServer server = context.getSource().getServer();
+        if (server == null || Frens.CONFIG == null) {
+            ChatUtils.sendSystemMessage(context.getSource(), "Mode access status unavailable: server/config not ready.");
+            return 0;
+        }
+
+        ManualConfig.SurvivalRecruitmentState st = SurvivalRecruitmentService.getState(server);
+        Map<String, String> delegates = st.getModeSelectionDelegatesByUuid();
+        ChatUtils.sendSystemMessage(context.getSource(), "Mode delegates: " + delegates.size());
+        if (delegates.isEmpty()) {
+            ChatUtils.sendSystemMessage(context.getSource(), "No delegated players. Operators can always choose world mode.");
+            return 1;
+        }
+
+        List<String> names = new ArrayList<>(delegates.values());
+        names.sort(String.CASE_INSENSITIVE_ORDER);
+        ChatUtils.sendSystemMessage(context.getSource(), "Delegated players: " + String.join(", ", names));
+        return 1;
+    }
+
+    private static int executeRecruitModeAccessAllow(CommandContext<ServerCommandSource> context,
+                                                     ServerPlayerEntity target,
+                                                     boolean allowed) {
+        if (!hasOperatorPermissions(context)) {
+            ChatUtils.sendSystemMessage(context.getSource(), "You must be an operator to use /bot recruit.");
+            return 0;
+        }
+        MinecraftServer server = context.getSource().getServer();
+        if (server == null || Frens.CONFIG == null) {
+            ChatUtils.sendSystemMessage(context.getSource(), "Mode access update unavailable: server/config not ready.");
+            return 0;
+        }
+        if (target == null || target.isRemoved()) {
+            ChatUtils.sendSystemMessage(context.getSource(), "Target player not found.");
+            return 0;
+        }
+
+        ManualConfig.SurvivalRecruitmentState st = SurvivalRecruitmentService.getState(server);
+        st.setDelegateWorldModeChoice(target.getUuidAsString(), target.getName().getString(), allowed);
+        Frens.CONFIG.save();
+
+        for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
+            if (p == null || p.isRemoved() || (p instanceof createFakePlayer)) {
+                continue;
+            }
+            SurvivalRecruitmentService.sendRecruitmentState(p);
+        }
+
+        if (allowed) {
+            ChatUtils.sendSystemMessage(context.getSource(), "Granted world-mode selection access to " + target.getName().getString() + ".");
+        } else {
+            ChatUtils.sendSystemMessage(context.getSource(), "Revoked world-mode selection access from " + target.getName().getString() + ".");
+        }
+        return 1;
+    }
+
+    private static int executeRecruitModeAccessClear(CommandContext<ServerCommandSource> context) {
+        if (!hasOperatorPermissions(context)) {
+            ChatUtils.sendSystemMessage(context.getSource(), "You must be an operator to use /bot recruit.");
+            return 0;
+        }
+        MinecraftServer server = context.getSource().getServer();
+        if (server == null || Frens.CONFIG == null) {
+            ChatUtils.sendSystemMessage(context.getSource(), "Mode access update unavailable: server/config not ready.");
+            return 0;
+        }
+
+        ManualConfig.SurvivalRecruitmentState st = SurvivalRecruitmentService.getState(server);
+        int previous = st.getModeSelectionDelegatesByUuid().size();
+        st.clearWorldModeDelegates();
+        Frens.CONFIG.save();
+
+        for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
+            if (p == null || p.isRemoved() || (p instanceof createFakePlayer)) {
+                continue;
+            }
+            SurvivalRecruitmentService.sendRecruitmentState(p);
+        }
+
+        ChatUtils.sendSystemMessage(context.getSource(), "Cleared " + previous + " delegated world-mode access entr" + (previous == 1 ? "y." : "ies."));
+        return 1;
+    }
+
     private static int executeRecruitEnable(CommandContext<ServerCommandSource> context, boolean enabled) {
         if (!hasOperatorPermissions(context)) {
             ChatUtils.sendSystemMessage(context.getSource(), "You must be an operator to use /bot recruit.");
@@ -1474,6 +1611,34 @@ public class modCommandRegistry {
         MinecraftServer server = context.getSource().getServer();
         String botAlias = "Jake";
         if (server != null) {
+            String targetWorldMode = enabled ? "questing" : "admin";
+            ManualConfig.SurvivalRecruitmentState before = SurvivalRecruitmentService.getState(server);
+            String currentWorldMode = before != null ? before.getSelectedWorldMode() : null;
+            boolean shouldWarnAboutSwitch = before != null
+                    && before.isModeSelectionDone()
+                    && currentWorldMode != null
+                    && !currentWorldMode.isBlank()
+                    && !currentWorldMode.equalsIgnoreCase(targetWorldMode);
+            if (shouldWarnAboutSwitch) {
+                String worldKey = server.getSaveProperties().getLevelName();
+                if (worldKey == null || worldKey.isBlank()) {
+                    worldKey = "default";
+                }
+                String confirmKey = (worldKey + "->" + targetWorldMode).toLowerCase(Locale.ROOT);
+                long now = System.currentTimeMillis();
+                Long confirmUntil = RECRUIT_MODE_SWITCH_CONFIRM_UNTIL_MS.get(confirmKey);
+                if (confirmUntil == null || confirmUntil < now) {
+                    RECRUIT_MODE_SWITCH_CONFIRM_UNTIL_MS.put(confirmKey, now + 12_000L);
+                    ChatUtils.sendSystemMessage(context.getSource(),
+                            "Warning: switching world mode from '" + currentWorldMode + "' to '" + targetWorldMode +
+                                    "' may cause future questline/build progression conflicts.");
+                    ChatUtils.sendSystemMessage(context.getSource(),
+                            "Run the same command again within 12 seconds to confirm.");
+                    return 0;
+                }
+                RECRUIT_MODE_SWITCH_CONFIRM_UNTIL_MS.remove(confirmKey);
+            }
+
             SurvivalRecruitmentService.setWorldMode(server, enabled, context.getSource().getName());
             ManualConfig.SurvivalRecruitmentState st = SurvivalRecruitmentService.getState(server);
             botAlias = st != null ? st.getBotAlias() : botAlias;
@@ -1575,6 +1740,18 @@ public class modCommandRegistry {
     private static void spawnBot(CommandContext<ServerCommandSource> context, String spawnMode, String explicitGameMode) {
         try {
             MinecraftServer server = context.getSource().getServer(); // gets the minecraft server
+            String requestedSpawnMode = spawnMode == null ? "" : spawnMode.trim();
+            String normalizedSpawnMode = normalizeSpawnModeOrNull(requestedSpawnMode);
+            if (normalizedSpawnMode == null) {
+                ServerCommandSource serverSource = server.getCommandSource();
+                LOGGER.warn("spawnBot: invalid spawn mode '{}' for requested bot", requestedSpawnMode);
+                ChatUtils.sendSystemMessage(serverSource, "Invalid spawn mode!");
+                ChatUtils.sendSystemMessage(serverSource,
+                        "Usage: /bot spawn <your bot's name> <spawnMode: admin|questing|training> [gamemode: survival|creative]");
+                ChatUtils.sendSystemMessage(serverSource,
+                        "Legacy aliases: play -> admin, quest -> questing, train -> training");
+                return;
+            }
 
             // Survival recruitment gating: don't let non-ops bypass recruitment or resurrection.
             // Non-ops may only spawn the recruited companion (and only in play mode, and only if alive).
@@ -1596,8 +1773,8 @@ public class modCommandRegistry {
                         return;
                     }
 
-                    if (!"play".equalsIgnoreCase(spawnMode)) {
-                        ChatUtils.sendSystemMessage(context.getSource(), "Only play-mode spawning is allowed for the recruited companion.");
+                    if (!isAdminLikeSpawnMode(normalizedSpawnMode)) {
+                        ChatUtils.sendSystemMessage(context.getSource(), "Only admin/questing spawning is allowed for the recruited companion.");
                         return;
                     }
 
@@ -1632,9 +1809,17 @@ public class modCommandRegistry {
             botName = StringArgumentType.getString(context, "bot_name");
 
             ServerCommandSource serverSource = server.getCommandSource();
+                if (!requestedSpawnMode.equalsIgnoreCase(normalizedSpawnMode)) {
+                ChatUtils.sendSystemMessage(serverSource,
+                    "Note: '/bot spawn " + botName + " " + requestedSpawnMode + "' maps to mode '" + normalizedSpawnMode + "'.");
+                }
+                if ("play".equalsIgnoreCase(requestedSpawnMode)) {
+                ChatUtils.sendSystemMessage(serverSource,
+                    "Heads up: 'play' is now a legacy alias. Prefer 'admin' (or 'questing').");
+                }
 
             LOGGER.info("spawnBot starting: botName={}, mode={}, dimType={}, pos={}, facingYaw={}, facingPitch={}",
-                    botName, spawnMode, dimType.getValue(), pos, facing.y, facing.x);
+                    botName, normalizedSpawnMode, dimType.getValue(), pos, facing.y, facing.x);
 
             ServerPlayerEntity existingBot = server.getPlayerManager().getPlayer(botName);
             if (existingBot != null) {
@@ -1663,7 +1848,7 @@ public class modCommandRegistry {
                     return;
                 }
 
-                isTrainingMode = "training".equalsIgnoreCase(spawnMode);
+                isTrainingMode = "training".equalsIgnoreCase(normalizedSpawnMode);
 
                 existingBot.teleport(targetWorld, pos.x, pos.y, pos.z, java.util.Set.of(), (float) facing.y, (float) facing.x, true);
                 Objects.requireNonNull(existingBot.getAttributeInstance(EntityAttributes.KNOCKBACK_RESISTANCE)).setBaseValue(0.0);
@@ -1677,10 +1862,10 @@ public class modCommandRegistry {
                 AutoFaceEntity.startAutoFace(existingBot);
 
                 BotEventHandler.rememberSpawn(targetWorld, pos, facing.y, facing.x);
-                LOGGER.info("spawnBot: repositioned existing bot {} at {} (mode={})", botName, spawnPos.toShortString(), spawnMode);
+                LOGGER.info("spawnBot: repositioned existing bot {} at {} (mode={})", botName, spawnPos.toShortString(), normalizedSpawnMode);
 
                 // If an admin force-spawns a play bot before recruitment, treat the world as recruited to avoid UI/gating confusion.
-                if ("play".equalsIgnoreCase(spawnMode)
+                if (isAdminLikeSpawnMode(normalizedSpawnMode)
                         && SurvivalRecruitmentService.isEnabled(server)
                         && !SurvivalRecruitmentService.isWorldRecruited(server)
                         && Frens.CONFIG != null) {
@@ -1704,7 +1889,7 @@ public class modCommandRegistry {
                 return;
             }
 
-            if (spawnMode.equals("training")) {
+            if ("training".equalsIgnoreCase(normalizedSpawnMode)) {
 
                 LOGGER.info("spawnBot: entering training branch for {}", botName);
 
@@ -1751,13 +1936,13 @@ public class modCommandRegistry {
 
                 // don't initialize ollama client for training mode.
 
-            } else if (spawnMode.equals("play")) {
-                LOGGER.info("spawnBot: entering play branch for {}", botName);
+            } else if (isAdminLikeSpawnMode(normalizedSpawnMode)) {
+                LOGGER.info("spawnBot: entering {} branch for {}", normalizedSpawnMode, botName);
 
                 isTrainingMode = false;
-                LOGGER.info("Training mode disabled for play spawn.");
+                LOGGER.info("Training mode disabled for {} spawn.", normalizedSpawnMode);
 
-                LOGGER.info("About to call createFakePlayer.createFake for play bot {}", botName);
+                LOGGER.info("About to call createFakePlayer.createFake for {} bot {}", normalizedSpawnMode, botName);
                 createFakePlayer.createFake(
                         botName,
                         server,
@@ -1768,11 +1953,11 @@ public class modCommandRegistry {
                         mode,
                         false
                 );
-                LOGGER.info("Returned from createFakePlayer.createFake for play bot {}", botName);
+                    LOGGER.info("Returned from createFakePlayer.createFake for {} bot {}", normalizedSpawnMode, botName);
 
                 ServerWorld spawnWorld = server.getWorld(dimType);
                 if (spawnWorld != null) {
-                    LOGGER.info("spawnBot: remembering spawn for play bot {}", botName);
+                    LOGGER.info("spawnBot: remembering spawn for {} bot {}", normalizedSpawnMode, botName);
                     BotEventHandler.rememberSpawn(spawnWorld, pos, facing.y, facing.x);
                 }
 
@@ -1924,7 +2109,7 @@ public class modCommandRegistry {
                 LOGGER.warn("spawnBot: invalid spawn mode '{}' for bot {}", spawnMode, botName);
                 ChatUtils.sendSystemMessage(serverSource, "Invalid spawn mode!");
                 ChatUtils.sendSystemMessage(serverSource,
-                        "Usage: /bot spawn <your bot's name> <spawnMode: training or play> [gamemode: survival or creative]");
+                    "Usage: /bot spawn <your bot's name> <spawnMode: admin|questing|training> [gamemode: survival|creative]");
             }
 
         } catch (Exception e) {
@@ -4674,7 +4859,13 @@ public class modCommandRegistry {
             // Clear snow on target
             var state = bot.getEntityWorld().getBlockState(placePos);
             if (state.isOf(net.minecraft.block.Blocks.SNOW) || state.isOf(net.minecraft.block.Blocks.SNOW_BLOCK)) {
-                bot.getEntityWorld().breakBlock(placePos, false);
+                if (bot.getEntityWorld() instanceof ServerWorld sw) {
+                    var auth = net.wcfcarolina13.GameAI.services.BotTerritoryAuthorizationService
+                            .authorizeBlockMutation(bot, sw, placePos);
+                    if (auth.allowed()) {
+                        bot.getEntityWorld().breakBlock(placePos, false);
+                    }
+                }
             }
             if (BotActions.placeBlockAt(bot, placePos, target.face, List.of(placeItem))) {
                 return placePos.toImmutable();
@@ -6805,6 +6996,142 @@ public class modCommandRegistry {
         return 1;
     }
 
+    static int executeZonePermit(CommandContext<ServerCommandSource> context,
+                                 String label,
+                                 String ownerDescriptor) throws CommandSyntaxException {
+        ServerCommandSource source = context.getSource();
+        ServerPlayerEntity actor = source.getPlayerOrThrow();
+        ServerWorld world = source.getWorld();
+        boolean isAdmin = Frens.isOperator(source);
+
+        if (label == null || label.isBlank()) {
+            source.sendError(Text.literal("Provide a zone label."));
+            return 0;
+        }
+        if (ownerDescriptor == null || ownerDescriptor.isBlank()) {
+            source.sendError(Text.literal("Provide a player name, UUID, or bot alias owner to permit."));
+            return 0;
+        }
+
+        ProtectedZoneService.ProtectedZone zone = findZoneByLabel(world, label);
+        if (zone == null) {
+            source.sendError(Text.literal("Zone '" + label + "' not found."));
+            return 0;
+        }
+
+        if (!isAdmin && (zone.getOwnerUuid() == null || !zone.getOwnerUuid().equals(actor.getUuid()))) {
+            source.sendError(Text.literal("Only the zone owner (or an operator) can grant access."));
+            return 0;
+        }
+
+        ZoneOwnerSubject subject = resolveOwnerSubjectForZone(source.getServer(), ownerDescriptor);
+        if (subject == null) {
+            source.sendError(Text.literal("Couldn't resolve owner from '" + ownerDescriptor + "'."));
+            return 0;
+        }
+        if (zone.getOwnerUuid() != null && zone.getOwnerUuid().equals(subject.ownerUuid())) {
+            source.sendError(Text.literal("That owner already controls this zone."));
+            return 0;
+        }
+
+        boolean ok = ProtectedZoneService.grantZoneAccess(world, zone.getLabel(), subject.ownerUuid());
+        if (!ok) {
+            source.sendError(Text.literal(subject.ownerName() + " already has access to '" + zone.getLabel() + "'."));
+            return 0;
+        }
+
+        source.sendFeedback(() -> Text.literal("§aGranted zone access for '" + zone.getLabel() + "' to " + subject.ownerName() + "."), false);
+        return 1;
+    }
+
+    static int executeZoneRevoke(CommandContext<ServerCommandSource> context,
+                                 String label,
+                                 String ownerDescriptor) throws CommandSyntaxException {
+        ServerCommandSource source = context.getSource();
+        ServerPlayerEntity actor = source.getPlayerOrThrow();
+        ServerWorld world = source.getWorld();
+        boolean isAdmin = Frens.isOperator(source);
+
+        if (label == null || label.isBlank()) {
+            source.sendError(Text.literal("Provide a zone label."));
+            return 0;
+        }
+        if (ownerDescriptor == null || ownerDescriptor.isBlank()) {
+            source.sendError(Text.literal("Provide a player name, UUID, or bot alias owner to revoke."));
+            return 0;
+        }
+
+        ProtectedZoneService.ProtectedZone zone = findZoneByLabel(world, label);
+        if (zone == null) {
+            source.sendError(Text.literal("Zone '" + label + "' not found."));
+            return 0;
+        }
+
+        if (!isAdmin && (zone.getOwnerUuid() == null || !zone.getOwnerUuid().equals(actor.getUuid()))) {
+            source.sendError(Text.literal("Only the zone owner (or an operator) can revoke access."));
+            return 0;
+        }
+
+        ZoneOwnerSubject subject = resolveOwnerSubjectForZone(source.getServer(), ownerDescriptor);
+        if (subject == null) {
+            source.sendError(Text.literal("Couldn't resolve owner from '" + ownerDescriptor + "'."));
+            return 0;
+        }
+        if (zone.getOwnerUuid() != null && zone.getOwnerUuid().equals(subject.ownerUuid())) {
+            source.sendError(Text.literal("You can't revoke the primary owner."));
+            return 0;
+        }
+
+        boolean ok = ProtectedZoneService.revokeZoneAccess(world, zone.getLabel(), subject.ownerUuid());
+        if (!ok) {
+            source.sendError(Text.literal(subject.ownerName() + " does not have explicit access to '" + zone.getLabel() + "'."));
+            return 0;
+        }
+
+        source.sendFeedback(() -> Text.literal("§aRevoked zone access for '" + zone.getLabel() + "' from " + subject.ownerName() + "."), false);
+        return 1;
+    }
+
+    static int executeZoneMode(CommandContext<ServerCommandSource> context,
+                               String label,
+                               String modeRaw) throws CommandSyntaxException {
+        ServerCommandSource source = context.getSource();
+        ServerPlayerEntity actor = source.getPlayerOrThrow();
+        ServerWorld world = source.getWorld();
+        boolean isAdmin = Frens.isOperator(source);
+
+        if (label == null || label.isBlank()) {
+            source.sendError(Text.literal("Provide a zone label."));
+            return 0;
+        }
+
+        ProtectedZoneService.ProtectedZone zone = findZoneByLabel(world, label);
+        if (zone == null) {
+            source.sendError(Text.literal("Zone '" + label + "' not found."));
+            return 0;
+        }
+
+        if (!isAdmin && (zone.getOwnerUuid() == null || !zone.getOwnerUuid().equals(actor.getUuid()))) {
+            source.sendError(Text.literal("Only the zone owner (or an operator) can change access mode."));
+            return 0;
+        }
+
+        String mode = normalizeZoneMode(modeRaw);
+        if (mode == null) {
+            source.sendError(Text.literal("Invalid mode '" + modeRaw + "'. Use owner_only, allowlist, or public."));
+            return 0;
+        }
+
+        boolean ok = ProtectedZoneService.setZoneAccessMode(world, zone.getLabel(), mode);
+        if (!ok) {
+            source.sendError(Text.literal("Failed to set access mode for zone '" + zone.getLabel() + "'."));
+            return 0;
+        }
+
+        source.sendFeedback(() -> Text.literal("§aZone '" + zone.getLabel() + "' access mode set to §f" + mode + "§a."), false);
+        return 1;
+    }
+
     static int executeZoneList(CommandContext<ServerCommandSource> context) throws CommandSyntaxException {
         ServerCommandSource source = context.getSource();
         ServerWorld world = source.getWorld();
@@ -6818,12 +7145,108 @@ public class modCommandRegistry {
         source.sendFeedback(() -> Text.literal("§6Protected Zones in " + world.getRegistryKey().getValue() + ":"), false);
         for (ProtectedZoneService.ProtectedZone zone : zones) {
             BlockPos center = zone.getCenter();
+            String mode = zone.getAccessMode();
+            int permits = zone.getAllowedOwnerUuids().size();
             source.sendFeedback(() -> Text.literal(
                     "§7- §a" + zone.getLabel() + "§7: center=" + center.toShortString() + 
-                    ", radius=" + zone.getRadius() + ", owner=" + zone.getOwnerName()), false);
+                    ", radius=" + zone.getRadius() + ", owner=" + zone.getOwnerName() +
+                    ", mode=" + mode + ", permits=" + permits), false);
         }
         
         return 1;
+    }
+
+    private static ProtectedZoneService.ProtectedZone findZoneByLabel(ServerWorld world, String label) {
+        if (world == null || label == null || label.isBlank()) {
+            return null;
+        }
+        String needle = label.trim();
+        List<ProtectedZoneService.ProtectedZone> zones = ProtectedZoneService.listZones(world);
+        for (ProtectedZoneService.ProtectedZone zone : zones) {
+            if (zone != null && needle.equals(zone.getLabel())) {
+                return zone;
+            }
+        }
+        for (ProtectedZoneService.ProtectedZone zone : zones) {
+            if (zone != null && zone.getLabel() != null && needle.equalsIgnoreCase(zone.getLabel())) {
+                return zone;
+            }
+        }
+        return null;
+    }
+
+    private static String normalizeZoneMode(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        String mode = raw.trim().toLowerCase(Locale.ROOT);
+        if ("public".equals(mode) || "allowlist".equals(mode) || "owner_only".equals(mode)) {
+            return mode;
+        }
+        return null;
+    }
+
+    private record ZoneOwnerSubject(UUID ownerUuid, String ownerName) {}
+
+    private static ZoneOwnerSubject resolveOwnerSubjectForZone(MinecraftServer server, String raw) {
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        String token = raw.trim();
+
+        UUID parsed = tryParseUuidForZone(token);
+        if (parsed != null) {
+            String display = token;
+            if (server != null && server.getPlayerManager() != null) {
+                ServerPlayerEntity online = server.getPlayerManager().getPlayer(parsed);
+                if (online != null && online.getName() != null) {
+                    display = online.getName().getString();
+                }
+            }
+            return new ZoneOwnerSubject(parsed, display);
+        }
+
+        if (server != null && server.getPlayerManager() != null) {
+            ServerPlayerEntity byName = server.getPlayerManager().getPlayer(token);
+            if (byName == null) {
+                for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
+                    if (p != null && p.getName() != null && token.equalsIgnoreCase(p.getName().getString())) {
+                        byName = p;
+                        break;
+                    }
+                }
+            }
+            if (byName != null && byName.getUuid() != null) {
+                String display = byName.getName() != null ? byName.getName().getString() : token;
+                return new ZoneOwnerSubject(byName.getUuid(), display);
+            }
+        }
+
+        if (Frens.CONFIG != null) {
+            ManualConfig.BotOwnership owner = Frens.CONFIG.getOwner(token);
+            if (owner != null && owner.ownerUuid() != null && !owner.ownerUuid().isBlank()) {
+                UUID ownerUuid = tryParseUuidForZone(owner.ownerUuid());
+                if (ownerUuid != null) {
+                    String display = owner.ownerName() != null && !owner.ownerName().isBlank()
+                            ? owner.ownerName()
+                            : token;
+                    return new ZoneOwnerSubject(ownerUuid, display);
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private static UUID tryParseUuidForZone(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        try {
+            return UUID.fromString(raw.trim());
+        } catch (IllegalArgumentException ignored) {
+            return null;
+        }
     }
 
             private static void interruptAmbientHobbyIfAny(ServerPlayerEntity bot, String reason) {

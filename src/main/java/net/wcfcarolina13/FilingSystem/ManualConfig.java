@@ -661,6 +661,7 @@ public class ManualConfig {
     }
 
     public static class BotSpawn {
+        private String levelName;
         private String dimension;
         private double x;
         private double y;
@@ -671,13 +672,18 @@ public class ManualConfig {
         public BotSpawn() {
         }
 
-        public BotSpawn(String dimension, double x, double y, double z, float yaw, float pitch) {
+        public BotSpawn(String levelName, String dimension, double x, double y, double z, float yaw, float pitch) {
+            this.levelName = levelName;
             this.dimension = dimension;
             this.x = x;
             this.y = y;
             this.z = z;
             this.yaw = yaw;
             this.pitch = pitch;
+        }
+
+        public String levelName() {
+            return levelName;
         }
 
         public String dimension() {
@@ -857,6 +863,9 @@ public class ManualConfig {
         private String selectedWorldMode;
         private long modeSelectedAtEpochMs;
         private String modeSelectedByName;
+        // Optional delegated players (uuid -> last known name) that may choose world mode.
+        // Operators are always allowed regardless of this map.
+        private Map<String, String> modeSelectionDelegatesByUuid;
 
         // ===== Companion questline (per-world, survival recruitment mode) =====
         // Anchor location for village improvement checks.
@@ -958,6 +967,41 @@ public class ManualConfig {
             this.modeSelectedByName = (modeSelectedByName == null || modeSelectedByName.isBlank())
                     ? null
                     : modeSelectedByName.trim();
+        }
+
+        public Map<String, String> getModeSelectionDelegatesByUuid() {
+            if (modeSelectionDelegatesByUuid == null) {
+                modeSelectionDelegatesByUuid = new HashMap<>();
+            }
+            return modeSelectionDelegatesByUuid;
+        }
+
+        public boolean canDelegateChooseWorldMode(String uuid) {
+            if (uuid == null || uuid.isBlank()) {
+                return false;
+            }
+            return getModeSelectionDelegatesByUuid().containsKey(normalizeUuid(uuid));
+        }
+
+        public void setDelegateWorldModeChoice(String uuid, String name, boolean allowed) {
+            if (uuid == null || uuid.isBlank()) {
+                return;
+            }
+            String key = normalizeUuid(uuid);
+            if (!allowed) {
+                getModeSelectionDelegatesByUuid().remove(key);
+                return;
+            }
+            String displayName = (name == null || name.isBlank()) ? key : name.trim();
+            getModeSelectionDelegatesByUuid().put(key, displayName);
+        }
+
+        public void clearWorldModeDelegates() {
+            getModeSelectionDelegatesByUuid().clear();
+        }
+
+        private static String normalizeUuid(String uuid) {
+            return uuid == null ? "" : uuid.trim().toLowerCase(Locale.ROOT);
         }
 
         public boolean isCompanionAnchorSet() {

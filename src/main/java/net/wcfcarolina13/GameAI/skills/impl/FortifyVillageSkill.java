@@ -53,6 +53,8 @@ import org.slf4j.LoggerFactory;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ThreadLocalRandom;
+import java.nio.charset.StandardCharsets;
+import java.util.zip.CRC32;
 
 /**
  * Skill for autonomously building a defensive wall perimeter around a village.
@@ -64,6 +66,8 @@ import java.util.concurrent.ThreadLocalRandom;
  *   /bot fortify resume <name>       — continue saved wall
  *   /bot fortify patch <name>        — scan & repair existing wall
  *   /bot fortify status <name>       — show completion stats + particles
+ *   /bot fortify drift <name>        — compare saved schema vs current village anchors
+ *   /bot fortify expand <name>       — merge current footprint into saved schema
  *   /bot fortify list                — list saved walls for this world
  *   /bot fortify name <old> <new>    — rename a saved wall
  *   /bot fortify merge <name>        — merge current village into existing wall
@@ -97,6 +101,8 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
     private static final int MAX_BREAK_THROUGHS_PER_WALK = 3;
     private static final int PERIMETER_VERTEX_SKIP = 3;
     private static final int PERIMETER_WALK_SEARCH_RADIUS = 2;
+    /** Walk offset for moat digging: outside moat trench (offset 3) + exterior clear (offset 4). */
+    private static final int MOAT_WALK_OFFSET = 5;
     private static final int MIN_APPROACH_OPEN_EXITS = 2;
     private static final long DIG_RESULT_POLL_MS = 50L;
     private static final long DIG_RESULT_TIMEOUT_MS = 1_200L;
@@ -122,6 +128,7 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
     private static final int FORTIFY_PATCH_SKIP_LOG_SAMPLE_LIMIT = 10;
 
     private static final int FORTIFY_GATE_EXIT_SIDESTEP_NO_PROGRESS_LIMIT = 2;
+    private static final int FORTIFY_MOAT_SIDESTEP_NO_PROGRESS_LIMIT = 3;
 
     private static final int FORTIFY_TRAP_CARVE_DEPTH_LIMIT = 6;
 
@@ -337,16 +344,39 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
 
             // /bot fortify moat [name]
             if (lower.equals("moat")) {
+                return executeMoat(source, bot, world, server, null);
+            }
+            if (lower.startsWith("moat ")) {
+                String wallName = args.trim().substring(5).trim();
+                return executeMoat(source, bot, world, server, wallName);
+            }
+
+            // /bot fortify drift [name]
+            if (lower.equals("drift")) {
                 String wallName = findNearestWallName(server, world, bot.getBlockPos());
                 if (wallName == null) {
                     return SkillExecutionResult.failure("No saved walls found. Build one first with `/bot fortify`.");
                 }
                 ChatUtils.sendSystemMessage(source, "§7[Fortify] Auto-detected nearest wall: §f" + wallName);
-                return executeMoat(source, bot, world, server, wallName);
+                return handleDrift(source, bot, world, server, wallName);
             }
-            if (lower.startsWith("moat ")) {
-                String wallName = args.trim().substring(5).trim();
-                return executeMoat(source, bot, world, server, wallName);
+            if (lower.startsWith("drift ")) {
+                String wallName = args.trim().substring(6).trim();
+                return handleDrift(source, bot, world, server, wallName);
+            }
+
+            // /bot fortify expand [name]
+            if (lower.equals("expand")) {
+                String wallName = findNearestWallName(server, world, bot.getBlockPos());
+                if (wallName == null) {
+                    return SkillExecutionResult.failure("No saved walls found. Build one first with `/bot fortify`.");
+                }
+                ChatUtils.sendSystemMessage(source, "§7[Fortify] Auto-detected nearest wall: §f" + wallName);
+                return handleExpand(source, bot, world, server, wallName, "expand");
+            }
+            if (lower.startsWith("expand ")) {
+                String wallName = args.trim().substring(7).trim();
+                return handleExpand(source, bot, world, server, wallName, "expand");
             }
 
             // /bot fortify merge [name]
@@ -356,11 +386,11 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
                     return SkillExecutionResult.failure("No saved walls found. Build one first with `/bot fortify`.");
                 }
                 ChatUtils.sendSystemMessage(source, "§7[Fortify] Auto-detected nearest wall: §f" + wallName);
-                return handleMerge(source, bot, world, server, wallName);
+                return handleExpand(source, bot, world, server, wallName, "merge");
             }
             if (lower.startsWith("merge ")) {
                 String wallName = args.trim().substring(6).trim();
-                return handleMerge(source, bot, world, server, wallName);
+                return handleExpand(source, bot, world, server, wallName, "merge");
             }
         }
 
@@ -377,9 +407,33 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
     public SkillExecutionResult executeMoat(ServerCommandSource source, ServerPlayerEntity bot,
                                              ServerWorld world, MinecraftServer server, String wallName) {
         String worldKey = FortificationPersistenceService.serverWorldKey(server, world);
-        Optional<SavedFortification> opt = FortificationPersistenceService.load(server, worldKey, wallName);
+        String requestedName = wallName != null ? wallName.trim() : "";
+        String effectiveWallName = requestedName;
+        Optional<SavedFortification> opt = Optional.empty();
+
+        if (effectiveWallName.isBlank()) {
+            String nearest = findNearestWallName(server, world, bot.getBlockPos());
+            if (nearest != null) {
+                effectiveWallName = nearest;
+                ChatUtils.sendSystemMessage(source, "§7[Fortify] Auto-detected nearest wall: §f" + effectiveWallName);
+                opt = FortificationPersistenceService.load(server, worldKey, effectiveWallName);
+            }
+        } else {
+            opt = FortificationPersistenceService.load(server, worldKey, effectiveWallName);
+        }
+
         if (opt.isEmpty()) {
-            return SkillExecutionResult.failure("No saved wall named '" + wallName + "'. Use `/bot fortify list` to see saved walls.");
+            Optional<SavedFortification> bootstrap = bootstrapFortificationSchemaForMoat(
+                    source, bot, world, server, effectiveWallName);
+            if (bootstrap.isEmpty()) {
+                if (requestedName.isBlank()) {
+                    return SkillExecutionResult.failure("No saved walls found and no village schema could be bootstrapped nearby.");
+                }
+                return SkillExecutionResult.failure("No saved wall named '" + requestedName + "' and no nearby village schema could be bootstrapped.");
+            }
+            SavedFortification created = bootstrap.get();
+            effectiveWallName = created.getName();
+            opt = Optional.of(created);
         }
 
         SavedFortification saved = opt.get();
@@ -441,8 +495,15 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
         if (!allDigBlocks.isEmpty()) {
             showOverhead(bot, "Digging moat (" + allDigBlocks.size() + " blocks)...");
 
-            // Build a moat walk path with corner coverage enabled.
-            List<BlockPos> path = buildPerimeterPath(layout, world, surfaceProfile, 2, 0);
+            Set<Long> moatWalkBlockedColumns = new HashSet<>();
+            for (ProceduralWallBlock block : allDigBlocks) {
+                BlockPos pos = block.worldPos();
+                moatWalkBlockedColumns.add(packXZ(pos.getX(), pos.getZ()));
+            }
+
+            // Build a moat walk path outside the trench so the bot doesn't fall
+            // into already-dug moat sections while walking between waypoints.
+            List<BlockPos> path = buildPerimeterPath(layout, world, surfaceProfile, MOAT_WALK_OFFSET, 0, moatWalkBlockedColumns);
             MoatDigResult moatDigResult = digMoatSimplePerimeterWalk(
                     source,
                     bot,
@@ -498,17 +559,17 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
         }
 
         boolean moatComplete = remainingAfterDig == 0;
-        FortificationPersistenceService.setMoatComplete(server, worldKey, wallName, moatComplete);
+        FortificationPersistenceService.setMoatComplete(server, worldKey, effectiveWallName, moatComplete);
 
         String summary;
         if (moatComplete) {
             summary = String.format("Moat complete for '%s'. %d blocks dug, %d blocks placed.",
-                wallName, totalDug, totalPlaced);
+                effectiveWallName, totalDug, totalPlaced);
             ChatUtils.sendChatMessages(source, "§a[Fortify] " + summary);
             showOverhead(bot, "Moat done!");
         } else {
             summary = String.format("Moat partially complete for '%s'. %d blocks dug, %d remaining, %d blocks placed.",
-                wallName, totalDug, remainingAfterDig, totalPlaced);
+                effectiveWallName, totalDug, remainingAfterDig, totalPlaced);
             ChatUtils.sendChatMessages(source, "§e[Fortify] " + summary);
             showOverhead(bot, "Moat partial: " + remainingAfterDig + " left");
         }
@@ -1184,6 +1245,114 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
 
     private SkillExecutionResult handleMerge(ServerCommandSource source, ServerPlayerEntity bot,
                                               ServerWorld world, MinecraftServer server, String wallName) {
+        return handleExpand(source, bot, world, server, wallName, "merge");
+    }
+
+    private SkillExecutionResult handleDrift(ServerCommandSource source, ServerPlayerEntity bot,
+                                             ServerWorld world, MinecraftServer server, String wallName) {
+        String worldKey = FortificationPersistenceService.serverWorldKey(server, world);
+        Optional<SavedFortification> opt = FortificationPersistenceService.load(server, worldKey, wallName);
+        if (opt.isEmpty()) {
+            return SkillExecutionResult.failure("No saved wall named '" + wallName + "'. Use `/bot fortify list` to see saved walls.");
+        }
+
+        SavedFortification saved = opt.get();
+        List<WallPoint> savedHull = saved.getHullWallPoints();
+        if (savedHull.size() < 3) {
+            return SkillExecutionResult.failure("Saved wall '" + wallName + "' has invalid hull data.");
+        }
+
+        int searchRadius = Math.max(48, saved.getSearchRadius());
+        showOverhead(bot, "Checking schema drift...");
+
+        List<WallPoint> detectedAnchors = VillageFortificationLayoutService.detectVillagePositions(
+                world, saved.getCenter(), searchRadius);
+        if (detectedAnchors.isEmpty()) {
+            return SkillExecutionResult.failure("Could not detect village anchors near saved wall center.");
+        }
+
+        FortificationLayout currentLayout = VillageFortificationLayoutService.generateLayout(
+                world, saved.getCenter(), searchRadius);
+        if (currentLayout.hullVertices().size() < 3) {
+            return SkillExecutionResult.failure("Could not compute current fortification hull for drift check.");
+        }
+
+        String currentAnchorSig = signatureForWallPoints(detectedAnchors);
+        String currentHullSig = signatureForWallPoints(currentLayout.hullVertices());
+
+        String baselineAnchorSig = saved.getPoiStructureSignature();
+        String baselineHullSig = saved.getHullSignature();
+        boolean baselineInitialized = false;
+
+        if (baselineAnchorSig.isBlank()) {
+            baselineAnchorSig = currentAnchorSig;
+            saved.setPoiStructureSignature(baselineAnchorSig);
+            baselineInitialized = true;
+        }
+        if (baselineHullSig.isBlank()) {
+            baselineHullSig = signatureForWallPoints(savedHull);
+            saved.setHullSignature(baselineHullSig);
+            baselineInitialized = true;
+        }
+        if (saved.getSchemaVersion() < 2) {
+            saved.setSchemaVersion(2);
+            baselineInitialized = true;
+        }
+        if (saved.getSchemaRevision() <= 0) {
+            saved.setSchemaRevision(1L);
+            baselineInitialized = true;
+        }
+        if (baselineInitialized) {
+            if (saved.getSchemaOrigin() == null || saved.getSchemaOrigin().isBlank()) {
+                saved.setSchemaOrigin("legacy");
+            }
+            saved.setSchemaUpdatedAt(System.currentTimeMillis());
+            FortificationPersistenceService.save(server, saved);
+            ChatUtils.sendSystemMessage(source,
+                    "§7[Fortify] Initialized drift baseline for legacy schema metadata.");
+        }
+
+        boolean anchorsChanged = !baselineAnchorSig.equals(currentAnchorSig);
+        boolean hullChanged = !baselineHullSig.equals(currentHullSig);
+        double overlap = VillageFortificationLayoutService.overlapPercentage(savedHull, currentLayout.hullVertices());
+
+        String level;
+        String color;
+        if (!anchorsChanged && !hullChanged && overlap >= 0.98) {
+            level = "STABLE";
+            color = "§a";
+        } else if (overlap >= 0.90) {
+            level = "MINOR";
+            color = "§e";
+        } else {
+            level = "MAJOR";
+            color = "§c";
+        }
+
+        ChatUtils.sendChatMessages(source, String.format(Locale.ROOT,
+                "§a[Fortify] Drift check for '%s': %s%s§a (hull overlap %.1f%%)",
+                wallName, color, level, overlap * 100.0));
+        ChatUtils.sendSystemMessage(source, String.format(Locale.ROOT,
+                "§7  Anchors: %s (baseline %s → current %s)",
+                anchorsChanged ? "changed" : "stable",
+                shortSignature(baselineAnchorSig), shortSignature(currentAnchorSig)));
+        ChatUtils.sendSystemMessage(source, String.format(Locale.ROOT,
+                "§7  Hull: %s (baseline %s → current %s)",
+                hullChanged ? "changed" : "stable",
+                shortSignature(baselineHullSig), shortSignature(currentHullSig)));
+
+        if ("STABLE".equals(level)) {
+            return SkillExecutionResult.success("Drift stable for '" + wallName + "'.");
+        }
+
+        ChatUtils.sendSystemMessage(source,
+                "§e  Use §f/bot fortify expand " + wallName + "§e to expand this schema with world-scan carryover.");
+        return SkillExecutionResult.success("Drift " + level.toLowerCase(Locale.ROOT) + " for '" + wallName + "'.");
+    }
+
+    private SkillExecutionResult handleExpand(ServerCommandSource source, ServerPlayerEntity bot,
+                                              ServerWorld world, MinecraftServer server,
+                                              String wallName, String originLabel) {
         String worldKey = FortificationPersistenceService.serverWorldKey(server, world);
         Optional<SavedFortification> opt = FortificationPersistenceService.load(server, worldKey, wallName);
         if (opt.isEmpty()) {
@@ -1196,26 +1365,47 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
             return SkillExecutionResult.failure("Existing wall '" + wallName + "' has invalid hull data.");
         }
 
-        // Detect current village
-        showOverhead(bot, "Scanning for village to merge...");
-        BlockPos searchCenter = bot.getBlockPos();
-        VillageBounds bounds = VillageFortificationLayoutService.detectVillageBounds(world, searchCenter, 64);
-        if (bounds.foundPOIs() == 0) {
-            return SkillExecutionResult.failure("No village detected nearby to merge.");
+        int searchRadius = Math.max(64, existing.getSearchRadius());
+        showOverhead(bot, "Scanning for expansion...");
+
+        List<WallPoint> detectedAnchors = VillageFortificationLayoutService.detectVillagePositions(
+                world, existing.getCenter(), searchRadius);
+        if (detectedAnchors.isEmpty()) {
+            return SkillExecutionResult.failure("No village anchors detected near saved wall center.");
         }
 
         // Generate layout for current village to get its hull
-        FortificationLayout currentLayout = VillageFortificationLayoutService.generateLayout(world, bounds.center(), 64);
+        FortificationLayout currentLayout = VillageFortificationLayoutService.generateLayout(
+                world, existing.getCenter(), searchRadius);
         if (currentLayout.hullVertices().size() < 3) {
             return SkillExecutionResult.failure("Could not compute hull for current village.");
         }
 
-        // Merge the two hulls
+        // Merge the two hulls (expand existing schema outward, not a separate ring)
         List<WallPoint> mergedHull = VillageFortificationLayoutService.mergeHulls(
                 existingHull, currentLayout.hullVertices());
 
         if (mergedHull.size() < 3) {
             return SkillExecutionResult.failure("Merged hull has too few vertices.");
+        }
+
+        String existingHullSig = existing.getHullSignature().isBlank()
+                ? signatureForWallPoints(existingHull)
+                : existing.getHullSignature();
+        String mergedHullSig = signatureForWallPoints(mergedHull);
+
+        if (existingHullSig.equals(mergedHullSig)) {
+            existing.setSchemaVersion(Math.max(existing.getSchemaVersion(), 2));
+            existing.setSchemaUpdatedAt(System.currentTimeMillis());
+            existing.setSchemaOrigin(originLabel + "-nochange");
+            existing.setPoiStructureSignature(signatureForWallPoints(detectedAnchors));
+            if (existing.getHullSignature().isBlank()) {
+                existing.setHullSignature(existingHullSig);
+            }
+            FortificationPersistenceService.save(server, existing);
+            ChatUtils.sendChatMessages(source,
+                    "§a[Fortify] Schema is already up to date — no expansion needed.");
+            return SkillExecutionResult.success("Schema already up to date.");
         }
 
         // Generate new layout from merged hull
@@ -1226,37 +1416,218 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
             return SkillExecutionResult.failure("Could not generate layout from merged hull.");
         }
 
-        // Count blocks that are already placed from the old wall
-        int alreadyPresent = 0;
-        for (ProceduralWallBlock block : mergedLayout.allBlocks()) {
-            BlockState current = world.getBlockState(block.worldPos());
-            if (!current.isAir() && !current.isReplaceable()) {
-                alreadyPresent++;
-            }
-        }
-
         // Compute per-edge planned counts for the merged layout
         Map<Integer, Integer> edgePlannedCounts = computeEdgePlannedCounts(mergedLayout);
+        FortifyProgressSnapshot progress = snapshotFortificationProgress(world, mergedLayout, edgePlannedCounts);
 
-        // Update the existing wall with the merged hull and reset progress
+        // Update existing schema and carry over progress by scanning world state.
         SavedFortification merged = FortificationPersistenceService.create(
                 wallName, worldKey, existing.getCenter(), mergedHull,
                 existing.getSearchRadius(), edgePlannedCounts);
-        merged.setTotalBlocksPlaced(alreadyPresent);
+        merged.setOwnerUuid(existing.getOwnerUuid());
+        merged.setOwnerName(existing.getOwnerName());
+        merged.setOwnershipPolicy(existing.getOwnershipPolicy());
+        merged.setAllowedOwnerUuids(existing.getAllowedOwnerUuids());
+        assignOwnerFromBotIfMissing(merged, bot);
+        merged.setTotalBlocksPlaced(progress.totalPresent());
+        merged.setCompletedEdges(progress.completedEdges());
+        merged.setEdgeActualCounts(progress.edgeActualCounts());
+        merged.setLastEdgeIndex(progress.lastEdgeIndex());
+        merged.setSchemaVersion(Math.max(2, existing.getSchemaVersion()));
+        merged.setSchemaRevision(Math.max(1L, existing.getSchemaRevision()) + 1L);
+        merged.setSchemaUpdatedAt(System.currentTimeMillis());
+        merged.setSchemaOrigin(originLabel);
+        merged.setSchemaParentName(existing.getName());
+        merged.setPoiStructureSignature(signatureForWallPoints(detectedAnchors));
+        merged.setHullSignature(mergedHullSig);
         if (mergedLayout.surfaceProfile() != null) {
             merged.setSurfaceProfile(mergedLayout.surfaceProfile().export());
         }
         FortificationPersistenceService.save(server, merged);
+        FortificationPersistenceService.setMoatComplete(server, worldKey, wallName, false);
 
         String mergedDesc = VillageFortificationLayoutService.describePlan(mergedLayout);
-        ChatUtils.sendChatMessages(source, "§a[Fortify] Merged! " + mergedDesc);
-        ChatUtils.sendSystemMessage(source, "§7  " + alreadyPresent + " existing blocks retained. Auto-resuming build...");
+        ChatUtils.sendChatMessages(source, "§a[Fortify] Schema expanded! " + mergedDesc);
+        ChatUtils.sendSystemMessage(source, String.format(Locale.ROOT,
+                "§7  Carry-over scan retained %d placed blocks; %d edges already above completion threshold.",
+                progress.totalPresent(), progress.completedEdges().size()));
+        ChatUtils.sendSystemMessage(source, "§7  Moat completion flag reset for the expanded perimeter. Auto-resuming build...");
 
         // Show the merged layout with particles
         FortificationVisualizerService.spawnLayoutParticles(world, mergedLayout, Set.of(), bot);
 
-        // Auto-resume building the expanded wall
+        // Auto-resume building the expanded wall/schema
         return handleResume(source, bot, world, server, wallName);
+    }
+
+    private FortifyProgressSnapshot snapshotFortificationProgress(ServerWorld world,
+                                                                   FortificationLayout layout,
+                                                                   Map<Integer, Integer> edgePlannedCounts) {
+        Map<Integer, Integer> edgeActualCounts = new HashMap<>();
+        for (ProceduralWallBlock block : layout.allBlocks()) {
+            if (!isActiveFortifyBlock(block)) {
+                continue;
+            }
+            if (isPlannedBlockSatisfied(block, world.getBlockState(block.worldPos()))) {
+                edgeActualCounts.merge(block.edgeIndex(), 1, Integer::sum);
+            }
+        }
+
+        Set<Integer> completed = new HashSet<>();
+        for (Map.Entry<Integer, Integer> entry : edgePlannedCounts.entrySet()) {
+            int edgeIndex = entry.getKey();
+            int planned = entry.getValue();
+            int actual = edgeActualCounts.getOrDefault(edgeIndex, 0);
+            double ratio = planned > 0 ? (double) actual / planned : 1.0;
+            if (ratio >= FortificationPersistenceService.EDGE_COMPLETION_THRESHOLD) {
+                completed.add(edgeIndex);
+            }
+        }
+
+        int totalPresent = 0;
+        for (int count : edgeActualCounts.values()) {
+            totalPresent += count;
+        }
+
+        int nextEdgeIndex = 0;
+        for (int i = 0; i < layout.edges().size(); i++) {
+            if (!completed.contains(i)) {
+                nextEdgeIndex = i;
+                break;
+            }
+        }
+
+        return new FortifyProgressSnapshot(edgeActualCounts, completed, totalPresent, nextEdgeIndex);
+    }
+
+    private record FortifyProgressSnapshot(
+            Map<Integer, Integer> edgeActualCounts,
+            Set<Integer> completedEdges,
+            int totalPresent,
+            int lastEdgeIndex
+    ) {}
+
+    private Optional<SavedFortification> bootstrapFortificationSchemaForMoat(ServerCommandSource source,
+                                                                              ServerPlayerEntity bot,
+                                                                              ServerWorld world,
+                                                                              MinecraftServer server,
+                                                                              String preferredName) {
+        String worldKey = FortificationPersistenceService.serverWorldKey(server, world);
+        String requestedName = preferredName != null ? preferredName.trim() : "";
+
+        showOverhead(bot, "Planning moat schema...");
+        VillageBounds bounds = VillageFortificationLayoutService.detectVillageBounds(world, bot.getBlockPos(), 64);
+        if (bounds.foundPOIs() == 0) {
+            return Optional.empty();
+        }
+
+        FortificationLayout layout = VillageFortificationLayoutService.generateLayout(world, bounds.center(), 64);
+        if (layout.edges().isEmpty()) {
+            return Optional.empty();
+        }
+
+        Map<Integer, Integer> edgePlannedCounts = computeEdgePlannedCounts(layout);
+        String baseName = requestedName.isBlank()
+                ? FortificationPersistenceService.autoName(layout.center())
+                : requestedName;
+        String resolvedName = uniqueFortificationName(server, worldKey, baseName);
+
+        SavedFortification saved = FortificationPersistenceService.create(
+                resolvedName,
+                worldKey,
+                layout.center(),
+                layout.hullVertices(),
+                64,
+                edgePlannedCounts
+        );
+        assignOwnerFromBotIfMissing(saved, bot);
+        if (layout.surfaceProfile() != null) {
+            saved.setSurfaceProfile(layout.surfaceProfile().export());
+        }
+
+        List<WallPoint> detectedAnchors = VillageFortificationLayoutService.detectVillagePositions(
+                world, layout.center(), 64);
+        saved.setSchemaVersion(2);
+        saved.setSchemaRevision(1L);
+        saved.setSchemaUpdatedAt(System.currentTimeMillis());
+        saved.setSchemaOrigin("moat_bootstrap");
+        saved.setSchemaParentName(null);
+        saved.setPoiStructureSignature(signatureForWallPoints(detectedAnchors));
+        saved.setHullSignature(signatureForWallPoints(layout.hullVertices()));
+        FortificationPersistenceService.save(server, saved);
+
+        if (requestedName.isBlank()) {
+            ChatUtils.sendChatMessages(source,
+                    "§a[Fortify] No saved wall found. Bootstrapped schema '" + resolvedName + "' from nearby village for moat digging.");
+        } else {
+            ChatUtils.sendChatMessages(source,
+                    "§e[Fortify] Saved wall '" + requestedName + "' was missing. Bootstrapped schema '" + resolvedName + "' from nearby village.");
+        }
+        return Optional.of(saved);
+    }
+
+    private String uniqueFortificationName(MinecraftServer server, String worldKey, String preferredBaseName) {
+        String base = (preferredBaseName == null || preferredBaseName.isBlank())
+                ? "wall_" + System.currentTimeMillis()
+                : preferredBaseName.trim();
+        Set<String> taken = new HashSet<>();
+        for (SavedFortification f : FortificationPersistenceService.listForWorld(server, worldKey)) {
+            if (f.getName() != null) {
+                taken.add(f.getName().trim().toLowerCase(Locale.ROOT));
+            }
+        }
+
+        String candidate = base;
+        int suffix = 2;
+        while (taken.contains(candidate.toLowerCase(Locale.ROOT))) {
+            candidate = base + "_" + suffix;
+            suffix++;
+        }
+        return candidate;
+    }
+
+    private String signatureForWallPoints(List<WallPoint> points) {
+        if (points == null || points.isEmpty()) {
+            return "";
+        }
+        List<WallPoint> sorted = new ArrayList<>(points);
+        sorted.sort(Comparator.comparingInt(WallPoint::x).thenComparingInt(WallPoint::z));
+
+        CRC32 crc = new CRC32();
+        for (WallPoint point : sorted) {
+            byte[] bytes = (point.x() + "," + point.z() + ";").getBytes(StandardCharsets.UTF_8);
+            crc.update(bytes, 0, bytes.length);
+        }
+        return sorted.size() + "-" + Long.toHexString(crc.getValue());
+    }
+
+    private void assignOwnerFromBotIfMissing(SavedFortification saved, ServerPlayerEntity bot) {
+        if (saved == null || bot == null || Frens.CONFIG == null) {
+            return;
+        }
+        if (saved.getOwnerUuid() != null && !saved.getOwnerUuid().isBlank()) {
+            return;
+        }
+        try {
+            var ownership = Frens.CONFIG.getOwner(bot.getName().getString());
+            if (ownership == null || ownership.ownerUuid() == null || ownership.ownerUuid().isBlank()) {
+                return;
+            }
+            saved.setOwnerUuid(ownership.ownerUuid());
+            saved.setOwnerName(ownership.ownerName());
+            if (saved.getOwnershipPolicy() == null || saved.getOwnershipPolicy().isBlank()) {
+                saved.setOwnershipPolicy("owner_only");
+            }
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private String shortSignature(String signature) {
+        if (signature == null || signature.isBlank()) {
+            return "n/a";
+        }
+        int max = Math.min(12, signature.length());
+        return signature.substring(0, max);
     }
 
     private SkillExecutionResult handleNewBuild(ServerCommandSource source, ServerPlayerEntity bot,
@@ -1341,13 +1712,26 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
         Map<Integer, Integer> edgePlannedCounts = computeEdgePlannedCounts(layout);
 
         // Create persistence entry
-        String wallName = FortificationPersistenceService.autoName(layout.center());
+        String wallName = uniqueFortificationName(
+            server,
+            worldKey,
+            FortificationPersistenceService.autoName(layout.center()));
         SavedFortification saved = FortificationPersistenceService.create(
                 wallName, worldKey, layout.center(), layout.hullVertices(), 64, edgePlannedCounts);
+        assignOwnerFromBotIfMissing(saved, bot);
         // Save original terrain Y values so patching uses stable positions
         if (layout.surfaceProfile() != null) {
             saved.setSurfaceProfile(layout.surfaceProfile().export());
         }
+        List<WallPoint> detectedAnchors = VillageFortificationLayoutService.detectVillagePositions(
+            world, bounds.center(), 64);
+        saved.setSchemaVersion(2);
+        saved.setSchemaRevision(1L);
+        saved.setSchemaUpdatedAt(System.currentTimeMillis());
+        saved.setSchemaOrigin("wall_build");
+        saved.setSchemaParentName(null);
+        saved.setPoiStructureSignature(signatureForWallPoints(detectedAnchors));
+        saved.setHullSignature(signatureForWallPoints(layout.hullVertices()));
         FortificationPersistenceService.save(server, saved);
 
         showOverhead(bot, "Wall saved. Let's get started!");
@@ -1638,7 +2022,8 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
         LOGGER.info("[Moat] simple-perimeter: {} total, {} already air, {} to dig",
                 totalBlocks, alreadyAir, remaining.size());
 
-        for (int i = 0; i < perimeterPath.size(); i++) {
+        int startIdx = nearestPathIndex(bot, perimeterPath);
+        for (int offset = 0; offset < perimeterPath.size(); offset++) {
             if (SkillManager.shouldAbortSkill(bot) || remaining.isEmpty()) {
                 break;
             }
@@ -1647,8 +2032,21 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
                 ensureOnSurface(bot, world, referenceSurfaceY);
             }
 
-            BlockPos walkPos = perimeterPath.get(i);
-            walkToTarget(source, bot, walkPos, 6_000L);
+            int pathIdx = (startIdx + offset) % perimeterPath.size();
+            BlockPos walkPos = perimeterPath.get(pathIdx);
+            // Pin walk target to surface level: moat digging may have removed
+            // ground under the pre-computed waypoint, causing the bot to fall in.
+            if (walkPos.getY() < referenceSurfaceY - 1) {
+                walkPos = new BlockPos(walkPos.getX(), referenceSurfaceY, walkPos.getZ());
+            }
+            // If we need to cross the fortification boundary, use gate routing first
+            // instead of carving through walls during moat navigation.
+            navigateThroughGateIfNeeded(source, bot, world, walkPos, surfaceProfile);
+            if (SkillManager.shouldAbortSkill(bot)) {
+                break;
+            }
+
+            walkToTarget(source, bot, walkPos, 6_000L, "fortify-moat:perimeter");
 
             int minedThisStop;
             do {
@@ -1656,7 +2054,7 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
                 dug += minedThisStop;
             } while (minedThisStop > 0 && !SkillManager.shouldAbortSkill(bot));
 
-            if (i % 10 == 0 || i == perimeterPath.size() - 1) {
+            if (offset % 10 == 0 || offset == perimeterPath.size() - 1) {
                 showOverhead(bot, "Moat: " + dug + "/" + totalBlocks);
             }
         }
@@ -1664,6 +2062,7 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
         if (!remaining.isEmpty() && !SkillManager.shouldAbortSkill(bot)) {
             LOGGER.info("[Moat] cleanup-pass start: {} remaining after perimeter walk", remaining.size());
             Map<BlockPos, Integer> failCounts = new HashMap<>();
+            Set<BlockPos> deferredTargets = new HashSet<>();
             int noProgressLoops = 0;
             int attemptBudget = Math.max(64, remaining.size() * 3);
             long cleanupDeadline = System.currentTimeMillis() + Math.min(MOAT_PASS2_TIME_BUDGET_MS, MOAT_CLEANUP_TIME_BUDGET_MS);
@@ -1677,7 +2076,11 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
                 }
 
                 List<BlockPos> ordered = orderMoatDirectTargets(new ArrayList<>(remaining), bot.getBlockPos());
+                ordered.removeIf(deferredTargets::contains);
                 if (ordered.isEmpty()) {
+                    if (!deferredTargets.isEmpty()) {
+                        LOGGER.info("[Moat] cleanup-pass exhausted non-deferred candidates ({} deferred)", deferredTargets.size());
+                    }
                     break;
                 }
 
@@ -1696,13 +2099,14 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
                 if (mined > 0) {
                     noProgressLoops = 0;
                     failCounts.remove(target);
+                    deferredTargets.remove(target);
                     continue;
                 }
 
                 int failures = failCounts.merge(target, 1, Integer::sum);
                 if (failures >= MOAT_CLEANUP_TARGET_FAIL_CAP) {
-                    remaining.remove(target);
-                    LOGGER.debug("[Moat] cleanup-pass pruning repeatedly blocked target {} after {} failures",
+                    deferredTargets.add(target);
+                    LOGGER.debug("[Moat] cleanup-pass deferring repeatedly blocked target {} after {} failures",
                             target.toShortString(), failures);
                 }
 
@@ -2380,7 +2784,7 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
      * Uses traceEdge (Bresenham) for each hull edge, with terrain Y lookup.
      */
     private List<BlockPos> buildPerimeterPath(FortificationLayout layout, ServerWorld world, SurfaceProfile surfaceProfile) {
-        return buildPerimeterPath(layout, world, surfaceProfile, 1, PERIMETER_VERTEX_SKIP);
+        return buildPerimeterPath(layout, world, surfaceProfile, 1, PERIMETER_VERTEX_SKIP, Collections.emptySet());
     }
 
     /**
@@ -2389,11 +2793,17 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
      * Offset 3 = along moat line (ensures diagonal-normal edges stay within mining reach).
      */
     private List<BlockPos> buildPerimeterPath(FortificationLayout layout, ServerWorld world, SurfaceProfile surfaceProfile, int walkOffset) {
-        return buildPerimeterPath(layout, world, surfaceProfile, walkOffset, PERIMETER_VERTEX_SKIP);
+        return buildPerimeterPath(layout, world, surfaceProfile, walkOffset, PERIMETER_VERTEX_SKIP, Collections.emptySet());
     }
 
     private List<BlockPos> buildPerimeterPath(FortificationLayout layout, ServerWorld world,
                                               SurfaceProfile surfaceProfile, int walkOffset, int vertexSkip) {
+        return buildPerimeterPath(layout, world, surfaceProfile, walkOffset, vertexSkip, Collections.emptySet());
+    }
+
+    private List<BlockPos> buildPerimeterPath(FortificationLayout layout, ServerWorld world,
+                                              SurfaceProfile surfaceProfile, int walkOffset, int vertexSkip,
+                                              Set<Long> blockedWalkColumns) {
         List<BlockPos> path = new ArrayList<>();
         List<WallEdge> edges = layout.edges();
         BlockPos previous = null;
@@ -2423,7 +2833,7 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
                 WallPoint wp = traced.get(j);
                 int walkX = wp.x() + normalX * walkOffset;
                 int walkZ = wp.z() + normalZ * walkOffset;
-                BlockPos walkPos = choosePerimeterWalkPos(world, surfaceProfile, walkX, walkZ, previous);
+                BlockPos walkPos = choosePerimeterWalkPos(world, surfaceProfile, walkX, walkZ, previous, blockedWalkColumns);
                 if (path.isEmpty() || !path.get(path.size() - 1).equals(walkPos)) {
                     path.add(walkPos);
                     previous = walkPos;
@@ -2435,7 +2845,8 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
     }
 
     private BlockPos choosePerimeterWalkPos(ServerWorld world, SurfaceProfile surfaceProfile,
-                                            int targetX, int targetZ, BlockPos previous) {
+                                            int targetX, int targetZ, BlockPos previous,
+                                            Set<Long> blockedWalkColumns) {
         int baseY = safeSurfaceY(surfaceProfile, world, targetX, targetZ);
         BlockPos desired = new BlockPos(targetX, baseY, targetZ);
         BlockPos best = null;
@@ -2450,6 +2861,9 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
 
                     int x = targetX + dx;
                     int z = targetZ + dz;
+                    if (blockedWalkColumns != null && blockedWalkColumns.contains(packXZ(x, z))) {
+                        continue;
+                    }
                     int candidateBaseY = safeSurfaceY(surfaceProfile, world, x, z);
                     int[] yCandidates = {candidateBaseY, candidateBaseY - 1, candidateBaseY + 1};
                     for (int y : yCandidates) {
@@ -2482,6 +2896,12 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
      */
     private void moveToDigPosition(ServerCommandSource source, ServerPlayerEntity bot,
                                    ServerWorld world, BlockPos target, SurfaceProfile surfaceProfile) {
+        // Ensure moat direct-approach moves cross via gate rather than carving through walls.
+        navigateThroughGateIfNeeded(source, bot, world, target, surfaceProfile);
+        if (SkillManager.shouldAbortSkill(bot)) {
+            return;
+        }
+
         BlockPos approach = chooseDigApproachPosition(bot, world, target, surfaceProfile);
         MovementService.MovementPlan plan = new MovementService.MovementPlan(
                 MovementService.Mode.DIRECT,
@@ -4040,41 +4460,43 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
                     deferCarveRepair(scope, headPos, headOriginal, headMandatory);
                     deferCarveRepair(scope, overheadPos, overheadOriginal, overheadMandatory);
                 } else {
-                    // Replace mined blocks — emergency escapes restore from far/upper to near/lower to avoid re-entombing.
+                    // Replace mined blocks — but only mandatory (fortification) blocks.
+                    // Non-mandatory blocks are natural terrain broken during navigation;
+                    // backfilling them blocks the bot's own escape/travel path.
                     boolean replaceTopDown = emergencyTrapSearch || (moved && preferHeadFirstEscapeOrder);
                     if (replaceTopDown) {
-                        if (overheadOriginal != null) {
+                        if (overheadOriginal != null && overheadMandatory) {
                             ReplaceBlockResult result = tryReplaceMinedBlock(bot, world, overheadPos, overheadOriginal, overheadMandatory, replaceContext);
                             if (!result.success()) {
                                 queueMandatoryCarveRepairIfNeeded(bot, world, overheadPos, overheadOriginal, overheadMandatory, replaceContext);
                             }
                         }
-                        if (headOriginal != null) {
+                        if (headOriginal != null && headMandatory) {
                             ReplaceBlockResult result = tryReplaceMinedBlock(bot, world, headPos, headOriginal, headMandatory, replaceContext);
                             if (!result.success()) {
                                 queueMandatoryCarveRepairIfNeeded(bot, world, headPos, headOriginal, headMandatory, replaceContext);
                             }
                         }
-                        if (feetOriginal != null) {
+                        if (feetOriginal != null && feetMandatory) {
                             ReplaceBlockResult result = tryReplaceMinedBlock(bot, world, feetPos, feetOriginal, feetMandatory, replaceContext);
                             if (!result.success()) {
                                 queueMandatoryCarveRepairIfNeeded(bot, world, feetPos, feetOriginal, feetMandatory, replaceContext);
                             }
                         }
                     } else {
-                        if (feetOriginal != null) {
+                        if (feetOriginal != null && feetMandatory) {
                             ReplaceBlockResult result = tryReplaceMinedBlock(bot, world, feetPos, feetOriginal, feetMandatory, replaceContext);
                             if (!result.success()) {
                                 queueMandatoryCarveRepairIfNeeded(bot, world, feetPos, feetOriginal, feetMandatory, replaceContext);
                             }
                         }
-                        if (headOriginal != null) {
+                        if (headOriginal != null && headMandatory) {
                             ReplaceBlockResult result = tryReplaceMinedBlock(bot, world, headPos, headOriginal, headMandatory, replaceContext);
                             if (!result.success()) {
                                 queueMandatoryCarveRepairIfNeeded(bot, world, headPos, headOriginal, headMandatory, replaceContext);
                             }
                         }
-                        if (overheadOriginal != null) {
+                        if (overheadOriginal != null && overheadMandatory) {
                             ReplaceBlockResult result = tryReplaceMinedBlock(bot, world, overheadPos, overheadOriginal, overheadMandatory, replaceContext);
                             if (!result.success()) {
                                 queueMandatoryCarveRepairIfNeeded(bot, world, overheadPos, overheadOriginal, overheadMandatory, replaceContext);
@@ -8671,12 +9093,15 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
         boolean scaffoldHold = false;
         int breakThroughCount = 0;
         int stuckRecoveryAttempts = 0;
-        boolean microPathAttempted = navContext != null && navContext.startsWith("fortify-gate"); // skip micro-path for gates
-        boolean allowBreakThrough = navContext == null || !navContext.startsWith("fortify-gate");
+        boolean gateNavContext = navContext != null && navContext.startsWith("fortify-gate");
+        boolean moatNavContext = navContext != null && navContext.startsWith("fortify-moat");
+        boolean microPathAttempted = gateNavContext; // skip micro-path for gates
+        boolean allowBreakThrough = !(gateNavContext || moatNavContext);
         boolean gateBreakEscalated = false; // track if we've escalated gate exit to allow break-through
         boolean gateContext = navContext != null && navContext.startsWith("fortify-gate:");
         boolean gateExitContext = navContext != null && navContext.startsWith("fortify-gate:exit");
         int gateSidestepNoProgressBursts = 0;
+        int moatSidestepNoProgressBursts = 0;
         int stuckThreshold = (navContext != null && navContext.startsWith("fortify-gate")) ? 1 : 5; // far faster gate carve decision
         try {
             while (System.currentTimeMillis() < deadline) {
@@ -8777,6 +9202,23 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
                         continue;
                     }
 
+                    // Moat navigation frequently runs near trench bottoms where terrainY-based depth
+                    // reads can under-report entombment. If we're clearly below the target walk Y,
+                    // proactively surface-escape before sidestep/arc oscillation begins.
+                    if (!recovered && moatNavContext && recoveryStart.getY() <= target.getY() - 2) {
+                        BlockPos beforeSurface = bot.getBlockPos();
+                        ensureOnSurface(bot, recoveryWorld, target.getY());
+                        if (!beforeSurface.equals(bot.getBlockPos()) || bot.getBlockPos().getY() >= target.getY() - 1) {
+                            recovered = true;
+                            recoveryResult = "moat-surface-escape";
+                            stuckTicks = 0;
+                            lastBlockPos = bot.getBlockPos();
+                            moatSidestepNoProgressBursts = 0;
+                            entombmentHelper.noteEntombmentRecoverySuccess(recoveryWorld, recoveryStart, bot.getBlockPos(), navContext);
+                            continue;
+                        }
+                    }
+
                     // Try a short-range path plan before destructive recovery.
                     if (!microPathAttempted && !carvePreferredMode) {
                         Optional<MovementService.MovementPlan> microPlan = MovementService.planLootApproach(
@@ -8840,7 +9282,9 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
                     } else if (!allowBreakThrough) {
                         breakSuppressed = true;
                     }
-                    if (!recovered && !carvePreferredMode && !(gateContext && gateSidestepNoProgressBursts >= FORTIFY_GATE_EXIT_SIDESTEP_NO_PROGRESS_LIMIT)) {
+                        boolean sidestepBudgetExhausted = (gateContext && gateSidestepNoProgressBursts >= FORTIFY_GATE_EXIT_SIDESTEP_NO_PROGRESS_LIMIT)
+                            || (moatNavContext && moatSidestepNoProgressBursts >= FORTIFY_MOAT_SIDESTEP_NO_PROGRESS_LIMIT);
+                        if (!recovered && !carvePreferredMode && !sidestepBudgetExhausted) {
                         // Lateral sidestep: move perpendicular to target direction
                         sidestepTried = true;
                         double toTargetX = targetVec.x - bot.getX();
@@ -8857,14 +9301,20 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
                             LOGGER.debug("[FortifyNav] lateral sidestep to {}", sideStep.toShortString());
                             walkTowardBlock(bot, sideStep, 1_500L);
                             if (!before.equals(bot.getBlockPos())) {
-                                if (gateContext) {
+                                if (gateContext || moatNavContext) {
                                     double sidestepGain = Math.sqrt(Math.max(0.0D, currentDistSq))
                                             - Math.sqrt(Math.max(0.0D, bot.squaredDistanceTo(targetVec)));
                                     if (sidestepGain < 0.75D) {
-                                        gateSidestepNoProgressBursts++;
+                                        if (gateContext) {
+                                            gateSidestepNoProgressBursts++;
+                                        }
+                                        if (moatNavContext) {
+                                            moatSidestepNoProgressBursts++;
+                                        }
                                         recoveryResult = "sidestep-no-progress";
                                     } else {
                                         gateSidestepNoProgressBursts = 0;
+                                        moatSidestepNoProgressBursts = 0;
                                         recovered = true;
                                         recoveryResult = "sidestep";
                                     }
@@ -8884,6 +9334,9 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
                         if (recovered) {
                             if (gateContext) {
                                 gateSidestepNoProgressBursts = 0;
+                            }
+                            if (moatNavContext) {
+                                moatSidestepNoProgressBursts = 0;
                             }
                             recoveryResult = "arc";
                         }

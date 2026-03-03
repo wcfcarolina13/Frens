@@ -10,6 +10,7 @@ import net.minecraft.client.input.KeyInput;
 import net.minecraft.text.OrderedText;
 import net.minecraft.text.Text;
 import net.minecraft.util.math.MathHelper;
+import net.wcfcarolina13.FrensClient;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -191,6 +192,10 @@ public final class BotGuideScreen extends Screen {
                 context.drawText(this.textRenderer, row.category(), viewport.x + 4, y + 3, 0xFFFFD48A, false);
             } else {
                 GuideTopic topic = row.topic();
+                if (topic == null) {
+                    y += rowH;
+                    continue;
+                }
                 boolean selected = topic != null && topic.id().equals(selectedTopicId);
                 boolean hover = mouseX >= viewport.x && mouseX < viewport.x + rowAreaW && mouseY >= y && mouseY < rowBottom;
                 int fill = selected ? 0xFF3A2C14 : 0xFF1A1A1A;
@@ -619,8 +624,46 @@ public final class BotGuideScreen extends Screen {
         return botAlias;
     }
 
+    private boolean isAdminUser() {
+        MinecraftClient client = MinecraftClient.getInstance();
+        if (client == null) {
+            return false;
+        }
+        var player = client.player;
+        if (player == null) {
+            return false;
+        }
+        try {
+            java.lang.reflect.Method m = player.getClass().getMethod("hasPermissionLevel", int.class);
+            Object r = m.invoke(player, 2);
+            if (r instanceof Boolean b) {
+                return b;
+            }
+        } catch (Throwable ignored) {
+            // Fail closed when permission APIs are unavailable.
+        }
+        return false;
+    }
+
+    private boolean isAdminOnlyGuideTopic(GuideTopic topic) {
+        if (topic == null || topic.id() == null) {
+            return false;
+        }
+        String id = topic.id().trim().toLowerCase(Locale.ROOT);
+        return id.equals("modes_delegate") || id.equals("modes_direct");
+    }
+
     private List<GuideTopic> filteredTopics() {
         List<GuideTopic> base = baseTopics();
+        if (!isAdminUser()) {
+            ArrayList<GuideTopic> filtered = new ArrayList<>();
+            for (GuideTopic topic : base) {
+                if (!isAdminOnlyGuideTopic(topic)) {
+                    filtered.add(topic);
+                }
+            }
+            base = filtered;
+        }
         String q = searchField != null ? searchField.getText().trim().toLowerCase(Locale.ROOT) : "";
         if (q.isBlank()) {
             return base;
@@ -639,6 +682,7 @@ public final class BotGuideScreen extends Screen {
 
     private List<GuideTopic> baseTopics() {
         String target = botTarget();
+        String guideKey = FrensClient.getGuideHotkeyDisplayName();
         return List.of(
                 new GuideTopic(
                         "basics_stop",
@@ -666,6 +710,20 @@ public final class BotGuideScreen extends Screen {
                         "Shortcut: (optional) bind Resume key in controls",
                         "continue paused task"
                 ),
+                    new GuideTopic(
+                        "basics_switch_bot",
+                        "Basics",
+                        "Switch Active Bot (Inventory)",
+                        "Cycle to another companion from the inventory UI without retyping commands.",
+                        List.of(
+                            "In Bot Inventory, press [ and ] to switch previous/next companion.",
+                            "You can also click < / > in the switch chip on the bot stats row or overlay header.",
+                            "Switching reuses /bot open <alias>, so normal ownership and permission rules still apply."
+                        ),
+                        "bot open <alias> (or /bot open for last targeted)",
+                        "In Bot Inventory: [ previous, ] next",
+                        "switch inventory open alias multi bot"
+                    ),
                 new GuideTopic(
                         "move_follow",
                         "Movement",
@@ -836,7 +894,7 @@ public final class BotGuideScreen extends Screen {
                                 "Village structures are detected and excluded — walls route around buildings automatically.",
                                 "dry_run — preview layout with particles (orange=towers, blue=walls, gold=gate, dark blue=moat, purple=overhang, red=clear).",
                                 "status <name> — per-edge completion stats + particles highlighting missing blocks in red.",
-                                "resume / patch / merge / list / name — manage saved walls.",
+                                "resume / patch / drift / expand / merge / list / name — manage saved walls and schema updates.",
                                 "Tip: Use the Base Manager screen (Wall Status button) for a quick visual check."
                         ),
                         "bot fortify " + target,
@@ -856,6 +914,20 @@ public final class BotGuideScreen extends Screen {
                         "Guide + Dialogue topics",
                         "recruit unlock quest"
                 ),
+                    new GuideTopic(
+                        "modes_delegate",
+                        "Modes",
+                        "Delegate Mode Setup",
+                        "Admins can permit specific non-operator players to choose world mode.",
+                        List.of(
+                            "Use mode_access allow/revoke to manage delegated players.",
+                            "Operators can always choose mode; delegates are world-specific.",
+                            "Clear removes all delegates for the current world."
+                        ),
+                        "bot recruit mode_access allow <player> | revoke <player> | clear",
+                        "No keybind by default",
+                        "delegate guest permission world mode setup"
+                    ),
                 new GuideTopic(
                         "modes_direct",
                         "Modes",
@@ -891,7 +963,9 @@ public final class BotGuideScreen extends Screen {
                         "Command + Keybind Cheatsheet",
                         "Quick reference for the most-used controls.",
                         List.of(
+                            "Guide -> " + guideKey + " -> open in-game companion guide",
                                 "Follow -> ` -> bot follow toggle <bot>",
+                            "Switch bot in inventory -> [ / ] -> previous / next companion",
                                 "Sleep -> (hold \\ then 5) -> bot sleep <bot>",
                                 "- key -> spells / go_to_look / direction confirm (contextual)",
                                 "Stop -> \\\\ -> bot stop <bot>",

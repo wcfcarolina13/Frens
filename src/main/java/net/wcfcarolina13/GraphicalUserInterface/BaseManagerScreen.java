@@ -12,11 +12,15 @@ import net.minecraft.client.gui.widget.ButtonWidget;
 import net.minecraft.client.gui.widget.TextFieldWidget;
 import net.minecraft.text.Text;
 import net.minecraft.util.math.MathHelper;
+import net.wcfcarolina13.network.BaseClaimWallPayload;
 import net.wcfcarolina13.network.BaseGoToPayload;
+import net.wcfcarolina13.network.BaseGrantWallAccessPayload;
 import net.wcfcarolina13.network.BaseRemovePayload;
+import net.wcfcarolina13.network.BaseRevokeWallAccessPayload;
 import net.wcfcarolina13.network.BaseRenamePayload;
 import net.wcfcarolina13.network.BaseSetPayload;
 import net.wcfcarolina13.network.BaseSetHomePayload;
+import net.wcfcarolina13.network.BaseUnclaimWallPayload;
 import net.wcfcarolina13.network.RequestBasesPayload;
 
 import java.lang.reflect.Type;
@@ -32,7 +36,7 @@ public class BaseManagerScreen extends Screen {
     private static final Gson GSON = new GsonBuilder().disableHtmlEscaping().create();
     private static final Type BASE_LIST_TYPE = new TypeToken<List<BaseDto>>() {}.getType();
 
-    public record BaseDto(String label, int x, int y, int z, boolean home, String wallStatus) {
+    public record BaseDto(String label, int x, int y, int z, boolean home, String wallStatus, String ownerName) {
         /** True when this entry represents a fortification wall rather than a simple base. */
         boolean isWall() { return wallStatus != null && !wallStatus.isBlank(); }
     }
@@ -134,8 +138,33 @@ public class BaseManagerScreen extends Screen {
                 .build());
 
         int btnY5 = btnY4 + CONTROL_ROW_DY;
+        this.addDrawableChild(ButtonWidget.builder(Text.literal("Drift Check"), (btn) -> sendDriftCheckWall())
+            .dimensions(cx - 110, btnY5, 70, 20)
+            .build());
+        this.addDrawableChild(ButtonWidget.builder(Text.literal("Expand Wall"), (btn) -> sendExpandWall())
+            .dimensions(cx - 36, btnY5, 70, 20)
+            .build());
+        this.addDrawableChild(ButtonWidget.builder(Text.literal("Claim Wall"), (btn) -> sendClaimWall())
+            .dimensions(cx + 38, btnY5, 70, 20)
+            .build());
+
+        int btnY6 = btnY5 + CONTROL_ROW_DY;
+        this.addDrawableChild(ButtonWidget.builder(Text.literal("Unclaim"), (btn) -> sendUnclaimWall())
+            .dimensions(cx - 110, btnY6, 70, 20)
+            .build());
+        this.addDrawableChild(ButtonWidget.builder(Text.literal("Permit"), (btn) -> sendPermitWallAccess())
+            .dimensions(cx - 36, btnY6, 70, 20)
+            .build());
+        this.addDrawableChild(ButtonWidget.builder(Text.literal("Revoke"), (btn) -> sendRevokeWallAccess())
+            .dimensions(cx + 38, btnY6, 70, 20)
+            .build());
+
+        int btnY7 = btnY6 + CONTROL_ROW_DY;
+        this.addDrawableChild(ButtonWidget.builder(Text.literal("Refresh"), (btn) -> requestRefresh())
+            .dimensions(cx - 110, btnY7, 70, 20)
+            .build());
         this.addDrawableChild(ButtonWidget.builder(Text.literal("Close"), (btn) -> close())
-                .dimensions(cx - 35, btnY5, 70, 20)
+            .dimensions(cx + 38, btnY7, 70, 20)
                 .build());
 
         requestRefresh();
@@ -208,9 +237,7 @@ public class BaseManagerScreen extends Screen {
 
     private void sendFortifyNew() {
         MinecraftClient mc = this.client;
-        if (mc != null && mc.player != null) {
-            mc.player.networkHandler.sendChatCommand("bot fortify");
-        }
+        sendChatCommand(mc, "bot fortify");
         close();
     }
 
@@ -220,9 +247,7 @@ public class BaseManagerScreen extends Screen {
             return;
         }
         MinecraftClient mc = this.client;
-        if (mc != null && mc.player != null) {
-            mc.player.networkHandler.sendChatCommand("bot fortify resume " + selected.label);
-        }
+        sendChatCommand(mc, "bot fortify resume " + selected.label);
         close();
     }
 
@@ -232,9 +257,7 @@ public class BaseManagerScreen extends Screen {
             return;
         }
         MinecraftClient mc = this.client;
-        if (mc != null && mc.player != null) {
-            mc.player.networkHandler.sendChatCommand("bot fortify patch " + selected.label);
-        }
+        sendChatCommand(mc, "bot fortify patch " + selected.label);
         close();
     }
 
@@ -244,9 +267,7 @@ public class BaseManagerScreen extends Screen {
             return;
         }
         MinecraftClient mc = this.client;
-        if (mc != null && mc.player != null) {
-            mc.player.networkHandler.sendChatCommand("bot fortify patch " + selected.label + " auto");
-        }
+        sendChatCommand(mc, "bot fortify patch " + selected.label + " auto");
         close();
     }
 
@@ -256,9 +277,7 @@ public class BaseManagerScreen extends Screen {
             return;
         }
         MinecraftClient mc = this.client;
-        if (mc != null && mc.player != null) {
-            mc.player.networkHandler.sendChatCommand("bot fortify status " + selected.label);
-        }
+        sendChatCommand(mc, "bot fortify status " + selected.label);
         close();
     }
 
@@ -268,10 +287,91 @@ public class BaseManagerScreen extends Screen {
             return;
         }
         MinecraftClient mc = this.client;
-        if (mc != null && mc.player != null) {
-            mc.player.networkHandler.sendChatCommand("bot fortify moat " + selected.label);
-        }
+        sendChatCommand(mc, "bot fortify moat " + selected.label);
         close();
+    }
+
+    private void sendDriftCheckWall() {
+        BaseDto selected = getSelected();
+        if (selected == null || !selected.isWall() || selected.label == null || selected.label.isBlank()) {
+            return;
+        }
+        MinecraftClient mc = this.client;
+        sendChatCommand(mc, "bot fortify drift " + selected.label);
+        close();
+    }
+
+    private void sendExpandWall() {
+        BaseDto selected = getSelected();
+        if (selected == null || !selected.isWall() || selected.label == null || selected.label.isBlank()) {
+            return;
+        }
+        MinecraftClient mc = this.client;
+        sendChatCommand(mc, "bot fortify expand " + selected.label);
+        close();
+    }
+
+    private void sendClaimWall() {
+        BaseDto selected = getSelected();
+        if (selected == null || !selected.isWall() || selected.label == null || selected.label.isBlank()) {
+            return;
+        }
+        if (ClientPlayNetworking.canSend(BaseClaimWallPayload.ID)) {
+            ClientPlayNetworking.send(new BaseClaimWallPayload(selected.label));
+        }
+        requestRefresh();
+    }
+
+    private void sendUnclaimWall() {
+        BaseDto selected = getSelected();
+        if (selected == null || !selected.isWall() || selected.label == null || selected.label.isBlank()) {
+            return;
+        }
+        if (ClientPlayNetworking.canSend(BaseUnclaimWallPayload.ID)) {
+            ClientPlayNetworking.send(new BaseUnclaimWallPayload(selected.label));
+        }
+        requestRefresh();
+    }
+
+    private void sendPermitWallAccess() {
+        BaseDto selected = getSelected();
+        if (selected == null || !selected.isWall() || selected.label == null || selected.label.isBlank()) {
+            return;
+        }
+        String grantee = nameField != null ? nameField.getText() : "";
+        if (grantee == null || grantee.isBlank()) {
+            return;
+        }
+        if (ClientPlayNetworking.canSend(BaseGrantWallAccessPayload.ID)) {
+            ClientPlayNetworking.send(new BaseGrantWallAccessPayload(selected.label, grantee.trim()));
+        }
+        requestRefresh();
+    }
+
+    private void sendRevokeWallAccess() {
+        BaseDto selected = getSelected();
+        if (selected == null || !selected.isWall() || selected.label == null || selected.label.isBlank()) {
+            return;
+        }
+        String grantee = nameField != null ? nameField.getText() : "";
+        if (grantee == null || grantee.isBlank()) {
+            return;
+        }
+        if (ClientPlayNetworking.canSend(BaseRevokeWallAccessPayload.ID)) {
+            ClientPlayNetworking.send(new BaseRevokeWallAccessPayload(selected.label, grantee.trim()));
+        }
+        requestRefresh();
+    }
+
+    private static void sendChatCommand(MinecraftClient client, String command) {
+        if (client == null) {
+            return;
+        }
+        var player = client.player;
+        if (player == null || player.networkHandler == null) {
+            return;
+        }
+        player.networkHandler.sendChatCommand(command);
     }
 
     private BaseDto getSelected() {
@@ -310,10 +410,6 @@ public class BaseManagerScreen extends Screen {
             int idx = scroll + row;
             if (idx >= 0 && idx < bases.size()) {
                 selectedIndex = idx;
-                BaseDto sel = bases.get(idx);
-                if (nameField != null && sel != null && sel.label != null) {
-                    nameField.setText(sel.label);
-                }
                 return true;
             }
         }
@@ -337,7 +433,7 @@ public class BaseManagerScreen extends Screen {
         context.drawCenteredTextWithShadow(this.textRenderer, this.title, cx, 10, 0xFFFFFF);
 
         Rect list = listRect();
-        String hint = "Tip: Select a wall, then use Resume, Patch, Status, or Dig Moat.";
+        String hint = "Tip: Select a wall. Use Claim/Permit/Revoke for ownership access control.";
         context.drawCenteredTextWithShadow(this.textRenderer, Text.literal(hint), cx, list.bottom() + 6, 0xFFB0B0B0);
     }
 
@@ -370,7 +466,8 @@ public class BaseManagerScreen extends Screen {
             // Compact right-side info: XZ only for walls (Y is less useful), include status
             String rightInfo;
             if (b != null && b.isWall()) {
-                rightInfo = "(" + b.x + "," + b.z + ") §7[" + b.wallStatus + "]";
+                String owner = (b.ownerName != null && !b.ownerName.isBlank()) ? b.ownerName : "Unclaimed";
+                rightInfo = "(" + b.x + "," + b.z + ") §7[" + b.wallStatus + "] §6{" + owner + "}";
             } else {
                 rightInfo = b != null ? ("(" + b.x + ", " + b.y + ", " + b.z + ")") : "";
             }
@@ -389,8 +486,8 @@ public class BaseManagerScreen extends Screen {
     private Rect listRect() {
         int cx = this.width / 2;
         int x = cx - 110;
-        // Below the 5th button row (+ a small gap). Prevents list background from overlapping controls.
-        int y = TOP_Y + (CONTROL_ROW_DY * 5) + BUTTON_H + LIST_TOP_GAP;
+        // Below the 7th button row (+ a small gap). Prevents list background from overlapping controls.
+        int y = TOP_Y + (CONTROL_ROW_DY * 7) + BUTTON_H + LIST_TOP_GAP;
         int w = 220;
         int h = Math.max(LIST_MIN_H, this.height - y - LIST_BOTTOM_MARGIN);
         return new Rect(x, y, w, h);

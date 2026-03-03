@@ -20,18 +20,23 @@ import net.minecraft.util.Identifier;
 import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.BlockPos;
 import net.wcfcarolina13.Frens;
+import net.wcfcarolina13.FrensClient;
 import net.wcfcarolina13.items.ModItems;
-import net.wcfcarolina13.FilingSystem.ManualConfig;
 import net.wcfcarolina13.network.CompanionQuestStateRequestPayload;
 import net.wcfcarolina13.network.CompanionQuestTopicPayload;
 import net.wcfcarolina13.network.RecruitmentAdminActionPayload;
 import net.wcfcarolina13.network.RequestRecruitmentReplayPayload;
 import net.wcfcarolina13.network.RequestRecruitmentDialoguePayload;
 import net.wcfcarolina13.ui.BotPlayerInventoryScreenHandler;
+import org.lwjgl.glfw.GLFW;
 
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 import java.util.UUID;
 
 public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventoryScreenHandler> {
@@ -79,6 +84,10 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
     private static final int TOPICS_OVERLAY_SEARCH_GAP = 4;
     private static final int TOPICS_OVERLAY_SCROLLBAR_W = 10;
     private static final int TOPICS_OVERLAY_SCROLLBAR_MIN_THUMB_H = 18;
+    private static final int BOT_SWITCH_CONTROL_H = 12;
+    private static final int BOT_SWITCH_CONTROL_W = 12;
+    private static final int BOT_SWITCH_CONTROL_GAP = 2;
+    private static final long BOT_SWITCH_HINT_COOLDOWN_MS = 1200L;
     private OtherClientPlayerEntity fallbackBot;
     private final String botAlias;
     private float lastMouseX;
@@ -95,6 +104,10 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
     private TopicEntry overlayHoveredEntry = null;
     private long overlayHoverStartedAtMs = 0L;
     private static final long OVERLAY_HOVER_TOOLTIP_DELAY_MS = 1000L;
+    private TopicEntry quickHoveredEntry = null;
+    private long quickHoverStartedAtMs = 0L;
+    private static final long QUICK_HOVER_TOOLTIP_DELAY_MS = 1800L;
+    private long lastBotSwitchHintAtMs = 0L;
 
     // Skills list scroll (always used for the small panel; also used for overlay when Skills tab is selected).
     private int skillScrollIndex;
@@ -153,6 +166,16 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         int bottom() { return y + h; }
         boolean contains(double px, double py) {
             return px >= x && px < x + w && py >= y && py < y + h;
+        }
+    }
+
+    private record BotSwitchLayout(Rect prevRect,
+                                   Rect labelRect,
+                                   Rect nextRect,
+                                   List<String> aliases,
+                                   int currentIndex) {
+        boolean canSwitch() {
+            return aliases != null && aliases.size() > 1;
         }
     }
 
@@ -280,12 +303,12 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             // Curated, non-scroll quick actions for the collapsed panel.
             // (These are intentionally short labels; the expanded overlay still shows the full list.)
             private static final List<TopicEntry> QUICK_TOPIC_ENTRIES = List.of(
+                TopicEntry.skill("📘 Guide", TopicAction.OPEN_GUIDE, false, 0),
                 TopicEntry.skill("🛑 Stop", TopicAction.STOP, false, 0),
                 TopicEntry.skill("👣 Follow", TopicAction.FOLLOW, true, 0),
                 TopicEntry.skill("🏠 Home", TopicAction.RETURN_HOME, true, 0),
                 TopicEntry.skill("🛌 Sleep", TopicAction.SLEEP, false, 0),
-                TopicEntry.skill("🛡 Guard", TopicAction.GUARD, true, 0),
-                TopicEntry.skill("🧹 Cleanup", TopicAction.DROP_SWEEP, false, 0)
+                TopicEntry.skill("🛡 Guard", TopicAction.GUARD, true, 0)
             );
 
     // Dialogue/quest topics are intentionally local/scripted: they feed the dialogue panel without
@@ -366,6 +389,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         int statsTop = y + SECTION_HEIGHT + 2;
         context.fill(x, statsTop, x + SECTION_WIDTH, statsTop + STATS_AREA_HEIGHT - 4, 0xC0101010);
         drawBotStats(context, x + 6, statsTop + 6);
+        drawCollapsedBotSwitchControls(context, mouseX, mouseY, statsTop + STATS_AREA_HEIGHT - BOT_SWITCH_CONTROL_H - 5);
         // When the expanded overlay is open, let it consume this space (don't render the small panel behind it).
         if (!topicsExpanded) {
             drawTopicPanel(context, x + SECTION_WIDTH + BLOCK_GAP, statsTop, mouseX, mouseY);
@@ -405,6 +429,229 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         context.fill(x + 1, y + 1, x + 1 + filled, y + height - 1, color);
     }
 
+    private void drawCollapsedBotSwitchControls(DrawContext context, int mouseX, int mouseY, int rowY) {
+        BotSwitchLayout layout = computeBotSwitchLayout(this.x + 6, this.x + SECTION_WIDTH - 6, rowY);
+        if (layout == null) {
+            return;
+        }
+        drawBotSwitchControls(context, layout, mouseX, mouseY, false);
+    }
+
+    private void drawOverlayBotSwitchControls(DrawContext context, Rect overlayRect, int closeX, int mouseX, int mouseY) {
+        int headerH = this.textRenderer.fontHeight + TOPICS_OVERLAY_HEADER_PAD * 2;
+        int rowY = overlayRect.y + Math.max(1, (headerH - BOT_SWITCH_CONTROL_H) / 2);
+        int leftBound = overlayRect.x + TOPICS_OVERLAY_PADDING + this.textRenderer.getWidth("Conversation") + 10;
+        int rightBound = closeX - 8;
+        BotSwitchLayout layout = computeBotSwitchLayout(leftBound, rightBound, rowY);
+        if (layout == null) {
+            return;
+        }
+        drawBotSwitchControls(context, layout, mouseX, mouseY, true);
+    }
+
+    private BotSwitchLayout computeBotSwitchLayout(int leftBound, int rightBound, int y) {
+        int width = rightBound - leftBound;
+        int minWidth = BOT_SWITCH_CONTROL_W * 2 + BOT_SWITCH_CONTROL_GAP * 2 + 24;
+        if (width < minWidth) {
+            return null;
+        }
+        int buttonY = y;
+        Rect prevRect = new Rect(leftBound, buttonY, BOT_SWITCH_CONTROL_W, BOT_SWITCH_CONTROL_H);
+        Rect nextRect = new Rect(rightBound - BOT_SWITCH_CONTROL_W, buttonY, BOT_SWITCH_CONTROL_W, BOT_SWITCH_CONTROL_H);
+        int labelX = prevRect.right() + BOT_SWITCH_CONTROL_GAP;
+        int labelW = Math.max(24, nextRect.x - BOT_SWITCH_CONTROL_GAP - labelX);
+        Rect labelRect = new Rect(labelX, buttonY, labelW, BOT_SWITCH_CONTROL_H);
+        List<String> aliases = collectSwitchableBotAliases();
+        int currentIndex = indexOfAliasIgnoreCase(aliases, botAlias);
+        if (currentIndex < 0 && !aliases.isEmpty()) {
+            currentIndex = 0;
+        }
+        return new BotSwitchLayout(prevRect, labelRect, nextRect, aliases, currentIndex);
+    }
+
+    private List<String> collectSwitchableBotAliases() {
+        Set<String> unique = new LinkedHashSet<>();
+        addSwitchAlias(unique, botAlias);
+        addSwitchAlias(unique, FrensClient.getRecruitmentBotAlias());
+
+        if (Frens.CONFIG != null) {
+            for (String alias : Frens.CONFIG.getBotGameProfile().keySet()) {
+                addSwitchAlias(unique, alias);
+            }
+            for (String alias : Frens.CONFIG.getBotControls().keySet()) {
+                addSwitchAlias(unique, alias);
+            }
+        }
+
+        ArrayList<String> aliases = new ArrayList<>(unique);
+        aliases.sort(Comparator.comparing(name -> name.toLowerCase(Locale.ROOT)));
+        int currentIndex = indexOfAliasIgnoreCase(aliases, botAlias);
+        if (currentIndex > 0) {
+            String current = aliases.remove(currentIndex);
+            aliases.add(0, current);
+        }
+        return aliases;
+    }
+
+    private void addSwitchAlias(Set<String> unique, String alias) {
+        if (alias == null) {
+            return;
+        }
+        String trimmed = alias.trim();
+        if (trimmed.isEmpty()) {
+            return;
+        }
+        if (trimmed.equalsIgnoreCase("default")) {
+            return;
+        }
+        if (containsAliasIgnoreCase(unique, trimmed)) {
+            return;
+        }
+        unique.add(trimmed);
+    }
+
+    private boolean containsAliasIgnoreCase(Set<String> aliases, String alias) {
+        if (aliases == null || aliases.isEmpty() || alias == null || alias.isBlank()) {
+            return false;
+        }
+        for (String candidate : aliases) {
+            if (candidate != null && candidate.equalsIgnoreCase(alias)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private int indexOfAliasIgnoreCase(List<String> aliases, String alias) {
+        if (aliases == null || aliases.isEmpty() || alias == null || alias.isBlank()) {
+            return -1;
+        }
+        for (int i = 0; i < aliases.size(); i++) {
+            String candidate = aliases.get(i);
+            if (candidate != null && candidate.equalsIgnoreCase(alias)) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    private String switchLabel(BotSwitchLayout layout) {
+        if (layout == null || layout.aliases() == null || layout.aliases().isEmpty()) {
+            return botAlias;
+        }
+        int idx = MathHelper.clamp(layout.currentIndex(), 0, layout.aliases().size() - 1);
+        String current = layout.aliases().get(idx);
+        if (layout.aliases().size() <= 1) {
+            return current;
+        }
+        return current + " (" + (idx + 1) + "/" + layout.aliases().size() + ")";
+    }
+
+    private void drawBotSwitchControls(DrawContext context, BotSwitchLayout layout, int mouseX, int mouseY, boolean overlayStyle) {
+        if (layout == null) {
+            return;
+        }
+        boolean canSwitch = layout.canSwitch();
+        int labelFill = overlayStyle ? 0xFF171717 : 0xCC171717;
+        int labelBorder = overlayStyle ? 0xFF2A2A2A : 0xFF000000;
+        if (!canSwitch) {
+            labelFill = overlayStyle ? 0xFF141414 : 0xCC141414;
+        }
+
+        context.fill(layout.labelRect().x, layout.labelRect().y, layout.labelRect().right(), layout.labelRect().bottom(), labelFill);
+        context.fill(layout.labelRect().x, layout.labelRect().y, layout.labelRect().right(), layout.labelRect().y + 1, labelBorder);
+        context.fill(layout.labelRect().x, layout.labelRect().bottom() - 1, layout.labelRect().right(), layout.labelRect().bottom(), labelBorder);
+        context.fill(layout.labelRect().x, layout.labelRect().y, layout.labelRect().x + 1, layout.labelRect().bottom(), labelBorder);
+        context.fill(layout.labelRect().right() - 1, layout.labelRect().y, layout.labelRect().right(), layout.labelRect().bottom(), labelBorder);
+
+        drawSwitchButton(context, layout.prevRect(), "<", canSwitch, mouseX, mouseY);
+        drawSwitchButton(context, layout.nextRect(), ">", canSwitch, mouseX, mouseY);
+
+        String label = elideToWidth(switchLabel(layout), Math.max(1, layout.labelRect().w - 4));
+        int textX = layout.labelRect().x + (layout.labelRect().w - this.textRenderer.getWidth(label)) / 2;
+        int textY = layout.labelRect().y + Math.max(1, (layout.labelRect().h - this.textRenderer.fontHeight) / 2);
+        int color = canSwitch ? COLOR_TEXT_PARCHMENT : COLOR_TEXT_DISABLED;
+        context.drawText(this.textRenderer, label, textX, textY, color, false);
+    }
+
+    private void drawSwitchButton(DrawContext context, Rect rect, String glyph, boolean enabled, int mouseX, int mouseY) {
+        if (rect == null) {
+            return;
+        }
+        boolean hover = rect.contains(mouseX, mouseY);
+        int fill = enabled ? 0xFF1A1A1A : 0xFF151515;
+        if (enabled && hover) {
+            fill = 0xFF2F2F2F;
+        }
+        context.fill(rect.x, rect.y, rect.right(), rect.bottom(), fill);
+        context.fill(rect.x, rect.y, rect.right(), rect.y + 1, 0xFF000000);
+        context.fill(rect.x, rect.bottom() - 1, rect.right(), rect.bottom(), 0xFF000000);
+        context.fill(rect.x, rect.y, rect.x + 1, rect.bottom(), 0xFF000000);
+        context.fill(rect.right() - 1, rect.y, rect.right(), rect.bottom(), 0xFF000000);
+
+        int textX = rect.x + (rect.w - this.textRenderer.getWidth(glyph)) / 2;
+        int textY = rect.y + Math.max(1, (rect.h - this.textRenderer.fontHeight) / 2);
+        context.drawText(this.textRenderer, glyph, textX, textY, enabled ? COLOR_TEXT_PARCHMENT : COLOR_TEXT_DISABLED, false);
+    }
+
+    private boolean handleBotSwitchClick(BotSwitchLayout layout, double mouseX, double mouseY) {
+        if (layout == null) {
+            return false;
+        }
+        boolean hitSwitchControl = layout.prevRect().contains(mouseX, mouseY)
+                || layout.nextRect().contains(mouseX, mouseY)
+                || layout.labelRect().contains(mouseX, mouseY);
+        if (!hitSwitchControl) {
+            return false;
+        }
+        if (!layout.canSwitch()) {
+            showBotSwitchUnavailableHint();
+            return true;
+        }
+        if (layout.prevRect().contains(mouseX, mouseY)) {
+            return cycleBotInventory(layout, -1);
+        }
+        if (layout.nextRect().contains(mouseX, mouseY) || layout.labelRect().contains(mouseX, mouseY)) {
+            return cycleBotInventory(layout, 1);
+        }
+        return false;
+    }
+
+    private boolean cycleBotInventory(BotSwitchLayout layout, int direction) {
+        if (layout == null || !layout.canSwitch()) {
+            return false;
+        }
+        List<String> aliases = layout.aliases();
+        if (aliases == null || aliases.isEmpty()) {
+            return false;
+        }
+        int baseIndex = layout.currentIndex() >= 0 ? layout.currentIndex() : 0;
+        int nextIndex = Math.floorMod(baseIndex + (direction < 0 ? -1 : 1), aliases.size());
+        String targetAlias = aliases.get(nextIndex);
+        if (targetAlias == null || targetAlias.isBlank() || targetAlias.equalsIgnoreCase(botAlias)) {
+            showBotSwitchUnavailableHint();
+            return false;
+        }
+        sendChatCommand("bot open " + formatBotTarget(targetAlias));
+        return true;
+    }
+
+    private void showBotSwitchUnavailableHint() {
+        if (this.client == null) {
+            return;
+        }
+        var player = this.client.player;
+        if (player == null) {
+            return;
+        }
+        long now = System.currentTimeMillis();
+        if (now - lastBotSwitchHintAtMs < BOT_SWITCH_HINT_COOLDOWN_MS) {
+            return;
+        }
+        lastBotSwitchHintAtMs = now;
+        player.sendMessage(Text.literal("No other bot is available to switch right now."), true);
+    }
+
     private void drawTopicPanel(DrawContext context, int panelX, int panelY, int mouseX, int mouseY) {
         int panelWidth = SECTION_WIDTH;
         int panelHeight = STATS_AREA_HEIGHT - 4;
@@ -442,6 +689,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
 
     private void drawQuickTopicGrid(DrawContext context, int x, int y, int w, int h, int mouseX, int mouseY) {
         if (QUICK_TOPIC_ENTRIES == null || QUICK_TOPIC_ENTRIES.isEmpty() || w <= 0 || h <= 0) {
+            quickHoveredEntry = null;
             return;
         }
 
@@ -462,6 +710,76 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             boolean active = entry.action != null && isEntryActive(entry.action);
             drawQuickTopicButton(context, bx, by, bw, bh, entry, active, mouseX, mouseY);
         }
+
+        drawQuickTopicHoverTooltip(context, mouseX, mouseY, x, y, w, h);
+    }
+
+    private TopicEntry getQuickTopicEntryAt(int mouseX, int mouseY, int gridX, int gridY, int gridW, int gridH) {
+        if (mouseX < gridX || mouseX >= gridX + gridW || mouseY < gridY || mouseY >= gridY + gridH) {
+            return null;
+        }
+        QuickGridLayout layout = computeQuickGridLayout(gridW, gridH);
+        int cols = layout.cols;
+        int rows = layout.rows;
+        int bw = layout.buttonW;
+        int bh = layout.buttonH;
+        int gap = layout.gap;
+
+        int col = (mouseX - gridX) / (bw + gap);
+        int row = (mouseY - gridY) / (bh + gap);
+        if (col < 0 || col >= cols || row < 0 || row >= rows) {
+            return null;
+        }
+
+        int cellX = gridX + col * (bw + gap);
+        int cellY = gridY + row * (bh + gap);
+        if (mouseX >= cellX + bw || mouseY >= cellY + bh) {
+            return null;
+        }
+
+        int index = row * cols + col;
+        int maxButtons = Math.min(QUICK_TOPIC_ENTRIES.size(), cols * rows);
+        if (index < 0 || index >= maxButtons) {
+            return null;
+        }
+        return QUICK_TOPIC_ENTRIES.get(index);
+    }
+
+    private void drawQuickTopicHoverTooltip(DrawContext context, int mouseX, int mouseY, int gridX, int gridY, int gridW, int gridH) {
+        TopicEntry hovered = getQuickTopicEntryAt(mouseX, mouseY, gridX, gridY, gridW, gridH);
+        if (hovered != quickHoveredEntry) {
+            quickHoveredEntry = hovered;
+            quickHoverStartedAtMs = System.currentTimeMillis();
+        }
+
+        if (quickHoveredEntry == null) {
+            return;
+        }
+
+        if (System.currentTimeMillis() - quickHoverStartedAtMs < QUICK_HOVER_TOOLTIP_DELAY_MS) {
+            return;
+        }
+
+        java.util.List<String> lines = getQuickTooltipLines(quickHoveredEntry);
+        if (lines == null || lines.isEmpty()) {
+            return;
+        }
+        drawTooltipBox(context, mouseX, mouseY, lines);
+    }
+
+    private java.util.List<String> getQuickTooltipLines(TopicEntry entry) {
+        if (entry == null) {
+            return java.util.List.of();
+        }
+        if (entry.action == TopicAction.OPEN_GUIDE) {
+            String guideKey = FrensClient.getGuideHotkeyDisplayName();
+            return java.util.List.of(
+                    "Guide",
+                    "Open the in-game companion guide.",
+                    "Hotkey: [" + guideKey + "]"
+            );
+        }
+        return java.util.List.of(entry.label);
     }
 
     private void drawQuickTopicButton(DrawContext context, int x, int y, int w, int h, TopicEntry entry,
@@ -666,9 +984,10 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         context.fill(closeX, closeY, closeX + closeSize, closeY + closeSize, closeHover ? 0xFF2A2A2A : 0xFF1A1A1A);
         int closeTextX = closeX + (closeSize - this.textRenderer.getWidth(closeLabel)) / 2;
         context.drawText(this.textRenderer, closeLabel, closeTextX, closeY + 2, 0xFFEFEFEF, false);
+        drawOverlayBotSwitchControls(context, r, closeX, mouseX, mouseY);
 
         // Footer hint.
-        String hint = "Scroll or drag scrollbar; click a topic; Esc closes";
+        String hint = "Scroll or drag scrollbar; click a topic; [ / ] switch bot; Esc closes";
         int footerH = this.textRenderer.fontHeight + TOPICS_OVERLAY_FOOTER_PAD * 2;
         int footerY = r.bottom() - footerH;
         context.fill(r.x + 1, footerY, r.right() - 1, r.bottom() - 1, 0xFF161616);
@@ -807,24 +1126,27 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
 
     private boolean isAdminUser() {
         MinecraftClient client = MinecraftClient.getInstance();
-        if (client == null || client.player == null) {
+        if (client == null) {
+            return false;
+        }
+        var player = client.player;
+        if (player == null) {
             return false;
         }
 
-        // Best-effort: some mappings expose a permission-level helper on the client player.
-        // Avoid hard-linking to a method that may not exist in all environments.
+        // Match server-side command permission gates (/bot ... requires level 2/op equivalent).
         try {
-            java.lang.reflect.Method m = client.player.getClass().getMethod("hasPermissionLevel", int.class);
-            Object r = m.invoke(client.player, 4);
+            java.lang.reflect.Method m = player.getClass().getMethod("hasPermissionLevel", int.class);
+            Object r = m.invoke(player, 2);
             if (r instanceof Boolean b) {
                 return b;
             }
         } catch (Throwable ignored) {
-            // Fall through.
+            // Fall through to stricter fallback below.
         }
 
-        // Fallback: keep the UI available; server will validate operator status.
-        return true;
+        // When permission-level APIs are unavailable in current mappings, fail closed.
+        return false;
     }
 
     private void drawDialogueColumn(DrawContext context, int x, int y, int w, int h) {
@@ -984,6 +1306,14 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         int closeY = r.y + (headerH - closeSize) / 2;
         if (mouseX >= closeX && mouseX < closeX + closeSize && mouseY >= closeY && mouseY < closeY + closeSize) {
             toggleTopicsExpanded(false);
+            return true;
+        }
+
+        int overlaySwitchLeft = r.x + TOPICS_OVERLAY_PADDING + this.textRenderer.getWidth("Conversation") + 10;
+        int overlaySwitchRight = closeX - 8;
+        int overlaySwitchY = r.y + Math.max(1, (headerH - BOT_SWITCH_CONTROL_H) / 2);
+        BotSwitchLayout overlaySwitch = computeBotSwitchLayout(overlaySwitchLeft, overlaySwitchRight, overlaySwitchY);
+        if (handleBotSwitchClick(overlaySwitch, mouseX, mouseY)) {
             return true;
         }
 
@@ -1575,10 +1905,18 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
                 );
             }
             if (k.equals("recruit_enable")) {
-                return java.util.List.of("Enable survival recruitment mode", "Turns ON survival recruitment system.");
+                return java.util.List.of(
+                        "Enable survival recruitment mode",
+                        "Sets world mode to Questing (recruitment ON).",
+                        "If switching from Admin mode, click again within 12s to confirm."
+                );
             }
             if (k.equals("recruit_disable")) {
-                return java.util.List.of("Disable survival recruitment mode", "Turns OFF survival recruitment system.");
+                return java.util.List.of(
+                        "Disable survival recruitment mode",
+                        "Sets world mode to Admin (recruitment OFF).",
+                        "If switching from Questing mode, click again within 12s to confirm."
+                );
             }
             if (k.equals("anchor_set")) {
                 return java.util.List.of("Set village anchor here", "Sets the village/settlement anchor at your position.");
@@ -1607,6 +1945,15 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             return java.util.List.of(
                     "Cleanup",
                     "Runs cleanup (drop sweep) to collect nearby dropped items."
+            );
+        }
+
+        if (entry.category == TopicCategory.SKILL && entry.action == TopicAction.OPEN_GUIDE) {
+            String guideKey = FrensClient.getGuideHotkeyDisplayName();
+            return java.util.List.of(
+                    "Guide",
+                    "Open the in-game companion guide.",
+                    "Hotkey: [" + guideKey + "]"
             );
         }
 
@@ -1778,6 +2125,14 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
 
     @Override
     public boolean mouseClicked(net.minecraft.client.gui.Click click, boolean isInside) {
+        if (!topicsExpanded) {
+            int rowY = this.y + SECTION_HEIGHT + 2 + STATS_AREA_HEIGHT - BOT_SWITCH_CONTROL_H - 5;
+            BotSwitchLayout collapsedSwitch = computeBotSwitchLayout(this.x + 6, this.x + SECTION_WIDTH - 6, rowY);
+            if (handleBotSwitchClick(collapsedSwitch, click.x(), click.y())) {
+                return true;
+            }
+        }
+
         if (topicsExpanded) {
             return clickTopicsOverlay(click);
         }
@@ -1858,6 +2213,20 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
 
     @Override
     public boolean keyPressed(KeyInput input) {
+        if (input != null && !(topicsExpanded && topicSearchFocused)) {
+            int key = input.key();
+            if (key == GLFW.GLFW_KEY_LEFT_BRACKET || key == GLFW.GLFW_KEY_RIGHT_BRACKET) {
+                int direction = key == GLFW.GLFW_KEY_LEFT_BRACKET ? -1 : 1;
+                BotSwitchLayout keyboardSwitch = computeBotSwitchLayout(this.x + 6, this.x + SECTION_WIDTH - 6,
+                        this.y + SECTION_HEIGHT + 2 + STATS_AREA_HEIGHT - BOT_SWITCH_CONTROL_H - 5);
+                if (cycleBotInventory(keyboardSwitch, direction)) {
+                    return true;
+                }
+                showBotSwitchUnavailableHint();
+                return true;
+            }
+        }
+
         if (input != null && topicsExpanded) {
             int key = input.key();
             if (topicSearchFocused) {
@@ -2246,16 +2615,11 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         }
 
         // Other recruitment/admin utilities remain operator-only.
-        if (entry.action != null) {
-            return isAdminUser();
-        }
-        // Recruitment/admin utilities remain operator-only.
         return isAdminUser();
     }
 
     private boolean isAdminTabEnabled() {
-        // Always enabled because the Spells entry lives here.
-        return true;
+        return !getVisibleAdminEntries().isEmpty();
     }
 
     private boolean canOpenSpellsMenu() {
@@ -2561,9 +2925,22 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
     private List<TopicEntry> getOverlayEntries() {
         return switch (overlayCategory) {
             case DIALOGUE -> DIALOGUE_TOPIC_ENTRIES;
-            case ADMIN -> ADMIN_TOPIC_ENTRIES;
+            case ADMIN -> getVisibleAdminEntries();
             default -> SKILL_TOPIC_ENTRIES;
         };
+    }
+
+    private List<TopicEntry> getVisibleAdminEntries() {
+        if (isAdminUser()) {
+            return ADMIN_TOPIC_ENTRIES;
+        }
+        java.util.ArrayList<TopicEntry> visible = new java.util.ArrayList<>();
+        for (TopicEntry entry : ADMIN_TOPIC_ENTRIES) {
+            if (entry != null && entry.action == TopicAction.OPEN_SPELLS) {
+                visible.add(entry);
+            }
+        }
+        return visible;
     }
 
     private void setTopicSearchQuery(String raw) {
@@ -2652,10 +3029,15 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
     }
 
     private String formatBotTarget() {
-        if (botAlias.contains(" ")) {
-            return "\"" + botAlias + "\"";
+        return formatBotTarget(botAlias);
+    }
+
+    private String formatBotTarget(String alias) {
+        String value = alias != null ? alias.trim() : "";
+        if (value.contains(" ")) {
+            return "\"" + value + "\"";
         }
-        return botAlias;
+        return value;
     }
 
     private void toggleFollow() {

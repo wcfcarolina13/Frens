@@ -8,6 +8,7 @@ import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 import net.wcfcarolina13.GameAI.BotActions;
+import net.wcfcarolina13.GameAI.services.BotTerritoryAuthorizationService;
 import net.wcfcarolina13.GameAI.skills.SkillManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -413,6 +414,11 @@ public final class ScaffoldService {
                     boolean isScaffoldType = SCAFFOLD_BLOCKS.stream()
                             .anyMatch(item -> state.getBlock().asItem().equals(item));
                     if (isScaffoldType) {
+                        var auth = BotTerritoryAuthorizationService.authorizeBlockMutation(bot, world, pos);
+                        if (!auth.allowed()) {
+                            future.complete(false);
+                            return;
+                        }
                         future.complete(world.breakBlock(pos, true));
                     } else {
                         future.complete(false);

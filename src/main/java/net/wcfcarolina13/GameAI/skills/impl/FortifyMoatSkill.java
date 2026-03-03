@@ -52,7 +52,8 @@ public final class FortifyMoatSkill implements Skill {
             List<FortificationPersistenceService.SavedFortification> walls =
                     FortificationPersistenceService.listForWorld(server, worldKey);
             if (walls.isEmpty()) {
-                return SkillExecutionResult.failure("No saved walls found. Build one first with `/bot fortify`.");
+                // Let FortifyVillageSkill bootstrap a schema from the nearby village.
+                return fortifySkill.executeMoat(source, bot, world, server, null);
             }
             // Pick nearest by center distance
             FortificationPersistenceService.SavedFortification nearest = null;

@@ -1,0 +1,21 @@
+package net.wcfcarolina13.network;
+
+import net.minecraft.network.PacketByteBuf;
+import net.minecraft.network.codec.PacketCodec;
+import net.minecraft.network.packet.CustomPayload;
+import net.minecraft.util.Identifier;
+
+/** Client -> Server: claim a saved fortification wall for the requesting player. */
+public record BaseClaimWallPayload(String label) implements CustomPayload {
+    public static final Identifier ID_IDENTIFIER = Identifier.of("frens", "base_claim_wall");
+    public static final CustomPayload.Id<BaseClaimWallPayload> ID = new CustomPayload.Id<>(ID_IDENTIFIER);
+
+    public static final PacketCodec<PacketByteBuf, String> STRING_CODEC = new StringCodec(32767);
+    public static final PacketCodec<PacketByteBuf, BaseClaimWallPayload> CODEC =
+            PacketCodec.tuple(STRING_CODEC, BaseClaimWallPayload::label, BaseClaimWallPayload::new);
+
+    @Override
+    public Id<? extends CustomPayload> getId() {
+        return ID;
+    }
+}

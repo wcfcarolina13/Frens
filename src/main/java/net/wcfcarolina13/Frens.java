@@ -455,6 +455,10 @@ public class Frens implements ModInitializer {
         PayloadTypeRegistry.playC2S().register(net.wcfcarolina13.network.BaseRenamePayload.ID, net.wcfcarolina13.network.BaseRenamePayload.CODEC);
         PayloadTypeRegistry.playC2S().register(net.wcfcarolina13.network.BaseSetHomePayload.ID, net.wcfcarolina13.network.BaseSetHomePayload.CODEC);
         PayloadTypeRegistry.playC2S().register(net.wcfcarolina13.network.BaseGoToPayload.ID, net.wcfcarolina13.network.BaseGoToPayload.CODEC);
+        PayloadTypeRegistry.playC2S().register(net.wcfcarolina13.network.BaseClaimWallPayload.ID, net.wcfcarolina13.network.BaseClaimWallPayload.CODEC);
+        PayloadTypeRegistry.playC2S().register(net.wcfcarolina13.network.BaseUnclaimWallPayload.ID, net.wcfcarolina13.network.BaseUnclaimWallPayload.CODEC);
+        PayloadTypeRegistry.playC2S().register(net.wcfcarolina13.network.BaseGrantWallAccessPayload.ID, net.wcfcarolina13.network.BaseGrantWallAccessPayload.CODEC);
+        PayloadTypeRegistry.playC2S().register(net.wcfcarolina13.network.BaseRevokeWallAccessPayload.ID, net.wcfcarolina13.network.BaseRevokeWallAccessPayload.CODEC);
         PayloadTypeRegistry.playC2S().register(net.wcfcarolina13.network.RequestCraftingHistoryPayload.ID, net.wcfcarolina13.network.RequestCraftingHistoryPayload.CODEC);
         PayloadTypeRegistry.playS2C().register(net.wcfcarolina13.network.CraftingHistoryPayload.ID, net.wcfcarolina13.network.CraftingHistoryPayload.CODEC);
         PayloadTypeRegistry.playC2S().register(net.wcfcarolina13.network.RequestCookablesPayload.ID, net.wcfcarolina13.network.RequestCookablesPayload.CODEC);

@@ -101,12 +101,23 @@ After the workflow completes, the jar is attached to the matching release page.
 ```bash
 /bot spawn Jake training    # Spawn a bot named Jake
 /bot follow Jake            # Make Jake follow you
+/bot open Jake              # Open Jake's inventory/actions screen
 /bot skill woodcut 10 Jake  # Cut 10 trees
 /bot skill mining 32 Jake   # Mine 32 stone blocks
 /bot stop Jake              # Stop current task
 ```
 
 Alternatively, a work-in-progress topics dialogue menu and a shared inventory view are available for non-command interactions; these interfaces provide a simpler way to interact with bots without typing commands and are under active development.
+
+### Inventory UI quick-switch
+
+When a bot inventory screen is open:
+
+- Press `[` / `]` to switch to previous/next bot
+- Click `<` / `>` in the switch chip (bot stats row or expanded overlay header)
+- Clicking the alias chip also advances to the next bot
+
+Switching uses `/bot open <alias>` under the hood, so normal ownership/permission checks still apply.
 
 ---
 
@@ -120,6 +131,7 @@ Alternatively, a work-in-progress topics dialogue menu and a shared inventory vi
 | `/bot stop [alias&#124;all]` | Stop current task and movement |
 | `/bot resume [alias&#124;all]` | Resume a paused skill |
 | `/bot follow [alias&#124;all]` | Follow the commander |
+| `/bot open [alias]` | Open bot inventory/actions UI (no alias = last targeted fallback) |
 | `/bot heal [alias&#124;all]` | Force immediate eating |
 | `/bot inventory [alias&#124;all]` | Show inventory summary |
 
@@ -144,6 +156,24 @@ Alternatively, a work-in-progress topics dialogue menu and a shared inventory vi
 |---------|-------------|
 | `/bot store deposit <amount&#124;all> <item>` | Deposit to nearby chest |
 | `/bot store withdraw <amount&#124;all> <item>` | Withdraw from nearby chest |
+
+### Protected Zones
+
+| Command | Description |
+|---------|-------------|
+| `/bot zone protect <radius> [label]` | Create a protected zone centered on the block you are looking at |
+| `/bot zone remove <label>` | Remove a protected zone (owner/op only) |
+| `/bot zone list` | List zones with center, radius, owner, access mode, and permit count |
+| `/bot zone permit <label> <owner>` | Grant explicit access to another owner (owner/op only) |
+| `/bot zone revoke <label> <owner>` | Revoke explicit access (owner/op only) |
+| `/bot zone mode <label> <owner_only&#124;allowlist&#124;public>` | Set access policy for a zone (owner/op only) |
+
+`<owner>` may be a player name, UUID, or a bot alias owner.
+
+Mode behavior:
+- `owner_only` - only the zone owner can modify within the zone
+- `allowlist` - zone owner plus explicitly permitted owners
+- `public` - all owners may modify within the zone
 
 ### Configuration
 

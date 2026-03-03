@@ -13,6 +13,7 @@ import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.LightType;
+import net.wcfcarolina13.GameAI.services.BotTerritoryAuthorizationService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -295,6 +296,10 @@ public final class TorchPlacer {
     }
 
     private static boolean placeTorchAt(ServerPlayerEntity bot, ServerWorld world, BlockPos torchPos) {
+        var auth = BotTerritoryAuthorizationService.authorizeBlockMutation(bot, world, torchPos);
+        if (!auth.allowed()) {
+            return false;
+        }
         // torchPos is the AIR position where we want to place the torch
         // Find which adjacent block is a solid wall to attach to
         for (Direction dir : Direction.values()) {

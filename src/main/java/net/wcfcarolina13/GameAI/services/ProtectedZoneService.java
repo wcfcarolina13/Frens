@@ -88,8 +88,18 @@ public class ProtectedZoneService {
         private final UUID ownerUuid;
         private final String ownerName;
         private final long createdTime;
+        /** Access policy reserved for governance/economics expansion. */
+        private final String accessMode;
+        /** Explicitly allowed owner UUID strings. */
+        private final Set<String> allowedOwnerUuids;
         
         public ProtectedZone(String label, String worldId, BlockPos center, int radius, UUID ownerUuid, String ownerName) {
+            this(label, worldId, center, radius, ownerUuid, ownerName, "owner_only", Set.of());
+        }
+
+        public ProtectedZone(String label, String worldId, BlockPos center, int radius,
+                             UUID ownerUuid, String ownerName,
+                             String accessMode, Collection<String> allowedOwnerUuids) {
             this.label = label;
             this.worldId = worldId;
             this.center = center.toImmutable();
@@ -97,6 +107,8 @@ public class ProtectedZoneService {
             this.ownerUuid = ownerUuid;
             this.ownerName = ownerName;
             this.createdTime = System.currentTimeMillis();
+            this.accessMode = normalizeAccessMode(accessMode);
+            this.allowedOwnerUuids = normalizeOwnerUuidSet(allowedOwnerUuids);
         }
         
         public String getLabel() {
@@ -125,6 +137,14 @@ public class ProtectedZoneService {
         
         public long getCreatedTime() {
             return createdTime;
+        }
+
+        public String getAccessMode() {
+            return accessMode;
+        }
+
+        public Set<String> getAllowedOwnerUuids() {
+            return new HashSet<>(allowedOwnerUuids);
         }
         
         public boolean contains(BlockPos pos) {
@@ -158,11 +178,37 @@ public class ProtectedZoneService {
         }
         
         for (ProtectedZone zone : worldZones.values()) {
-            if (zone.contains(pos)) {
+            if (!zone.contains(pos)) {
+                continue;
+            }
+            if (!isMutationAllowed(zone, botOwner)) {
                 return true;
             }
         }
         return false;
+    }
+
+    private static boolean isMutationAllowed(ProtectedZone zone, @Nullable UUID actorOwner) {
+        if (zone == null) {
+            return true;
+        }
+        String mode = normalizeAccessMode(zone.getAccessMode());
+        if ("public".equals(mode)) {
+            return true;
+        }
+
+        UUID claimOwner = zone.getOwnerUuid();
+        if (claimOwner == null) {
+            return false;
+        }
+        if (actorOwner != null && claimOwner.equals(actorOwner)) {
+            return true;
+        }
+        if (actorOwner == null) {
+            return false;
+        }
+        String actorKey = actorOwner.toString();
+        return zone.allowedOwnerUuids.contains(actorKey);
     }
     
     /**
@@ -293,6 +339,96 @@ public class ProtectedZoneService {
         
         return new ArrayList<>(worldZones.values());
     }
+
+    /** Grants mutation access in this zone to another owner UUID. */
+    public static boolean grantZoneAccess(ServerWorld world, String label, UUID ownerUuid) {
+        if (world == null || label == null || label.isBlank() || ownerUuid == null) {
+            return false;
+        }
+        String worldId = getWorldId(world);
+        Map<String, ProtectedZone> worldZones = zones.get(worldId);
+        if (worldZones == null) {
+            return false;
+        }
+        ProtectedZone zone = worldZones.get(label);
+        if (zone == null) {
+            return false;
+        }
+        Set<String> allowed = zone.getAllowedOwnerUuids();
+        allowed.add(ownerUuid.toString());
+        worldZones.put(label, new ProtectedZone(
+                zone.getLabel(),
+                zone.getWorldId(),
+                zone.getCenter(),
+                zone.getRadius(),
+                zone.getOwnerUuid(),
+                zone.getOwnerName(),
+                zone.getAccessMode(),
+                allowed
+        ));
+        save(world.getServer(), worldId);
+        return true;
+    }
+
+    /** Revokes mutation access in this zone for the given owner UUID. */
+    public static boolean revokeZoneAccess(ServerWorld world, String label, UUID ownerUuid) {
+        if (world == null || label == null || label.isBlank() || ownerUuid == null) {
+            return false;
+        }
+        String worldId = getWorldId(world);
+        Map<String, ProtectedZone> worldZones = zones.get(worldId);
+        if (worldZones == null) {
+            return false;
+        }
+        ProtectedZone zone = worldZones.get(label);
+        if (zone == null) {
+            return false;
+        }
+        Set<String> allowed = zone.getAllowedOwnerUuids();
+        if (!allowed.remove(ownerUuid.toString())) {
+            return false;
+        }
+        worldZones.put(label, new ProtectedZone(
+                zone.getLabel(),
+                zone.getWorldId(),
+                zone.getCenter(),
+                zone.getRadius(),
+                zone.getOwnerUuid(),
+                zone.getOwnerName(),
+                zone.getAccessMode(),
+                allowed
+        ));
+        save(world.getServer(), worldId);
+        return true;
+    }
+
+    /** Sets zone access mode: owner_only | allowlist | public. */
+    public static boolean setZoneAccessMode(ServerWorld world, String label, String accessMode) {
+        if (world == null || label == null || label.isBlank()) {
+            return false;
+        }
+        String worldId = getWorldId(world);
+        Map<String, ProtectedZone> worldZones = zones.get(worldId);
+        if (worldZones == null) {
+            return false;
+        }
+        ProtectedZone zone = worldZones.get(label);
+        if (zone == null) {
+            return false;
+        }
+        worldZones.put(label, new ProtectedZone(
+                zone.getLabel(),
+                zone.getWorldId(),
+                zone.getCenter(),
+                zone.getRadius(),
+                zone.getOwnerUuid(),
+                zone.getOwnerName(),
+                accessMode,
+                zone.getAllowedOwnerUuids()
+        ));
+        save(world.getServer(), worldId);
+        return true;
+    }
     
     /**
      * Load zones from disk for a specific world.
@@ -323,16 +459,25 @@ public class ProtectedZoneService {
             
             Map<String, ProtectedZone> worldZones = zones.computeIfAbsent(worldId, k -> new ConcurrentHashMap<>());
             for (ZoneData data : zoneDataList) {
-                BlockPos center = new BlockPos(data.centerX, data.centerY, data.centerZ);
-                ProtectedZone zone = new ProtectedZone(
-                    data.label,
-                    worldId,
-                    center,
-                    data.radius,
-                    UUID.fromString(data.ownerUuid),
-                    data.ownerName
-                );
-                worldZones.put(data.label, zone);
+                try {
+                    BlockPos center = new BlockPos(data.centerX, data.centerY, data.centerZ);
+                    UUID ownerUuid = data.ownerUuid != null && !data.ownerUuid.isBlank()
+                            ? UUID.fromString(data.ownerUuid)
+                            : null;
+                    ProtectedZone zone = new ProtectedZone(
+                        data.label,
+                        worldId,
+                        center,
+                        data.radius,
+                        ownerUuid,
+                        data.ownerName,
+                        data.accessMode,
+                        data.allowedOwnerUuids
+                    );
+                    worldZones.put(data.label, zone);
+                } catch (Exception e) {
+                    LOGGER.warn("Skipping malformed protected zone '{}' in world {}", data.label, worldId);
+                }
             }
             
             LOGGER.info("Loaded {} protected zones for world {}", zoneDataList.size(), worldId);
@@ -411,7 +556,10 @@ public class ProtectedZoneService {
         int radius;
         String ownerUuid;
         String ownerName;
+        String accessMode;
+        List<String> allowedOwnerUuids;
         
+        @SuppressWarnings("unused")
         ZoneData() {}
         
         ZoneData(ProtectedZone zone) {
@@ -420,8 +568,41 @@ public class ProtectedZoneService {
             this.centerY = zone.getCenter().getY();
             this.centerZ = zone.getCenter().getZ();
             this.radius = zone.getRadius();
-            this.ownerUuid = zone.getOwnerUuid().toString();
+            this.ownerUuid = zone.getOwnerUuid() != null ? zone.getOwnerUuid().toString() : null;
             this.ownerName = zone.getOwnerName();
+            this.accessMode = zone.getAccessMode();
+            this.allowedOwnerUuids = new ArrayList<>(zone.getAllowedOwnerUuids());
         }
+    }
+
+    private static String normalizeAccessMode(String mode) {
+        if (mode == null || mode.isBlank()) {
+            return "owner_only";
+        }
+        String normalized = mode.trim().toLowerCase(Locale.ROOT);
+        if ("public".equals(normalized)) {
+            return "public";
+        }
+        if ("allowlist".equals(normalized) || "owner_only".equals(normalized)) {
+            return normalized;
+        }
+        return "owner_only";
+    }
+
+    private static Set<String> normalizeOwnerUuidSet(Collection<String> values) {
+        Set<String> out = new HashSet<>();
+        if (values == null || values.isEmpty()) {
+            return out;
+        }
+        for (String value : values) {
+            if (value == null || value.isBlank()) {
+                continue;
+            }
+            try {
+                out.add(UUID.fromString(value.trim()).toString());
+            } catch (IllegalArgumentException ignored) {
+            }
+        }
+        return out;
     }
 }

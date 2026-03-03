@@ -72,7 +72,7 @@ public class WorldModeSelectionScreen extends Screen {
     @Override
     public boolean keyPressed(KeyInput input) {
         if (input != null && input.key() == 256 /* ESC */) {
-            // Keep this modal until a mode is selected.
+            close();
             return true;
         }
         return super.keyPressed(input);
@@ -80,7 +80,7 @@ public class WorldModeSelectionScreen extends Screen {
 
     @Override
     public void close() {
-        // Intentionally modal until server confirms selection and clears modeSelectionRequired.
+        super.close();
     }
 
     @Override
@@ -106,7 +106,7 @@ public class WorldModeSelectionScreen extends Screen {
         int textY = panelY + 36;
         List<OrderedText> lines = this.textRenderer.wrapLines(
                 Text.literal("Questing: Go to a village, interact with villager/bell/bed, then initiate contact to recruit.\n"
-                        + "Admin: Spawn bot directly with /bot spawn <name> play. Spells/commands work without recruitment."),
+                + "Admin: Spawn bot directly with /bot spawn <name> admin. Spells/commands work without recruitment."),
                 panelW - 14
         );
         for (OrderedText line : lines) {
@@ -116,7 +116,7 @@ public class WorldModeSelectionScreen extends Screen {
 
         if (!canChoose) {
             context.drawCenteredTextWithShadow(this.textRenderer,
-                    Text.literal("Only an admin/operator can choose this."),
+                    Text.literal("Only an admin or delegated player can choose this."),
                     cx,
                     this.height - 26,
                     0xFFFF8080);

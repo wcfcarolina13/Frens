@@ -9,6 +9,7 @@ import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.util.Hand;
 import net.minecraft.util.math.BlockPos;
 import net.wcfcarolina13.Entity.LookController;
+import net.wcfcarolina13.GameAI.services.BotTerritoryAuthorizationService;
 import net.wcfcarolina13.GameAI.skills.SkillManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -67,6 +68,14 @@ public class MiningTool {
         if (distSq > SURVIVAL_REACH_SQ) {
             miningResult.complete("⚠️ Cannot mine: out of reach.");
             return miningResult;
+        }
+
+        if (bot.getEntityWorld() instanceof net.minecraft.server.world.ServerWorld serverWorld) {
+            var auth = BotTerritoryAuthorizationService.authorizeBlockMutation(bot, serverWorld, targetBlockPos);
+            if (!auth.allowed()) {
+                miningResult.complete("⚠️ Cannot mine: protected claim.");
+                return miningResult;
+            }
         }
 
         AtomicBoolean canceled = new AtomicBoolean(false);
@@ -134,6 +143,14 @@ public class MiningTool {
                 if (tickDistSq > SURVIVAL_REACH_SQ) {
                     miningResult.complete("⚠️ Cannot mine: out of reach.");
                     return;
+                }
+
+                if (bot.getEntityWorld() instanceof net.minecraft.server.world.ServerWorld serverWorld) {
+                    var auth = BotTerritoryAuthorizationService.authorizeBlockMutation(bot, serverWorld, targetBlockPos);
+                    if (!auth.allowed()) {
+                        miningResult.complete("⚠️ Cannot mine: protected claim.");
+                        return;
+                    }
                 }
                 
                 try {

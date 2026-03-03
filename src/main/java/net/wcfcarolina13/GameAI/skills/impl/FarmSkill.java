@@ -26,6 +26,7 @@ import net.minecraft.world.Heightmap;
 import net.wcfcarolina13.ChatUtils.ChatUtils;
 import net.wcfcarolina13.Entity.LookController;
 import net.wcfcarolina13.GameAI.BotActions;
+import net.wcfcarolina13.GameAI.services.BotTerritoryAuthorizationService;
 import net.wcfcarolina13.GameAI.services.MovementService;
 import net.wcfcarolina13.GameAI.services.ReturnBaseStuckService;
 import net.wcfcarolina13.GameAI.services.TaskService;
@@ -1391,6 +1392,10 @@ public class FarmSkill implements Skill {
                     false
             );
 
+                if (!isMutationAuthorized(bot, world, plot.up())) {
+                continue;
+                }
+
             ActionResult result = bot.interactionManager.interactBlock(
                     bot,
                     world,
@@ -1636,6 +1641,9 @@ public class FarmSkill implements Skill {
 
     private static boolean placeWater(ServerPlayerEntity bot, ServerWorld world, BlockPos waterPos) {
         abortIfRequested(bot);
+        if (!isMutationAuthorized(bot, world, waterPos)) {
+            return false;
+        }
         if (!isWithinReach(bot, waterPos)) {
             LOGGER.debug("Water position {} out of reach", waterPos);
             return false;
@@ -1679,6 +1687,10 @@ public class FarmSkill implements Skill {
         CompletableFuture<Boolean> future = new CompletableFuture<>();
         server.execute(() -> {
             try {
+                if (!isMutationAuthorized(bot, world, waterPos)) {
+                    future.complete(false);
+                    return;
+                }
                 if (!ensureWaterBucketSelected(bot)) {
                     LOGGER.warn("[FarmIrrigation] water bucket unavailable on server thread at {}", waterPos.toShortString());
                     future.complete(false);
@@ -2313,6 +2325,10 @@ public class FarmSkill implements Skill {
         CompletableFuture<Boolean> future = new CompletableFuture<>();
         server.execute(() -> {
             try {
+                if (!isMutationAuthorized(bot, world, waterPos)) {
+                    future.complete(false);
+                    return;
+                }
                 // Ensure bucket is selected on server thread
                 selectHotbarSlot(bot, bucketSlot);
                 if (!bot.getMainHandStack().isOf(Items.BUCKET)) {
@@ -2412,6 +2428,10 @@ public class FarmSkill implements Skill {
         CompletableFuture<Boolean> fallbackFuture = new CompletableFuture<>();
         server.execute(() -> {
             try {
+                if (!isMutationAuthorized(bot, world, waterPos)) {
+                    fallbackFuture.complete(false);
+                    return;
+                }
                 selectHotbarSlot(bot, bucketSlot);
                 if (!bot.getMainHandStack().isOf(Items.BUCKET)) {
                     fallbackFuture.complete(false);
@@ -2498,6 +2518,14 @@ public class FarmSkill implements Skill {
         Vec3d eye = bot.getEyePos();
         Vec3d target = Vec3d.ofCenter(pos);
         return eye.distanceTo(target) <= MAX_INTERACTION_RANGE;
+    }
+
+    private static boolean isMutationAuthorized(ServerPlayerEntity bot, ServerWorld world, BlockPos pos) {
+        if (bot == null || world == null || pos == null) {
+            return false;
+        }
+        var auth = BotTerritoryAuthorizationService.authorizeBlockMutation(bot, world, pos);
+        return auth.allowed();
     }
 
     private static boolean fillWithDirt(ServerPlayerEntity bot, ServerWorld world, BlockPos pos) {
@@ -2620,6 +2648,9 @@ public class FarmSkill implements Skill {
                 LookController.faceBlock(bot, plot);
                 sleep(ACTION_DELAY_MS);
                 BlockHitResult hit = new BlockHitResult(Vec3d.ofCenter(plot).add(0, 0.5, 0), Direction.UP, plot, false);
+                if (!isMutationAuthorized(bot, world, plot.up())) {
+                    continue;
+                }
                 ActionResult result = bot.interactionManager.interactBlock(bot, world, bot.getMainHandStack(), Hand.MAIN_HAND, hit);
                 if (result.isAccepted()) {
                     bot.swingHand(Hand.MAIN_HAND, true);
@@ -2897,6 +2928,9 @@ public class FarmSkill implements Skill {
     }
 
     private static boolean pickupWater(ServerPlayerEntity bot, ServerWorld world, BlockPos pos) {
+        if (!isMutationAuthorized(bot, world, pos)) {
+            return false;
+        }
         int bucketSlot = findHotbarItemSlot(bot.getInventory(), Items.BUCKET);
         if (bucketSlot == -1) bucketSlot = findInventoryItemSlot(bot.getInventory(), Items.BUCKET);
         if (bucketSlot == -1) {

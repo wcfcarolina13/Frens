@@ -26,6 +26,7 @@ import net.minecraft.block.Blocks;
 import net.minecraft.sound.SoundEvents;
 import net.minecraft.text.Text;
 import net.wcfcarolina13.GraphicalUserInterface.BaseManagerScreen;
+import net.wcfcarolina13.GraphicalUserInterface.BotGuideScreen;
 import net.wcfcarolina13.GraphicalUserInterface.BotPlayerInventoryScreen;
 import net.wcfcarolina13.GraphicalUserInterface.CookablesScreen;
 import net.wcfcarolina13.GraphicalUserInterface.CraftingHistoryScreen;
@@ -61,6 +62,7 @@ public class FrensClient implements ClientModInitializer {
 
     private static KeyBinding KEY_FOLLOW_TOGGLE_LOOK;
     private static KeyBinding KEY_GO_TO_LOOK;
+    private static KeyBinding KEY_OPEN_GUIDE;
     private static KeyBinding KEY_OPEN_SPELLS;
     private static KeyBinding KEY_RESUME;
     private static KeyBinding KEY_STOP_LOOK;
@@ -369,6 +371,11 @@ public class FrensClient implements ClientModInitializer {
             GLFW.GLFW_KEY_MINUS,
             KeyBinding.Category.MISC
         ));
+        KEY_OPEN_GUIDE = KeyBindingHelper.registerKeyBinding(new KeyBinding(
+            "key.frens.open_guide",
+            GLFW.GLFW_KEY_RIGHT_BRACKET,
+            KeyBinding.Category.MISC
+        ));
         KEY_OPEN_SPELLS = KeyBindingHelper.registerKeyBinding(new KeyBinding(
             "key.frens.open_spells",
             GLFW.GLFW_KEY_UNKNOWN,
@@ -446,6 +453,9 @@ public class FrensClient implements ClientModInitializer {
             }
 
             if (goToPressed) {
+                if (tryOpenModeSelectionFromContextKey(client)) {
+                    return;
+                }
                 if (hasPendingDirectionalMining() || hasPendingShelter()) {
                     // Pending look-confirm commands must consume '-' before contextual spells.
                     handleGoToLook(client);
@@ -465,6 +475,9 @@ public class FrensClient implements ClientModInitializer {
                         }
                     }
                 }
+            }
+            if (KEY_OPEN_GUIDE.wasPressed()) {
+                handleOpenGuideKey(client);
             }
             if (KEY_OPEN_SPELLS.wasPressed()) {
                 handleSpellsContextKey(client);
@@ -686,6 +699,7 @@ public class FrensClient implements ClientModInitializer {
         HudRenderCallback.EVENT.register((context, tickDelta) -> resetTopTipLayout(context));
         HudRenderCallback.EVENT.register((context, tickDelta) -> renderResumeDecisionHint(context));
         HudRenderCallback.EVENT.register((context, tickDelta) -> renderLeashButton(context));
+        HudRenderCallback.EVENT.register((context, tickDelta) -> renderModeSelectionReminder(context));
         HudRenderCallback.EVENT.register((context, tickDelta) -> renderRecruitmentPrompt(context));
         HudRenderCallback.EVENT.register((context, tickDelta) -> renderSpellsAcquireHint(context));
         HudRenderCallback.EVENT.register((context, tickDelta) -> renderSpellsPrompt(context));
@@ -693,6 +707,7 @@ public class FrensClient implements ClientModInitializer {
         HudRenderCallback.EVENT.register((context, tickDelta) -> renderDirectionalMiningHint(context));
         HudRenderCallback.EVENT.register((context, tickDelta) -> CompanionHotkeyOverlayHud.render(context));
         HudRenderCallback.EVENT.register((context, tickDelta) -> renderLookedAtBotStatusHint(context));
+        HudRenderCallback.EVENT.register((context, tickDelta) -> renderLookedAtBotInventoryHint(context));
         
         // Update schematic preview box every client tick
         ClientTickEvents.END_CLIENT_TICK.register(FrensClient::updateSchematicPreviewBox);
@@ -778,6 +793,74 @@ public class FrensClient implements ClientModInitializer {
             default -> y = TOP_TIP_MARGIN;
         }
         return y;
+    }
+
+    public static String getGuideHotkeyDisplayName() {
+        String keyName = keyNameOrNull(KEY_OPEN_GUIDE);
+        return keyName != null ? keyName : "]";
+    }
+
+    private static boolean tryOpenModeSelectionFromContextKey(MinecraftClient client) {
+        if (client == null || client.getNetworkHandler() == null) {
+            return false;
+        }
+        if (!modeSelectionRequired || !modeSelectionCanChoose) {
+            return false;
+        }
+        if (client.currentScreen instanceof WorldModeSelectionScreen) {
+            return true;
+        }
+        client.setScreen(new WorldModeSelectionScreen(modeSelectionWorldKey, true));
+        modeSelectionAutoOpenPending = false;
+        modeSelectionOpenedThisConnection = true;
+        return true;
+    }
+
+    private static void handleOpenGuideKey(MinecraftClient client) {
+        if (client == null || client.player == null || client.currentScreen != null) {
+            return;
+        }
+        String alias = resolveQuickBotTarget(client);
+        if (alias == null || alias.isBlank()) {
+            alias = (recruitmentBotAlias == null || recruitmentBotAlias.isBlank()) ? "bot" : recruitmentBotAlias;
+        }
+        client.setScreen(new BotGuideScreen(null, alias));
+    }
+
+    private static void renderModeSelectionReminder(DrawContext context) {
+        MinecraftClient client = MinecraftClient.getInstance();
+        if (client == null || client.player == null || client.currentScreen != null) {
+            return;
+        }
+        if (!isGameplayTipsEnabled()) {
+            return;
+        }
+        if (!modeSelectionRequired || !modeSelectionCanChoose) {
+            return;
+        }
+
+        String openKey = keyNameOrNull(KEY_GO_TO_LOOK);
+        if (openKey == null) {
+            openKey = "-";
+        }
+        String line1 = "World setup pending: choose Questing or Admin mode.";
+        String line2 = "Press [" + openKey + "] to reopen setup, or use /bot spawn <name> admin";
+
+        int w1 = client.textRenderer.getWidth(line1);
+        int w2 = client.textRenderer.getWidth(line2);
+        int maxW = Math.max(w1, w2);
+        int x = 12;
+        int boxH = client.textRenderer.fontHeight * 2 + 6;
+        int y = reserveTopTipY(TopTipLane.LEFT, boxH + 7);
+
+        context.fill(x - 6, y - 4, x + maxW + 6, y + boxH, 0xAA101010);
+        context.fill(x - 7, y - 5, x + maxW + 7, y - 4, 0xFF4A4A4A);
+        context.fill(x - 7, y + boxH, x + maxW + 7, y + boxH + 1, 0xFF4A4A4A);
+        context.fill(x - 7, y - 5, x - 6, y + boxH + 1, 0xFF4A4A4A);
+        context.fill(x + maxW + 6, y - 5, x + maxW + 7, y + boxH + 1, 0xFF4A4A4A);
+
+        context.drawTextWithShadow(client.textRenderer, line1, x, y, 0xFFE6D7A3);
+        context.drawTextWithShadow(client.textRenderer, line2, x, y + client.textRenderer.fontHeight + 2, 0xFFB8A76A);
     }
 
     private static void handleRecruitContactKey(MinecraftClient client) {
@@ -1612,6 +1695,43 @@ public class FrensClient implements ClientModInitializer {
         } else {
             return;
         }
+
+        int w = client.textRenderer.getWidth(line);
+        int x = (context.getScaledWindowWidth() - w) / 2;
+        int y = reserveTopTipY(TopTipLane.CENTER, client.textRenderer.fontHeight + 9);
+
+        context.fill(x - 6, y - 4, x + w + 6, y + client.textRenderer.fontHeight + 4, 0xAA101010);
+        context.drawTextWithShadow(client.textRenderer, line, x, y, 0xFFE6D7A3);
+    }
+
+    private static void renderLookedAtBotInventoryHint(DrawContext context) {
+        if (!isGameplayTipsEnabled()) {
+            return;
+        }
+        MinecraftClient client = MinecraftClient.getInstance();
+        if (client == null || client.player == null || client.currentScreen != null) {
+            return;
+        }
+        PlayerEntity looked = findLookedAtBotEntity(client);
+        if (looked == null || looked == client.player || looked.isRemoved() || !looked.isAlive()) {
+            return;
+        }
+        if (lookedAtBotStatus == null || lookedAtBotStatus.botUuid() == null) {
+            return;
+        }
+        if (System.currentTimeMillis() - lookedAtBotStatusAtMs > 1800L) {
+            return;
+        }
+        if (!looked.getUuidAsString().equalsIgnoreCase(lookedAtBotStatus.botUuid())) {
+            return;
+        }
+
+        String alias = looked.getName() != null ? looked.getName().getString() : "Bot";
+        if (alias == null || alias.isBlank()) {
+            alias = "Bot";
+        }
+        String guideKey = getGuideHotkeyDisplayName();
+        String line = "Looking at " + alias + ". Right-click to open menu • [" + guideKey + "] opens Guide";
 
         int w = client.textRenderer.getWidth(line);
         int x = (context.getScaledWindowWidth() - w) / 2;
