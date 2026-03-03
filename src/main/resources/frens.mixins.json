@@ -6,7 +6,9 @@
 		"ExampleMixin",
 		"CraftingResultSlotMixin"
 	],
-	"client": [],
+	"client": [
+		"MouseAccessor"
+	],
 	"injectors": {
 		"defaultRequire": 1
 	}

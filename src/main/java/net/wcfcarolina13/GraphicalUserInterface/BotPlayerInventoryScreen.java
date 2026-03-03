@@ -394,12 +394,20 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
     protected void init() {
         super.init();
         // Restore cursor position after a bot-switch screen transition.
-        // setScreen() calls mouse.unlockCursor() (which centers the cursor)
+        // setScreen() calls mouse.unlockCursor() (which centres the cursor)
         // BEFORE init(), so by the time we get here the cursor has been
-        // centered. Restoring now puts it back before the first render frame.
+        // centred.  We must update BOTH the physical GLFW cursor AND the
+        // internal Mouse.x/y fields; glfwSetCursorPos alone only moves the
+        // physical cursor — the onCursorPos callback won't fire until the
+        // next glfwPollEvents, leaving Mouse.x/y at the centre and causing
+        // the first Click after a switch to resolve to wrong coordinates.
         if (savedSwitchCursorX >= 0 && this.client != null) {
             long window = this.client.getWindow().getHandle();
             GLFW.glfwSetCursorPos(window, savedSwitchCursorX, savedSwitchCursorY);
+            ((net.wcfcarolina13.mixin.MouseAccessor) (Object) this.client.mouse)
+                    .setX(savedSwitchCursorX);
+            ((net.wcfcarolina13.mixin.MouseAccessor) (Object) this.client.mouse)
+                    .setY(savedSwitchCursorY);
             savedSwitchCursorX = -1;
             savedSwitchCursorY = -1;
         }
@@ -692,17 +700,24 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         }
         int baseIndex = layout.currentIndex() >= 0 ? layout.currentIndex() : 0;
         int effectiveIndex = Math.floorMod(baseIndex + switchBrowseOffset, aliases.size());
-        int nextIndex = Math.floorMod(effectiveIndex + (direction < 0 ? -1 : 1), aliases.size());
+        int step = direction < 0 ? -1 : 1;
+        int nextIndex = Math.floorMod(effectiveIndex + step, aliases.size());
+        // Skip the currently-open bot so browsing always lands on a
+        // *different* bot.  Without this, a 2-bot setup would toggle between
+        // showing the blocked warning and clearing it on every click, making
+        // the button feel unresponsive.
+        if (aliases.size() > 2 && aliases.get(nextIndex).equalsIgnoreCase(botAlias)) {
+            nextIndex = Math.floorMod(nextIndex + step, aliases.size());
+        }
         String targetAlias = aliases.get(nextIndex);
         if (targetAlias == null || targetAlias.isBlank()) {
             showBotSwitchUnavailableHint();
             return false;
         }
-        // Scrolled back to current bot — reset browse state.
+        // Wrapped all the way around back to current bot (possible when there
+        // are only 2 bots, or only 1 other bot left).  Absorb the click
+        // without changing browse state so the warning stays visible.
         if (targetAlias.equalsIgnoreCase(botAlias)) {
-            switchBrowseOffset = 0;
-            switchBrowsedBlockedAlias = null;
-            switchBrowsedBlockReason = null;
             return true;
         }
         // Gated switching: verify proximity, spell item, or admin status.
