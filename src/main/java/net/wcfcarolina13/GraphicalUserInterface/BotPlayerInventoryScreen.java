@@ -32,19 +32,22 @@ import org.lwjgl.glfw.GLFW;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
+import net.minecraft.client.network.PlayerListEntry;
 
 public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventoryScreenHandler> {
     private static final Identifier BACKGROUND_TEXTURE = Identifier.of("minecraft", "textures/gui/container/inventory.png");
     private static final int SECTION_WIDTH = 176;
     private static final int SECTION_HEIGHT = 166;
     private static final int BLOCK_GAP = 12;
-    private static final int STATS_AREA_HEIGHT = 48;
+    private static final int STATS_AREA_HEIGHT = 64;
     private static final int TOPIC_PADDING = 6;
     // Row height must comfortably fit the font + padding; 10px is too tight and causes visual overlap.
     private static final int TOPIC_ROW_HEIGHT = 12;
@@ -470,16 +473,26 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
     }
 
     private List<String> collectSwitchableBotAliases() {
+        Set<String> onlineNames = getOnlinePlayerNames();
         Set<String> unique = new LinkedHashSet<>();
-        addSwitchAlias(unique, botAlias);
-        addSwitchAlias(unique, FrensClient.getRecruitmentBotAlias());
+        addSwitchAlias(unique, botAlias); // current bot — always include
+
+        // Only include other aliases if they are actually online in this world
+        String recruitAlias = FrensClient.getRecruitmentBotAlias();
+        if (recruitAlias != null && onlineNames.contains(recruitAlias.toLowerCase(Locale.ROOT))) {
+            addSwitchAlias(unique, recruitAlias);
+        }
 
         if (Frens.CONFIG != null) {
             for (String alias : Frens.CONFIG.getBotGameProfile().keySet()) {
-                addSwitchAlias(unique, alias);
+                if (onlineNames.contains(alias.toLowerCase(Locale.ROOT))) {
+                    addSwitchAlias(unique, alias);
+                }
             }
             for (String alias : Frens.CONFIG.getBotControls().keySet()) {
-                addSwitchAlias(unique, alias);
+                if (onlineNames.contains(alias.toLowerCase(Locale.ROOT))) {
+                    addSwitchAlias(unique, alias);
+                }
             }
         }
 
@@ -491,6 +504,19 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             aliases.add(0, current);
         }
         return aliases;
+    }
+
+    /** Returns lowercase names of all players currently in the tab list. */
+    private Set<String> getOnlinePlayerNames() {
+        MinecraftClient client = MinecraftClient.getInstance();
+        if (client == null || client.getNetworkHandler() == null) return Collections.emptySet();
+        Set<String> names = new HashSet<>();
+        for (PlayerListEntry entry : client.getNetworkHandler().getPlayerList()) {
+            if (entry.getProfile() != null && entry.getProfile().name() != null) {
+                names.add(entry.getProfile().name().toLowerCase(Locale.ROOT));
+            }
+        }
+        return names;
     }
 
     private void addSwitchAlias(Set<String> unique, String alias) {
