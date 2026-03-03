@@ -238,7 +238,8 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         SKILL_STRIPMINE,
         SKILL_ASCENT,
         SKILL_DESCENT,
-        OPEN_BOT_CONTROLS
+        OPEN_BOT_CONTROLS,
+        OPEN_SKIN_CHOOSER
     }
 
     private enum TopicCategory {
@@ -351,6 +352,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
                 // ── Screens ──
                 new TopicEntry("Bot Controls >", TopicCategory.ADMIN, TopicAction.OPEN_BOT_CONTROLS, false, 0, null),
                 new TopicEntry("Spells >", TopicCategory.ADMIN, TopicAction.OPEN_SPELLS, false, 0, null),
+                new TopicEntry("Change Skin >", TopicCategory.ADMIN, TopicAction.OPEN_SKIN_CHOOSER, false, 0, null),
                 // ── Toggles ──
                 new TopicEntry("Gameplay Tips", TopicCategory.ADMIN, TopicAction.GAMEPLAY_TIPS, true, 0, null),
                 new TopicEntry("Idle Hobbies Anywhere", TopicCategory.ADMIN, TopicAction.IDLE_HOBBIES_ANYWHERE, true, 0, null),
@@ -2521,6 +2523,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case OPEN_SPELLS -> openSpellsMenu();
             case OPEN_GUIDE -> openGuideMenu();
             case OPEN_BOT_CONTROLS -> openBotControls();
+            case OPEN_SKIN_CHOOSER -> openSkinChooser();
             case STOP -> runStop();
             case RESUME -> runResume();
             case FOLLOW -> toggleFollow();
@@ -3467,6 +3470,13 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             return;
         }
         this.client.setScreen(new BotControlScreen(this));
+    }
+
+    private void openSkinChooser() {
+        if (this.client == null) {
+            return;
+        }
+        this.client.setScreen(new BotSkinChooserScreen(this, botAlias));
     }
 
     /**

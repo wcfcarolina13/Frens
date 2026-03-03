@@ -490,6 +490,9 @@ public class Frens implements ModInitializer {
         PayloadTypeRegistry.playC2S().register(LearningInputSamplePayload.ID, LearningInputSamplePayload.CODEC);
         PayloadTypeRegistry.playS2C().register(LearningSessionStatusPayload.ID, LearningSessionStatusPayload.CODEC);
 
+        // Bot skin change
+        PayloadTypeRegistry.playC2S().register(net.wcfcarolina13.network.BotSkinPayload.ID, net.wcfcarolina13.network.BotSkinPayload.CODEC);
+
         net.wcfcarolina13.network.BaseNetworkManager.registerReceiversOnce();
         net.wcfcarolina13.network.CraftingHistoryNetworkManager.registerReceiversOnce();
         net.wcfcarolina13.network.CookablesNetworkManager.registerReceiversOnce();
@@ -498,6 +501,7 @@ public class Frens implements ModInitializer {
         net.wcfcarolina13.network.CompanionQuestNetworkManager.registerReceiversOnce();
         net.wcfcarolina13.network.RecruitmentAdminNetworkManager.registerReceiversOnce();
         net.wcfcarolina13.network.BotTaskPeekNetworkManager.registerReceiversOnce();
+        net.wcfcarolina13.network.BotSkinNetworkManager.registerReceiversOnce();
         LearningModeService.registerReceiversOnce();
 
         modCommandRegistry.register();

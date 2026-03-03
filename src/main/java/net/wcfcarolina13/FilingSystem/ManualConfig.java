@@ -53,6 +53,7 @@ public class ManualConfig {
     private boolean idleHobbiesAnywhereEnabled = false;
     private boolean baritonePathfinderEnabled = false;
     private boolean fortifyForcePlaceEnabled = false;
+    private Map<String, String> botSkins = new HashMap<>();
     private Map<String, BotControlSettings> botControls = new HashMap<>();
     // Seed-agnostic, bot-persistent quest continuity (non-power progression).
     private Map<String, BotQuestMemory> botQuestMemory = new HashMap<>();
@@ -362,6 +363,31 @@ public class ManualConfig {
         putAliasValue(getBotGameProfile(), alias, uuid.trim());
     }
 
+    // ── Bot skin presets ──
+
+    public Map<String, String> getBotSkins() {
+        if (botSkins == null) {
+            botSkins = new HashMap<>();
+        }
+        return botSkins;
+    }
+
+    public void setBotSkins(Map<String, String> botSkins) {
+        this.botSkins = normalizeAliasMap(botSkins);
+    }
+
+    public String getBotSkin(String alias) {
+        String key = resolveAliasKey(getBotSkins(), alias);
+        return key != null ? getBotSkins().get(key) : null;
+    }
+
+    public void setBotSkin(String alias, String presetId) {
+        if (alias == null || alias.isBlank() || presetId == null || presetId.isBlank()) {
+            return;
+        }
+        putAliasValue(getBotSkins(), alias, presetId.trim());
+    }
+
     public Map<String, BotOwnership> getBotOwnership() {
         if (botOwnership == null) {
             botOwnership = new HashMap<>();
@@ -547,6 +573,7 @@ public class ManualConfig {
         removeAliasVariants(botSpawnPoints, alias);
         removeAliasVariants(botControls, alias);
         removeAliasVariants(botQuestMemory, alias);
+        removeAliasVariants(botSkins, alias);
     }
 
     private void normalizeAliasBackedMaps() {
@@ -555,6 +582,7 @@ public class ManualConfig {
         botSpawnPoints = normalizeAliasMap(botSpawnPoints);
         botControls = normalizeAliasMap(botControls);
         botQuestMemory = normalizeAliasMap(botQuestMemory);
+        botSkins = normalizeAliasMap(botSkins);
     }
 
     private static String normalizeAlias(String alias) {

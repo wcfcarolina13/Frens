@@ -41,6 +41,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import net.wcfcarolina13.Frens;
 import net.wcfcarolina13.GameAI.services.BotPersistenceService;
+import net.wcfcarolina13.GameAI.services.BotSkinService;
 
 // Same as carpet's code for spawning fake players, only difference is that it will work even if the command executor is in offline mode
 
@@ -109,6 +110,16 @@ public class createFakePlayer extends ServerPlayerEntity {
     }
 
     private static void spawnFake(MinecraftServer server, ServerWorld worldIn, GameProfile gameprofile, Vec3d pos, double yaw, double pitch, GameMode gamemode, boolean flying, RegistryKey<World> dimensionId) {
+        // Apply persisted (or random) skin before connecting so the initial
+        // PlayerListS2CPacket already carries the texture.
+        String skinId = BotSkinService.getSkin(gameprofile.name());
+        if (skinId != null) {
+            BotSkinService.applySkinToProfile(gameprofile, skinId);
+        } else {
+            String chosen = BotSkinService.applyRandomSkin(gameprofile);
+            BotSkinService.persistSkin(gameprofile.name(), chosen);
+        }
+
         createFakePlayer instance = new createFakePlayer(server, worldIn, gameprofile, SyncedClientOptions.createDefault(), false);
 //        instance.fixStartingPosition = () -> {
 //            instance.refreshPositionAndAngles(pos.x, pos.y, pos.z, (float) yaw, (float) pitch);
