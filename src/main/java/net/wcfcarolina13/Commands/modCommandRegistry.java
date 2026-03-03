@@ -102,6 +102,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.*;
+import java.util.regex.Pattern;
 import net.minecraft.entity.ItemEntity;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
@@ -139,6 +140,50 @@ public class modCommandRegistry {
     public static boolean enableReinforcementLearning = false;
     public static String botName = "";
     public static final Logger LOGGER = LoggerFactory.getLogger("mod-command-registry");
+
+    // ── Bot name validation ──────────────────────────────────────────
+    /** Max length for a bot name (vanilla MC usernames are 3-16; we allow up to 24 for creative names). */
+    private static final int BOT_NAME_MAX_LENGTH = 24;
+    /** Allowed characters: letters, digits, underscores, hyphens, spaces, periods, and apostrophes. */
+    private static final Pattern BOT_NAME_PATTERN = Pattern.compile("^[a-zA-Z0-9_ \\-.']+$");
+    /** Minecraft formatting code prefix — disallowed to prevent color/style injection. */
+    private static final char SECTION_SIGN = '\u00A7';
+
+    /**
+     * Validates and normalises a bot name. Returns the trimmed name on success,
+     * or {@code null} if the name is invalid (with an error already sent to the source).
+     */
+    private static String validateBotName(String raw, ServerCommandSource source) {
+        if (raw == null || raw.isBlank()) {
+            ChatUtils.sendSystemMessage(source, "Bot name cannot be empty.");
+            return null;
+        }
+        String trimmed = raw.trim();
+        if (trimmed.length() > BOT_NAME_MAX_LENGTH) {
+            ChatUtils.sendSystemMessage(source, "Bot name is too long (" + trimmed.length()
+                    + " chars). Maximum is " + BOT_NAME_MAX_LENGTH + ".");
+            return null;
+        }
+        if (trimmed.indexOf(SECTION_SIGN) >= 0) {
+            ChatUtils.sendSystemMessage(source, "Bot name cannot contain formatting codes (§).");
+            return null;
+        }
+        if (!BOT_NAME_PATTERN.matcher(trimmed).matches()) {
+            ChatUtils.sendSystemMessage(source,
+                    "Bot name contains invalid characters. Use only letters, numbers, spaces, underscores, hyphens, periods, or apostrophes.");
+            return null;
+        }
+        // Reject names that are only whitespace/punctuation (e.g. "---")
+        boolean hasAlphanumeric = false;
+        for (int i = 0; i < trimmed.length(); i++) {
+            if (Character.isLetterOrDigit(trimmed.charAt(i))) { hasAlphanumeric = true; break; }
+        }
+        if (!hasAlphanumeric) {
+            ChatUtils.sendSystemMessage(source, "Bot name must contain at least one letter or digit.");
+            return null;
+        }
+        return trimmed;
+    }
 
     // Eye-of-Ender access is intentionally limited: it has a cooldown and does NOT represent a full Wizard's Tome unlock.
     private static final long COMPANION_EYE_SPELL_COOLDOWN_TICKS = 20L * 60L; // 60s
@@ -1808,7 +1853,12 @@ public class modCommandRegistry {
 
             botName = StringArgumentType.getString(context, "bot_name");
 
+            // ── Name validation ─────────────────────────────────────────
             ServerCommandSource serverSource = server.getCommandSource();
+            String validatedName = validateBotName(botName, serverSource);
+            if (validatedName == null) return;  // error already sent
+            botName = validatedName;
+
                 if (!requestedSpawnMode.equalsIgnoreCase(normalizedSpawnMode)) {
                 ChatUtils.sendSystemMessage(serverSource,
                     "Note: '/bot spawn " + botName + " " + requestedSpawnMode + "' maps to mode '" + normalizedSpawnMode + "'.");

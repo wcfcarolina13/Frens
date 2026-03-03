@@ -2,6 +2,7 @@ package net.wcfcarolina13.ui;
 
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.text.Text;
+import net.wcfcarolina13.EntityUtil;
 import net.wcfcarolina13.Frens;
 
 public final class BotInventoryAccess {
@@ -19,7 +20,7 @@ public final class BotInventoryAccess {
         viewer.openHandledScreen(new net.minecraft.screen.SimpleNamedScreenHandlerFactory(
                 (syncId, playerInv, player) ->
                         new net.wcfcarolina13.ui.BotPlayerInventoryScreenHandler(syncId, playerInv, bot.getInventory(), bot),
-                net.minecraft.text.Text.literal(bot.getName().getString() + "'s Inventory")
+                net.minecraft.text.Text.literal(EntityUtil.safeDisplayName(bot.getName().getString()) + "'s Inventory")
         ));
         return true;
     }
@@ -30,7 +31,7 @@ public final class BotInventoryAccess {
         viewer.openHandledScreen(new net.minecraft.screen.SimpleNamedScreenHandlerFactory(
                 (syncId, playerInv, player) ->
                         new net.wcfcarolina13.ui.BotPlayerInventoryScreenHandler(syncId, playerInv, bot.getInventory(), bot),
-                net.minecraft.text.Text.literal(bot.getName().getString() + "'s Inventory")
+                net.minecraft.text.Text.literal(EntityUtil.safeDisplayName(bot.getName().getString()) + "'s Inventory")
         ));
         return true;
     }

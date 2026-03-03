@@ -1672,7 +1672,7 @@ public class FrensClient implements ClientModInitializer {
         }
 
         String alias = (lookedAtBotStatus.botAlias() == null || lookedAtBotStatus.botAlias().isBlank())
-                ? "Bot" : lookedAtBotStatus.botAlias();
+                ? "Bot" : EntityUtil.safeDisplayName(lookedAtBotStatus.botAlias());
         String stopKey = keyNameOrNull(KEY_STOP_LOOK);
         if (stopKey == null) {
             stopKey = "\\\\";
@@ -1726,7 +1726,7 @@ public class FrensClient implements ClientModInitializer {
             return;
         }
 
-        String alias = looked.getName() != null ? looked.getName().getString() : "Bot";
+        String alias = looked.getName() != null ? EntityUtil.safeDisplayName(looked.getName().getString()) : "Bot";
         if (alias == null || alias.isBlank()) {
             alias = "Bot";
         }
