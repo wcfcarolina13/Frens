@@ -723,6 +723,7 @@ public class ManualConfig {
         private boolean teleportDuringDropSweep = false;
         private boolean llmEnabled = true;
         private boolean voicedDialogue = true;
+        private String failsafeSpawnMode = "world_spawn";  // owner_bed | world_spawn | saved_base
 
         /** @deprecated Use {@link #isAutoRespawnOnDeath()} instead. Kept for JSON compat. */
         @Deprecated
@@ -822,6 +823,27 @@ public class ManualConfig {
 
         public void setVoicedDialogue(boolean voicedDialogue) {
             this.voicedDialogue = voicedDialogue;
+        }
+
+        /**
+         * Where the bot should spawn when all higher-priority checkpoints
+         * (bed, recruitment anchor, BotSpawn config) fail.
+         *
+         * @return one of {@code "owner_bed"}, {@code "world_spawn"}, or {@code "saved_base"}.
+         */
+        public String getFailsafeSpawnMode() {
+            if (failsafeSpawnMode == null || failsafeSpawnMode.isBlank()) {
+                return "world_spawn";
+            }
+            String normalized = failsafeSpawnMode.trim().toLowerCase();
+            return switch (normalized) {
+                case "owner_bed", "saved_base" -> normalized;
+                default -> "world_spawn";
+            };
+        }
+
+        public void setFailsafeSpawnMode(String failsafeSpawnMode) {
+            this.failsafeSpawnMode = failsafeSpawnMode;
         }
     }
 

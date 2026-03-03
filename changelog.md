@@ -1,6 +1,17 @@
 # Changelog & History
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
+## 2026-03-03
+- **Respawn hardening (bed validation + failsafe chain + safe-surface guarantees)**: Hardened the bot respawn system to mirror vanilla Minecraft's bed destruction/obstruction handling. 6 files changed:
+  - **SafePositionService.java**: Added `validateBedSpawn(world, bedPos)` — checks bed block still exists (`instanceof BedBlock`) and has safe standing room within 2 blocks. Added `findSafeSurface(world, base, fallbackRadius, heightmapRadius)` — combines spiral search with heightmap scan when underground/void.
+  - **ManualConfig.java**: Added `failsafeSpawnMode` field to `BotControlSettings` with 3 values: `owner_bed`, `world_spawn` (default), `saved_base`. Getter normalizes invalid values.
+  - **BotControlScreen.java**: Added "Failsafe Spawn" 3-way toggle (Owner Bed / World Spawn / Saved Base) in the Spawning group. New `makeString` 3-option overload. SettingsSnapshot now has 9 fields.
+  - **BotEventHandler.java**: Complete rewrite of `onBotRespawn()` fallback chain with 6 tiers: (1) validated bed spawn — rejects if bed destroyed/obstructed with log message, (2) recruitment anchor with safe-surface wrap, (3) BotSpawn config with safe-surface wrap, (4) failsafe per admin toggle — owner's bed (validated, with offline fallthrough), saved base (bot's preferred home base), or world spawn, (5) world spawn with heightmap fallback for void columns, (6) bedrock-level emergency for completely empty worlds. Every tier logs the resolution path. `resolveSpawnPoint()` replaced reflection cascade with direct `WorldProperties.SpawnPoint.getPos()` call.
+  - **BotQuestService.java**: Same `resolveSpawnPoint()` reflection→direct replacement.
+  - **BotIdleHobbiesService.java**: Same `resolveSpawnPoint()` reflection→direct replacement.
+  - Unused `java.lang.reflect.Field` imports removed from BotEventHandler and BotQuestService.
+  - Build verified, deployed to Prism.
+
 ## 2026-03-02- **Auto-spawn rework (death toggle + implicit server-start + checkpoint respawn)**: Major rework of the auto-spawn system across 9 files. The per-bot "Auto Spawn" toggle has been replaced with "Auto Respawn" — controlling whether bots automatically respawn on death (skipping resurrection ritual) rather than whether they appear on server start. Server-start auto-spawn is now implicit for all bots with saved `BotSpawn` data and matching `levelName`. Key changes:
   - **ManualConfig.java**: Added `autoRespawnOnDeath` (nullable Boolean) to `BotControlSettings` with mode-based defaults (admin/training=ON, play/questing=OFF). Old `autoSpawn` field retained `@Deprecated` for JSON backward compat.
   - **BotControlApplier.java**: `scheduleAutoSpawns()` no longer checks per-bot `isAutoSpawn()` — spawns all bots with matching `BotSpawn` data + `levelName`. Recruitment gate still active.

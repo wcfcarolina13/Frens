@@ -53,6 +53,7 @@ import net.wcfcarolina13.GameAI.services.BotStuckService;
 import net.wcfcarolina13.GameAI.services.BotRLActionService;
 import net.wcfcarolina13.GameAI.services.BotRLPersistenceThrottleService;
 import net.wcfcarolina13.GameAI.services.BotHomeService;
+import net.wcfcarolina13.GameAI.services.SafePositionService;
 import net.wcfcarolina13.Database.StateActionPair;
 import net.wcfcarolina13.Entity.AutoFaceEntity;
 import net.wcfcarolina13.Entity.LookController;
@@ -91,7 +92,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
-import java.lang.reflect.Field;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
@@ -1048,8 +1048,11 @@ public class BotEventHandler {
         ServerWorld destinationWorld = botWorld;
         Vec3d target = null;
 
-        // ── Checkpoint-based fallback chain ──────────────────────────
-        // 1. Vanilla spawn point (set by sleeping in bed)
+        // ── Checkpoint-based fallback chain (mirrors vanilla bed-missing/obstructed logic) ──
+        String alias = bot.getName().getString();
+        String respawnLog = null;
+
+        // 1. Vanilla spawn point (set by sleeping in bed) — VALIDATED
         net.minecraft.server.network.ServerPlayerEntity.Respawn respawnInfo = bot.getRespawn();
         BlockPos bedSpawn = null;
         RegistryKey<World> bedDimKey = null;
@@ -1060,15 +1063,20 @@ public class BotEventHandler {
         if (bedSpawn != null && srv != null && bedDimKey != null) {
             ServerWorld bedWorld = srv.getWorld(bedDimKey);
             if (bedWorld != null) {
-                destinationWorld = bedWorld;
-                target = new Vec3d(bedSpawn.getX() + 0.5, bedSpawn.getY() + 0.1, bedSpawn.getZ() + 0.5);
+                BlockPos safeBed = SafePositionService.validateBedSpawn(bedWorld, bedSpawn);
+                if (safeBed != null) {
+                    destinationWorld = bedWorld;
+                    target = new Vec3d(safeBed.getX() + 0.5, safeBed.getY() + 0.1, safeBed.getZ() + 0.5);
+                    respawnLog = "bed at " + bedSpawn.toShortString();
+                } else {
+                    LOGGER.info("[Frens] Respawn for {}: bed missing or obstructed at {}, falling through.",
+                            alias, bedSpawn.toShortString());
+                }
             }
         }
 
-        // 2. Recruitment anchor (questing mode) or BotSpawn config position (admin/training)
+        // 2. Recruitment anchor (questing mode) — with safe-surface validation
         if (target == null && srv != null) {
-            String alias = bot.getName().getString();
-            // Try recruitment anchor first (questing mode companions)
             try {
                 if (net.wcfcarolina13.GameAI.services.SurvivalRecruitmentService.isEnabled(srv)) {
                     net.wcfcarolina13.FilingSystem.ManualConfig.SurvivalRecruitmentState st =
@@ -1082,48 +1090,141 @@ public class BotEventHandler {
                                 RegistryKey<World> key = RegistryKey.of(RegistryKeys.WORLD, dimId);
                                 ServerWorld anchorWorld = srv.getWorld(key);
                                 if (anchorWorld != null) {
-                                    destinationWorld = anchorWorld;
-                                    target = new Vec3d(anchorPos.getX() + 0.5, anchorPos.getY() + 0.1, anchorPos.getZ() + 0.5);
+                                    BlockPos safeAnchor = SafePositionService.findSafeSurface(anchorWorld, anchorPos, 5, 10);
+                                    if (safeAnchor != null) {
+                                        destinationWorld = anchorWorld;
+                                        target = new Vec3d(safeAnchor.getX() + 0.5, safeAnchor.getY() + 0.1, safeAnchor.getZ() + 0.5);
+                                        respawnLog = "recruitment anchor near " + anchorPos.toShortString();
+                                    }
                                 }
                             }
                         }
                     }
                 }
             } catch (Throwable ignored) {}
+        }
 
-            // Fall back to BotSpawn config position (admin/training bots, or if no anchor)
-            if (target == null && net.wcfcarolina13.Frens.CONFIG != null) {
-                net.wcfcarolina13.FilingSystem.ManualConfig.BotSpawn spawn =
-                        net.wcfcarolina13.Frens.CONFIG.getBotSpawn(alias);
-                if (spawn != null && spawn.dimension() != null) {
-                    net.minecraft.util.Identifier dimId = net.minecraft.util.Identifier.tryParse(spawn.dimension());
-                    if (dimId != null) {
-                        RegistryKey<World> key = RegistryKey.of(RegistryKeys.WORLD, dimId);
-                        ServerWorld spawnWorld = srv.getWorld(key);
-                        if (spawnWorld != null) {
+        // 3. BotSpawn config position (admin/training bots) — with safe-surface validation
+        if (target == null && srv != null && net.wcfcarolina13.Frens.CONFIG != null) {
+            net.wcfcarolina13.FilingSystem.ManualConfig.BotSpawn spawn =
+                    net.wcfcarolina13.Frens.CONFIG.getBotSpawn(alias);
+            if (spawn != null && spawn.dimension() != null) {
+                net.minecraft.util.Identifier dimId = net.minecraft.util.Identifier.tryParse(spawn.dimension());
+                if (dimId != null) {
+                    RegistryKey<World> key = RegistryKey.of(RegistryKeys.WORLD, dimId);
+                    ServerWorld spawnWorld = srv.getWorld(key);
+                    if (spawnWorld != null) {
+                        BlockPos spawnPos = BlockPos.ofFloored(spawn.x(), spawn.y(), spawn.z());
+                        BlockPos safeSpawn = SafePositionService.findSafeSurface(spawnWorld, spawnPos, 5, 10);
+                        if (safeSpawn != null) {
                             destinationWorld = spawnWorld;
-                            target = new Vec3d(spawn.x(), spawn.y(), spawn.z());
+                            target = new Vec3d(safeSpawn.getX() + 0.5, safeSpawn.getY() + 0.1, safeSpawn.getZ() + 0.5);
+                            respawnLog = "BotSpawn config near " + spawnPos.toShortString();
                         }
                     }
                 }
             }
         }
 
-        // 3. World spawn point (last resort)
+        // 4. Failsafe tier — admin-configurable per-bot preference
+        if (target == null && srv != null) {
+            String failsafeMode = "world_spawn";
+            if (net.wcfcarolina13.Frens.CONFIG != null) {
+                net.wcfcarolina13.FilingSystem.ManualConfig.BotControlSettings ctrl =
+                        net.wcfcarolina13.Frens.CONFIG.getOrCreateBotControl(alias);
+                failsafeMode = ctrl.getFailsafeSpawnMode();
+            }
+
+            // 4a. Owner's bed
+            if ("owner_bed".equals(failsafeMode)) {
+                try {
+                    ServerPlayerEntity owner = net.wcfcarolina13.GameAI.services.CompanionCommunicationPolicy
+                            .resolveController(srv, bot);
+                    if (owner != null) {
+                        net.minecraft.server.network.ServerPlayerEntity.Respawn ownerRespawn = owner.getRespawn();
+                        if (ownerRespawn != null && ownerRespawn.respawnData() != null) {
+                            BlockPos ownerBedPos = ownerRespawn.respawnData().getPos();
+                            RegistryKey<World> ownerBedDim = ownerRespawn.respawnData().getDimension();
+                            if (ownerBedPos != null && ownerBedDim != null) {
+                                ServerWorld ownerBedWorld = srv.getWorld(ownerBedDim);
+                                if (ownerBedWorld != null) {
+                                    BlockPos safeOwnerBed = SafePositionService.validateBedSpawn(ownerBedWorld, ownerBedPos);
+                                    if (safeOwnerBed != null) {
+                                        destinationWorld = ownerBedWorld;
+                                        target = new Vec3d(safeOwnerBed.getX() + 0.5, safeOwnerBed.getY() + 0.1, safeOwnerBed.getZ() + 0.5);
+                                        respawnLog = "owner bed near " + ownerBedPos.toShortString();
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if (target == null) {
+                        LOGGER.info("[Frens] Respawn for {}: failsafe=owner_bed but owner offline or bed gone, falling through.", alias);
+                    }
+                } catch (Throwable ignored) {}
+            }
+
+            // 4b. Saved base (bot's preferred home base)
+            if (target == null && "saved_base".equals(failsafeMode)) {
+                try {
+                    java.util.Optional<String> baseLabel = BotHomeService.getPreferredHomeBaseLabel(bot);
+                    if (baseLabel.isPresent() && bot.getEntityWorld() instanceof ServerWorld sw) {
+                        java.util.Optional<BlockPos> basePos = BotHomeService.getBaseByLabel(srv, sw, baseLabel.get());
+                        if (basePos.isPresent()) {
+                            BlockPos safeBase = SafePositionService.findSafeSurface(sw, basePos.get(), 5, 10);
+                            if (safeBase != null) {
+                                destinationWorld = sw;
+                                target = new Vec3d(safeBase.getX() + 0.5, safeBase.getY() + 0.1, safeBase.getZ() + 0.5);
+                                respawnLog = "saved base '" + baseLabel.get() + "' near " + basePos.get().toShortString();
+                            }
+                        }
+                    }
+                    if (target == null) {
+                        LOGGER.info("[Frens] Respawn for {}: failsafe=saved_base but no preferred base set or obstructed, falling through.", alias);
+                    }
+                } catch (Throwable ignored) {}
+            }
+        }
+
+        // 5. World spawn (guaranteed — always available)
         if (target == null && srv != null) {
             ServerWorld overworld = srv.getOverworld();
             if (overworld != null) {
                 BlockPos worldSpawn = resolveSpawnPoint(overworld);
-                destinationWorld = overworld;
-                target = new Vec3d(worldSpawn.getX() + 0.5, worldSpawn.getY() + 0.1, worldSpawn.getZ() + 0.5);
+                BlockPos safeWorldSpawn = SafePositionService.findSafeSurface(overworld, worldSpawn, 5, 16);
+                if (safeWorldSpawn != null) {
+                    destinationWorld = overworld;
+                    target = new Vec3d(safeWorldSpawn.getX() + 0.5, safeWorldSpawn.getY() + 0.1, safeWorldSpawn.getZ() + 0.5);
+                    respawnLog = "world spawn near " + worldSpawn.toShortString();
+                } else {
+                    // Heightmap-only absolute fallback: find any solid column at world spawn XZ
+                    int surfaceY = overworld.getTopY(Heightmap.Type.MOTION_BLOCKING, worldSpawn.getX(), worldSpawn.getZ());
+                    if (surfaceY > overworld.getBottomY()) {
+                        destinationWorld = overworld;
+                        target = new Vec3d(worldSpawn.getX() + 0.5, surfaceY + 0.1, worldSpawn.getZ() + 0.5);
+                        respawnLog = "world spawn heightmap at Y=" + surfaceY;
+                    } else {
+                        // Complete void — place on bedrock level
+                        destinationWorld = overworld;
+                        target = new Vec3d(worldSpawn.getX() + 0.5, overworld.getBottomY() + 1.1, worldSpawn.getZ() + 0.5);
+                        respawnLog = "void fallback at bedrock Y=" + (overworld.getBottomY() + 1);
+                        LOGGER.warn("[Frens] Respawn for {}: no solid ground found anywhere near world spawn; placing at bedrock level.", alias);
+                    }
+                }
             }
         }
 
-        // Absolute fallback
+        // 6. Absolute emergency fallback (should never happen)
         if (target == null) {
             BlockPos anchor = bot.getBlockPos().up(2);
             target = new Vec3d(anchor.getX() + 0.5, anchor.getY(), anchor.getZ() + 0.5);
+            respawnLog = "emergency fallback at current pos";
+            LOGGER.warn("[Frens] Respawn for {}: all checkpoints exhausted, using current position.", alias);
         }
+
+        LOGGER.info("[Frens] Respawn for {}: resolved to {} ({})", alias,
+                String.format("%.1f, %.1f, %.1f", target.x, target.y, target.z),
+                respawnLog != null ? respawnLog : "unknown");
 
         if (destinationWorld != null && destinationWorld != botWorld) {
             bot.teleport(destinationWorld, target.x, target.y, target.z,
@@ -1658,32 +1759,18 @@ public class BotEventHandler {
     }
 
     private static BlockPos resolveSpawnPoint(ServerWorld world) {
-        Object spawnPoint = world.getSpawnPoint();
-        if (spawnPoint != null) {
-            Class<?> clazz = spawnPoint.getClass();
-            try {
-                Object result = clazz.getMethod("pos").invoke(spawnPoint);
-                if (result instanceof BlockPos blockPos) {
-                    return blockPos;
+        if (world == null) {
+            return BlockPos.ORIGIN;
+        }
+        try {
+            net.minecraft.world.WorldProperties.SpawnPoint sp = world.getSpawnPoint();
+            if (sp != null) {
+                BlockPos pos = sp.getPos();
+                if (pos != null) {
+                    return pos;
                 }
-            } catch (ReflectiveOperationException ignored) {
             }
-            try {
-                Object result = clazz.getMethod("toImmutable").invoke(spawnPoint);
-                if (result instanceof BlockPos blockPos) {
-                    return blockPos;
-                }
-            } catch (ReflectiveOperationException ignored) {
-            }
-            try {
-                Field field = clazz.getDeclaredField("pos");
-                field.setAccessible(true);
-                Object result = field.get(spawnPoint);
-                if (result instanceof BlockPos blockPos) {
-                    return blockPos;
-                }
-            } catch (ReflectiveOperationException ignored) {
-            }
+        } catch (Throwable ignored) {
         }
         return BlockPos.ORIGIN;
     }

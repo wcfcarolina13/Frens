@@ -285,32 +285,15 @@ public final class BotIdleHobbiesService {
         if (world == null) {
             return BlockPos.ORIGIN;
         }
-        Object spawnPoint = world.getSpawnPoint();
-        if (spawnPoint != null) {
-            Class<?> clazz = spawnPoint.getClass();
-            try {
-                Object result = clazz.getMethod("pos").invoke(spawnPoint);
-                if (result instanceof BlockPos blockPos) {
-                    return blockPos;
+        try {
+            net.minecraft.world.WorldProperties.SpawnPoint sp = world.getSpawnPoint();
+            if (sp != null) {
+                BlockPos pos = sp.getPos();
+                if (pos != null) {
+                    return pos;
                 }
-            } catch (ReflectiveOperationException ignored) {
             }
-            try {
-                Object result = clazz.getMethod("toImmutable").invoke(spawnPoint);
-                if (result instanceof BlockPos blockPos) {
-                    return blockPos;
-                }
-            } catch (ReflectiveOperationException ignored) {
-            }
-            try {
-                java.lang.reflect.Field field = clazz.getDeclaredField("pos");
-                field.setAccessible(true);
-                Object result = field.get(spawnPoint);
-                if (result instanceof BlockPos blockPos) {
-                    return blockPos;
-                }
-            } catch (ReflectiveOperationException ignored) {
-            }
+        } catch (Throwable ignored) {
         }
         return BlockPos.ORIGIN;
     }

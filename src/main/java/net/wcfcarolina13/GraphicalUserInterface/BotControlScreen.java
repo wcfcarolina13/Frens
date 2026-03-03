@@ -223,6 +223,7 @@ public class BotControlScreen extends Screen {
 
     private record SettingsSnapshot(
             boolean autoRespawnOnDeath, String spawnMode, String gameMode,
+            String failsafeSpawnMode,
             boolean teleportDuringSkills, boolean pauseOnFullInventory,
             boolean teleportDuringDropSweep, boolean llmEnabled,
             boolean voicedDialogue) {}
@@ -235,16 +236,17 @@ public class BotControlScreen extends Screen {
     private void captureCurrentWidgets() {
         if (settingGroups.isEmpty() || selectedAlias == null) return;
         List<CyclingButtonWidget<?>> ws = settingWidgets;
-        if (ws.size() < 8) return;
+        if (ws.size() < 9) return;
         dirtySettings.put(selectedAlias, new SettingsSnapshot(
                 (Boolean) ws.get(0).getValue(),
                 (String)  ws.get(1).getValue(),
                 (String)  ws.get(2).getValue(),
-                (Boolean) ws.get(3).getValue(),
+                (String)  ws.get(3).getValue(),
                 (Boolean) ws.get(4).getValue(),
                 (Boolean) ws.get(5).getValue(),
                 (Boolean) ws.get(6).getValue(),
-                (Boolean) ws.get(7).getValue()
+                (Boolean) ws.get(7).getValue(),
+                (Boolean) ws.get(8).getValue()
         ));
     }
 
@@ -261,6 +263,7 @@ public class BotControlScreen extends Screen {
         boolean autoRespawn = snap != null ? snap.autoRespawnOnDeath : cfg.isAutoRespawnOnDeath();
         String  spawnMode  = snap != null ? snap.spawnMode  : cfg.getSpawnMode();
         String  gameMode   = snap != null ? snap.gameMode   : cfg.getGameMode();
+        String  failsafe   = snap != null ? snap.failsafeSpawnMode : cfg.getFailsafeSpawnMode();
         boolean teleSkills = snap != null ? snap.teleportDuringSkills : cfg.isTeleportDuringSkills();
         boolean pauseInv   = snap != null ? snap.pauseOnFullInventory : cfg.isPauseOnFullInventory();
         boolean teleDrop   = snap != null ? snap.teleportDuringDropSweep : cfg.isTeleportDuringDropSweep();
@@ -276,6 +279,13 @@ public class BotControlScreen extends Screen {
         spawning.add(makeString("Game Mode", "Minecraft gamemode (inventory, damage, etc).",
                 gameMode, "survival", "creative",
                 v -> Text.of("creative".equals(v) ? "Creative" : "Survival"), WIDE_TOGGLE_W));
+        spawning.add(makeString("Failsafe Spawn", "Where to spawn when bed/anchor are gone.",
+                failsafe, "world_spawn", "owner_bed", "saved_base",
+                v -> Text.of(switch (v) {
+                    case "owner_bed" -> "Owner Bed";
+                    case "saved_base" -> "Saved Base";
+                    default -> "World Spawn";
+                }), WIDE_TOGGLE_W));
         settingGroups.add(new SettingGroup("Spawning", spawning));
 
         // ── Behavior ────────────────────────────────────────────────────
@@ -317,6 +327,20 @@ public class BotControlScreen extends Screen {
         return new SettingEntry(label, desc, btn, w);
     }
 
+    /** Create a compact string-cycling toggle with three options. */
+    private SettingEntry makeString(String label, String desc,
+                                    String value, String opt1, String opt2, String opt3,
+                                    java.util.function.Function<String, Text> formatter,
+                                    int w) {
+        CyclingButtonWidget<String> btn = CyclingButtonWidget.<String>builder(
+                        formatter::apply, () -> value)
+                .values(List.of(opt1, opt2, opt3))
+                .build(0, 0, w, BUTTON_H, Text.empty(), (b, v) -> {});
+        this.addDrawableChild(btn);
+        settingWidgets.add(btn);
+        return new SettingEntry(label, desc, btn, w);
+    }
+
     // ════════════════════════════════════════════════════════════════════
     //  Save
     // ════════════════════════════════════════════════════════════════════
@@ -335,6 +359,7 @@ public class BotControlScreen extends Screen {
             s.setAutoRespawnOnDeath(v.autoRespawnOnDeath);
             s.setSpawnMode(v.spawnMode);
             s.setGameMode(v.gameMode);
+            s.setFailsafeSpawnMode(v.failsafeSpawnMode);
             s.setTeleportDuringSkills(v.teleportDuringSkills);
             s.setPauseOnFullInventory(v.pauseOnFullInventory);
             s.setTeleportDuringDropSweep(v.teleportDuringDropSweep);

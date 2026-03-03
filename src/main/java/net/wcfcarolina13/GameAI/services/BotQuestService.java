@@ -35,7 +35,6 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
-import java.lang.reflect.Field;
 
 /**
  * Minimal, seed-agnostic quest runtime.
@@ -980,37 +979,15 @@ public final class BotQuestService {
         if (world == null) {
             return BlockPos.ORIGIN;
         }
-        Object spawnPoint;
         try {
-            spawnPoint = world.getSpawnPoint();
-        } catch (Exception ignored) {
-            spawnPoint = null;
-        }
-        if (spawnPoint != null) {
-            Class<?> clazz = spawnPoint.getClass();
-            try {
-                Object result = clazz.getMethod("pos").invoke(spawnPoint);
-                if (result instanceof BlockPos blockPos) {
-                    return blockPos;
+            net.minecraft.world.WorldProperties.SpawnPoint sp = world.getSpawnPoint();
+            if (sp != null) {
+                BlockPos pos = sp.getPos();
+                if (pos != null) {
+                    return pos;
                 }
-            } catch (ReflectiveOperationException ignored) {
             }
-            try {
-                Object result = clazz.getMethod("toImmutable").invoke(spawnPoint);
-                if (result instanceof BlockPos blockPos) {
-                    return blockPos;
-                }
-            } catch (ReflectiveOperationException ignored) {
-            }
-            try {
-                Field field = clazz.getDeclaredField("pos");
-                field.setAccessible(true);
-                Object result = field.get(spawnPoint);
-                if (result instanceof BlockPos blockPos) {
-                    return blockPos;
-                }
-            } catch (ReflectiveOperationException ignored) {
-            }
+        } catch (Throwable ignored) {
         }
         return BlockPos.ORIGIN;
     }

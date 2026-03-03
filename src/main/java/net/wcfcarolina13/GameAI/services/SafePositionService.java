@@ -1,11 +1,13 @@
 package net.wcfcarolina13.GameAI.services;
 
+import net.minecraft.block.BedBlock;
 import net.minecraft.block.BlockState;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
+import net.minecraft.world.Heightmap;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -129,5 +131,67 @@ public final class SafePositionService {
         bot.setVelocity(Vec3d.ZERO);
         bot.velocityDirty = true;
         bot.fallDistance = 0.0F;
+    }
+
+    // ════════════════════════════════════════════════════════════════════
+    //  Bed / spawn validation
+    // ════════════════════════════════════════════════════════════════════
+
+    /**
+     * Validate that a bed still exists at the given position and has safe standing room nearby.
+     * Mirrors vanilla's "bed missing or obstructed" check using public APIs only.
+     *
+     * @return a safe standing {@link BlockPos} adjacent to the bed, or {@code null} if the bed
+     *         is destroyed or fully obstructed.
+     */
+    public static BlockPos validateBedSpawn(ServerWorld world, BlockPos bedPos) {
+        if (world == null || bedPos == null) {
+            return null;
+        }
+        // Check if the block is actually a bed
+        BlockState state = world.getBlockState(bedPos);
+        if (!(state.getBlock() instanceof BedBlock)) {
+            return null; // Bed destroyed
+        }
+        // Look for safe standing room within 2 blocks (vanilla checks adjacent blocks)
+        return findSafeNear(world, bedPos, 2);
+    }
+
+    /**
+     * Find a safe surface position near the given coordinates, using heightmap when the
+     * simple spiral search fails (e.g. void, deep underground, or massive obstruction).
+     *
+     * @param fallbackRadius radius for the initial spiral search
+     * @param heightmapRadius radius for the heightmap-based surface scan
+     * @return a safe {@link BlockPos}, or {@code null} if no safe ground exists at all
+     */
+    public static BlockPos findSafeSurface(ServerWorld world, BlockPos base, int fallbackRadius, int heightmapRadius) {
+        if (world == null || base == null) {
+            return null;
+        }
+        // First try the normal near-search
+        BlockPos safe = findSafeNear(world, base, fallbackRadius);
+        if (safe != null) {
+            return safe;
+        }
+        // Heightmap scan: find the top solid block at expanding offsets
+        for (int r = 0; r <= heightmapRadius; r++) {
+            for (int dx = -r; dx <= r; dx++) {
+                for (int dz = -r; dz <= r; dz++) {
+                    if (r > 0 && Math.abs(dx) != r && Math.abs(dz) != r) {
+                        continue;
+                    }
+                    int surfaceY = world.getTopY(Heightmap.Type.MOTION_BLOCKING, base.getX() + dx, base.getZ() + dz);
+                    if (surfaceY <= world.getBottomY()) {
+                        continue; // No surface here (void column)
+                    }
+                    BlockPos candidate = new BlockPos(base.getX() + dx, surfaceY, base.getZ() + dz);
+                    if (isSpawnable(world, candidate)) {
+                        return candidate;
+                    }
+                }
+            }
+        }
+        return null;
     }
 }
