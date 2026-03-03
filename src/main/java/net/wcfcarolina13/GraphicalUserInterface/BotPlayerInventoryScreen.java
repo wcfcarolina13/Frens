@@ -115,11 +115,12 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
     // Browse state for scrolling past blocked bots in the switcher.
     private int switchBrowseOffset = 0;
     private String switchBrowsedBlockedAlias = null;
+    private String switchBrowsedBlockReason = null;
 
     // Save/restore cursor position across bot-switch screen transitions.
+    // Static so they survive the old→new screen instance transition.
     private static double savedSwitchCursorX = -1;
     private static double savedSwitchCursorY = -1;
-    private boolean cursorRestorePending = false;
 
     // Skills list scroll (always used for the small panel; also used for overlay when Skills tab is selected).
     private int skillScrollIndex;
@@ -387,22 +388,25 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         this.playerInventoryTitleX = SECTION_WIDTH + BLOCK_GAP + 8;
         this.playerInventoryTitleY = 6;
         this.botAlias = extractAlias(title.getString());
-        if (savedSwitchCursorX >= 0) {
-            cursorRestorePending = true;
+    }
+
+    @Override
+    protected void init() {
+        super.init();
+        // Restore cursor position after a bot-switch screen transition.
+        // setScreen() calls mouse.unlockCursor() (which centers the cursor)
+        // BEFORE init(), so by the time we get here the cursor has been
+        // centered. Restoring now puts it back before the first render frame.
+        if (savedSwitchCursorX >= 0 && this.client != null) {
+            long window = this.client.getWindow().getHandle();
+            GLFW.glfwSetCursorPos(window, savedSwitchCursorX, savedSwitchCursorY);
+            savedSwitchCursorX = -1;
+            savedSwitchCursorY = -1;
         }
     }
 
     @Override
     protected void drawBackground(DrawContext context, float delta, int mouseX, int mouseY) {
-        if (cursorRestorePending) {
-            cursorRestorePending = false;
-            if (this.client != null) {
-                long window = this.client.getWindow().getHandle();
-                GLFW.glfwSetCursorPos(window, savedSwitchCursorX, savedSwitchCursorY);
-            }
-            savedSwitchCursorX = -1;
-            savedSwitchCursorY = -1;
-        }
         int x = (this.width - this.backgroundWidth) / 2;
         int y = (this.height - this.backgroundHeight) / 2;
         context.drawTexture(RenderPipelines.GUI_TEXTURED, BACKGROUND_TEXTURE, x, y, 0f, 0f,
@@ -519,11 +523,6 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
 
         ArrayList<String> aliases = new ArrayList<>(unique);
         aliases.sort(Comparator.comparing(name -> name.toLowerCase(Locale.ROOT)));
-        int currentIndex = indexOfAliasIgnoreCase(aliases, botAlias);
-        if (currentIndex > 0) {
-            String current = aliases.remove(currentIndex);
-            aliases.add(0, current);
-        }
         return aliases;
     }
 
@@ -703,6 +702,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         if (targetAlias.equalsIgnoreCase(botAlias)) {
             switchBrowseOffset = 0;
             switchBrowsedBlockedAlias = null;
+            switchBrowsedBlockReason = null;
             return true;
         }
         // Gated switching: verify proximity, spell item, or admin status.
@@ -710,6 +710,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         if (blockReason != null) {
             switchBrowseOffset = Math.floorMod(nextIndex - baseIndex, aliases.size());
             switchBrowsedBlockedAlias = targetAlias;
+            switchBrowsedBlockReason = blockReason;
             showBotSwitchBlockedWarning(blockReason);
             return true;
         }
@@ -723,6 +724,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         }
         switchBrowseOffset = 0;
         switchBrowsedBlockedAlias = null;
+        switchBrowsedBlockReason = null;
         sendChatCommand("bot open " + formatBotTarget(targetAlias));
         return true;
     }
@@ -3508,6 +3510,35 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         if (!topicsExpanded || !isMouseOverTopicsOverlay(mouseX, mouseY)) {
             this.drawMouseoverTooltip(context, mouseX, mouseY);
         }
+        drawBotSwitchWarningTooltip(context, mouseX, mouseY);
+    }
+
+    /**
+     * Shows a tooltip when hovering the label area while a blocked bot is displayed.
+     */
+    private void drawBotSwitchWarningTooltip(DrawContext context, int mouseX, int mouseY) {
+        if (switchBrowsedBlockedAlias == null || switchBrowsedBlockReason == null) {
+            return;
+        }
+        // Check if mouse is over any of the bot-switch label rects (collapsed or overlay).
+        BotSwitchLayout layout = computeBotSwitchLayout(this.x + 6, this.x + SECTION_WIDTH - 6,
+                this.y + SECTION_HEIGHT + 2 + STATS_AREA_HEIGHT - BOT_SWITCH_CONTROL_H - 5);
+        boolean hovering = layout != null && layout.labelRect().contains(mouseX, mouseY);
+        if (!hovering && topicsExpanded) {
+            // Also check overlay header switch controls (approximate; use full header width).
+            int headerH = this.textRenderer.fontHeight + TOPICS_OVERLAY_HEADER_PAD * 2;
+            int overlayY = this.y - 20;
+            Rect headerRect = new Rect(this.x, overlayY, this.backgroundWidth, headerH);
+            hovering = headerRect.contains(mouseX, mouseY);
+        }
+        if (!hovering) {
+            return;
+        }
+        java.util.List<String> lines = new java.util.ArrayList<>();
+        lines.add(switchBrowsedBlockReason);
+        lines.add("Use Wizard's Tome or approach");
+        lines.add("the bot to switch inventories.");
+        drawTooltipBox(context, mouseX, mouseY, lines);
     }
 
     private void drawEntities(DrawContext context, int mouseX, int mouseY) {
