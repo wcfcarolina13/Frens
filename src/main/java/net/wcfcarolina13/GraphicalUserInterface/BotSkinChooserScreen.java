@@ -1,25 +1,30 @@
 package net.wcfcarolina13.GraphicalUserInterface;
 
 import com.mojang.authlib.GameProfile;
+import com.mojang.authlib.properties.Property;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.screen.ingame.InventoryScreen;
+import net.minecraft.client.gui.widget.TextFieldWidget;
 import net.minecraft.client.network.AbstractClientPlayerEntity;
 import net.minecraft.client.network.OtherClientPlayerEntity;
+import net.minecraft.client.world.ClientWorld;
 import net.minecraft.entity.LivingEntity;
+import net.minecraft.entity.player.SkinTextures;
 import net.minecraft.client.input.KeyInput;
 import net.minecraft.sound.SoundEvents;
 import net.minecraft.text.Text;
 import net.minecraft.util.math.MathHelper;
+import net.wcfcarolina13.FrensClient;
 import net.wcfcarolina13.GameAI.services.BotSkinService;
 import net.wcfcarolina13.GameAI.services.BotSkinService.SkinPreset;
 import net.wcfcarolina13.network.BotSkinPayload;
 import org.lwjgl.glfw.GLFW;
 
 import java.nio.charset.StandardCharsets;
-import java.util.List;
-import java.util.UUID;
+import java.util.*;
+import java.util.function.Supplier;
 
 /**
  * Client-side screen for choosing a bot's skin.  Accessible from the
@@ -27,6 +32,10 @@ import java.util.UUID;
  *
  * <p>Layout: bot entity preview on the left, scrollable preset list on
  * the right, "Random" button at top of list, "Done" at the bottom.
+ *
+ * <p>Clicking a preset only updates the local preview.  The skin change
+ * packet is sent to the server only when the user clicks "Apply" (or
+ * "Random", which is instant-confirm).
  */
 public final class BotSkinChooserScreen extends Screen {
 
@@ -35,13 +44,21 @@ public final class BotSkinChooserScreen extends Screen {
     private final String botAlias;
 
     // ── preview entity ──────────────────────────────────────────────────
-    private OtherClientPlayerEntity fallbackBot;
     private float lastMouseX;
     private float lastMouseY;
+
+    // ── skin suppliers for preview ──────────────────────────────────────
+    /** Lazy-computed skin suppliers, keyed by preset id. */
+    private final Map<String, Supplier<SkinTextures>> skinSuppliers = new HashMap<>();
+    /** The preview entity we re-use (swapping skin suppliers). */
+    private SkinPreviewEntity previewEntity;
 
     // ── presets ─────────────────────────────────────────────────────────
     private final List<SkinPreset> presets;
     private String selectedSkinId;           // null until user clicks
+    private TextFieldWidget customUrlField;
+    private String policyNotice = "";
+    private int customBtnX, customBtnY, customBtnW, customBtnH;
 
     // ── scroll state ────────────────────────────────────────────────────
     private double scrollOffset;
@@ -82,6 +99,7 @@ public final class BotSkinChooserScreen extends Screen {
     private static final int TITLE_H      = 22;
     private static final int BTN_ROW_H    = 24;
     private static final int RND_BTN_H    = 18;
+    private static final int CUSTOM_ROW_H = 24;
 
     // ═════════════════════════════════════════════════════════════════════
 
@@ -99,7 +117,7 @@ public final class BotSkinChooserScreen extends Screen {
         super.init();
 
         panelW = Math.min(300, this.width - 20);
-        panelH = Math.min(230, this.height - 30);
+        panelH = Math.min(250, this.height - 30);
         panelX = (this.width  - panelW) / 2;
         panelY = (this.height - panelH) / 2;
 
@@ -107,7 +125,7 @@ public final class BotSkinChooserScreen extends Screen {
         previewW = 90;
         previewX = panelX + GAP;
         previewY = panelY + TITLE_H;
-        previewH = panelH - TITLE_H - BTN_ROW_H;
+        previewH = panelH - TITLE_H - BTN_ROW_H - CUSTOM_ROW_H;
 
         // Right column: list of presets
         listX = previewX + previewW + GAP;
@@ -115,30 +133,117 @@ public final class BotSkinChooserScreen extends Screen {
         listW = panelX + panelW - GAP - listX;
         listH = previewH;
 
+        customBtnW = 42;
+        customBtnH = 16;
+        customBtnX = listX + listW - customBtnW;
+        customBtnY = panelY + panelH - BTN_ROW_H - CUSTOM_ROW_H + 4;
+
+        int customFieldW = Math.max(40, listW - customBtnW - 4);
+        customUrlField = new TextFieldWidget(this.textRenderer, listX, customBtnY, customFieldW, customBtnH, Text.literal("Texture URL"));
+        customUrlField.setMaxLength(512);
+        customUrlField.setPlaceholder(Text.literal("https://textures.minecraft.net/texture/..."));
+        this.addDrawableChild(customUrlField);
+        this.addSelectableChild(customUrlField);
+
         scrollOffset = 0;
+
+        // Pre-compute skin suppliers for all presets so the preview can
+        // show the correct skin texture for any selection.
+        if (this.client != null) {
+            for (SkinPreset preset : presets) {
+                if (!skinSuppliers.containsKey(preset.id())) {
+                    GameProfile previewProfile = BotSkinService.buildPreviewProfile(preset);
+                    skinSuppliers.put(preset.id(),
+                            this.client.getSkinProvider().supplySkinTextures(previewProfile, false));
+                }
+            }
+        }
+
+        String liveTextureUrl = detectLiveBotTextureUrl();
+        selectedSkinId = null;
+        if (liveTextureUrl != null) {
+            for (SkinPreset preset : presets) {
+                if (preset.textureUrl().equalsIgnoreCase(liveTextureUrl)) {
+                    selectedSkinId = preset.id();
+                    break;
+                }
+            }
+            if (selectedSkinId == null && customUrlField != null) {
+                customUrlField.setText(liveTextureUrl);
+            }
+        }
+
+        policyNotice = buildPolicyNotice();
     }
 
     // ── entity lookup ───────────────────────────────────────────────────
 
+    /**
+     * Returns the entity to render in the preview pane.
+     * When a preset is selected, returns a {@link SkinPreviewEntity}
+     * that overrides {@code getSkin()} with the selected preset's
+     * texture.  Otherwise returns the live bot entity from the world.
+     */
     private LivingEntity findBotEntity() {
         if (this.client == null || this.client.world == null) return null;
 
-        // Try the actual bot in the world
+        // If a preset is selected, use the preview entity with that skin.
+        if (selectedSkinId != null && skinSuppliers.containsKey(selectedSkinId)) {
+            return getOrCreatePreviewEntity(skinSuppliers.get(selectedSkinId));
+        }
+
+        // No selection — show the actual bot in the world.
         for (AbstractClientPlayerEntity p : this.client.world.getPlayers()) {
             if (p.getGameProfile().name().equals(botAlias)) return p;
         }
 
-        // Fallback: deterministic dummy (matches BotPlayerInventoryScreen)
+        // Fallback: create a default preview entity.
         if (this.client.player == null) return null;
-        if (fallbackBot == null || !fallbackBot.getGameProfile().name().equals(botAlias)) {
+        return getOrCreatePreviewEntity(null);
+    }
+
+    private SkinPreviewEntity getOrCreatePreviewEntity(Supplier<SkinTextures> skinSupplier) {
+        if (this.client == null || this.client.world == null || this.client.player == null)
+            return null;
+        if (previewEntity == null) {
             GameProfile profile = new GameProfile(
                     UUID.nameUUIDFromBytes(("bot:" + botAlias).getBytes(StandardCharsets.UTF_8)),
                     botAlias);
-            fallbackBot = new OtherClientPlayerEntity(this.client.world, profile);
-            fallbackBot.copyPositionAndRotation(this.client.player);
+            previewEntity = new SkinPreviewEntity(this.client.world, profile);
+            previewEntity.copyPositionAndRotation(this.client.player);
         }
-        fallbackBot.tick();
-        return fallbackBot;
+        previewEntity.setSkinSupplier(skinSupplier);
+        previewEntity.tick();
+        return previewEntity;
+    }
+
+    // ── SkinPreviewEntity ───────────────────────────────────────────────
+
+    /**
+     * A local-only client player entity whose {@link #getSkin()} returns
+     * the skin from a supplied {@code Supplier<SkinTextures>}, bypassing
+     * the normal {@link net.minecraft.client.network.PlayerListEntry}
+     * lookup (which wouldn't exist for a preview-only entity).
+     */
+    private static final class SkinPreviewEntity extends OtherClientPlayerEntity {
+        private Supplier<SkinTextures> skinSupplier;
+
+        SkinPreviewEntity(ClientWorld world, GameProfile profile) {
+            super(world, profile);
+        }
+
+        void setSkinSupplier(Supplier<SkinTextures> supplier) {
+            this.skinSupplier = supplier;
+        }
+
+        @Override
+        public SkinTextures getSkin() {
+            if (skinSupplier != null) {
+                SkinTextures tex = skinSupplier.get();
+                if (tex != null) return tex;
+            }
+            return super.getSkin();
+        }
     }
 
     // ── rendering ───────────────────────────────────────────────────────
@@ -153,6 +258,7 @@ public final class BotSkinChooserScreen extends Screen {
         super.render(ctx, mouseX, mouseY, delta);
         this.lastMouseX = mouseX;
         this.lastMouseY = mouseY;
+        policyNotice = buildPolicyNotice();
 
         // Panel border + fill
         ctx.fill(panelX - 1, panelY - 1, panelX + panelW + 1, panelY + panelH + 1, COL_BORDER);
@@ -164,6 +270,12 @@ public final class BotSkinChooserScreen extends Screen {
         ctx.drawText(this.textRenderer, titleStr,
                 panelX + (panelW - titleW) / 2, panelY + 7, COL_TITLE, true);
 
+        if (!policyNotice.isBlank()) {
+            int noticeColor = canUsePresetChanges() ? 0xFFE6D7A3 : 0xFFE08A8A;
+            String shown = elide(policyNotice, panelW - 12);
+            ctx.drawText(this.textRenderer, shown, panelX + 6, panelY + 18, noticeColor, false);
+        }
+
         // Bot preview
         renderPreview(ctx, mouseX, mouseY);
 
@@ -174,6 +286,8 @@ public final class BotSkinChooserScreen extends Screen {
         // Preset list (random button + scrollable list)
         renderRandomButton(ctx, mouseX, mouseY);
         renderPresetList(ctx, mouseX, mouseY);
+
+        renderCustomUrlControls(ctx, mouseX, mouseY);
 
         // Done button
         renderDoneButton(ctx, mouseX, mouseY);
@@ -200,9 +314,14 @@ public final class BotSkinChooserScreen extends Screen {
                     previewY + previewH / 2 - 4, COL_DESC, false);
         }
 
-        // Bot name below preview
-        int nameW = this.textRenderer.getWidth(botAlias);
-        ctx.drawText(this.textRenderer, botAlias,
+        // Bot name below preview — show preset name if selected
+        String label = botAlias;
+        if (selectedSkinId != null) {
+            SkinPreset p = BotSkinService.presetById(selectedSkinId);
+            if (p != null) label = p.displayName();
+        }
+        int nameW = this.textRenderer.getWidth(label);
+        ctx.drawText(this.textRenderer, label,
                 previewX + (previewW - nameW) / 2,
                 previewY + previewH + 2, COL_ACCENT, true);
     }
@@ -213,17 +332,19 @@ public final class BotSkinChooserScreen extends Screen {
 
     private void renderRandomButton(DrawContext ctx, int mouseX, int mouseY) {
         int by = rndBtnY();
+        boolean enabled = canUsePresetChanges();
         boolean hovered = mouseX >= listX && mouseX < listX + listW
                 && mouseY >= by && mouseY < by + RND_BTN_H;
+        if (!enabled) hovered = false;
         ctx.fill(listX, by, listX + listW, by + RND_BTN_H,
-                hovered ? COL_RND_BTN_HOVER : COL_RND_BTN);
+            enabled ? (hovered ? COL_RND_BTN_HOVER : COL_RND_BTN) : 0xFF1F1F1F);
         ctx.fill(listX, by, listX + listW, by + 1, COL_ACCENT);   // accent top edge
 
-        String label = "Random";
+        String label = "\u2684 Random";
         int lw = this.textRenderer.getWidth(label);
         ctx.drawText(this.textRenderer, label,
                 listX + (listW - lw) / 2, by + (RND_BTN_H - 8) / 2,
-                COL_LABEL, true);
+            enabled ? COL_LABEL : COL_DESC, true);
     }
 
     // ── Scrollable preset list ──────────────────────────────────────────
@@ -248,20 +369,23 @@ public final class BotSkinChooserScreen extends Screen {
         for (SkinPreset preset : presets) {
             if (y + ITEM_H > cTop && y < cTop + cH) {
                 boolean selected = preset.id().equals(selectedSkinId);
+                boolean enabled = canUsePresetChanges();
                 boolean hovered  = mouseX >= listX && mouseX < listX + usableW
                         && mouseY >= y && mouseY < y + ITEM_H
                         && mouseY >= cTop && mouseY < cTop + cH;
+                if (!enabled) hovered = false;
 
                 int bg;
                 if (selected && hovered)     bg = COL_SELECTED_HOVER;
                 else if (selected)           bg = COL_SELECTED;
                 else if (hovered)            bg = COL_HOVER;
                 else                         bg = COL_ITEM_BG;
+                if (!enabled) bg = 0xFF161616;
 
                 ctx.fill(listX, y, listX + usableW, y + ITEM_H - 1, bg);
 
                 // Display name
-                int textCol = selected ? COL_TITLE : COL_LABEL;
+                int textCol = !enabled ? COL_DESC : (selected ? COL_TITLE : COL_LABEL);
                 ctx.drawText(this.textRenderer, preset.displayName(),
                         listX + 6, y + (ITEM_H - 8) / 2, textCol, false);
 
@@ -300,7 +424,7 @@ public final class BotSkinChooserScreen extends Screen {
     private static final int DONE_H = 18;
 
     private int doneBtnX() {
-        String t = "Done";
+        String t = selectedSkinId != null ? "Apply" : "Done";
         int tw = this.textRenderer.getWidth(t);
         return panelX + (panelW - tw - 16) / 2;
     }
@@ -308,18 +432,42 @@ public final class BotSkinChooserScreen extends Screen {
         return panelY + panelH - DONE_H - 3;
     }
     private int doneBtnW() {
-        return this.textRenderer.getWidth("Done") + 16;
+        String t = selectedSkinId != null ? "Apply" : "Done";
+        return this.textRenderer.getWidth(t) + 16;
     }
 
     private void renderDoneButton(DrawContext ctx, int mouseX, int mouseY) {
         int bx = doneBtnX(), by = doneBtnY(), bw = doneBtnW();
         boolean hovered = mouseX >= bx && mouseX < bx + bw
                 && mouseY >= by && mouseY < by + DONE_H;
-        ctx.fill(bx, by, bx + bw, by + DONE_H, hovered ? COL_HOVER : COL_ITEM_BG);
-        ctx.fill(bx, by, bx + bw, by + 1, COL_BORDER);  // subtle top edge
-        ctx.drawText(this.textRenderer, "Done",
+        String label = selectedSkinId != null ? "Apply" : "Done";
+        int btnBg = selectedSkinId != null
+                ? (hovered ? COL_RND_BTN_HOVER : COL_RND_BTN)
+                : (hovered ? COL_HOVER : COL_ITEM_BG);
+        ctx.fill(bx, by, bx + bw, by + DONE_H, btnBg);
+        ctx.fill(bx, by, bx + bw, by + 1, COL_BORDER);
+        ctx.drawText(this.textRenderer, label,
                 bx + 8, by + (DONE_H - 8) / 2, COL_LABEL, true);
     }
+
+        private void renderCustomUrlControls(DrawContext ctx, int mouseX, int mouseY) {
+        if (customUrlField == null) {
+            return;
+        }
+        boolean enabled = canUseCustomUrl();
+        customUrlField.setEditable(enabled);
+        customUrlField.setFocusUnlocked(enabled);
+        customUrlField.render(ctx, mouseX, mouseY, 0);
+
+        boolean hovered = enabled
+            && mouseX >= customBtnX && mouseX < customBtnX + customBtnW
+            && mouseY >= customBtnY && mouseY < customBtnY + customBtnH;
+        ctx.fill(customBtnX, customBtnY, customBtnX + customBtnW, customBtnY + customBtnH,
+            enabled ? (hovered ? COL_RND_BTN_HOVER : COL_RND_BTN) : 0xFF1F1F1F);
+        ctx.drawText(this.textRenderer, "URL",
+            customBtnX + 10, customBtnY + (customBtnH - 8) / 2,
+            enabled ? COL_LABEL : COL_DESC, true);
+        }
 
     // ═════════════════════════════════════════════════════════════════════
     //  Input
@@ -331,25 +479,37 @@ public final class BotSkinChooserScreen extends Screen {
         double my = click.y();
         if (click.button() != 0) return super.mouseClicked(click, isInside);
 
-        // ── Random button ──
+        // ── Random button — instant confirm ──
         int by = rndBtnY();
         if (mx >= listX && mx < listX + listW && my >= by && my < by + RND_BTN_H) {
-            sendSkinChange("random");
-            selectedSkinId = null;
-            playClick();
+            if (canUsePresetChanges()) {
+                sendSkinChange("preset", "random");
+                selectedSkinId = null;
+                playClick();
+            }
             return true;
         }
 
-        // ── Preset list ──
+        if (mx >= customBtnX && mx < customBtnX + customBtnW && my >= customBtnY && my < customBtnY + customBtnH) {
+            if (canUseCustomUrl() && customUrlField != null) {
+                String url = customUrlField.getText() != null ? customUrlField.getText().trim() : "";
+                if (!url.isBlank()) {
+                    sendSkinChange("custom_url", url);
+                    playClick();
+                }
+            }
+            return true;
+        }
+
+        // ── Preset list — local preview only (confirm on Apply) ──
         int cTop = contentTop();
         int cH   = contentH();
         int usableW = listW - SCROLLBAR_W - 2;
-        if (mx >= listX && mx < listX + usableW && my >= cTop && my < cTop + cH) {
+        if (canUsePresetChanges() && mx >= listX && mx < listX + usableW && my >= cTop && my < cTop + cH) {
             int relY  = (int) (my - cTop + scrollOffset);
             int index = relY / ITEM_H;
             if (index >= 0 && index < presets.size()) {
                 SkinPreset preset = presets.get(index);
-                sendSkinChange(preset.id());
                 selectedSkinId = preset.id();
                 playClick();
                 return true;
@@ -368,10 +528,13 @@ public final class BotSkinChooserScreen extends Screen {
             }
         }
 
-        // ── Done button ──
+        // ── Done / Apply button ──
         {
             int dx = doneBtnX(), dy = doneBtnY(), dw = doneBtnW();
             if (mx >= dx && mx < dx + dw && my >= dy && my < dy + DONE_H) {
+                if (selectedSkinId != null && canUsePresetChanges()) {
+                    sendSkinChange("preset", selectedSkinId);
+                }
                 close();
                 return true;
             }
@@ -419,13 +582,121 @@ public final class BotSkinChooserScreen extends Screen {
             close();
             return true;
         }
+        if ((input.key() == GLFW.GLFW_KEY_ENTER || input.key() == GLFW.GLFW_KEY_KP_ENTER)
+                && customUrlField != null
+                && customUrlField.isFocused()
+                && canUseCustomUrl()) {
+            String url = customUrlField.getText() != null ? customUrlField.getText().trim() : "";
+            if (!url.isBlank()) {
+                sendSkinChange("custom_url", url);
+            }
+            return true;
+        }
+        if (input.key() == GLFW.GLFW_KEY_ENTER || input.key() == GLFW.GLFW_KEY_KP_ENTER) {
+            if (selectedSkinId != null && canUsePresetChanges()) {
+                sendSkinChange("preset", selectedSkinId);
+            }
+            close();
+            return true;
+        }
         return super.keyPressed(input);
     }
 
     // ── helpers ─────────────────────────────────────────────────────────
 
-    private void sendSkinChange(String presetId) {
-        ClientPlayNetworking.send(new BotSkinPayload(botAlias, presetId));
+    private void sendSkinChange(String source, String value) {
+        ClientPlayNetworking.send(new BotSkinPayload(botAlias, source, value));
+    }
+
+    private String detectLiveBotTextureUrl() {
+        if (this.client == null || this.client.world == null) return null;
+        for (AbstractClientPlayerEntity p : this.client.world.getPlayers()) {
+            if (!p.getGameProfile().name().equalsIgnoreCase(botAlias)) continue;
+            return extractTextureUrlFromProfile(p.getGameProfile());
+        }
+        return null;
+    }
+
+    private boolean isCurrentPlayerAdmin() {
+        if (this.client == null) {
+            return false;
+        }
+        if (this.client.isInSingleplayer()) {
+            return true;
+        }
+        if (this.client.player == null) {
+            return false;
+        }
+        try {
+            java.lang.reflect.Method m = this.client.player.getClass().getMethod("hasPermissionLevel", int.class);
+            Object out = m.invoke(this.client.player, 2);
+            return out instanceof Boolean b && b;
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
+    private boolean canUsePresetChanges() {
+        return isCurrentPlayerAdmin() || FrensClient.isSkinChangeForEveryoneEnabled();
+    }
+
+    private boolean canUseCustomUrl() {
+        return isCurrentPlayerAdmin() || FrensClient.isCustomSkinsEnabled();
+    }
+
+    private String buildPolicyNotice() {
+        if (!canUsePresetChanges()) {
+            return "Skin changes are currently restricted to server admins.";
+        }
+        if (!isCurrentPlayerAdmin() && !FrensClient.isCustomSkinsEnabled()) {
+            return "Custom URL skins are disabled by admin; non-admin custom skins were reverted to Steve.";
+        }
+        if (isCurrentPlayerAdmin() && !FrensClient.isCustomSkinsEnabled()) {
+            return "Custom URL skins are disabled for non-admin players.";
+        }
+        return "";
+    }
+
+    private String elide(String input, int maxWidth) {
+        if (input == null || input.isBlank()) return "";
+        if (this.textRenderer.getWidth(input) <= maxWidth) return input;
+        String e = "…";
+        int lo = 0;
+        int hi = input.length();
+        while (lo < hi) {
+            int mid = (lo + hi + 1) >>> 1;
+            String cand = input.substring(0, mid) + e;
+            if (this.textRenderer.getWidth(cand) <= maxWidth) {
+                lo = mid;
+            } else {
+                hi = mid - 1;
+            }
+        }
+        return input.substring(0, lo) + e;
+    }
+
+    private String extractTextureUrlFromProfile(GameProfile profile) {
+        if (profile == null || profile.properties() == null) return null;
+        Collection<Property> textures = profile.properties().get("textures");
+        if (textures == null || textures.isEmpty()) return null;
+
+        for (Property prop : textures) {
+            if (prop == null || prop.value() == null || prop.value().isBlank()) continue;
+            try {
+                byte[] raw = Base64.getDecoder().decode(prop.value());
+                String json = new String(raw, StandardCharsets.UTF_8);
+                String marker = "\"url\":\"";
+                int start = json.indexOf(marker);
+                if (start < 0) continue;
+                int valueStart = start + marker.length();
+                int end = json.indexOf('"', valueStart);
+                if (end <= valueStart) continue;
+                return json.substring(valueStart, end);
+            } catch (IllegalArgumentException ignored) {
+                // not valid base64, ignore this property value
+            }
+        }
+        return null;
     }
 
     private void playClick() {

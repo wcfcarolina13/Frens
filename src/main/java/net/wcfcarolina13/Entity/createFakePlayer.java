@@ -112,13 +112,10 @@ public class createFakePlayer extends ServerPlayerEntity {
     private static void spawnFake(MinecraftServer server, ServerWorld worldIn, GameProfile gameprofile, Vec3d pos, double yaw, double pitch, GameMode gamemode, boolean flying, RegistryKey<World> dimensionId) {
         // Apply persisted (or random) skin before connecting so the initial
         // PlayerListS2CPacket already carries the texture.
-        String skinId = BotSkinService.getSkin(gameprofile.name());
-        if (skinId != null) {
-            BotSkinService.applySkinToProfile(gameprofile, skinId);
-        } else {
-            String chosen = BotSkinService.applyRandomSkin(gameprofile);
-            BotSkinService.persistSkin(gameprofile.name(), chosen);
-        }
+        // applySkinToProfile returns a NEW GameProfile (records are immutable).
+        BotSkinService.SkinSelection selection = BotSkinService.resolveSelectionForSpawn(server, gameprofile.name());
+        gameprofile = BotSkinService.applySelectionToProfile(gameprofile, selection);
+        BotSkinService.persistSkinSelection(gameprofile.name(), selection);
 
         createFakePlayer instance = new createFakePlayer(server, worldIn, gameprofile, SyncedClientOptions.createDefault(), false);
 //        instance.fixStartingPosition = () -> {

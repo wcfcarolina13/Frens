@@ -6,6 +6,7 @@ import net.minecraft.server.network.ServerPlayerEntity;
 import net.wcfcarolina13.Entity.createFakePlayer;
 import net.wcfcarolina13.Frens;
 import net.wcfcarolina13.GameAI.services.BotSkinService;
+import net.wcfcarolina13.GameAI.services.SurvivalRecruitmentService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -13,7 +14,7 @@ import java.util.Locale;
 
 /**
  * Server-side handler for {@link BotSkinPayload}.
- * Only operators can change bot skins.
+ * Permissions and skin policy are server-authoritative.
  */
 public final class BotSkinNetworkManager {
     private static final Logger LOGGER = LoggerFactory.getLogger("BotSkinNetworkManager");
@@ -33,14 +34,19 @@ public final class BotSkinNetworkManager {
         if (server == null || player == null || player.isRemoved()) return;
         if (player instanceof createFakePlayer) return;
 
-        if (!Frens.isOperator(player)) {
+        boolean operator = Frens.isOperator(player);
+        boolean allowEveryoneSkinChange = SurvivalRecruitmentService.isAllowEveryoneSkinChange(server);
+        if (!operator && !allowEveryoneSkinChange) {
             player.sendMessage(net.minecraft.text.Text.literal("§cNot authorized to change bot skins."), true);
             return;
         }
 
         String alias = payload.botAlias() != null ? payload.botAlias().trim() : "";
-        String presetId = payload.skinPresetId() != null ? payload.skinPresetId().trim().toLowerCase(Locale.ROOT) : "";
-        if (alias.isEmpty() || presetId.isEmpty()) return;
+        String skinSourceRaw = payload.skinSource() != null ? payload.skinSource().trim() : "";
+        String skinValueRaw = payload.skinValue() != null ? payload.skinValue().trim() : "";
+        if (alias.isEmpty() || skinValueRaw.isEmpty()) return;
+
+        BotSkinService.SkinSource skinSource = BotSkinService.SkinSource.fromWire(skinSourceRaw);
 
         // Find the online bot.
         ServerPlayerEntity bot = null;
@@ -56,25 +62,60 @@ public final class BotSkinNetworkManager {
             return;
         }
 
-        // Handle "random" choice.
-        if ("random".equals(presetId)) {
-            String chosen = BotSkinService.applyRandomSkin(bot.getGameProfile());
-            // Still need to do the remove/re-add dance for live bots.
-            // applyRandomSkin only sets the property; we need the full packet dance.
-            // Re-use changeSkin with the chosen id.
-            BotSkinService.changeSkin(server, bot, chosen);
-            player.sendMessage(net.minecraft.text.Text.literal("Randomized skin for " + alias + " → " + chosen), true);
-            return;
+        BotSkinService.SkinSelection selection;
+        boolean fallbackApplied = false;
+
+        if (skinSource == BotSkinService.SkinSource.CUSTOM_URL) {
+            if (!BotSkinService.isValidCustomTextureUrl(skinValueRaw)) {
+                player.sendMessage(net.minecraft.text.Text.literal("§cInvalid custom skin URL."), true);
+                return;
+            }
+
+            boolean allowCustomSkins = SurvivalRecruitmentService.isAllowCustomSkins(server);
+            if (!operator && !allowCustomSkins) {
+                fallbackApplied = true;
+                selection = new BotSkinService.SkinSelection(
+                        BotSkinService.SkinSource.PRESET,
+                        BotSkinService.SAFE_PRESET_ID,
+                        player.getUuidAsString(),
+                        player.getName().getString(),
+                        false,
+                        System.currentTimeMillis());
+            } else {
+                selection = BotSkinService.SkinSelection.customUrl(
+                        skinValueRaw,
+                        player.getUuidAsString(),
+                        player.getName().getString(),
+                        operator);
+            }
+        } else {
+            String presetId = skinValueRaw.toLowerCase(Locale.ROOT);
+            if ("random".equals(presetId)) {
+                presetId = BotSkinService.randomPresetId();
+            }
+            if (BotSkinService.presetById(presetId) == null) {
+                player.sendMessage(net.minecraft.text.Text.literal("§cUnknown skin: " + presetId), true);
+                return;
+            }
+            selection = new BotSkinService.SkinSelection(
+                    BotSkinService.SkinSource.PRESET,
+                    presetId,
+                    player.getUuidAsString(),
+                    player.getName().getString(),
+                    operator,
+                    System.currentTimeMillis());
         }
 
-        if (BotSkinService.presetById(presetId) == null) {
-            player.sendMessage(net.minecraft.text.Text.literal("§cUnknown skin: " + presetId), true);
-            return;
-        }
-
-        boolean ok = BotSkinService.changeSkin(server, bot, presetId);
+        boolean ok = BotSkinService.changeSkin(server, bot, selection);
         if (ok) {
-            player.sendMessage(net.minecraft.text.Text.literal("Skin applied: " + presetId), true);
+            if (fallbackApplied) {
+                player.sendMessage(net.minecraft.text.Text.literal(
+                        "§eCustom skins are disabled for non-admins; applied safe skin '" + BotSkinService.SAFE_PRESET_ID + "'."), true);
+            } else if (selection.isCustomUrl()) {
+                player.sendMessage(net.minecraft.text.Text.literal("Custom URL skin applied."), true);
+            } else {
+                player.sendMessage(net.minecraft.text.Text.literal("Skin applied: " + selection.value()), true);
+            }
         } else {
             player.sendMessage(net.minecraft.text.Text.literal("§cFailed to apply skin."), true);
         }

@@ -10,6 +10,7 @@ import net.wcfcarolina13.FilingSystem.ManualConfig;
 import net.wcfcarolina13.GameAI.services.SurvivalRecruitmentService;
 import net.wcfcarolina13.GameAI.services.WizardTomeGrantService;
 import net.wcfcarolina13.GameAI.services.LearningModeService;
+import net.wcfcarolina13.GameAI.services.BotSkinService;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -206,6 +207,35 @@ public final class RecruitmentAdminNetworkManager {
                     out.add("Permanent companion unlocked (required for companion spells/commands).");
                 }
             }
+            case "skin_everyone_toggle" -> {
+                boolean updated = !SurvivalRecruitmentService.isAllowEveryoneSkinChange(server);
+                SurvivalRecruitmentService.setAllowEveryoneSkinChange(server, updated);
+                for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
+                    if (p == null || p.isRemoved() || (p instanceof createFakePlayer)) {
+                        continue;
+                    }
+                    SurvivalRecruitmentService.sendRecruitmentState(p);
+                }
+                out.add("Skin policy: allowEveryoneSkinChange=" + updated);
+            }
+            case "skin_custom_toggle" -> {
+                boolean updated = !SurvivalRecruitmentService.isAllowCustomSkins(server);
+                SurvivalRecruitmentService.setAllowCustomSkins(server, updated);
+                int reverted = 0;
+                if (!updated) {
+                    reverted = BotSkinService.reconcileNonAdminCustomSkinsToSafe(server);
+                }
+                for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
+                    if (p == null || p.isRemoved() || (p instanceof createFakePlayer)) {
+                        continue;
+                    }
+                    SurvivalRecruitmentService.sendRecruitmentState(p);
+                }
+                out.add("Skin policy: allowCustomSkins=" + updated);
+                if (!updated) {
+                    out.add("Reverted non-admin custom skins to safe preset: " + reverted);
+                }
+            }
             case "learning_status", "learning_start", "learning_stop_success", "learning_stop_fail", "learning_stop_abort" -> {
                 out.addAll(LearningModeService.handleAdminAction(server, player, action, botAlias));
             }
@@ -256,6 +286,8 @@ public final class RecruitmentAdminNetworkManager {
         }
 
         out.add("Companion quest: stage=" + st.getCompanionQuestStage() + " permanent=" + st.isPermanentCompanion());
+        out.add("Skin policy: allowEveryoneSkinChange=" + st.isAllowEveryoneSkinChange()
+            + " allowCustomSkins=" + st.isAllowCustomSkins());
         if (st.isCompanionAnchorSet()) {
             BlockPos anchor = BlockPos.fromLong(st.getCompanionAnchorPos());
             String dim = st.getCompanionAnchorDimension();

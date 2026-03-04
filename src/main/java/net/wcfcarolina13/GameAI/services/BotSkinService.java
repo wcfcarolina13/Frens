@@ -8,11 +8,13 @@ import net.minecraft.network.packet.s2c.play.PlayerRemoveS2CPacket;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.wcfcarolina13.Entity.createFakePlayer;
+import net.wcfcarolina13.FilingSystem.ManualConfig;
 import net.wcfcarolina13.Frens;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.nio.charset.StandardCharsets;
+import java.net.URI;
 import java.util.*;
 
 /**
@@ -32,8 +34,71 @@ import java.util.*;
  */
 public final class BotSkinService {
     private static final Logger LOGGER = LoggerFactory.getLogger("BotSkinService");
+    public static final String SAFE_PRESET_ID = "steve";
+    private static final int MAX_CUSTOM_URL_LENGTH = 512;
 
     private BotSkinService() {}
+
+    public enum SkinSource {
+        PRESET("preset"),
+        CUSTOM_URL("custom_url");
+
+        private final String wireId;
+
+        SkinSource(String wireId) {
+            this.wireId = wireId;
+        }
+
+        public String wireId() {
+            return wireId;
+        }
+
+        public static SkinSource fromWire(String wireValue) {
+            String normalized = wireValue == null ? "" : wireValue.trim().toLowerCase(Locale.ROOT);
+            return "custom_url".equals(normalized) ? CUSTOM_URL : PRESET;
+        }
+    }
+
+    public record SkinSelection(
+            SkinSource source,
+            String value,
+            String lastSetByUuid,
+            String lastSetByName,
+            boolean lastSetByAdmin,
+            long lastSetAtEpochMs
+    ) {
+        public SkinSelection normalized() {
+            SkinSource normalizedSource = source == null ? SkinSource.PRESET : source;
+            String normalizedValue = value == null ? "" : value.trim();
+            if (normalizedSource == SkinSource.PRESET && normalizedValue.isBlank()) {
+                normalizedValue = SAFE_PRESET_ID;
+            }
+            return new SkinSelection(
+                    normalizedSource,
+                    normalizedValue,
+                    (lastSetByUuid == null || lastSetByUuid.isBlank()) ? null : lastSetByUuid.trim(),
+                    (lastSetByName == null || lastSetByName.isBlank()) ? null : lastSetByName.trim(),
+                    lastSetByAdmin,
+                    Math.max(0L, lastSetAtEpochMs)
+            );
+        }
+
+        public boolean isPreset() {
+            return source == SkinSource.PRESET;
+        }
+
+        public boolean isCustomUrl() {
+            return source == SkinSource.CUSTOM_URL;
+        }
+
+        public static SkinSelection preset(String presetId) {
+            return new SkinSelection(SkinSource.PRESET, presetId, null, null, false, System.currentTimeMillis());
+        }
+
+        public static SkinSelection customUrl(String textureUrl, String actorUuid, String actorName, boolean actorIsAdmin) {
+            return new SkinSelection(SkinSource.CUSTOM_URL, textureUrl, actorUuid, actorName, actorIsAdmin, System.currentTimeMillis());
+        }
+    }
 
     // ── Skin preset catalogue ───────────────────────────────────────────
 
@@ -79,35 +144,221 @@ public final class BotSkinService {
         return null;
     }
 
+    public static boolean isValidCustomTextureUrl(String textureUrl) {
+        if (textureUrl == null) {
+            return false;
+        }
+        String trimmed = textureUrl.trim();
+        if (trimmed.isBlank() || trimmed.length() > MAX_CUSTOM_URL_LENGTH) {
+            return false;
+        }
+        try {
+            URI uri = URI.create(trimmed);
+            String scheme = uri.getScheme();
+            if (scheme == null) {
+                return false;
+            }
+            String normalized = scheme.toLowerCase(Locale.ROOT);
+            if (!normalized.equals("http") && !normalized.equals("https")) {
+                return false;
+            }
+            return uri.getHost() != null && !uri.getHost().isBlank();
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
+    private static SkinSelection fromConfigSelection(ManualConfig.BotSkinSelection cfg) {
+        if (cfg == null) {
+            return null;
+        }
+        return new SkinSelection(
+                SkinSource.fromWire(cfg.getSource()),
+                cfg.getValue(),
+                cfg.getLastSetByUuid(),
+                cfg.getLastSetByName(),
+                cfg.isLastSetByAdmin(),
+                cfg.getLastSetAtEpochMs()
+        ).normalized();
+    }
+
+    private static ManualConfig.BotSkinSelection toConfigSelection(SkinSelection selection) {
+        SkinSelection normalized = selection.normalized();
+        return new ManualConfig.BotSkinSelection(
+                normalized.source().wireId(),
+                normalized.value(),
+                normalized.lastSetByUuid(),
+                normalized.lastSetByName(),
+                normalized.lastSetByAdmin(),
+                normalized.lastSetAtEpochMs()
+        ).sanitized();
+    }
+
+    private static SkinSelection applyCustomPolicy(MinecraftServer server, SkinSelection selection) {
+        SkinSelection normalized = selection.normalized();
+        if (!normalized.isCustomUrl()) {
+            return normalized;
+        }
+        boolean allowCustomSkins = SurvivalRecruitmentService.isAllowCustomSkins(server);
+        if (allowCustomSkins || normalized.lastSetByAdmin()) {
+            return normalized;
+        }
+        return new SkinSelection(
+                SkinSource.PRESET,
+                SAFE_PRESET_ID,
+                normalized.lastSetByUuid(),
+                normalized.lastSetByName(),
+                normalized.lastSetByAdmin(),
+                System.currentTimeMillis()
+        ).normalized();
+    }
+
     // ── Profile enrichment (pre-connect) ────────────────────────────────
 
     /**
-     * Adds (or replaces) the {@code "textures"} property on the given
-     * GameProfile.  Call this <em>before</em>
-     * {@code PlayerManager.onPlayerConnect} so that the initial
-     * {@code PlayerListS2CPacket} carries the skin.
+     * Returns a <b>new</b> GameProfile with the {@code "textures"}
+     * property set to the given preset.  The original profile is
+     * not modified (GameProfile is a Java record with final fields).
      *
-     * @param profile  the bot's GameProfile (mutable properties map)
+     * @param profile  the bot's current GameProfile
      * @param presetId preset short id (e.g. {@code "ari"})
+     * @return new GameProfile with skin, or the original if preset unknown
      */
-    public static void applySkinToProfile(GameProfile profile, String presetId) {
+    public static GameProfile applySkinToProfile(GameProfile profile, String presetId) {
         SkinPreset preset = presetById(presetId);
-        if (preset == null) return;
-        applyPresetToProfile(profile, preset);
+        if (preset == null) return profile;
+        return applyPresetToProfile(profile, preset);
     }
 
-    /** Pick a random skin and apply it to the profile.  Returns the chosen preset id. */
-    public static String applyRandomSkin(GameProfile profile) {
-        SkinPreset preset = PRESETS.get(new Random().nextInt(PRESETS.size()));
-        applyPresetToProfile(profile, preset);
-        return preset.id();
+    public static GameProfile applySelectionToProfile(GameProfile profile, SkinSelection selection) {
+        if (profile == null || selection == null) {
+            return profile;
+        }
+        SkinSelection normalized = selection.normalized();
+        if (normalized.isCustomUrl()) {
+            if (!isValidCustomTextureUrl(normalized.value())) {
+                return profile;
+            }
+            return applyCustomUrlToProfile(profile, normalized.value());
+        }
+        return applySkinToProfile(profile, normalized.value());
     }
 
-    private static void applyPresetToProfile(GameProfile profile, SkinPreset preset) {
-        String json = buildTexturesJson(profile, preset);
+    /** Returns a random preset id from the catalogue. */
+    public static String randomPresetId() {
+        return PRESETS.get(new Random().nextInt(PRESETS.size())).id();
+    }
+
+    /**
+     * Creates a <b>new</b> {@link GameProfile} with the same UUID and name
+     * as {@code profile} but with a fresh {@link com.mojang.authlib.properties.PropertyMap}
+     * containing the skin texture property for {@code preset}.
+     *
+     * <p>GameProfile is a Java record in authlib 7 — its fields are
+     * final, and Java 21 blocks {@code Unsafe.objectFieldOffset} on record
+     * classes.  So we never mutate an existing profile; we always return a
+     * brand-new one.
+     */
+    private static GameProfile applyPresetToProfile(GameProfile profile, SkinPreset preset) {
+        String json = buildTexturesJson(profile, preset.textureUrl(), preset.slim());
         String base64 = Base64.getEncoder().encodeToString(json.getBytes(StandardCharsets.UTF_8));
-        profile.properties().removeAll("textures");
-        profile.properties().put("textures", new Property("textures", base64));
+
+        com.google.common.collect.LinkedHashMultimap<String, Property> mutable =
+                com.google.common.collect.LinkedHashMultimap.create();
+
+        // Copy any non-textures properties from the old map.
+        try {
+            for (var entry : profile.properties().entries()) {
+                if (!"textures".equals(entry.getKey())) {
+                    mutable.put(entry.getKey(), entry.getValue());
+                }
+            }
+        } catch (Exception ignored) {
+            // Old map might be in a weird state; carry on with just the new texture.
+        }
+        mutable.put("textures", new Property("textures", base64));
+
+        // Construct a brand-new GameProfile (record) with the fresh property map.
+        // PropertyMap's constructor freezes to ImmutableMultimap — that's fine.
+        GameProfile newProfile = new GameProfile(
+                profile.id(), profile.name(),
+                new com.mojang.authlib.properties.PropertyMap(mutable));
+
+        LOGGER.info("Built new GameProfile for {} with skin '{}'",
+                newProfile.name(), preset.id());
+        return newProfile;
+    }
+
+    private static GameProfile applyCustomUrlToProfile(GameProfile profile, String textureUrl) {
+        String json = buildTexturesJson(profile, textureUrl, false);
+        String base64 = Base64.getEncoder().encodeToString(json.getBytes(StandardCharsets.UTF_8));
+
+        com.google.common.collect.LinkedHashMultimap<String, Property> mutable =
+                com.google.common.collect.LinkedHashMultimap.create();
+        try {
+            for (var entry : profile.properties().entries()) {
+                if (!"textures".equals(entry.getKey())) {
+                    mutable.put(entry.getKey(), entry.getValue());
+                }
+            }
+        } catch (Exception ignored) {
+        }
+        mutable.put("textures", new Property("textures", base64));
+
+        GameProfile newProfile = new GameProfile(
+                profile.id(), profile.name(),
+                new com.mojang.authlib.properties.PropertyMap(mutable));
+
+        LOGGER.info("Built new GameProfile for {} with custom_url skin", newProfile.name());
+        return newProfile;
+    }
+
+    // ── PlayerEntity profile swap (Unsafe on regular class) ─────────────
+
+    /**
+     * Replaces the {@code gameProfile} field on a live {@link net.minecraft.entity.player.PlayerEntity}.
+     * {@code PlayerEntity} is a regular (non-record) class, so
+     * {@code Unsafe.objectFieldOffset} works normally.
+     *
+     * <p>At runtime the field may be named {@code "gameProfile"} (Yarn dev)
+     * or {@code "field_7507"} (intermediary prod).  We try both.
+     */
+    private static void swapPlayerProfile(ServerPlayerEntity bot, GameProfile newProfile) {
+        try {
+            java.lang.reflect.Field f = null;
+            // Try Yarn name first, then intermediary.
+            for (String name : new String[]{"gameProfile", "field_7507"}) {
+                try {
+                    f = net.minecraft.entity.player.PlayerEntity.class.getDeclaredField(name);
+                    break;
+                } catch (NoSuchFieldException ignored) {}
+            }
+            // Ultimate fallback: search by type.
+            if (f == null) {
+                for (java.lang.reflect.Field candidate :
+                        net.minecraft.entity.player.PlayerEntity.class.getDeclaredFields()) {
+                    if (candidate.getType() == GameProfile.class) {
+                        f = candidate;
+                        break;
+                    }
+                }
+            }
+            if (f == null) {
+                LOGGER.error("Cannot find GameProfile field on PlayerEntity");
+                return;
+            }
+            java.lang.reflect.Field unsafeField =
+                    sun.misc.Unsafe.class.getDeclaredField("theUnsafe");
+            unsafeField.setAccessible(true);
+            sun.misc.Unsafe unsafe = (sun.misc.Unsafe) unsafeField.get(null);
+            long offset = unsafe.objectFieldOffset(f);
+            unsafe.putObject(bot, offset, newProfile);
+            LOGGER.info("Swapped GameProfile on PlayerEntity for '{}' (field: {})",
+                    newProfile.name(), f.getName());
+        } catch (Exception e) {
+            LOGGER.error("Failed to swap GameProfile on PlayerEntity for '{}'",
+                    newProfile.name(), e);
+        }
     }
 
     // ── Runtime skin change (post-connect) ──────────────────────────────
@@ -120,54 +371,59 @@ public final class BotSkinService {
      * @return true if the skin was applied successfully
      */
     public static boolean changeSkin(MinecraftServer server, ServerPlayerEntity bot, String presetId) {
-        if (server == null || bot == null) return false;
-        SkinPreset preset = presetById(presetId);
-        if (preset == null) {
-            LOGGER.warn("Unknown skin preset '{}' for bot '{}'", presetId, bot.getGameProfile().name());
-            return false;
-        }
+        return changeSkin(server, bot, SkinSelection.preset(presetId));
+    }
 
-        GameProfile profile = bot.getGameProfile();
+    public static boolean changeSkin(MinecraftServer server, ServerPlayerEntity bot, SkinSelection selection) {
+        if (server == null || bot == null || selection == null) return false;
+
+        SkinSelection normalized = applyCustomPolicy(server, selection).normalized();
+        GameProfile oldProfile = bot.getGameProfile();
+        GameProfile newProfile;
+        String appliedLabel;
+
+        if (normalized.isCustomUrl()) {
+            if (!isValidCustomTextureUrl(normalized.value())) {
+                LOGGER.warn("Invalid custom skin URL '{}' for bot '{}'", normalized.value(), bot.getGameProfile().name());
+                return false;
+            }
+            newProfile = applyCustomUrlToProfile(oldProfile, normalized.value());
+            appliedLabel = "custom_url";
+        } else {
+            SkinPreset preset = presetById(normalized.value());
+            if (preset == null) {
+                LOGGER.warn("Unknown skin preset '{}' for bot '{}'", normalized.value(), bot.getGameProfile().name());
+                return false;
+            }
+            newProfile = applyPresetToProfile(oldProfile, preset);
+            appliedLabel = preset.id();
+        }
 
         // 1. Remove from player list for all clients.
         server.getPlayerManager().sendToAll(
-                new PlayerRemoveS2CPacket(List.of(profile.id())));
+                new PlayerRemoveS2CPacket(List.of(oldProfile.id())));
 
         // 2. Remove entity from all clients.
         server.getPlayerManager().sendToAll(
                 new EntitiesDestroyS2CPacket(bot.getId()));
 
-        // 3. Update profile textures.
-        applyPresetToProfile(profile, preset);
+        // 3. Swap the profile reference on PlayerEntity (regular class,
+        //    Unsafe works on non-record fields).
+        swapPlayerProfile(bot, newProfile);
 
-        // 4. Re-add to player list with updated profile.
-        server.getPlayerManager().sendToAll(
-                PlayerListS2CPacket.entryFromPlayer(List.of(bot)));
+        // 4. Schedule re-add + respawn for the NEXT server tick.
+        server.execute(() -> {
+            LOGGER.info("Skin refresh phase for '{}': sending ADD_PLAYER and retrack", bot.getGameProfile().name());
 
-        // 5. Re-send entity spawn to all tracking clients.
-        //    unloadEntity / loadEntity are protected on ServerChunkLoadingManager,
-        //    so we call them reflectively (standard Carpet-style pattern).
-        net.minecraft.server.world.ServerWorld sw =
-                (net.minecraft.server.world.ServerWorld) bot.getEntityWorld();
-        var loadingManager = sw.getChunkManager().chunkLoadingManager;
-        try {
-            java.lang.reflect.Method unload = loadingManager.getClass()
-                    .getDeclaredMethod("unloadEntity", net.minecraft.entity.Entity.class);
-            unload.setAccessible(true);
-            unload.invoke(loadingManager, bot);
-            java.lang.reflect.Method load = loadingManager.getClass()
-                    .getDeclaredMethod("loadEntity", net.minecraft.entity.Entity.class);
-            load.setAccessible(true);
-            load.invoke(loadingManager, bot);
-        } catch (Exception e) {
-            LOGGER.warn("Reflective entity re-track failed for skin change on '{}'; " +
-                    "skin will still apply on next login", bot.getGameProfile().name(), e);
-        }
+            server.getPlayerManager().sendToAll(
+                    PlayerListS2CPacket.entryFromPlayer(List.of(bot)));
 
-        // 6. Persist choice.
-        persistSkin(bot.getGameProfile().name(), presetId);
+            retrackEntity(bot);
 
-        LOGGER.info("Applied skin '{}' to bot '{}'", presetId, bot.getGameProfile().name());
+            persistSkinSelection(bot.getGameProfile().name(), normalized);
+
+            LOGGER.info("Applied skin '{}' to bot '{}'", appliedLabel, bot.getGameProfile().name());
+        });
         return true;
     }
 
@@ -175,20 +431,215 @@ public final class BotSkinService {
 
     /** Gets the persisted skin preset id for a bot alias, or null. */
     public static String getSkin(String alias) {
-        if (Frens.CONFIG == null || alias == null) return null;
-        return Frens.CONFIG.getBotSkin(alias);
+        SkinSelection selection = getSkinSelection(alias);
+        if (selection == null || !selection.isPreset()) {
+            return null;
+        }
+        return selection.value();
     }
 
     /** Persists the skin choice for a bot alias. */
     public static void persistSkin(String alias, String presetId) {
-        if (Frens.CONFIG == null || alias == null || presetId == null) return;
-        Frens.CONFIG.setBotSkin(alias, presetId);
+        persistSkinSelection(alias, SkinSelection.preset(presetId));
+    }
+
+    public static SkinSelection getSkinSelection(String alias) {
+        if (Frens.CONFIG == null || alias == null || alias.isBlank()) {
+            return null;
+        }
+        ManualConfig.BotSkinSelection structured = Frens.CONFIG.getBotSkinSelection(alias);
+        if (structured != null) {
+            return fromConfigSelection(structured);
+        }
+        String legacyPreset = Frens.CONFIG.getBotSkin(alias);
+        if (legacyPreset == null || legacyPreset.isBlank()) {
+            return null;
+        }
+        return SkinSelection.preset(legacyPreset).normalized();
+    }
+
+    public static void persistSkinSelection(String alias, SkinSelection selection) {
+        if (Frens.CONFIG == null || alias == null || alias.isBlank() || selection == null) return;
+        Frens.CONFIG.setBotSkinSelection(alias, toConfigSelection(selection));
         Frens.CONFIG.save();
+    }
+
+    public static SkinSelection resolveSelectionForSpawn(MinecraftServer server, String alias) {
+        SkinSelection existing = getSkinSelection(alias);
+        SkinSelection resolved;
+        if (existing == null) {
+            resolved = SkinSelection.preset(randomPresetId()).normalized();
+            persistSkinSelection(alias, resolved);
+            return resolved;
+        }
+        resolved = applyCustomPolicy(server, existing).normalized();
+        if (!resolved.equals(existing.normalized())) {
+            persistSkinSelection(alias, resolved);
+        }
+        return resolved;
+    }
+
+    public static int reconcileNonAdminCustomSkinsToSafe(MinecraftServer server) {
+        if (Frens.CONFIG == null) {
+            return 0;
+        }
+        Map<String, ManualConfig.BotSkinSelection> selections = Frens.CONFIG.getBotSkinSelections();
+        if (selections == null || selections.isEmpty()) {
+            return 0;
+        }
+
+        int reverted = 0;
+        List<Map.Entry<String, ManualConfig.BotSkinSelection>> snapshot = new ArrayList<>(selections.entrySet());
+        for (Map.Entry<String, ManualConfig.BotSkinSelection> entry : snapshot) {
+            String alias = entry.getKey();
+            SkinSelection current = fromConfigSelection(entry.getValue());
+            if (alias == null || alias.isBlank() || current == null || !current.isCustomUrl() || current.lastSetByAdmin()) {
+                continue;
+            }
+            SkinSelection fallback = new SkinSelection(
+                    SkinSource.PRESET,
+                    SAFE_PRESET_ID,
+                    current.lastSetByUuid(),
+                    current.lastSetByName(),
+                    current.lastSetByAdmin(),
+                    System.currentTimeMillis()
+            ).normalized();
+            persistSkinSelection(alias, fallback);
+            reverted++;
+
+            if (server != null) {
+                ServerPlayerEntity online = null;
+                for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
+                    if (p instanceof createFakePlayer && p.getGameProfile().name().equalsIgnoreCase(alias)) {
+                        online = p;
+                        break;
+                    }
+                }
+                if (online != null) {
+                    changeSkin(server, online, fallback);
+                }
+            }
+        }
+        return reverted;
+    }
+
+    // ── Entity re-track (reflection) ────────────────────────────────────
+
+    /**
+     * Unloads and re-loads the entity in the chunk loading manager so that
+     * a fresh entity spawn packet is sent to all tracking clients.
+     * Uses reflection because {@code unloadEntity}/{@code loadEntity} are
+     * protected on {@code ServerChunkLoadingManager}, and at runtime Yarn
+     * names are remapped to intermediary.
+     */
+    private static void retrackEntity(ServerPlayerEntity bot) {
+        net.minecraft.server.world.ServerWorld sw =
+                (net.minecraft.server.world.ServerWorld) bot.getEntityWorld();
+        var loadingManager = sw.getChunkManager().chunkLoadingManager;
+        try {
+            Class<?> managerClass = loadingManager.getClass();
+
+            // Deterministic resolution across both dev (Yarn names) and prod
+            // (intermediary names) runtimes.
+            java.lang.reflect.Method unload = resolveEntityVoidMethod(
+                    managerClass,
+                    new String[]{"unloadEntity", "method_18716"},
+                    true
+            );
+            java.lang.reflect.Method load = resolveEntityVoidMethod(
+                    managerClass,
+                    new String[]{"loadEntity", "method_18701"},
+                    true
+            );
+
+            // Last-resort fallback if remapping changes in future versions:
+            // classify protected void(Entity) methods by name heuristics,
+            // but never rely on raw declaration index ordering.
+            if (unload == null || load == null) {
+                for (java.lang.reflect.Method m : managerClass.getDeclaredMethods()) {
+                    Class<?>[] params = m.getParameterTypes();
+                    if (params.length == 1
+                            && params[0] == net.minecraft.entity.Entity.class
+                            && m.getReturnType() == void.class
+                            && java.lang.reflect.Modifier.isProtected(m.getModifiers())) {
+                        String n = m.getName().toLowerCase(Locale.ROOT);
+                        if (unload == null && (n.contains("unload") || n.contains("18716"))) {
+                            unload = m;
+                        } else if (load == null && (n.contains("load") || n.contains("18701"))) {
+                            load = m;
+                        }
+                    }
+                }
+            }
+
+            if (unload != null && load != null) {
+                LOGGER.info("Skin re-track using {}#{} then {}#{} for '{}'",
+                        managerClass.getSimpleName(), unload.getName(),
+                        managerClass.getSimpleName(), load.getName(),
+                        bot.getGameProfile().name());
+
+                unload.setAccessible(true);
+                unload.invoke(loadingManager, bot);
+                load.setAccessible(true);
+                load.invoke(loadingManager, bot);
+            } else {
+                LOGGER.warn("Could not find unloadEntity/loadEntity on {}",
+                        loadingManager.getClass().getName());
+            }
+        } catch (Exception e) {
+            LOGGER.warn("Reflective entity re-track failed for skin change on '{}'; " +
+                    "skin will still apply on next login", bot.getGameProfile().name(), e);
+        }
+    }
+
+    private static java.lang.reflect.Method resolveEntityVoidMethod(
+            Class<?> owner,
+            String[] names,
+            boolean requireProtected
+    ) {
+        for (String name : names) {
+            try {
+                java.lang.reflect.Method m = owner.getDeclaredMethod(
+                        name, net.minecraft.entity.Entity.class);
+                if (m.getReturnType() != void.class) continue;
+                if (requireProtected && !java.lang.reflect.Modifier.isProtected(m.getModifiers())) {
+                    continue;
+                }
+                return m;
+            } catch (NoSuchMethodException ignored) {
+            }
+        }
+        return null;
+    }
+
+    // ── Client-side preview helper ──────────────────────────────────────
+
+    /**
+     * Builds a {@link GameProfile} with the given preset's texture property
+     * already embedded.  Intended for client-side skin preview — pass the
+     * result to {@code MinecraftClient.getSkinProvider().supplySkinTextures()}
+     * to get an async-resolving {@code Supplier<SkinTextures>}.
+     */
+    public static GameProfile buildPreviewProfile(SkinPreset preset) {
+        UUID uuid = UUID.nameUUIDFromBytes(
+                ("preview:" + preset.id()).getBytes(StandardCharsets.UTF_8));
+        // Build the same base64 textures JSON the server would produce.
+        GameProfile temp = new GameProfile(uuid, "Preview");
+        String json = buildTexturesJson(temp, preset.textureUrl(), preset.slim());
+        String base64 = Base64.getEncoder().encodeToString(
+                json.getBytes(StandardCharsets.UTF_8));
+
+        com.google.common.collect.LinkedHashMultimap<String, Property> mutable =
+                com.google.common.collect.LinkedHashMultimap.create();
+        mutable.put("textures", new Property("textures", base64));
+
+        return new GameProfile(uuid, "Preview",
+                new com.mojang.authlib.properties.PropertyMap(mutable));
     }
 
     // ── Texture JSON builder ────────────────────────────────────────────
 
-    private static String buildTexturesJson(GameProfile profile, SkinPreset preset) {
+    private static String buildTexturesJson(GameProfile profile, String textureUrl, boolean slim) {
         String uuid = profile.id() != null
                 ? profile.id().toString().replace("-", "")
                 : "00000000000000000000000000000000";
@@ -198,12 +649,16 @@ public final class BotSkinService {
         sb.append("{\"timestamp\":").append(System.currentTimeMillis());
         sb.append(",\"profileId\":\"").append(uuid).append("\"");
         sb.append(",\"profileName\":\"").append(escapeJson(name)).append("\"");
-        sb.append(",\"textures\":{\"SKIN\":{\"url\":\"").append(preset.textureUrl()).append("\"");
-        if (preset.slim()) {
+        sb.append(",\"textures\":{\"SKIN\":{\"url\":\"").append(escapeJson(textureUrl)).append("\"");
+        if (slim) {
             sb.append(",\"metadata\":{\"model\":\"slim\"}");
         }
         sb.append("}}}");
         return sb.toString();
+    }
+
+    private static String buildTexturesJson(GameProfile profile, SkinPreset preset) {
+        return buildTexturesJson(profile, preset.textureUrl(), preset.slim());
     }
 
     private static String escapeJson(String s) {

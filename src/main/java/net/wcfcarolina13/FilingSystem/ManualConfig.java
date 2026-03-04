@@ -54,6 +54,7 @@ public class ManualConfig {
     private boolean baritonePathfinderEnabled = false;
     private boolean fortifyForcePlaceEnabled = false;
     private Map<String, String> botSkins = new HashMap<>();
+    private Map<String, BotSkinSelection> botSkinSelections = new HashMap<>();
     private Map<String, BotControlSettings> botControls = new HashMap<>();
     // Seed-agnostic, bot-persistent quest continuity (non-power progression).
     private Map<String, BotQuestMemory> botQuestMemory = new HashMap<>();
@@ -228,6 +229,9 @@ public class ManualConfig {
             if (loadedConfig.botQuestMemory == null) {
                 loadedConfig.botQuestMemory = new HashMap<>();
             }
+            if (loadedConfig.botSkinSelections == null) {
+                loadedConfig.botSkinSelections = new HashMap<>();
+            }
             if (loadedConfig.survivalRecruitment == null) {
                 loadedConfig.survivalRecruitment = new HashMap<>();
             }
@@ -376,7 +380,38 @@ public class ManualConfig {
         this.botSkins = normalizeAliasMap(botSkins);
     }
 
+    public Map<String, BotSkinSelection> getBotSkinSelections() {
+        if (botSkinSelections == null) {
+            botSkinSelections = new HashMap<>();
+        }
+        return botSkinSelections;
+    }
+
+    public void setBotSkinSelections(Map<String, BotSkinSelection> botSkinSelections) {
+        this.botSkinSelections = normalizeAliasMap(botSkinSelections);
+    }
+
+    public BotSkinSelection getBotSkinSelection(String alias) {
+        String key = resolveAliasKey(getBotSkinSelections(), alias);
+        return key != null ? getBotSkinSelections().get(key) : null;
+    }
+
+    public void setBotSkinSelection(String alias, BotSkinSelection selection) {
+        if (alias == null || alias.isBlank() || selection == null) {
+            return;
+        }
+        putAliasValue(getBotSkinSelections(), alias, selection.sanitized());
+        // Keep legacy preset map synchronized for backward compatibility.
+        if (selection.hasPresetValue()) {
+            putAliasValue(getBotSkins(), alias, selection.getValue());
+        }
+    }
+
     public String getBotSkin(String alias) {
+        BotSkinSelection structured = getBotSkinSelection(alias);
+        if (structured != null && structured.hasPresetValue()) {
+            return structured.getValue();
+        }
         String key = resolveAliasKey(getBotSkins(), alias);
         return key != null ? getBotSkins().get(key) : null;
     }
@@ -386,6 +421,7 @@ public class ManualConfig {
             return;
         }
         putAliasValue(getBotSkins(), alias, presetId.trim());
+        setBotSkinSelection(alias, BotSkinSelection.preset(presetId.trim()));
     }
 
     public Map<String, BotOwnership> getBotOwnership() {
@@ -574,6 +610,7 @@ public class ManualConfig {
         removeAliasVariants(botControls, alias);
         removeAliasVariants(botQuestMemory, alias);
         removeAliasVariants(botSkins, alias);
+        removeAliasVariants(botSkinSelections, alias);
     }
 
     private void normalizeAliasBackedMaps() {
@@ -583,6 +620,29 @@ public class ManualConfig {
         botControls = normalizeAliasMap(botControls);
         botQuestMemory = normalizeAliasMap(botQuestMemory);
         botSkins = normalizeAliasMap(botSkins);
+        botSkinSelections = normalizeAliasMap(botSkinSelections);
+
+        // Legacy migration: seed structured skin selections from old preset-only map.
+        if (botSkinSelections.isEmpty() && !botSkins.isEmpty()) {
+            for (Map.Entry<String, String> entry : botSkins.entrySet()) {
+                String alias = entry.getKey();
+                String preset = entry.getValue();
+                if (alias == null || alias.isBlank() || preset == null || preset.isBlank()) {
+                    continue;
+                }
+                botSkinSelections.put(alias, BotSkinSelection.preset(preset));
+            }
+        }
+
+        // Keep legacy map populated for preset selections to avoid breaking old callers.
+        for (Map.Entry<String, BotSkinSelection> entry : botSkinSelections.entrySet()) {
+            String alias = entry.getKey();
+            BotSkinSelection selection = entry.getValue();
+            if (alias == null || alias.isBlank() || selection == null || !selection.hasPresetValue()) {
+                continue;
+            }
+            botSkins.putIfAbsent(alias, selection.getValue());
+        }
     }
 
     private static String normalizeAlias(String alias) {
@@ -690,6 +750,112 @@ public class ManualConfig {
 
         public void setOwnerName(String ownerName) {
             this.ownerName = ownerName;
+        }
+    }
+
+    public static class BotSkinSelection {
+        private String source = "preset";
+        private String value = "steve";
+        private String lastSetByUuid;
+        private String lastSetByName;
+        private boolean lastSetByAdmin;
+        private long lastSetAtEpochMs;
+
+        public BotSkinSelection() {
+        }
+
+        public BotSkinSelection(String source,
+                                String value,
+                                String lastSetByUuid,
+                                String lastSetByName,
+                                boolean lastSetByAdmin,
+                                long lastSetAtEpochMs) {
+            this.source = source;
+            this.value = value;
+            this.lastSetByUuid = lastSetByUuid;
+            this.lastSetByName = lastSetByName;
+            this.lastSetByAdmin = lastSetByAdmin;
+            this.lastSetAtEpochMs = lastSetAtEpochMs;
+        }
+
+        public static BotSkinSelection preset(String presetId) {
+            return new BotSkinSelection("preset", presetId, null, null, false, System.currentTimeMillis());
+        }
+
+        public BotSkinSelection sanitized() {
+            String normalizedSource = (source == null || source.isBlank())
+                    ? "preset"
+                    : source.trim().toLowerCase(Locale.ROOT);
+            if (!normalizedSource.equals("preset") && !normalizedSource.equals("custom_url")) {
+                normalizedSource = "preset";
+            }
+            String normalizedValue = (value == null || value.isBlank()) ? "steve" : value.trim();
+            return new BotSkinSelection(
+                    normalizedSource,
+                    normalizedValue,
+                    (lastSetByUuid == null || lastSetByUuid.isBlank()) ? null : lastSetByUuid.trim(),
+                    (lastSetByName == null || lastSetByName.isBlank()) ? null : lastSetByName.trim(),
+                    lastSetByAdmin,
+                    Math.max(0L, lastSetAtEpochMs)
+            );
+        }
+
+        public String getSource() {
+            return source;
+        }
+
+        public void setSource(String source) {
+            this.source = source;
+        }
+
+        public String getValue() {
+            return value;
+        }
+
+        public void setValue(String value) {
+            this.value = value;
+        }
+
+        public String getLastSetByUuid() {
+            return lastSetByUuid;
+        }
+
+        public void setLastSetByUuid(String lastSetByUuid) {
+            this.lastSetByUuid = lastSetByUuid;
+        }
+
+        public String getLastSetByName() {
+            return lastSetByName;
+        }
+
+        public void setLastSetByName(String lastSetByName) {
+            this.lastSetByName = lastSetByName;
+        }
+
+        public boolean isLastSetByAdmin() {
+            return lastSetByAdmin;
+        }
+
+        public void setLastSetByAdmin(boolean lastSetByAdmin) {
+            this.lastSetByAdmin = lastSetByAdmin;
+        }
+
+        public long getLastSetAtEpochMs() {
+            return lastSetAtEpochMs;
+        }
+
+        public void setLastSetAtEpochMs(long lastSetAtEpochMs) {
+            this.lastSetAtEpochMs = lastSetAtEpochMs;
+        }
+
+        public boolean hasPresetValue() {
+            return "preset".equalsIgnoreCase(source)
+                    && value != null
+                    && !value.isBlank();
+        }
+
+        public boolean isCustomUrl() {
+            return "custom_url".equalsIgnoreCase(source);
         }
     }
 
@@ -952,6 +1118,9 @@ public class ManualConfig {
         private String selectedWorldMode;
         private long modeSelectedAtEpochMs;
         private String modeSelectedByName;
+        // Skin policy controls (server-authoritative).
+        private boolean allowEveryoneSkinChange;
+        private boolean allowCustomSkins;
         // Optional delegated players (uuid -> last known name) that may choose world mode.
         // Operators are always allowed regardless of this map.
         private Map<String, String> modeSelectionDelegatesByUuid;
@@ -1056,6 +1225,22 @@ public class ManualConfig {
             this.modeSelectedByName = (modeSelectedByName == null || modeSelectedByName.isBlank())
                     ? null
                     : modeSelectedByName.trim();
+        }
+
+        public boolean isAllowEveryoneSkinChange() {
+            return allowEveryoneSkinChange;
+        }
+
+        public void setAllowEveryoneSkinChange(boolean allowEveryoneSkinChange) {
+            this.allowEveryoneSkinChange = allowEveryoneSkinChange;
+        }
+
+        public boolean isAllowCustomSkins() {
+            return allowCustomSkins;
+        }
+
+        public void setAllowCustomSkins(boolean allowCustomSkins) {
+            this.allowCustomSkins = allowCustomSkins;
         }
 
         public Map<String, String> getModeSelectionDelegatesByUuid() {

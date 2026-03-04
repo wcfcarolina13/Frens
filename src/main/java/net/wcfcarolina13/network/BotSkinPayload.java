@@ -7,9 +7,14 @@ import net.minecraft.util.Identifier;
 
 /**
  * Client → Server: request a skin change for a bot.
- * Fields: {@code botAlias} (target bot) and {@code skinPresetId} (preset short id, or "random").
+ * Fields:
+ * <ul>
+ *   <li>{@code botAlias} (target bot)</li>
+ *   <li>{@code skinSource} ({@code preset} or {@code custom_url})</li>
+ *   <li>{@code skinValue} (preset short id / {@code random} / texture URL)</li>
+ * </ul>
  */
-public record BotSkinPayload(String botAlias, String skinPresetId) implements CustomPayload {
+public record BotSkinPayload(String botAlias, String skinSource, String skinValue) implements CustomPayload {
     public static final Identifier ID_IDENTIFIER = Identifier.of("frens", "bot_skin");
     public static final CustomPayload.Id<BotSkinPayload> ID = new CustomPayload.Id<>(ID_IDENTIFIER);
 
@@ -18,7 +23,8 @@ public record BotSkinPayload(String botAlias, String skinPresetId) implements Cu
     public static final PacketCodec<PacketByteBuf, BotSkinPayload> CODEC =
             PacketCodec.tuple(
                     STRING_CODEC, BotSkinPayload::botAlias,
-                    STRING_CODEC, BotSkinPayload::skinPresetId,
+                STRING_CODEC, BotSkinPayload::skinSource,
+                STRING_CODEC, BotSkinPayload::skinValue,
                     BotSkinPayload::new
             );
 

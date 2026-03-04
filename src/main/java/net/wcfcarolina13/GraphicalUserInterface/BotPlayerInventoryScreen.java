@@ -239,7 +239,9 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         SKILL_ASCENT,
         SKILL_DESCENT,
         OPEN_BOT_CONTROLS,
-        OPEN_SKIN_CHOOSER
+        OPEN_SKIN_CHOOSER,
+        SKIN_POLICY_EVERYONE,
+        SKIN_POLICY_CUSTOM
     }
 
     private enum TopicCategory {
@@ -353,6 +355,8 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
                 new TopicEntry("Bot Controls >", TopicCategory.ADMIN, TopicAction.OPEN_BOT_CONTROLS, false, 0, null),
                 new TopicEntry("Spells >", TopicCategory.ADMIN, TopicAction.OPEN_SPELLS, false, 0, null),
                 new TopicEntry("Change Skin >", TopicCategory.ADMIN, TopicAction.OPEN_SKIN_CHOOSER, false, 0, null),
+                new TopicEntry("Skin Change for Everyone", TopicCategory.ADMIN, TopicAction.SKIN_POLICY_EVERYONE, true, 0, null),
+                new TopicEntry("Allow Custom URL Skins", TopicCategory.ADMIN, TopicAction.SKIN_POLICY_CUSTOM, true, 0, null),
                 // ── Toggles ──
                 new TopicEntry("Gameplay Tips", TopicCategory.ADMIN, TopicAction.GAMEPLAY_TIPS, true, 0, null),
                 new TopicEntry("Idle Hobbies Anywhere", TopicCategory.ADMIN, TopicAction.IDLE_HOBBIES_ANYWHERE, true, 0, null),
@@ -1239,6 +1243,12 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         if (client == null) {
             return false;
         }
+
+        // Singleplayer host is always admin — they own the world.
+        if (client.isInSingleplayer()) {
+            return true;
+        }
+
         var player = client.player;
         if (player == null) {
             return false;
@@ -1967,6 +1977,20 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
 
         // Prefer richer tooltips for Admin entries (these are the ones that get truncated / ambiguous).
         if (entry.category == TopicCategory.ADMIN) {
+            if (entry.action == TopicAction.SKIN_POLICY_EVERYONE) {
+                return java.util.List.of(
+                        "Skin Change for Everyone",
+                        "When ON, non-admin players may change bot skins.",
+                        "When OFF, skin changes remain admin-only."
+                );
+            }
+            if (entry.action == TopicAction.SKIN_POLICY_CUSTOM) {
+                return java.util.List.of(
+                        "Allow Custom URL Skins",
+                        "When OFF, non-admin custom skins are reverted to safe preset 'steve'.",
+                        "Admins can still apply custom skins."
+                );
+            }
             if (entry.action == TopicAction.OPEN_SPELLS) {
                 MinecraftClient client = MinecraftClient.getInstance();
                 boolean nearTable = isNearEnchantingTable(client, 4);
@@ -2524,6 +2548,8 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case OPEN_GUIDE -> openGuideMenu();
             case OPEN_BOT_CONTROLS -> openBotControls();
             case OPEN_SKIN_CHOOSER -> openSkinChooser();
+            case SKIN_POLICY_EVERYONE -> toggleSkinPolicyEveryone();
+            case SKIN_POLICY_CUSTOM -> toggleSkinPolicyCustom();
             case STOP -> runStop();
             case RESUME -> runResume();
             case FOLLOW -> toggleFollow();
@@ -2723,6 +2749,10 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         // and the server remains authoritative for what actually works.
         if (entry.action == TopicAction.OPEN_SPELLS) {
             return true;
+        }
+
+        if (entry.action == TopicAction.OPEN_SKIN_CHOOSER) {
+            return isAdminUser() || FrensClient.isSkinChangeForEveryoneEnabled();
         }
 
         // Other recruitment/admin utilities remain operator-only.
@@ -2953,10 +2983,20 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case GAMEPLAY_TIPS -> isGameplayTipsActive();
             case IDLE_HOBBIES_ANYWHERE -> isIdleHobbiesAnywhereActive();
             case BARITONE_PATHFINDER -> isBaritonePathfinderActive();
+            case SKIN_POLICY_EVERYONE -> isSkinPolicyEveryoneActive();
+            case SKIN_POLICY_CUSTOM -> isSkinPolicyCustomActive();
             case UNLEASH_TETHERED -> isUnleashTetheredActive();
             case LEASH_ON_DISMOUNT -> isLeashOnDismountActive();
             default -> false;
         };
+    }
+
+    private boolean isSkinPolicyEveryoneActive() {
+        return FrensClient.isSkinChangeForEveryoneEnabled();
+    }
+
+    private boolean isSkinPolicyCustomActive() {
+        return FrensClient.isCustomSkinsEnabled();
     }
 
     private boolean isEntryEnabled(TopicAction action) {
@@ -3089,13 +3129,25 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         };
     }
 
+    /** Actions visible to ALL players in the Admin tab (no permission needed). */
+    private static final Set<TopicAction> COMMON_ADMIN_ACTIONS = Set.of(
+            TopicAction.OPEN_BOT_CONTROLS,
+            TopicAction.OPEN_SPELLS,
+            TopicAction.OPEN_SKIN_CHOOSER,
+            TopicAction.GAMEPLAY_TIPS,
+            TopicAction.IDLE_HOBBIES_ANYWHERE,
+            TopicAction.BARITONE_PATHFINDER
+    );
+
     private List<TopicEntry> getVisibleAdminEntries() {
         if (isAdminUser()) {
             return ADMIN_TOPIC_ENTRIES;
         }
+        // Non-operator: show only the common-tier entries.
         java.util.ArrayList<TopicEntry> visible = new java.util.ArrayList<>();
         for (TopicEntry entry : ADMIN_TOPIC_ENTRIES) {
-            if (entry != null && entry.action == TopicAction.OPEN_SPELLS) {
+            if (entry != null && entry.action != null
+                    && COMMON_ADMIN_ACTIONS.contains(entry.action)) {
                 visible.add(entry);
             }
         }
@@ -3477,6 +3529,20 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             return;
         }
         this.client.setScreen(new BotSkinChooserScreen(this, botAlias));
+    }
+
+    private void toggleSkinPolicyEveryone() {
+        if (this.client == null || this.client.getNetworkHandler() == null) {
+            return;
+        }
+        ClientPlayNetworking.send(new RecruitmentAdminActionPayload(botAlias, "skin_everyone_toggle", 0, false));
+    }
+
+    private void toggleSkinPolicyCustom() {
+        if (this.client == null || this.client.getNetworkHandler() == null) {
+            return;
+        }
+        ClientPlayNetworking.send(new RecruitmentAdminActionPayload(botAlias, "skin_custom_toggle", 0, false));
     }
 
     /**

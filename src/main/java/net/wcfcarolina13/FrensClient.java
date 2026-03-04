@@ -103,6 +103,8 @@ public class FrensClient implements ClientModInitializer {
     private static String modeSelectionWorldKey = "default";
     private static boolean modeSelectionAutoOpenPending = false;
     private static boolean modeSelectionOpenedThisConnection = false;
+    private static boolean allowEveryoneSkinChange = false;
+    private static boolean allowCustomSkins = false;
 
     // Auto-open recruitment dialogue once when entering a village (prompt transitions hidden -> visible).
     private static boolean recruitmentAutoOpenPending = false;
@@ -174,6 +176,14 @@ public class FrensClient implements ClientModInitializer {
 
     public static String getRecruitmentBotAlias() {
         return recruitmentBotAlias;
+    }
+
+    public static boolean isSkinChangeForEveryoneEnabled() {
+        return allowEveryoneSkinChange;
+    }
+
+    public static boolean isCustomSkinsEnabled() {
+        return allowCustomSkins;
     }
 
     public static boolean isEyeSpellOnCooldown() {
@@ -414,6 +424,8 @@ public class FrensClient implements ClientModInitializer {
                 modeSelectionWorldKey = "default";
                 modeSelectionAutoOpenPending = false;
                 modeSelectionOpenedThisConnection = false;
+                allowEveryoneSkinChange = false;
+                allowCustomSkins = false;
                 spellHintFirstScanDone = false;
                 learningInputStreamActive = false;
                 learningInputSessionToken = 0L;
@@ -578,6 +590,8 @@ public class FrensClient implements ClientModInitializer {
                 modeSelectionWorldKey = (payload.worldKey() == null || payload.worldKey().isBlank())
                         ? "default"
                         : payload.worldKey();
+                allowEveryoneSkinChange = payload.allowEveryoneSkinChange();
+                allowCustomSkins = payload.allowCustomSkins();
                 if (modeSelectionRequired && modeSelectionCanChoose && !modeSelectionOpenedThisConnection) {
                     modeSelectionAutoOpenPending = true;
                 }

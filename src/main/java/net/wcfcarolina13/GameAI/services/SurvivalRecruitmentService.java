@@ -147,13 +147,57 @@ public final class SurvivalRecruitmentService {
         String alias = st != null ? st.getBotAlias() : "Jake";
         boolean canChooseMode = canChooseWorldMode(player);
         boolean modeSelectionRequired = canChooseMode && (st == null || !st.isModeSelectionDone() || st.getSelectedWorldMode() == null);
+        boolean allowEveryoneSkinChange = st != null && st.isAllowEveryoneSkinChange();
+        boolean allowCustomSkins = st != null && st.isAllowCustomSkins();
         ServerPlayNetworking.send(player, new RecruitmentStatePayload(
                 enabled,
                 recruited,
                 alias,
                 modeSelectionRequired,
                 canChooseMode,
+                allowEveryoneSkinChange,
+                allowCustomSkins,
                 worldKey(server)));
+    }
+
+    public static boolean isAllowEveryoneSkinChange(MinecraftServer server) {
+        if (server == null || Frens.CONFIG == null) {
+            return false;
+        }
+        ManualConfig.SurvivalRecruitmentState st = getState(server);
+        return st != null && st.isAllowEveryoneSkinChange();
+    }
+
+    public static boolean isAllowCustomSkins(MinecraftServer server) {
+        if (server == null || Frens.CONFIG == null) {
+            return false;
+        }
+        ManualConfig.SurvivalRecruitmentState st = getState(server);
+        return st != null && st.isAllowCustomSkins();
+    }
+
+    public static void setAllowEveryoneSkinChange(MinecraftServer server, boolean allow) {
+        if (server == null || Frens.CONFIG == null) {
+            return;
+        }
+        ManualConfig.SurvivalRecruitmentState st = getState(server);
+        if (st == null) {
+            return;
+        }
+        st.setAllowEveryoneSkinChange(allow);
+        Frens.CONFIG.save();
+    }
+
+    public static void setAllowCustomSkins(MinecraftServer server, boolean allow) {
+        if (server == null || Frens.CONFIG == null) {
+            return;
+        }
+        ManualConfig.SurvivalRecruitmentState st = getState(server);
+        if (st == null) {
+            return;
+        }
+        st.setAllowCustomSkins(allow);
+        Frens.CONFIG.save();
     }
 
     public static void noteModeSelectionConfigured(MinecraftServer server, boolean questingMode, String actorName) {

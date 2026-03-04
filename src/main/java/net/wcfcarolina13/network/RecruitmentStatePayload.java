@@ -11,6 +11,8 @@ public record RecruitmentStatePayload(boolean enabled,
                                       String botAlias,
                                       boolean modeSelectionRequired,
                                       boolean modeSelectionCanChoose,
+                                      boolean allowEveryoneSkinChange,
+                                      boolean allowCustomSkins,
                                       String worldKey) implements CustomPayload {
     public static final Identifier ID_IDENTIFIER = Identifier.of("frens", "recruitment_state");
     public static final CustomPayload.Id<RecruitmentStatePayload> ID = new CustomPayload.Id<>(ID_IDENTIFIER);
@@ -34,8 +36,20 @@ public record RecruitmentStatePayload(boolean enabled,
                     STRING_CODEC, RecruitmentStatePayload::botAlias,
                     BOOL_CODEC, RecruitmentStatePayload::modeSelectionRequired,
                     BOOL_CODEC, RecruitmentStatePayload::modeSelectionCanChoose,
+                BOOL_CODEC, RecruitmentStatePayload::allowEveryoneSkinChange,
+                BOOL_CODEC, RecruitmentStatePayload::allowCustomSkins,
                     STRING_CODEC, RecruitmentStatePayload::worldKey,
-                    RecruitmentStatePayload::new);
+                (enabled, recruited, botAlias, modeSelectionRequired, modeSelectionCanChoose,
+                 allowEveryoneSkinChange, allowCustomSkins, worldKey) ->
+                    new RecruitmentStatePayload(
+                        enabled != null && enabled,
+                        recruited != null && recruited,
+                        botAlias,
+                        modeSelectionRequired != null && modeSelectionRequired,
+                        modeSelectionCanChoose != null && modeSelectionCanChoose,
+                        allowEveryoneSkinChange != null && allowEveryoneSkinChange,
+                        allowCustomSkins != null && allowCustomSkins,
+                        worldKey));
 
     @Override
     public Id<? extends CustomPayload> getId() {
