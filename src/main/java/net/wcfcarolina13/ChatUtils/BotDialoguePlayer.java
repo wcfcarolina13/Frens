@@ -51,6 +51,14 @@ public final class BotDialoguePlayer {
         FAILED
     }
 
+    public enum DialogueAttemptResult {
+        PLAYED,
+        THROTTLED,
+        DISABLED,
+        NO_SOUND_MAPPING,
+        FAILED
+    }
+
     private enum DialogueCategory {
         COMBAT,
         STATUS,
@@ -582,9 +590,13 @@ public final class BotDialoguePlayer {
      * @return true if a sound was played, false otherwise
      */
     public static boolean tryPlayDialogue(ServerCommandSource source, String message) {
+        return tryPlayDialogueDetailed(source, message) == DialogueAttemptResult.PLAYED;
+    }
+
+    public static DialogueAttemptResult tryPlayDialogueDetailed(ServerCommandSource source, String message) {
         if (source == null || message == null || message.isBlank()) {
             LOGGER.info("[VoicedDialogue] Skipping: null/blank source or message");
-            return false;
+            return DialogueAttemptResult.FAILED;
         }
 
         // Get the bot entity from the source
@@ -596,18 +608,23 @@ public final class BotDialoguePlayer {
             }
         } catch (Exception e) {
             LOGGER.info("[VoicedDialogue] Could not get player entity from source: {}", e.getMessage());
-            return false;
+            return DialogueAttemptResult.FAILED;
         }
 
         if (bot == null) {
             LOGGER.info("[VoicedDialogue] No bot entity found in source");
-            return false;
+            return DialogueAttemptResult.FAILED;
         }
 
         // Check if this is actually a registered bot
         if (!BotEventHandler.isRegisteredBot(bot)) {
             LOGGER.info("[VoicedDialogue] Entity is not a registered bot: {}", bot.getName().getString());
-            return false;
+            return DialogueAttemptResult.FAILED;
+        }
+
+        if (!isGlobalVoicedDialogueEnabled()) {
+            LOGGER.info("[VoicedDialogue] Disabled globally");
+            return DialogueAttemptResult.DISABLED;
         }
 
         // Check if voiced dialogue is enabled for this bot
@@ -615,7 +632,7 @@ public final class BotDialoguePlayer {
         ManualConfig.BotControlSettings settings = Frens.CONFIG.getEffectiveBotControl(botName);
         if (settings == null || !settings.isVoicedDialogue()) {
             LOGGER.info("[VoicedDialogue] Disabled for bot: {}", botName);
-            return false;
+            return DialogueAttemptResult.DISABLED;
         }
 
         // Look up the sound for this message
@@ -623,14 +640,23 @@ public final class BotDialoguePlayer {
         SoundEvent sound = DialogueTextMapper.lookup(message);
         if (sound == null) {
             LOGGER.info("[VoicedDialogue] No sound mapping for message: '{}'", message);
-            return false;
+            return DialogueAttemptResult.NO_SOUND_MAPPING;
         }
 
         LOGGER.info("[VoicedDialogue] Found sound: {} for message", sound.id());
 
         // Play the sound at the bot's location (throttled to avoid spam)
         PlayResult res = playSoundInternal(bot, sound, false);
-        return res == PlayResult.PLAYED;
+        return switch (res) {
+            case PLAYED -> DialogueAttemptResult.PLAYED;
+            case THROTTLED -> DialogueAttemptResult.THROTTLED;
+            case DISABLED -> DialogueAttemptResult.DISABLED;
+            case FAILED -> DialogueAttemptResult.FAILED;
+        };
+    }
+
+    public static boolean isGlobalVoicedDialogueEnabled() {
+        return Frens.CONFIG == null || Frens.CONFIG.isVoicedDialogueEnabled();
     }
 
     /**
@@ -772,6 +798,10 @@ public final class BotDialoguePlayer {
             return PlayResult.FAILED;
         }
 
+        if (!isGlobalVoicedDialogueEnabled()) {
+            return PlayResult.DISABLED;
+        }
+
         String botName = bot.getName().getString();
         ManualConfig.BotControlSettings settings = Frens.CONFIG.getEffectiveBotControl(botName);
         if (settings == null || !settings.isVoicedDialogue()) {
@@ -789,6 +819,10 @@ public final class BotDialoguePlayer {
      * @param sound The sound being played
      */
     private static void showSubtitle(ServerPlayerEntity bot, SoundEvent sound) {
+        if (Frens.CONFIG != null && !Frens.CONFIG.isTextDialogueEnabled()) {
+            return;
+        }
+
         String subtitleText = SUBTITLE_MAP.get(sound);
         if (subtitleText == null) {
             return; // No subtitle for this sound

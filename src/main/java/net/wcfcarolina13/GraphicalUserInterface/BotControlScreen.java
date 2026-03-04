@@ -28,7 +28,7 @@ public class BotControlScreen extends Screen {
     // ── Layout constants (matching codebase style) ──────────────────────
     private static final int BUTTON_H = 20;
     private static final int TOGGLE_W = 46;           // compact: just "ON"/"OFF"
-    private static final int WIDE_TOGGLE_W = 60;      // for "Play"/"Training", "Survival"/"Creative"
+    private static final int WIDE_TOGGLE_W = 78;      // for multi-word values (Questing/Admin/Training)
     private static final int ROW_H = 30;              // each setting row
     private static final int SECTION_H = 18;          // section header height
     private static final int PANEL_PAD = 8;           // inner padding of settings panel
@@ -58,6 +58,8 @@ public class BotControlScreen extends Screen {
     private CyclingButtonWidget<Boolean> worldToggle;
     private CyclingButtonWidget<Boolean> survivalRecruitmentToggle;
     private CyclingButtonWidget<Boolean> forcePlaceToggle;
+    private CyclingButtonWidget<Boolean> textDialogueToggle;
+    private CyclingButtonWidget<Boolean> voicedDialogueGlobalToggle;
 
     // ── Bot selector ────────────────────────────────────────────────────
     private DropdownMenuWidget aliasDropdown;
@@ -143,6 +145,25 @@ public class BotControlScreen extends Screen {
                 "When ON: bots will force-place edge blocks that have no valid line-of-sight. Bypasses vanilla placement rules.")));
         this.addDrawableChild(forcePlaceToggle);
 
+        y += BUTTON_H + 4;
+        boolean textDialogueEnabled = Frens.CONFIG.isTextDialogueEnabled();
+        textDialogueToggle = CyclingButtonWidget.onOffBuilder(textDialogueEnabled)
+            .build(lx, y, contentW, BUTTON_H,
+                Text.of("Global Text Dialogue"), (b, v) -> {});
+        textDialogueToggle.setTooltip(Tooltip.of(Text.of(
+            "Master toggle for companion dialogue text (chat + overhead lines).")));
+        this.addDrawableChild(textDialogueToggle);
+
+        y += BUTTON_H + 4;
+        boolean voicedDialogueEnabled = Frens.CONFIG.isVoicedDialogueEnabled();
+        voicedDialogueGlobalToggle = CyclingButtonWidget.onOffBuilder(voicedDialogueEnabled)
+            .build(lx, y, contentW, BUTTON_H,
+                Text.of("Global Voiced Dialogue"), (b, v) -> {});
+        voicedDialogueGlobalToggle.setTooltip(Tooltip.of(Text.of(
+            "Master toggle for companion voice clips. Current voiced lines use a male voice set. " +
+                "If you'd like female/alternate voices, request it and we'll prioritize it on the roadmap.")));
+        this.addDrawableChild(voicedDialogueGlobalToggle);
+
         // ── Alias list & dropdown ───────────────────────────────────────
         y += BUTTON_H + 10;
         aliasList = buildAliasList();
@@ -205,7 +226,7 @@ public class BotControlScreen extends Screen {
     private void updateSubtitleText() {
         boolean isDefault = selectedAlias.equalsIgnoreCase("default");
         if (isDefault) {
-            subtitleText = "Fallback profile — applies when a bot has no override.";
+            subtitleText = "Fallback profile — used when a bot has no override.";
             helperText = "";
         } else {
             ManualConfig.BotOwnership ownership = Frens.CONFIG.getOwner(selectedAlias);
@@ -262,6 +283,7 @@ public class BotControlScreen extends Screen {
                 Frens.CONFIG.getOrCreateBotControl(selectedAlias);
         boolean autoRespawn = snap != null ? snap.autoRespawnOnDeath : cfg.isAutoRespawnOnDeath();
         String  spawnMode  = snap != null ? snap.spawnMode  : cfg.getSpawnMode();
+        String  spawnModeUi = canonicalSpawnModeForUi(spawnMode);
         String  gameMode   = snap != null ? snap.gameMode   : cfg.getGameMode();
         String  failsafe   = snap != null ? snap.failsafeSpawnMode : cfg.getFailsafeSpawnMode();
         boolean teleSkills = snap != null ? snap.teleportDuringSkills : cfg.isTeleportDuringSkills();
@@ -273,13 +295,17 @@ public class BotControlScreen extends Screen {
         // ── Spawning ────────────────────────────────────────────────────
         List<SettingEntry> spawning = new ArrayList<>();
         spawning.add(makeOnOff("Auto Respawn", "Respawn on death (skip resurrection ritual).", autoRespawn, TOGGLE_W));
-        spawning.add(makeString("Spawn Mode", "Training = sandboxed. Play = full AI.",
-                spawnMode, "training", "play",
-                v -> Text.of("play".equals(v) ? "Play" : "Training"), WIDE_TOGGLE_W));
+        spawning.add(makeString("Spawn Mode", "Training is sandboxed. Questing/Admin use full gameplay presets.",
+            spawnModeUi, "training", "questing", "admin",
+            v -> Text.of(switch (v) {
+                case "admin" -> "Admin";
+                case "questing" -> "Questing";
+                default -> "Training";
+            }), WIDE_TOGGLE_W));
         spawning.add(makeString("Game Mode", "Minecraft gamemode (inventory, damage, etc).",
                 gameMode, "survival", "creative",
                 v -> Text.of("creative".equals(v) ? "Creative" : "Survival"), WIDE_TOGGLE_W));
-        spawning.add(makeString("Failsafe Spawn", "Where to spawn when bed/anchor are gone.",
+        spawning.add(makeString("Failsafe Spawn", "Fallback spawn point when bed/anchor are unavailable.",
                 failsafe, "world_spawn", "owner_bed", "saved_base",
                 v -> Text.of(switch (v) {
                     case "owner_bed" -> "Owner Bed";
@@ -292,7 +318,7 @@ public class BotControlScreen extends Screen {
         List<SettingEntry> behavior = new ArrayList<>();
         behavior.add(makeOnOff("Teleport During Skills", "Emergency teleports in tight shafts.", teleSkills, TOGGLE_W));
         behavior.add(makeOnOff("Pause on Full Inventory", "Pause job when full; /bot resume.", pauseInv, TOGGLE_W));
-        behavior.add(makeOnOff("Teleport During Sweeps", "Teleport when collecting drops.", teleDrop, TOGGLE_W));
+        behavior.add(makeOnOff("Teleport During Sweeps", "Allow teleporting during drop-sweep cleanup.", teleDrop, TOGGLE_W));
         settingGroups.add(new SettingGroup("Behavior", behavior));
 
         // ── LLM ─────────────────────────────────────────────────────────
@@ -300,6 +326,19 @@ public class BotControlScreen extends Screen {
         llm.add(makeOnOff("LLM Enabled", "Natural-language control for this bot.", llmEnabled, TOGGLE_W));
         llm.add(makeOnOff("Voiced Dialogue", "Text-to-speech voiced dialogue.", voiced, TOGGLE_W));
         settingGroups.add(new SettingGroup("LLM", llm));
+    }
+
+    private String canonicalSpawnModeForUi(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return "training";
+        }
+        String normalized = raw.trim().toLowerCase(Locale.ROOT);
+        return switch (normalized) {
+            case "admin", "play" -> "admin";
+            case "questing", "quest" -> "questing";
+            case "training", "train" -> "training";
+            default -> "training";
+        };
     }
 
     /** Create a compact ON/OFF toggle showing just "ON" or "OFF". */
@@ -352,6 +391,8 @@ public class BotControlScreen extends Screen {
         config.setDefaultLlmWorldEnabled(worldToggle.getValue());
         config.setSurvivalRecruitmentMode(survivalRecruitmentToggle.getValue());
         config.setFortifyForcePlaceEnabled(forcePlaceToggle.getValue());
+        config.setTextDialogueEnabled(textDialogueToggle.getValue());
+        config.setVoicedDialogueEnabled(voicedDialogueGlobalToggle.getValue());
 
         for (Map.Entry<String, SettingsSnapshot> entry : dirtySettings.entrySet()) {
             ManualConfig.BotControlSettings s = config.getOrCreateBotControl(entry.getKey());
@@ -413,6 +454,9 @@ public class BotControlScreen extends Screen {
         // ── Re-render non-panel widgets outside scissor ─────────────────
         worldToggle.render(context, mouseX, mouseY, delta);
         survivalRecruitmentToggle.render(context, mouseX, mouseY, delta);
+        forcePlaceToggle.render(context, mouseX, mouseY, delta);
+        textDialogueToggle.render(context, mouseX, mouseY, delta);
+        voicedDialogueGlobalToggle.render(context, mouseX, mouseY, delta);
         aliasDropdown.render(context, mouseX, mouseY, delta);
         saveButton.render(context, mouseX, mouseY, delta);
         closeButton.render(context, mouseX, mouseY, delta);

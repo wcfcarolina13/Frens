@@ -48,6 +48,7 @@ import net.wcfcarolina13.network.RecruitmentStatePayload;
 import net.wcfcarolina13.network.RequestRecruitmentDialoguePayload;
 import net.wcfcarolina13.network.ResumeDecisionPayload;
 import net.wcfcarolina13.network.OpenConfigPayload;
+import net.wcfcarolina13.network.RecruitmentAdminPermissionsPayload;
 import net.wcfcarolina13.network.RecruitmentAdminStatusPayload;
 import net.wcfcarolina13.network.BotTaskPeekRequestPayload;
 import net.wcfcarolina13.network.BotTaskPeekStatusPayload;
@@ -696,6 +697,17 @@ public class FrensClient implements ClientModInitializer {
                     if (line == null || line.isBlank()) continue;
                     appendDialogue(alias, "Admin: " + line);
                 }
+            });
+        });
+
+        ClientPlayNetworking.registerGlobalReceiver(RecruitmentAdminPermissionsPayload.ID, (payload, context) -> {
+            context.client().execute(() -> {
+                String alias = payload.botAlias();
+                String json = payload.jsonData();
+                if (alias == null || alias.isBlank() || json == null || json.isBlank()) {
+                    return;
+                }
+                BotPlayerInventoryScreen.applyAdminPermissionsJson(alias, json);
             });
         });
 

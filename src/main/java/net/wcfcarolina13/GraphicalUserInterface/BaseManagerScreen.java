@@ -97,6 +97,7 @@ public class BaseManagerScreen extends Screen {
     private static final int PANEL_MIN_H = 220;
     private static final int PANEL_PAD = 8;
     private static final int HEADER_H = 24;
+    private static final int HEADER_TEXT_PAD = 6;
 
     private static final int SCROLLBAR_W = 6;
     private static final int THUMB_MIN_H = 16;
@@ -203,13 +204,13 @@ public class BaseManagerScreen extends Screen {
     }
 
     private void buildControls() {
-        resetLayoutButton = ButtonWidget.builder(Text.literal("↺"), b -> {
+        resetLayoutButton = ButtonWidget.builder(Text.literal("↺ Reset"), b -> {
                     resetPanelToDefault();
                     persistPanelPrefs();
                 })
-                .dimensions(0, 0, 18, 18)
+            .dimensions(0, 0, 58, 18)
                 .build();
-        resetLayoutButton.setTooltip(Tooltip.of(Text.literal("Reset window layout to default")));
+        resetLayoutButton.setTooltip(Tooltip.of(Text.literal("Reset window layout to default size + position")));
         this.addDrawableChild(resetLayoutButton);
 
         int y = TOP_Y;
@@ -368,14 +369,32 @@ public class BaseManagerScreen extends Screen {
         }
 
         resetLayoutButton.setX(panelX + 6);
-        resetLayoutButton.setY(panelY + 3);
+        resetLayoutButton.setY(panelY + Math.max(2, (HEADER_H - resetLayoutButton.getHeight()) / 2));
         resetLayoutButton.visible = true;
         resetLayoutButton.active = true;
+    }
+
+    private String elideForWidth(String raw, int maxWidth) {
+        if (raw == null || raw.isBlank() || maxWidth <= 0) {
+            return "";
+        }
+        if (this.textRenderer.getWidth(raw) <= maxWidth) {
+            return raw;
+        }
+        int ellipsisW = this.textRenderer.getWidth("…");
+        if (ellipsisW >= maxWidth) {
+            return "";
+        }
+        return this.textRenderer.trimToWidth(raw, maxWidth - ellipsisW) + "…";
     }
 
     @Override
     public void render(DrawContext context, int mouseX, int mouseY, float delta) {
         context.fill(0, 0, this.width, this.height, COL_BG);
+
+        // Keep persisted/moved layout snapped into the current viewport at all times.
+        clampPanelToViewport();
+        contentScroll = MathHelper.clamp(contentScroll, 0.0D, maxScroll());
 
         List<BaseDto> bases = getBasesSnapshot();
         if (selectedIndex >= bases.size()) {
@@ -392,8 +411,24 @@ public class BaseManagerScreen extends Screen {
 
         // Header
         context.fill(panelX, panelY, panelX + panelW, panelY + HEADER_H, COL_HEADER);
-        context.drawCenteredTextWithShadow(this.textRenderer, this.title, panelX + panelW / 2, panelY + 8, COL_TITLE);
-        context.drawTextWithShadow(this.textRenderer, Text.literal("drag edges to resize"), panelX + 28, panelY + 6, 0xFF999999);
+        int headerTextLeft = resetLayoutButton.getX() + resetLayoutButton.getWidth() + HEADER_TEXT_PAD;
+        int headerTextRight = panelX + panelW - PANEL_PAD;
+
+        String titleRaw = this.title != null ? this.title.getString() : "Bases";
+        String titleText = elideForWidth(titleRaw, Math.max(0, headerTextRight - headerTextLeft));
+        int titleY = panelY + Math.max(1, (HEADER_H - this.textRenderer.fontHeight) / 2);
+        int titleX = headerTextLeft;
+        if (!titleText.isBlank()) {
+            context.drawTextWithShadow(this.textRenderer, titleText, titleX, titleY, COL_TITLE);
+        }
+
+        String hintRaw = "Drag edges to resize";
+        int hintMaxW = Math.max(0, headerTextRight - (titleX + this.textRenderer.getWidth(titleText) + 8));
+        String hintText = elideForWidth(hintRaw, hintMaxW);
+        if (!hintText.isBlank()) {
+            int hintX = headerTextRight - this.textRenderer.getWidth(hintText);
+            context.drawTextWithShadow(this.textRenderer, Text.literal(hintText), hintX, titleY, 0xFF999999);
+        }
 
         // Content background
         context.fill(content.x, content.y, content.right(), content.bottom(), 0xAA101010);
@@ -764,7 +799,7 @@ public class BaseManagerScreen extends Screen {
         panelX = (this.width - panelW) / 2;
         panelY = Math.max(PANEL_MARGIN, (this.height - panelH) / 2);
         clampPanelToViewport();
-        contentScroll = MathHelper.clamp(contentScroll, 0.0D, maxScroll());
+        contentScroll = 0.0D;
     }
 
     private void clampPanelToViewport() {

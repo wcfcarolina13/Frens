@@ -27,6 +27,9 @@ import net.wcfcarolina13.network.OpenRecruitmentDialoguePayload;
 import net.wcfcarolina13.network.RecruitmentPromptPayload;
 import net.wcfcarolina13.network.RecruitmentStatePayload;
 
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -76,6 +79,25 @@ public final class SurvivalRecruitmentService {
 
     // Server-side handshake: when we open the dialogue we remember it for a short window.
     private static final ConcurrentHashMap<UUID, Long> LAST_DIALOGUE_GRANTED_TICK = new ConcurrentHashMap<>();
+
+        // Default admin-tab permission policy for non-operators.
+        // Operators always bypass these checks.
+        private static final Map<String, Boolean> DEFAULT_ADMIN_PERMISSION_GLOBALS = Map.ofEntries(
+            Map.entry("open_bot_controls", true),
+            Map.entry("open_spells", true),
+            Map.entry("open_skin_chooser", true),
+            Map.entry("gameplay_tips", true),
+            Map.entry("idle_hobbies_anywhere", true),
+            Map.entry("baritone_pathfinder", true),
+            Map.entry("skin_policy_everyone", false),
+            Map.entry("skin_policy_custom", false),
+            Map.entry("wizard_tome", false),
+            Map.entry("learning_manage", false),
+            Map.entry("recruit_manage", false),
+            Map.entry("recruit_reset", false),
+            Map.entry("village_anchor", false),
+            Map.entry("stage_debug", false)
+        );
 
     // Integrated-server reload safety: when you exit to menu and re-enter a world, the JVM stays alive,
     // but Minecraft's tick counter resets. Any tick-based state stored in static maps becomes stale.
@@ -198,6 +220,178 @@ public final class SurvivalRecruitmentService {
         }
         st.setAllowCustomSkins(allow);
         Frens.CONFIG.save();
+    }
+
+    public static Map<String, Boolean> defaultAdminPermissionGlobals() {
+        return new LinkedHashMap<>(DEFAULT_ADMIN_PERMISSION_GLOBALS);
+    }
+
+    public static boolean defaultAdminPermissionAllowed(String permissionKey) {
+        String normalized = normalizePermissionKey(permissionKey);
+        return DEFAULT_ADMIN_PERMISSION_GLOBALS.getOrDefault(normalized, false);
+    }
+
+    public static boolean isAdminPermissionAllowed(ServerPlayerEntity player, String permissionKey) {
+        if (player == null || player.isRemoved()) {
+            return false;
+        }
+        if (Frens.isOperator(player)) {
+            return true;
+        }
+        MinecraftServer server = player.getCommandSource().getServer();
+        if (server == null || Frens.CONFIG == null) {
+            return false;
+        }
+        return isAdminPermissionAllowed(server, player.getUuidAsString(), permissionKey);
+    }
+
+    public static boolean isAdminPermissionAllowed(MinecraftServer server, String playerUuid, String permissionKey) {
+        if (server == null || Frens.CONFIG == null) {
+            return false;
+        }
+        ManualConfig.SurvivalRecruitmentState st = getState(server);
+        if (st == null) {
+            return defaultAdminPermissionAllowed(permissionKey);
+        }
+        String normalizedKey = normalizePermissionKey(permissionKey);
+        boolean fallback = defaultAdminPermissionAllowed(normalizedKey);
+        Boolean userOverride = st.getAdminPermissionUserOverride(playerUuid, normalizedKey);
+        if (userOverride != null) {
+            return userOverride;
+        }
+        return st.getAdminPermissionDefault(normalizedKey, fallback);
+    }
+
+    public static void setAdminPermissionGlobal(MinecraftServer server, String permissionKey, boolean allowed) {
+        if (server == null || Frens.CONFIG == null) {
+            return;
+        }
+        ManualConfig.SurvivalRecruitmentState st = getState(server);
+        if (st == null) {
+            return;
+        }
+        st.setAdminPermissionDefault(permissionKey, allowed);
+        Frens.CONFIG.save();
+    }
+
+    public static void setAdminPermissionUserOverride(MinecraftServer server,
+                                                      String playerUuid,
+                                                      String permissionKey,
+                                                      boolean allowed) {
+        if (server == null || Frens.CONFIG == null) {
+            return;
+        }
+        ManualConfig.SurvivalRecruitmentState st = getState(server);
+        if (st == null) {
+            return;
+        }
+        st.setAdminPermissionUserOverride(playerUuid, permissionKey, allowed);
+        Frens.CONFIG.save();
+    }
+
+    public static Map<String, Boolean> getAdminPermissionGlobals(MinecraftServer server) {
+        LinkedHashMap<String, Boolean> out = new LinkedHashMap<>(DEFAULT_ADMIN_PERMISSION_GLOBALS);
+        if (server == null || Frens.CONFIG == null) {
+            return out;
+        }
+        ManualConfig.SurvivalRecruitmentState st = getState(server);
+        if (st == null) {
+            return out;
+        }
+        Map<String, Boolean> stored = st.getAdminPermissionDefaultsByKey();
+        if (stored != null && !stored.isEmpty()) {
+            for (Map.Entry<String, Boolean> entry : stored.entrySet()) {
+                String key = normalizePermissionKey(entry.getKey());
+                if (key.isBlank()) {
+                    continue;
+                }
+                out.put(key, Boolean.TRUE.equals(entry.getValue()));
+            }
+        }
+        return out;
+    }
+
+    public static Map<String, Map<String, Boolean>> getAdminPermissionUserOverrides(MinecraftServer server) {
+        LinkedHashMap<String, Map<String, Boolean>> out = new LinkedHashMap<>();
+        if (server == null || Frens.CONFIG == null) {
+            return out;
+        }
+        ManualConfig.SurvivalRecruitmentState st = getState(server);
+        if (st == null) {
+            return out;
+        }
+        Map<String, Map<String, Boolean>> stored = st.getAdminPermissionOverridesByUserUuid();
+        if (stored == null || stored.isEmpty()) {
+            return out;
+        }
+        for (Map.Entry<String, Map<String, Boolean>> userEntry : stored.entrySet()) {
+            String userKey = normalizeUuid(userEntry.getKey());
+            if (userKey.isBlank()) {
+                continue;
+            }
+            Map<String, Boolean> userMap = userEntry.getValue();
+            if (userMap == null || userMap.isEmpty()) {
+                continue;
+            }
+            LinkedHashMap<String, Boolean> normalizedUserMap = new LinkedHashMap<>();
+            for (Map.Entry<String, Boolean> permEntry : userMap.entrySet()) {
+                String permKey = normalizePermissionKey(permEntry.getKey());
+                if (permKey.isBlank()) {
+                    continue;
+                }
+                normalizedUserMap.put(permKey, Boolean.TRUE.equals(permEntry.getValue()));
+            }
+            if (!normalizedUserMap.isEmpty()) {
+                out.put(userKey, normalizedUserMap);
+            }
+        }
+        return out;
+    }
+
+    public static Map<String, String> collectKnownPermissionUsers(MinecraftServer server) {
+        LinkedHashMap<String, String> out = new LinkedHashMap<>();
+        if (server == null) {
+            return out;
+        }
+        for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
+            if (p == null || p.isRemoved() || (p instanceof createFakePlayer)) {
+                continue;
+            }
+            out.put(normalizeUuid(p.getUuidAsString()), p.getName().getString());
+        }
+
+        ManualConfig.SurvivalRecruitmentState st = getState(server);
+        if (st != null) {
+            Map<String, String> delegates = st.getModeSelectionDelegatesByUuid();
+            if (delegates != null) {
+                for (Map.Entry<String, String> entry : delegates.entrySet()) {
+                    String key = normalizeUuid(entry.getKey());
+                    if (key.isBlank()) {
+                        continue;
+                    }
+                    String name = entry.getValue();
+                    out.putIfAbsent(key, (name == null || name.isBlank()) ? key : name.trim());
+                }
+            }
+            Map<String, Map<String, Boolean>> overrides = st.getAdminPermissionOverridesByUserUuid();
+            if (overrides != null) {
+                for (String userKey : overrides.keySet()) {
+                    String key = normalizeUuid(userKey);
+                    if (!key.isBlank()) {
+                        out.putIfAbsent(key, key);
+                    }
+                }
+            }
+        }
+        return out;
+    }
+
+    private static String normalizePermissionKey(String key) {
+        return key == null ? "" : key.trim().toLowerCase(java.util.Locale.ROOT);
+    }
+
+    private static String normalizeUuid(String uuid) {
+        return uuid == null ? "" : uuid.trim().toLowerCase(java.util.Locale.ROOT);
     }
 
     public static void noteModeSelectionConfigured(MinecraftServer server, boolean questingMode, String actorName) {

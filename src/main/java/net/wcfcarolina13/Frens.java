@@ -485,6 +485,7 @@ public class Frens implements ModInitializer {
         // Operator-only admin actions for survival recruitment mode.
         PayloadTypeRegistry.playC2S().register(net.wcfcarolina13.network.RecruitmentAdminActionPayload.ID, net.wcfcarolina13.network.RecruitmentAdminActionPayload.CODEC);
         PayloadTypeRegistry.playS2C().register(net.wcfcarolina13.network.RecruitmentAdminStatusPayload.ID, net.wcfcarolina13.network.RecruitmentAdminStatusPayload.CODEC);
+        PayloadTypeRegistry.playS2C().register(net.wcfcarolina13.network.RecruitmentAdminPermissionsPayload.ID, net.wcfcarolina13.network.RecruitmentAdminPermissionsPayload.CODEC);
         PayloadTypeRegistry.playC2S().register(net.wcfcarolina13.network.BotTaskPeekRequestPayload.ID, net.wcfcarolina13.network.BotTaskPeekRequestPayload.CODEC);
         PayloadTypeRegistry.playS2C().register(net.wcfcarolina13.network.BotTaskPeekStatusPayload.ID, net.wcfcarolina13.network.BotTaskPeekStatusPayload.CODEC);
         PayloadTypeRegistry.playC2S().register(LearningInputSamplePayload.ID, LearningInputSamplePayload.CODEC);

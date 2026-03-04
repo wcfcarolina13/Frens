@@ -1,5 +1,6 @@
 package net.wcfcarolina13.network;
 
+import com.google.gson.Gson;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
@@ -22,8 +23,14 @@ import java.util.concurrent.ConcurrentHashMap;
 public final class RecruitmentAdminNetworkManager {
 
     private static volatile boolean REGISTERED = false;
+    private static final Gson GSON = new Gson();
     private static final Map<String, Long> RECRUIT_MODE_SWITCH_CONFIRM_UNTIL_MS = new ConcurrentHashMap<>();
     private static final long RECRUIT_MODE_SWITCH_CONFIRM_WINDOW_MS = 12_000L;
+
+    private record PermissionsSnapshotData(boolean requesterOperator,
+                                           Map<String, Boolean> globalDefaults,
+                                           Map<String, Map<String, Boolean>> userOverrides,
+                                           Map<String, String> knownUsers) {}
 
     private RecruitmentAdminNetworkManager() {
     }
@@ -52,11 +59,6 @@ public final class RecruitmentAdminNetworkManager {
                 ? payload.botAlias().trim()
                 : "Jake";
 
-        if (!Frens.isOperator(player)) {
-            ServerPlayNetworking.send(player, new RecruitmentAdminStatusPayload(botAlias, "Not authorized."));
-            return;
-        }
-
         if (Frens.CONFIG == null) {
             ServerPlayNetworking.send(player, new RecruitmentAdminStatusPayload(botAlias, "Config not ready."));
             return;
@@ -66,6 +68,67 @@ public final class RecruitmentAdminNetworkManager {
         int payloadIntArg = payload != null ? payload.intArg() : 0;
         String worldKey = worldKey(server);
         ManualConfig.SurvivalRecruitmentState st = SurvivalRecruitmentService.getState(server);
+
+        if (action.equals("permissions_snapshot")) {
+            if (!Frens.isOperator(player)) {
+                ServerPlayNetworking.send(player, new RecruitmentAdminStatusPayload(botAlias, "Not authorized."));
+                return;
+            }
+            sendPermissionsSnapshot(server, player, botAlias);
+            ServerPlayNetworking.send(player, new RecruitmentAdminStatusPayload(botAlias, "Permissions snapshot synced."));
+            return;
+        }
+
+        if (action.startsWith("perm_global:")) {
+            if (!Frens.isOperator(player)) {
+                ServerPlayNetworking.send(player, new RecruitmentAdminStatusPayload(botAlias, "Not authorized."));
+                return;
+            }
+            String permissionKey = action.substring("perm_global:".length()).trim();
+            if (permissionKey.isBlank()) {
+                ServerPlayNetworking.send(player, new RecruitmentAdminStatusPayload(botAlias, "Missing permission key."));
+                return;
+            }
+            SurvivalRecruitmentService.setAdminPermissionGlobal(server, permissionKey, payload != null && payload.boolArg());
+            broadcastPermissionsSnapshot(server, botAlias);
+            ServerPlayNetworking.send(player, new RecruitmentAdminStatusPayload(botAlias,
+                    "Global permission '" + permissionKey + "' set to " + (payload != null && payload.boolArg()) + "."));
+            return;
+        }
+
+        if (action.startsWith("perm_user:")) {
+            if (!Frens.isOperator(player)) {
+                ServerPlayNetworking.send(player, new RecruitmentAdminStatusPayload(botAlias, "Not authorized."));
+                return;
+            }
+            String encoded = action.substring("perm_user:".length()).trim();
+            String[] parts = encoded.split(":", 2);
+            if (parts.length < 2) {
+                ServerPlayNetworking.send(player, new RecruitmentAdminStatusPayload(botAlias, "Expected perm_user:<uuid>:<permissionKey>."));
+                return;
+            }
+            String targetUuid = parts[0].trim().toLowerCase(Locale.ROOT);
+            String permissionKey = parts[1].trim().toLowerCase(Locale.ROOT);
+            if (targetUuid.isBlank() || permissionKey.isBlank()) {
+                ServerPlayNetworking.send(player, new RecruitmentAdminStatusPayload(botAlias, "Missing uuid or permission key."));
+                return;
+            }
+            SurvivalRecruitmentService.setAdminPermissionUserOverride(server, targetUuid, permissionKey,
+                    payload != null && payload.boolArg());
+            broadcastPermissionsSnapshot(server, botAlias);
+            ServerPlayNetworking.send(player, new RecruitmentAdminStatusPayload(botAlias,
+                    "User permission '" + permissionKey + "' for " + targetUuid + " set to "
+                            + (payload != null && payload.boolArg()) + "."));
+            return;
+        }
+
+        String permissionKey = permissionKeyForAction(action);
+        if (permissionKey != null && !permissionKey.isBlank()
+                && !SurvivalRecruitmentService.isAdminPermissionAllowed(player, permissionKey)) {
+            ServerPlayNetworking.send(player, new RecruitmentAdminStatusPayload(botAlias,
+                    "Not authorized for action '" + action + "'."));
+            return;
+        }
 
         List<String> out = new ArrayList<>();
 
@@ -249,6 +312,48 @@ public final class RecruitmentAdminNetworkManager {
         }
 
         ServerPlayNetworking.send(player, new RecruitmentAdminStatusPayload(botAlias, String.join("\n", out)));
+    }
+
+    private static String permissionKeyForAction(String action) {
+        if (action == null || action.isBlank()) {
+            return null;
+        }
+        return switch (action) {
+            case "give_wizard_tome" -> "wizard_tome";
+            case "status", "recruit_status", "enable", "disable" -> "recruit_manage";
+            case "reset", "recruit_reset" -> "recruit_reset";
+            case "setanchor_here", "clearanchor", "anchor_set", "anchor_clear" -> "village_anchor";
+            case "setstage" -> "stage_debug";
+            case "skin_everyone_toggle" -> "skin_policy_everyone";
+            case "skin_custom_toggle" -> "skin_policy_custom";
+            case "learning_status", "learning_start", "learning_stop_success", "learning_stop_fail", "learning_stop_abort" -> "learning_manage";
+            default -> null;
+        };
+    }
+
+    private static void sendPermissionsSnapshot(MinecraftServer server, ServerPlayerEntity player, String botAlias) {
+        if (server == null || player == null || player.isRemoved()) {
+            return;
+        }
+        PermissionsSnapshotData data = new PermissionsSnapshotData(
+                Frens.isOperator(player),
+                SurvivalRecruitmentService.getAdminPermissionGlobals(server),
+                SurvivalRecruitmentService.getAdminPermissionUserOverrides(server),
+                SurvivalRecruitmentService.collectKnownPermissionUsers(server)
+        );
+        ServerPlayNetworking.send(player, new RecruitmentAdminPermissionsPayload(botAlias, GSON.toJson(data)));
+    }
+
+    private static void broadcastPermissionsSnapshot(MinecraftServer server, String botAlias) {
+        if (server == null) {
+            return;
+        }
+        for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
+            if (p == null || p.isRemoved() || (p instanceof createFakePlayer)) {
+                continue;
+            }
+            sendPermissionsSnapshot(server, p, botAlias);
+        }
     }
 
     private static String worldKey(MinecraftServer server) {

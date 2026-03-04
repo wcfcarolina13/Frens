@@ -49,6 +49,8 @@ public class ManualConfig {
     private Map<String, BotOwnership> botOwnership = new HashMap<>();
     private Map<String, BotSpawn> botSpawnPoints = new HashMap<>();
     private boolean defaultLlmWorldEnabled = true;
+    private boolean textDialogueEnabled = true;
+    private boolean voicedDialogueEnabled = true;
     private boolean gameplayTipsEnabled = true;
     private boolean idleHobbiesAnywhereEnabled = false;
     private boolean baritonePathfinderEnabled = false;
@@ -476,6 +478,22 @@ public class ManualConfig {
 
     public void setDefaultLlmWorldEnabled(boolean defaultLlmWorldEnabled) {
         this.defaultLlmWorldEnabled = defaultLlmWorldEnabled;
+    }
+
+    public boolean isTextDialogueEnabled() {
+        return textDialogueEnabled;
+    }
+
+    public void setTextDialogueEnabled(boolean textDialogueEnabled) {
+        this.textDialogueEnabled = textDialogueEnabled;
+    }
+
+    public boolean isVoicedDialogueEnabled() {
+        return voicedDialogueEnabled;
+    }
+
+    public void setVoicedDialogueEnabled(boolean voicedDialogueEnabled) {
+        this.voicedDialogueEnabled = voicedDialogueEnabled;
     }
 
     public boolean isGameplayTipsEnabled() {
@@ -1121,6 +1139,11 @@ public class ManualConfig {
         // Skin policy controls (server-authoritative).
         private boolean allowEveryoneSkinChange;
         private boolean allowCustomSkins;
+        // Granular admin-tab permissions (server-authoritative).
+        // Global defaults applied to all non-operators.
+        private Map<String, Boolean> adminPermissionDefaultsByKey;
+        // Per-user overrides: uuid -> (permissionKey -> allowed)
+        private Map<String, Map<String, Boolean>> adminPermissionOverridesByUserUuid;
         // Optional delegated players (uuid -> last known name) that may choose world mode.
         // Operators are always allowed regardless of this map.
         private Map<String, String> modeSelectionDelegatesByUuid;
@@ -1243,6 +1266,85 @@ public class ManualConfig {
             this.allowCustomSkins = allowCustomSkins;
         }
 
+        public Map<String, Boolean> getAdminPermissionDefaultsByKey() {
+            if (adminPermissionDefaultsByKey == null) {
+                adminPermissionDefaultsByKey = new HashMap<>();
+            }
+            return adminPermissionDefaultsByKey;
+        }
+
+        public Map<String, Map<String, Boolean>> getAdminPermissionOverridesByUserUuid() {
+            if (adminPermissionOverridesByUserUuid == null) {
+                adminPermissionOverridesByUserUuid = new HashMap<>();
+            }
+            return adminPermissionOverridesByUserUuid;
+        }
+
+        public boolean getAdminPermissionDefault(String permissionKey, boolean fallbackDefault) {
+            String key = normalizePermissionKey(permissionKey);
+            if (key.isBlank()) {
+                return fallbackDefault;
+            }
+            Boolean stored = getAdminPermissionDefaultsByKey().get(key);
+            return stored != null ? stored : fallbackDefault;
+        }
+
+        public void setAdminPermissionDefault(String permissionKey, boolean allowed) {
+            String key = normalizePermissionKey(permissionKey);
+            if (key.isBlank()) {
+                return;
+            }
+            getAdminPermissionDefaultsByKey().put(key, allowed);
+        }
+
+        public Boolean getAdminPermissionUserOverride(String uuid, String permissionKey) {
+            String userKey = normalizeUuid(uuid);
+            String permKey = normalizePermissionKey(permissionKey);
+            if (userKey.isBlank() || permKey.isBlank()) {
+                return null;
+            }
+            Map<String, Boolean> userMap = getAdminPermissionOverridesByUserUuid().get(userKey);
+            if (userMap == null || userMap.isEmpty()) {
+                return null;
+            }
+            return userMap.get(permKey);
+        }
+
+        public void setAdminPermissionUserOverride(String uuid, String permissionKey, boolean allowed) {
+            String userKey = normalizeUuid(uuid);
+            String permKey = normalizePermissionKey(permissionKey);
+            if (userKey.isBlank() || permKey.isBlank()) {
+                return;
+            }
+            Map<String, Boolean> userMap = getAdminPermissionOverridesByUserUuid()
+                    .computeIfAbsent(userKey, ignored -> new HashMap<>());
+            userMap.put(permKey, allowed);
+        }
+
+        public void clearAdminPermissionUserOverride(String uuid, String permissionKey) {
+            String userKey = normalizeUuid(uuid);
+            String permKey = normalizePermissionKey(permissionKey);
+            if (userKey.isBlank() || permKey.isBlank()) {
+                return;
+            }
+            Map<String, Boolean> userMap = getAdminPermissionOverridesByUserUuid().get(userKey);
+            if (userMap == null) {
+                return;
+            }
+            userMap.remove(permKey);
+            if (userMap.isEmpty()) {
+                getAdminPermissionOverridesByUserUuid().remove(userKey);
+            }
+        }
+
+        public void clearAdminPermissionUserOverrides(String uuid) {
+            String userKey = normalizeUuid(uuid);
+            if (userKey.isBlank()) {
+                return;
+            }
+            getAdminPermissionOverridesByUserUuid().remove(userKey);
+        }
+
         public Map<String, String> getModeSelectionDelegatesByUuid() {
             if (modeSelectionDelegatesByUuid == null) {
                 modeSelectionDelegatesByUuid = new HashMap<>();
@@ -1276,6 +1378,10 @@ public class ManualConfig {
 
         private static String normalizeUuid(String uuid) {
             return uuid == null ? "" : uuid.trim().toLowerCase(Locale.ROOT);
+        }
+
+        private static String normalizePermissionKey(String key) {
+            return key == null ? "" : key.trim().toLowerCase(Locale.ROOT);
         }
 
         public boolean isCompanionAnchorSet() {

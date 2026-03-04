@@ -724,6 +724,23 @@ public final class BotGuideScreen extends Screen {
                         "In Bot Inventory: [ previous, ] next",
                         "switch inventory open alias multi bot"
                     ),
+                    new GuideTopic(
+                        "basics_bot_controls",
+                        "Basics",
+                        "Bot Controls Panel",
+                        "Configure spawn behavior and per-bot preferences in one place.",
+                        List.of(
+                            "Open from Admin tab: Bot Controls >.",
+                            "Spawn modes are Training, Questing, and Admin.",
+                            "General settings include Global Text Dialogue and Global Voiced Dialogue toggles.",
+                            "Also includes gameplay, survival, behavior, and pathfinder toggles.",
+                            "Use this as the primary settings hub instead of memorizing many commands.",
+                            "See also: Modes topics for progression context."
+                        ),
+                        "UI-only action (Admin > Bot Controls >)",
+                        "Actions overlay: Admin tab > Bot Controls >",
+                        "bot controls settings spawn mode admin panel"
+                    ),
                 new GuideTopic(
                         "move_follow",
                         "Movement",
@@ -861,10 +878,10 @@ public final class BotGuideScreen extends Screen {
                         "Climbs upward by a block count or until surface sky.",
                         List.of(
                                 "Use +/- for block count.",
-                                "Use the S toggle in Actions to switch to Surface mode."
+                        "Use the ☀ toggle in Actions to turn Surface mode on/off."
                         ),
                         "bot skill mining ascent <blocks|surface> " + target,
-                        "Actions menu: +/- and S mode toggle",
+                    "Actions menu: +/- and ☀ mode toggle",
                         "up climb surface"
                 ),
                 new GuideTopic(
@@ -908,7 +925,8 @@ public final class BotGuideScreen extends Screen {
                         "Layman progression path: recruit first, then unlock more capabilities.",
                         List.of(
                                 "Designed for survival progression and narrative onboarding.",
-                                "Dialogue topics help explain what is unlocked next."
+                        "Dialogue topics help explain what is unlocked next.",
+                        "Backlink: Bot Controls panel includes Spawn Mode and related settings."
                         ),
                         "UI-driven mode",
                         "Guide + Dialogue topics",
@@ -935,11 +953,27 @@ public final class BotGuideScreen extends Screen {
                         "Spawn/use bots with broad capabilities immediately.",
                         List.of(
                                 "Best for testing, admin workflows, and sandbox play.",
-                                "No recruitment progression needed."
+                        "No recruitment progression needed.",
+                        "Backlink: use Bot Controls to switch Spawn Mode and tune behavior."
                         ),
                         "bot spawn <alias>",
                         "No keybind by default",
                         "direct admin"
+                ),
+                new GuideTopic(
+                    "roadmap_overview",
+                    "Roadmap",
+                    "Roadmap (High-Level)",
+                    "Short overview of near-term companion quality and dialogue priorities.",
+                    List.of(
+                        "Dialogue controls: keep global per-world toggles for text, voice, or both off.",
+                        "Voice library expansion: current voiced lines ship with a male voice set.",
+                        "If players strongly request female or alternate voice packs, that work can be prioritized on the roadmap.",
+                        "UX polish: continue improving guide clarity, mode onboarding, and admin controls."
+                    ),
+                    "UI-only reference",
+                    "Guide topic only",
+                    "roadmap voices text dialogue priorities future"
                 ),
                 new GuideTopic(
                         "items_wizard_tome",

@@ -5,6 +5,7 @@ import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.text.Text;
 import net.minecraft.util.Formatting;
+import net.wcfcarolina13.Frens;
 import net.wcfcarolina13.GameAI.BotEventHandler;
 import net.wcfcarolina13.GameAI.services.CompanionCommunicationPolicy;
 import org.slf4j.Logger;
@@ -72,12 +73,29 @@ public class ChatUtils {
 
         LOGGER.info("Sending chat message (withDelay={}): '{}'", withDelay, message);
 
+        boolean forceTextFallback = shouldForceTextFallbackForVoiceOnly(recipient.botSender, message);
+
         List<String> messageParts = splitMessage(message.trim());
         LOGGER.info("Message split into {} parts", messageParts.size());
 
         // This is the core fix. We are queuing a single task on the server's main thread.
         // The task itself handles all logic, including delays.
-        server.execute(() -> scheduleAndSendMessages(server, source, recipient.playerUuid, recipient.botSender, messageParts, 0, withDelay));
+        server.execute(() -> scheduleAndSendMessages(server, source, recipient.playerUuid, recipient.botSender, messageParts, 0, withDelay, forceTextFallback));
+    }
+
+    private static boolean isGlobalTextDialogueEnabled() {
+        return Frens.CONFIG == null || Frens.CONFIG.isTextDialogueEnabled();
+    }
+
+    private static boolean shouldForceTextFallbackForVoiceOnly(boolean botSender, String rawMessage) {
+        if (!botSender || isGlobalTextDialogueEnabled() || !BotDialoguePlayer.isGlobalVoicedDialogueEnabled()) {
+            return false;
+        }
+        String cleaned = stripLegacyFormatting(rawMessage == null ? "" : rawMessage.trim());
+        if (cleaned.isEmpty()) {
+            return false;
+        }
+        return DialogueTextMapper.lookup(cleaned) == null;
     }
 
     /**
@@ -94,19 +112,20 @@ public class ChatUtils {
                                                 boolean botSender,
                                                 List<String> messageParts,
                                                 int partIndex,
-                                                boolean withDelay) {
+                                                boolean withDelay,
+                                                boolean forceTextFallback) {
         if (partIndex >= messageParts.size()) {
             // All parts have been sent, stop the recursion.
             return;
         }
 
         // Send the current message part.
-        sendSingleMessage(server, source, recipientUuid, botSender, messageParts.get(partIndex), partIndex);
+        sendSingleMessage(server, source, recipientUuid, botSender, messageParts.get(partIndex), partIndex, forceTextFallback);
 
         // Schedule the next part if there are more to send and a delay is requested.
         if (withDelay && partIndex < messageParts.size() - 1) {
             CHAT_DELAY_EXECUTOR.schedule(
-                    () -> server.execute(() -> scheduleAndSendMessages(server, source, recipientUuid, botSender, messageParts, partIndex + 1, true)),
+                    () -> server.execute(() -> scheduleAndSendMessages(server, source, recipientUuid, botSender, messageParts, partIndex + 1, true, forceTextFallback)),
                     MESSAGE_DELAY_MS,
                     TimeUnit.MILLISECONDS
             );
@@ -121,7 +140,8 @@ public class ChatUtils {
                                           UUID recipientUuid,
                                           boolean botSender,
                                           String message,
-                                          int partIndex) {
+                                          int partIndex,
+                                          boolean forceTextFallback) {
         try {
 
             if (server == null || recipientUuid == null) {
@@ -152,8 +172,13 @@ public class ChatUtils {
 
             // Play dialogue sound for the first message part only
             // This avoids playing the sound multiple times for split messages
-            if (partIndex == 0) {
-                BotDialoguePlayer.tryPlayDialogue(source, cleanedMessage);
+            if (partIndex == 0 && botSender && BotDialoguePlayer.isGlobalVoicedDialogueEnabled()) {
+                BotDialoguePlayer.tryPlayDialogueDetailed(source, cleanedMessage);
+            }
+
+            boolean sendText = !botSender || isGlobalTextDialogueEnabled() || forceTextFallback;
+            if (!sendText) {
+                return;
             }
 
             String toSend = botSender ? (sourceName + ": " + cleanedMessage) : cleanedMessage;

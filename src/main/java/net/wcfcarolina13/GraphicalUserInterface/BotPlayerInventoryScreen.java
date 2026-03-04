@@ -1,5 +1,7 @@
 package net.wcfcarolina13.GraphicalUserInterface;
 
+import com.google.gson.Gson;
+import com.google.gson.reflect.TypeToken;
 import com.mojang.authlib.GameProfile;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.minecraft.client.MinecraftClient;
@@ -31,13 +33,16 @@ import net.wcfcarolina13.ui.BotPlayerInventoryScreenHandler;
 import org.lwjgl.glfw.GLFW;
 
 import java.nio.charset.StandardCharsets;
+import java.lang.reflect.Type;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import net.minecraft.client.network.PlayerListEntry;
@@ -106,11 +111,19 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
     // Hover tooltip (delayed) for entries in the expanded overlay.
     private TopicEntry overlayHoveredEntry = null;
     private long overlayHoverStartedAtMs = 0L;
-    private static final long OVERLAY_HOVER_TOOLTIP_DELAY_MS = 1000L;
+    private static final long OVERLAY_HOVER_TOOLTIP_DELAY_MS = 2500L;
     private TopicEntry quickHoveredEntry = null;
     private long quickHoverStartedAtMs = 0L;
-    private static final long QUICK_HOVER_TOOLTIP_DELAY_MS = 1800L;
+    private static final long QUICK_HOVER_TOOLTIP_DELAY_MS = 2500L;
+    private String overlayHoveredControlKey = null;
+    private long overlayControlHoverStartedAtMs = 0L;
     private long lastBotSwitchHintAtMs = 0L;
+
+    private static final Gson GSON = new Gson();
+    private static final Type ADMIN_PERMISSIONS_CACHE_TYPE = new TypeToken<AdminPermissionsCache>() {}.getType();
+    private static final Map<String, AdminPermissionsCache> ADMIN_PERMISSIONS_BY_ALIAS = new HashMap<>();
+
+    private boolean adminPreviewAsNonAdmin = false;
 
     // Browse state for scrolling past blocked bots in the switcher.
     private int switchBrowseOffset = 0;
@@ -192,6 +205,156 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         }
     }
 
+    private static final class AdminPermissionsCache {
+        boolean requesterOperator;
+        Map<String, Boolean> globalDefaults = new HashMap<>();
+        Map<String, Map<String, Boolean>> userOverrides = new HashMap<>();
+        Map<String, String> knownUsers = new HashMap<>();
+    }
+
+    public static void applyAdminPermissionsJson(String botAlias, String jsonData) {
+        String aliasKey = normalizedAliasKey(botAlias);
+        if (aliasKey.isBlank() || jsonData == null || jsonData.isBlank()) {
+            return;
+        }
+        try {
+            AdminPermissionsCache parsed = GSON.fromJson(jsonData, ADMIN_PERMISSIONS_CACHE_TYPE);
+            if (parsed == null) {
+                return;
+            }
+            AdminPermissionsCache cache = new AdminPermissionsCache();
+            cache.requesterOperator = parsed.requesterOperator;
+
+            if (parsed.globalDefaults != null) {
+                for (Map.Entry<String, Boolean> entry : parsed.globalDefaults.entrySet()) {
+                    String key = entry.getKey() == null ? "" : entry.getKey().trim().toLowerCase(Locale.ROOT);
+                    if (key.isBlank()) {
+                        continue;
+                    }
+                    cache.globalDefaults.put(key, Boolean.TRUE.equals(entry.getValue()));
+                }
+            }
+
+            if (parsed.userOverrides != null) {
+                for (Map.Entry<String, Map<String, Boolean>> userEntry : parsed.userOverrides.entrySet()) {
+                    String userUuid = normalizeUuidKey(userEntry.getKey());
+                    if (userUuid.isBlank()) {
+                        continue;
+                    }
+                    Map<String, Boolean> src = userEntry.getValue();
+                    if (src == null || src.isEmpty()) {
+                        continue;
+                    }
+                    HashMap<String, Boolean> dst = new HashMap<>();
+                    for (Map.Entry<String, Boolean> permEntry : src.entrySet()) {
+                        String permKey = permEntry.getKey() == null ? "" : permEntry.getKey().trim().toLowerCase(Locale.ROOT);
+                        if (permKey.isBlank()) {
+                            continue;
+                        }
+                        dst.put(permKey, Boolean.TRUE.equals(permEntry.getValue()));
+                    }
+                    if (!dst.isEmpty()) {
+                        cache.userOverrides.put(userUuid, dst);
+                    }
+                }
+            }
+
+            if (parsed.knownUsers != null) {
+                for (Map.Entry<String, String> entry : parsed.knownUsers.entrySet()) {
+                    String userUuid = normalizeUuidKey(entry.getKey());
+                    String userName = entry.getValue() != null ? entry.getValue().trim() : "";
+                    if (userUuid.isBlank() || userName.isBlank()) {
+                        continue;
+                    }
+                    cache.knownUsers.put(userUuid, userName);
+                }
+            }
+
+            synchronized (ADMIN_PERMISSIONS_BY_ALIAS) {
+                ADMIN_PERMISSIONS_BY_ALIAS.put(aliasKey, cache);
+            }
+        } catch (Exception ignored) {
+            // Ignore malformed payloads; next server sync can refresh this cache.
+        }
+    }
+
+    public static Map<String, Boolean> getDefaultAdminPermissionGlobalsSnapshot() {
+        return new HashMap<>(DEFAULT_ADMIN_PERMISSION_GLOBALS);
+    }
+
+    public static Map<String, Boolean> getAdminPermissionGlobalsSnapshot(String botAlias) {
+        AdminPermissionsCache cache;
+        synchronized (ADMIN_PERMISSIONS_BY_ALIAS) {
+            cache = ADMIN_PERMISSIONS_BY_ALIAS.get(normalizedAliasKey(botAlias));
+        }
+        if (cache == null || cache.globalDefaults == null || cache.globalDefaults.isEmpty()) {
+            return getDefaultAdminPermissionGlobalsSnapshot();
+        }
+        return new HashMap<>(cache.globalDefaults);
+    }
+
+    public static Map<String, Map<String, Boolean>> getAdminPermissionUserOverridesSnapshot(String botAlias) {
+        AdminPermissionsCache cache;
+        synchronized (ADMIN_PERMISSIONS_BY_ALIAS) {
+            cache = ADMIN_PERMISSIONS_BY_ALIAS.get(normalizedAliasKey(botAlias));
+        }
+        HashMap<String, Map<String, Boolean>> out = new HashMap<>();
+        if (cache == null || cache.userOverrides == null || cache.userOverrides.isEmpty()) {
+            return out;
+        }
+        for (Map.Entry<String, Map<String, Boolean>> entry : cache.userOverrides.entrySet()) {
+            if (entry.getKey() == null || entry.getKey().isBlank() || entry.getValue() == null || entry.getValue().isEmpty()) {
+                continue;
+            }
+            out.put(entry.getKey(), new HashMap<>(entry.getValue()));
+        }
+        return out;
+    }
+
+    public static Map<String, String> getAdminPermissionKnownUsersSnapshot(String botAlias) {
+        AdminPermissionsCache cache;
+        synchronized (ADMIN_PERMISSIONS_BY_ALIAS) {
+            cache = ADMIN_PERMISSIONS_BY_ALIAS.get(normalizedAliasKey(botAlias));
+        }
+        if (cache == null || cache.knownUsers == null || cache.knownUsers.isEmpty()) {
+            return new HashMap<>();
+        }
+        return new HashMap<>(cache.knownUsers);
+    }
+
+    public static void requestAdminPermissionsSnapshot(String botAlias) {
+        MinecraftClient client = MinecraftClient.getInstance();
+        if (client == null || client.getNetworkHandler() == null || botAlias == null || botAlias.isBlank()) {
+            return;
+        }
+        ClientPlayNetworking.send(new RecruitmentAdminActionPayload(botAlias, "permissions_snapshot", 0, false));
+    }
+
+    public static void sendAdminPermissionGlobalUpdate(String botAlias, String permissionKey, boolean allowed) {
+        MinecraftClient client = MinecraftClient.getInstance();
+        if (client == null || client.getNetworkHandler() == null || botAlias == null || botAlias.isBlank()) {
+            return;
+        }
+        String key = permissionKey == null ? "" : permissionKey.trim().toLowerCase(Locale.ROOT);
+        if (key.isBlank()) {
+            return;
+        }
+        ClientPlayNetworking.send(new RecruitmentAdminActionPayload(botAlias, "perm_global:" + key, 0, allowed));
+    }
+
+    public static void sendAdminPermissionUserUpdate(String botAlias, String userUuid, String permissionKey, boolean allowed) {
+        MinecraftClient client = MinecraftClient.getInstance();
+        if (client == null || client.getNetworkHandler() == null || botAlias == null || botAlias.isBlank()) {
+            return;
+        }
+        String uuid = normalizeUuidKey(userUuid);
+        String key = permissionKey == null ? "" : permissionKey.trim().toLowerCase(Locale.ROOT);
+        if (uuid.isBlank() || key.isBlank()) {
+            return;
+        }
+        ClientPlayNetworking.send(new RecruitmentAdminActionPayload(botAlias, "perm_user:" + uuid + ":" + key, 0, allowed));
+    }
+
     private record OverlayColumns(int contentX, int contentY, int contentW, int contentH,
                                   int dialogueX, int dialogueW,
                                   int dividerX, int dividerW,
@@ -239,6 +402,8 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         SKILL_ASCENT,
         SKILL_DESCENT,
         OPEN_BOT_CONTROLS,
+        OPEN_PLAYER_SETTINGS,
+        ADMIN_PREVIEW_NON_ADMIN,
         OPEN_SKIN_CHOOSER,
         SKIN_POLICY_EVERYONE,
         SKIN_POLICY_CUSTOM
@@ -280,6 +445,10 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         private static TopicEntry admin(String label, String adminKey) {
             // Reuse dialogueKey field to carry the admin action key.
             return new TopicEntry(label, TopicCategory.ADMIN, null, false, 0, adminKey);
+        }
+
+        private static TopicEntry adminHeader(String label) {
+            return new TopicEntry(label, TopicCategory.ADMIN, null, false, 0, "__header__");
         }
     }
 
@@ -349,40 +518,46 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             TopicEntry.dialogue("Goodbye", "goodbye")
     );
 
-            // Operator-only admin tools for survival recruitment mode.
+            // Admin tools organized by category headers.
             private static final List<TopicEntry> ADMIN_TOPIC_ENTRIES = List.of(
-                // ── Screens ──
+                TopicEntry.adminHeader("🧭 Controls"),
                 new TopicEntry("Bot Controls >", TopicCategory.ADMIN, TopicAction.OPEN_BOT_CONTROLS, false, 0, null),
+                new TopicEntry("Player Permissions >", TopicCategory.ADMIN, TopicAction.OPEN_PLAYER_SETTINGS, false, 0, null),
+                new TopicEntry("Preview as Non-Admin", TopicCategory.ADMIN, TopicAction.ADMIN_PREVIEW_NON_ADMIN, true, 0, null),
+
+                TopicEntry.adminHeader("🧙 Magic & Skins"),
                 new TopicEntry("Spells >", TopicCategory.ADMIN, TopicAction.OPEN_SPELLS, false, 0, null),
                 new TopicEntry("Change Skin >", TopicCategory.ADMIN, TopicAction.OPEN_SKIN_CHOOSER, false, 0, null),
-                new TopicEntry("Skin Change for Everyone", TopicCategory.ADMIN, TopicAction.SKIN_POLICY_EVERYONE, true, 0, null),
+                new TopicEntry("Allow Skin Changes for Everyone", TopicCategory.ADMIN, TopicAction.SKIN_POLICY_EVERYONE, true, 0, null),
                 new TopicEntry("Allow Custom URL Skins", TopicCategory.ADMIN, TopicAction.SKIN_POLICY_CUSTOM, true, 0, null),
-                // ── Toggles ──
-                new TopicEntry("Gameplay Tips", TopicCategory.ADMIN, TopicAction.GAMEPLAY_TIPS, true, 0, null),
+                TopicEntry.admin("Give Wizard's Tome", "give_wizard_tome"),
+
+                TopicEntry.adminHeader("⚙️ Behavior"),
+                new TopicEntry("Gameplay Tips (Hints)", TopicCategory.ADMIN, TopicAction.GAMEPLAY_TIPS, true, 0, null),
                 new TopicEntry("Idle Hobbies Anywhere", TopicCategory.ADMIN, TopicAction.IDLE_HOBBIES_ANYWHERE, true, 0, null),
                 new TopicEntry("Baritone Pathfinder", TopicCategory.ADMIN, TopicAction.BARITONE_PATHFINDER, true, 0, null),
-                // ── Items ──
-                TopicEntry.admin("Give Wizard's Tome", "give_wizard_tome"),
-                // ── Learning mode ──
-                TopicEntry.admin("Learning status", "learning_status"),
-                TopicEntry.admin("Learning start", "learning_start"),
-                TopicEntry.admin("Learning stop (Success)", "learning_stop_success"),
-                TopicEntry.admin("Learning stop (Fail)", "learning_stop_fail"),
-                TopicEntry.admin("Learning stop (Abort)", "learning_stop_abort"),
-                // ── Recruitment ──
-                TopicEntry.admin("Recruit status", "recruit_status"),
-                TopicEntry.admin("Enable recruit", "recruit_enable"),
-                TopicEntry.admin("Disable recruit", "recruit_disable"),
-                TopicEntry.admin("Reset recruit", "recruit_reset"),
-                // ── Village ──
-                TopicEntry.admin("Set village anchor", "anchor_set"),
-                TopicEntry.admin("Clear village anchor", "anchor_clear"),
-                // ── Debug: quest stages ──
-                TopicEntry.admin("Set stage 0", "setstage:0"),
-                TopicEntry.admin("Set stage 1", "setstage:1"),
-                TopicEntry.admin("Set stage 2", "setstage:2"),
-                TopicEntry.admin("Set stage 3", "setstage:3"),
-                TopicEntry.admin("Set stage 4", "setstage:4")
+
+                TopicEntry.adminHeader("🎓 Learning"),
+                TopicEntry.admin("Learning Status", "learning_status"),
+                TopicEntry.admin("Learning Start", "learning_start"),
+                TopicEntry.admin("Learning Stop (Success)", "learning_stop_success"),
+                TopicEntry.admin("Learning Stop (Failure)", "learning_stop_fail"),
+                TopicEntry.admin("Learning Stop (Abort)", "learning_stop_abort"),
+
+                TopicEntry.adminHeader("🏘 Recruitment"),
+                TopicEntry.admin("Recruitment Status", "recruit_status"),
+                TopicEntry.admin("Recruitment Enable", "recruit_enable"),
+                TopicEntry.admin("Recruitment Disable", "recruit_disable"),
+                TopicEntry.admin("Recruitment Reset", "recruit_reset"),
+                TopicEntry.admin("Set Village Anchor", "anchor_set"),
+                TopicEntry.admin("Clear Village Anchor", "anchor_clear"),
+
+                TopicEntry.adminHeader("🔧 Debug"),
+                TopicEntry.admin("Set Stage 0", "setstage:0"),
+                TopicEntry.admin("Set Stage 1", "setstage:1"),
+                TopicEntry.admin("Set Stage 2", "setstage:2"),
+                TopicEntry.admin("Set Stage 3", "setstage:3"),
+                TopicEntry.admin("Set Stage 4", "setstage:4")
             );
 
     public BotPlayerInventoryScreen(BotPlayerInventoryScreenHandler handler, PlayerInventory inventory, Text title) {
@@ -416,6 +591,10 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
                     .setY(savedSwitchCursorY);
             savedSwitchCursorX = -1;
             savedSwitchCursorY = -1;
+        }
+
+        if (isAdminUser()) {
+            requestAdminPermissionsSnapshot(this.botAlias);
         }
     }
 
@@ -1398,6 +1577,9 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         if (!companionQuestStateRequested) {
             requestCompanionQuestState();
         }
+        if (isAdminUser()) {
+            requestAdminPermissionsSnapshot(this.botAlias);
+        }
 
         // Ensure the scroll is valid for the (larger) overlay view.
         Rect r = computeTopicsOverlayRect();
@@ -1474,6 +1656,9 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             if (mouseX >= adminTabX && mouseX < adminTabX + tabW) {
                 if (isAdminTabEnabled()) {
                     overlayCategory = TopicCategory.ADMIN;
+                    if (isAdminUser()) {
+                        requestAdminPermissionsSnapshot(this.botAlias);
+                    }
                     return true;
                 }
                 return false;
@@ -1538,6 +1723,9 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
 
         TopicEntry entry = getTopicEntryAtOverlay(mouseX, mouseY);
         if (entry != null) {
+            if (entry.category == TopicCategory.ADMIN && isAdminHeaderEntry(entry)) {
+                return true;
+            }
             boolean enabled;
             if (entry.category == TopicCategory.DIALOGUE) {
                 enabled = isDialogueEntryEnabled(entry);
@@ -1550,7 +1738,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
                 handleTopicEntry(entry);
                 return true;
             }
-            return false;
+            return true;
         }
         return true;
     }
@@ -1611,6 +1799,8 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
     }
 
     private record SkillAdjustHit(TopicAction action, SkillAdjustControl control) {}
+
+    private record OverlayControlHover(String key, java.util.List<String> lines) {}
 
     private int getFollowAdjustDirectionInOverlay(double mouseX, double mouseY) {
         if (overlayCategory != TopicCategory.SKILL) {
@@ -1869,7 +2059,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         if (entry.action == TopicAction.SKILL_ASCENT) {
             int modeX = minusX - TOPIC_CONTROL_GAP - controlSize;
             valueX = modeX - TOPIC_CONTROL_GAP - this.textRenderer.getWidth(valueLabel);
-            drawControlBox(context, modeX, controlY, controlSize, "S", mouseX, mouseY, ascentSurfaceMode);
+            drawControlBox(context, modeX, controlY, controlSize, "☀", mouseX, mouseY, ascentSurfaceMode);
         }
 
         int labelX = rowX + 4 + entry.indent * 8;
@@ -1887,18 +2077,31 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
     private String getAdjustableSkillValueLabel(TopicAction action) {
         return switch (action) {
             case SKILL_FISH -> fishTargetCount > 0 ? "Catches " + fishTargetCount : "Until sunset";
-            case SKILL_WOOL -> woolTargetCount > 0 ? "Wool " + woolTargetCount : "Default";
-            case SKILL_STRIPMINE -> stripmineLength > 0 ? "Length " + stripmineLength : "Default";
+            case SKILL_WOOL -> "Wool " + (woolTargetCount > 0 ? woolTargetCount : SKILL_WOOL_COUNT_DEFAULT);
+            case SKILL_STRIPMINE -> "Length " + (stripmineLength > 0 ? stripmineLength : SKILL_STRIPMINE_COUNT_DEFAULT);
             case SKILL_ASCENT -> ascentSurfaceMode
                     ? "Surface"
-                    : (ascentBlocks > 0 ? "Blocks " + ascentBlocks : "Default");
-            case SKILL_DESCENT -> descentBlocks > 0 ? "Blocks " + descentBlocks : "Default";
+                : "Blocks " + (ascentBlocks > 0 ? ascentBlocks : SKILL_ASCENT_COUNT_DEFAULT);
+            case SKILL_DESCENT -> "Blocks " + (descentBlocks > 0 ? descentBlocks : SKILL_DESCENT_COUNT_DEFAULT);
             default -> "";
         };
     }
 
     private void drawTopicRow(DrawContext context, int rowX, int rowY, int rowW, TopicEntry entry,
                               boolean active, int mouseX, int mouseY) {
+        if (entry == null) {
+            return;
+        }
+
+        if (isAdminHeaderEntry(entry)) {
+            context.fill(rowX, rowY, rowX + rowW, rowY + TOPIC_ROW_HEIGHT, 0xFF141414);
+            int accentY = rowY + TOPIC_ROW_HEIGHT - 1;
+            context.fill(rowX + 2, accentY, rowX + rowW - 2, accentY + 1, 0xFF5A4728);
+            int textY = rowY + Math.max(1, (TOPIC_ROW_HEIGHT - this.textRenderer.fontHeight) / 2);
+            context.drawText(this.textRenderer, entry.label != null ? entry.label : "", rowX + 4, textY, 0xFFB08C40, false);
+            return;
+        }
+
         boolean enabled;
         if (entry.category == TopicCategory.DIALOGUE) {
             enabled = isDialogueEntryEnabled(entry);
@@ -1918,7 +2121,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
 
         int textY = rowY + Math.max(1, (TOPIC_ROW_HEIGHT - this.textRenderer.fontHeight) / 2);
         int labelX = rowX + 4 + entry.indent * 8;
-        String label = entry.label;
+    String label = displayLabelForEntry(entry);
 
         // UI declutter: only show state for toggles; actions are implicit via clicking the row.
         String status = entry.toggle ? (active ? "ON" : "OFF") : null;
@@ -1940,10 +2143,36 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         }
     }
 
+    private String displayLabelForEntry(TopicEntry entry) {
+        if (entry == null) {
+            return "";
+        }
+        if (entry.category == TopicCategory.ADMIN && entry.action == TopicAction.ADMIN_PREVIEW_NON_ADMIN) {
+            return adminPreviewAsNonAdmin ? "Preview as Non-Admin (ON)" : "Preview as Non-Admin";
+        }
+        return entry.label != null ? entry.label : "";
+    }
+
     private void drawOverlayHoverTooltip(DrawContext context, int mouseX, int mouseY) {
         if (!topicsExpanded || overlayDraggingSplit) {
             overlayHoveredEntry = null;
+            overlayHoveredControlKey = null;
             return;
+        }
+
+        OverlayControlHover hoveredControl = getOverlayControlHover(mouseX, mouseY);
+        String controlKey = hoveredControl != null ? hoveredControl.key() : null;
+        if (!java.util.Objects.equals(controlKey, overlayHoveredControlKey)) {
+            overlayHoveredControlKey = controlKey;
+            overlayControlHoverStartedAtMs = System.currentTimeMillis();
+        }
+
+        if (hoveredControl != null) {
+            long now = System.currentTimeMillis();
+            if (now - overlayControlHoverStartedAtMs >= OVERLAY_HOVER_TOOLTIP_DELAY_MS) {
+                drawTooltipBox(context, mouseX, mouseY, hoveredControl.lines());
+                return;
+            }
         }
 
         // Only consider entries in the list area (below tabs).
@@ -1970,6 +2199,93 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         drawTooltipBox(context, mouseX, mouseY, lines);
     }
 
+    private OverlayControlHover getOverlayControlHover(double mouseX, double mouseY) {
+        if (!topicsExpanded || overlayCategory != TopicCategory.SKILL) {
+            return null;
+        }
+
+        int followDir = getFollowAdjustDirectionInOverlay(mouseX, mouseY);
+        if (followDir != 0) {
+            if (followDir > 0) {
+                return new OverlayControlHover(
+                        "follow:+",
+                        java.util.List.of(
+                                "Increase Follow Distance",
+                                "Adds " + String.format(Locale.ROOT, "%.1f", FOLLOW_DISTANCE_STEP) + " blocks.",
+                                "Current: " + formatFollowDistance()
+                        )
+                );
+            }
+            return new OverlayControlHover(
+                    "follow:-",
+                    java.util.List.of(
+                            "Decrease Follow Distance",
+                            "Reduces follow spacing by " + String.format(Locale.ROOT, "%.1f", FOLLOW_DISTANCE_STEP) + ".",
+                            "Current: " + formatFollowDistance()
+                    )
+            );
+        }
+
+        int woodcutDir = getWoodcutAdjustDirectionInOverlay(mouseX, mouseY);
+        if (woodcutDir != 0) {
+            if (woodcutDir > 0) {
+                return new OverlayControlHover(
+                        "woodcut:+",
+                        java.util.List.of("Woodcut Trees +1", "Increase tree target for the next woodcut run.")
+                );
+            }
+            return new OverlayControlHover(
+                    "woodcut:-",
+                    java.util.List.of("Woodcut Trees -1", "Decrease tree target. Reaching minimum keeps runs compact.")
+            );
+        }
+
+        SkillAdjustHit hit = getAdjustableSkillHitInOverlay(mouseX, mouseY);
+        if (hit == null || hit.action() == null || hit.control() == null) {
+            return null;
+        }
+
+        String key = hit.action().name() + ":" + hit.control().name();
+        return switch (hit.control()) {
+            case INCREMENT -> new OverlayControlHover(
+                    key,
+                    java.util.List.of(
+                            "Increase Amount",
+                            "Raises the value for " + readableSkillLabel(hit.action()) + "."
+                    )
+            );
+            case DECREMENT -> new OverlayControlHover(
+                    key,
+                    java.util.List.of(
+                            "Decrease Amount",
+                            "Lowers the value for " + readableSkillLabel(hit.action()) + "."
+                    )
+            );
+            case TOGGLE_MODE -> new OverlayControlHover(
+                    key,
+                    java.util.List.of(
+                            "Surface Mode",
+                            "Ascent digs upward until open sky when ON.",
+                            "Default ascent is " + SKILL_ASCENT_COUNT_DEFAULT + " blocks."
+                    )
+            );
+        };
+    }
+
+    private String readableSkillLabel(TopicAction action) {
+        if (action == null) {
+            return "this action";
+        }
+        return switch (action) {
+            case SKILL_FISH -> "Fishing";
+            case SKILL_WOOL -> "Wool";
+            case SKILL_STRIPMINE -> "Stripmine";
+            case SKILL_ASCENT -> "Ascent";
+            case SKILL_DESCENT -> "Descent";
+            default -> "this action";
+        };
+    }
+
     private java.util.List<String> getOverlayTooltipLines(TopicEntry entry) {
         if (entry == null) {
             return java.util.List.of();
@@ -1977,9 +2293,26 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
 
         // Prefer richer tooltips for Admin entries (these are the ones that get truncated / ambiguous).
         if (entry.category == TopicCategory.ADMIN) {
+            if (isAdminHeaderEntry(entry)) {
+                return java.util.List.of(entry.label != null ? entry.label : "Admin", "Category section");
+            }
+            if (entry.action == TopicAction.OPEN_PLAYER_SETTINGS) {
+                return java.util.List.of(
+                        "Player Permissions",
+                        "Configure global defaults and per-player overrides.",
+                        "Admins only."
+                );
+            }
+            if (entry.action == TopicAction.ADMIN_PREVIEW_NON_ADMIN) {
+                return java.util.List.of(
+                        "Preview as Non-Admin",
+                        "Shows the Admin tab exactly as non-admin players see it.",
+                        "Current: " + (adminPreviewAsNonAdmin ? "ON" : "OFF")
+                );
+            }
             if (entry.action == TopicAction.SKIN_POLICY_EVERYONE) {
                 return java.util.List.of(
-                        "Skin Change for Everyone",
+                        "Allow Skin Changes for Everyone",
                         "When ON, non-admin players may change bot skins.",
                         "When OFF, skin changes remain admin-only."
                 );
@@ -2029,38 +2362,38 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
                 );
             }
             if (k.equals("recruit_status")) {
-                return java.util.List.of("Recruitment status", "Shows current survival recruitment state.");
+                return java.util.List.of("Recruitment Status", "Shows the current survival recruitment state.");
             }
             if (k.equals("recruit_reset")) {
                 return java.util.List.of(
-                        "Reset recruitment (this world)",
-                        "Clears recruitment progress/state for testing.",
+                        "Recruitment Reset (This World)",
+                        "Clears recruitment progress and state for testing.",
                         "UI safety: click twice within 5s to confirm."
                 );
             }
             if (k.equals("recruit_enable")) {
                 return java.util.List.of(
-                        "Enable survival recruitment mode",
+                        "Recruitment Enable",
                         "Sets world mode to Questing (recruitment ON).",
                         "If switching from Admin mode, click again within 12s to confirm."
                 );
             }
             if (k.equals("recruit_disable")) {
                 return java.util.List.of(
-                        "Disable survival recruitment mode",
+                        "Recruitment Disable",
                         "Sets world mode to Admin (recruitment OFF).",
                         "If switching from Questing mode, click again within 12s to confirm."
                 );
             }
             if (k.equals("anchor_set")) {
-                return java.util.List.of("Set village anchor here", "Sets the village/settlement anchor at your position.");
+                return java.util.List.of("Set Village Anchor Here", "Sets the village/settlement anchor at your position.");
             }
             if (k.equals("anchor_clear")) {
-                return java.util.List.of("Clear village anchor", "Clears the saved village/settlement anchor.");
+                return java.util.List.of("Clear Village Anchor", "Clears the saved village/settlement anchor.");
             }
             if (k.startsWith("setstage:")) {
                 String n = k.substring("setstage:".length()).trim();
-                return java.util.List.of("Set companion stage: " + n, "Advances/rewinds companion quest stage.");
+                return java.util.List.of("Set Companion Stage: " + n, "Advances or rewinds companion quest stage.");
             }
 
             // Fallback: show the label.
@@ -2472,12 +2805,15 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
 
         // Admin topics include both operator-only utilities and gated companion commands.
         if (entry.category == TopicCategory.ADMIN) {
+            if (isAdminHeaderEntry(entry)) {
+                return;
+            }
             if (!isAdminEntryEnabled(entry)) {
                 return;
             }
             if (entry.label != null && !entry.label.isBlank()) {
                 net.wcfcarolina13.FrensClient.appendDialogue(botAlias,
-                        entry.action != null ? "You (Companion): " + entry.label : "You (Admin): " + entry.label);
+                        "You (Admin): " + entry.label);
             }
 
             if (entry.action != null) {
@@ -2547,6 +2883,8 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case OPEN_SPELLS -> openSpellsMenu();
             case OPEN_GUIDE -> openGuideMenu();
             case OPEN_BOT_CONTROLS -> openBotControls();
+            case OPEN_PLAYER_SETTINGS -> openAdminPlayerSettings();
+            case ADMIN_PREVIEW_NON_ADMIN -> toggleAdminPreviewAsNonAdmin();
             case OPEN_SKIN_CHOOSER -> openSkinChooser();
             case SKIN_POLICY_EVERYONE -> toggleSkinPolicyEveryone();
             case SKIN_POLICY_CUSTOM -> toggleSkinPolicyCustom();
@@ -2745,18 +3083,20 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         if (entry == null || entry.category != TopicCategory.ADMIN) {
             return false;
         }
-        // Spells are always accessible from this tab; the spell screen itself explains requirements
-        // and the server remains authoritative for what actually works.
-        if (entry.action == TopicAction.OPEN_SPELLS) {
+        if (isAdminHeaderEntry(entry)) {
+            return false;
+        }
+
+        boolean isAdmin = isAdminUser();
+        if (entry.action == TopicAction.OPEN_PLAYER_SETTINGS || entry.action == TopicAction.ADMIN_PREVIEW_NON_ADMIN) {
+            return isAdmin;
+        }
+
+        if (isAdmin && !adminPreviewAsNonAdmin) {
             return true;
         }
 
-        if (entry.action == TopicAction.OPEN_SKIN_CHOOSER) {
-            return isAdminUser() || FrensClient.isSkinChangeForEveryoneEnabled();
-        }
-
-        // Other recruitment/admin utilities remain operator-only.
-        return isAdminUser();
+        return adminPermissionAllowedForEntry(entry, isAdmin && adminPreviewAsNonAdmin);
     }
 
     private boolean isAdminTabEnabled() {
@@ -2983,6 +3323,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case GAMEPLAY_TIPS -> isGameplayTipsActive();
             case IDLE_HOBBIES_ANYWHERE -> isIdleHobbiesAnywhereActive();
             case BARITONE_PATHFINDER -> isBaritonePathfinderActive();
+            case ADMIN_PREVIEW_NON_ADMIN -> adminPreviewAsNonAdmin;
             case SKIN_POLICY_EVERYONE -> isSkinPolicyEveryoneActive();
             case SKIN_POLICY_CUSTOM -> isSkinPolicyCustomActive();
             case UNLEASH_TETHERED -> isUnleashTetheredActive();
@@ -3058,7 +3399,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
     }
 
     private void runStripmineSkillCommand() {
-        String arg = stripmineLength > 0 ? Integer.toString(stripmineLength) : null;
+        String arg = Integer.toString(stripmineLength > 0 ? stripmineLength : SKILL_STRIPMINE_COUNT_DEFAULT);
         queueDirectionalMiningCommand("stripmine", "stripmine", arg);
     }
 
@@ -3069,13 +3410,13 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         } else if (ascentBlocks > 0) {
             arg = "ascent " + ascentBlocks;
         } else {
-            arg = "ascent";
+            arg = "ascent " + SKILL_ASCENT_COUNT_DEFAULT;
         }
         queueDirectionalMiningCommand("ascent", "mining", arg);
     }
 
     private void runDescentSkillCommand() {
-        String arg = descentBlocks > 0 ? ("descent " + descentBlocks) : "descent";
+        String arg = "descent " + (descentBlocks > 0 ? descentBlocks : SKILL_DESCENT_COUNT_DEFAULT);
         queueDirectionalMiningCommand("descent", "mining", arg);
     }
 
@@ -3129,27 +3470,137 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         };
     }
 
-    /** Actions visible to ALL players in the Admin tab (no permission needed). */
-    private static final Set<TopicAction> COMMON_ADMIN_ACTIONS = Set.of(
-            TopicAction.OPEN_BOT_CONTROLS,
-            TopicAction.OPEN_SPELLS,
-            TopicAction.OPEN_SKIN_CHOOSER,
-            TopicAction.GAMEPLAY_TIPS,
-            TopicAction.IDLE_HOBBIES_ANYWHERE,
-            TopicAction.BARITONE_PATHFINDER
+    private static final Map<String, Boolean> DEFAULT_ADMIN_PERMISSION_GLOBALS = Map.ofEntries(
+            Map.entry("open_bot_controls", true),
+            Map.entry("open_spells", true),
+            Map.entry("open_skin_chooser", true),
+            Map.entry("gameplay_tips", true),
+            Map.entry("idle_hobbies_anywhere", true),
+            Map.entry("baritone_pathfinder", true),
+            Map.entry("skin_policy_everyone", false),
+            Map.entry("skin_policy_custom", false),
+            Map.entry("wizard_tome", false),
+            Map.entry("learning_manage", false),
+            Map.entry("recruit_manage", false),
+            Map.entry("recruit_reset", false),
+            Map.entry("village_anchor", false),
+            Map.entry("stage_debug", false)
     );
 
-    private List<TopicEntry> getVisibleAdminEntries() {
-        if (isAdminUser()) {
-            return ADMIN_TOPIC_ENTRIES;
+    private static String normalizedAliasKey(String alias) {
+        return alias == null ? "" : alias.trim().toLowerCase(Locale.ROOT);
+    }
+
+    private static String normalizeUuidKey(String uuid) {
+        return uuid == null ? "" : uuid.trim().toLowerCase(Locale.ROOT);
+    }
+
+    private boolean isAdminHeaderEntry(TopicEntry entry) {
+        return entry != null
+                && entry.category == TopicCategory.ADMIN
+                && entry.action == null
+                && "__header__".equals(entry.dialogueKey);
+    }
+
+    private String permissionKeyForAdminEntry(TopicEntry entry) {
+        if (entry == null || entry.category != TopicCategory.ADMIN) {
+            return null;
         }
-        // Non-operator: show only the common-tier entries.
-        java.util.ArrayList<TopicEntry> visible = new java.util.ArrayList<>();
-        for (TopicEntry entry : ADMIN_TOPIC_ENTRIES) {
-            if (entry != null && entry.action != null
-                    && COMMON_ADMIN_ACTIONS.contains(entry.action)) {
-                visible.add(entry);
+        if (entry.action != null) {
+            return switch (entry.action) {
+                case OPEN_BOT_CONTROLS -> "open_bot_controls";
+                case OPEN_SPELLS -> "open_spells";
+                case OPEN_SKIN_CHOOSER -> "open_skin_chooser";
+                case GAMEPLAY_TIPS -> "gameplay_tips";
+                case IDLE_HOBBIES_ANYWHERE -> "idle_hobbies_anywhere";
+                case BARITONE_PATHFINDER -> "baritone_pathfinder";
+                case SKIN_POLICY_EVERYONE -> "skin_policy_everyone";
+                case SKIN_POLICY_CUSTOM -> "skin_policy_custom";
+                default -> null;
+            };
+        }
+
+        String key = entry.dialogueKey != null ? entry.dialogueKey.trim().toLowerCase(Locale.ROOT) : "";
+        if (key.startsWith("setstage:")) {
+            return "stage_debug";
+        }
+        return switch (key) {
+            case "give_wizard_tome" -> "wizard_tome";
+            case "learning_status", "learning_start", "learning_stop_success", "learning_stop_fail", "learning_stop_abort" -> "learning_manage";
+            case "recruit_status", "recruit_enable", "recruit_disable" -> "recruit_manage";
+            case "recruit_reset" -> "recruit_reset";
+            case "anchor_set", "anchor_clear" -> "village_anchor";
+            default -> null;
+        };
+    }
+
+    private AdminPermissionsCache currentAdminPermissions() {
+        String key = normalizedAliasKey(botAlias);
+        synchronized (ADMIN_PERMISSIONS_BY_ALIAS) {
+            return ADMIN_PERMISSIONS_BY_ALIAS.get(key);
+        }
+    }
+
+    private boolean adminPermissionAllowedForEntry(TopicEntry entry, boolean previewAsNonAdmin) {
+        String permissionKey = permissionKeyForAdminEntry(entry);
+        if (permissionKey == null || permissionKey.isBlank()) {
+            return false;
+        }
+
+        boolean fallback = DEFAULT_ADMIN_PERMISSION_GLOBALS.getOrDefault(permissionKey, false);
+        AdminPermissionsCache cache = currentAdminPermissions();
+        if (cache == null) {
+            return fallback;
+        }
+
+        boolean allowed = cache.globalDefaults != null
+                ? cache.globalDefaults.getOrDefault(permissionKey, fallback)
+                : fallback;
+
+        if (!previewAsNonAdmin && this.client != null && this.client.player != null && cache.userOverrides != null) {
+            String uuid = normalizeUuidKey(this.client.player.getUuidAsString());
+            Map<String, Boolean> userMap = cache.userOverrides.get(uuid);
+            if (userMap != null && userMap.containsKey(permissionKey)) {
+                return Boolean.TRUE.equals(userMap.get(permissionKey));
             }
+        }
+        return allowed;
+    }
+
+    private List<TopicEntry> getVisibleAdminEntries() {
+        boolean isAdmin = isAdminUser();
+        boolean preview = isAdmin && adminPreviewAsNonAdmin;
+        java.util.ArrayList<TopicEntry> visible = new java.util.ArrayList<>();
+        TopicEntry pendingHeader = null;
+
+        for (TopicEntry entry : ADMIN_TOPIC_ENTRIES) {
+            if (entry == null) {
+                continue;
+            }
+
+            if (isAdminHeaderEntry(entry)) {
+                pendingHeader = entry;
+                continue;
+            }
+
+            boolean show;
+            if (entry.action == TopicAction.OPEN_PLAYER_SETTINGS || entry.action == TopicAction.ADMIN_PREVIEW_NON_ADMIN) {
+                show = isAdmin;
+            } else if (isAdmin && !preview) {
+                show = true;
+            } else {
+                show = adminPermissionAllowedForEntry(entry, preview);
+            }
+
+            if (!show) {
+                continue;
+            }
+
+            if (pendingHeader != null) {
+                visible.add(pendingHeader);
+                pendingHeader = null;
+            }
+            visible.add(entry);
         }
         return visible;
     }
@@ -3524,6 +3975,25 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         this.client.setScreen(new BotControlScreen(this));
     }
 
+    private void openAdminPlayerSettings() {
+        if (this.client == null || !isAdminUser()) {
+            return;
+        }
+        requestAdminPermissionsSnapshot(this.botAlias);
+        this.client.setScreen(new AdminPlayerSettingsScreen(this, this.botAlias));
+    }
+
+    private void toggleAdminPreviewAsNonAdmin() {
+        if (!isAdminUser()) {
+            return;
+        }
+        adminPreviewAsNonAdmin = !adminPreviewAsNonAdmin;
+        net.wcfcarolina13.FrensClient.appendDialogue(
+                botAlias,
+            "Admin: Non-admin preview is now " + (adminPreviewAsNonAdmin ? "ON" : "OFF") + "."
+        );
+    }
+
     private void openSkinChooser() {
         if (this.client == null) {
             return;
@@ -3627,8 +4097,8 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         }
         java.util.List<String> lines = new java.util.ArrayList<>();
         lines.add(switchBrowsedBlockReason);
-        lines.add("Use Wizard's Tome or approach");
-        lines.add("the bot to switch inventories.");
+        lines.add("Use a Wizard's Tome or move closer");
+        lines.add("to this bot before switching.");
         drawTooltipBox(context, mouseX, mouseY, lines);
     }
 
