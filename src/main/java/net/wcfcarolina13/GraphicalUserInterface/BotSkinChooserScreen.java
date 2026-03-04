@@ -14,6 +14,7 @@ import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.player.SkinTextures;
 import net.minecraft.client.input.KeyInput;
 import net.minecraft.sound.SoundEvents;
+import net.minecraft.text.OrderedText;
 import net.minecraft.text.Text;
 import net.minecraft.util.math.MathHelper;
 import net.wcfcarolina13.FrensClient;
@@ -58,6 +59,7 @@ public final class BotSkinChooserScreen extends Screen {
     private String selectedSkinId;           // null until user clicks
     private TextFieldWidget customUrlField;
     private String policyNotice = "";
+    private List<OrderedText> policyNoticeLines = List.of();
     private int customBtnX, customBtnY, customBtnW, customBtnH;
 
     // ── scroll state ────────────────────────────────────────────────────
@@ -100,6 +102,8 @@ public final class BotSkinChooserScreen extends Screen {
     private static final int BTN_ROW_H    = 24;
     private static final int RND_BTN_H    = 18;
     private static final int CUSTOM_ROW_H = 24;
+    private static final int NOTICE_H      = 24;
+    private static final int NOTICE_MAX_LINES = 2;
 
     // ═════════════════════════════════════════════════════════════════════
 
@@ -116,16 +120,16 @@ public final class BotSkinChooserScreen extends Screen {
     protected void init() {
         super.init();
 
-        panelW = Math.min(300, this.width - 20);
-        panelH = Math.min(250, this.height - 30);
+        panelW = Math.min(360, this.width - 20);
+        panelH = Math.min(270, this.height - 30);
         panelX = (this.width  - panelW) / 2;
         panelY = (this.height - panelH) / 2;
 
         // Left column: entity preview
         previewW = 90;
         previewX = panelX + GAP;
-        previewY = panelY + TITLE_H;
-        previewH = panelH - TITLE_H - BTN_ROW_H - CUSTOM_ROW_H;
+        previewY = panelY + TITLE_H + NOTICE_H;
+        previewH = panelH - TITLE_H - NOTICE_H - BTN_ROW_H - CUSTOM_ROW_H;
 
         // Right column: list of presets
         listX = previewX + previewW + GAP;
@@ -174,6 +178,7 @@ public final class BotSkinChooserScreen extends Screen {
         }
 
         policyNotice = buildPolicyNotice();
+        policyNoticeLines = wrapPolicyNotice(policyNotice);
     }
 
     // ── entity lookup ───────────────────────────────────────────────────
@@ -258,7 +263,7 @@ public final class BotSkinChooserScreen extends Screen {
         super.render(ctx, mouseX, mouseY, delta);
         this.lastMouseX = mouseX;
         this.lastMouseY = mouseY;
-        policyNotice = buildPolicyNotice();
+        refreshPolicyNotice();
 
         // Panel border + fill
         ctx.fill(panelX - 1, panelY - 1, panelX + panelW + 1, panelY + panelH + 1, COL_BORDER);
@@ -270,11 +275,24 @@ public final class BotSkinChooserScreen extends Screen {
         ctx.drawText(this.textRenderer, titleStr,
                 panelX + (panelW - titleW) / 2, panelY + 7, COL_TITLE, true);
 
-        if (!policyNotice.isBlank()) {
-            int noticeColor = canUsePresetChanges() ? 0xFFE6D7A3 : 0xFFE08A8A;
-            String shown = elide(policyNotice, panelW - 12);
-            ctx.drawText(this.textRenderer, shown, panelX + 6, panelY + 18, noticeColor, false);
+        int noticeTop = panelY + TITLE_H;
+        ctx.fill(panelX + 1, noticeTop, panelX + panelW - 1, noticeTop + NOTICE_H - 1, 0x22101010);
+        List<OrderedText> lines = policyNoticeLines;
+        int noticeColor = canUsePresetChanges() ? 0xFFE6D7A3 : 0xFFE08A8A;
+        if (lines.isEmpty()) {
+            lines = this.textRenderer.wrapLines(
+                    Text.literal("Tip: select a preset or paste a texture URL, then click Apply."),
+                    panelW - 12
+            );
+            noticeColor = COL_DESC;
         }
+        int maxLines = Math.min(NOTICE_MAX_LINES, lines.size());
+        int noticeY = noticeTop + 4;
+        for (int i = 0; i < maxLines; i++) {
+            ctx.drawText(this.textRenderer, lines.get(i), panelX + 6, noticeY, noticeColor, false);
+            noticeY += 9;
+        }
+        ctx.fill(panelX + 6, noticeTop + NOTICE_H - 1, panelX + panelW - 6, noticeTop + NOTICE_H, COL_SEC_LINE);
 
         // Bot preview
         renderPreview(ctx, mouseX, mouseY);
@@ -649,7 +667,7 @@ public final class BotSkinChooserScreen extends Screen {
             return "Skin changes are currently restricted to server admins.";
         }
         if (!isCurrentPlayerAdmin() && !FrensClient.isCustomSkinsEnabled()) {
-            return "Custom URL skins are disabled by admin; non-admin custom skins were reverted to Steve.";
+            return "Custom URL skins are disabled for non-admins; existing custom skins were reset to Steve.";
         }
         if (isCurrentPlayerAdmin() && !FrensClient.isCustomSkinsEnabled()) {
             return "Custom URL skins are disabled for non-admin players.";
@@ -657,22 +675,24 @@ public final class BotSkinChooserScreen extends Screen {
         return "";
     }
 
-    private String elide(String input, int maxWidth) {
-        if (input == null || input.isBlank()) return "";
-        if (this.textRenderer.getWidth(input) <= maxWidth) return input;
-        String e = "…";
-        int lo = 0;
-        int hi = input.length();
-        while (lo < hi) {
-            int mid = (lo + hi + 1) >>> 1;
-            String cand = input.substring(0, mid) + e;
-            if (this.textRenderer.getWidth(cand) <= maxWidth) {
-                lo = mid;
-            } else {
-                hi = mid - 1;
-            }
+    private void refreshPolicyNotice() {
+        String newNotice = buildPolicyNotice();
+        if (Objects.equals(newNotice, this.policyNotice)) {
+            return;
         }
-        return input.substring(0, lo) + e;
+        this.policyNotice = newNotice;
+        this.policyNoticeLines = wrapPolicyNotice(newNotice);
+    }
+
+    private List<OrderedText> wrapPolicyNotice(String notice) {
+        if (notice == null || notice.isBlank()) {
+            return List.of();
+        }
+        List<OrderedText> wrapped = this.textRenderer.wrapLines(Text.literal(notice), panelW - 12);
+        if (wrapped.size() <= NOTICE_MAX_LINES) {
+            return wrapped;
+        }
+        return new ArrayList<>(wrapped.subList(0, NOTICE_MAX_LINES));
     }
 
     private String extractTextureUrlFromProfile(GameProfile profile) {
