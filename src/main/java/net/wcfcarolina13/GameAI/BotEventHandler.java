@@ -1111,17 +1111,32 @@ public class BotEventHandler {
             net.wcfcarolina13.FilingSystem.ManualConfig.BotSpawn spawn =
                     net.wcfcarolina13.Frens.CONFIG.getBotSpawn(alias);
             if (spawn != null && spawn.dimension() != null) {
-                net.minecraft.util.Identifier dimId = net.minecraft.util.Identifier.tryParse(spawn.dimension());
-                if (dimId != null) {
-                    RegistryKey<World> key = RegistryKey.of(RegistryKeys.WORLD, dimId);
-                    ServerWorld spawnWorld = srv.getWorld(key);
-                    if (spawnWorld != null) {
-                        BlockPos spawnPos = BlockPos.ofFloored(spawn.x(), spawn.y(), spawn.z());
-                        BlockPos safeSpawn = SafePositionService.findSafeSurface(spawnWorld, spawnPos, 5, 10);
-                        if (safeSpawn != null) {
-                            destinationWorld = spawnWorld;
-                            target = new Vec3d(safeSpawn.getX() + 0.5, safeSpawn.getY() + 0.1, safeSpawn.getZ() + 0.5);
-                            respawnLog = "BotSpawn config near " + spawnPos.toShortString();
+                String currentLevelName = srv.getSaveProperties() != null
+                        ? srv.getSaveProperties().getLevelName()
+                        : null;
+                String spawnLevelName = spawn.levelName();
+                boolean levelMatches = spawnLevelName == null
+                        || spawnLevelName.isBlank()
+                        || currentLevelName == null
+                        || spawnLevelName.equalsIgnoreCase(currentLevelName);
+                if (!levelMatches) {
+                    LOGGER.info("[Frens] Respawn for {}: ignoring BotSpawn from different level '{}' (current='{}').",
+                            alias,
+                            spawnLevelName,
+                            currentLevelName);
+                } else {
+                    net.minecraft.util.Identifier dimId = net.minecraft.util.Identifier.tryParse(spawn.dimension());
+                    if (dimId != null) {
+                        RegistryKey<World> key = RegistryKey.of(RegistryKeys.WORLD, dimId);
+                        ServerWorld spawnWorld = srv.getWorld(key);
+                        if (spawnWorld != null) {
+                            BlockPos spawnPos = BlockPos.ofFloored(spawn.x(), spawn.y(), spawn.z());
+                            BlockPos safeSpawn = SafePositionService.findSafeSurface(spawnWorld, spawnPos, 5, 10);
+                            if (safeSpawn != null) {
+                                destinationWorld = spawnWorld;
+                                target = new Vec3d(safeSpawn.getX() + 0.5, safeSpawn.getY() + 0.1, safeSpawn.getZ() + 0.5);
+                                respawnLog = "BotSpawn config near " + spawnPos.toShortString();
+                            }
                         }
                     }
                 }

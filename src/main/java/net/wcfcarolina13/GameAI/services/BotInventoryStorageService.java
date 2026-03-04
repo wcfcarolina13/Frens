@@ -19,8 +19,14 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.FileTime;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashSet;
+import java.util.List;
 import java.text.Normalizer;
 import java.util.Locale;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Pattern;
 
@@ -30,6 +36,7 @@ public final class BotInventoryStorageService {
     /** Old mod-ID subdirectory used before the ai-player → frens rename. */
     private static final String LEGACY_MOD_DIR = "ai-player";
     private static final AtomicBoolean MIGRATION_DONE = new AtomicBoolean(false);
+    private static final long SNAPSHOT_STALE_GRACE_MS = 2_000L;
 
     private static final String KEY_ALIAS = "Alias";
     private static final String KEY_UUID = "Uuid";
@@ -124,9 +131,17 @@ public final class BotInventoryStorageService {
             return false;
         }
 
-        Path path = resolveInventoryPath(server, bot);
+        Path path = resolveBestInventoryPath(server, bot);
         if (path == null || !Files.exists(path)) {
             return false;
+        }
+
+        Path primaryPath = resolveInventoryPath(server, bot);
+        if (primaryPath != null && !path.equals(primaryPath)) {
+            LOGGER.info("Using fallback inventory snapshot for '{}': {} (expected {})",
+                    bot.getName().getString(),
+                    path.getFileName(),
+                    primaryPath.getFileName());
         }
 
         NbtCompound root;
@@ -201,29 +216,72 @@ public final class BotInventoryStorageService {
         return true;
     }
 
+    /**
+     * Returns true when loading a custom inventory snapshot is safe at join time.
+     *
+     * <p>When vanilla PlayerManager restoration already succeeded, an older custom snapshot
+     * should not overwrite newer vanilla data. We compare file mtimes with a small grace window.
+     */
+    public static boolean shouldRestoreOnJoin(MinecraftServer server,
+                                              ServerPlayerEntity bot,
+                                              boolean managerRestored) {
+        if (server == null || bot == null) {
+            return false;
+        }
+        Path snapshotPath = resolveBestInventoryPath(server, bot);
+        if (snapshotPath == null || !Files.exists(snapshotPath)) {
+            return false;
+        }
+
+        if (!managerRestored) {
+            return true;
+        }
+
+        Path playerDataPath = server.getSavePath(WorldSavePath.PLAYERDATA)
+                .resolve(bot.getUuidAsString() + ".dat");
+        if (!Files.exists(playerDataPath)) {
+            return true;
+        }
+
+        try {
+            long snapshotMs = Files.getLastModifiedTime(snapshotPath).toMillis();
+            long vanillaMs = Files.getLastModifiedTime(playerDataPath).toMillis();
+            boolean staleSnapshot = snapshotMs + SNAPSHOT_STALE_GRACE_MS < vanillaMs;
+            if (staleSnapshot) {
+                LOGGER.info("Skipping stale inventory snapshot for '{}': snapshot={} vanillaDat={} (ageDiffMs={})",
+                        bot.getName().getString(),
+                        snapshotPath.getFileName(),
+                        playerDataPath.getFileName(),
+                        vanillaMs - snapshotMs);
+                return false;
+            }
+        } catch (IOException e) {
+            LOGGER.warn("Unable to compare snapshot age for '{}': {}",
+                    bot.getName().getString(),
+                    e.getMessage());
+        }
+        return true;
+    }
+
     private static Path resolveInventoryPath(MinecraftServer server, ServerPlayerEntity bot) {
-        Path base = server.getSavePath(WorldSavePath.PLAYERDATA);
-        if (base == null) {
+        if (server == null || bot == null) {
             return null;
         }
-        migrateFromLegacyDir(base);
         String alias = sanitizeAliasForStorage(bot.getGameProfile().name());
-        String fileName = alias + "_" + bot.getUuidAsString() + ".nbt";
-        return base.resolve("frens").resolve("inventories").resolve(fileName);
+        return resolveInventoryPathForAliasUuid(server, alias, bot.getUuidAsString());
     }
 
     public static Path resolveInventoryPathForAliasUuid(MinecraftServer server, String alias, String uuidRaw) {
         if (server == null || alias == null || alias.isBlank() || uuidRaw == null || uuidRaw.isBlank()) {
             return null;
         }
-        Path base = server.getSavePath(WorldSavePath.PLAYERDATA);
-        if (base == null) {
+        Path inventoriesDir = inventoryDirectory(server);
+        if (inventoriesDir == null) {
             return null;
         }
-        migrateFromLegacyDir(base);
         String safeAlias = sanitizeAliasForStorage(alias);
         String fileName = safeAlias + "_" + uuidRaw.trim() + ".nbt";
-        return base.resolve("frens").resolve("inventories").resolve(fileName);
+        return inventoriesDir.resolve(fileName);
     }
 
     public static boolean delete(ServerPlayerEntity bot) {
@@ -231,16 +289,89 @@ public final class BotInventoryStorageService {
         if (server == null) {
             return false;
         }
-        Path path = resolveInventoryPath(server, bot);
-        if (path == null) {
+        Set<Path> candidates = collectCandidateSnapshots(server, bot.getGameProfile().name(), bot.getUuidAsString());
+        if (candidates.isEmpty()) {
             return false;
         }
-        try {
-            return Files.deleteIfExists(path);
+        boolean deleted = false;
+        for (Path path : candidates) {
+            try {
+                if (Files.deleteIfExists(path)) {
+                    deleted = true;
+                    LOGGER.info("Deleted inventory snapshot for '{}': {}", bot.getName().getString(), path.getFileName());
+                }
+            } catch (IOException e) {
+                LOGGER.warn("Failed to delete inventory snapshot '{}' for '{}': {}",
+                        path.getFileName(),
+                        bot.getName().getString(),
+                        e.getMessage());
+            }
+        }
+        return deleted;
+    }
+
+    private static Path resolveBestInventoryPath(MinecraftServer server, ServerPlayerEntity bot) {
+        Path primary = resolveInventoryPath(server, bot);
+        if (primary != null && Files.exists(primary)) {
+            return primary;
+        }
+        List<Path> candidates = new ArrayList<>(collectCandidateSnapshots(server, bot.getGameProfile().name(), bot.getUuidAsString()));
+        if (candidates.isEmpty()) {
+            return null;
+        }
+        candidates.sort(Comparator.comparing(BotInventoryStorageService::safeLastModified).reversed());
+        return candidates.get(0);
+    }
+
+    private static Set<Path> collectCandidateSnapshots(MinecraftServer server, String aliasRaw, String uuidRaw) {
+        Set<Path> out = new HashSet<>();
+        Path inventoriesDir = inventoryDirectory(server);
+        if (inventoriesDir == null || !Files.isDirectory(inventoriesDir)) {
+            return out;
+        }
+
+        String safeAlias = sanitizeAliasForStorage(aliasRaw);
+        String uuid = uuidRaw == null ? "" : uuidRaw.trim().toLowerCase(Locale.ROOT);
+        Path exact = resolveInventoryPathForAliasUuid(server, safeAlias, uuidRaw);
+        if (exact != null && Files.exists(exact)) {
+            out.add(exact);
+        }
+
+        String aliasPrefix = safeAlias + "_";
+        String uuidSuffix = uuid.isBlank() ? "" : ("_" + uuid + ".nbt");
+        try (var stream = Files.list(inventoriesDir)) {
+            stream.filter(Files::isRegularFile)
+                    .filter(path -> path.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".nbt"))
+                    .forEach(path -> {
+                        String file = path.getFileName().toString().toLowerCase(Locale.ROOT);
+                        if (file.startsWith(aliasPrefix) || (!uuidSuffix.isBlank() && file.endsWith(uuidSuffix))) {
+                            out.add(path);
+                        }
+                    });
         } catch (IOException e) {
-            LOGGER.warn("Failed to delete inventory snapshot for '{}': {}", bot.getName().getString(), e.getMessage());
-            return false;
+            LOGGER.warn("Unable to scan inventory snapshots under '{}': {}", inventoriesDir, e.getMessage());
         }
+        return out;
+    }
+
+    private static FileTime safeLastModified(Path path) {
+        try {
+            return Files.getLastModifiedTime(path);
+        } catch (IOException e) {
+            return FileTime.fromMillis(0L);
+        }
+    }
+
+    private static Path inventoryDirectory(MinecraftServer server) {
+        if (server == null) {
+            return null;
+        }
+        Path base = server.getSavePath(WorldSavePath.PLAYERDATA);
+        if (base == null) {
+            return null;
+        }
+        migrateFromLegacyDir(base);
+        return base.resolve("frens").resolve("inventories");
     }
 
     public static String sanitizeAliasForStorage(String value) {

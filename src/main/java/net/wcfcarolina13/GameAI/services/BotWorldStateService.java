@@ -35,7 +35,30 @@ public final class BotWorldStateService {
     private BotWorldStateService() {}
 
     private static String worldKey(MinecraftServer server) {
-        return server.getSaveProperties().getLevelName();
+        String levelName = legacyWorldKey(server);
+        String rootFingerprint = "unknown";
+        if (server != null) {
+            try {
+                Path root = server.getSavePath(WorldSavePath.ROOT);
+                if (root != null) {
+                    String normalized = root.toAbsolutePath().normalize().toString().toLowerCase(Locale.ROOT);
+                    rootFingerprint = Integer.toUnsignedString(normalized.hashCode(), 16);
+                }
+            } catch (Exception ignored) {
+            }
+        }
+        return levelName + "#" + rootFingerprint;
+    }
+
+    private static String legacyWorldKey(MinecraftServer server) {
+        if (server == null || server.getSaveProperties() == null) {
+            return "default";
+        }
+        String levelName = server.getSaveProperties().getLevelName();
+        if (levelName == null || levelName.isBlank()) {
+            return "default";
+        }
+        return levelName.trim();
     }
 
     private static Path stateFile() {
@@ -89,9 +112,25 @@ public final class BotWorldStateService {
     public static Optional<BotState> loadState(MinecraftServer server, String alias) {
         ensureLoaded();
         String key = worldKey(server);
+        String legacyKey = legacyWorldKey(server);
         Map<String, BotState> worldMap = STATE.get(normalizeAlias(alias));
         if (worldMap == null) return Optional.empty();
-        return Optional.ofNullable(worldMap.get(key));
+        BotState state = worldMap.get(key);
+        if (state != null) {
+            return Optional.of(state);
+        }
+
+        // Backward compatibility: pre-fingerprint entries were keyed only by levelName.
+        BotState legacyState = worldMap.get(legacyKey);
+        if (legacyState != null) {
+            worldMap.put(key, legacyState);
+            worldMap.remove(legacyKey);
+            flush();
+            LOGGER.info("Migrated legacy bot world-state key for alias '{}' from '{}' to '{}'.", alias, legacyKey, key);
+            return Optional.of(legacyState);
+        }
+
+        return Optional.empty();
     }
 
     public static void saveState(ServerPlayerEntity bot) {
@@ -120,12 +159,15 @@ public final class BotWorldStateService {
         }
         ensureLoaded();
         String key = worldKey(server);
+        String legacyKey = legacyWorldKey(server);
         String normalizedAlias = normalizeAlias(alias);
         Map<String, BotState> worldMap = STATE.get(normalizedAlias);
         if (worldMap == null) {
             return;
         }
-        if (worldMap.remove(key) != null) {
+        boolean removed = worldMap.remove(key) != null;
+        removed = (worldMap.remove(legacyKey) != null) || removed;
+        if (removed) {
             if (worldMap.isEmpty()) {
                 STATE.remove(normalizedAlias);
             }

@@ -125,12 +125,23 @@ public final class BotPersistenceService {
                     restoreSeq,
                     entityReady);
             if (!bot.isRemoved()) {
-                boolean loaded = BotInventoryStorageService.load(bot);
-                LOGGER.info("[PersistCheck] inventory-load bot={} loaded={} tick={} vitalsAfterLoad={}",
+                boolean shouldLoadSnapshot = BotInventoryStorageService.shouldRestoreOnJoin(server, bot, managerRestored);
+                boolean loaded = false;
+                if (shouldLoadSnapshot) {
+                    loaded = BotInventoryStorageService.load(bot);
+                } else {
+                    LOGGER.info("[PersistCheck] inventory-load-skipped bot={} reason=stale-or-missing-snapshot managerRestored={} tick={} vitalsBeforeSkip={}",
                         bot.getName().getString(),
-                        loaded,
+                        managerRestored,
                         server.getTicks(),
                         vitalsSnapshot(bot));
+                }
+                LOGGER.info("[PersistCheck] inventory-load bot={} loaded={} attempted={} tick={} vitalsAfterLoad={}",
+                    bot.getName().getString(),
+                    loaded,
+                    shouldLoadSnapshot,
+                    server.getTicks(),
+                    vitalsSnapshot(bot));
                 BotWorldStateService.loadState(server, bot.getName().getString()).ifPresentOrElse(state -> {
                     LOGGER.info("Restoring {} to last position in world {}: {},{},{}, yaw={}, pitch={}",
                             bot.getName().getString(),
