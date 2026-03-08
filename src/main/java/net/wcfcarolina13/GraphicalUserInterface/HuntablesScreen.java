@@ -14,23 +14,36 @@ import net.minecraft.text.Text;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.math.MathHelper;
 import net.wcfcarolina13.network.RequestHuntablesPayload;
+import net.wcfcarolina13.network.SaveHuntConfigPayload;
 
 import java.lang.reflect.Type;
 import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
- * Huntables list window (mobs the bot can hunt, unlocked by prior kills).
+ * Huntables list window — multi-select targets, depopulation toggle, zone size cycling.
  */
 public class HuntablesScreen extends Screen {
 
     private static final Gson GSON = new GsonBuilder().disableHtmlEscaping().create();
     private static final Type LIST_TYPE = new TypeToken<List<Map<String, Object>>>() {}.getType();
+    private static final Type MAP_TYPE = new TypeToken<Map<String, Object>>() {}.getType();
 
     private record HuntEntry(String id, String label, boolean unlocked, boolean food) {}
 
     private static List<HuntEntry> LAST_HUNTABLES = List.of();
+
+    // ── Config state received from server ───────────────────────────────
+    private static boolean configDepopulation = true;
+    private static String configZone = "STANDARD";
+    private static List<String> configSelectedTargets = List.of();
+
+    private static final String[] ZONE_NAMES = {"STANDARD", "EXPANDED", "SPRAWLING"};
+    private static final String[] ZONE_LABELS = {"Standard", "Expanded", "Sprawling"};
 
     public static void applyHuntablesJson(String json) {
         if (json == null) {
@@ -67,17 +80,35 @@ public class HuntablesScreen extends Screen {
         }
     }
 
+    public static void applyHuntConfigJson(String json) {
+        if (json == null) return;
+        try {
+            Map<String, Object> parsed = GSON.fromJson(json, MAP_TYPE);
+            if (parsed == null) return;
+            if (parsed.get("depopulationEnabled") instanceof Boolean b) configDepopulation = b;
+            if (parsed.get("zone") instanceof String s) configZone = s;
+            if (parsed.get("selectedTargets") instanceof List<?> list) {
+                configSelectedTargets = list.stream()
+                        .filter(o -> o instanceof String)
+                        .map(o -> (String) o)
+                        .toList();
+            }
+        } catch (Exception ignored) {}
+    }
+
     private final Screen parent;
     private final String botTarget;
     private int scroll;
-    private int selectedIndex = -1;
     private TextFieldWidget countField;
 
-    private static final int ROW_H = 12;
-    private static final int TOP_Y = 28;
-    private static final int CONTROL_ROW_DY = 24;
+    // ── Local config state (mirrors server config, editable in UI) ──────
+    private boolean depopulationEnabled = configDepopulation;
+    private int zoneIndex = zoneIndexOf(configZone);
+    private final Set<String> selectedTargets = new HashSet<>(configSelectedTargets);
+
+    private static final int ROW_H = 14;
+    private static final int TOP_Y = 24;
     private static final int BUTTON_H = 20;
-    private static final int LIST_TOP_GAP = 8;
     private static final int LIST_BOTTOM_MARGIN = 32;
     private static final int LIST_MIN_H = 60;
 
@@ -89,26 +120,82 @@ public class HuntablesScreen extends Screen {
 
     @Override
     protected void init() {
-        int cx = this.width / 2;
-        int top = TOP_Y;
+        // Sync from latest server config
+        depopulationEnabled = configDepopulation;
+        zoneIndex = zoneIndexOf(configZone);
+        selectedTargets.clear();
+        selectedTargets.addAll(configSelectedTargets);
 
-        this.countField = new TextFieldWidget(this.textRenderer, cx - 110, top, 120, 18, Text.literal("Count"));
+        int cx = this.width / 2;
+        int y = TOP_Y;
+
+        // Row 1: Count field + Refresh
+        this.countField = new TextFieldWidget(this.textRenderer, cx - 110, y, 100, 18, Text.literal("Count"));
         this.countField.setMaxLength(5);
-        this.countField.setPlaceholder(Text.literal("Count (optional)"));
+        this.countField.setPlaceholder(Text.literal("Count"));
         this.addDrawableChild(this.countField);
 
-        int btnY = top;
-        this.addDrawableChild(ButtonWidget.builder(Text.literal("Refresh"), (btn) -> requestRefresh())
-                .dimensions(cx + 20, btnY, 70, BUTTON_H)
-                .build());
-        this.addDrawableChild(ButtonWidget.builder(Text.literal("Hunt"), (btn) -> huntSelected())
-                .dimensions(cx - 40, btnY + CONTROL_ROW_DY, 60, BUTTON_H)
-                .build());
-        this.addDrawableChild(ButtonWidget.builder(Text.literal("Close"), (btn) -> close())
-                .dimensions(cx + 30, btnY + CONTROL_ROW_DY, 70, BUTTON_H)
-                .build());
+        this.addDrawableChild(ButtonWidget.builder(Text.literal("Refresh"), btn -> requestRefresh())
+                .dimensions(cx + 10, y, 60, BUTTON_H).build());
+
+        // Row 2: Depopulation toggle + Zone size
+        y += 24;
+        this.addDrawableChild(ButtonWidget.builder(
+                Text.literal(depopLabel()), btn -> {
+                    depopulationEnabled = !depopulationEnabled;
+                    btn.setMessage(Text.literal(depopLabel()));
+                    saveConfig();
+                }).dimensions(cx - 110, y, 110, BUTTON_H).build());
+
+        this.addDrawableChild(ButtonWidget.builder(
+                Text.literal("Zone: " + ZONE_LABELS[zoneIndex]), btn -> {
+                    zoneIndex = (zoneIndex + 1) % ZONE_NAMES.length;
+                    btn.setMessage(Text.literal("Zone: " + ZONE_LABELS[zoneIndex]));
+                    saveConfig();
+                }).dimensions(cx + 10, y, 100, BUTTON_H).build());
+
+        // Row 3: Hunt + All Edible + Close
+        y += 24;
+        this.addDrawableChild(ButtonWidget.builder(Text.literal("Hunt"), btn -> huntSelected())
+                .dimensions(cx - 110, y, 50, BUTTON_H).build());
+        this.addDrawableChild(ButtonWidget.builder(Text.literal("All Edible"), btn -> selectAllEdible())
+                .dimensions(cx - 50, y, 70, BUTTON_H).build());
+        this.addDrawableChild(ButtonWidget.builder(Text.literal("Close"), btn -> close())
+                .dimensions(cx + 30, y, 60, BUTTON_H).build());
 
         requestRefresh();
+    }
+
+    private String depopLabel() {
+        return depopulationEnabled ? "Depop: ON" : "Depop: OFF";
+    }
+
+    private static int zoneIndexOf(String name) {
+        for (int i = 0; i < ZONE_NAMES.length; i++) {
+            if (ZONE_NAMES[i].equalsIgnoreCase(name)) return i;
+        }
+        return 0;
+    }
+
+    private void selectAllEdible() {
+        selectedTargets.clear();
+        for (HuntEntry entry : getHuntablesSnapshot()) {
+            if (entry.unlocked()) {
+                selectedTargets.add(entry.id());
+            }
+        }
+        saveConfig();
+    }
+
+    private void saveConfig() {
+        if (!ClientPlayNetworking.canSend(SaveHuntConfigPayload.ID)) return;
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("botName", botTarget != null ? botTarget : "");
+        out.put("depopulationEnabled", depopulationEnabled);
+        out.put("zone", ZONE_NAMES[zoneIndex]);
+        out.put("selectedTargets", new ArrayList<>(selectedTargets));
+        String json = GSON.toJson(out);
+        ClientPlayNetworking.send(new SaveHuntConfigPayload(json));
     }
 
     private void requestRefresh() {
@@ -145,7 +232,16 @@ public class HuntablesScreen extends Screen {
                 int idx = scroll + row;
                 List<HuntEntry> entries = getHuntablesSnapshot();
                 if (idx >= 0 && idx < entries.size()) {
-                    selectedIndex = idx;
+                    HuntEntry entry = entries.get(idx);
+                    if (entry.unlocked()) {
+                        // Toggle multi-select
+                        if (selectedTargets.contains(entry.id())) {
+                            selectedTargets.remove(entry.id());
+                        } else {
+                            selectedTargets.add(entry.id());
+                        }
+                        saveConfig();
+                    }
                     return true;
                 }
             }
@@ -166,7 +262,7 @@ public class HuntablesScreen extends Screen {
         super.render(context, mouseX, mouseY, delta);
 
         int cx = this.width / 2;
-        context.drawCenteredTextWithShadow(this.textRenderer, this.title, cx, 10, 0xFFFFFF);
+        context.drawCenteredTextWithShadow(this.textRenderer, this.title, cx, 8, 0xFFFFFF);
 
         Rect list = listRect();
         List<HuntEntry> entries = getHuntablesSnapshot();
@@ -185,20 +281,31 @@ public class HuntablesScreen extends Screen {
         int y = list.y + 2;
         for (int i = start; i < end; i++) {
             HuntEntry entry = entries.get(i);
-            if (i == selectedIndex) {
-                context.fill(list.x + 1, y, list.x + list.w - 1, y + ROW_H, 0x553A2C14);
+            boolean selected = selectedTargets.contains(entry.id());
+
+            // Highlight selected rows
+            if (selected) {
+                context.fill(list.x + 1, y, list.x + list.w - 1, y + ROW_H, 0x44567832);
             }
-            int color = entry.unlocked() ? 0xFFE6D7A3 : 0xFF7F6F5A;
-            String label = entry.label();
+
+            // Checkmark for selected
+            String prefix = selected ? "\u2714 " : "  ";
+            int color = entry.unlocked() ? (selected ? 0xFFA8D86A : 0xFFE6D7A3) : 0xFF7F6F5A;
+            String label = prefix + entry.label();
             if (!entry.unlocked() && entry.food()) {
                 label = label + " (locked)";
             }
-            context.drawText(this.textRenderer, label, list.x + 6, y + 1, color, false);
+            context.drawText(this.textRenderer, label, list.x + 4, y + 2, color, false);
             y += ROW_H;
         }
 
         context.drawCenteredTextWithShadow(this.textRenderer, Text.literal("Huntable Mobs"), list.x + list.w / 2, list.y - 12, 0xFFE6D7A3);
-        String hint = "Select a mob and Hunt. Blank count hunts until sunset.";
+
+        // Status line
+        int selCount = selectedTargets.size();
+        String hint = selCount == 0
+                ? "Click mobs to select. Empty = hunt anything edible."
+                : selCount + " target" + (selCount != 1 ? "s" : "") + " selected.";
         context.drawCenteredTextWithShadow(this.textRenderer, Text.literal(hint), cx, list.bottom() + 6, 0xFFB0B0B0);
     }
 
@@ -215,26 +322,8 @@ public class HuntablesScreen extends Screen {
     }
 
     private void huntSelected() {
-        List<HuntEntry> entries = getHuntablesSnapshot();
-        if (selectedIndex < 0 || selectedIndex >= entries.size()) {
-            if (this.client != null && this.client.player != null) {
-                this.client.player.sendMessage(Text.literal("Select a huntable mob first."), true);
-            }
-            return;
-        }
-        HuntEntry entry = entries.get(selectedIndex);
-        sendHuntCommand(entry);
-    }
+        if (this.client == null || this.client.getNetworkHandler() == null) return;
 
-    private void sendHuntCommand(HuntEntry entry) {
-        if (this.client == null || this.client.getNetworkHandler() == null || entry == null) {
-            return;
-        }
-        String target = entry.id();
-        Identifier id = Identifier.tryParse(target);
-        if (id != null && "minecraft".equals(id.getNamespace())) {
-            target = id.getPath();
-        }
         String count = countField != null ? countField.getText() : "";
         StringBuilder command = new StringBuilder("bot skill hunt ");
         if (count != null && !count.isBlank()) {
@@ -243,17 +332,29 @@ public class HuntablesScreen extends Screen {
                 command.append(cleaned).append(" ");
             }
         }
-        command.append(target);
+
+        // If specific targets selected, pick the first as the explicit target for the command.
+        // The config service stores the full multi-select list, so the skill will respect it.
+        if (!selectedTargets.isEmpty()) {
+            String firstTarget = selectedTargets.iterator().next();
+            Identifier id = Identifier.tryParse(firstTarget);
+            if (id != null && "minecraft".equals(id.getNamespace())) {
+                firstTarget = id.getPath();
+            }
+            command.append(firstTarget);
+        }
+
         if (botTarget != null && !botTarget.isBlank()) {
             command.append(" ").append(botTarget);
         }
-        this.client.getNetworkHandler().sendChatCommand(command.toString());
+        this.client.getNetworkHandler().sendChatCommand(command.toString().trim());
     }
 
     private Rect listRect() {
         int cx = this.width / 2;
-        int listY = TOP_Y + CONTROL_ROW_DY + BUTTON_H + LIST_TOP_GAP + 8;
-        int listW = 180;
+        // Below the 3 control rows
+        int listY = TOP_Y + 24 + 24 + BUTTON_H + 8;
+        int listW = 220;
         int listH = MathHelper.clamp(this.height - listY - LIST_BOTTOM_MARGIN, LIST_MIN_H, 220);
         return new Rect(cx - listW / 2, listY, listW, listH);
     }

@@ -466,6 +466,9 @@ public class Frens implements ModInitializer {
         PayloadTypeRegistry.playS2C().register(net.wcfcarolina13.network.ResumeDecisionPayload.ID, net.wcfcarolina13.network.ResumeDecisionPayload.CODEC);
         PayloadTypeRegistry.playC2S().register(net.wcfcarolina13.network.RequestHuntablesPayload.ID, net.wcfcarolina13.network.RequestHuntablesPayload.CODEC);
         PayloadTypeRegistry.playS2C().register(net.wcfcarolina13.network.HuntablesPayload.ID, net.wcfcarolina13.network.HuntablesPayload.CODEC);
+        PayloadTypeRegistry.playS2C().register(net.wcfcarolina13.network.HuntDiscoveryPayload.ID, net.wcfcarolina13.network.HuntDiscoveryPayload.CODEC);
+        PayloadTypeRegistry.playC2S().register(net.wcfcarolina13.network.SaveHuntConfigPayload.ID, net.wcfcarolina13.network.SaveHuntConfigPayload.CODEC);
+        PayloadTypeRegistry.playS2C().register(net.wcfcarolina13.network.HuntConfigPayload.ID, net.wcfcarolina13.network.HuntConfigPayload.CODEC);
 
         // Survival recruitment (find village -> recruit bot) payloads.
         PayloadTypeRegistry.playS2C().register(RecruitmentPromptPayload.ID, RecruitmentPromptPayload.CODEC);
@@ -649,6 +652,8 @@ public class Frens implements ModInitializer {
                     } else if (attacker instanceof net.minecraft.entity.mob.HostileEntity) {
                         // Mob hit the bot - use damage taken callout
                         net.wcfcarolina13.GameAI.services.BotCombatCalloutService.onDamageTaken(serverPlayer, attacker, amount);
+                        net.wcfcarolina13.GameAI.services.BotCombatCalloutService.noteHostileDamage(
+                                serverPlayer, serverPlayer.getCommandSource().getServer().getTicks());
                     }
                 }
 
@@ -707,7 +712,14 @@ public class Frens implements ModInitializer {
                 var attacker = damageSource != null ? damageSource.getAttacker() : null;
                 if (attacker instanceof ServerPlayerEntity killer
                         && HuntCatalog.isFoodMob(dead.getType())) {
-                    HuntHistoryService.recordHunt(killer, net.minecraft.entity.EntityType.getId(dead.getType()));
+                    net.minecraft.util.Identifier huntId = net.minecraft.entity.EntityType.getId(dead.getType());
+                    boolean isNew = HuntHistoryService.recordHunt(killer, huntId);
+                    if (isNew && !BotEventHandler.isRegisteredBot(killer)) {
+                        HuntCatalog.HuntTarget target = HuntCatalog.findByName(huntId.getPath());
+                        String label = target != null ? target.label() : huntId.getPath();
+                        net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.send(
+                                killer, new net.wcfcarolina13.network.HuntDiscoveryPayload(label));
+                    }
                 }
                 // Combat callout: bot killed something
                 if (attacker instanceof ServerPlayerEntity killer2 && BotEventHandler.isRegisteredBot(killer2)) {

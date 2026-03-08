@@ -31,6 +31,7 @@ import net.wcfcarolina13.GameAI.services.BotHomeService;
 import net.wcfcarolina13.GameAI.services.CraftingHelper;
 import net.wcfcarolina13.GameAI.services.ToolProvisionService;
 import net.wcfcarolina13.GameAI.services.HuntCatalog;
+import net.wcfcarolina13.GameAI.services.HuntConfigService;
 import net.wcfcarolina13.GameAI.services.HuntHistoryService;
 import net.wcfcarolina13.GameAI.services.MovementService;
 import net.wcfcarolina13.GameAI.services.ProtectedZoneService;
@@ -59,8 +60,8 @@ import java.util.Set;
 public final class HuntSkill implements Skill {
 
     private static final Logger LOGGER = LoggerFactory.getLogger("skill-hunt");
-    private static final int HUNT_RADIUS = 48;
-    private static final int HUNT_Y_SPAN = 8;
+    private static final int DEFAULT_HUNT_RADIUS = 48;
+    private static final int DEFAULT_HUNT_Y_SPAN = 8;
     private static final int FOOD_CONTAINER_RADIUS = 12;
     private static final int FOOD_CONTAINER_YSPAN = 4;
     private static final int MIN_PEACEFUL_COUNT = 3;
@@ -170,7 +171,14 @@ public final class HuntSkill implements Skill {
         }
         ChatUtils.sendSystemMessage(source, "Hunting " + targetLabel + " (" + countLabel + ").");
 
-        List<BlockPos> anchors = buildHuntAnchors(bot, world);
+        HuntConfigService.HuntConfig huntConfig = HuntConfigService.getConfig(bot);
+        HuntConfigService.HuntZone huntZone = huntConfig.huntZone();
+        int huntRadius = huntZone.radius;
+        int huntYSpan = huntZone.ySpan;
+        boolean depopulationEnabled = huntConfig.depopulationEnabled;
+        List<String> selectedTargets = huntConfig.selectedTargets;
+
+        List<BlockPos> anchors = buildHuntAnchors(bot, world, huntRadius);
         LOGGER.info("Hunt anchors: {}", anchors.size());
         long lastSweep = System.currentTimeMillis();
         int kills = 0;
@@ -199,7 +207,8 @@ public final class HuntSkill implements Skill {
                 return SkillExecutionResult.failure("I need a weapon to hunt.");
             }
 
-            HuntCandidate candidate = findCandidate(world, bot, anchors, unlocked, explicitTarget, request.hobby());
+            HuntCandidate candidate = findCandidate(world, bot, anchors, unlocked, explicitTarget, request.hobby(),
+                    depopulationEnabled, selectedTargets, huntRadius, huntYSpan);
             if (candidate == null || candidate.entity == null) {
                 LOGGER.info("Hunt candidate not found (explicitTarget={})", explicitTarget != null);
                 if (explicitTarget != null) {
@@ -215,14 +224,18 @@ public final class HuntSkill implements Skill {
                 return SkillExecutionResult.failure("I'm not geared enough to fight zombies.");
             }
 
-            if (candidate.target.peaceful()) {
-                int count = countTargets(world, bot, anchors, candidate.target, request.hobby());
+            if (depopulationEnabled && candidate.target.peaceful()) {
+                int count = countTargets(world, bot, anchors, candidate.target, request.hobby(),
+                        huntRadius, huntYSpan);
                 if (count < MIN_PEACEFUL_COUNT) {
-                    if (explicitTarget != null) {
+                    if (explicitTarget == null) {
+                        candidate = null;
+                    } else {
                         runDropSweep(source, bot);
-                        return SkillExecutionResult.failure("Only " + count + " " + candidate.target.label() + "(s) nearby; hunting paused to avoid depopulation.");
+                        return SkillExecutionResult.failure(
+                                "Population too low (" + count + " " + candidate.target.label()
+                                        + "). Depopulation protection is active.");
                     }
-                    candidate = null;
                 }
             }
 
@@ -376,13 +389,13 @@ public final class HuntSkill implements Skill {
         }
     }
 
-    private static List<BlockPos> buildHuntAnchors(ServerPlayerEntity bot, ServerWorld world) {
+    private static List<BlockPos> buildHuntAnchors(ServerPlayerEntity bot, ServerWorld world, int huntRadius) {
         List<BlockPos> anchors = new ArrayList<>();
         BlockPos botPos = bot.getBlockPos();
         anchors.add(botPos);
 
         BotHomeService.getLastSleep(bot).ifPresent(bedPos -> {
-            if (botPos.getSquaredDistance(bedPos) <= (double) HUNT_RADIUS * HUNT_RADIUS) {
+            if (botPos.getSquaredDistance(bedPos) <= (double) huntRadius * huntRadius) {
                 anchors.add(bedPos);
             }
         });
@@ -391,7 +404,7 @@ public final class HuntSkill implements Skill {
             List<BotHomeService.BaseEntry> bases = BotHomeService.listBases(world.getServer(), world);
             for (BotHomeService.BaseEntry base : bases) {
                 BlockPos pos = base.pos();
-                if (pos != null && botPos.getSquaredDistance(pos) <= (double) HUNT_RADIUS * HUNT_RADIUS) {
+                if (pos != null && botPos.getSquaredDistance(pos) <= (double) huntRadius * huntRadius) {
                     anchors.add(pos);
                 }
             }
@@ -403,9 +416,13 @@ public final class HuntSkill implements Skill {
         if (bot == null || world == null) {
             return false;
         }
+        HuntConfigService.HuntConfig config = HuntConfigService.getConfig(bot);
+        HuntConfigService.HuntZone zone = config.huntZone();
         Set<Identifier> unlocked = HuntHistoryService.getWorldHistory(world);
-        List<BlockPos> anchors = buildHuntAnchors(bot, world);
-        return findCandidate(world, bot, anchors, unlocked, null, true) != null;
+        List<BlockPos> anchors = buildHuntAnchors(bot, world, zone.radius);
+        return findCandidate(world, bot, anchors, unlocked, null, true,
+                config.depopulationEnabled, config.selectedTargets,
+                zone.radius, zone.ySpan) != null;
     }
 
     private static HuntCandidate findCandidate(ServerWorld world,
@@ -413,9 +430,12 @@ public final class HuntSkill implements Skill {
                                                List<BlockPos> anchors,
                                                Set<Identifier> unlocked,
                                                HuntCatalog.HuntTarget explicit,
-                                               boolean hobbyMode) {
+                                               boolean hobbyMode,
+                                               boolean depopulationEnabled,
+                                               List<String> selectedTargets,
+                                               int huntRadius, int huntYSpan) {
         if (explicit != null) {
-            List<LivingEntity> entities = findTargets(world, bot, anchors, explicit, hobbyMode);
+            List<LivingEntity> entities = findTargets(world, bot, anchors, explicit, hobbyMode, huntRadius, huntYSpan);
             LivingEntity nearest = entities.stream()
                     .min(Comparator.comparingDouble(e -> e.squaredDistanceTo(bot)))
                     .orElse(null);
@@ -427,16 +447,22 @@ public final class HuntSkill implements Skill {
             if (target.foodMob() && !unlocked.contains(target.id())) {
                 continue;
             }
+            // Multi-select filter: if targets specified, only hunt those
+            if (selectedTargets != null && !selectedTargets.isEmpty()) {
+                if (!selectedTargets.contains(target.id().toString())) {
+                    continue;
+                }
+            }
             if (target.zombie() && !canHuntZombie(bot)) {
                 continue;
             }
-            if (target.peaceful()) {
-                int count = countTargets(world, bot, anchors, target, hobbyMode);
+            if (depopulationEnabled && target.peaceful()) {
+                int count = countTargets(world, bot, anchors, target, hobbyMode, huntRadius, huntYSpan);
                 if (count < MIN_PEACEFUL_COUNT) {
                     continue;
                 }
             }
-            List<LivingEntity> entities = findTargets(world, bot, anchors, target, hobbyMode);
+            List<LivingEntity> entities = findTargets(world, bot, anchors, target, hobbyMode, huntRadius, huntYSpan);
             LivingEntity nearest = entities.stream()
                     .min(Comparator.comparingDouble(e -> e.squaredDistanceTo(bot)))
                     .orElse(null);
@@ -455,12 +481,13 @@ public final class HuntSkill implements Skill {
                                                   ServerPlayerEntity bot,
                                                   List<BlockPos> anchors,
                                                   HuntCatalog.HuntTarget target,
-                                                  boolean hobbyMode) {
-        Box box = buildSearchBox(anchors);
+                                                  boolean hobbyMode,
+                                                  int huntRadius, int huntYSpan) {
+        Box box = buildSearchBox(anchors, huntRadius, huntYSpan);
         List<LivingEntity> out = new ArrayList<>();
         world.getEntitiesByType(target.type(), box, Entity::isAlive).forEach(entity -> {
             if (entity instanceof LivingEntity living && withinAnchors(anchors, new Vec3d(
-                    living.getX(), living.getY(), living.getZ()))
+                    living.getX(), living.getY(), living.getZ()), huntRadius)
                     && isEligibleHuntTarget(world, bot, living, hobbyMode)) {
                 out.add(living);
             }
@@ -472,15 +499,16 @@ public final class HuntSkill implements Skill {
                                     ServerPlayerEntity bot,
                                     List<BlockPos> anchors,
                                     HuntCatalog.HuntTarget target,
-                                    boolean hobbyMode) {
-        Box box = buildSearchBox(anchors);
+                                    boolean hobbyMode,
+                                    int huntRadius, int huntYSpan) {
+        Box box = buildSearchBox(anchors, huntRadius, huntYSpan);
         return world.getEntitiesByType(target.type(), box, Entity::isAlive)
                 .stream()
                 .mapToInt(entity -> {
                     if (!(entity instanceof LivingEntity living)) {
                         return 0;
                     }
-                    boolean within = withinAnchors(anchors, new Vec3d(entity.getX(), entity.getY(), entity.getZ()));
+                    boolean within = withinAnchors(anchors, new Vec3d(entity.getX(), entity.getY(), entity.getZ()), huntRadius);
                     return within && isEligibleHuntTarget(world, bot, living, hobbyMode) ? 1 : 0;
                 })
                 .sum();
@@ -619,7 +647,7 @@ public final class HuntSkill implements Skill {
         return state.isOf(Blocks.IRON_BARS);
     }
 
-    private static Box buildSearchBox(List<BlockPos> anchors) {
+    private static Box buildSearchBox(List<BlockPos> anchors, int huntRadius, int huntYSpan) {
         int minX = Integer.MAX_VALUE;
         int minY = Integer.MAX_VALUE;
         int minZ = Integer.MAX_VALUE;
@@ -627,19 +655,19 @@ public final class HuntSkill implements Skill {
         int maxY = Integer.MIN_VALUE;
         int maxZ = Integer.MIN_VALUE;
         for (BlockPos pos : anchors) {
-            minX = Math.min(minX, pos.getX() - HUNT_RADIUS);
-            minY = Math.min(minY, pos.getY() - HUNT_Y_SPAN);
-            minZ = Math.min(minZ, pos.getZ() - HUNT_RADIUS);
-            maxX = Math.max(maxX, pos.getX() + HUNT_RADIUS);
-            maxY = Math.max(maxY, pos.getY() + HUNT_Y_SPAN);
-            maxZ = Math.max(maxZ, pos.getZ() + HUNT_RADIUS);
+            minX = Math.min(minX, pos.getX() - huntRadius);
+            minY = Math.min(minY, pos.getY() - huntYSpan);
+            minZ = Math.min(minZ, pos.getZ() - huntRadius);
+            maxX = Math.max(maxX, pos.getX() + huntRadius);
+            maxY = Math.max(maxY, pos.getY() + huntYSpan);
+            maxZ = Math.max(maxZ, pos.getZ() + huntRadius);
         }
         return new Box(minX, minY, minZ, maxX + 1, maxY + 1, maxZ + 1);
     }
 
-    private static boolean withinAnchors(List<BlockPos> anchors, Vec3d pos) {
+    private static boolean withinAnchors(List<BlockPos> anchors, Vec3d pos, int huntRadius) {
         for (BlockPos anchor : anchors) {
-            if (pos.squaredDistanceTo(Vec3d.ofCenter(anchor)) <= (double) HUNT_RADIUS * HUNT_RADIUS) {
+            if (pos.squaredDistanceTo(Vec3d.ofCenter(anchor)) <= (double) huntRadius * huntRadius) {
                 return true;
             }
         }
@@ -667,6 +695,7 @@ public final class HuntSkill implements Skill {
             }
             double distSq = bot.squaredDistanceTo(target);
             if (distSq <= ATTACK_RANGE_SQ && bot.canSee(target)) {
+                BotActions.selectBestMeleeWeapon(bot);
                 bot.attack(target);
                 bot.swingHand(net.minecraft.util.Hand.MAIN_HAND, true);
             } else {
@@ -935,7 +964,11 @@ public final class HuntSkill implements Skill {
     private static void runDropSweep(ServerCommandSource source, ServerPlayerEntity bot) {
         try {
             if (bot.getInventory().getEmptySlot() == -1) {
-                return;
+                offloadInventory(bot, source);
+                if (bot.getInventory().getEmptySlot() == -1) {
+                    LOGGER.info("Drop sweep skipped: inventory still full after offload attempt");
+                    return;
+                }
             }
             DropSweeper.sweep(source.withSilent(), 6.0D, 4.0D, 8, 8_000L);
         } catch (Exception e) {
@@ -946,7 +979,11 @@ public final class HuntSkill implements Skill {
     private static void runFinalDropSweep(ServerCommandSource source, ServerPlayerEntity bot) {
         try {
             if (bot.getInventory().getEmptySlot() == -1) {
-                return;
+                offloadInventory(bot, source);
+                if (bot.getInventory().getEmptySlot() == -1) {
+                    LOGGER.info("Final drop sweep skipped: inventory still full after offload attempt");
+                    return;
+                }
             }
             DropSweeper.sweep(source.withSilent(), FINAL_SWEEP_RADIUS, FINAL_SWEEP_VERTICAL, 12, 12_000L);
         } catch (Exception e) {

@@ -26,6 +26,7 @@ import net.minecraft.block.Blocks;
 import net.minecraft.sound.SoundEvents;
 import net.minecraft.text.Text;
 import net.wcfcarolina13.GraphicalUserInterface.BaseManagerScreen;
+import net.wcfcarolina13.GraphicalUserInterface.BotRestoreScreen;
 import net.wcfcarolina13.GraphicalUserInterface.BotGuideScreen;
 import net.wcfcarolina13.GraphicalUserInterface.BotPlayerInventoryScreen;
 import net.wcfcarolina13.GraphicalUserInterface.CookablesScreen;
@@ -67,6 +68,7 @@ public class FrensClient implements ClientModInitializer {
     private static KeyBinding KEY_OPEN_SPELLS;
     private static KeyBinding KEY_RESUME;
     private static KeyBinding KEY_STOP_LOOK;
+    private static KeyBinding KEY_LOCK_PREVIEW;
     private static KeyBinding KEY_LEASH;
     private static KeyBinding KEY_RECRUIT_CONTACT;
 
@@ -75,11 +77,20 @@ public class FrensClient implements ClientModInitializer {
     private static boolean stopKeyDown = false;
     private static long stopKeyDownAtMs = 0L;
     private static boolean stopKeyHoldConsumed = false;
+    private static boolean previewLockBindingMigrationChecked = false;
 
     // Pending shelter type from the Topics menu (null = no pending shelter, use go_to_look as normal)
     private static String pendingShelterType = null;
     private static String pendingShelterBotTarget = null;
+    private static String pendingShelterDisplayLabel = null;
     private static net.wcfcarolina13.GameAI.schematic.SchematicData pendingSchematicData = null;
+    private static BlockPos pendingPreviewTargetPos = null;
+    private static int pendingPreviewRotationQuarterTurns = 0;
+    private static boolean pendingPreviewLocked = false;
+    private static boolean previewUpKeyDown = false;
+    private static boolean previewDownKeyDown = false;
+    private static boolean previewLeftKeyDown = false;
+    private static boolean previewRightKeyDown = false;
     private static String pendingDirectionalActionLabel = null;
     private static String pendingDirectionalCommand = null;
     private static int directionalPreviewTick = 0;
@@ -152,9 +163,13 @@ public class FrensClient implements ClientModInitializer {
 
     private static final int TOP_TIP_MARGIN = 4;
     private static final int TOP_TIP_GAP = 4;
+    private static final long NO_BOTS_HINT_DEBOUNCE_MS = 2_000L;
+    private static final long NO_BOTS_HINT_DURATION_MS = 10_000L;
     private static int topTipLeftY = TOP_TIP_MARGIN;
     private static int topTipCenterY = TOP_TIP_MARGIN;
     private static int topTipRightY = TOP_TIP_MARGIN;
+    private static long noBotsDetectedSinceMs = 0L;
+    private static long noBotsHintUntilMs = 0L;
 
     private enum TopTipLane {
         LEFT,
@@ -283,6 +298,8 @@ public class FrensClient implements ClientModInitializer {
     public static void setPendingShelter(String type, String botTarget) {
         pendingShelterType = type;
         pendingShelterBotTarget = botTarget;
+        pendingShelterDisplayLabel = humanizeShelterPreviewLabel(type);
+        resetPendingPreviewTransform();
         // Load the schematic data for preview
         if (type != null) {
             // First try loading from resources
@@ -334,7 +351,9 @@ public class FrensClient implements ClientModInitializer {
     public static void clearPendingShelter() {
         pendingShelterType = null;
         pendingShelterBotTarget = null;
+        pendingShelterDisplayLabel = null;
         pendingSchematicData = null;
+        resetPendingPreviewTransform();
     }
     
     public static boolean hasPendingShelter() {
@@ -405,6 +424,13 @@ public class FrensClient implements ClientModInitializer {
             KeyBinding.Category.MISC
         ));
 
+        KEY_LOCK_PREVIEW = KeyBindingHelper.registerKeyBinding(new KeyBinding(
+            "key.frens.lock_preview",
+            // Default ';' to avoid colliding with vanilla Advancements ('L') and this mod's other defaults.
+            GLFW.GLFW_KEY_SEMICOLON,
+            KeyBinding.Category.MISC
+        ));
+
         KEY_LEASH = KeyBindingHelper.registerKeyBinding(new KeyBinding(
             "key.frens.leash",
             GLFW.GLFW_KEY_APOSTROPHE,
@@ -431,9 +457,13 @@ public class FrensClient implements ClientModInitializer {
                 learningInputStreamActive = false;
                 learningInputSessionToken = 0L;
                 learningInputTickHz = 0;
+                previewLockBindingMigrationChecked = false;
+                resetNoBotsRestoreState();
                 return;
             }
+            migrateLegacyPreviewLockBinding(client);
             tickLearningInputTelemetry(client);
+            tickNoBotsRestoreState(client);
             if (client.currentScreen != null) {
                 return;
             }
@@ -469,6 +499,10 @@ public class FrensClient implements ClientModInitializer {
                 if (tryOpenModeSelectionFromContextKey(client)) {
                     return;
                 }
+                if (shouldOpenNoBotsRestoreFromContextKey(client)) {
+                    openNoBotsRestoreScreen(client);
+                    return;
+                }
                 if (hasPendingDirectionalMining() || hasPendingShelter()) {
                     // Pending look-confirm commands must consume '-' before contextual spells.
                     handleGoToLook(client);
@@ -498,6 +532,7 @@ public class FrensClient implements ClientModInitializer {
             if (KEY_RESUME.wasPressed()) {
                 handleResumeKey(client);
             }
+            handlePendingPreviewControls(client);
             tickStopHoldBehavior(client);
             if (KEY_LEASH.wasPressed()) {
                 handleLeashKey(client);
@@ -573,6 +608,23 @@ public class FrensClient implements ClientModInitializer {
         ClientPlayNetworking.registerGlobalReceiver(HuntablesPayload.ID, (payload, context) -> {
             String json = payload.huntablesJson();
             context.client().execute(() -> HuntablesScreen.applyHuntablesJson(json));
+        });
+
+        ClientPlayNetworking.registerGlobalReceiver(net.wcfcarolina13.network.HuntConfigPayload.ID, (payload, context) -> {
+            String json = payload.configJson();
+            context.client().execute(() -> HuntablesScreen.applyHuntConfigJson(json));
+        });
+
+        ClientPlayNetworking.registerGlobalReceiver(net.wcfcarolina13.network.HuntDiscoveryPayload.ID, (payload, context) -> {
+            String label = payload.mobLabel();
+            context.client().execute(() -> {
+                MinecraftClient mc = context.client();
+                mc.getToastManager().add(
+                    net.minecraft.client.toast.SystemToast.create(mc,
+                        net.minecraft.client.toast.SystemToast.Type.NARRATOR_TOGGLE,
+                        net.minecraft.text.Text.of("New Hunting Target!"),
+                        net.minecraft.text.Text.of(label + " added to the hunting menu")));
+            });
         });
 
         ClientPlayNetworking.registerGlobalReceiver(ResumeDecisionPayload.ID, (payload, context) -> {
@@ -725,7 +777,9 @@ public class FrensClient implements ClientModInitializer {
         HudRenderCallback.EVENT.register((context, tickDelta) -> resetTopTipLayout(context));
         HudRenderCallback.EVENT.register((context, tickDelta) -> renderResumeDecisionHint(context));
         HudRenderCallback.EVENT.register((context, tickDelta) -> renderLeashButton(context));
+        HudRenderCallback.EVENT.register((context, tickDelta) -> renderPendingShelterHint(context));
         HudRenderCallback.EVENT.register((context, tickDelta) -> renderModeSelectionReminder(context));
+        HudRenderCallback.EVENT.register((context, tickDelta) -> renderNoBotsPresentHint(context));
         HudRenderCallback.EVENT.register((context, tickDelta) -> renderRecruitmentPrompt(context));
         HudRenderCallback.EVENT.register((context, tickDelta) -> renderSpellsAcquireHint(context));
         HudRenderCallback.EVENT.register((context, tickDelta) -> renderSpellsPrompt(context));
@@ -878,6 +932,150 @@ public class FrensClient implements ClientModInitializer {
         int x = 12;
         int boxH = client.textRenderer.fontHeight * 2 + 6;
         int y = reserveTopTipY(TopTipLane.LEFT, boxH + 7);
+
+        context.fill(x - 6, y - 4, x + maxW + 6, y + boxH, 0xAA101010);
+        context.fill(x - 7, y - 5, x + maxW + 7, y - 4, 0xFF4A4A4A);
+        context.fill(x - 7, y + boxH, x + maxW + 7, y + boxH + 1, 0xFF4A4A4A);
+        context.fill(x - 7, y - 5, x - 6, y + boxH + 1, 0xFF4A4A4A);
+        context.fill(x + maxW + 6, y - 5, x + maxW + 7, y + boxH + 1, 0xFF4A4A4A);
+
+        context.drawTextWithShadow(client.textRenderer, line1, x, y, 0xFFE6D7A3);
+        context.drawTextWithShadow(client.textRenderer, line2, x, y + client.textRenderer.fontHeight + 2, 0xFFB8A76A);
+    }
+
+    public static java.util.List<String> getKnownRestorableBotAliases() {
+        java.util.LinkedHashSet<String> aliasSet = new java.util.LinkedHashSet<>();
+        if (Frens.CONFIG != null) {
+            aliasSet.addAll(Frens.CONFIG.getBotGameProfile().keySet());
+            aliasSet.addAll(Frens.CONFIG.getBotOwnership().keySet());
+            aliasSet.addAll(Frens.CONFIG.getAllBotAliases());
+            aliasSet.addAll(Frens.CONFIG.getBotQuestMemory().keySet());
+        }
+        if (recruitmentBotAlias != null && !recruitmentBotAlias.isBlank()) {
+            aliasSet.add(recruitmentBotAlias.trim());
+        }
+
+        java.util.ArrayList<String> aliases = new java.util.ArrayList<>();
+        for (String alias : aliasSet) {
+            if (alias == null) {
+                continue;
+            }
+            String trimmed = alias.trim();
+            if (trimmed.isEmpty() || "default".equalsIgnoreCase(trimmed)) {
+                continue;
+            }
+            aliases.add(trimmed);
+        }
+        aliases.sort(String.CASE_INSENSITIVE_ORDER);
+        return aliases;
+    }
+
+    private static void resetNoBotsRestoreState() {
+        noBotsDetectedSinceMs = 0L;
+        noBotsHintUntilMs = 0L;
+    }
+
+    private static void tickNoBotsRestoreState(MinecraftClient client) {
+        if (!shouldOfferNoBotsRestore(client)) {
+            resetNoBotsRestoreState();
+            return;
+        }
+        long now = System.currentTimeMillis();
+        if (noBotsDetectedSinceMs == 0L) {
+            noBotsDetectedSinceMs = now;
+            noBotsHintUntilMs = 0L;
+            return;
+        }
+        if (noBotsHintUntilMs == 0L && now - noBotsDetectedSinceMs >= NO_BOTS_HINT_DEBOUNCE_MS) {
+            noBotsHintUntilMs = now + NO_BOTS_HINT_DURATION_MS;
+        }
+    }
+
+    private static boolean shouldOpenNoBotsRestoreFromContextKey(MinecraftClient client) {
+        if (!shouldOfferNoBotsRestore(client)) {
+            return false;
+        }
+        if (client == null || client.currentScreen != null) {
+            return false;
+        }
+        return noBotsDetectedSinceMs > 0L
+                && System.currentTimeMillis() - noBotsDetectedSinceMs >= NO_BOTS_HINT_DEBOUNCE_MS;
+    }
+
+    private static boolean shouldOfferNoBotsRestore(MinecraftClient client) {
+        if (client == null || client.player == null || client.world == null) {
+            return false;
+        }
+        if (survivalRecruitmentEnabled && !survivalRecruitmentCompleted) {
+            return false;
+        }
+        java.util.List<String> knownAliases = getKnownRestorableBotAliases();
+        if (knownAliases.isEmpty()) {
+            return false;
+        }
+        java.util.HashSet<String> normalizedAliases = new java.util.HashSet<>();
+        for (String alias : knownAliases) {
+            normalizedAliases.add(alias.toLowerCase(java.util.Locale.ROOT));
+        }
+        try {
+            for (PlayerEntity player : client.world.getPlayers()) {
+                if (player == null || player == client.player) {
+                    continue;
+                }
+                String name = player.getName() != null ? player.getName().getString() : null;
+                if (name == null || name.isBlank()) {
+                    continue;
+                }
+                if (normalizedAliases.contains(name.trim().toLowerCase(java.util.Locale.ROOT))) {
+                    return false;
+                }
+            }
+        } catch (Throwable ignored) {
+            return false;
+        }
+        return true;
+    }
+
+    private static void openNoBotsRestoreScreen(MinecraftClient client) {
+        if (client == null) {
+            return;
+        }
+        java.util.List<String> aliases = getKnownRestorableBotAliases();
+        if (aliases.isEmpty()) {
+            return;
+        }
+        client.setScreen(new BotRestoreScreen(null, aliases));
+    }
+
+    private static void renderNoBotsPresentHint(DrawContext context) {
+        MinecraftClient client = MinecraftClient.getInstance();
+        if (client == null || client.player == null || client.currentScreen != null) {
+            return;
+        }
+        if (!isGameplayTipsEnabled()) {
+            return;
+        }
+        if (!shouldOfferNoBotsRestore(client)) {
+            return;
+        }
+        long now = System.currentTimeMillis();
+        if (noBotsHintUntilMs <= 0L || now > noBotsHintUntilMs) {
+            return;
+        }
+
+        String openKey = keyNameOrNull(KEY_GO_TO_LOOK);
+        if (openKey == null) {
+            openKey = "-";
+        }
+        String line1 = "No companions are currently present in this world.";
+        String line2 = "Press [" + openKey + "] to restore one, or use /bot spawn <name> admin";
+
+        int w1 = client.textRenderer.getWidth(line1);
+        int w2 = client.textRenderer.getWidth(line2);
+        int maxW = Math.max(w1, w2);
+        int x = (context.getScaledWindowWidth() - maxW) / 2;
+        int boxH = client.textRenderer.fontHeight * 2 + 6;
+        int y = reserveTopTipY(TopTipLane.CENTER, boxH + 7);
 
         context.fill(x - 6, y - 4, x + maxW + 6, y + boxH, 0xAA101010);
         context.fill(x - 7, y - 5, x + maxW + 7, y - 4, 0xFF4A4A4A);
@@ -1477,6 +1675,63 @@ public class FrensClient implements ClientModInitializer {
         }
     }
 
+    private static String keyTranslationOrNull(KeyBinding binding) {
+        if (binding == null) {
+            return null;
+        }
+        try {
+            Object value = KeyBinding.class.getMethod("getBoundKeyTranslationKey").invoke(binding);
+            if (value instanceof String translation && !translation.isBlank()) {
+                return translation;
+            }
+        } catch (Throwable ignored) {
+        }
+        return null;
+    }
+
+    private static boolean invokeFirstNoArgMethod(Object target, String... methodNames) {
+        if (target == null || methodNames == null) {
+            return false;
+        }
+        for (String methodName : methodNames) {
+            if (methodName == null || methodName.isBlank()) {
+                continue;
+            }
+            try {
+                target.getClass().getMethod(methodName).invoke(target);
+                return true;
+            } catch (Throwable ignored) {
+            }
+        }
+        return false;
+    }
+
+    private static void migrateLegacyPreviewLockBinding(MinecraftClient client) {
+        if (previewLockBindingMigrationChecked || client == null || KEY_LOCK_PREVIEW == null) {
+            return;
+        }
+        previewLockBindingMigrationChecked = true;
+
+        String boundTranslation = keyTranslationOrNull(KEY_LOCK_PREVIEW);
+        if (!"key.keyboard.l".equals(boundTranslation)) {
+            return;
+        }
+
+        try {
+            Object defaultKey = KeyBinding.class.getMethod("getDefaultKey").invoke(KEY_LOCK_PREVIEW);
+            if (defaultKey == null) {
+                return;
+            }
+            KeyBinding.class.getMethod("setBoundKey", defaultKey.getClass()).invoke(KEY_LOCK_PREVIEW, defaultKey);
+            invokeFirstNoArgMethod(KeyBinding.class, "updateKeysByCode");
+            invokeFirstNoArgMethod(client.options, "write", "save");
+            if (client.player != null) {
+                client.player.sendMessage(Text.literal("Preview lock hotkey moved to ';' to avoid Advancements."), true);
+            }
+        } catch (Throwable ignored) {
+        }
+    }
+
     private static void tickStopHoldBehavior(MinecraftClient client) {
         if (KEY_STOP_LOOK == null) {
             return;
@@ -1595,6 +1850,320 @@ public class FrensClient implements ClientModInitializer {
             return "";
         }
         return botName.contains(" ") ? "\"" + botName + "\"" : botName;
+    }
+
+    private static String humanizeShelterPreviewLabel(String type) {
+        if (type == null || type.isBlank()) {
+            return "Build";
+        }
+        return switch (type.toLowerCase(java.util.Locale.ROOT)) {
+            case "hovel" -> "Hovel";
+            case "burrow" -> "Burrow";
+            case "small_shelter" -> "Small Shelter";
+            case "small_hut" -> "Small Hut";
+            case "watchtower" -> "Watchtower";
+            case "bridge" -> "Bridge";
+            case "test_platform" -> "Platform";
+            case "defensive_wall_section" -> "Wall Section";
+            case "defensive_wall_corner" -> "Wall Corner";
+            case "defensive_gatehouse" -> "Gatehouse";
+            default -> {
+                String[] parts = type.replace('_', ' ').trim().split("\\s+");
+                StringBuilder builder = new StringBuilder();
+                for (String part : parts) {
+                    if (part.isBlank()) {
+                        continue;
+                    }
+                    if (!builder.isEmpty()) {
+                        builder.append(' ');
+                    }
+                    builder.append(Character.toUpperCase(part.charAt(0)));
+                    if (part.length() > 1) {
+                        builder.append(part.substring(1));
+                    }
+                }
+                yield builder.isEmpty() ? "Build" : builder.toString();
+            }
+        };
+    }
+
+    private record PreviewPlacement(BlockPos targetPos,
+                                    net.wcfcarolina13.GameAI.schematic.SchematicData schematic,
+                                    Box previewBox) {
+    }
+
+    private static void resetPendingPreviewTransform() {
+        pendingPreviewTargetPos = null;
+        pendingPreviewRotationQuarterTurns = 0;
+        pendingPreviewLocked = false;
+        previewUpKeyDown = false;
+        previewDownKeyDown = false;
+        previewLeftKeyDown = false;
+        previewRightKeyDown = false;
+        pendingPreviewBox = null;
+        previousPreviewBox = null;
+        particleSpawnTick = 0;
+        particlePauseTicks = 0;
+    }
+
+    private static boolean isProceduralShelterType(String type) {
+        if (type == null) {
+            return false;
+        }
+        return "hovel".equalsIgnoreCase(type) || "burrow".equalsIgnoreCase(type);
+    }
+
+    private static int normalizedPreviewRotationTurns() {
+        return Math.floorMod(pendingPreviewRotationQuarterTurns, 4);
+    }
+
+    private static net.wcfcarolina13.GameAI.schematic.SchematicData getEffectivePendingPreviewSchematic() {
+        if (pendingSchematicData == null) {
+            return null;
+        }
+        return pendingSchematicData.rotated(normalizedPreviewRotationTurns());
+    }
+
+    private static PreviewPlacement buildPreviewPlacement(BlockPos targetPos) {
+        net.wcfcarolina13.GameAI.schematic.SchematicData effectiveSchematic = getEffectivePendingPreviewSchematic();
+        if (targetPos == null || effectiveSchematic == null) {
+            return null;
+        }
+
+        int offsetX = -effectiveSchematic.sizeX() / 2;
+        int offsetZ = -effectiveSchematic.sizeZ() / 2;
+
+        Box previewBox = new Box(
+                targetPos.getX() + offsetX, targetPos.getY(), targetPos.getZ() + offsetZ,
+                targetPos.getX() + offsetX + effectiveSchematic.sizeX(),
+                targetPos.getY() + effectiveSchematic.sizeY(),
+                targetPos.getZ() + offsetZ + effectiveSchematic.sizeZ()
+        );
+        return new PreviewPlacement(targetPos, effectiveSchematic, previewBox);
+    }
+
+    private static PreviewPlacement resolveLivePreviewPlacement(MinecraftClient client) {
+        if (client == null || client.player == null || client.world == null || pendingSchematicData == null) {
+            return null;
+        }
+
+        HitResult hit = client.player.raycast(32.0, 1.0f, false);
+        if (hit.getType() != HitResult.Type.BLOCK) {
+            return null;
+        }
+        BlockHitResult blockHit = (BlockHitResult) hit;
+        BlockPos hitBlockPos = blockHit.getBlockPos();
+
+        net.minecraft.block.BlockState hitState = client.world.getBlockState(hitBlockPos);
+        boolean isReplaceable = hitState.isReplaceable()
+                || hitState.isOf(net.minecraft.block.Blocks.SNOW)
+                || hitState.isOf(net.minecraft.block.Blocks.SHORT_GRASS)
+                || hitState.isOf(net.minecraft.block.Blocks.TALL_GRASS)
+                || hitState.isOf(net.minecraft.block.Blocks.FERN);
+
+        int baseX = hitBlockPos.getX();
+        int baseY = hitBlockPos.getY();
+        int baseZ = hitBlockPos.getZ();
+        if (blockHit.getSide() == Direction.UP && !isReplaceable) {
+            baseY += 1;
+        }
+
+        float yaw = client.player.getYaw();
+        double yawRad = Math.toRadians(yaw);
+        int forwardOffsetX = (int) Math.round(-Math.sin(yawRad) * 3.0);
+        int forwardOffsetZ = (int) Math.round(Math.cos(yawRad) * 3.0);
+
+        BlockPos targetPos = new BlockPos(baseX + forwardOffsetX, baseY, baseZ + forwardOffsetZ);
+        if ("hovel".equalsIgnoreCase(pendingShelterType)) {
+            targetPos = targetPos.withY(detectPreviewFloorBlockY(client, targetPos));
+        }
+        return buildPreviewPlacement(targetPos);
+    }
+
+    private static boolean isRawKeyDown(MinecraftClient client, int keyCode) {
+        if (client == null || client.getWindow() == null) {
+            return false;
+        }
+        long handle = client.getWindow().getHandle();
+        return handle != 0L && GLFW.glfwGetKey(handle, keyCode) == GLFW.GLFW_PRESS;
+    }
+
+    private static boolean isPreviewShiftDown(MinecraftClient client) {
+        return isRawKeyDown(client, GLFW.GLFW_KEY_LEFT_SHIFT) || isRawKeyDown(client, GLFW.GLFW_KEY_RIGHT_SHIFT);
+    }
+
+    private static void nudgeLockedPreview(Direction direction) {
+        if (pendingPreviewTargetPos == null || direction == null || !direction.getAxis().isHorizontal()) {
+            return;
+        }
+        pendingPreviewTargetPos = pendingPreviewTargetPos.offset(direction);
+    }
+
+    private static void moveLockedPreviewVertical(int deltaY) {
+        if (pendingPreviewTargetPos == null || deltaY == 0) {
+            return;
+        }
+        pendingPreviewTargetPos = pendingPreviewTargetPos.add(0, deltaY, 0);
+    }
+
+    private static void rotateLockedPreview(int deltaTurns) {
+        if (deltaTurns == 0) {
+            return;
+        }
+        pendingPreviewRotationQuarterTurns = Math.floorMod(pendingPreviewRotationQuarterTurns + deltaTurns, 4);
+    }
+
+    private static void togglePendingPreviewLock(MinecraftClient client) {
+        if (client == null || client.player == null || !hasPendingShelter()) {
+            return;
+        }
+        if (!pendingPreviewLocked) {
+            PreviewPlacement placement = resolveLivePreviewPlacement(client);
+            if (placement == null) {
+                client.player.sendMessage(Text.literal("Look at a block first to lock the preview."), true);
+                return;
+            }
+            pendingPreviewTargetPos = placement.targetPos();
+            pendingPreviewBox = placement.previewBox();
+            pendingPreviewLocked = true;
+            previousPreviewBox = null;
+            particleSpawnTick = 0;
+            particlePauseTicks = 0;
+            client.player.sendMessage(Text.literal("Preview locked. Use arrows to adjust it."), true);
+            return;
+        }
+
+        pendingPreviewLocked = false;
+        previewUpKeyDown = false;
+        previewDownKeyDown = false;
+        previewLeftKeyDown = false;
+        previewRightKeyDown = false;
+        previousPreviewBox = null;
+        particleSpawnTick = 0;
+        particlePauseTicks = 0;
+        client.player.sendMessage(Text.literal("Preview unlocked. It will follow your look again."), true);
+    }
+
+    private static void handlePendingPreviewControls(MinecraftClient client) {
+        if (client == null || client.player == null || client.currentScreen != null || !hasPendingShelter()) {
+            previewUpKeyDown = false;
+            previewDownKeyDown = false;
+            previewLeftKeyDown = false;
+            previewRightKeyDown = false;
+            return;
+        }
+
+        if (KEY_LOCK_PREVIEW != null && KEY_LOCK_PREVIEW.wasPressed()) {
+            togglePendingPreviewLock(client);
+        }
+
+        if (!pendingPreviewLocked || pendingPreviewTargetPos == null) {
+            previewUpKeyDown = false;
+            previewDownKeyDown = false;
+            previewLeftKeyDown = false;
+            previewRightKeyDown = false;
+            return;
+        }
+
+        boolean shiftDown = isPreviewShiftDown(client);
+        Direction facing = client.player.getHorizontalFacing();
+        boolean upDown = isRawKeyDown(client, GLFW.GLFW_KEY_UP);
+        boolean downDown = isRawKeyDown(client, GLFW.GLFW_KEY_DOWN);
+        boolean leftDown = isRawKeyDown(client, GLFW.GLFW_KEY_LEFT);
+        boolean rightDown = isRawKeyDown(client, GLFW.GLFW_KEY_RIGHT);
+
+        if (upDown && !previewUpKeyDown) {
+            if (shiftDown) {
+                moveLockedPreviewVertical(1);
+            } else {
+                nudgeLockedPreview(facing);
+            }
+        }
+        if (downDown && !previewDownKeyDown) {
+            if (shiftDown) {
+                moveLockedPreviewVertical(-1);
+            } else {
+                nudgeLockedPreview(facing.getOpposite());
+            }
+        }
+        if (leftDown && !previewLeftKeyDown) {
+            if (shiftDown) {
+                rotateLockedPreview(-1);
+            } else {
+                nudgeLockedPreview(facing.rotateYCounterclockwise());
+            }
+        }
+        if (rightDown && !previewRightKeyDown) {
+            if (shiftDown) {
+                rotateLockedPreview(1);
+            } else {
+                nudgeLockedPreview(facing.rotateYClockwise());
+            }
+        }
+
+        previewUpKeyDown = upDown;
+        previewDownKeyDown = downDown;
+        previewLeftKeyDown = leftDown;
+        previewRightKeyDown = rightDown;
+    }
+
+    private static void renderPendingShelterHint(DrawContext context) {
+        if (!hasPendingShelter()) {
+            return;
+        }
+        if (!isGameplayTipsEnabled()) {
+            return;
+        }
+        MinecraftClient client = MinecraftClient.getInstance();
+        if (client == null || client.player == null || client.currentScreen != null) {
+            return;
+        }
+
+        String goToKey = keyNameOrNull(KEY_GO_TO_LOOK);
+        if (goToKey == null) {
+            goToKey = "-";
+        }
+        String stopKey = keyNameOrNull(KEY_STOP_LOOK);
+        if (stopKey == null) {
+            stopKey = "\\\\";
+        }
+        String lockKey = keyNameOrNull(KEY_LOCK_PREVIEW);
+        if (lockKey == null) {
+            lockKey = ";";
+        }
+        String label = pendingShelterDisplayLabel != null && !pendingShelterDisplayLabel.isBlank()
+                ? pendingShelterDisplayLabel
+                : humanizeShelterPreviewLabel(pendingShelterType);
+
+        int rotationDegrees = normalizedPreviewRotationTurns() * 90;
+        String lockState = pendingPreviewLocked ? "Locked" : "Live";
+        String line1 = rotationDegrees == 0
+            ? "Previewing: " + label + " [" + lockState + "]"
+            : "Previewing: " + label + " [" + lockState + " • " + rotationDegrees + "°]";
+        String line2 = "[" + lockKey + "] " + (pendingPreviewLocked ? "unlock" : "lock")
+            + " • [" + goToKey + "] confirm • [" + stopKey + "] cancel";
+        String line3 = pendingPreviewLocked
+            ? "Arrows move 1 block • Shift+Up/Down height • Shift+Left/Right rotate"
+            : "Look to place it, then walk around and press [" + lockKey + "] to edit in 3D";
+
+        int w1 = client.textRenderer.getWidth(line1);
+        int w2 = client.textRenderer.getWidth(line2);
+        int w3 = client.textRenderer.getWidth(line3);
+        int maxW = Math.max(w1, Math.max(w2, w3));
+        int x = 12;
+        int lineStep = client.textRenderer.fontHeight + 2;
+        int boxH = client.textRenderer.fontHeight * 3 + 10;
+        int y = reserveTopTipY(TopTipLane.LEFT, boxH + 7);
+
+        context.fill(x - 6, y - 4, x + maxW + 6, y + boxH, 0xAA101010);
+        context.fill(x - 7, y - 5, x + maxW + 7, y - 4, 0xFF4A4A4A);
+        context.fill(x - 7, y + boxH, x + maxW + 7, y + boxH + 1, 0xFF4A4A4A);
+        context.fill(x - 7, y - 5, x - 6, y + boxH + 1, 0xFF4A4A4A);
+        context.fill(x + maxW + 6, y - 5, x + maxW + 7, y + boxH + 1, 0xFF4A4A4A);
+
+        context.drawTextWithShadow(client.textRenderer, line1, x, y, 0xFFE6D7A3);
+        context.drawTextWithShadow(client.textRenderer, line2, x, y + lineStep, 0xFFB8A76A);
+        context.drawTextWithShadow(client.textRenderer, line3, x, y + lineStep * 2, 0xFFB8A76A);
     }
 
     private static void renderDirectionalMiningHint(DrawContext context) {
@@ -1797,22 +2366,42 @@ public class FrensClient implements ClientModInitializer {
         }
         // Check if there's a pending shelter command from the Topics menu
         if (pendingShelterType != null) {
-            String cmd;
-            // Determine if this is a procedural shelter or schematic build
-            if (pendingShelterType.equals("hovel") || pendingShelterType.equals("burrow")) {
-                cmd = "bot shelter_look " + pendingShelterType;
-                if (pendingShelterBotTarget != null && !pendingShelterBotTarget.isEmpty()) {
-                    cmd += " " + pendingShelterBotTarget;
+            PreviewPlacement placement = pendingPreviewTargetPos != null
+                    ? buildPreviewPlacement(pendingPreviewTargetPos)
+                    : resolveLivePreviewPlacement(client);
+            if (placement == null) {
+                client.player.sendMessage(Text.literal("Look at a block first to place this build preview."), true);
+                return;
+            }
+
+            pendingPreviewTargetPos = placement.targetPos();
+            String formattedTarget = pendingShelterBotTarget != null && !pendingShelterBotTarget.isBlank()
+                    ? formatBotTarget(pendingShelterBotTarget)
+                    : null;
+            StringBuilder cmd = new StringBuilder("bot skill ");
+            if (isProceduralShelterType(pendingShelterType)) {
+                cmd.append("shelter ").append(pendingShelterType);
+                if (formattedTarget != null && !formattedTarget.isBlank()) {
+                    cmd.append(' ').append(formattedTarget);
+                }
+                if ("hovel".equalsIgnoreCase(pendingShelterType)) {
+                    cmd.append(" radius=4");
                 }
             } else {
-                // For schematic builds, use build_look to respect looked-at position
-                cmd = "bot build_look " + pendingShelterType;
-                if (pendingShelterBotTarget != null && !pendingShelterBotTarget.isEmpty()) {
-                    cmd += " " + pendingShelterBotTarget;
+                cmd.append("build ").append(pendingShelterType);
+                if (formattedTarget != null && !formattedTarget.isBlank()) {
+                    cmd.append(' ').append(formattedTarget);
+                }
+                int turns = normalizedPreviewRotationTurns();
+                if (turns != 0) {
+                    cmd.append(" rotation=").append(turns);
                 }
             }
-            
-            sendChatCommand(client, cmd);
+            cmd.append(" targetX=").append(placement.targetPos().getX())
+                    .append(" targetY=").append(placement.targetPos().getY())
+                    .append(" targetZ=").append(placement.targetPos().getZ());
+
+            sendChatCommand(client, cmd.toString());
             clearPendingShelter();
         } else {
             // Normal go_to_look behavior
@@ -2221,6 +2810,27 @@ public class FrensClient implements ClientModInitializer {
     private static float previousPlayerPitch = 0;
     private static int particleSpawnTick = 0;
     private static int particlePauseTicks = 0; // Pause spawning when preview moves to let old particles fade
+
+    private static int detectPreviewFloorBlockY(MinecraftClient client, BlockPos center) {
+        if (client == null || client.world == null || center == null) {
+            return center != null ? center.getY() - 1 : 0;
+        }
+        int start = center.getY();
+        for (int y = start; y >= start - 6; y--) {
+            BlockPos pos = new BlockPos(center.getX(), y, center.getZ());
+            if (!client.world.isChunkLoaded(pos)) {
+                continue;
+            }
+            net.minecraft.block.BlockState state = client.world.getBlockState(pos);
+            if (!client.world.getFluidState(pos).isEmpty()) {
+                continue;
+            }
+            if (!state.getCollisionShape(client.world, pos).isEmpty()) {
+                return y;
+            }
+        }
+        return start - 1;
+    }
     
     /**
      * Updates the schematic preview box every client tick based on player's look direction.
@@ -2236,55 +2846,20 @@ public class FrensClient implements ClientModInitializer {
             pendingPreviewBox = null;
             return;
         }
-        
-        // Raycast to find where the player is looking (max 32 blocks)
-        HitResult hit = client.player.raycast(32.0, 1.0f, false);
-        if (hit.getType() != HitResult.Type.BLOCK) {
+
+        PreviewPlacement placement = pendingPreviewLocked && pendingPreviewTargetPos != null
+                ? buildPreviewPlacement(pendingPreviewTargetPos)
+                : resolveLivePreviewPlacement(client);
+        if (placement == null) {
             pendingPreviewBox = null;
+            if (!pendingPreviewLocked) {
+                pendingPreviewTargetPos = null;
+            }
             return;
         }
-        BlockHitResult blockHit = (BlockHitResult) hit;
-        BlockPos hitBlockPos = blockHit.getBlockPos();
-        
-        // Check if the hit block is replaceable (snow, carpet, grass, etc.)
-        // For replaceable blocks, we build AT that position, not above it
-        net.minecraft.block.BlockState hitState = client.world.getBlockState(hitBlockPos);
-        boolean isReplaceable = hitState.isReplaceable() 
-            || hitState.isOf(net.minecraft.block.Blocks.SNOW)
-            || hitState.isOf(net.minecraft.block.Blocks.SHORT_GRASS)
-            || hitState.isOf(net.minecraft.block.Blocks.TALL_GRASS)
-            || hitState.isOf(net.minecraft.block.Blocks.FERN);
-        
-        int baseX = hitBlockPos.getX();
-        int baseY = hitBlockPos.getY();
-        int baseZ = hitBlockPos.getZ();
-        
-        // If hit from above and block is NOT replaceable, place on top of the block
-        // For replaceable blocks (snow layers, grass, etc.), place AT that Y level
-        if (blockHit.getSide() == Direction.UP && !isReplaceable) {
-            baseY += 1;
-        }
-        
-        // Get schematic dimensions (use actual dimensions - schematics are not rotated)
-        int sizeX = pendingSchematicData.sizeX();
-        int sizeY = pendingSchematicData.sizeY();
-        int sizeZ = pendingSchematicData.sizeZ();
-        
-        // Center preview on cursor and offset 3 blocks forward along look direction
-        float yaw = client.player.getYaw();
-        double yawRad = Math.toRadians(yaw);
-        int forwardOffsetX = (int) Math.round(-Math.sin(yawRad) * 3.0);
-        int forwardOffsetZ = (int) Math.round(Math.cos(yawRad) * 3.0);
-        
-        // Center the box with forward offset (using actual schematic dimensions)
-        int offsetX = -sizeX / 2 + forwardOffsetX;
-        int offsetZ = -sizeZ / 2 + forwardOffsetZ;
-        
-        // Preview box centered on cursor with forward offset
-        pendingPreviewBox = new Box(
-            baseX + offsetX, baseY, baseZ + offsetZ,
-            baseX + offsetX + sizeX, baseY + sizeY, baseZ + offsetZ + sizeZ
-        );
+
+        pendingPreviewTargetPos = placement.targetPos();
+        pendingPreviewBox = placement.previewBox();
     }
     
     /**
@@ -2307,7 +2882,7 @@ public class FrensClient implements ClientModInitializer {
         float yawDiff = Math.abs(client.player.getYaw() - previousPlayerYaw);
         float pitchDiff = Math.abs(client.player.getPitch() - previousPlayerPitch);
         
-        if (yawDiff > 2.0f || pitchDiff > 2.0f) {
+        if (!pendingPreviewLocked && (yawDiff > 2.0f || pitchDiff > 2.0f)) {
             // View direction changed - clear preview and pause spawning to let old particles fade
             previousPreviewBox = null;
             previousPlayerYaw = client.player.getYaw();

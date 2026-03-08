@@ -1,34 +1,31 @@
 ---
-task: Stabilize P0/P1 bot reliability issues
+task: Construction parity across builders
 test_command: "./gradlew build -x test"
 ---
 
-# Task: Stabilize P0/P1 Bot Reliability
+# Task: Construction Reliability + Runtime Parity
 
-Address the highest-priority pending issues from the project backlog.
+Bring all existing construction abilities and their associated services to the same reliability and runtime baseline, using the best existing patterns from `FortifyVillageSkill`, shelter/hovel flows, and the generic construction services.
 
-## P0 — Critical
+## Active Criteria
 
-- [x] Verify launch after permission predicate fix: Ensure bots can start without the LeveledPermissionPredicate OWNERS crash on 1.21.11
-- [ ] Persist bot stats on respawn (verification): Save/load path exists; verify health/XP/hunger restore timing is visible before spawn flow completes
-
-## P1 — High
-
-- [x] Bot config UI refactor: Single-bot view with alias dropdown, grouped/scrollable settings, save/cancel affecting only the selected bot
-- [ ] Bot identity separation (verification): Alias canonicalization + consistency guards across restart/respawn with multi-alias scenarios
-- [ ] Job resume prompts on death/leave (verification): Verify leave/rejoin prompt and resume behavior in-game
-- [ ] Per-bot chat addressing & broadcasts (verification): Verify no duplicate replies or cross-talk in runtime scenarios
+- [ ] Establish a measurable parity baseline for generic schematic builds, shelter/hovel/burrow, fortify wall/patch/moat, and other construction-adjacent block-placement paths
+- [ ] Standardize shared construction reach/scaffold behavior in the generic service layer (feet-based reach, LOS-aware recovery, scaffold stance rules, approximate-arrival handling, and shared tuning constants)
+- [ ] Remove remaining generic schematic bottlenecks in `BuildSchematicSkill` and `ConstructionRecoveryService` (including tall-structure scaffold gating and scaffold stance/headroom failures)
+- [ ] Move shelter / hovel / burrow onto the same shared reach/scaffold semantics without regressing their geometry-specific behavior
+- [ ] Preserve fortify-specific hull/gate/moat/tower behavior while extracting only the generic mechanics worth sharing
+- [ ] Verify parity in-game with representative build scenarios and record metrics/results
 
 ## Success Criteria
 
-All P0/P1 checkboxes above marked `[x]` after in-game verification or code fix.
+All active criteria above marked `[x]`, with build verification plus in-game evidence that construction paths converge on the same failure taxonomy and no longer diverge badly on scaffold usage, no-LOS retry loops, or wall-hugging stalls.
 
 ## Notes
 
-- P0 items may require code changes if bugs are found during verification
-- P1 verification items map to `docs/testing/IN_GAME_AUDIT_MASTER.md` cases (AUD-010..015, AUD-030..033, AUD-050..055, AUD-060..062)
-- Build must pass (`./gradlew build -x test`) after any code changes
-- Commit after completing each criterion
+- Treat `FortifyVillageSkill` as the behavioral reference for elevated reach/scaffold recovery
+- Standardize generic mechanics in shared construction services; do not flatten fortify-specific policy into generic code
+- Build must pass (`./gradlew build -x test`) after each implementation slice
+- After code changes, deploy the built JAR to PrismLauncher for immediate playtesting
 
 ### In-Flight: FortifyVillageSkill Refactoring — Phase 1 Complete, Phase 2 Blocked
 
@@ -150,6 +147,11 @@ Future work items, organized by priority. Not active Ralph criteria — these ar
 - [ ] **Farm chest workflow**: Proactive chest placement/use during farming
 - [ ] **Farm irrigation leak patching**: Detect and patch leakage
 - [ ] Hobby verification: flower picking, feed-animals, hobby hunt behavior
+
+### Hunting — Multi-Day Self-Sufficiency (Future Phase)
+
+- [ ] **Hunt camp shelter**: Bot builds a small hut with a bed and door at hunting grounds for multi-day hunts. Falls back to placeholder blocks (e.g. fence gate) if no door materials available. Keeps builds small and tidy.
+- [ ] **Hunt self-sufficient resource gathering**: Bot gathers wood, dirt, or cobblestone (whichever is most abundant at the hunting grounds) for camp building and chest crafting. Keeps quarrying clean and contained rather than sprawling.
 
 ### Mining & Resource Gathering
 - [ ] Tree chopping (safe climbing, late drop collection)
