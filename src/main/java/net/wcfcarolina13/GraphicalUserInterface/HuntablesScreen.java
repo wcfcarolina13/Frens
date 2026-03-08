@@ -154,14 +154,16 @@ public class HuntablesScreen extends Screen {
                     saveConfig();
                 }).dimensions(cx + 10, y, 100, BUTTON_H).build());
 
-        // Row 3: Hunt + All Edible + Close
+        // Row 3: Hunt + Target + All Edible + Close
         y += 24;
         this.addDrawableChild(ButtonWidget.builder(Text.literal("Hunt"), btn -> huntSelected())
                 .dimensions(cx - 110, y, 50, BUTTON_H).build());
+        this.addDrawableChild(ButtonWidget.builder(Text.literal("Target"), btn -> activateTargetPicker())
+                .dimensions(cx - 52, y, 52, BUTTON_H).build());
         this.addDrawableChild(ButtonWidget.builder(Text.literal("All Edible"), btn -> selectAllEdible())
-                .dimensions(cx - 50, y, 70, BUTTON_H).build());
+                .dimensions(cx + 8, y, 70, BUTTON_H).build());
         this.addDrawableChild(ButtonWidget.builder(Text.literal("Close"), btn -> close())
-                .dimensions(cx + 30, y, 60, BUTTON_H).build());
+                .dimensions(cx + 86, y, 50, BUTTON_H).build());
 
         requestRefresh();
     }
@@ -247,6 +249,15 @@ public class HuntablesScreen extends Screen {
             }
         }
         return super.mouseClicked(click, isInside);
+    }
+
+    private void activateTargetPicker() {
+        HuntTargetPickerOverlay.activate(botTarget);
+        // Close the screen so the player can look around and click a mob
+        MinecraftClient client = this.client;
+        if (client != null) {
+            client.setScreen(null);
+        }
     }
 
     @Override

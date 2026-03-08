@@ -42,6 +42,7 @@ import net.wcfcarolina13.GameAI.services.CompanionOverheadDialogueService;
 import net.wcfcarolina13.GameAI.services.ReturnBaseStuckService;
 import net.wcfcarolina13.GameAI.services.SmeltingService;
 import net.wcfcarolina13.GameAI.services.DebugFileLogger;
+import net.wcfcarolina13.network.HuntablesNetworkManager;
 import net.wcfcarolina13.GameAI.skills.Skill;
 import net.wcfcarolina13.GameAI.skills.SkillContext;
 import net.wcfcarolina13.GameAI.skills.SkillExecutionResult;
@@ -59,6 +60,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 
 public final class HuntSkill implements Skill {
 
@@ -255,8 +257,12 @@ public final class HuntSkill implements Skill {
                 return SkillExecutionResult.failure("I need a weapon to hunt.");
             }
 
-            HuntCandidate candidate = findCandidate(world, bot, anchors, unlocked, explicitTarget, request.hobby(),
-                    depopulationEnabled, selectedTargets, huntRadius, huntYSpan);
+            // Check for targeted entity (from TARGET button in UI)
+            HuntCandidate candidate = findTargetedEntity(world, bot);
+            if (candidate == null) {
+                candidate = findCandidate(world, bot, anchors, unlocked, explicitTarget, request.hobby(),
+                        depopulationEnabled, selectedTargets, huntRadius, huntYSpan);
+            }
             if (candidate == null || candidate.entity == null) {
                 LOGGER.info("Hunt candidate not found (explicitTarget={})", explicitTarget != null);
                 if (explicitTarget != null) {
@@ -490,6 +496,34 @@ public final class HuntSkill implements Skill {
         return findCandidate(world, bot, anchors, unlocked, null, true,
                 config.depopulationEnabled, config.selectedTargets,
                 zone.radius, zone.ySpan) != null;
+    }
+
+    /**
+     * Check for a pending entity target set by the TARGET button UI.
+     * Finds the specific entity by UUID in the world, bypassing depopulation checks.
+     */
+    private static HuntCandidate findTargetedEntity(ServerWorld world, ServerPlayerEntity bot) {
+        if (world == null || bot == null) return null;
+        UUID targetUuid = HuntablesNetworkManager.consumePendingTarget(bot.getUuid());
+        if (targetUuid == null) return null;
+
+        Entity entity = world.getEntity(targetUuid);
+        if (!(entity instanceof LivingEntity living) || living.isDead() || living.isRemoved()) {
+            LOGGER.info("Targeted entity {} not found or dead", targetUuid);
+            return null;
+        }
+
+        // Resolve HuntCatalog target for the entity type
+        Identifier entityId = net.minecraft.entity.EntityType.getId(entity.getType());
+        HuntCatalog.HuntTarget catalogTarget = entityId != null
+                ? HuntCatalog.findByName(entityId.getPath()) : null;
+        if (catalogTarget == null) {
+            LOGGER.info("Targeted entity {} ({}) not in hunt catalog", targetUuid, entityId);
+            return null;
+        }
+
+        LOGGER.info("Using targeted entity: {} ({})", living.getName().getString(), targetUuid);
+        return new HuntCandidate(catalogTarget, living);
     }
 
     private static HuntCandidate findCandidate(ServerWorld world,

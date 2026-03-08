@@ -788,9 +788,13 @@ public class FrensClient implements ClientModInitializer {
         HudRenderCallback.EVENT.register((context, tickDelta) -> CompanionHotkeyOverlayHud.render(context));
         HudRenderCallback.EVENT.register((context, tickDelta) -> renderLookedAtBotStatusHint(context));
         HudRenderCallback.EVENT.register((context, tickDelta) -> renderLookedAtBotInventoryHint(context));
-        
+        HudRenderCallback.EVENT.register((context, tickDelta) ->
+                net.wcfcarolina13.GraphicalUserInterface.HuntTargetPickerOverlay.render(context));
+
         // Update schematic preview box every client tick
         ClientTickEvents.END_CLIENT_TICK.register(FrensClient::updateSchematicPreviewBox);
+        ClientTickEvents.END_CLIENT_TICK.register(client ->
+                net.wcfcarolina13.GraphicalUserInterface.HuntTargetPickerOverlay.onClientTick(client));
 
     }
 

@@ -469,6 +469,8 @@ public class Frens implements ModInitializer {
         PayloadTypeRegistry.playS2C().register(net.wcfcarolina13.network.HuntDiscoveryPayload.ID, net.wcfcarolina13.network.HuntDiscoveryPayload.CODEC);
         PayloadTypeRegistry.playC2S().register(net.wcfcarolina13.network.SaveHuntConfigPayload.ID, net.wcfcarolina13.network.SaveHuntConfigPayload.CODEC);
         PayloadTypeRegistry.playS2C().register(net.wcfcarolina13.network.HuntConfigPayload.ID, net.wcfcarolina13.network.HuntConfigPayload.CODEC);
+        PayloadTypeRegistry.playC2S().register(net.wcfcarolina13.network.HuntTargetPayload.ID, net.wcfcarolina13.network.HuntTargetPayload.CODEC);
+        PayloadTypeRegistry.playC2S().register(net.wcfcarolina13.network.HuntTargetModePayload.ID, net.wcfcarolina13.network.HuntTargetModePayload.CODEC);
 
         // Survival recruitment (find village -> recruit bot) payloads.
         PayloadTypeRegistry.playS2C().register(RecruitmentPromptPayload.ID, RecruitmentPromptPayload.CODEC);
@@ -753,6 +755,7 @@ public class Frens implements ModInitializer {
         ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.BotFallSafetyService::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.BotAutoHuntService::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(BotAutoReturnSunsetService::onServerTick);
+        ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.network.HuntablesNetworkManager::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(BotIdleHobbiesService::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(BotInventoryFullDialogueService::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(BotAmbientSocialChatService::onServerTick);
