@@ -57,6 +57,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
     // Row height must comfortably fit the font + padding; 10px is too tight and causes visual overlap.
     private static final int TOPIC_ROW_HEIGHT = 12;
     private static final int TOPIC_CONTROL_GAP = 2;
+    private static final int SKILL_ICON_SLOT_W = 16;
 
     // Collapsed (shared inventory) quick-actions grid.
     private static final String TOPIC_PANEL_TITLE = "Actions";
@@ -92,10 +93,12 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
     private static final int TOPICS_OVERLAY_SEARCH_GAP = 4;
     private static final int TOPICS_OVERLAY_SCROLLBAR_W = 10;
     private static final int TOPICS_OVERLAY_SCROLLBAR_MIN_THUMB_H = 18;
+    private static final int ACTIONS_TWO_COLUMN_GAP = 8;
     private static final int BOT_SWITCH_CONTROL_H = 12;
     private static final int BOT_SWITCH_CONTROL_W = 12;
     private static final int BOT_SWITCH_CONTROL_GAP = 2;
     private static final long BOT_SWITCH_HINT_COOLDOWN_MS = 1200L;
+    private static final long BOT_SWITCH_STATE_RESTORE_WINDOW_MS = 5_000L;
     private OtherClientPlayerEntity fallbackBot;
     private final String botAlias;
     private float lastMouseX;
@@ -111,10 +114,10 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
     // Hover tooltip (delayed) for entries in the expanded overlay.
     private TopicEntry overlayHoveredEntry = null;
     private long overlayHoverStartedAtMs = 0L;
-    private static final long OVERLAY_HOVER_TOOLTIP_DELAY_MS = 2500L;
+    private static final long OVERLAY_HOVER_TOOLTIP_DELAY_MS = 1700L;
     private TopicEntry quickHoveredEntry = null;
     private long quickHoverStartedAtMs = 0L;
-    private static final long QUICK_HOVER_TOOLTIP_DELAY_MS = 2500L;
+    private static final long QUICK_HOVER_TOOLTIP_DELAY_MS = 1700L;
     private String overlayHoveredControlKey = null;
     private long overlayControlHoverStartedAtMs = 0L;
     private long lastBotSwitchHintAtMs = 0L;
@@ -134,6 +137,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
     // Static so they survive the old→new screen instance transition.
     private static double savedSwitchCursorX = -1;
     private static double savedSwitchCursorY = -1;
+    private static BotSwitchUiState pendingBotSwitchUiState = null;
 
     // Skills list scroll (always used for the small panel; also used for overlay when Skills tab is selected).
     private int skillScrollIndex;
@@ -211,6 +215,20 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         Map<String, Map<String, Boolean>> userOverrides = new HashMap<>();
         Map<String, String> knownUsers = new HashMap<>();
     }
+
+    private record BotSwitchUiState(String targetAlias,
+                                    long createdAtMs,
+                                    boolean topicsExpanded,
+                                    TopicCategory overlayCategory,
+                                    double overlaySplitRatio,
+                                    int skillScrollIndex,
+                                    int dialogueScrollIndex,
+                                    int adminScrollIndex,
+                                    String topicSearchQuery,
+                                    boolean topicSearchFocused,
+                                    String lastDialogueTopicLabel,
+                                    String lastDialogueTopicKey,
+                                    boolean adminPreviewAsNonAdmin) {}
 
     public static void applyAdminPermissionsJson(String botAlias, String jsonData) {
         String aliasKey = normalizedAliasKey(botAlias);
@@ -361,6 +379,16 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
                                   int listX, int listW,
                                   Rect dividerRect) {}
 
+    private enum SkillVisualRowKind {
+        HEADER,
+        FULL_WIDTH,
+        TWO_COLUMN
+    }
+
+    private record SkillVisualRow(SkillVisualRowKind kind, TopicEntry left, TopicEntry right) {}
+
+    private record SkillEntryHit(TopicEntry entry, Rect rect) {}
+
     private enum TopicAction {
         COMPANION_COME,
         COMPANION_SUMMON,
@@ -406,7 +434,8 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         ADMIN_PREVIEW_NON_ADMIN,
         OPEN_SKIN_CHOOSER,
         SKIN_POLICY_EVERYONE,
-        SKIN_POLICY_CUSTOM
+        SKIN_POLICY_CUSTOM,
+        STORAGE
     }
 
     private enum TopicCategory {
@@ -438,6 +467,10 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             return new TopicEntry(label, TopicCategory.SKILL, action, toggle, indent, null);
         }
 
+        private static TopicEntry skillHeader(String label) {
+            return new TopicEntry(label, TopicCategory.SKILL, null, false, 0, "__header__");
+        }
+
         private static TopicEntry dialogue(String label, String dialogueKey) {
             return new TopicEntry(label, TopicCategory.DIALOGUE, null, false, 0, dialogueKey);
         }
@@ -452,33 +485,43 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         }
     }
 
-    private static final List<TopicEntry> SKILL_TOPIC_ENTRIES = List.of(
-            TopicEntry.skill("📘 Guide", TopicAction.OPEN_GUIDE, false, 0),
-            TopicEntry.skill("🛑 Stop", TopicAction.STOP, false, 0),
-            TopicEntry.skill("▶ Resume", TopicAction.RESUME, false, 0),
-            TopicEntry.skill("👣 Follow", TopicAction.FOLLOW, true, 0),
-            TopicEntry.skill("🛡 Guard", TopicAction.GUARD, true, 0),
+        private static final List<TopicEntry> SKILL_TOPIC_ENTRIES = List.of(
+            TopicEntry.skillHeader("Core Actions"),
+            TopicEntry.skill("Guide", TopicAction.OPEN_GUIDE, false, 0),
+            TopicEntry.skill("Stop", TopicAction.STOP, false, 0),
+            TopicEntry.skill("Resume", TopicAction.RESUME, false, 0),
+
+            TopicEntry.skillHeader("Orders & Travel"),
+            TopicEntry.skill("Follow", TopicAction.FOLLOW, true, 0),
+            TopicEntry.skill("Guard", TopicAction.GUARD, true, 0),
             TopicEntry.skill("Patrol", TopicAction.PATROL, true, 0),
-            TopicEntry.skill("🏠 Return Home", TopicAction.RETURN_HOME, true, 0),
-            TopicEntry.skill("🛌 Sleep", TopicAction.SLEEP, false, 0),
+            TopicEntry.skill("Return Home", TopicAction.RETURN_HOME, true, 0),
+            TopicEntry.skill("Sleep", TopicAction.SLEEP, false, 0),
+
+            TopicEntry.skillHeader("Automation"),
             TopicEntry.skill("Auto Home @ Sunset", TopicAction.AUTO_RETURN_SUNSET, true, 0),
-            TopicEntry.skill("Guard/Patrol eligible", TopicAction.AUTO_RETURN_SUNSET_GUARD_PATROL, true, 1),
+            TopicEntry.skill("Guard/Patrol Eligible", TopicAction.AUTO_RETURN_SUNSET_GUARD_PATROL, true, 1),
             TopicEntry.skill("Idle Hobbies", TopicAction.IDLE_HOBBIES, true, 0),
             TopicEntry.skill("Auto Hunt (Starving)", TopicAction.AUTO_HUNT_STARVING, true, 1),
             TopicEntry.skill("Unleash Tethered", TopicAction.UNLEASH_TETHERED, true, 0),
             TopicEntry.skill("Leash on Dismount", TopicAction.LEASH_ON_DISMOUNT, true, 0),
-            TopicEntry.skill("🧹 Cleanup", TopicAction.DROP_SWEEP, false, 0),
+
+            TopicEntry.skillHeader("Utilities"),
+            TopicEntry.skill("Cleanup", TopicAction.DROP_SWEEP, false, 0),
             TopicEntry.skill("Bases >", TopicAction.BASES, false, 0),
             TopicEntry.skill("Crafting >", TopicAction.CRAFTING, false, 0),
             TopicEntry.skill("Construction >", TopicAction.CONSTRUCTION, false, 0),
             TopicEntry.skill("Cooking >", TopicAction.COOKING, false, 0),
             TopicEntry.skill("Hunting >", TopicAction.HUNTING, false, 0),
+            TopicEntry.skill("Storage >", TopicAction.STORAGE, false, 0),
+
+            TopicEntry.skillHeader("Skills"),
             TopicEntry.skill("Fishing", TopicAction.SKILL_FISH, false, 0),
             TopicEntry.skill("Woodcut", TopicAction.SKILL_WOODCUT, false, 0),
             TopicEntry.skill("Woodcut Cleanup", TopicAction.SKILL_WOODCUT_CLEANUP, false, 1),
             TopicEntry.skill("Wool", TopicAction.SKILL_WOOL, false, 0),
             TopicEntry.skill("Farming", TopicAction.SKILL_FARM, false, 0),
-            TopicEntry.skill("Collect Dirt", TopicAction.SKILL_COLLECT_DIRT, false, 1),
+            TopicEntry.skill("Collect Dirt", TopicAction.SKILL_COLLECT_DIRT, false, 0),
             TopicEntry.skill("Mining", TopicAction.SKILL_MINING, false, 0),
             TopicEntry.skill("Stripmine", TopicAction.SKILL_STRIPMINE, false, 1),
             TopicEntry.skill("Ascent", TopicAction.SKILL_ASCENT, false, 1),
@@ -488,12 +531,12 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             // Curated, non-scroll quick actions for the collapsed panel.
             // (These are intentionally short labels; the expanded overlay still shows the full list.)
             private static final List<TopicEntry> QUICK_TOPIC_ENTRIES = List.of(
-                TopicEntry.skill("📘 Guide", TopicAction.OPEN_GUIDE, false, 0),
-                TopicEntry.skill("🛑 Stop", TopicAction.STOP, false, 0),
-                TopicEntry.skill("👣 Follow", TopicAction.FOLLOW, true, 0),
-                TopicEntry.skill("🏠 Home", TopicAction.RETURN_HOME, true, 0),
-                TopicEntry.skill("🛌 Sleep", TopicAction.SLEEP, false, 0),
-                TopicEntry.skill("🛡 Guard", TopicAction.GUARD, true, 0)
+                TopicEntry.skill("Guide", TopicAction.OPEN_GUIDE, false, 0),
+                TopicEntry.skill("Stop", TopicAction.STOP, false, 0),
+                TopicEntry.skill("Follow", TopicAction.FOLLOW, true, 0),
+                TopicEntry.skill("Home", TopicAction.RETURN_HOME, true, 0),
+                TopicEntry.skill("Sleep", TopicAction.SLEEP, false, 0),
+                TopicEntry.skill("Guard", TopicAction.GUARD, true, 0)
             );
 
     // Dialogue/quest topics are intentionally local/scripted: they feed the dialogue panel without
@@ -593,8 +636,63 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             savedSwitchCursorY = -1;
         }
 
+        restorePendingBotSwitchUiState();
+
         if (isAdminUser()) {
             requestAdminPermissionsSnapshot(this.botAlias);
+        }
+    }
+
+    private void captureBotSwitchUiState(String targetAlias) {
+        if (targetAlias == null || targetAlias.isBlank()) {
+            pendingBotSwitchUiState = null;
+            return;
+        }
+        pendingBotSwitchUiState = new BotSwitchUiState(
+                targetAlias,
+                System.currentTimeMillis(),
+                this.topicsExpanded,
+                this.overlayCategory,
+                this.overlaySplitRatio,
+                this.skillScrollIndex,
+                this.dialogueScrollIndex,
+                this.adminScrollIndex,
+                this.topicSearchQuery != null ? this.topicSearchQuery : "",
+                this.topicSearchFocused,
+                this.lastDialogueTopicLabel != null ? this.lastDialogueTopicLabel : "",
+                this.lastDialogueTopicKey != null ? this.lastDialogueTopicKey : "",
+                this.adminPreviewAsNonAdmin
+        );
+    }
+
+    private void restorePendingBotSwitchUiState() {
+        BotSwitchUiState state = pendingBotSwitchUiState;
+        if (state == null) {
+            return;
+        }
+        long ageMs = System.currentTimeMillis() - state.createdAtMs();
+        boolean aliasMatches = state.targetAlias() != null && state.targetAlias().equalsIgnoreCase(this.botAlias);
+        if (!aliasMatches) {
+            if (ageMs > BOT_SWITCH_STATE_RESTORE_WINDOW_MS) {
+                pendingBotSwitchUiState = null;
+            }
+            return;
+        }
+        pendingBotSwitchUiState = null;
+
+        this.overlayCategory = state.overlayCategory() != null ? state.overlayCategory() : TopicCategory.SKILL;
+        this.overlaySplitRatio = MathHelper.clamp(state.overlaySplitRatio(), 0.25, 0.75);
+        this.skillScrollIndex = Math.max(0, state.skillScrollIndex());
+        this.dialogueScrollIndex = Math.max(0, state.dialogueScrollIndex());
+        this.adminScrollIndex = Math.max(0, state.adminScrollIndex());
+        this.topicSearchQuery = state.topicSearchQuery() != null ? state.topicSearchQuery() : "";
+        this.topicSearchFocused = state.topicSearchFocused();
+        this.lastDialogueTopicLabel = state.lastDialogueTopicLabel() != null ? state.lastDialogueTopicLabel() : "";
+        this.lastDialogueTopicKey = state.lastDialogueTopicKey() != null ? state.lastDialogueTopicKey() : "";
+        this.adminPreviewAsNonAdmin = state.adminPreviewAsNonAdmin();
+
+        if (state.topicsExpanded()) {
+            toggleTopicsExpanded(true);
         }
     }
 
@@ -659,15 +757,72 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
     }
 
     private void drawOverlayBotSwitchControls(DrawContext context, Rect overlayRect, int closeX, int mouseX, int mouseY) {
-        int headerH = this.textRenderer.fontHeight + TOPICS_OVERLAY_HEADER_PAD * 2;
-        int rowY = overlayRect.y + Math.max(1, (headerH - BOT_SWITCH_CONTROL_H) / 2);
-        int leftBound = overlayRect.x + TOPICS_OVERLAY_PADDING + this.textRenderer.getWidth("Conversation") + 10;
-        int rightBound = closeX - 8;
-        BotSwitchLayout layout = computeBotSwitchLayout(leftBound, rightBound, rowY);
+        BotSwitchLayout layout = computeOverlayBotSwitchLayout(overlayRect, closeX);
         if (layout == null) {
             return;
         }
         drawBotSwitchControls(context, layout, mouseX, mouseY, true);
+    }
+
+    private BotSwitchLayout computeOverlayBotSwitchLayout(Rect overlayRect, int closeX) {
+        int headerH = this.textRenderer.fontHeight + TOPICS_OVERLAY_HEADER_PAD * 2;
+        int rowY = overlayRect.y + Math.max(1, (headerH - BOT_SWITCH_CONTROL_H) / 2);
+        int leftBound = overlayRect.x + TOPICS_OVERLAY_PADDING + this.textRenderer.getWidth(getOverlayHeaderTitle()) + 10;
+        int rightBound = closeX - 8;
+        return computeBotSwitchLayout(leftBound, rightBound, rowY);
+    }
+
+    private BotSwitchLayout getActiveBotSwitchLayout() {
+        if (topicsExpanded) {
+            Rect overlayRect = computeTopicsOverlayRect();
+            int closeSize = 12;
+            int closeX = overlayRect.right() - TOPICS_OVERLAY_PADDING - closeSize;
+            return computeOverlayBotSwitchLayout(overlayRect, closeX);
+        }
+        int rowY = this.y + SECTION_HEIGHT + 2 + STATS_AREA_HEIGHT - BOT_SWITCH_CONTROL_H - 5;
+        return computeBotSwitchLayout(this.x + 6, this.x + SECTION_WIDTH - 6, rowY);
+    }
+
+    private boolean isActionsOverlayFullWidth() {
+        return overlayCategory == TopicCategory.SKILL;
+    }
+
+    private String getOverlayHeaderTitle() {
+        return switch (overlayCategory) {
+            case DIALOGUE -> "Dialogue";
+            case ADMIN -> "Admin";
+            default -> TOPIC_PANEL_TITLE;
+        };
+    }
+
+    private String getOverlayFooterHint() {
+        return switch (overlayCategory) {
+            case SKILL -> "Scroll or drag scrollbar; click an action; [ and ] switch bot; Esc closes";
+            case DIALOGUE -> "Scroll or drag scrollbar; click a topic; [ and ] switch bot; Esc closes";
+            case ADMIN -> "Scroll or drag scrollbar; click an admin action; [ and ] switch bot; Esc closes";
+        };
+    }
+
+    private int getOverlayListX(OverlayColumns cols) {
+        return isActionsOverlayFullWidth() ? cols.contentX : cols.listX;
+    }
+
+    private int getOverlayListW(OverlayColumns cols) {
+        return isActionsOverlayFullWidth() ? cols.contentW : cols.listW;
+    }
+
+    private int getOverlayListContentWidth(OverlayColumns cols) {
+        return getOverlayListContentWidth(getOverlayListW(cols));
+    }
+
+    private void resetInventoryTooltipHoverState() {
+        long now = System.currentTimeMillis();
+        quickHoveredEntry = null;
+        quickHoverStartedAtMs = now;
+        overlayHoveredEntry = null;
+        overlayHoverStartedAtMs = now;
+        overlayHoveredControlKey = null;
+        overlayControlHoverStartedAtMs = now;
     }
 
     private BotSwitchLayout computeBotSwitchLayout(int leftBound, int rightBound, int y) {
@@ -707,7 +862,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
                     addSwitchAlias(unique, alias);
                 }
             }
-            for (String alias : Frens.CONFIG.getBotControls().keySet()) {
+            for (String alias : Frens.CONFIG.getAllBotAliases()) {
                 if (onlineNames.contains(alias.toLowerCase(Locale.ROOT))) {
                     addSwitchAlias(unique, alias);
                 }
@@ -879,6 +1034,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         if (layout == null || !layout.canSwitch()) {
             return false;
         }
+        resetInventoryTooltipHoverState();
         List<String> aliases = layout.aliases();
         if (aliases == null || aliases.isEmpty()) {
             return false;
@@ -922,6 +1078,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             savedSwitchCursorX = xBuf[0];
             savedSwitchCursorY = yBuf[0];
         }
+        captureBotSwitchUiState(targetAlias);
         switchBrowseOffset = 0;
         switchBrowsedBlockedAlias = null;
         switchBrowsedBlockReason = null;
@@ -1061,18 +1218,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
     }
 
     private java.util.List<String> getQuickTooltipLines(TopicEntry entry) {
-        if (entry == null) {
-            return java.util.List.of();
-        }
-        if (entry.action == TopicAction.OPEN_GUIDE) {
-            String guideKey = FrensClient.getGuideHotkeyDisplayName();
-            return java.util.List.of(
-                    "Guide",
-                    "Open the in-game companion guide.",
-                    "Hotkey: [" + guideKey + "]"
-            );
-        }
-        return java.util.List.of(entry.label);
+        return java.util.List.of();
     }
 
     private void drawQuickTopicButton(DrawContext context, int x, int y, int w, int h, TopicEntry entry,
@@ -1209,10 +1355,241 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         return Math.max(60, listW - TOPICS_OVERLAY_SCROLLBAR_W - 2);
     }
 
+    private int getSkillLabelStartX(int rowX, TopicAction action, int indent) {
+        int baseX = rowX + 4;
+        return baseX + SKILL_ICON_SLOT_W + Math.max(0, indent) * 10;
+    }
+
+    private int getCompactControlRight(int rowX, int rowW, int labelX, int valueWidth, int controlCount) {
+        int controlSize = TOPIC_ROW_HEIGHT - 2;
+        int controlsWidth = Math.max(0, controlCount) * controlSize + Math.max(0, controlCount - 1) * TOPIC_CONTROL_GAP;
+        int minRight = labelX + 44 + Math.max(0, valueWidth) + TOPIC_CONTROL_GAP + controlsWidth;
+        int preferredRight = rowX + Math.min(Math.max(88, rowW - 18), 208);
+        int maxRight = rowX + rowW - 1;
+        return MathHelper.clamp(Math.max(preferredRight, minRight), rowX + controlsWidth + 8, maxRight);
+    }
+
+    private void drawValueClusterBox(DrawContext context, int left, int rowY, int right, boolean hover) {
+        if (right - left < 12) {
+            return;
+        }
+        int boxY = rowY + 1;
+        int boxBottom = rowY + TOPIC_ROW_HEIGHT - 1;
+        int fill = hover ? 0xFF171717 : 0xFF131313;
+        int border = hover ? 0xFF2D2D2D : 0xFF222222;
+        context.fill(left, boxY, right, boxBottom, fill);
+        context.fill(left, boxY, right, boxY + 1, border);
+        context.fill(left, boxBottom - 1, right, boxBottom, border);
+        context.fill(left, boxY, left + 1, boxBottom, border);
+        context.fill(right - 1, boxY, right, boxBottom, border);
+    }
+
     private Rect computeOverlayListScrollbarTrack(int listX, int listStartY, int listW, int rowsHeight) {
         int rowW = getOverlayListContentWidth(listW);
         int trackX = listX + rowW + 1;
         return new Rect(trackX, listStartY, TOPICS_OVERLAY_SCROLLBAR_W, Math.max(1, rowsHeight));
+    }
+
+    private boolean shouldUseTwoColumnSkillRow(TopicEntry entry) {
+        if (entry == null || entry.category != TopicCategory.SKILL || isSkillHeaderEntry(entry) || entry.action == null) {
+            return false;
+        }
+        return switch (entry.action) {
+            case FOLLOW,
+                 SKILL_WOODCUT,
+                 SKILL_FISH,
+                 SKILL_WOOL,
+                 SKILL_COLLECT_DIRT,
+                 SKILL_STRIPMINE,
+                 SKILL_ASCENT,
+                 SKILL_DESCENT,
+                 AUTO_RETURN_SUNSET,
+                 AUTO_RETURN_SUNSET_GUARD_PATROL -> false;
+            default -> true;
+        };
+    }
+
+    private List<SkillVisualRow> buildSkillVisualRows(List<TopicEntry> entries) {
+        ArrayList<SkillVisualRow> rows = new ArrayList<>();
+        TopicEntry pendingSimple = null;
+
+        for (TopicEntry entry : entries) {
+            if (entry == null) {
+                continue;
+            }
+            if (isSkillHeaderEntry(entry)) {
+                if (pendingSimple != null) {
+                    rows.add(new SkillVisualRow(SkillVisualRowKind.FULL_WIDTH, pendingSimple, null));
+                    pendingSimple = null;
+                }
+                rows.add(new SkillVisualRow(SkillVisualRowKind.HEADER, entry, null));
+                continue;
+            }
+
+            if (!shouldUseTwoColumnSkillRow(entry)) {
+                if (pendingSimple != null) {
+                    rows.add(new SkillVisualRow(SkillVisualRowKind.FULL_WIDTH, pendingSimple, null));
+                    pendingSimple = null;
+                }
+                rows.add(new SkillVisualRow(SkillVisualRowKind.FULL_WIDTH, entry, null));
+                continue;
+            }
+
+            if (pendingSimple == null) {
+                pendingSimple = entry;
+            } else {
+                rows.add(new SkillVisualRow(SkillVisualRowKind.TWO_COLUMN, pendingSimple, entry));
+                pendingSimple = null;
+            }
+        }
+
+        if (pendingSimple != null) {
+            rows.add(new SkillVisualRow(SkillVisualRowKind.FULL_WIDTH, pendingSimple, null));
+        }
+
+        return rows;
+    }
+
+    private int getOverlayVisualRowCount(List<TopicEntry> entries) {
+        if (overlayCategory == TopicCategory.SKILL) {
+            return buildSkillVisualRows(entries).size();
+        }
+        return entries != null ? entries.size() : 0;
+    }
+
+    private void drawSkillEntryRow(DrawContext context, int rowX, int rowY, int rowW, TopicEntry entry, int mouseX, int mouseY) {
+        if (entry == null) {
+            return;
+        }
+        if (entry.action == TopicAction.FOLLOW) {
+            drawFollowRow(context, rowX, rowY, rowW, mouseX, mouseY);
+            return;
+        }
+        if (entry.action == TopicAction.SKILL_WOODCUT) {
+            drawWoodcutRow(context, rowX, rowY, rowW, mouseX, mouseY);
+            return;
+        }
+        if (isAdjustableSkillAction(entry.action)) {
+            drawAdjustableSkillRow(context, rowX, rowY, rowW, entry, mouseX, mouseY);
+            return;
+        }
+        boolean active = entry.action != null && isEntryActive(entry.action);
+        drawTopicRow(context, rowX, rowY, rowW, entry, active, mouseX, mouseY);
+    }
+
+    private void drawSkillVisualRow(DrawContext context, int rowX, int rowY, int rowW, SkillVisualRow row, int mouseX, int mouseY) {
+        if (row == null || row.left() == null) {
+            return;
+        }
+        if (row.kind() == SkillVisualRowKind.TWO_COLUMN && row.right() != null) {
+            int leftW = Math.max(40, (rowW - ACTIONS_TWO_COLUMN_GAP) / 2);
+            int rightX = rowX + leftW + ACTIONS_TWO_COLUMN_GAP;
+            int rightW = Math.max(40, rowW - leftW - ACTIONS_TWO_COLUMN_GAP);
+            drawSkillEntryRow(context, rowX, rowY, leftW, row.left(), mouseX, mouseY);
+            drawSkillEntryRow(context, rightX, rowY, rightW, row.right(), mouseX, mouseY);
+            return;
+        }
+        drawSkillEntryRow(context, rowX, rowY, rowW, row.left(), mouseX, mouseY);
+    }
+
+    private SkillEntryHit getSkillEntryHitAtOverlay(double mouseX, double mouseY) {
+        if (overlayCategory != TopicCategory.SKILL) {
+            return null;
+        }
+        Rect r = computeTopicsOverlayRect();
+        int headerH = this.textRenderer.fontHeight + TOPICS_OVERLAY_HEADER_PAD * 2;
+        int footerH = this.textRenderer.fontHeight + TOPICS_OVERLAY_FOOTER_PAD * 2;
+        int footerY = r.bottom() - footerH;
+        int contentY = r.y + headerH + 2;
+        int contentH = (footerY - 2) - contentY;
+
+        OverlayColumns cols = computeOverlayColumns(r);
+        int listX = getOverlayListX(cols);
+        int listY = getOverlayRowsStartY(cols.contentY);
+        int listW = getOverlayListContentWidth(cols);
+        int listH = getOverlayRowsHeight(contentH);
+        int visibleRows = Math.max(1, listH / TOPIC_ROW_HEIGHT);
+        List<TopicEntry> entries = getFilteredOverlayEntries(getOverlayEntries());
+        List<SkillVisualRow> rows = buildSkillVisualRows(entries);
+        clampOverlayScroll(visibleRows);
+
+        if (mouseX < listX || mouseX >= listX + listW || mouseY < listY || mouseY >= listY + listH) {
+            return null;
+        }
+
+        int rowOffset = (int) ((mouseY - listY) / TOPIC_ROW_HEIGHT);
+        if (rowOffset < 0 || rowOffset >= visibleRows) {
+            return null;
+        }
+        int visualIndex = skillScrollIndex + rowOffset;
+        if (visualIndex < 0 || visualIndex >= rows.size()) {
+            return null;
+        }
+
+        int rowTop = listY + rowOffset * TOPIC_ROW_HEIGHT;
+        SkillVisualRow row = rows.get(visualIndex);
+        if (row.kind() == SkillVisualRowKind.TWO_COLUMN && row.right() != null) {
+            int leftW = Math.max(40, (listW - ACTIONS_TWO_COLUMN_GAP) / 2);
+            int rightX = listX + leftW + ACTIONS_TWO_COLUMN_GAP;
+            int rightW = Math.max(40, listW - leftW - ACTIONS_TWO_COLUMN_GAP);
+            Rect leftRect = new Rect(listX, rowTop, leftW, TOPIC_ROW_HEIGHT);
+            Rect rightRect = new Rect(rightX, rowTop, rightW, TOPIC_ROW_HEIGHT);
+            if (rightRect.contains(mouseX, mouseY)) {
+                return new SkillEntryHit(row.right(), rightRect);
+            }
+            if (leftRect.contains(mouseX, mouseY)) {
+                return new SkillEntryHit(row.left(), leftRect);
+            }
+            return null;
+        }
+
+        Rect fullRect = new Rect(listX, rowTop, listW, TOPIC_ROW_HEIGHT);
+        return fullRect.contains(mouseX, mouseY) ? new SkillEntryHit(row.left(), fullRect) : null;
+    }
+
+    private Rect getSkillEntryRectInOverlay(TopicAction action) {
+        if (overlayCategory != TopicCategory.SKILL || action == null) {
+            return null;
+        }
+        Rect r = computeTopicsOverlayRect();
+        int headerH = this.textRenderer.fontHeight + TOPICS_OVERLAY_HEADER_PAD * 2;
+        int footerH = this.textRenderer.fontHeight + TOPICS_OVERLAY_FOOTER_PAD * 2;
+        int footerY = r.bottom() - footerH;
+        int contentY = r.y + headerH + 2;
+        int contentH = (footerY - 2) - contentY;
+
+        OverlayColumns cols = computeOverlayColumns(r);
+        int listX = getOverlayListX(cols);
+        int listY = getOverlayRowsStartY(cols.contentY);
+        int listW = getOverlayListContentWidth(cols);
+        int listH = getOverlayRowsHeight(contentH);
+        int visibleRows = Math.max(1, listH / TOPIC_ROW_HEIGHT);
+        List<TopicEntry> entries = getFilteredOverlayEntries(getOverlayEntries());
+        List<SkillVisualRow> rows = buildSkillVisualRows(entries);
+        clampOverlayScroll(visibleRows);
+
+        for (int i = 0; i < visibleRows; i++) {
+            int visualIndex = skillScrollIndex + i;
+            if (visualIndex < 0 || visualIndex >= rows.size()) {
+                break;
+            }
+            int rowTop = listY + i * TOPIC_ROW_HEIGHT;
+            SkillVisualRow row = rows.get(visualIndex);
+            if (row.kind() == SkillVisualRowKind.TWO_COLUMN && row.right() != null) {
+                int leftW = Math.max(40, (listW - ACTIONS_TWO_COLUMN_GAP) / 2);
+                int rightX = listX + leftW + ACTIONS_TWO_COLUMN_GAP;
+                int rightW = Math.max(40, listW - leftW - ACTIONS_TWO_COLUMN_GAP);
+                if (row.left() != null && row.left().action == action) {
+                    return new Rect(listX, rowTop, leftW, TOPIC_ROW_HEIGHT);
+                }
+                if (row.right().action == action) {
+                    return new Rect(rightX, rowTop, rightW, TOPIC_ROW_HEIGHT);
+                }
+            } else if (row.left() != null && row.left().action == action) {
+                return new Rect(listX, rowTop, listW, TOPIC_ROW_HEIGHT);
+            }
+        }
+        return null;
     }
 
     private Rect computeOverlayListScrollbarThumb(Rect track, int totalRows, int visibleRows) {
@@ -1266,7 +1643,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         // Header.
         int headerH = this.textRenderer.fontHeight + TOPICS_OVERLAY_HEADER_PAD * 2;
         context.fill(r.x + 1, r.y + 1, r.right() - 1, r.y + headerH, 0xFF161616);
-        context.drawText(this.textRenderer, "Conversation", r.x + TOPICS_OVERLAY_PADDING, r.y + TOPICS_OVERLAY_HEADER_PAD + 1, 0xFFFFE08A, false);
+        context.drawText(this.textRenderer, getOverlayHeaderTitle(), r.x + TOPICS_OVERLAY_PADDING, r.y + TOPICS_OVERLAY_HEADER_PAD + 1, 0xFFFFE08A, false);
 
         // Close box (top-right).
         String closeLabel = "X";
@@ -1280,7 +1657,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         drawOverlayBotSwitchControls(context, r, closeX, mouseX, mouseY);
 
         // Footer hint.
-        String hint = "Scroll or drag scrollbar; click a topic; [ / ] switch bot; Esc closes";
+        String hint = getOverlayFooterHint();
         int footerH = this.textRenderer.fontHeight + TOPICS_OVERLAY_FOOTER_PAD * 2;
         int footerY = r.bottom() - footerH;
         context.fill(r.x + 1, footerY, r.right() - 1, r.bottom() - 1, 0xFF161616);
@@ -1289,31 +1666,35 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         // Content region (two columns).
         OverlayColumns cols = computeOverlayColumns(r);
 
-        // Dialogue column.
-        drawDialogueColumn(context, cols.dialogueX, cols.contentY, cols.dialogueW, cols.contentH);
+        if (!isActionsOverlayFullWidth()) {
+            // Dialogue/Admin keep the transcript column visible.
+            drawDialogueColumn(context, cols.dialogueX, cols.contentY, cols.dialogueW, cols.contentH);
 
-        // Divider (draggable).
-        boolean dividerHover = cols.dividerRect.contains(mouseX, mouseY);
-        int dividerFill = dividerHover || overlayDraggingSplit ? 0xFF141414 : 0xFF101010;
-        context.fill(cols.dividerX, cols.contentY, cols.dividerX + cols.dividerW, cols.contentY + cols.contentH, dividerFill);
-        int dividerLineX = cols.dividerX + cols.dividerW / 2;
-        int dividerLineColor = dividerHover || overlayDraggingSplit ? 0xFFB08C40 : 0xFF303030;
-        context.fill(dividerLineX, cols.contentY + 2, dividerLineX + 1, cols.contentY + cols.contentH - 2, dividerLineColor);
+            // Divider (draggable).
+            boolean dividerHover = cols.dividerRect.contains(mouseX, mouseY);
+            int dividerFill = dividerHover || overlayDraggingSplit ? 0xFF141414 : 0xFF101010;
+            context.fill(cols.dividerX, cols.contentY, cols.dividerX + cols.dividerW, cols.contentY + cols.contentH, dividerFill);
+            int dividerLineX = cols.dividerX + cols.dividerW / 2;
+            int dividerLineColor = dividerHover || overlayDraggingSplit ? 0xFFB08C40 : 0xFF303030;
+            context.fill(dividerLineX, cols.contentY + 2, dividerLineX + 1, cols.contentY + cols.contentH - 2, dividerLineColor);
+        }
 
         // Topics list region.
-        int listX = cols.listX;
+        int listX = getOverlayListX(cols);
         int listY = cols.contentY;
-        int listW = cols.listW;
+        int listW = getOverlayListW(cols);
         int listH = cols.contentH;
 
         List<TopicEntry> entries = getFilteredOverlayEntries(getOverlayEntries());
+        List<SkillVisualRow> skillRows = overlayCategory == TopicCategory.SKILL ? buildSkillVisualRows(entries) : null;
         int rowsHeight = getOverlayRowsHeight(listH);
         int visibleRows = Math.max(1, rowsHeight / TOPIC_ROW_HEIGHT);
         clampOverlayScroll(visibleRows);
-        int listContentW = getOverlayListContentWidth(listW);
+        int listContentW = getOverlayListContentWidth(cols);
         int listStartY = getOverlayRowsStartY(listY);
         Rect scrollTrack = computeOverlayListScrollbarTrack(listX, listStartY, listW, rowsHeight);
-        Rect scrollThumb = computeOverlayListScrollbarThumb(scrollTrack, entries.size(), visibleRows);
+        int totalRows = skillRows != null ? skillRows.size() : entries.size();
+        Rect scrollThumb = computeOverlayListScrollbarThumb(scrollTrack, totalRows, visibleRows);
 
         // Tabs (Skills / Dialogue / Admin)
         int tabY = listY + 2;
@@ -1333,17 +1714,19 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         // Clip to list area.
         context.enableScissor(listX, listStartY, listX + listContentW, listStartY + rowsHeight);
         for (int i = 0; i < visibleRows; i++) {
-            int entryIndex = getOverlayScrollIndex() + i;
-            if (entryIndex >= entries.size()) break;
-            TopicEntry entry = entries.get(entryIndex);
             int rowY = listStartY + i * TOPIC_ROW_HEIGHT;
-            if (overlayCategory == TopicCategory.SKILL && entry.action == TopicAction.FOLLOW) {
-                drawFollowRow(context, listX, rowY, listContentW, mouseX, mouseY);
-            } else if (overlayCategory == TopicCategory.SKILL && entry.action == TopicAction.SKILL_WOODCUT) {
-                drawWoodcutRow(context, listX, rowY, listContentW, mouseX, mouseY);
-            } else if (overlayCategory == TopicCategory.SKILL && isAdjustableSkillAction(entry.action)) {
-                drawAdjustableSkillRow(context, listX, rowY, listContentW, entry, mouseX, mouseY);
+            if (overlayCategory == TopicCategory.SKILL) {
+                int visualIndex = getOverlayScrollIndex() + i;
+                if (skillRows == null || visualIndex >= skillRows.size()) {
+                    break;
+                }
+                drawSkillVisualRow(context, listX, rowY, listContentW, skillRows.get(visualIndex), mouseX, mouseY);
             } else {
+                int entryIndex = getOverlayScrollIndex() + i;
+                if (entryIndex >= entries.size()) {
+                    break;
+                }
+                TopicEntry entry = entries.get(entryIndex);
                 boolean active = entry.action != null && isEntryActive(entry.action);
                 drawTopicRow(context, listX, rowY, listContentW, entry, active, mouseX, mouseY);
             }
@@ -1611,10 +1994,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             return true;
         }
 
-        int overlaySwitchLeft = r.x + TOPICS_OVERLAY_PADDING + this.textRenderer.getWidth("Conversation") + 10;
-        int overlaySwitchRight = closeX - 8;
-        int overlaySwitchY = r.y + Math.max(1, (headerH - BOT_SWITCH_CONTROL_H) / 2);
-        BotSwitchLayout overlaySwitch = computeBotSwitchLayout(overlaySwitchLeft, overlaySwitchRight, overlaySwitchY);
+        BotSwitchLayout overlaySwitch = computeOverlayBotSwitchLayout(r, closeX);
         if (handleBotSwitchClick(overlaySwitch, mouseX, mouseY)) {
             return true;
         }
@@ -1622,16 +2002,16 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         OverlayColumns cols = computeOverlayColumns(r);
 
         // Divider drag start.
-        if (click.button() == 0 && cols.dividerRect.contains(mouseX, mouseY)) {
+        if (!isActionsOverlayFullWidth() && click.button() == 0 && cols.dividerRect.contains(mouseX, mouseY)) {
             overlayDraggingSplit = true;
             updateOverlaySplitFromMouse(mouseX);
             return true;
         }
 
         // Tabs (Skills / Dialogue / Admin).
-        int listX = cols.listX;
+        int listX = getOverlayListX(cols);
         int listY = cols.contentY;
-        int listW = cols.listW;
+        int listW = getOverlayListW(cols);
 
         int tabY = listY + 2;
         int tabH = TOPICS_OVERLAY_LIST_HEADER_H - 4;
@@ -1644,6 +2024,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         if (mouseY >= tabY && mouseY < tabY + tabH) {
             if (mouseX >= skillsTabX && mouseX < skillsTabX + tabW) {
                 overlayCategory = TopicCategory.SKILL;
+                overlayDraggingSplit = false;
                 return true;
             }
             if (mouseX >= dialogueTabX && mouseX < dialogueTabX + tabW) {
@@ -1675,8 +2056,9 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         int rowsHeight = getOverlayRowsHeight(cols.contentH);
         int visibleRows = Math.max(1, rowsHeight / TOPIC_ROW_HEIGHT);
         List<TopicEntry> entries = getFilteredOverlayEntries(getOverlayEntries());
+        int totalRows = getOverlayVisualRowCount(entries);
         Rect scrollTrack = computeOverlayListScrollbarTrack(listX, getOverlayRowsStartY(listY), listW, rowsHeight);
-        Rect scrollThumb = computeOverlayListScrollbarThumb(scrollTrack, entries.size(), visibleRows);
+        Rect scrollThumb = computeOverlayListScrollbarThumb(scrollTrack, totalRows, visibleRows);
         if (scrollTrack != null && scrollTrack.contains(mouseX, mouseY) && click.button() == 0) {
             if (scrollThumb != null && scrollThumb.contains(mouseX, mouseY)) {
                 overlayDraggingListScroll = true;
@@ -1686,7 +2068,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             if (scrollThumb != null) {
                 int page = Math.max(1, visibleRows - 1);
                 int delta = mouseY < scrollThumb.y ? -page : page;
-                setOverlayScrollIndex(MathHelper.clamp(getOverlayScrollIndex() + delta, 0, Math.max(0, entries.size() - visibleRows)));
+                setOverlayScrollIndex(MathHelper.clamp(getOverlayScrollIndex() + delta, 0, Math.max(0, totalRows - visibleRows)));
                 return true;
             }
             return true;
@@ -1723,7 +2105,8 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
 
         TopicEntry entry = getTopicEntryAtOverlay(mouseX, mouseY);
         if (entry != null) {
-            if (entry.category == TopicCategory.ADMIN && isAdminHeaderEntry(entry)) {
+            if ((entry.category == TopicCategory.ADMIN && isAdminHeaderEntry(entry))
+                    || (entry.category == TopicCategory.SKILL && isSkillHeaderEntry(entry))) {
                 return true;
             }
             boolean enabled;
@@ -1761,6 +2144,10 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
     }
 
     private TopicEntry getTopicEntryAtOverlay(double mouseX, double mouseY) {
+        if (overlayCategory == TopicCategory.SKILL) {
+            SkillEntryHit hit = getSkillEntryHitAtOverlay(mouseX, mouseY);
+            return hit != null ? hit.entry() : null;
+        }
         Rect r = computeTopicsOverlayRect();
         int headerH = this.textRenderer.fontHeight + TOPICS_OVERLAY_HEADER_PAD * 2;
         int footerH = this.textRenderer.fontHeight + TOPICS_OVERLAY_FOOTER_PAD * 2;
@@ -1770,9 +2157,9 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         int contentH = (footerY - 2) - contentY;
 
         OverlayColumns cols = computeOverlayColumns(r);
-        int listX = cols.listX;
+        int listX = getOverlayListX(cols);
         int listY = getOverlayRowsStartY(cols.contentY);
-        int listW = getOverlayListContentWidth(cols.listW);
+        int listW = getOverlayListContentWidth(cols);
         int listH = getOverlayRowsHeight(contentH);
         int visibleRows = Math.max(1, listH / TOPIC_ROW_HEIGHT);
         clampOverlayScroll(visibleRows);
@@ -1806,34 +2193,23 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         if (overlayCategory != TopicCategory.SKILL) {
             return 0;
         }
-        Rect r = computeTopicsOverlayRect();
-        int headerH = this.textRenderer.fontHeight + TOPICS_OVERLAY_HEADER_PAD * 2;
-        int footerH = this.textRenderer.fontHeight + TOPICS_OVERLAY_FOOTER_PAD * 2;
-
-        int footerY = r.bottom() - footerH;
-        int contentY = r.y + headerH + 2;
-        int contentH = (footerY - 2) - contentY;
-
-        OverlayColumns cols = computeOverlayColumns(r);
-        int listX = cols.listX;
-        int listY = getOverlayRowsStartY(cols.contentY);
-        int listW = getOverlayListContentWidth(cols.listW);
-        int listH = getOverlayRowsHeight(contentH);
-        int visibleRows = Math.max(1, listH / TOPIC_ROW_HEIGHT);
-        clampOverlayScroll(visibleRows);
-
-        List<TopicEntry> entries = getFilteredOverlayEntries(SKILL_TOPIC_ENTRIES);
-        int followIndex = getSkillEntryIndex(entries, TopicAction.FOLLOW);
-        int visibleStart = skillScrollIndex;
-        int visibleEnd = skillScrollIndex + visibleRows;
-        if (followIndex < visibleStart || followIndex >= visibleEnd) {
+        Rect rowRect = getSkillEntryRectInOverlay(TopicAction.FOLLOW);
+        if (rowRect == null) {
             return 0;
         }
-
-        int rowY = listY + (followIndex - visibleStart) * TOPIC_ROW_HEIGHT;
+        int labelX = getSkillLabelStartX(rowRect.x, TopicAction.FOLLOW, 0);
+        String status = isFollowActive() ? "ON" : "OFF";
+        String distanceLabel = formatFollowDistance();
         int controlSize = TOPIC_ROW_HEIGHT - 2;
-        int controlY = rowY + 1;
-        int plusX = listX + listW - controlSize;
+        int controlY = rowRect.y + 1;
+        int controlRight = getCompactControlRight(
+                rowRect.x,
+                rowRect.w,
+                labelX,
+                this.textRenderer.getWidth(distanceLabel) + TOPIC_CONTROL_GAP + this.textRenderer.getWidth(status),
+                2
+        );
+        int plusX = controlRight - controlSize;
         int minusX = plusX - TOPIC_CONTROL_GAP - controlSize;
 
         if (mouseY >= controlY && mouseY < controlY + controlSize) {
@@ -1851,37 +2227,16 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         if (overlayCategory != TopicCategory.SKILL) {
             return 0;
         }
-        Rect r = computeTopicsOverlayRect();
-        int headerH = this.textRenderer.fontHeight + TOPICS_OVERLAY_HEADER_PAD * 2;
-        int footerH = this.textRenderer.fontHeight + TOPICS_OVERLAY_FOOTER_PAD * 2;
-
-        int footerY = r.bottom() - footerH;
-        int contentY = r.y + headerH + 2;
-        int contentH = (footerY - 2) - contentY;
-
-        OverlayColumns cols = computeOverlayColumns(r);
-        int listX = cols.listX;
-        int listY = getOverlayRowsStartY(cols.contentY);
-        int listW = getOverlayListContentWidth(cols.listW);
-        int listH = getOverlayRowsHeight(contentH);
-        int visibleRows = Math.max(1, listH / TOPIC_ROW_HEIGHT);
-        clampOverlayScroll(visibleRows);
-
-        List<TopicEntry> entries = getFilteredOverlayEntries(SKILL_TOPIC_ENTRIES);
-        int woodcutIndex = getSkillEntryIndex(entries, TopicAction.SKILL_WOODCUT);
-        if (woodcutIndex < 0) {
+        Rect rowRect = getSkillEntryRectInOverlay(TopicAction.SKILL_WOODCUT);
+        if (rowRect == null) {
             return 0;
         }
-        int visibleStart = skillScrollIndex;
-        int visibleEnd = skillScrollIndex + visibleRows;
-        if (woodcutIndex < visibleStart || woodcutIndex >= visibleEnd) {
-            return 0;
-        }
-
-        int rowY = listY + (woodcutIndex - visibleStart) * TOPIC_ROW_HEIGHT;
+        int labelX = getSkillLabelStartX(rowRect.x, TopicAction.SKILL_WOODCUT, 0);
+        String countLabel = "Trees " + woodcutTreeCount;
         int controlSize = TOPIC_ROW_HEIGHT - 2;
-        int controlY = rowY + 1;
-        int plusX = listX + listW - controlSize;
+        int controlY = rowRect.y + 1;
+        int controlRight = getCompactControlRight(rowRect.x, rowRect.w, labelX, this.textRenderer.getWidth(countLabel), 2);
+        int plusX = controlRight - controlSize;
         int minusX = plusX - TOPIC_CONTROL_GAP - controlSize;
 
         if (mouseY >= controlY && mouseY < controlY + controlSize) {
@@ -1899,34 +2254,25 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         if (overlayCategory != TopicCategory.SKILL) {
             return null;
         }
-        Rect r = computeTopicsOverlayRect();
-        int headerH = this.textRenderer.fontHeight + TOPICS_OVERLAY_HEADER_PAD * 2;
-        int footerH = this.textRenderer.fontHeight + TOPICS_OVERLAY_FOOTER_PAD * 2;
-        int footerY = r.bottom() - footerH;
-        int contentY = r.y + headerH + 2;
-        int contentH = (footerY - 2) - contentY;
-
-        OverlayColumns cols = computeOverlayColumns(r);
-        int listX = cols.listX;
-        int listY = getOverlayRowsStartY(cols.contentY);
-        int listW = getOverlayListContentWidth(cols.listW);
-        int listH = getOverlayRowsHeight(contentH);
-        int visibleRows = Math.max(1, listH / TOPIC_ROW_HEIGHT);
-        clampOverlayScroll(visibleRows);
-
-        List<TopicEntry> entries = getFilteredOverlayEntries(SKILL_TOPIC_ENTRIES);
-        int visibleStart = skillScrollIndex;
-        int visibleEnd = skillScrollIndex + visibleRows;
         int controlSize = TOPIC_ROW_HEIGHT - 2;
 
         for (TopicAction action : getAdjustableSkillActions()) {
-            int entryIndex = getSkillEntryIndex(entries, action);
-            if (entryIndex < visibleStart || entryIndex >= visibleEnd) {
+            Rect rowRect = getSkillEntryRectInOverlay(action);
+            if (rowRect == null) {
                 continue;
             }
-            int rowY = listY + (entryIndex - visibleStart) * TOPIC_ROW_HEIGHT;
-            int controlY = rowY + 1;
-            int plusX = listX + listW - controlSize;
+            TopicEntry entry = null;
+            for (TopicEntry candidate : SKILL_TOPIC_ENTRIES) {
+                if (candidate != null && candidate.action == action) {
+                    entry = candidate;
+                    break;
+                }
+            }
+            int labelX = getSkillLabelStartX(rowRect.x, action, entry != null ? entry.indent : 0);
+            int controlCount = action == TopicAction.SKILL_ASCENT ? 3 : 2;
+            int controlY = rowRect.y + 1;
+            int controlRight = getCompactControlRight(rowRect.x, rowRect.w, labelX, this.textRenderer.getWidth(getAdjustableSkillValueLabel(action)), controlCount);
+            int plusX = controlRight - controlSize;
             int minusX = plusX - TOPIC_CONTROL_GAP - controlSize;
             if (mouseY < controlY || mouseY >= controlY + controlSize) {
                 continue;
@@ -1955,20 +2301,25 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         int rowColor = hover ? (active ? 0xFF4A3720 : 0xFF2A2A2A) : baseRow;
         context.fill(rowX, rowY, rowX + rowW, rowY + TOPIC_ROW_HEIGHT, rowColor);
 
-        int controlSize = TOPIC_ROW_HEIGHT - 2;
-        int controlY = rowY + 1;
-        int plusX = rowX + rowW - controlSize;
-        int minusX = plusX - TOPIC_CONTROL_GAP - controlSize;
+        int labelX = drawSkillRowIcon(context, rowX, rowY, TopicAction.FOLLOW);
 
         String status = active ? "ON" : "OFF";
-        int statusX = minusX - TOPIC_CONTROL_GAP - this.textRenderer.getWidth(status);
         String distanceLabel = formatFollowDistance();
+        int controlSize = TOPIC_ROW_HEIGHT - 2;
+        int controlY = rowY + 1;
+        int statusW = this.textRenderer.getWidth(status);
+        int distanceW = this.textRenderer.getWidth(distanceLabel);
+        int controlRight = getCompactControlRight(rowX, rowW, labelX, distanceW + TOPIC_CONTROL_GAP + statusW, 2);
+        int plusX = controlRight - controlSize;
+        int minusX = plusX - TOPIC_CONTROL_GAP - controlSize;
+        int statusX = minusX - TOPIC_CONTROL_GAP - statusW;
         int distX = statusX - TOPIC_CONTROL_GAP - this.textRenderer.getWidth(distanceLabel);
-        int labelX = rowX + 4;
 
         if (distX < labelX + 40) {
             distX = labelX + 40;
         }
+
+        drawValueClusterBox(context, distX - 4, rowY, plusX + controlSize + 3, hover);
 
         int textY = rowY + Math.max(1, (TOPIC_ROW_HEIGHT - this.textRenderer.fontHeight) / 2);
         context.drawText(this.textRenderer, "Follow", labelX, textY, COLOR_TEXT_PARCHMENT, false);
@@ -1985,17 +2336,20 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         int rowColor = hover ? 0xFF2A2A2A : 0xFF1A1A1A;
         context.fill(rowX, rowY, rowX + rowW, rowY + TOPIC_ROW_HEIGHT, rowColor);
 
-        int controlSize = TOPIC_ROW_HEIGHT - 2;
-        int controlY = rowY + 1;
-        int plusX = rowX + rowW - controlSize;
-        int minusX = plusX - TOPIC_CONTROL_GAP - controlSize;
+        int labelX = drawSkillRowIcon(context, rowX, rowY, TopicAction.SKILL_WOODCUT);
 
         String countLabel = "Trees " + woodcutTreeCount;
+        int controlSize = TOPIC_ROW_HEIGHT - 2;
+        int controlY = rowY + 1;
+        int controlRight = getCompactControlRight(rowX, rowW, labelX, this.textRenderer.getWidth(countLabel), 2);
+        int plusX = controlRight - controlSize;
+        int minusX = plusX - TOPIC_CONTROL_GAP - controlSize;
         int countX = minusX - TOPIC_CONTROL_GAP - this.textRenderer.getWidth(countLabel);
-        int labelX = rowX + 4;
         if (countX < labelX + 44) {
             countX = labelX + 44;
         }
+
+        drawValueClusterBox(context, countX - 4, rowY, plusX + controlSize + 3, hover);
 
         int textY = rowY + Math.max(1, (TOPIC_ROW_HEIGHT - this.textRenderer.fontHeight) / 2);
         context.drawText(this.textRenderer, "Woodcut", labelX, textY, COLOR_TEXT_PARCHMENT, false);
@@ -2048,13 +2402,15 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         int rowColor = hover ? 0xFF2A2A2A : 0xFF1A1A1A;
         context.fill(rowX, rowY, rowX + rowW, rowY + TOPIC_ROW_HEIGHT, rowColor);
 
-        int controlSize = TOPIC_ROW_HEIGHT - 2;
-        int controlY = rowY + 1;
-        int plusX = rowX + rowW - controlSize;
-        int minusX = plusX - TOPIC_CONTROL_GAP - controlSize;
-
         String label = entry.label;
         String valueLabel = getAdjustableSkillValueLabel(entry.action);
+        int labelX = drawSkillRowIcon(context, rowX, rowY, entry.action) + entry.indent * 10;
+        int controlCount = entry.action == TopicAction.SKILL_ASCENT ? 3 : 2;
+        int controlSize = TOPIC_ROW_HEIGHT - 2;
+        int controlY = rowY + 1;
+        int controlRight = getCompactControlRight(rowX, rowW, labelX, this.textRenderer.getWidth(valueLabel), controlCount);
+        int plusX = controlRight - controlSize;
+        int minusX = plusX - TOPIC_CONTROL_GAP - controlSize;
         int valueX = minusX - TOPIC_CONTROL_GAP - this.textRenderer.getWidth(valueLabel);
         if (entry.action == TopicAction.SKILL_ASCENT) {
             int modeX = minusX - TOPIC_CONTROL_GAP - controlSize;
@@ -2062,10 +2418,10 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             drawControlBox(context, modeX, controlY, controlSize, "☀", mouseX, mouseY, ascentSurfaceMode);
         }
 
-        int labelX = rowX + 4 + entry.indent * 8;
         if (valueX < labelX + 42) {
             valueX = labelX + 42;
         }
+        drawValueClusterBox(context, valueX - 4, rowY, plusX + controlSize + 3, hover);
         int textY = rowY + Math.max(1, (TOPIC_ROW_HEIGHT - this.textRenderer.fontHeight) / 2);
         context.drawText(this.textRenderer, label, labelX, textY, COLOR_TEXT_PARCHMENT, false);
         context.drawText(this.textRenderer, valueLabel, valueX, textY, 0xFFE6D7A3, false);
@@ -2093,12 +2449,14 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             return;
         }
 
-        if (isAdminHeaderEntry(entry)) {
+        if (isAdminHeaderEntry(entry) || isSkillHeaderEntry(entry)) {
             context.fill(rowX, rowY, rowX + rowW, rowY + TOPIC_ROW_HEIGHT, 0xFF141414);
-            int accentY = rowY + TOPIC_ROW_HEIGHT - 1;
-            context.fill(rowX + 2, accentY, rowX + rowW - 2, accentY + 1, 0xFF5A4728);
-            int textY = rowY + Math.max(1, (TOPIC_ROW_HEIGHT - this.textRenderer.fontHeight) / 2);
-            context.drawText(this.textRenderer, entry.label != null ? entry.label : "", rowX + 4, textY, 0xFFB08C40, false);
+            int accentY = rowY + TOPIC_ROW_HEIGHT - 3;
+            int accentColor = entry.category == TopicCategory.SKILL ? 0xFF35546C : 0xFF5A4728;
+            int textColor = entry.category == TopicCategory.SKILL ? 0xFFB9D6EC : 0xFFB08C40;
+            context.fill(rowX + 6, accentY, rowX + rowW - 6, accentY + 1, accentColor);
+            int textY = rowY + Math.max(0, (TOPIC_ROW_HEIGHT - this.textRenderer.fontHeight) / 2 - 1);
+            context.drawText(this.textRenderer, entry.label != null ? entry.label : "", rowX + 4, textY, textColor, false);
             return;
         }
 
@@ -2121,7 +2479,10 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
 
         int textY = rowY + Math.max(1, (TOPIC_ROW_HEIGHT - this.textRenderer.fontHeight) / 2);
         int labelX = rowX + 4 + entry.indent * 8;
-    String label = displayLabelForEntry(entry);
+        if (entry.category == TopicCategory.SKILL) {
+            labelX = drawSkillRowIcon(context, rowX, rowY, entry.action) + entry.indent * 10;
+        }
+        String label = displayLabelForEntry(entry);
 
         // UI declutter: only show state for toggles; actions are implicit via clicking the row.
         String status = entry.toggle ? (active ? "ON" : "OFF") : null;
@@ -2143,6 +2504,74 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         }
     }
 
+    private int drawSkillRowIcon(DrawContext context, int rowX, int rowY, TopicAction action) {
+        if (action == TopicAction.SKILL_COLLECT_DIRT) {
+            int baseX = rowX + 4;
+            int iconSize = 7;
+            int iconX = baseX + Math.max(0, (SKILL_ICON_SLOT_W - iconSize) / 2);
+            int iconY = rowY + Math.max(1, (TOPIC_ROW_HEIGHT - iconSize) / 2);
+
+            context.fill(iconX, iconY, iconX + iconSize, iconY + iconSize, 0xFF5E4327);
+            context.fill(iconX, iconY, iconX + iconSize, iconY + 2, 0xFF7D5A33);
+            context.fill(iconX, iconY + iconSize - 1, iconX + iconSize, iconY + iconSize, 0xFF3A2816);
+            context.fill(iconX, iconY, iconX + 1, iconY + iconSize, 0xFF3A2816);
+            context.fill(iconX + iconSize - 1, iconY, iconX + iconSize, iconY + iconSize, 0xFF3A2816);
+            context.fill(iconX + 2, iconY + 3, iconX + 3, iconY + 4, 0xFF8E6A42);
+            context.fill(iconX + 4, iconY + 4, iconX + 5, iconY + 5, 0xFF8E6A42);
+            return getSkillLabelStartX(rowX, action, 0);
+        }
+
+        String icon = iconForAction(action);
+        int baseX = rowX + 4;
+        if (icon == null || icon.isBlank()) {
+            return baseX;
+        }
+        int textY = rowY + Math.max(1, (TOPIC_ROW_HEIGHT - this.textRenderer.fontHeight) / 2);
+        int iconX = baseX + Math.max(0, (SKILL_ICON_SLOT_W - this.textRenderer.getWidth(icon)) / 2);
+        context.drawText(this.textRenderer, icon, iconX, textY, 0xFFB9D6EC, false);
+        return getSkillLabelStartX(rowX, action, 0);
+    }
+
+    private String iconForAction(TopicAction action) {
+        if (action == null) {
+            return "";
+        }
+        return switch (action) {
+            case OPEN_GUIDE -> "📘";
+            case STOP -> "🛑";
+            case RESUME -> "▶";
+            case FOLLOW -> "👣";
+            case GUARD -> "🛡";
+            case PATROL -> "◆";
+            case RETURN_HOME -> "🏠";
+            case SLEEP -> "🛌";
+            case AUTO_RETURN_SUNSET -> "☾";
+            case AUTO_RETURN_SUNSET_GUARD_PATROL -> "↔";
+            case IDLE_HOBBIES -> "✦";
+            case AUTO_HUNT_STARVING -> "⚔";
+            case UNLEASH_TETHERED -> "✂";
+            case LEASH_ON_DISMOUNT -> "⌁";
+            case DROP_SWEEP -> "🧹";
+            case BASES -> "⌂";
+            case CRAFTING -> "⚒";
+            case CONSTRUCTION -> "▧";
+            case COOKING -> "♨";
+            case HUNTING -> "🏹";
+            case STORAGE -> "📦";
+            case SKILL_FISH -> "🎣";
+            case SKILL_WOODCUT -> "🪓";
+            case SKILL_WOODCUT_CLEANUP -> "•";
+            case SKILL_WOOL -> "✂";
+            case SKILL_FARM -> "❀";
+            case SKILL_COLLECT_DIRT -> "";
+            case SKILL_MINING -> "⛏";
+            case SKILL_STRIPMINE -> "↦";
+            case SKILL_ASCENT -> "↑";
+            case SKILL_DESCENT -> "↓";
+            default -> "";
+        };
+    }
+
     private String displayLabelForEntry(TopicEntry entry) {
         if (entry == null) {
             return "";
@@ -2154,7 +2583,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
     }
 
     private void drawOverlayHoverTooltip(DrawContext context, int mouseX, int mouseY) {
-        if (!topicsExpanded || overlayDraggingSplit) {
+        if (!topicsExpanded || overlayDraggingSplit || overlayDraggingListScroll) {
             overlayHoveredEntry = null;
             overlayHoveredControlKey = null;
             return;
@@ -2277,6 +2706,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             return "this action";
         }
         return switch (action) {
+            case SKILL_WOODCUT -> "Woodcut";
             case SKILL_FISH -> "Fishing";
             case SKILL_WOOL -> "Wool";
             case SKILL_STRIPMINE -> "Stripmine";
@@ -2288,6 +2718,10 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
 
     private java.util.List<String> getOverlayTooltipLines(TopicEntry entry) {
         if (entry == null) {
+            return java.util.List.of();
+        }
+
+        if (isSkillHeaderEntry(entry)) {
             return java.util.List.of();
         }
 
@@ -2391,6 +2825,41 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             if (k.equals("anchor_clear")) {
                 return java.util.List.of("Clear Village Anchor", "Clears the saved village/settlement anchor.");
             }
+            if (k.equals("learning_status")) {
+                return java.util.List.of(
+                        "Learning Status",
+                        "Shows whether operator learning mode is armed or actively recording a demonstration trace.",
+                        "Use this before starting or stopping a capture run. See Guide > Learning Mode / Roadmap for the bigger picture."
+                );
+            }
+            if (k.equals("learning_start")) {
+                return java.util.List.of(
+                        "Learning Start",
+                        "Starts operator-only learning mode capture for the current demonstration session.",
+                        "This records movement, camera, interactions, and local context for later bot-control tuning."
+                );
+            }
+            if (k.equals("learning_stop_success")) {
+                return java.util.List.of(
+                        "Learning Stop (Success)",
+                        "Stops learning mode and marks the demonstration as a successful example to keep.",
+                        "Use when the player performed the intended behavior correctly."
+                );
+            }
+            if (k.equals("learning_stop_fail")) {
+                return java.util.List.of(
+                        "Learning Stop (Failure)",
+                        "Stops learning mode and marks the demonstration as a failed attempt for analysis.",
+                        "Useful when testing recovery logic, bad paths, or broken build movement."
+                );
+            }
+            if (k.equals("learning_stop_abort")) {
+                return java.util.List.of(
+                        "Learning Stop (Abort)",
+                        "Stops learning mode without treating the run as a clean success.",
+                        "Use when the demo should end early because the setup changed or the run became invalid."
+                );
+            }
             if (k.startsWith("setstage:")) {
                 String n = k.substring("setstage:".length()).trim();
                 return java.util.List.of("Set Companion Stage: " + n, "Advances or rewinds companion quest stage.");
@@ -2408,20 +2877,115 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             }
         }
 
-        if (entry.category == TopicCategory.SKILL && entry.action == TopicAction.DROP_SWEEP) {
-            return java.util.List.of(
-                    "Cleanup",
-                    "Runs cleanup (drop sweep) to collect nearby dropped items."
+        if (entry.category == TopicCategory.SKILL) {
+            if (entry.action == null) {
+            return java.util.List.of();
+            }
+            return switch (entry.action) {
+            case STOP -> java.util.List.of(
+                "Stop",
+                "Cancels the bot's current task, movement, or queued action right away."
             );
-        }
-
-        if (entry.category == TopicCategory.SKILL && entry.action == TopicAction.OPEN_GUIDE) {
-            String guideKey = FrensClient.getGuideHotkeyDisplayName();
-            return java.util.List.of(
-                    "Guide",
-                    "Open the in-game companion guide.",
-                    "Hotkey: [" + guideKey + "]"
+            case AUTO_RETURN_SUNSET -> java.util.List.of(
+                "Auto Home @ Sunset",
+                "At dusk, the bot heads back toward home instead of staying out overnight."
             );
+            case AUTO_RETURN_SUNSET_GUARD_PATROL -> java.util.List.of(
+                "Guard/Patrol Eligible",
+                "When ON, Guard and Patrol bots may still auto-return home at sunset."
+            );
+            case IDLE_HOBBIES -> java.util.List.of(
+                "Idle Hobbies",
+                "Lets the bot do light background activities when it has nothing urgent to work on."
+            );
+            case AUTO_HUNT_STARVING -> java.util.List.of(
+                "Auto Hunt (Starving)",
+                "If the bot gets desperate for food, it may hunt for meat on its own."
+            );
+            case UNLEASH_TETHERED -> java.util.List.of(
+                "Unleash Tethered",
+                "Allows the bot to free itself from leads when it needs to keep moving or resume work."
+            );
+            case LEASH_ON_DISMOUNT -> java.util.List.of(
+                "Leash on Dismount",
+                "Reattaches a lead after getting off a mount so the bot stays tethered."
+            );
+            case DROP_SWEEP -> java.util.List.of(
+                "Cleanup",
+                "Runs a quick item sweep to pick up nearby drops after combat, mining, or building."
+            );
+            case BASES -> java.util.List.of(
+                "Bases",
+                "Open the base manager for saved homes, wall claims, and base travel helpers."
+            );
+            case CRAFTING -> java.util.List.of(
+                "Crafting",
+                "Open crafting-related history and helper tools for the selected bot."
+            );
+            case CONSTRUCTION -> java.util.List.of(
+                "Construction",
+                "Open shelter, fortify, and other building-focused helper actions."
+            );
+            case COOKING -> java.util.List.of(
+                "Cooking",
+                "Open the cooking helper menu for food preparation tasks."
+            );
+            case HUNTING -> java.util.List.of(
+                "Hunting",
+                "Open the hunting target menu for meat, leather, and mob-hunt tasks."
+            );
+            case STORAGE -> java.util.List.of(
+                "Storage",
+                "View all chests placed by this bot. Collect items or dismiss records."
+            );
+            case SKILL_WOODCUT -> java.util.List.of(
+                "Woodcut",
+                "Fells natural trees and collects the wood.",
+                "Set how many trees to cut before starting; standalone runs stop at sunset."
+            );
+            case SKILL_FISH -> java.util.List.of(
+                "Fishing",
+                "Casts and catches fish from a nearby shoreline.",
+                "Set a catch target, or leave it at the default to fish until sunset."
+            );
+            case SKILL_WOODCUT_CLEANUP -> java.util.List.of(
+                "Woodcut Cleanup",
+                "Cleans up after tree cutting by grabbing leftover drops and breaking floating leftover logs or dirt scaffold bits."
+            );
+            case SKILL_WOOL -> java.util.List.of(
+                "Wool",
+                "Shears adult sheep and gathers wool without killing them.",
+                "Set a wool target before starting; standalone runs stop at sunset."
+            );
+            case SKILL_FARM -> java.util.List.of(
+                "Farming",
+                "Runs the bot's general farm work routine for planting and harvesting."
+            );
+            case SKILL_COLLECT_DIRT -> java.util.List.of(
+                "Collect Dirt",
+                "Gathers common soft terrain blocks like dirt, gravel, sand, and similar shovel-friendly material."
+            );
+            case SKILL_MINING -> java.util.List.of(
+                "Mining",
+                "Starts the bot's standard mining routine for nearby ores and underground resources."
+            );
+            case SKILL_STRIPMINE -> java.util.List.of(
+                "Stripmine",
+                "Digs a straight tunnel in the direction you pick.",
+                "Set the length first, then look where you want it to go and confirm from the world."
+            );
+            case SKILL_ASCENT -> java.util.List.of(
+                "Ascent",
+                "Climbs upward by digging and building as needed.",
+                "Use ☀ for surface mode, or set a block count, then look in the direction to start from."
+            );
+            case SKILL_DESCENT -> java.util.List.of(
+                "Descent",
+                "Digs a safe downward staircase in the direction you choose.",
+                "Set the depth first, then look where you want it to begin and confirm from the world."
+            );
+            default -> java.util.List.of();
+            };
         }
 
         return java.util.List.of(entry.label);
@@ -2433,14 +2997,30 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         }
 
         int pad = 6;
-        int lineH = this.textRenderer.fontHeight;
+        int lineH = this.textRenderer.fontHeight + 1;
+        int maxTextW = Math.max(120, Math.min(260, this.width - 32));
+        java.util.List<StyledLine> wrapped = new java.util.ArrayList<>();
         int maxW = 0;
-        for (String s : lines) {
-            if (s == null) continue;
-            maxW = Math.max(maxW, this.textRenderer.getWidth(s));
+        for (int i = 0; i < lines.size(); i++) {
+            String s = lines.get(i);
+            if (s == null || s.isBlank()) {
+                continue;
+            }
+            int color = (i == 0) ? COLOR_TEXT_PLAYER : COLOR_TEXT_PARCHMENT;
+            java.util.List<net.minecraft.text.OrderedText> parts = this.textRenderer.wrapLines(Text.literal(s), maxTextW);
+            if (parts.isEmpty()) {
+                continue;
+            }
+            for (net.minecraft.text.OrderedText part : parts) {
+                wrapped.add(new StyledLine(part, color));
+                maxW = Math.max(maxW, this.textRenderer.getWidth(part));
+            }
+        }
+        if (wrapped.isEmpty()) {
+            return;
         }
         int boxW = maxW + pad * 2;
-        int boxH = lines.size() * lineH + pad * 2;
+        int boxH = wrapped.size() * lineH + pad * 2 - 1;
 
         int x = mouseX + 12;
         int y = mouseY + 10;
@@ -2463,11 +3043,8 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         context.fill(x + boxW - 1, y, x + boxW, y + boxH, border);
 
         int ty = y + pad;
-        for (int i = 0; i < lines.size(); i++) {
-            String s = lines.get(i);
-            if (s == null) continue;
-            int color = (i == 0) ? COLOR_TEXT_PLAYER : COLOR_TEXT_PARCHMENT;
-            context.drawText(this.textRenderer, s, x + pad, ty, color, false);
+        for (StyledLine line : wrapped) {
+            context.drawText(this.textRenderer, line.text(), x + pad, ty, line.color(), false);
             ty += lineH;
         }
     }
@@ -2592,6 +3169,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
 
     @Override
     public boolean mouseClicked(net.minecraft.client.gui.Click click, boolean isInside) {
+        resetInventoryTooltipHoverState();
         if (!topicsExpanded) {
             int rowY = this.y + SECTION_HEIGHT + 2 + STATS_AREA_HEIGHT - BOT_SWITCH_CONTROL_H - 5;
             BotSwitchLayout collapsedSwitch = computeBotSwitchLayout(this.x + 6, this.x + SECTION_WIDTH - 6, rowY);
@@ -2634,9 +3212,12 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             int rowsHeight = getOverlayRowsHeight(cols.contentH);
             int visibleRows = Math.max(1, rowsHeight / TOPIC_ROW_HEIGHT);
             List<TopicEntry> entries = getFilteredOverlayEntries(getOverlayEntries());
-            Rect track = computeOverlayListScrollbarTrack(cols.listX, getOverlayRowsStartY(cols.contentY), cols.listW, rowsHeight);
-            Rect thumb = computeOverlayListScrollbarThumb(track, entries.size(), visibleRows);
-            updateOverlayScrollFromThumb(click, track, thumb, entries.size(), visibleRows);
+            int listX = getOverlayListX(cols);
+            int listW = getOverlayListW(cols);
+            Rect track = computeOverlayListScrollbarTrack(listX, getOverlayRowsStartY(cols.contentY), listW, rowsHeight);
+            int totalRows = getOverlayVisualRowCount(entries);
+            Rect thumb = computeOverlayListScrollbarThumb(track, totalRows, visibleRows);
+            updateOverlayScrollFromThumb(click, track, thumb, totalRows, visibleRows);
             return true;
         }
         return super.mouseDragged(click, deltaX, deltaY);
@@ -2658,6 +3239,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double horizontalAmount, double verticalAmount) {
         if (topicsExpanded && isMouseOverTopicsOverlay(mouseX, mouseY)) {
+            resetInventoryTooltipHoverState();
             Rect r = computeTopicsOverlayRect();
             int headerH = this.textRenderer.fontHeight + TOPICS_OVERLAY_HEADER_PAD * 2;
             int footerH = this.textRenderer.fontHeight + TOPICS_OVERLAY_FOOTER_PAD * 2;
@@ -2665,7 +3247,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             int listH = (r.bottom() - footerH - 2) - listY;
             List<TopicEntry> entries = getFilteredOverlayEntries(getOverlayEntries());
             int visibleRows = Math.max(1, getOverlayRowsHeight(listH) / TOPIC_ROW_HEIGHT);
-            int maxScroll = Math.max(0, entries.size() - visibleRows);
+            int maxScroll = Math.max(0, getOverlayVisualRowCount(entries) - visibleRows);
             if (maxScroll == 0) {
                 return true;
             }
@@ -2684,8 +3266,8 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             int key = input.key();
             if (key == GLFW.GLFW_KEY_LEFT_BRACKET || key == GLFW.GLFW_KEY_RIGHT_BRACKET) {
                 int direction = key == GLFW.GLFW_KEY_LEFT_BRACKET ? -1 : 1;
-                BotSwitchLayout keyboardSwitch = computeBotSwitchLayout(this.x + 6, this.x + SECTION_WIDTH - 6,
-                        this.y + SECTION_HEIGHT + 2 + STATS_AREA_HEIGHT - BOT_SWITCH_CONTROL_H - 5);
+                BotSwitchLayout keyboardSwitch = getActiveBotSwitchLayout();
+                resetInventoryTooltipHoverState();
                 if (cycleBotInventory(keyboardSwitch, direction)) {
                     return true;
                 }
@@ -2803,6 +3385,10 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             return;
         }
 
+        if (isSkillHeaderEntry(entry)) {
+            return;
+        }
+
         // Admin topics include both operator-only utilities and gated companion commands.
         if (entry.category == TopicCategory.ADMIN) {
             if (isAdminHeaderEntry(entry)) {
@@ -2909,6 +3495,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case CRAFTING -> openCraftingHistory();
             case COOKING -> openCookingMenu();
             case HUNTING -> openHuntingMenu();
+            case STORAGE -> openStorageMenu();
             case CONSTRUCTION -> openConstructionMenu();
             case SKILL_FISH -> runFishSkillCommand();
             case SKILL_WOODCUT -> runWoodcutSkillCommand();
@@ -3502,6 +4089,13 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
                 && "__header__".equals(entry.dialogueKey);
     }
 
+    private boolean isSkillHeaderEntry(TopicEntry entry) {
+        return entry != null
+                && entry.category == TopicCategory.SKILL
+                && entry.action == null
+                && "__header__".equals(entry.dialogueKey);
+    }
+
     private String permissionKeyForAdminEntry(TopicEntry entry) {
         if (entry == null || entry.category != TopicCategory.ADMIN) {
             return null;
@@ -3665,7 +4259,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
 
     private void clampOverlayScroll(int visibleRows) {
         List<TopicEntry> entries = getFilteredOverlayEntries(getOverlayEntries());
-        int maxScroll = Math.max(0, (entries != null ? entries.size() : 0) - visibleRows);
+        int maxScroll = Math.max(0, getOverlayVisualRowCount(entries) - visibleRows);
         setOverlayScrollIndex(MathHelper.clamp(getOverlayScrollIndex(), 0, maxScroll));
     }
 
@@ -3943,6 +4537,13 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         this.client.setScreen(new HuntablesScreen(this, formatBotTarget()));
     }
 
+    private void openStorageMenu() {
+        if (this.client == null) {
+            return;
+        }
+        this.client.setScreen(new BotStorageScreen(this, formatBotTarget()));
+    }
+
     private void openConstructionMenu() {
         if (this.client == null) {
             return;
@@ -4030,24 +4631,6 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         net.wcfcarolina13.FrensClient.setPendingShelter(shelterType, botTarget);
         // Close the screen first so player can see where they're looking
         this.close();
-        // Show instruction message for 2.5 seconds (action bar messages fade quickly, so we repeat)
-        if (this.client.player != null) {
-            String message = "Look where you want the " + shelterType + " and press your 'Go To Look' keybind";
-            net.minecraft.text.Text msgText = net.minecraft.text.Text.literal(message);
-            // Send immediately
-            this.client.player.sendMessage(msgText, true);
-            // Schedule repeats at 0.5s, 1.0s, 1.5s, 2.0s to keep message visible for ~2.5s
-            java.util.concurrent.ScheduledExecutorService scheduler = java.util.concurrent.Executors.newSingleThreadScheduledExecutor();
-            final net.minecraft.client.MinecraftClient clientRef = this.client;
-            for (int delayMs : new int[]{500, 1000, 1500, 2000}) {
-                scheduler.schedule(() -> {
-                    if (clientRef.player != null) {
-                        clientRef.execute(() -> clientRef.player.sendMessage(msgText, true));
-                    }
-                }, delayMs, java.util.concurrent.TimeUnit.MILLISECONDS);
-            }
-            scheduler.shutdown();
-        }
     }
 
     private void sendChatCommand(String command) {
@@ -4081,17 +4664,8 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         if (switchBrowsedBlockedAlias == null || switchBrowsedBlockReason == null) {
             return;
         }
-        // Check if mouse is over any of the bot-switch label rects (collapsed or overlay).
-        BotSwitchLayout layout = computeBotSwitchLayout(this.x + 6, this.x + SECTION_WIDTH - 6,
-                this.y + SECTION_HEIGHT + 2 + STATS_AREA_HEIGHT - BOT_SWITCH_CONTROL_H - 5);
+        BotSwitchLayout layout = getActiveBotSwitchLayout();
         boolean hovering = layout != null && layout.labelRect().contains(mouseX, mouseY);
-        if (!hovering && topicsExpanded) {
-            // Also check overlay header switch controls (approximate; use full header width).
-            int headerH = this.textRenderer.fontHeight + TOPICS_OVERLAY_HEADER_PAD * 2;
-            int overlayY = this.y - 20;
-            Rect headerRect = new Rect(this.x, overlayY, this.backgroundWidth, headerH);
-            hovering = headerRect.contains(mouseX, mouseY);
-        }
         if (!hovering) {
             return;
         }

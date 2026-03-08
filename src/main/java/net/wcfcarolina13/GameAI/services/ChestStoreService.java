@@ -409,6 +409,10 @@ public final class ChestStoreService {
         }
         if (placed != null) {
             LAST_PLACED_CHEST.put(bot.getUuid(), new WorldPos(source.getWorld().getRegistryKey(), placed.toImmutable()));
+            // Register in the persistent chest registry
+            if (source.getWorld() instanceof ServerWorld sw) {
+                BotChestRegistryService.registerChest(bot, placed.toImmutable(), sw, "supply");
+            }
         }
         return placed;
     }

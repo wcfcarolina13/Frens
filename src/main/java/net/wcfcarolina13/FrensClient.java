@@ -615,6 +615,11 @@ public class FrensClient implements ClientModInitializer {
             context.client().execute(() -> HuntablesScreen.applyHuntConfigJson(json));
         });
 
+        ClientPlayNetworking.registerGlobalReceiver(net.wcfcarolina13.network.ChestRegistryPayload.ID, (payload, context) -> {
+            String json = payload.json();
+            context.client().execute(() -> net.wcfcarolina13.GraphicalUserInterface.BotStorageScreen.applyChestRegistryJson(json));
+        });
+
         ClientPlayNetworking.registerGlobalReceiver(net.wcfcarolina13.network.HuntDiscoveryPayload.ID, (payload, context) -> {
             String label = payload.mobLabel();
             context.client().execute(() -> {

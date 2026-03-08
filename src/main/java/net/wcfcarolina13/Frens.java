@@ -471,6 +471,10 @@ public class Frens implements ModInitializer {
         PayloadTypeRegistry.playS2C().register(net.wcfcarolina13.network.HuntConfigPayload.ID, net.wcfcarolina13.network.HuntConfigPayload.CODEC);
         PayloadTypeRegistry.playC2S().register(net.wcfcarolina13.network.HuntTargetPayload.ID, net.wcfcarolina13.network.HuntTargetPayload.CODEC);
         PayloadTypeRegistry.playC2S().register(net.wcfcarolina13.network.HuntTargetModePayload.ID, net.wcfcarolina13.network.HuntTargetModePayload.CODEC);
+        PayloadTypeRegistry.playC2S().register(net.wcfcarolina13.network.RequestChestRegistryPayload.ID, net.wcfcarolina13.network.RequestChestRegistryPayload.CODEC);
+        PayloadTypeRegistry.playS2C().register(net.wcfcarolina13.network.ChestRegistryPayload.ID, net.wcfcarolina13.network.ChestRegistryPayload.CODEC);
+        PayloadTypeRegistry.playC2S().register(net.wcfcarolina13.network.ChestCollectPayload.ID, net.wcfcarolina13.network.ChestCollectPayload.CODEC);
+        PayloadTypeRegistry.playC2S().register(net.wcfcarolina13.network.ChestDismissPayload.ID, net.wcfcarolina13.network.ChestDismissPayload.CODEC);
 
         // Survival recruitment (find village -> recruit bot) payloads.
         PayloadTypeRegistry.playS2C().register(RecruitmentPromptPayload.ID, RecruitmentPromptPayload.CODEC);
@@ -503,6 +507,7 @@ public class Frens implements ModInitializer {
         net.wcfcarolina13.network.CraftingHistoryNetworkManager.registerReceiversOnce();
         net.wcfcarolina13.network.CookablesNetworkManager.registerReceiversOnce();
         net.wcfcarolina13.network.HuntablesNetworkManager.registerReceiversOnce();
+        net.wcfcarolina13.network.ChestRegistryNetworkManager.registerReceiversOnce();
         SurvivalRecruitmentNetworkManager.registerReceiversOnce();
         net.wcfcarolina13.network.CompanionQuestNetworkManager.registerReceiversOnce();
         net.wcfcarolina13.network.RecruitmentAdminNetworkManager.registerReceiversOnce();
