@@ -34,6 +34,8 @@ import net.wcfcarolina13.GameAI.services.ToolProvisionService;
 import net.wcfcarolina13.GameAI.services.HuntCatalog;
 import net.wcfcarolina13.GameAI.services.HuntConfigService;
 import net.wcfcarolina13.GameAI.services.HuntHistoryService;
+import net.wcfcarolina13.GameAI.services.HuntSessionService;
+import net.wcfcarolina13.GameAI.services.SkillResumeService;
 import net.wcfcarolina13.GameAI.services.MovementService;
 import net.wcfcarolina13.GameAI.services.ProtectedZoneService;
 import net.wcfcarolina13.GameAI.services.CompanionOverheadDialogueService;
@@ -172,6 +174,31 @@ public final class HuntSkill implements Skill {
         }
         ChatUtils.sendSystemMessage(source, "Hunting " + targetLabel + " (" + countLabel + ").");
 
+        // Check for resumed multi-day hunt session
+        boolean isResume = SkillResumeService.consumeResumeIntent(bot.getUuid());
+        HuntSessionService.HuntSession resumedSession = isResume
+                ? HuntSessionService.consumeSession(bot.getUuid()) : null;
+        int resumedKills = 0;
+        BlockPos huntOriginPos = bot.getBlockPos();
+
+        if (resumedSession != null) {
+            resumedKills = resumedSession.killsCompleted();
+            huntOriginPos = resumedSession.huntOrigin();
+            LOGGER.info("Resuming hunt session: kills={}/{} origin={}",
+                    resumedKills, resumedSession.killsTarget(), huntOriginPos);
+            ChatUtils.sendSystemMessage(source, "Resuming yesterday's hunt (" + resumedKills + " kills so far).");
+
+            // Travel back to hunting grounds
+            if (huntOriginPos != null && bot.getBlockPos().getSquaredDistance(huntOriginPos) > 16.0D) {
+                Optional<MovementService.MovementPlan> plan =
+                        MovementService.planLootApproach(bot, huntOriginPos, MovementService.MovementOptions.skillLoot());
+                if (plan.isPresent()) {
+                    MovementService.execute(source, bot, plan.get(),
+                            SkillPreferences.teleportDuringSkills(bot), true);
+                }
+            }
+        }
+
         HuntConfigService.HuntConfig huntConfig = HuntConfigService.getConfig(bot);
         HuntConfigService.HuntZone huntZone = huntConfig.huntZone();
         int huntRadius = huntZone.radius;
@@ -188,7 +215,7 @@ public final class HuntSkill implements Skill {
         List<BlockPos> anchors = buildHuntAnchors(bot, world, huntRadius);
         LOGGER.info("Hunt anchors: {}", anchors.size());
         long lastSweep = System.currentTimeMillis();
-        int kills = 0;
+        int kills = resumedKills;
 
         while (kills < request.targetCount) {
             if (SkillManager.shouldAbortSkill(bot)) {
@@ -196,7 +223,21 @@ public final class HuntSkill implements Skill {
             }
 
             if (request.checkSunset && isSunset(world)) {
-                ChatUtils.sendSystemMessage(source, "Sun has set. Stopping hunt.");
+                // Multi-day hunt: save session for sunrise resume
+                if (kills < request.targetCount && BotHomeService.isAutoReturnAtSunset(bot)) {
+                    HuntSessionService.saveSession(bot, huntOriginPos, null,
+                            selectedTargets, kills, request.targetCount,
+                            huntZone.name(), depopulationEnabled,
+                            request.targetName != null ? request.targetName : "");
+                    SkillResumeService.recordExecution(bot, "hunt",
+                            request.targetName != null ? request.targetName : "", source);
+                    SkillResumeService.requestAutoResume(bot);
+                    ChatUtils.sendSystemMessage(source,
+                            "Sun's setting. Heading home. I'll resume the hunt tomorrow. ("
+                                    + kills + " kill" + (kills != 1 ? "s" : "") + " so far)");
+                } else {
+                    ChatUtils.sendSystemMessage(source, "Sun has set. Stopping hunt.");
+                }
                 break;
             }
 
@@ -273,6 +314,17 @@ public final class HuntSkill implements Skill {
 
             if (bot.getInventory().getEmptySlot() == -1) {
                 offloadInventory(bot, source);
+            }
+
+            // Post-kill depopulation recheck: if population getting thin, end hunt early
+            if (depopulationEnabled && candidate.target.peaceful()) {
+                int remaining = countTargets(world, bot, anchors, candidate.target, request.hobby,
+                        huntRadius, huntYSpan);
+                if (remaining < MIN_PEACEFUL_COUNT) {
+                    ChatUtils.sendSystemMessage(source,
+                            "Population getting thin. Heading back. (" + kills + " kills)");
+                    break;
+                }
             }
         }
 

@@ -31,7 +31,9 @@ public final class BotAutoReturnSunsetService {
     private static final long DAY_TICKS = 24000L;
     private static final long SUNSET_START_TICK = 12000L;
 
+    private static final long SUNRISE_END_TICK = 1000L;
     private static final Map<UUID, Long> LAST_TRIGGERED_DAY = new ConcurrentHashMap<>();
+    private static final Map<UUID, Long> LAST_RESUMED_DAY = new ConcurrentHashMap<>();
 
     private record PendingSleep(Vec3d target, long triggeredServerTick, long day, long nextAttemptServerTick) {}
 
@@ -116,6 +118,19 @@ public final class BotAutoReturnSunsetService {
                                 }
                             }
                         }
+                    }
+                }
+            }
+
+            // Sunrise: resume paused hunt sessions
+            if (tod < SUNRISE_END_TICK && HuntSessionService.hasSession(bot.getUuid())) {
+                long lastResumed = LAST_RESUMED_DAY.getOrDefault(bot.getUuid(), Long.MIN_VALUE);
+                if (lastResumed < day) {
+                    LAST_RESUMED_DAY.put(bot.getUuid(), day);
+                    var taskInfo = TaskService.getActiveTaskInfo(bot.getUuid());
+                    if (taskInfo.isEmpty()) {
+                        LOGGER.info("Sunrise hunt resume for {} (day={})", bot.getName().getString(), day);
+                        SkillResumeService.tryAutoResume(bot);
                     }
                 }
             }
