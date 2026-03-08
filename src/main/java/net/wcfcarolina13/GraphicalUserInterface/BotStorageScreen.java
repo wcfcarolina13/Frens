@@ -115,6 +115,10 @@ public class BotStorageScreen extends Screen {
     private DropdownMenuWidget botSelector;
     private String lastSelectedBot;
 
+    private String statusMessage;
+    private long statusMessageExpiry;
+    private static final long STATUS_DISPLAY_MS = 3000L;
+
     private int panelX, panelY, panelW, panelH;
     private double contentScroll;
     private boolean draggingScroll;
@@ -402,14 +406,23 @@ public class BotStorageScreen extends Screen {
         // Position row buttons
         positionRowButtons(cr);
 
-        // Chest count status
-        List<ChestEntry> snapshot = getChestsSnapshot();
-        int total = snapshot.size();
-        long active = snapshot.stream().filter(c -> !c.destroyed).count();
-        String status = active + " active / " + total + " total";
+        // Chest count status or action feedback
+        String status;
+        int statusColor;
+        if (statusMessage != null && System.currentTimeMillis() < statusMessageExpiry) {
+            status = statusMessage;
+            statusColor = 0xFFAADD66;
+        } else {
+            statusMessage = null;
+            List<ChestEntry> snapshot = getChestsSnapshot();
+            int total = snapshot.size();
+            long active = snapshot.stream().filter(c -> !c.destroyed).count();
+            status = active + " active / " + total + " total";
+            statusColor = 0xFFB0B0B0;
+        }
         int statusW = this.textRenderer.getWidth(status);
         context.drawTextWithShadow(this.textRenderer, status,
-                panelX + panelW / 2 - statusW / 2, bottomY + 4, 0xFFB0B0B0);
+                panelX + panelW / 2 - statusW / 2, bottomY + 4, statusColor);
 
         // Render dropdown on top so it overlays content when open
         if (botSelector != null) {
@@ -703,6 +716,7 @@ public class BotStorageScreen extends Screen {
         out.put("y", entry.y);
         out.put("z", entry.z);
         ClientPlayNetworking.send(new ChestCollectPayload(GSON.toJson(out)));
+        showStatus("Sent to collect from " + entry.x + ", " + entry.y + ", " + entry.z);
     }
 
     private void sendDismiss(ChestEntry entry) {
@@ -714,6 +728,12 @@ public class BotStorageScreen extends Screen {
         out.put("y", entry.y);
         out.put("z", entry.z);
         ClientPlayNetworking.send(new ChestDismissPayload(GSON.toJson(out)));
+        showStatus("Dismissed");
+    }
+
+    private void showStatus(String msg) {
+        statusMessage = msg;
+        statusMessageExpiry = System.currentTimeMillis() + STATUS_DISPLAY_MS;
     }
 
     private static List<ChestEntry> getChestsSnapshot() {

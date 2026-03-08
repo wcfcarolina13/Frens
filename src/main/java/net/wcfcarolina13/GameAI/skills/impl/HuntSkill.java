@@ -211,7 +211,7 @@ public final class HuntSkill implements Skill {
         // Pre-hunt inventory check: if nearly full, announce and place a chest
         ensureHuntingSupplies(bot, world, source, commander);
 
-        // Snapshot inventory before hunt for loot summary
+        // Snapshot inventory AFTER prerequisites so woodcut logs aren't counted as hunt loot
         Map<Item, Integer> preHuntInventory = snapshotInventory(bot);
 
         List<BlockPos> anchors = buildHuntAnchors(bot, world, huntRadius);

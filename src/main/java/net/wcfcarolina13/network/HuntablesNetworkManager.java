@@ -167,6 +167,18 @@ public final class HuntablesNetworkManager {
                 return;
             }
 
+            // Validate entity type is a huntable food mob
+            if (entityType != null && !entityType.isBlank()) {
+                net.minecraft.util.Identifier typeId = net.minecraft.util.Identifier.tryParse(entityType);
+                if (typeId != null) {
+                    var optType = net.minecraft.registry.Registries.ENTITY_TYPE.getOptionalValue(typeId);
+                    if (optType.isPresent() && !HuntCatalog.isFoodMob(optType.get())) {
+                        LOGGER.warn("Rejected non-huntable target type: {}", entityType);
+                        return;
+                    }
+                }
+            }
+
             // Store the pending target for HuntSkill to consume
             PENDING_TARGET_ENTITY.put(bot.getUuid(), entityUuid);
             PENDING_TARGET_TIMESTAMPS.put(bot.getUuid(), System.currentTimeMillis());

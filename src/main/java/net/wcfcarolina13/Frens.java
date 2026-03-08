@@ -29,6 +29,7 @@ import net.wcfcarolina13.GameAI.BotEventHandler;
 import net.wcfcarolina13.GameAI.services.SkillResumeService;
 import net.wcfcarolina13.FunctionCaller.FunctionCallerV2;
 import net.wcfcarolina13.GameAI.services.BotPersistenceService;
+import net.wcfcarolina13.GameAI.services.HuntSessionService;
 import net.wcfcarolina13.GameAI.services.BotAutoReturnSunsetService;
 import net.wcfcarolina13.GameAI.services.BotAmbientSocialChatService;
 import net.wcfcarolina13.GameAI.services.BotCampfireAvoidanceService;
@@ -714,6 +715,7 @@ public class Frens implements ModInitializer {
                         BotEventHandler.ensureRespawnHandled(serverPlayer);
                 }
                 BotPersistenceService.onBotDeath(serverPlayer);
+                HuntSessionService.clearSession(serverPlayer.getUuid());
             }
             if (entity instanceof net.minecraft.entity.LivingEntity dead) {
                 var attacker = damageSource != null ? damageSource.getAttacker() : null;
