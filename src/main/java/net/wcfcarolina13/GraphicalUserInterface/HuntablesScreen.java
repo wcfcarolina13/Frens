@@ -35,12 +35,12 @@ public class HuntablesScreen extends Screen {
 
     private record HuntEntry(String id, String label, boolean unlocked, boolean food) {}
 
-    private static List<HuntEntry> LAST_HUNTABLES = List.of();
+    private static volatile List<HuntEntry> LAST_HUNTABLES = List.of();
 
     // ── Config state received from server ───────────────────────────────
-    private static boolean configDepopulation = true;
-    private static String configZone = "STANDARD";
-    private static List<String> configSelectedTargets = List.of();
+    private static volatile boolean configDepopulation = true;
+    private static volatile String configZone = "STANDARD";
+    private static volatile List<String> configSelectedTargets = List.of();
 
     private static final String[] ZONE_NAMES = {"STANDARD", "EXPANDED", "SPRAWLING"};
     private static final String[] ZONE_LABELS = {"Standard", "Expanded", "Sprawling"};

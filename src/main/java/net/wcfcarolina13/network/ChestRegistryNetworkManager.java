@@ -76,9 +76,15 @@ public final class ChestRegistryNetworkManager {
             String botName = parsed.get("botName") instanceof String s ? s : null;
             if (botName == null || botName.isBlank()) return;
 
-            int x = ((Number) parsed.get("x")).intValue();
-            int y = ((Number) parsed.get("y")).intValue();
-            int z = ((Number) parsed.get("z")).intValue();
+            if (!(parsed.get("x") instanceof Number nx)
+                    || !(parsed.get("y") instanceof Number ny)
+                    || !(parsed.get("z") instanceof Number nz)) {
+                LOGGER.warn("Chest collect payload missing coordinates");
+                return;
+            }
+            int x = nx.intValue();
+            int y = ny.intValue();
+            int z = nz.intValue();
 
             ServerPlayerEntity bot = server.getPlayerManager().getPlayer(botName);
             if (bot == null) return;
@@ -103,9 +109,15 @@ public final class ChestRegistryNetworkManager {
             String botName = parsed.get("botName") instanceof String s ? s : null;
             if (botName == null || botName.isBlank()) return;
 
-            int x = ((Number) parsed.get("x")).intValue();
-            int y = ((Number) parsed.get("y")).intValue();
-            int z = ((Number) parsed.get("z")).intValue();
+            if (!(parsed.get("x") instanceof Number nx)
+                    || !(parsed.get("y") instanceof Number ny)
+                    || !(parsed.get("z") instanceof Number nz)) {
+                LOGGER.warn("Chest dismiss payload missing coordinates");
+                return;
+            }
+            int x = nx.intValue();
+            int y = ny.intValue();
+            int z = nz.intValue();
 
             ServerPlayerEntity bot = server.getPlayerManager().getPlayer(botName);
             if (bot == null) return;

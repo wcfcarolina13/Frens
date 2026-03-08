@@ -35,9 +35,14 @@ public final class HuntablesNetworkManager {
 
     /** Pending entity targets set by the target picker, consumed by HuntSkill. */
     private static final Map<UUID, UUID> PENDING_TARGET_ENTITY = new ConcurrentHashMap<>();
+    /** Timestamps for pending target entries, used for expiry cleanup. */
+    private static final Map<UUID, Long> PENDING_TARGET_TIMESTAMPS = new ConcurrentHashMap<>();
+    private static final long PENDING_TARGET_EXPIRY_MS = 30_000L;
 
     private static final DustParticleEffect GREEN_DUST = new DustParticleEffect(0x66CC33, 1.0f);
     private static final double PARTICLE_RANGE = 32.0;
+    private static final int PARTICLE_INTERVAL_TICKS = 10;
+    private static int particleTickCounter;
 
     private HuntablesNetworkManager() {}
 
@@ -164,6 +169,7 @@ public final class HuntablesNetworkManager {
 
             // Store the pending target for HuntSkill to consume
             PENDING_TARGET_ENTITY.put(bot.getUuid(), entityUuid);
+            PENDING_TARGET_TIMESTAMPS.put(bot.getUuid(), System.currentTimeMillis());
 
             // Clear target-picking mode
             TARGET_PICKERS.remove(player.getUuid());
@@ -189,7 +195,9 @@ public final class HuntablesNetworkManager {
 
     /** Consume a pending target entity UUID for a bot (called by HuntSkill). */
     public static UUID consumePendingTarget(UUID botId) {
-        return botId != null ? PENDING_TARGET_ENTITY.remove(botId) : null;
+        if (botId == null) return null;
+        PENDING_TARGET_TIMESTAMPS.remove(botId);
+        return PENDING_TARGET_ENTITY.remove(botId);
     }
 
     /**
@@ -197,14 +205,36 @@ public final class HuntablesNetworkManager {
      * mobs near players who are in target-picking mode.
      */
     public static void onServerTick(MinecraftServer server) {
-        if (server == null || TARGET_PICKERS.isEmpty()) return;
+        if (server == null) return;
+
+        // Expire stale pending targets
+        if (!PENDING_TARGET_TIMESTAMPS.isEmpty()) {
+            long now = System.currentTimeMillis();
+            PENDING_TARGET_TIMESTAMPS.entrySet().removeIf(e -> {
+                if (now - e.getValue() > PENDING_TARGET_EXPIRY_MS) {
+                    PENDING_TARGET_ENTITY.remove(e.getKey());
+                    return true;
+                }
+                return false;
+            });
+        }
+
+        if (TARGET_PICKERS.isEmpty()) return;
+
+        // Clean up disconnected players (safe iteration via removeIf)
+        TARGET_PICKERS.entrySet().removeIf(e -> {
+            ServerPlayerEntity p = server.getPlayerManager().getPlayer(e.getKey());
+            return p == null || p.isRemoved();
+        });
+
+        // Throttle particles to every N ticks
+        particleTickCounter++;
+        if (particleTickCounter < PARTICLE_INTERVAL_TICKS) return;
+        particleTickCounter = 0;
 
         for (var entry : TARGET_PICKERS.entrySet()) {
             ServerPlayerEntity player = server.getPlayerManager().getPlayer(entry.getKey());
-            if (player == null || player.isRemoved()) {
-                TARGET_PICKERS.remove(entry.getKey());
-                continue;
-            }
+            if (player == null || player.isRemoved()) continue;
             if (!(player.getEntityWorld() instanceof ServerWorld world)) continue;
 
             Box scanBox = player.getBoundingBox().expand(PARTICLE_RANGE, PARTICLE_RANGE / 2.0, PARTICLE_RANGE);

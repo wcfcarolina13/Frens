@@ -11,23 +11,34 @@ import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.tooltip.Tooltip;
 import net.minecraft.client.gui.widget.ButtonWidget;
+import net.minecraft.client.network.PlayerListEntry;
 import net.minecraft.text.Text;
 import net.minecraft.util.math.MathHelper;
+import net.wcfcarolina13.Frens;
+import net.wcfcarolina13.GraphicalUserInterface.Widgets.DropdownMenuWidget;
 import net.wcfcarolina13.network.ChestCollectPayload;
 import net.wcfcarolina13.network.ChestDismissPayload;
 import net.wcfcarolina13.network.RequestChestRegistryPayload;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.Reader;
 import java.io.Writer;
 import java.lang.reflect.Type;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.text.SimpleDateFormat;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
-import java.util.Date;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Bot storage/chest registry screen — resizable panel with scrollbar,
@@ -35,9 +46,11 @@ import java.util.Map;
  */
 public class BotStorageScreen extends Screen {
 
+    private static final Logger LOGGER = LoggerFactory.getLogger("bot-storage-screen");
     private static final Gson GSON = new GsonBuilder().disableHtmlEscaping().create();
     private static final Type CHEST_LIST_TYPE = new TypeToken<List<ChestEntry>>() {}.getType();
-    private static final SimpleDateFormat DATE_FMT = new SimpleDateFormat("MMM d HH:mm");
+    private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("MMM d HH:mm")
+            .withZone(ZoneId.systemDefault());
 
     // ── UI prefs persistence ────────────────────────────────────────────
     private static final Path UI_PREFS_PATH = FabricLoader.getInstance()
@@ -48,14 +61,15 @@ public class BotStorageScreen extends Screen {
     // ── Data model ──────────────────────────────────────────────────────
     public record ChestEntry(int x, int y, int z, String context, long placedAtMs, boolean destroyed) {}
 
-    private static List<ChestEntry> LAST_CHESTS = List.of();
+    private static volatile List<ChestEntry> LAST_CHESTS = List.of();
 
     public static void applyChestRegistryJson(String json) {
         if (json == null) { LAST_CHESTS = List.of(); return; }
         try {
             List<ChestEntry> parsed = GSON.fromJson(json, CHEST_LIST_TYPE);
-            LAST_CHESTS = parsed != null ? parsed : List.of();
-        } catch (Exception ignored) {
+            LAST_CHESTS = parsed != null ? List.copyOf(parsed) : List.of();
+        } catch (Exception e) {
+            LOGGER.warn("Failed to parse chest registry JSON: {}", e.getMessage());
             LAST_CHESTS = List.of();
         }
     }
@@ -96,7 +110,10 @@ public class BotStorageScreen extends Screen {
 
     // ── Instance state ──────────────────────────────────────────────────
     private final Screen parent;
-    private final String botTarget;
+    private String botTarget;
+
+    private DropdownMenuWidget botSelector;
+    private String lastSelectedBot;
 
     private int panelX, panelY, panelW, panelH;
     private double contentScroll;
@@ -132,10 +149,79 @@ public class BotStorageScreen extends Screen {
         dismissButtons.clear();
 
         applySavedOrDefaultPanel();
+        buildBotSelector();
         buildBottomButtons();
         buildRowButtons();
         contentScroll = MathHelper.clamp(contentScroll, 0.0, maxScroll());
         requestRefresh();
+    }
+
+    private void buildBotSelector() {
+        List<String> botNames = collectOnlineBotAliases();
+        int dropdownX = panelX + PANEL_PAD + this.textRenderer.getWidth("Storage") + 10;
+        int dropdownW = Math.min(120, panelW - (dropdownX - panelX) - PANEL_PAD - 50);
+        if (dropdownW < 60) dropdownW = 60;
+
+        botSelector = new DropdownMenuWidget(
+                dropdownX, panelY + 4, dropdownW, 16,
+                Text.literal(stripQuotes(botTarget)), botNames);
+        botSelector.setSelectedOption(stripQuotes(botTarget));
+        lastSelectedBot = stripQuotes(botTarget);
+        this.addDrawableChild(botSelector);
+    }
+
+    private List<String> collectOnlineBotAliases() {
+        Set<String> onlineNames = getOnlinePlayerNames();
+        Set<String> unique = new LinkedHashSet<>();
+
+        // Always include current bot
+        String current = stripQuotes(botTarget);
+        if (current != null && !current.isBlank()) {
+            unique.add(current);
+        }
+
+        // Add all configured bots that are online
+        if (Frens.CONFIG != null) {
+            for (String alias : Frens.CONFIG.getBotGameProfile().keySet()) {
+                if (alias != null && onlineNames.contains(alias.toLowerCase(Locale.ROOT))) {
+                    unique.add(alias);
+                }
+            }
+            for (String alias : Frens.CONFIG.getAllBotAliases()) {
+                if (alias != null && onlineNames.contains(alias.toLowerCase(Locale.ROOT))) {
+                    unique.add(alias);
+                }
+            }
+        }
+
+        ArrayList<String> sorted = new ArrayList<>(unique);
+        sorted.sort(String.CASE_INSENSITIVE_ORDER);
+        return sorted;
+    }
+
+    private Set<String> getOnlinePlayerNames() {
+        MinecraftClient client = MinecraftClient.getInstance();
+        if (client == null || client.getNetworkHandler() == null) return Set.of();
+        Set<String> names = new HashSet<>();
+        for (PlayerListEntry entry : client.getNetworkHandler().getPlayerList()) {
+            if (entry.getProfile() != null && entry.getProfile().name() != null) {
+                names.add(entry.getProfile().name().toLowerCase(Locale.ROOT));
+            }
+        }
+        return names;
+    }
+
+    private static String stripQuotes(String s) {
+        if (s == null) return "";
+        if (s.length() >= 2 && s.startsWith("\"") && s.endsWith("\"")) {
+            return s.substring(1, s.length() - 1);
+        }
+        return s;
+    }
+
+    private static String formatBotTarget(String alias) {
+        if (alias == null || alias.isBlank()) return "";
+        return alias.contains(" ") ? "\"" + alias + "\"" : alias;
     }
 
     @Override
@@ -257,6 +343,17 @@ public class BotStorageScreen extends Screen {
     public void render(DrawContext context, int mouseX, int mouseY, float delta) {
         super.render(context, mouseX, mouseY, delta);
 
+        // Detect bot selector change
+        if (botSelector != null) {
+            String selected = botSelector.getSelectedOption();
+            if (selected != null && !selected.equals(lastSelectedBot)) {
+                lastSelectedBot = selected;
+                botTarget = formatBotTarget(selected);
+                requestRefresh();
+                buildRowButtons();
+            }
+        }
+
         Rect cr = contentRect();
         contentScroll = MathHelper.clamp(contentScroll, 0.0, maxScroll());
 
@@ -266,7 +363,17 @@ public class BotStorageScreen extends Screen {
 
         // Header
         context.fill(panelX + 1, panelY + 1, panelX + panelW - 1, panelY + HEADER_H, COL_HEADER);
-        context.drawTextWithShadow(this.textRenderer, "Bot Storage", panelX + PANEL_PAD, panelY + 7, COL_TITLE);
+        context.drawTextWithShadow(this.textRenderer, "Storage", panelX + PANEL_PAD, panelY + 7, COL_TITLE);
+
+        // Position bot selector in header
+        if (botSelector != null) {
+            int dropdownX = panelX + PANEL_PAD + this.textRenderer.getWidth("Storage") + 10;
+            int dropdownW = Math.min(120, panelX + panelW - dropdownX - PANEL_PAD - 50);
+            if (dropdownW < 60) dropdownW = 60;
+            botSelector.setX(dropdownX);
+            botSelector.setY(panelY + 4);
+            botSelector.setWidth(dropdownW);
+        }
 
         // Reset layout hint in header
         String resetLabel = "Reset";
@@ -296,12 +403,18 @@ public class BotStorageScreen extends Screen {
         positionRowButtons(cr);
 
         // Chest count status
-        int total = getChestsSnapshot().size();
-        long active = getChestsSnapshot().stream().filter(c -> !c.destroyed).count();
+        List<ChestEntry> snapshot = getChestsSnapshot();
+        int total = snapshot.size();
+        long active = snapshot.stream().filter(c -> !c.destroyed).count();
         String status = active + " active / " + total + " total";
         int statusW = this.textRenderer.getWidth(status);
         context.drawTextWithShadow(this.textRenderer, status,
                 panelX + panelW / 2 - statusW / 2, bottomY + 4, 0xFFB0B0B0);
+
+        // Render dropdown on top so it overlays content when open
+        if (botSelector != null) {
+            botSelector.renderOnTop(context, mouseX, mouseY, delta);
+        }
     }
 
     private void renderContent(DrawContext context, Rect cr, int mouseX, int mouseY) {
@@ -337,7 +450,7 @@ public class BotStorageScreen extends Screen {
                 int statusColor = isDestroyed ? 0xFFCC4444 : 0xFF66AA44;
                 String dateStr = "";
                 if (entry.placedAtMs > 0) {
-                    try { dateStr = " - " + DATE_FMT.format(new Date(entry.placedAtMs)); }
+                    try { dateStr = " - " + DATE_FMT.format(Instant.ofEpochMilli(entry.placedAtMs)); }
                     catch (Exception ignored) {}
                 }
                 context.drawText(this.textRenderer, statusLabel + dateStr,
@@ -552,17 +665,23 @@ public class BotStorageScreen extends Screen {
             try (Writer w = Files.newBufferedWriter(UI_PREFS_PATH)) {
                 GSON.toJson(CACHED_PREFS, w);
             }
-        } catch (Exception ignored) {}
+        } catch (Exception e) {
+            LOGGER.warn("Failed to save storage screen prefs: {}", e.getMessage());
+        }
     }
 
     private static UiPrefs loadUiPrefs() {
         try {
             if (Files.exists(UI_PREFS_PATH)) {
                 try (Reader r = Files.newBufferedReader(UI_PREFS_PATH)) {
-                    return GSON.fromJson(r, UiPrefs.class);
+                    UiPrefs prefs = GSON.fromJson(r, UiPrefs.class);
+                    return prefs;
                 }
             }
-        } catch (Exception ignored) {}
+        } catch (Exception e) {
+            LoggerFactory.getLogger("bot-storage-screen")
+                    .warn("Failed to load storage screen prefs: {}", e.getMessage());
+        }
         return null;
     }
 
