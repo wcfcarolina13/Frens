@@ -498,6 +498,14 @@ public final class ChestStoreService {
         return performStoreTransferWithBot(source, bot, chestPos, Integer.MAX_VALUE, matcher, true, WALK_ONLY);
     }
 
+    /**
+     * Deposits hunt loot: everything except equipped tools, cooked food, and other protected items.
+     * Raw meat, leather, feathers, bones, wool, and other drops are deposited.
+     */
+    public static int depositHuntLoot(ServerCommandSource source, ServerPlayerEntity bot, BlockPos chestPos) {
+        return depositMatching(source, bot, chestPos, stack -> !isOffloadProtected(stack));
+    }
+
     private static int performStoreTransferWithBot(ServerCommandSource source,
                                                    ServerPlayerEntity bot,
                                                    BlockPos chestPos,

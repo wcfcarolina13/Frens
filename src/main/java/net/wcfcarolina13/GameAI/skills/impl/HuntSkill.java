@@ -28,6 +28,7 @@ import net.wcfcarolina13.ChatUtils.ChatUtils;
 import net.wcfcarolina13.GameAI.BotActions;
 import net.wcfcarolina13.GameAI.DropSweeper;
 import net.wcfcarolina13.GameAI.services.BotHomeService;
+import net.wcfcarolina13.GameAI.services.ChestStoreService;
 import net.wcfcarolina13.GameAI.services.CraftingHelper;
 import net.wcfcarolina13.GameAI.services.ToolProvisionService;
 import net.wcfcarolina13.GameAI.services.HuntCatalog;
@@ -178,6 +179,12 @@ public final class HuntSkill implements Skill {
         boolean depopulationEnabled = huntConfig.depopulationEnabled;
         List<String> selectedTargets = huntConfig.selectedTargets;
 
+        // Pre-hunt inventory check: if nearly full, announce and place a chest
+        ensureHuntingSupplies(bot, world, source, commander);
+
+        // Snapshot inventory before hunt for loot summary
+        Map<Item, Integer> preHuntInventory = snapshotInventory(bot);
+
         List<BlockPos> anchors = buildHuntAnchors(bot, world, huntRadius);
         LOGGER.info("Hunt anchors: {}", anchors.size());
         long lastSweep = System.currentTimeMillis();
@@ -286,9 +293,17 @@ public final class HuntSkill implements Skill {
             return SkillExecutionResult.failure("No kills completed.");
         }
         runFinalDropSweep(source, bot);
+
+        // Post-hunt return: summarize loot and return to base or owner
+        String lootSummary = buildLootSummary(bot, preHuntInventory);
+        String killMsg = kills + " kill" + (kills == 1 ? "" : "s");
+        if (!request.hobby) {
+            returnFromHunt(bot, source, commander, lootSummary, killMsg);
+        }
+
         String msg = request.targetCount == Integer.MAX_VALUE
                 ? "Hunt complete."
-                : "Hunt complete (" + kills + " kill" + (kills == 1 ? "" : "s") + ").";
+                : "Hunt complete (" + killMsg + ").";
         return SkillExecutionResult.success(msg);
     }
 
@@ -993,6 +1008,7 @@ public final class HuntSkill implements Skill {
 
     private static void offloadInventory(ServerPlayerEntity bot, ServerCommandSource source) {
         try {
+            // First try offloading to an existing nearby chest
             Map<Item, Integer> reserve = new HashMap<>();
             for (int i = 0; i < bot.getInventory().size(); i++) {
                 ItemStack stack = bot.getInventory().getStack(i);
@@ -1004,6 +1020,20 @@ public final class HuntSkill implements Skill {
                 }
             }
             CraftingHelper.offloadCheapItemsToNearbyChest(bot, source, 0, 0, reserve);
+
+            // If still full, try crafting + placing a chest
+            if (bot.getInventory().getEmptySlot() == -1) {
+                ServerPlayerEntity commander = source.getPlayer() != null && source.getPlayer() != bot
+                        ? source.getPlayer() : null;
+                if (bot.getEntityWorld() instanceof ServerWorld world) {
+                    ToolProvisionService.ensureChest(bot, source, commander, 1);
+                    BlockPos chestPos = ChestStoreService.placeChestNearBot(source, bot, false);
+                    if (chestPos != null) {
+                        ChestStoreService.depositHuntLoot(source, bot, chestPos);
+                        LOGGER.info("Hunt offload: placed chest at {} and deposited loot", chestPos);
+                    }
+                }
+            }
         } catch (Exception e) {
             LOGGER.warn("Inventory offload failed during hunt: {}", e.getMessage());
         }
@@ -1076,6 +1106,139 @@ public final class HuntSkill implements Skill {
             new net.wcfcarolina13.GameAI.skills.impl.HangoutSkill().execute(hangoutContext);
         } catch (Exception e) {
             LOGGER.warn("Hobby hangout failed: {}", e.getMessage());
+        }
+    }
+
+    // ── Phase 2: Pre-hunt inventory check ─────────────────────────────
+
+    private static final int MIN_FREE_SLOTS = 4;
+
+    private static void ensureHuntingSupplies(ServerPlayerEntity bot, ServerWorld world,
+                                               ServerCommandSource source, ServerPlayerEntity commander) {
+        int emptySlots = countEmptySlots(bot);
+        if (emptySlots >= MIN_FREE_SLOTS) {
+            return;
+        }
+
+        ChatUtils.sendSystemMessage(source, "Inventory is nearly full. Setting up a chest first.");
+
+        // Try to craft a chest if we don't have one
+        boolean hasChest = ToolProvisionService.ensureChest(bot, source, commander, 1);
+
+        if (!hasChest) {
+            // No chest materials — run woodcutting prerequisite
+            LOGGER.info("No chest materials available, running woodcut prerequisite");
+            runWoodcutPrerequisite(bot, world, source, commander);
+            hasChest = ToolProvisionService.ensureChest(bot, source, commander, 1);
+        }
+
+        if (hasChest) {
+            BlockPos chestPos = ChestStoreService.placeChestNearBot(source, bot, true);
+            if (chestPos != null) {
+                ChestStoreService.depositHuntLoot(source, bot, chestPos);
+                LOGGER.info("Pre-hunt: placed chest at {} and deposited non-essentials", chestPos);
+            }
+        }
+    }
+
+    private static void runWoodcutPrerequisite(ServerPlayerEntity bot, ServerWorld world,
+                                                ServerCommandSource source, ServerPlayerEntity commander) {
+        try {
+            ChatUtils.sendSystemMessage(source, "Need wood for a chest. Chopping some trees first.");
+
+            // Ensure basic tools for woodcutting
+            ToolProvisionService.ensureCraftingTable(bot, source, commander, 1);
+            ToolProvisionService.ensureAxe(bot, source, commander);
+
+            // Run a small woodcut (8 logs = enough for planks -> chest + extra)
+            Map<String, Object> params = new HashMap<>();
+            params.put("count", 8);
+            params.put("_origin", "hunt_prerequisite");
+            SkillContext woodcutCtx = new SkillContext(source,
+                    new java.util.concurrent.ConcurrentHashMap<>(), params, source);
+            new net.wcfcarolina13.GameAI.skills.impl.WoodcutSkill().execute(woodcutCtx);
+        } catch (Exception e) {
+            LOGGER.warn("Woodcut prerequisite failed: {}", e.getMessage());
+        }
+    }
+
+    private static int countEmptySlots(ServerPlayerEntity bot) {
+        int count = 0;
+        for (int i = 0; i < bot.getInventory().size(); i++) {
+            ItemStack stack = bot.getInventory().getStack(i);
+            if (stack == null || stack.isEmpty()) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    // ── Phase 2: Inventory snapshot + loot summary ──────────────────────
+
+    private static Map<Item, Integer> snapshotInventory(ServerPlayerEntity bot) {
+        Map<Item, Integer> snapshot = new HashMap<>();
+        for (int i = 0; i < bot.getInventory().size(); i++) {
+            ItemStack stack = bot.getInventory().getStack(i);
+            if (stack != null && !stack.isEmpty()) {
+                snapshot.merge(stack.getItem(), stack.getCount(), Integer::sum);
+            }
+        }
+        return snapshot;
+    }
+
+    private static String buildLootSummary(ServerPlayerEntity bot, Map<Item, Integer> preHunt) {
+        Map<Item, Integer> current = snapshotInventory(bot);
+        List<String> gains = new ArrayList<>();
+
+        for (Map.Entry<Item, Integer> entry : current.entrySet()) {
+            int before = preHunt.getOrDefault(entry.getKey(), 0);
+            int diff = entry.getValue() - before;
+            if (diff > 0) {
+                String name = entry.getKey().getName().getString();
+                gains.add(diff + " " + name);
+            }
+        }
+
+        return gains.isEmpty() ? "" : String.join(", ", gains);
+    }
+
+    // ── Phase 2: Post-hunt return ───────────────────────────────────────
+
+    private static void returnFromHunt(ServerPlayerEntity bot, ServerCommandSource source,
+                                        ServerPlayerEntity commander, String lootSummary,
+                                        String killMsg) {
+        try {
+            // Try returning to nearest base
+            Optional<BlockPos> homeTarget = BotHomeService.resolveHomeTarget(bot);
+            if (homeTarget.isPresent()) {
+                BlockPos target = homeTarget.get();
+                double distSq = bot.getBlockPos().getSquaredDistance(target);
+                if (distSq > 16.0D) {
+                    String returnMsg = "Returned from the hunt (" + killMsg + ").";
+                    if (!lootSummary.isEmpty()) {
+                        returnMsg += " I've got " + lootSummary + ".";
+                    }
+                    ChatUtils.sendSystemMessage(source, returnMsg);
+
+                    // Deposit loot at base chests if available
+                    if (bot.getEntityWorld() instanceof ServerWorld) {
+                        Optional<MovementService.MovementPlan> plan =
+                                MovementService.planLootApproach(bot, target, MovementService.MovementOptions.skillLoot());
+                        if (plan.isPresent()) {
+                            MovementService.execute(source, bot, plan.get(),
+                                    SkillPreferences.teleportDuringSkills(bot), true);
+                        }
+                    }
+                    return;
+                }
+            }
+
+            // No base — just announce loot
+            if (!lootSummary.isEmpty()) {
+                ChatUtils.sendSystemMessage(source, "Returned from the hunt. I've got " + lootSummary + ".");
+            }
+        } catch (Exception e) {
+            LOGGER.warn("Return from hunt failed: {}", e.getMessage());
         }
     }
 
