@@ -2148,11 +2148,13 @@ public class BotEventHandler {
         // Come-mode early-exit: if the live player has moved back within reach (e.g. after a regroup
         // pillar-up) before the bot reaches the stale fixed goal, resume normal follow immediately.
         // This prevents the bot from walking all the way to where the player WAS.
+        // Y tolerance is generous (10 blocks) because after recovery the bot may surface several
+        // blocks below the player; canSee already guarantees reachability via normal follow.
         if (fixedGoal != null && target != null && state != null) {
             Vec3d liveTargetPos = new Vec3d(target.getX(), target.getY(), target.getZ());
             double liveHorizSq = horizontalDistanceSq(bot, liveTargetPos);
             double liveDeltaY = Math.abs(target.getY() - bot.getY());
-            if (liveHorizSq <= 8.0D * 8.0D && liveDeltaY <= 4.0D && bot.canSee(target)) {
+            if (liveHorizSq <= 8.0D * 8.0D && liveDeltaY <= 10.0D && bot.canSee(target)) {
                 state.followFixedGoal = null;
                 state.comeBestGoalDistSq = Double.NaN;
                 state.comeTicksSinceBest = 0;
@@ -2168,8 +2170,19 @@ public class BotEventHandler {
                 net.wcfcarolina13.GameAI.services.ReturnBaseStuckService.clear(bot.getUuid());
                 BotActions.stop(bot);
                 maybeLogFollowDecision(bot, "come-early-exit: live player in reach liveHorizDist="
-                        + String.format(Locale.ROOT, "%.2f", Math.sqrt(liveHorizSq)));
+                        + String.format(Locale.ROOT, "%.2f", Math.sqrt(liveHorizSq))
+                        + " liveDeltaY=" + String.format(Locale.ROOT, "%.2f", liveDeltaY));
                 return true;
+            } else if (liveHorizSq <= 12.0D * 12.0D) {
+                // Near-miss: log why early-exit didn't fire to help diagnose future issues
+                boolean hasLos = bot.canSee(target);
+                maybeLogFollowDecision(bot, "come-early-exit SKIP: horizDist="
+                        + String.format(Locale.ROOT, "%.1f", Math.sqrt(liveHorizSq))
+                        + " deltaY=" + String.format(Locale.ROOT, "%.1f", liveDeltaY)
+                        + " canSee=" + hasLos
+                        + (liveHorizSq > 8.0D * 8.0D ? " [horiz>8]" : "")
+                        + (liveDeltaY > 10.0D ? " [deltaY>10]" : "")
+                        + (!hasLos ? " [no-LOS]" : ""));
             }
         }
 
