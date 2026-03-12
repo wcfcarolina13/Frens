@@ -10,6 +10,7 @@ import net.minecraft.component.DataComponentTypes;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.ItemEntity;
 import net.minecraft.entity.LivingEntity;
+import net.minecraft.entity.projectile.PersistentProjectileEntity;
 import net.minecraft.entity.damage.DamageSource;
 import net.minecraft.entity.damage.DamageTypes;
 import net.minecraft.entity.player.PlayerInventory;
@@ -37,6 +38,7 @@ import net.wcfcarolina13.DangerZoneDetector.DangerZoneDetector;
 import net.wcfcarolina13.Database.QTable;
 import net.wcfcarolina13.Database.QTableStorage;
 import net.wcfcarolina13.GameAI.services.BotPersistenceService;
+import net.wcfcarolina13.GameAI.services.SurvivalRecruitmentService;
 import net.wcfcarolina13.GameAI.services.CompanionOverheadDialogueService;
 import net.wcfcarolina13.GameAI.services.ElytraFlightService;
 import net.wcfcarolina13.GameAI.services.TreeStuckEscapeService;
@@ -52,6 +54,8 @@ import net.wcfcarolina13.GameAI.services.BotArrowRecoveryService;
 import net.wcfcarolina13.GameAI.services.BotStuckService;
 import net.wcfcarolina13.GameAI.services.BotRLActionService;
 import net.wcfcarolina13.GameAI.services.BotRLPersistenceThrottleService;
+import net.wcfcarolina13.GameAI.services.BotCombatCalloutService;
+import net.wcfcarolina13.GameAI.services.BotFleeService;
 import net.wcfcarolina13.GameAI.services.BotHomeService;
 import net.wcfcarolina13.GameAI.services.SafePositionService;
 import net.wcfcarolina13.Database.StateActionPair;
@@ -81,6 +85,8 @@ import net.wcfcarolina13.GameAI.services.FollowStateService.FollowDoorRecovery;
 import net.wcfcarolina13.GameAI.services.FollowStateService.VerticalClimbLock;
 import net.wcfcarolina13.GameAI.services.FollowMovementService;
 import net.wcfcarolina13.GameAI.services.SharedStateService;
+import net.wcfcarolina13.GameAI.services.CompanionSafeZoneService;
+import net.wcfcarolina13.GameAI.services.construction.ScaffoldService;
 import net.wcfcarolina13.GameAI.services.follow.FollowVerticalAssistPolicyUtil;
 import net.wcfcarolina13.GameAI.skills.SkillContext;
 import net.wcfcarolina13.GameAI.skills.SkillExecutionResult;
@@ -1042,6 +1048,7 @@ public class BotEventHandler {
     public static void onBotRespawn(ServerPlayerEntity bot) {
         registerBot(bot);
         BotStuckService.resetBot(bot.getUuid());
+        BotFleeService.reset(bot.getUuid());
 
         MinecraftServer srv = bot.getCommandSource().getServer();
         ServerWorld botWorld = bot.getCommandSource().getWorld();
@@ -1108,24 +1115,12 @@ public class BotEventHandler {
 
         // 3. BotSpawn config position (admin/training bots) — with safe-surface validation
         if (target == null && srv != null && net.wcfcarolina13.Frens.CONFIG != null) {
+            String worldKey = net.wcfcarolina13.GameAI.services.BotWorldStateService.currentWorldKey(srv);
             net.wcfcarolina13.FilingSystem.ManualConfig.BotSpawn spawn =
-                    net.wcfcarolina13.Frens.CONFIG.getBotSpawn(alias);
+                    net.wcfcarolina13.Frens.CONFIG.getBotSpawn(alias, worldKey);
             if (spawn != null && spawn.dimension() != null) {
-                String currentLevelName = srv.getSaveProperties() != null
-                        ? srv.getSaveProperties().getLevelName()
-                        : null;
-                String spawnLevelName = spawn.levelName();
-                boolean levelMatches = spawnLevelName == null
-                        || spawnLevelName.isBlank()
-                        || currentLevelName == null
-                        || spawnLevelName.equalsIgnoreCase(currentLevelName);
-                if (!levelMatches) {
-                    LOGGER.info("[Frens] Respawn for {}: ignoring BotSpawn from different level '{}' (current='{}').",
-                            alias,
-                            spawnLevelName,
-                            currentLevelName);
-                } else {
-                    net.minecraft.util.Identifier dimId = net.minecraft.util.Identifier.tryParse(spawn.dimension());
+                // Per-world BotSpawn is already scoped to the current world, so no level-name check needed.
+                net.minecraft.util.Identifier dimId = net.minecraft.util.Identifier.tryParse(spawn.dimension());
                     if (dimId != null) {
                         RegistryKey<World> key = RegistryKey.of(RegistryKeys.WORLD, dimId);
                         ServerWorld spawnWorld = srv.getWorld(key);
@@ -1139,7 +1134,6 @@ public class BotEventHandler {
                             }
                         }
                     }
-                }
             }
         }
 
@@ -1147,8 +1141,9 @@ public class BotEventHandler {
         if (target == null && srv != null) {
             String failsafeMode = "world_spawn";
             if (net.wcfcarolina13.Frens.CONFIG != null) {
+                String wk = net.wcfcarolina13.GameAI.services.BotWorldStateService.currentWorldKey(srv);
                 net.wcfcarolina13.FilingSystem.ManualConfig.BotControlSettings ctrl =
-                        net.wcfcarolina13.Frens.CONFIG.getOrCreateBotControl(alias);
+                        net.wcfcarolina13.Frens.CONFIG.getOrCreateBotControl(alias, wk);
                 failsafeMode = ctrl.getFailsafeSpawnMode();
             }
 
@@ -1334,6 +1329,20 @@ public class BotEventHandler {
         }
         BotArrowRecoveryService.tickArrowTracking(bot, server, !augmentedHostiles.isEmpty());
 
+        // ---- Post-combat drop/arrow sweep (all modes) ----
+        if (augmentedHostiles.isEmpty()) {
+            BotCombatCalloutService.noteHostilesCleared(bot, server.getTicks());
+        } else {
+            BotCombatCalloutService.clearPostCombatSweep(bot.getUuid());
+            DropSweepService.requestCancel(bot, "hostiles-reappeared");
+        }
+        if (augmentedHostiles.isEmpty()
+                && BotCombatCalloutService.isPostCombatSweepReady(bot)) {
+            if (tickPostCombatSweep(bot, server, mode)) {
+                return true;
+            }
+        }
+
         switch (mode) {
             case FOLLOW -> {
                 // Arrow recovery during FOLLOW: only allow short, bounded detours when we're not far from
@@ -1360,6 +1369,22 @@ public class BotEventHandler {
                     }
                     if (allowRecovery && BotArrowRecoveryService.tryRecoverMissedArrows(bot, server, null, 26.0D)) {
                         return true;
+                    }
+                    // Sweep mob drops after combat (mirrors GUARD/PATROL behavior).
+                    // Only block follow while a sweep is actively running.
+                    if (allowRecovery) {
+                        if (DropSweepService.isInProgressFor(bot) && !DropSweepService.isCancelRequestedFor(bot)) {
+                            return true;
+                        }
+                        if (!DropSweepService.isInProgress()) {
+                            Entity nearestItem = findNearestDrop(bot, 8.0D);
+                            if (nearestItem != null) {
+                                collectNearbyDrops(bot, 8.0D);
+                                if (DropSweepService.isInProgressFor(bot)) {
+                                    return true;
+                                }
+                            }
+                        }
                     }
                 }
                 return handleFollow(bot, state, server, augmentedHostiles);
@@ -1390,8 +1415,24 @@ public class BotEventHandler {
                 return handleReturnToBase(bot, state);
             }
             default -> {
+                // Flee check: if outnumbered/critically wounded and IDLE, sprint to safety
+                if (BotFleeService.tickFlee(bot, server, augmentedHostiles, mode)) {
+                    return true;
+                }
                 if (!augmentedHostiles.isEmpty()) {
                     return engageHostiles(bot, server, augmentedHostiles);
+                }
+                // If we were recently damaged by a hostile (within 2s), do a wider scan.
+                // Prevents premature combat exit when a skeleton shoots from beyond 10-block range.
+                if (BotCombatCalloutService.wasRecentlyDamagedByHostile(bot, server.getTicks(), 40)) {
+                    List<Entity> widerScan = AutoFaceEntity.detectNearbyEntities(bot, 16.0D)
+                            .stream()
+                            .filter(EntityUtil::isHostile)
+                            .toList();
+                    if (!widerScan.isEmpty()) {
+                        return engageHostiles(bot, server, widerScan);
+                    }
+                    return true; // stay alert, don't start idle behaviors
                 }
                 if (BotArrowRecoveryService.tryRecoverMissedArrows(bot, server, null, 24.0D)) {
                     return true;
@@ -1432,6 +1473,7 @@ public class BotEventHandler {
             state.comeNextSkillTick = 0L;
             state.comeRecoverySkillInFlight = false;
             state.comeRecoverySkillStartTick = 0L;
+            state.comeRecoverySkillAttempts = 0;
             state.comeAllowRecoverySkills = true;
         }
         setMode(bot, Mode.FOLLOW);
@@ -1468,6 +1510,7 @@ public class BotEventHandler {
             state.comeNextSkillTick = 0L;
             state.comeRecoverySkillInFlight = false;
             state.comeRecoverySkillStartTick = 0L;
+            state.comeRecoverySkillAttempts = 0;
             state.comeAllowRecoverySkills = true;
         }
         setMode(bot, Mode.FOLLOW);
@@ -1515,6 +1558,7 @@ public class BotEventHandler {
             state.comeNextSkillTick = 0L;
             state.comeRecoverySkillInFlight = false;
             state.comeRecoverySkillStartTick = 0L;
+            state.comeRecoverySkillAttempts = 0;
             state.comeAllowRecoverySkills = allowRecoverySkills;
         }
         setMode(bot, Mode.FOLLOW);
@@ -1609,6 +1653,7 @@ public class BotEventHandler {
             state.comeNextSkillTick = 0L;
             state.comeRecoverySkillInFlight = false;
             state.comeRecoverySkillStartTick = 0L;
+            state.comeRecoverySkillAttempts = 0;
             state.comeAllowRecoverySkills = true;
         }
         setMode(bot, Mode.FOLLOW);
@@ -2082,7 +2127,10 @@ public class BotEventHandler {
                 stopRange);
         if (fixedGoal == null && target != null && srv != null && !ElytraFlightService.isInFlight(bot.getUuid())) {
             double botAboveTarget = bot.getY() - target.getY();
-            if (botAboveTarget >= 6.0D) {
+            // Only attempt elytra glide for cliff/mountain scenarios where the player is
+            // horizontally distant.  If they're directly below (underground/hole), elytra
+            // can't descend into a tunnel — the bot should wait at the opening instead.
+            if (botAboveTarget >= 6.0D && horizDistSq > 10.0D * 10.0D) {
                 if (ElytraFlightService.tryAutonomousFollowFlightNow(srv, bot, srv.getTicks())) {
                     return true;
                 }
@@ -2094,6 +2142,33 @@ public class BotEventHandler {
             double stopRangeSq = stopRange * stopRange;
             if (horizDistSq <= stopRangeSq && absDeltaY <= 2.5D) {
                 stopFollowing(bot);
+                return true;
+            }
+        }
+        // Come-mode early-exit: if the live player has moved back within reach (e.g. after a regroup
+        // pillar-up) before the bot reaches the stale fixed goal, resume normal follow immediately.
+        // This prevents the bot from walking all the way to where the player WAS.
+        if (fixedGoal != null && target != null && state != null) {
+            Vec3d liveTargetPos = new Vec3d(target.getX(), target.getY(), target.getZ());
+            double liveHorizSq = horizontalDistanceSq(bot, liveTargetPos);
+            double liveDeltaY = Math.abs(target.getY() - bot.getY());
+            if (liveHorizSq <= 8.0D * 8.0D && liveDeltaY <= 4.0D && bot.canSee(target)) {
+                state.followFixedGoal = null;
+                state.comeBestGoalDistSq = Double.NaN;
+                state.comeTicksSinceBest = 0;
+                state.comeRerouteAttempts = 0;
+                state.comeNextRerouteTick = 0L;
+                state.comeNextSkillTick = 0L;
+                state.comeRecoverySkillInFlight = false;
+                state.comeRecoverySkillAttempts = 0;
+                FollowStateService.FOLLOW_AUTO_REGROUP_ATTEMPTS.remove(bot.getUuid());
+                FollowStateService.FOLLOW_WAYPOINTS.remove(bot.getUuid());
+                // Clear stale stuck state from come-mode so mine-escape doesn't fire immediately
+                // when normal follow resumes (stagnant counter would carry over otherwise).
+                net.wcfcarolina13.GameAI.services.ReturnBaseStuckService.clear(bot.getUuid());
+                BotActions.stop(bot);
+                maybeLogFollowDecision(bot, "come-early-exit: live player in reach liveHorizDist="
+                        + String.format(Locale.ROOT, "%.2f", Math.sqrt(liveHorizSq)));
                 return true;
             }
         }
@@ -2215,6 +2290,23 @@ public class BotEventHandler {
 	                        + String.format(Locale.ROOT, "%.2f", Math.sqrt(distanceSq)));
 	            }
 	        }
+        // In come mode on flat terrain with an unobstructed path to the goal, drop waypoints so
+        // the bot moves in a smooth straight line rather than hopping block-by-block.
+        if (usingWaypoints && fixedGoal != null && absDeltaY <= 2.0D) {
+            boolean directToGoalClear = !isDirectRouteBlocked(bot, targetPos, fixedGoal);
+            if (directToGoalClear) {
+                FollowStateService.FOLLOW_WAYPOINTS.remove(botId);
+                FollowStateService.FOLLOW_DOOR_PLAN.remove(botId);
+                FollowStateService.FOLLOW_DOOR_LAST_BLOCK.remove(botId);
+                FollowStateService.FOLLOW_DOOR_STUCK_TICKS.remove(botId);
+                FollowStateService.FOLLOW_DOOR_RECOVERY.remove(botId);
+                usingWaypoints = false;
+                navGoalBlock = fixedGoal;
+                navGoalPos = targetPos;
+                maybeLogFollowDecision(bot, "drop-waypoints: come-mode flat terrain direct-clear dy="
+                        + String.format(Locale.ROOT, "%.2f", absDeltaY));
+            }
+        }
 
         double progressDistSq = bot.getBlockPos().getSquaredDistance(navGoalBlock);
         boolean directBlocked = progressDistSq <= 36.0D && isDirectRouteBlocked(bot, navGoalPos, navGoalBlock);
@@ -2235,6 +2327,70 @@ public class BotEventHandler {
         // Personal space only applies when following an actual entity. For fixed-goal follow,
         // stopping early based on Euclidean distance can strand the bot behind doors/walls.
         if (target != null && canSee && horizDistSq <= personalSpaceSq) {
+            // When the player is significantly below the bot (went underground), stay put and
+            // announce rather than silently stopping.  Do not auto-descend — it could be fatal.
+            // Only trigger when the player is genuinely far below (6+ blocks) — 3 blocks triggers
+            // on normal slopes and staircases.  Also require player to be BELOW the bot (deltaY < 0).
+            if (fixedGoal == null && deltaY < -6.0D) {
+                long nowTick = srv != null ? srv.getTicks() : 0L;
+                // Track when the bot first started waiting at this drop-off.
+                FollowStateService.FOLLOW_WAIT_ABOVE_START_TICK.putIfAbsent(botId, nowTick);
+
+                long lastAnnounce = FollowStateService.FOLLOW_WAIT_ABOVE_ANNOUNCED_TICK.getOrDefault(botId, 0L);
+                if (nowTick - lastAnnounce >= 600L) { // announce at most every 30s
+                    FollowStateService.FOLLOW_WAIT_ABOVE_ANNOUNCED_TICK.put(botId, nowTick);
+                    CompanionOverheadDialogueService.showOverheadLine(bot,
+                            "Waiting by the opening.", 4_000, 48.0, "follow-wait-above", null);
+                    // Only mention /bot regroup in admin mode; in questing mode the bot just waits.
+                    if (!SurvivalRecruitmentService.isEnabled(srv)) {
+                        // Check auto-regroup config to tailor the message.
+                        boolean autoRegroupEnabled = false;
+                        if (net.wcfcarolina13.Frens.CONFIG != null) {
+                            String alias = bot.getName().getString();
+                            String wk = net.wcfcarolina13.GameAI.services.BotWorldStateService.currentWorldKey(srv);
+                            autoRegroupEnabled = net.wcfcarolina13.Frens.CONFIG.getOrCreateBotControl(alias, wk).isAutoRegroupOnLost();
+                        }
+                        if (autoRegroupEnabled) {
+                            sendBotMessage(bot, "I can see you down there but it's too dangerous to follow. I'll find a way down shortly.");
+                        } else {
+                            sendBotMessage(bot, "I can see you down there but it's too dangerous to follow. Use /bot regroup when you're ready.");
+                        }
+                    }
+                }
+
+                // Auto-regroup: if the toggle is enabled and the bot has been waiting ~2 minutes, descend.
+                long waitStart = FollowStateService.FOLLOW_WAIT_ABOVE_START_TICK.getOrDefault(botId, nowTick);
+                if (nowTick - waitStart >= 2400L && target != null && srv != null) {
+                    boolean autoRegroup = false;
+                    if (net.wcfcarolina13.Frens.CONFIG != null) {
+                        String alias = bot.getName().getString();
+                        String wk = net.wcfcarolina13.GameAI.services.BotWorldStateService.currentWorldKey(srv);
+                        autoRegroup = net.wcfcarolina13.Frens.CONFIG.getOrCreateBotControl(alias, wk).isAutoRegroupOnLost();
+                    }
+                    if (autoRegroup) {
+                        FollowStateService.FOLLOW_WAIT_ABOVE_START_TICK.remove(botId);
+                        FollowStateService.FOLLOW_WAIT_ABOVE_ANNOUNCED_TICK.remove(botId);
+                        CompanionOverheadDialogueService.showOverheadLine(bot,
+                                "Coming to find you.", 3_000, 48.0, "follow-auto-regroup", null);
+                        BlockPos goal = target.getBlockPos().toImmutable();
+                        net.minecraft.server.world.ServerWorld sw = target.getEntityWorld() instanceof net.minecraft.server.world.ServerWorld s ? s : null;
+                        if (sw != null) {
+                            BlockPos safe = net.wcfcarolina13.GameAI.services.SafePositionService.findForwardSafeSpot(sw, target);
+                            if (safe == null) {
+                                safe = net.wcfcarolina13.GameAI.services.SafePositionService.findSafeNear(sw, goal, 8);
+                            }
+                            if (safe != null) {
+                                goal = safe;
+                            }
+                        }
+                        setComeModeWalk(bot, target, goal, 3.2D, true);
+                        return true;
+                    }
+                }
+            } else {
+                // Player is no longer far below — clear the drop-off wait timer.
+                FollowStateService.FOLLOW_WAIT_ABOVE_START_TICK.remove(botId);
+            }
             FOLLOW_WAYPOINTS.remove(botId);
             FOLLOW_DOOR_PLAN.remove(botId);
             BotActions.stop(bot);
@@ -2251,6 +2407,82 @@ public class BotEventHandler {
             followInputStep(bot, targetPos, horizDistSq, allowCloseStop, desiredSpace);
         }
         return true;
+    }
+
+    /**
+     * Post-combat cleanup: recover arrows, then sweep drops.  Returns true if
+     * this method is actively driving bot movement (caller should skip mode handler).
+     * For STAY mode the bot returns to its post after the sweep finishes.
+     */
+    private static boolean tickPostCombatSweep(ServerPlayerEntity bot,
+                                                MinecraftServer server,
+                                                Mode mode) {
+        // Anchor for bounded recovery (STAY/GUARD use guard center).
+        Vec3d anchor = null;
+        if (mode == Mode.STAY || mode == Mode.GUARD) {
+            anchor = getGuardCenter(bot);
+        }
+        if (anchor == null) {
+            anchor = positionOf(bot);
+        }
+        double arrowRadius = (mode == Mode.STAY) ? 18.0D : 24.0D;
+
+        // Step 1: arrow recovery (has its own 2 s safety delay).
+        if (BotArrowRecoveryService.tryRecoverMissedArrows(bot, server, anchor, arrowRadius)) {
+            return true;
+        }
+
+        // Step 2: drop sweep – let an in-flight sweep keep driving.
+        if (DropSweepService.isInProgressFor(bot) && !DropSweepService.isCancelRequestedFor(bot)) {
+            return true;
+        }
+
+        // Start a new sweep if there are nearby drops.
+        double sweepRadius = 16.0D;
+        if (!DropSweepService.isInProgress()) {
+            Entity nearestItem = findNearestDrop(bot, sweepRadius);
+            if (nearestItem != null) {
+                collectNearbyDrops(bot, sweepRadius);
+                if (DropSweepService.isInProgressFor(bot)) {
+                    return true;
+                }
+            }
+        }
+
+        // Step 3: pick up ground arrows (mob-fired arrows the recovery service missed).
+        if (bot.getEntityWorld() instanceof ServerWorld sw) {
+            double arrowSweepRadius = 16.0D;
+            Box arrowBox = bot.getBoundingBox().expand(arrowSweepRadius, 6.0D, arrowSweepRadius);
+            PersistentProjectileEntity nearestArrow = sw.getEntitiesByClass(
+                    PersistentProjectileEntity.class, arrowBox,
+                    p -> !p.isRemoved()
+                            && p.isAlive()
+                            && p.pickupType == PersistentProjectileEntity.PickupPermission.ALLOWED
+                            && p.getVelocity().lengthSquared() < 0.001D
+                            && p.squaredDistanceTo(bot) > 1.0D
+            ).stream()
+                    .min(java.util.Comparator.comparingDouble(bot::squaredDistanceTo))
+                    .orElse(null);
+            if (nearestArrow != null) {
+                Vec3d arrowPos = new Vec3d(nearestArrow.getX(), nearestArrow.getY(), nearestArrow.getZ());
+                boolean sprint = bot.squaredDistanceTo(arrowPos) > 100.0D;
+                moveToward(bot, arrowPos, 0.25D, sprint);
+                return true;
+            }
+        }
+
+        // Step 4: STAY mode – return to post if we drifted during the sweep.
+        if (mode == Mode.STAY) {
+            Vec3d guardCenter = getGuardCenter(bot);
+            if (guardCenter != null && positionOf(bot).distanceTo(guardCenter) > 1.5D) {
+                moveToward(bot, guardCenter, 0.9D, false);
+                return true;
+            }
+        }
+
+        // Nothing left to recover – sweep complete.
+        BotCombatCalloutService.clearPostCombatSweep(bot.getUuid());
+        return false;
     }
 
     public static void collectNearbyDrops(ServerPlayerEntity bot, double radius) {
@@ -2535,6 +2767,11 @@ public class BotEventHandler {
         if (closest == null) {
             return false;
         }
+
+        // Prepare combat loadout (armor, shield, weapon staging) regardless of mode.
+        // Guard/Patrol skip the AutoFaceEntity loadout path, so this is their only chance.
+        CombatInventoryManager.ensureCombatLoadout(bot);
+
         double distance = Math.sqrt(closest.squaredDistanceTo(bot));
         boolean targetVisible = closest instanceof LivingEntity living && bot.canSee(living);
         boolean hasRanged = targetVisible && BotActions.hasRangedWeapon(bot);
@@ -2553,9 +2790,37 @@ public class BotEventHandler {
             return true;
         }
 
-        if (creeperThreat && distance <= 4.0D) {
+        // Creeper avoidance: sprint away within 6 blocks, shield within 4.5.
+        if (creeperThreat && distance <= 6.0D) {
+            if (distance <= 4.5D) {
+                BotActions.raiseShield(bot);
+            }
+            double dx = bot.getX() - closest.getX();
+            double dz = bot.getZ() - closest.getZ();
+            double len = Math.sqrt(dx * dx + dz * dz);
+            if (len < 0.01) { dx = 1; dz = 0; len = 1; }
+            Vec3d fleeTarget = new Vec3d(
+                    bot.getX() + (dx / len) * 12,
+                    bot.getY(),
+                    bot.getZ() + (dz / len) * 12);
+            BotActions.sprint(bot, true);
+            FollowMovementService.moveToward(bot, fleeTarget, 1.0, true, null);
+            return true;
+        }
+
+        // Ghast handling: never melee approach — use ranged or take cover.
+        // GhastFireballDeflectService handles punching fireballs back independently.
+        if (closest.getType() == EntityType.GHAST) {
+            if (hasRanged && closest instanceof LivingEntity living) {
+                if (BotActions.tryRepositionForRanged(bot, living, server.getTicks())) {
+                    return true;
+                }
+                if (BotActions.performRangedAttack(bot, living, server.getTicks())) {
+                    return true;
+                }
+            }
+            // No ranged weapon or can't fire — shield up and hold position (defilade).
             BotActions.raiseShield(bot);
-            BotActions.moveBackward(bot);
             return true;
         }
 
@@ -2570,16 +2835,6 @@ public class BotEventHandler {
             BotActions.resetRangedState(bot);
         }
 
-        if (creeperThreat && distance <= 3.0D) {
-            long tick = bot.getCommandSource().getServer().getTicks();
-            if (!isShieldRaised(bot) && BotActions.raiseShield(bot)) {
-                setShieldRaised(bot, true);
-                setShieldDecisionTick(bot, tick);
-            }
-            BotActions.moveBackward(bot);
-            return true;
-        }
-
         if (distance > 3.0D) {
             lowerShieldTracking(bot);
             moveToward(bot, positionOf(closest), 2.5D, true);
@@ -2589,7 +2844,14 @@ public class BotEventHandler {
                 if (BotActions.raiseShield(bot)) {
                     setShieldRaised(bot, true);
                     setShieldDecisionTick(bot, now);
+                    return true;
                 }
+                // No shield available — attack with whatever we have
+                lowerShieldTracking(bot);
+                if (!BotActions.selectBestMeleeWeapon(bot)) {
+                    BotActions.selectBestWeapon(bot);
+                }
+                BotActions.attackNearest(bot, hostileEntities);
                 return true;
             }
 
@@ -2804,9 +3066,13 @@ public class BotEventHandler {
         //
         // Mining / pillaring escapes are far too destructive for normal follow, and when mounted they
         // can cause dismount loops and block-breaking while the horse is just trying to climb terrain.
+        //
+        // When the bot has line-of-sight to the target and is within 10 blocks, suppress all mining
+        // escapes — the problem is navigation (terrain traversal), not physical obstruction.
         if (!fixedGoalActive && target != null) {
             if (forceWalk && !bot.hasVehicle()) {
-                net.wcfcarolina13.GameAI.services.ReturnBaseStuckService.tickAndCheckStuck(bot, positionOf(target));
+                boolean suppressMining = canSee && targetDistSq < 100.0D;
+                net.wcfcarolina13.GameAI.services.ReturnBaseStuckService.tickAndCheckStuck(bot, positionOf(target), suppressMining);
             } else {
                 // Prevent stale stuck timers from accumulating when not using the follow stuck system.
                 net.wcfcarolina13.GameAI.services.ReturnBaseStuckService.clear(bot.getUuid());
@@ -3740,9 +4006,105 @@ public class BotEventHandler {
                     goal.toShortString());
             return false;
         }
+        // Cap total recovery skill attempts per come session to prevent infinite dig loops.
+        if (state.comeRecoverySkillAttempts >= 3) {
+            LOGGER.info("[ComeRecovery] launch-skip bot={} goal={} reason=max-attempts-reached attempts={}",
+                    bot.getName().getString(),
+                    goal.toShortString(),
+                    state.comeRecoverySkillAttempts);
+            if (commander != null && state.comeRecoverySkillAttempts == 3) {
+                // Announce once on the 3rd attempt hit
+                sendBotMessage(bot, "I can't find a safe way to reach you after multiple attempts. Try /bot regroup again when you're closer.");
+                state.comeRecoverySkillAttempts++; // increment past 3 so we don't announce again
+            }
+            return false;
+        }
 
         int dyBlocks = (int) Math.round(deltaY);
         double horizDist = Math.sqrt(Math.max(0.0D, horizDistSq));
+
+        // Priority 0: Pillar-up when bot is below goal with open sky above (shallow hole escape).
+        if (dyBlocks >= 3 && horizDist <= 8.0D && bot.getEntityWorld() instanceof ServerWorld world) {
+            boolean skyVisible = world.isSkyVisible(bot.getBlockPos().up(2));
+            boolean inSafeZone = CompanionSafeZoneService.isProtected(world, bot.getBlockPos(), null);
+            if (skyVisible && !inSafeZone) {
+                int steps = Math.min(12, Math.max(3, dyBlocks + 1));
+                String pillarAnnounce = bot.getName().getString()
+                        + " is blocked getting to your last location; attempting to pillar up " + steps + " blocks.";
+
+                state.comeRerouteAttempts = 0;
+                state.comeNextRerouteTick = 0L;
+                state.comeNextSkillTick = server.getTicks() + 120L;
+                state.comeTicksSinceBest = 0;
+                state.comeBestGoalDistSq = Double.NaN;
+                state.comeRecoverySkillInFlight = true;
+                state.comeRecoverySkillStartTick = server.getTicks();
+                state.comeRecoverySkillAttempts++;
+
+                LOGGER.info("[ComeRecovery] pillar-up-queued bot={} goal={} steps={} dyBlocks={} horizDist={}",
+                        bot.getName().getString(),
+                        goal.toShortString(),
+                        steps,
+                        dyBlocks,
+                        String.format(Locale.ROOT, "%.2f", horizDist));
+
+                final int finalSteps = steps;
+                TaskService.forceAbort(bot.getUuid(), "\u00a7cInterrupted by pillar-up recovery.");
+                try {
+                    CompletableFuture.runAsync(() -> {
+                        try {
+                            server.execute(() -> {
+                                if (commander != null) {
+                                    ChatUtils.sendSystemMessage(commander.getCommandSource(), pillarAnnounce);
+                                }
+                            });
+                            boolean success = ScaffoldService.pillarUp(bot, finalSteps, false);
+                            String resultMsg = success
+                                    ? "Pillar-up complete (" + finalSteps + " blocks)."
+                                    : "Pillar-up failed — could not place all blocks.";
+                            LOGGER.info("[ComeRecovery] pillar-up-result bot={} goal={} success={} steps={}",
+                                    bot.getName().getString(),
+                                    goal.toShortString(),
+                                    success,
+                                    finalSteps);
+                            server.execute(() -> {
+                                state.comeRecoverySkillInFlight = false;
+                                state.comeRecoverySkillStartTick = 0L;
+                                // Reset stuck state so mine-escape doesn't fire on stale stagnant counter
+                                net.wcfcarolina13.GameAI.services.ReturnBaseStuckService.clear(bot.getUuid());
+                                if (commander != null) {
+                                    ChatUtils.sendSystemMessage(commander.getCommandSource(), resultMsg);
+                                }
+                            });
+                        } catch (Throwable t) {
+                            LOGGER.warn("[ComeRecovery] pillar-up-failed bot={} goal={} err={}",
+                                    bot.getName().getString(),
+                                    goal.toShortString(),
+                                    t.getClass().getSimpleName(),
+                                    t);
+                            server.execute(() -> {
+                                state.comeRecoverySkillInFlight = false;
+                                state.comeRecoverySkillStartTick = 0L;
+                                String msg = "Pillar-up failed: " + (t.getMessage() != null ? t.getMessage() : t.getClass().getSimpleName());
+                                if (commander != null) {
+                                    ChatUtils.sendSystemMessage(commander.getCommandSource(), msg);
+                                }
+                            });
+                        }
+                    }, COME_RECOVERY_EXECUTOR);
+                } catch (Throwable t) {
+                    LOGGER.warn("[ComeRecovery] pillar-up-queue-failed bot={} goal={} err={}",
+                            bot.getName().getString(),
+                            goal.toShortString(),
+                            t.getClass().getSimpleName(),
+                            t);
+                    state.comeRecoverySkillInFlight = false;
+                    state.comeRecoverySkillStartTick = 0L;
+                    return false;
+                }
+                return true;
+            }
+        }
 
         Direction towardGoal = approximateToward(bot.getBlockPos(), goal);
         if (towardGoal == null || !towardGoal.getAxis().isHorizontal()) {
@@ -3753,12 +4115,14 @@ public class BotEventHandler {
         String rawArgs = null;
         Map<String, Object> params = new HashMap<>();
         params.put("direction", towardGoal);
+        // Lock direction so consecutive recovery attempts don't zigzag (ascend west then east).
+        params.put("lockDirection", true);
 
         // When we're vertically separated (common: tunnel below the destination), build stairs first.
         // We allow a moderate horizontal offset because stair-building still helps escape a narrow tunnel.
-        if (Math.abs(dyBlocks) >= 5 && horizDist <= 12.0D) {
+        if (Math.abs(dyBlocks) >= 3 && horizDist <= 12.0D) {
             skillName = "collect_dirt";
-            int blocks = Math.min(12, Math.max(5, Math.abs(dyBlocks)));
+            int blocks = Math.min(12, Math.max(3, Math.abs(dyBlocks)));
             if (dyBlocks > 0) {
                 params.put("ascentBlocks", blocks);
                 rawArgs = "ascent " + blocks;
@@ -3787,6 +4151,7 @@ public class BotEventHandler {
         state.comeBestGoalDistSq = Double.NaN;
         state.comeRecoverySkillInFlight = true;
         state.comeRecoverySkillStartTick = server.getTicks();
+        state.comeRecoverySkillAttempts++;
 
         LOGGER.info("[ComeRecovery] launch-queued bot={} goal={} skill={} args={} dyBlocks={} horizDist={}",
                 bot.getName().getString(),
@@ -3834,6 +4199,8 @@ public class BotEventHandler {
                     server.execute(() -> {
                         state.comeRecoverySkillInFlight = false;
                         state.comeRecoverySkillStartTick = 0L;
+                        // Reset stuck state so mine-escape doesn't fire on stale stagnant counter
+                        net.wcfcarolina13.GameAI.services.ReturnBaseStuckService.clear(bot.getUuid());
                         if (commander != null) {
                             ChatUtils.sendSystemMessage(commander.getCommandSource(), resultMessage);
                         } else {

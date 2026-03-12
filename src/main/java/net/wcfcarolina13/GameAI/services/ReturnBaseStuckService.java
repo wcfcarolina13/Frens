@@ -198,11 +198,20 @@ public final class ReturnBaseStuckService {
         return tickAndCheckStuck(bot, baseTarget, StuckProfile.DEFAULT);
     }
 
-    public static boolean tickAndCheckStuck(ServerPlayerEntity bot, Vec3d baseTarget, StuckProfile profile) {
-        return tickAndCheckStuckInternal(bot, baseTarget, profile != null ? profile : StuckProfile.DEFAULT);
+    /**
+     * @param suppressMining when true, skip all destructive escape attempts (mine-escape, pillar, mine-to-surface)
+     *                       but still run non-destructive ones (nudge, backup/sidestep, panic flee).
+     *                       Use this when the bot has line-of-sight to target — the problem is navigation, not obstruction.
+     */
+    public static boolean tickAndCheckStuck(ServerPlayerEntity bot, Vec3d baseTarget, boolean suppressMining) {
+        return tickAndCheckStuckInternal(bot, baseTarget, StuckProfile.DEFAULT, suppressMining);
     }
 
-    private static boolean tickAndCheckStuckInternal(ServerPlayerEntity bot, Vec3d baseTarget, StuckProfile profile) {
+    public static boolean tickAndCheckStuck(ServerPlayerEntity bot, Vec3d baseTarget, StuckProfile profile) {
+        return tickAndCheckStuckInternal(bot, baseTarget, profile != null ? profile : StuckProfile.DEFAULT, false);
+    }
+
+    private static boolean tickAndCheckStuckInternal(ServerPlayerEntity bot, Vec3d baseTarget, StuckProfile profile, boolean suppressMining) {
         if (bot == null || baseTarget == null) {
             LOGGER.debug("ReturnBaseStuck: null bot or baseTarget");
             return false;
@@ -369,7 +378,7 @@ public final class ReturnBaseStuckService {
         }
 
         // Woodcut profile: prioritize pillar escape earlier than other strategies.
-        if (profile.pillarFirst() && stagnant >= pillarTicks && !PILLAR_ATTEMPTED.getOrDefault(botId, false)) {
+        if (!suppressMining && profile.pillarFirst() && stagnant >= pillarTicks && !PILLAR_ATTEMPTED.getOrDefault(botId, false)) {
             PILLAR_ATTEMPTED.put(botId, true);
             LOGGER.info("Bot {} stuck for {} ticks, attempting pillar escape", 
                 bot.getName().getString(), stagnant);
@@ -394,7 +403,8 @@ public final class ReturnBaseStuckService {
 
         // More aggressive progress: periodically mine immediate obstructions (headroom/staircase or tunnel).
         // This is intentionally earlier than pillaring and does not require a full path to exist.
-        if (stagnant >= mineEscapeTicks) {
+        // Suppressed when the bot has line-of-sight to target (problem is navigation, not obstruction).
+        if (!suppressMining && stagnant >= mineEscapeTicks) {
             long lastMine = LAST_MINE_ESCAPE_MS.getOrDefault(botId, -1L);
             if (lastMine < 0 || (nowMs - lastMine) >= MINE_ESCAPE_COOLDOWN_MS) {
                 LAST_MINE_ESCAPE_MS.put(botId, nowMs);
@@ -427,7 +437,7 @@ public final class ReturnBaseStuckService {
         }
         
         // At PILLAR_ATTEMPT_TICKS threshold, try pillar escape
-        if (!profile.pillarFirst() && stagnant >= pillarTicks && !PILLAR_ATTEMPTED.getOrDefault(botId, false)) {
+        if (!suppressMining && !profile.pillarFirst() && stagnant >= pillarTicks && !PILLAR_ATTEMPTED.getOrDefault(botId, false)) {
             PILLAR_ATTEMPTED.put(botId, true);
             LOGGER.info("Bot {} stuck for {} ticks, attempting pillar escape", 
                 bot.getName().getString(), stagnant);
@@ -442,7 +452,7 @@ public final class ReturnBaseStuckService {
 
         // Last-resort but still autonomous: mine a staircase upward until we reach surface/sky.
         // This is intended for "buried under terrain" / "trapped in a pocket" situations.
-        if (stagnant >= mineSurfaceTicks) {
+        if (!suppressMining && stagnant >= mineSurfaceTicks) {
             long last = LAST_MINE_SURFACE_MS.getOrDefault(botId, -1L);
             if (last < 0 || (nowMs - last) >= MINE_TO_SURFACE_COOLDOWN_MS) {
                 LAST_MINE_SURFACE_MS.put(botId, nowMs);

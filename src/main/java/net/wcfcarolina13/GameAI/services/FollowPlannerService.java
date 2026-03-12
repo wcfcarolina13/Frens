@@ -613,26 +613,37 @@ public final class FollowPlannerService {
         if (botPos == null || targetPos == null) {
             return List.of();
         }
-        int targetY = botPos.getY();
+        int botY = botPos.getY();
+        int goalY = targetPos.getY();
+        int midY = (botY + goalY) / 2;
+        // Generate fallback goals at multiple Y levels: bot level, midpoint, and goal level.
+        // This lets the planner find stepping-stone paths when the bot is in a hole.
+        int[] yLevels = (botY == goalY) ? new int[] { botY }
+                : (midY == botY || midY == goalY) ? new int[] { botY, goalY }
+                : new int[] { botY, midY, goalY };
         LinkedHashSet<BlockPos> out = new LinkedHashSet<>();
-        out.add(new BlockPos(targetPos.getX(), targetY, targetPos.getZ()));
-        int[] rings = new int[] { 1, 2, 3 };
-        for (int ring : rings) {
-            out.add(new BlockPos(targetPos.getX() + ring, targetY, targetPos.getZ()));
-            out.add(new BlockPos(targetPos.getX() - ring, targetY, targetPos.getZ()));
-            out.add(new BlockPos(targetPos.getX(), targetY, targetPos.getZ() + ring));
-            out.add(new BlockPos(targetPos.getX(), targetY, targetPos.getZ() - ring));
-            if (ring == 2) {
-                out.add(new BlockPos(targetPos.getX() + ring, targetY, targetPos.getZ() + ring));
-                out.add(new BlockPos(targetPos.getX() + ring, targetY, targetPos.getZ() - ring));
-                out.add(new BlockPos(targetPos.getX() - ring, targetY, targetPos.getZ() + ring));
-                out.add(new BlockPos(targetPos.getX() - ring, targetY, targetPos.getZ() - ring));
+        for (int y : yLevels) {
+            out.add(new BlockPos(targetPos.getX(), y, targetPos.getZ()));
+            int[] rings = new int[] { 1, 2, 3 };
+            for (int ring : rings) {
+                out.add(new BlockPos(targetPos.getX() + ring, y, targetPos.getZ()));
+                out.add(new BlockPos(targetPos.getX() - ring, y, targetPos.getZ()));
+                out.add(new BlockPos(targetPos.getX(), y, targetPos.getZ() + ring));
+                out.add(new BlockPos(targetPos.getX(), y, targetPos.getZ() - ring));
+                if (ring == 2) {
+                    out.add(new BlockPos(targetPos.getX() + ring, y, targetPos.getZ() + ring));
+                    out.add(new BlockPos(targetPos.getX() + ring, y, targetPos.getZ() - ring));
+                    out.add(new BlockPos(targetPos.getX() - ring, y, targetPos.getZ() + ring));
+                    out.add(new BlockPos(targetPos.getX() - ring, y, targetPos.getZ() - ring));
+                }
             }
         }
         int towardX = Integer.compare(targetPos.getX(), botPos.getX());
         int towardZ = Integer.compare(targetPos.getZ(), botPos.getZ());
-        out.add(new BlockPos(botPos.getX() + towardX * 6, targetY, botPos.getZ() + towardZ * 6));
-        out.add(new BlockPos(botPos.getX() + towardX * 10, targetY, botPos.getZ() + towardZ * 10));
+        for (int y : yLevels) {
+            out.add(new BlockPos(botPos.getX() + towardX * 6, y, botPos.getZ() + towardZ * 6));
+            out.add(new BlockPos(botPos.getX() + towardX * 10, y, botPos.getZ() + towardZ * 10));
+        }
         return new ArrayList<>(out);
     }
 
@@ -660,13 +671,15 @@ public final class FollowPlannerService {
             }
             long nowTick = server.getTicks();
             long lastTick = FOLLOW_LAST_NO_PATH_TICK.getOrDefault(botId, 0L);
-            int streak = (lastTick > 0L && (nowTick - lastTick) <= 120L)
+            // Window must exceed the planning backoff interval (7s / ~140 ticks) so that
+            // consecutive no-path events from the planner can actually build a streak.
+            int streak = (lastTick > 0L && (nowTick - lastTick) <= 200L)
                     ? FOLLOW_NO_PATH_STREAK.getOrDefault(botId, 0) + 1
                     : 1;
             FOLLOW_LAST_NO_PATH_TICK.put(botId, nowTick);
             FOLLOW_NO_PATH_STREAK.put(botId, streak);
 
-            boolean verticalGap = Math.abs(liveBot.getBlockY() - liveTarget.getBlockY()) >= 6;
+            boolean verticalGap = Math.abs(liveBot.getBlockY() - liveTarget.getBlockY()) >= 3;
             if (!verticalGap) {
                 clearFollowNoPathState(botId);
                 return;
@@ -675,11 +688,46 @@ public final class FollowPlannerService {
             if (streak < 3 || nowTick < nextPromptTick) {
                 return;
             }
+
+            // Auto-regroup at streak >= 5 with cooldown and attempt limit.
+            // Only auto-regroup when the bot is BELOW the player (safe to pillar/stair up).
+            // When the bot is ABOVE the player (player went underground), auto-descending
+            // could be fatal — fall into a shaft, lava, etc. Wait for manual /bot regroup.
+            boolean botBelowTarget = liveBot.getBlockY() < liveTarget.getBlockY();
+            if (streak >= 5 && botBelowTarget) {
+                long lastAutoRegroup = FOLLOW_LAST_AUTO_REGROUP_TICK.getOrDefault(botId, 0L);
+                int autoAttempts = FOLLOW_AUTO_REGROUP_ATTEMPTS.getOrDefault(botId, 0);
+                if (autoAttempts < 3 && (nowTick - lastAutoRegroup) >= 600L) {
+                    FOLLOW_LAST_AUTO_REGROUP_TICK.put(botId, nowTick);
+                    FOLLOW_AUTO_REGROUP_ATTEMPTS.put(botId, autoAttempts + 1);
+                    clearFollowNoPathState(botId);
+                    String botName = liveBot.getName().getString();
+                    ChatUtils.sendSystemMessage(liveTarget.getCommandSource(),
+                            botName + " is auto-regrouping to you (attempt " + (autoAttempts + 1) + "/3).");
+                    BotEventHandler.setComeModeWalk(liveBot, liveTarget,
+                            liveTarget.getBlockPos().toImmutable(), 3.2D, true);
+                    if (logger != null) {
+                        logger.info("[FollowAssert] auto-regroup bot={} target={} reason={} streak={} attempt={} dy={}",
+                                botId, targetId, reason == null ? "" : reason, streak,
+                                autoAttempts + 1, Math.abs(liveBot.getBlockY() - liveTarget.getBlockY()));
+                    }
+                    return;
+                }
+            }
+
             FOLLOW_NEXT_REGROUP_PROMPT_TICK.put(botId, nowTick + 300L);
-            ChatUtils.sendSystemMessage(liveTarget.getCommandSource(),
-                    liveBot.getName().getString()
-                            + " can't find a safe path to you here. Should I regroup? Use /bot regroup (safe),"
-                            + " or /bot come if you want digging recovery.");
+            // When the bot is below the player and auto-regroup is still within its attempt limit,
+            // tell the player the bot is working on it instead of suggesting manual /bot regroup.
+            int autoAttempts2 = FOLLOW_AUTO_REGROUP_ATTEMPTS.getOrDefault(botId, 0);
+            if (botBelowTarget && autoAttempts2 < 3) {
+                ChatUtils.sendSystemMessage(liveTarget.getCommandSource(),
+                        liveBot.getName().getString()
+                                + " is having trouble reaching you. Auto-regrouping shortly...");
+            } else {
+                ChatUtils.sendSystemMessage(liveTarget.getCommandSource(),
+                        liveBot.getName().getString()
+                                + " can't find a safe path to you here. Use /bot regroup to trigger recovery.");
+            }
             if (logger != null) {
                 logger.info("[FollowAssert] regroup-prompt bot={} target={} reason={} streak={} dy={}",
                         botId,

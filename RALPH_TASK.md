@@ -61,6 +61,24 @@ All active criteria above marked `[x]`, with build verification plus in-game evi
 
 ---
 
+# Current Hot Task: Fix Post-Recovery Mining Loop (P0+P1)
+
+After come-mode recovery (collect_dirt ascent), the bot enters a destructive mining loop in its own stairwell tunnel. Three root causes:
+
+## Active Criteria
+
+- [ ] **P1: Clear stale stagnant counter on come-mode exit** — `ReturnBaseStuckService.clear()` not called when come-mode early-exits (line 2156) or when recovery skills finish. Stale stagnant=1296 carries over and triggers mine-escape immediately.
+- [ ] **P0: Suppress mine-escape when bot can see target** — If bot has line-of-sight to player within ~10 blocks, mine-escape should not fire. The issue is navigation, not obstruction.
+- [ ] **P0: Clear stagnant state when recovery skill completes** — Come-recovery skill callbacks (lines 4053, 4180) should call `ReturnBaseStuckService.clear()` so the bot starts fresh.
+- [ ] **P2: Fix misleading regroup message** — "Use /bot regroup" keeps firing when auto-regroup is imminent.
+
+## Files to Modify
+
+1. `ReturnBaseStuckService.java` — Add `suppressMining` parameter variant
+2. `BotEventHandler.java` — Clear stuck state on come-mode exit; pass canSee to suppress mining; clear on recovery skill completion
+
+---
+
 # Backlog
 
 Future work items, organized by priority. Not active Ralph criteria — these are candidates for future RALPH_TASK.md iterations.
