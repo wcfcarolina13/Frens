@@ -12,7 +12,9 @@ import net.wcfcarolina13.GameAI.BotActions;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
+import net.minecraft.entity.mob.EndermanEntity;
 import net.minecraft.fluid.FluidState;
+import net.minecraft.util.math.Box;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
@@ -86,6 +88,7 @@ public final class FollowMovementService {
         }
 
         float yaw = (float) (Math.toDegrees(Math.atan2(-dx, dz)));
+        yaw = deflectFromPassiveEndermen(bot, yaw);
         bot.setYaw(yaw);
         bot.setHeadYaw(yaw);
         bot.setBodyYaw(yaw);
@@ -412,6 +415,18 @@ public final class FollowMovementService {
             front = bot.getBlockPos().offset(fallbackDir);
         }
         if (!isDangerousDropCell(world, front)) {
+            return false;
+        }
+
+        // If the target is a valid, grounded standing position and the step-down
+        // is within safe fall distance, this is a normal descent (e.g. cave
+        // staircase) — not a cliff walk-off.  The drop guard probes at the bot's
+        // current Y, so a deep cave below a perfectly walkable ledge triggers a
+        // false positive.  Checking the target directly avoids this.
+        BlockPos targetBlock = BlockPos.ofFloored(targetPos);
+        double stepDown = bot.getY() - targetPos.y;
+        if (stepDown >= -0.5D && stepDown <= 4.5D
+                && isGroundedTwoHighClearance(world, targetBlock)) {
             return false;
         }
 
@@ -838,5 +853,35 @@ public final class FollowMovementService {
         BotActions.autoJumpIfNeeded(bot);
         BotActions.applyMovementInput(bot, Vec3d.ofCenter(best), 0.22D);
         return true;
+    }
+
+    /**
+     * If the computed movement yaw would cause the bot to stare at a passive enderman
+     * (using Minecraft's own stare threshold: dot > 1 - 0.025/dist), deflect the yaw
+     * by 30 degrees to avoid triggering aggro.
+     */
+    private static float deflectFromPassiveEndermen(ServerPlayerEntity bot, float yaw) {
+        Box searchBox = bot.getBoundingBox().expand(12, 8, 12);
+        List<EndermanEntity> endermen = bot.getEntityWorld().getEntitiesByClass(
+                EndermanEntity.class, searchBox,
+                e -> e.isAlive() && !e.isRemoved() && EndermanSafetyService.shouldAvoidLookingAt(e));
+        if (endermen.isEmpty()) {
+            return yaw;
+        }
+        float adjusted = yaw;
+        for (EndermanEntity enderman : endermen) {
+            double lookX = -Math.sin(Math.toRadians(adjusted));
+            double lookZ =  Math.cos(Math.toRadians(adjusted));
+            double toEx = enderman.getX() - bot.getX();
+            double toEz = enderman.getZ() - bot.getZ();
+            double distSq = toEx * toEx + toEz * toEz;
+            if (distSq < 0.01) continue;
+            double dist = Math.sqrt(distSq);
+            double dot = (lookX * toEx + lookZ * toEz) / dist;
+            if (dot > 1.0 - 0.025 / dist) {
+                adjusted += 30.0f;
+            }
+        }
+        return adjusted;
     }
 }
