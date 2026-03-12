@@ -42,6 +42,8 @@ public final class FollowMovementService {
     private static final long DROP_WARNING_COOLDOWN_MS = 8_000L;
     private static final ConcurrentHashMap<UUID, Long> LAST_DROP_WARNING_MS = new ConcurrentHashMap<>();
     private static final String DROP_WARNING_LINE = "woah, I almost fell into that hole";
+    private static final long ELYTRA_DESCENT_COOLDOWN_MS = 30_000L;
+    private static final ConcurrentHashMap<UUID, Long> LAST_ELYTRA_DESCENT_ATTEMPT_MS = new ConcurrentHashMap<>();
 
     public enum WaypointRepositionOutcome {
         NO_CANDIDATE,
@@ -437,10 +439,18 @@ public final class FollowMovementService {
             BotActions.autoJumpIfNeeded(bot);
             BotActions.applyMovementInput(bot, Vec3d.ofCenter(safeBypass), 0.18D);
         } else {
-            // No safe bypass — try elytra descent if available.
-            if (!ElytraFlightService.isInFlight(bot.getUuid())
+            // No safe bypass — try elytra descent if available, with cooldown
+            // to prevent rapid retry loops when the bot can't actually launch
+            // (e.g. cave opening below, not open air).
+            UUID elytraId = bot.getUuid();
+            long elytraNow = System.currentTimeMillis();
+            long lastElytraAttempt = LAST_ELYTRA_DESCENT_ATTEMPT_MS.getOrDefault(elytraId, 0L);
+            boolean elytraCooledDown = (elytraNow - lastElytraAttempt) >= ELYTRA_DESCENT_COOLDOWN_MS;
+
+            if (elytraCooledDown
+                    && !ElytraFlightService.isInFlight(elytraId)
                     && ElytraFlightService.tryAutonomousDescent(bot, world.getServer())) {
-                // Elytra descent initiated — the flight service will handle it.
+                LAST_ELYTRA_DESCENT_ATTEMPT_MS.put(elytraId, elytraNow);
             } else {
                 BotActions.stop(bot);
             }

@@ -73,8 +73,11 @@ public final class ReturnBaseStuckService {
     /** At this threshold, try backing up and sidestepping */
     private static final int BACKUP_ATTEMPT_TICKS = 60;
 
+    /** At this threshold, try placing a scaffold block or finding a natural step-up. */
+    private static final int SCAFFOLD_ESCAPE_TICKS = 50;
+
     /** At this threshold, try clearing immediate obstructions by mining (more aggressive progress). */
-    private static final int MINE_ESCAPE_TICKS = 45;
+    private static final int MINE_ESCAPE_TICKS = 80;
 
     /** At this threshold, try a sustained staircase-up escape until reaching surface/sky. */
     private static final int MINE_TO_SURFACE_TICKS = 135;
@@ -183,6 +186,9 @@ public final class ReturnBaseStuckService {
      */
     private static final Map<UUID, Boolean> PANIC_FLEE_ATTEMPTED = new ConcurrentHashMap<>();
     private static final Map<UUID, Long> LAST_PANIC_FLEE_MS = new ConcurrentHashMap<>();
+    private static final Map<UUID, Boolean> SCAFFOLD_ATTEMPTED = new ConcurrentHashMap<>();
+    private static final long SCAFFOLD_ESCAPE_COOLDOWN_MS = 5_000L;
+    private static final Map<UUID, Long> LAST_SCAFFOLD_ESCAPE_MS = new ConcurrentHashMap<>();
 
     private ReturnBaseStuckService() {}
 
@@ -237,6 +243,7 @@ public final class ReturnBaseStuckService {
         int tickIncrement = Math.max(1, (int) Math.round((nowMs - lastTickMs) / 50.0));
         LAST_STAGNANT_TICK_MS.put(botId, nowMs);
         int quickNudgeTicks = scaleTicks(QUICK_NUDGE_AFTER_TICKS, profile);
+        int scaffoldTicks = scaleTicks(SCAFFOLD_ESCAPE_TICKS, profile);
         int backupTicks = scaleTicks(BACKUP_ATTEMPT_TICKS, profile);
         int mineEscapeTicks = scaleTicks(MINE_ESCAPE_TICKS, profile);
         int panicTicks = scaleTicks(PANIC_FLEE_TICKS, profile);
@@ -328,6 +335,7 @@ public final class ReturnBaseStuckService {
             LAST_QUICK_NUDGE_MS.remove(botId);
             LAST_MINE_ESCAPE_MS.remove(botId);
             BACKUP_ATTEMPTED.remove(botId);
+            SCAFFOLD_ATTEMPTED.remove(botId);
             PILLAR_ATTEMPTED.remove(botId);
             PANIC_FLEE_ATTEMPTED.remove(botId);
             LAST_PANIC_FLEE_MS.remove(botId);
@@ -374,6 +382,21 @@ public final class ReturnBaseStuckService {
                     LAST_QUICK_NUDGE_MS.put(botId, nowMs);
                     return false;
                 }
+            }
+        }
+
+        // Scaffold escape: try finding a natural step-up or placing a block to create one.
+        // This is non-destructive (or minimally constructive) and resolves shallow surface
+        // depressions without mining natural terrain.
+        if (stagnant >= scaffoldTicks && !SCAFFOLD_ATTEMPTED.getOrDefault(botId, false)) {
+            long lastScaffold = LAST_SCAFFOLD_ESCAPE_MS.getOrDefault(botId, -1L);
+            if (lastScaffold < 0 || (nowMs - lastScaffold) >= SCAFFOLD_ESCAPE_COOLDOWN_MS) {
+                LAST_SCAFFOLD_ESCAPE_MS.put(botId, nowMs);
+                SCAFFOLD_ATTEMPTED.put(botId, true);
+                LOGGER.info("ReturnBaseStuck: bot={} stuck for {} ticks, attempting scaffold escape toward base",
+                        bot.getName().getString(), stagnant);
+                runEscapeAsync(botId, () -> tryScaffoldEscape(bot, baseTarget));
+                return false;
             }
         }
 
@@ -550,6 +573,8 @@ public final class ReturnBaseStuckService {
             STUCK_ANCHOR_POS.remove(botId);
             PANIC_FLEE_ATTEMPTED.remove(botId);
             LAST_PANIC_FLEE_MS.remove(botId);
+            SCAFFOLD_ATTEMPTED.remove(botId);
+            LAST_SCAFFOLD_ESCAPE_MS.remove(botId);
         }
     }
 
@@ -1981,6 +2006,108 @@ public final class ReturnBaseStuckService {
         return BotActions.placeBlockAt(bot, target, Direction.UP, new java.util.ArrayList<>(PILLAR_BLOCKS));
     }
     
+    /**
+     * Try to escape a shallow depression by finding a natural step-up or placing
+     * a scaffold block. Two phases:
+     * <ol>
+     *   <li>Scan adjacent positions at Y+1 for a walkable step-up closer to base.</li>
+     *   <li>If none found, place a block from inventory to create a step-up.</li>
+     * </ol>
+     */
+    private static void tryScaffoldEscape(ServerPlayerEntity bot, Vec3d baseTarget) {
+        if (bot == null || baseTarget == null) return;
+        if (!(bot.getEntityWorld() instanceof ServerWorld world)) return;
+        MinecraftServer server = bot.getCommandSource() != null ? bot.getCommandSource().getServer() : null;
+        if (server == null) return;
+
+        BlockPos origin = bot.getBlockPos();
+        double originDist = horizontalDistSq(origin, baseTarget);
+
+        // Phase 1: scan for natural step-ups at Y+1 (jump-reachable)
+        int[][] offsets = {{1,0},{-1,0},{0,1},{0,-1},{1,1},{1,-1},{-1,1},{-1,-1}};
+        BlockPos bestStep = null;
+        double bestDist = originDist;
+        for (int[] off : offsets) {
+            BlockPos cand = origin.add(off[0], 1, off[1]);
+            if (isPassable(world, cand)) {
+                double d = horizontalDistSq(cand, baseTarget);
+                if (d < bestDist) {
+                    bestDist = d;
+                    bestStep = cand;
+                }
+            }
+        }
+        if (bestStep != null) {
+            BlockPos target = bestStep;
+            LOGGER.info("ReturnBaseStuck: scaffold-escape found natural step-up at {}", target.toShortString());
+            server.execute(() -> {
+                LookController.faceBlock(bot, target);
+                BotActions.autoJumpIfNeeded(bot);
+                BotActions.applyMovementInput(bot, Vec3d.ofCenter(target), 0.22D);
+            });
+            sleepQuiet(400);
+            return;
+        }
+
+        // Phase 2: place a scaffold block to create a step-up
+        if (countPillarBlocks(bot) <= 0) {
+            LOGGER.info("ReturnBaseStuck: scaffold-escape skipped (no blocks in inventory)");
+            return;
+        }
+
+        // Scan cardinal directions for a solid wall to place against
+        for (Direction dir : Direction.Type.HORIZONTAL) {
+            BlockPos wallPos = origin.offset(dir);
+            BlockState wallState = world.getBlockState(wallPos);
+            // Need a solid wall to place against
+            if (wallState.getCollisionShape(world, wallPos).isEmpty()) continue;
+
+            // Try placing a block at bot's feet level in an adjacent air spot
+            // that creates a usable step-up
+            Direction left = dir.rotateYCounterclockwise();
+            Direction right = dir.rotateYClockwise();
+            Direction back = dir.getOpposite();
+            BlockPos[] placeCandidates = {
+                origin.offset(left), origin.offset(right), origin.offset(back)
+            };
+            for (BlockPos placePos : placeCandidates) {
+                BlockState placeState = world.getBlockState(placePos);
+                if (!placeState.isAir() && !placeState.isReplaceable()) continue;
+                // Standing on placed block: check we'd have 2-high clearance
+                BlockPos standPos = placePos.up();
+                BlockState standState = world.getBlockState(standPos);
+                BlockState standHead = world.getBlockState(standPos.up());
+                if (!(standState.isAir() || !standState.blocksMovement())
+                        || !(standHead.isAir() || !standHead.blocksMovement())) continue;
+                // Must make progress toward base
+                double newDist = horizontalDistSq(standPos, baseTarget);
+                if (newDist >= originDist) continue;
+
+                LOGGER.info("ReturnBaseStuck: scaffold-escape placing block at {} (wall={})",
+                        placePos.toShortString(), dir);
+                boolean placed = BotActions.placeBlockAt(bot, placePos, Direction.UP,
+                        new java.util.ArrayList<>(PILLAR_BLOCKS));
+                if (placed) {
+                    BlockPos stepTarget = standPos;
+                    server.execute(() -> {
+                        LookController.faceBlock(bot, stepTarget);
+                        BotActions.autoJumpIfNeeded(bot);
+                        BotActions.applyMovementInput(bot, Vec3d.ofCenter(stepTarget), 0.22D);
+                    });
+                    sleepQuiet(400);
+                    return;
+                }
+            }
+        }
+        LOGGER.info("ReturnBaseStuck: scaffold-escape failed (no suitable placement found)");
+    }
+
+    private static double horizontalDistSq(BlockPos pos, Vec3d target) {
+        double dx = target.x - (pos.getX() + 0.5);
+        double dz = target.z - (pos.getZ() + 0.5);
+        return dx * dx + dz * dz;
+    }
+
     private static void sleepQuiet(long ms) {
         try {
             Thread.sleep(ms);
