@@ -2341,20 +2341,17 @@ public class BotEventHandler {
                     FollowStateService.FOLLOW_WAIT_ABOVE_ANNOUNCED_TICK.put(botId, nowTick);
                     CompanionOverheadDialogueService.showOverheadLine(bot,
                             "Waiting by the opening.", 4_000, 48.0, "follow-wait-above", null);
-                    // Only mention /bot regroup in admin mode; in questing mode the bot just waits.
-                    if (!SurvivalRecruitmentService.isEnabled(srv)) {
-                        // Check auto-regroup config to tailor the message.
-                        boolean autoRegroupEnabled = false;
-                        if (net.wcfcarolina13.Frens.CONFIG != null) {
-                            String alias = bot.getName().getString();
-                            String wk = net.wcfcarolina13.GameAI.services.BotWorldStateService.currentWorldKey(srv);
-                            autoRegroupEnabled = net.wcfcarolina13.Frens.CONFIG.getOrCreateBotControl(alias, wk).isAutoRegroupOnLost();
-                        }
-                        if (autoRegroupEnabled) {
-                            sendBotMessage(bot, "I can see you down there but it's too dangerous to follow. I'll find a way down shortly.");
-                        } else {
-                            sendBotMessage(bot, "I can see you down there but it's too dangerous to follow. Use /bot regroup when you're ready.");
-                        }
+                    // Check auto-regroup config to tailor the message.
+                    boolean autoRegroupEnabled = false;
+                    if (net.wcfcarolina13.Frens.CONFIG != null) {
+                        String alias = bot.getName().getString();
+                        String wk = net.wcfcarolina13.GameAI.services.BotWorldStateService.currentWorldKey(srv);
+                        autoRegroupEnabled = net.wcfcarolina13.Frens.CONFIG.getOrCreateBotControl(alias, wk).isAutoRegroupOnLost();
+                    }
+                    if (autoRegroupEnabled) {
+                        sendBotMessage(bot, "I can see you down there but it's too dangerous to follow. I'll find a way down shortly.");
+                    } else {
+                        sendBotMessage(bot, "I can see you down there but it's too dangerous to follow. Use /bot regroup when you're ready.");
                     }
                 }
 
