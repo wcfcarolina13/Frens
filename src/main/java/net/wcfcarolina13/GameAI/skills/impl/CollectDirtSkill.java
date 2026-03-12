@@ -236,14 +236,15 @@ public class CollectDirtSkill implements Skill {
         // Handle ascent mode
         if (ascentMode && playerForAbortCheck != null) {
             int targetY;
-            if (ascentToSurface) {
+            if (ascentBlocks != null) {
+                targetY = playerForAbortCheck.getBlockY() + ascentBlocks;
+                LOGGER.info("Ascent mode: climbing from Y={} to Y={} (+{} blocks){}",
+                           playerForAbortCheck.getBlockY(), targetY, ascentBlocks,
+                           ascentToSurface ? " (surface abort enabled)" : "");
+            } else if (ascentToSurface) {
                 targetY = resolveSurfaceTargetY(playerForAbortCheck);
                 LOGGER.info("Ascent surface mode: climbing from Y={} toward sky visibility (target floor Y={})",
                         playerForAbortCheck.getBlockY(), targetY);
-            } else if (ascentBlocks != null) {
-                targetY = playerForAbortCheck.getBlockY() + ascentBlocks;
-                LOGGER.info("Ascent mode: climbing from Y={} to Y={} (+{} blocks)", 
-                           playerForAbortCheck.getBlockY(), targetY, ascentBlocks);
             } else {
                 targetY = ascentTargetY;
                 LOGGER.info("Ascent mode: climbing from Y={} to Y={}", 

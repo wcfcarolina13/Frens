@@ -4135,6 +4135,7 @@ public class BotEventHandler {
             int blocks = Math.min(12, Math.max(3, Math.abs(dyBlocks)));
             if (dyBlocks > 0) {
                 params.put("ascentBlocks", blocks);
+                params.put("ascentToSurface", true);
                 rawArgs = "ascent " + blocks;
             } else {
                 params.put("descentBlocks", blocks);
