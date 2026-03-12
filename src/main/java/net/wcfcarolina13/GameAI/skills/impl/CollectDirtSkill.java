@@ -2408,7 +2408,10 @@ public class CollectDirtSkill implements Skill {
         }
         BlockPos botPos = player.getBlockPos();
 
-        if (!world.isSkyVisible(botPos.up())) {
+        // Use MOTION_BLOCKING_NO_LEAVES so tree canopy doesn't prevent surface detection.
+        // The bot should stop mining once it's under open sky or only leaves overhead.
+        int surfaceY = world.getTopY(Heightmap.Type.MOTION_BLOCKING_NO_LEAVES, botPos.getX(), botPos.getZ());
+        if (botPos.getY() < surfaceY - 1) {
             return false;
         }
         return !world.getBlockState(botPos.down()).getCollisionShape(world, botPos.down()).isEmpty();

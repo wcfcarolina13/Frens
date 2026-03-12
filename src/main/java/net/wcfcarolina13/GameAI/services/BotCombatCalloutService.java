@@ -69,7 +69,16 @@ public final class BotCombatCalloutService {
     private static final ConcurrentHashMap<UUID, Boolean> IN_COMBAT = new ConcurrentHashMap<>();
     private static final ConcurrentHashMap<UUID, Long> LAST_COMBAT_ACTIVITY_MS = new ConcurrentHashMap<>();
 
+    /** Server tick when the bot last took damage from a hostile entity (including projectiles). */
+    private static final ConcurrentHashMap<UUID, Long> LAST_HOSTILE_DAMAGE_TICK = new ConcurrentHashMap<>();
+
     private static final ConcurrentHashMap<UUID, CombatMetadata> COMBAT_META = new ConcurrentHashMap<>();
+
+    // Post-combat sweep: millis when hostiles first cleared after a combat session (null = no sweep pending).
+    private static final ConcurrentHashMap<UUID, Long> POST_COMBAT_SWEEP_TRIGGER_MS = new ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<UUID, Long> LAST_HOSTILES_PRESENT_TICK = new ConcurrentHashMap<>();
+    /** Bot position when hostiles first cleared — the sweep walks back here if the bot drifted. */
+    private static final ConcurrentHashMap<UUID, net.minecraft.util.math.Vec3d> LAST_COMBAT_CENTER = new ConcurrentHashMap<>();
 
     private static final class CombatMetadata {
         int maxDangerousMobCount = 0;
@@ -456,7 +465,69 @@ public final class BotCombatCalloutService {
         }
         LOGGER.debug("Bot {} combat ended", bot.getName().getString());
     }
-    
+
+    // ---- Post-combat sweep state management ----
+
+    /**
+     * Signals that a bot's hostile list just went empty after being non-empty.
+     * Starts the post-combat sweep timer if the bot was in an active combat session.
+     */
+    public static void noteHostilesCleared(ServerPlayerEntity bot, long serverTick) {
+        if (bot == null) return;
+        UUID botId = bot.getUuid();
+        if (!IN_COMBAT.getOrDefault(botId, false)) return;
+        if (POST_COMBAT_SWEEP_TRIGGER_MS.containsKey(botId)) return;
+        POST_COMBAT_SWEEP_TRIGGER_MS.put(botId, System.currentTimeMillis());
+        LAST_HOSTILES_PRESENT_TICK.put(botId, serverTick);
+        LAST_COMBAT_CENTER.putIfAbsent(botId, new net.minecraft.util.math.Vec3d(bot.getX(), bot.getY(), bot.getZ()));
+    }
+
+    /**
+     * Returns true if the post-combat sweep delay (2.5 s) has elapsed and the bot
+     * should attempt drop/arrow recovery this tick.  Auto-expires after 30 seconds.
+     */
+    public static boolean isPostCombatSweepReady(ServerPlayerEntity bot) {
+        if (bot == null) return false;
+        UUID botId = bot.getUuid();
+        Long triggerMs = POST_COMBAT_SWEEP_TRIGGER_MS.get(botId);
+        if (triggerMs == null) return false;
+        long elapsed = System.currentTimeMillis() - triggerMs;
+        // 1 s delay — drops spawn instantly in MC; only arrows need settling time.
+        if (elapsed < 1_000L) return false;
+        if (elapsed > 30_000L) {
+            clearPostCombatSweep(botId);
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * Returns true if a post-combat sweep is pending but the sweep delay hasn't elapsed yet.
+     * During this window, FOLLOW mode should linger near the combat site so drops stay in range.
+     */
+    public static boolean isInPostCombatLingerWindow(ServerPlayerEntity bot) {
+        if (bot == null) return false;
+        Long triggerMs = POST_COMBAT_SWEEP_TRIGGER_MS.get(bot.getUuid());
+        if (triggerMs == null) return false;
+        return System.currentTimeMillis() - triggerMs < 1_000L;
+    }
+
+    /** Returns the bot's position when hostiles first cleared (the combat center), or null. */
+    public static net.minecraft.util.math.Vec3d getLastCombatCenter(UUID botId) {
+        return botId == null ? null : LAST_COMBAT_CENTER.get(botId);
+    }
+
+    /**
+     * Clears the post-combat sweep flag.  Call when sweep completes, new hostiles
+     * appear, or the bot dies/is removed.
+     */
+    public static void clearPostCombatSweep(UUID botId) {
+        if (botId == null) return;
+        POST_COMBAT_SWEEP_TRIGGER_MS.remove(botId);
+        LAST_HOSTILES_PRESENT_TICK.remove(botId);
+        LAST_COMBAT_CENTER.remove(botId);
+    }
+
     /**
      * Called when the player hits the bot (not a friendly touch!).
      * This uses different dialogue than the touch system.
@@ -888,6 +959,23 @@ public final class BotCombatCalloutService {
         LAST_FF_DEALT_MS.remove(botId);
         LAST_COMBAT_MULTI_MS.remove(botId);
         COMBAT_META.remove(botId);
+        LAST_HOSTILE_DAMAGE_TICK.remove(botId);
+        clearPostCombatSweep(botId);
+        BotFleeService.reset(botId);
+    }
+
+    /** Record the server tick when a hostile entity dealt damage to this bot. */
+    public static void noteHostileDamage(ServerPlayerEntity bot, long serverTick) {
+        if (bot != null) {
+            LAST_HOSTILE_DAMAGE_TICK.put(bot.getUuid(), serverTick);
+        }
+    }
+
+    /** Returns true if the bot took hostile damage within the last {@code tickWindow} server ticks. */
+    public static boolean wasRecentlyDamagedByHostile(ServerPlayerEntity bot, long currentTick, int tickWindow) {
+        if (bot == null) return false;
+        long last = LAST_HOSTILE_DAMAGE_TICK.getOrDefault(bot.getUuid(), Long.MIN_VALUE);
+        return (currentTick - last) <= tickWindow;
     }
     
     /**

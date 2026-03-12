@@ -1342,6 +1342,17 @@ public class BotEventHandler {
                 return true;
             }
         }
+        // Linger window: FOLLOW mode pauses near the combat site while sweep delay elapses
+        // so drops stay within pickup range.  Pick up any items already at our feet.
+        if (augmentedHostiles.isEmpty()
+                && mode == Mode.FOLLOW
+                && BotCombatCalloutService.isInPostCombatLingerWindow(bot)) {
+            Entity nearDrop = findNearestDrop(bot, 6.0);
+            if (nearDrop != null) {
+                moveToward(bot, positionOf(nearDrop), 0.25D, false);
+            }
+            return true; // suppress follow movement during linger
+        }
 
         switch (mode) {
             case FOLLOW -> {
@@ -2427,6 +2438,8 @@ public class BotEventHandler {
     private static boolean tickPostCombatSweep(ServerPlayerEntity bot,
                                                 MinecraftServer server,
                                                 Mode mode) {
+        String botName = bot.getName().getString();
+
         // Anchor for bounded recovery (STAY/GUARD use guard center).
         Vec3d anchor = null;
         if (mode == Mode.STAY || mode == Mode.GUARD) {
@@ -2439,6 +2452,7 @@ public class BotEventHandler {
 
         // Step 1: arrow recovery (has its own 2 s safety delay).
         if (BotArrowRecoveryService.tryRecoverMissedArrows(bot, server, anchor, arrowRadius)) {
+            LOGGER.debug("[PostCombatSweep] {} arrow-recovery driving movement", botName);
             return true;
         }
 
@@ -2447,11 +2461,37 @@ public class BotEventHandler {
             return true;
         }
 
-        // Start a new sweep if there are nearby drops.
+        // Step 3: search for drops near bot AND near the combat center (if bot drifted).
         double sweepRadius = 16.0D;
         if (!DropSweepService.isInProgress()) {
             Entity nearestItem = findNearestDrop(bot, sweepRadius);
+
+            // If nothing near the bot, check around the combat center (where the fight happened).
+            Vec3d combatCenter = BotCombatCalloutService.getLastCombatCenter(bot.getUuid());
+            if (nearestItem == null && combatCenter != null
+                    && positionOf(bot).distanceTo(combatCenter) > 4.0D
+                    && bot.getEntityWorld() instanceof ServerWorld sw) {
+                Box ccBox = new Box(
+                        combatCenter.x - sweepRadius, combatCenter.y - 6.0D, combatCenter.z - sweepRadius,
+                        combatCenter.x + sweepRadius, combatCenter.y + 6.0D, combatCenter.z + sweepRadius);
+                Entity ccItem = sw.getEntitiesByClass(ItemEntity.class, ccBox,
+                                drop -> drop.isAlive() && !drop.isRemoved())
+                        .stream()
+                        .min(java.util.Comparator.comparingDouble(e -> e.squaredDistanceTo(combatCenter.x, combatCenter.y, combatCenter.z)))
+                        .orElse(null);
+                if (ccItem != null) {
+                    // Drops exist near combat center — walk back to collect them.
+                    LOGGER.info("[PostCombatSweep] {} drops found near combat center ({},{},{}) — walking back",
+                            botName, (int) combatCenter.x, (int) combatCenter.y, (int) combatCenter.z);
+                    boolean sprint = bot.squaredDistanceTo(combatCenter) > 64.0D;
+                    moveToward(bot, combatCenter, 2.0D, sprint);
+                    return true;
+                }
+            }
+
             if (nearestItem != null) {
+                LOGGER.info("[PostCombatSweep] {} starting drop sweep, nearest={}", botName,
+                        nearestItem.getBlockPos().toShortString());
                 collectNearbyDrops(bot, sweepRadius);
                 if (DropSweepService.isInProgressFor(bot)) {
                     return true;
@@ -2459,7 +2499,7 @@ public class BotEventHandler {
             }
         }
 
-        // Step 3: pick up ground arrows (mob-fired arrows the recovery service missed).
+        // Step 4: pick up ground arrows (mob-fired arrows the recovery service missed).
         if (bot.getEntityWorld() instanceof ServerWorld sw) {
             double arrowSweepRadius = 16.0D;
             Box arrowBox = bot.getBoundingBox().expand(arrowSweepRadius, 6.0D, arrowSweepRadius);
@@ -2477,11 +2517,12 @@ public class BotEventHandler {
                 Vec3d arrowPos = new Vec3d(nearestArrow.getX(), nearestArrow.getY(), nearestArrow.getZ());
                 boolean sprint = bot.squaredDistanceTo(arrowPos) > 100.0D;
                 moveToward(bot, arrowPos, 0.25D, sprint);
+                LOGGER.debug("[PostCombatSweep] {} walking to ground arrow", botName);
                 return true;
             }
         }
 
-        // Step 4: STAY mode – return to post if we drifted during the sweep.
+        // Step 5: STAY mode – return to post if we drifted during the sweep.
         if (mode == Mode.STAY) {
             Vec3d guardCenter = getGuardCenter(bot);
             if (guardCenter != null && positionOf(bot).distanceTo(guardCenter) > 1.5D) {
@@ -2491,6 +2532,7 @@ public class BotEventHandler {
         }
 
         // Nothing left to recover – sweep complete.
+        LOGGER.debug("[PostCombatSweep] {} sweep complete, nothing left to collect", botName);
         BotCombatCalloutService.clearPostCombatSweep(bot.getUuid());
         return false;
     }
@@ -4229,6 +4271,21 @@ public class BotEventHandler {
                         state.comeRecoverySkillStartTick = 0L;
                         // Reset stuck state so mine-escape doesn't fire on stale stagnant counter
                         net.wcfcarolina13.GameAI.services.ReturnBaseStuckService.clear(bot.getUuid());
+                        // After successful recovery (especially surface ascent), update the
+                        // come goal to the commander's CURRENT position. The old goal was
+                        // underground — routing back to it sends the bot down its own tunnel.
+                        if (result != null && result.success() && commander != null && !commander.isRemoved()) {
+                            BlockPos freshGoal = commander.getBlockPos().toImmutable();
+                            if (!freshGoal.equals(state.followFixedGoal)) {
+                                LOGGER.info("[ComeRecovery] updating come goal from {} to {} (commander moved)",
+                                        state.followFixedGoal != null ? state.followFixedGoal.toShortString() : "null",
+                                        freshGoal.toShortString());
+                                state.followFixedGoal = freshGoal;
+                                state.comeBestGoalDistSq = Double.NaN;
+                                state.comeTicksSinceBest = 0;
+                                state.comeRerouteAttempts = 0;
+                            }
+                        }
                         if (commander != null) {
                             ChatUtils.sendSystemMessage(commander.getCommandSource(), resultMessage);
                         } else {
