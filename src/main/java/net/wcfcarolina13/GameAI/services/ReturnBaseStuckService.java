@@ -380,7 +380,12 @@ public final class ReturnBaseStuckService {
                 boolean nudged = tryQuickNudge(bot, baseTarget, stagnant);
                 if (nudged) {
                     LAST_QUICK_NUDGE_MS.put(botId, nowMs);
-                    return false;
+                    // Once past scaffold threshold, don't return early — let scaffold
+                    // attempt fire even though we nudged. Quick-nudge alone has proven
+                    // insufficient if we've been stuck this long.
+                    if (stagnant < scaffoldTicks || SCAFFOLD_ATTEMPTED.getOrDefault(botId, false)) {
+                        return false;
+                    }
                 }
             }
         }

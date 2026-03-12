@@ -4116,6 +4116,23 @@ public class BotEventHandler {
             }
         }
 
+        // Mining-based recovery (collect_dirt, stripmine) requires inventory space.
+        // If the bot's inventory is full, it can't pick up mined blocks and the skill loops
+        // forever. Skip mining recovery and inform the player.
+        {
+            var inv = bot.getInventory();
+            int emptySlots = 0;
+            for (int i = 0; i < inv.size(); i++) {
+                if (inv.getStack(i).isEmpty()) emptySlots++;
+            }
+            if (emptySlots < 2) {
+                LOGGER.info("[ComeRecovery] launch-skip bot={} goal={} reason=inventory-full emptySlots={}",
+                        bot.getName().getString(), goal.toShortString(), emptySlots);
+                sendBotMessage(bot, "I can't mine my way to you — my inventory is full. Please clear some space or come closer.");
+                return false;
+            }
+        }
+
         Direction towardGoal = approximateToward(bot.getBlockPos(), goal);
         if (towardGoal == null || !towardGoal.getAxis().isHorizontal()) {
             towardGoal = bot.getHorizontalFacing();

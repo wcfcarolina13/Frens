@@ -496,6 +496,43 @@ public class modCommandRegistry {
                                             return 1;
                                         })
                                 )
+                                .then(literal("base_radius")
+                                        .then(CommandManager.argument("label", StringArgumentType.string())
+                                                .then(CommandManager.argument("radius", IntegerArgumentType.integer(1, 128))
+                                                        .executes(context -> {
+                                                            String label = StringArgumentType.getString(context, "label");
+                                                            int radius = IntegerArgumentType.getInteger(context, "radius");
+                                                            ServerWorld world = context.getSource().getWorld();
+                                                            MinecraftServer srv = context.getSource().getServer();
+                                                            boolean ok = BotHomeService.setBaseRadius(srv, world, label, radius);
+                                                            context.getSource().sendFeedback(
+                                                                    () -> Text.literal(ok
+                                                                            ? "Set protection radius for '" + label + "' to " + radius + " blocks."
+                                                                            : "No base named '" + label + "' found."), true);
+                                                            return ok ? 1 : 0;
+                                                        }))
+                                        )
+                                )
+                                .then(literal("fort_buffer")
+                                        .then(CommandManager.argument("radius", IntegerArgumentType.integer(0, 64))
+                                                .executes(context -> {
+                                                    int radius = IntegerArgumentType.getInteger(context, "radius");
+                                                    net.wcfcarolina13.GameAI.services.CompanionSafeZoneService.setFortBufferRadius(radius);
+                                                    if (Frens.CONFIG != null) {
+                                                        Frens.CONFIG.setFortBufferRadius(radius);
+                                                        Frens.CONFIG.save();
+                                                    }
+                                                    context.getSource().sendFeedback(
+                                                            () -> Text.literal("Fortification buffer radius set to " + radius + " blocks."), true);
+                                                    return 1;
+                                                }))
+                                        .executes(context -> {
+                                            int current = net.wcfcarolina13.GameAI.services.CompanionSafeZoneService.getFortBufferRadius();
+                                            context.getSource().sendFeedback(
+                                                    () -> Text.literal("Fortification buffer radius: " + current + " blocks."), false);
+                                            return 1;
+                                        })
+                                )
                         )
                         .then(literal("forceplace")
                                 .then(CommandManager.argument("value", StringArgumentType.word())
@@ -1845,7 +1882,8 @@ public class modCommandRegistry {
             if (parsedExplicit != null) {
                 mode = parsedExplicit;
             } else if (Frens.CONFIG != null) {
-                ManualConfig.BotControlSettings ctrl = Frens.CONFIG.getEffectiveBotControl(StringArgumentType.getString(context, "bot_name"));
+                String worldKey = net.wcfcarolina13.GameAI.services.BotWorldStateService.currentWorldKey(server);
+                ManualConfig.BotControlSettings ctrl = Frens.CONFIG.getEffectiveBotControl(StringArgumentType.getString(context, "bot_name"), worldKey);
                 if (ctrl != null && "creative".equalsIgnoreCase(ctrl.getGameMode())) {
                     mode = GameMode.CREATIVE;
                 }
@@ -1954,7 +1992,8 @@ public class modCommandRegistry {
                     }
                     // Training bots auto-respawn on death by default.
                     {
-                        ManualConfig.BotControlSettings ctrl = Frens.CONFIG.getOrCreateBotControl(botName);
+                        String worldKey = net.wcfcarolina13.GameAI.services.BotWorldStateService.currentWorldKey(server);
+                        ManualConfig.BotControlSettings ctrl = Frens.CONFIG.getOrCreateBotControl(botName, worldKey);
                         if (ctrl != null) {
                             ctrl.setSpawnMode("training");
                             ctrl.setAutoRespawnOnDeath(true);
@@ -2015,7 +2054,8 @@ public class modCommandRegistry {
                     }
                     // Admin/questing bots: set spawn mode and auto-respawn default.
                     {
-                        ManualConfig.BotControlSettings ctrl = Frens.CONFIG.getOrCreateBotControl(botName);
+                        String worldKey = net.wcfcarolina13.GameAI.services.BotWorldStateService.currentWorldKey(server);
+                        ManualConfig.BotControlSettings ctrl = Frens.CONFIG.getOrCreateBotControl(botName, worldKey);
                         if (ctrl != null) {
                             ctrl.setSpawnMode(normalizedSpawnMode);
                             if (isAdminLikeSpawnMode(normalizedSpawnMode)) {
@@ -2027,7 +2067,8 @@ public class modCommandRegistry {
                     // ── LLM initialization (only when LLM is enabled AND runtime classes are available) ──
                     boolean llmActive = false;
                     if (Frens.CONFIG != null) {
-                        ManualConfig.BotControlSettings llmCtrl = Frens.CONFIG.getEffectiveBotControl(botName);
+                        String worldKey = net.wcfcarolina13.GameAI.services.BotWorldStateService.currentWorldKey(server);
+                        ManualConfig.BotControlSettings llmCtrl = Frens.CONFIG.getEffectiveBotControl(botName, worldKey);
                         llmActive = llmCtrl != null && llmCtrl.isLlmEnabled();
                     }
 
@@ -3767,8 +3808,8 @@ public class modCommandRegistry {
         boolean isAll = targetArg != null && "all".equalsIgnoreCase(targetArg.trim());
         int successes = 0;
         for (ServerPlayerEntity bot : bots) {
-            // Safe regroup: do not launch come-recovery digging skills (ascent/stripmine).
-            successes += executeCome(context, bot, commander, false);
+            // Regroup now allows recovery skills (pillar-up, stair, stripmine) same as come.
+            successes += executeCome(context, bot, commander, true);
         }
         if (!bots.isEmpty() && successes > 0) {
             String summary = formatBotList(bots, isAll);
@@ -3947,10 +3988,29 @@ public class modCommandRegistry {
             return 0;
         }
 
-        BlockPos targetPos = bhr.getBlockPos().offset(bhr.getSide()).toImmutable();
+        BlockPos hitBlockPos = bhr.getBlockPos();
+        net.minecraft.block.BlockState hitState = commanderWorld.getBlockState(hitBlockPos);
+        boolean isReplaceable = hitState.isReplaceable()
+                || hitState.isOf(net.minecraft.block.Blocks.SNOW)
+                || hitState.isOf(net.minecraft.block.Blocks.SHORT_GRASS)
+                || hitState.isOf(net.minecraft.block.Blocks.TALL_GRASS)
+                || hitState.isOf(net.minecraft.block.Blocks.FERN);
+
+        BlockPos rawTargetPos;
+        if (isReplaceable) {
+            rawTargetPos = hitBlockPos.toImmutable();
+        } else {
+            rawTargetPos = hitBlockPos.offset(bhr.getSide()).toImmutable();
+        }
+
+        float yaw = commander.getYaw();
+        double yawRad = Math.toRadians(yaw);
+        int forwardOffsetX = (int) Math.round(-Math.sin(yawRad) * 3.0D);
+        int forwardOffsetZ = (int) Math.round(Math.cos(yawRad) * 3.0D);
+        BlockPos targetPos = rawTargetPos.add(forwardOffsetX, 0, forwardOffsetZ).toImmutable();
         BlockPos goal = SafePositionService.findSafeNear(commanderWorld, targetPos, 8);
         if (goal == null) {
-            goal = SafePositionService.findSafeNear(commanderWorld, bhr.getBlockPos().toImmutable(), 8);
+            goal = SafePositionService.findSafeNear(commanderWorld, rawTargetPos.toImmutable(), 8);
         }
         if (goal == null) {
             ChatUtils.sendSystemMessage(source, "Can't find a safe spot near there.");
@@ -3990,11 +4050,21 @@ public class modCommandRegistry {
         // This gives the direction the player is looking/pointing
         Direction lookDirection = computeHorizontalDirection(commander.getBlockPos(), goal);
         WorkDirectionService.setDirection(bot.getUuid(), lookDirection);
+        LOGGER.info("Shelter look [{}]: hit={} side={} replaceable={} rawTarget={} previewCenter={} safeGoal={} bot={}",
+            shelterType,
+            hitBlockPos.toShortString(),
+            bhr.getSide(),
+            isReplaceable,
+            rawTargetPos.toShortString(),
+            targetPos.toShortString(),
+            goal.toShortString(),
+                bot.getGameProfile().name());
 
         // Move the bot to the target location first, then run shelter skill
         final BlockPos finalGoal = goal;
         final String finalShelterType = shelterType;
         final Direction finalDirection = lookDirection;
+        final BlockPos finalTargetPos = targetPos;
         ChatUtils.sendSystemMessage(source, bot.getGameProfile().name() + " is heading to build a " + shelterType + " where you're looking.");
 
         // Use async movement to the position, then run the shelter skill
@@ -4010,6 +4080,12 @@ public class modCommandRegistry {
                 server.execute(() -> {
                     // Run the shelter skill
                     String skillArgs = finalShelterType;
+                    if ("hovel".equalsIgnoreCase(finalShelterType)) {
+                        skillArgs += " radius=4"
+                                + " targetX=" + finalTargetPos.getX()
+                                + " targetY=" + finalTargetPos.getY()
+                                + " targetZ=" + finalTargetPos.getZ();
+                    }
                     try {
                         executeSkillTargets(context, "shelter", skillArgs + " " + bot.getGameProfile().name());
                     } catch (CommandSyntaxException e) {
@@ -4152,7 +4228,9 @@ public class modCommandRegistry {
         // Commander-issued override: always preempt idle hobbies.
         interruptAmbientHobbyIfAny(bot, "§cInterrupted by /bot come.");
         boolean teleportAllowed = SkillPreferences.teleportDuringSkills(bot);
-        if (!teleportAllowed && !bot.canSee(commander) && !hasNavigationTool(bot)) {
+        // When recovery skills are allowed (come/regroup), skip the LOS + navigation-tool gate.
+        // The whole point of recovery skills is to reach the player when direct pathing fails.
+        if (!allowRecoverySkills && !teleportAllowed && !bot.canSee(commander) && !hasNavigationTool(bot)) {
             ChatUtils.sendSystemMessage(context.getSource(),
                     "I don't have any navigation tools to find you.");
             return 0;
@@ -4824,7 +4902,8 @@ public class modCommandRegistry {
 
         GameMode mode = GameMode.SURVIVAL;
         if (Frens.CONFIG != null) {
-            ManualConfig.BotControlSettings ctrl = Frens.CONFIG.getEffectiveBotControl(alias);
+            String worldKey = net.wcfcarolina13.GameAI.services.BotWorldStateService.currentWorldKey(server);
+            ManualConfig.BotControlSettings ctrl = Frens.CONFIG.getEffectiveBotControl(alias, worldKey);
             if (ctrl != null && "creative".equalsIgnoreCase(ctrl.getGameMode())) {
                 mode = GameMode.CREATIVE;
             }
@@ -4919,7 +4998,7 @@ public class modCommandRegistry {
         BlockPos placePos = target.hitPos.offset(target.face);
         bot.setYaw(target.yaw);
         bot.setHeadYaw(target.yaw);
-        bot.setPitch(target.pitch);
+        bot.setPitch(Math.max(-90.0F, Math.min(90.0F, target.pitch)));
 
         int tries = 0;
         while (tries < 10) {
