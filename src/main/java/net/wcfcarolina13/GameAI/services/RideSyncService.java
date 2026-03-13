@@ -3057,6 +3057,23 @@ public final class RideSyncService {
         handleDismountCare(bot, vehicle);
     }
 
+    /**
+     * Unconditionally leash a mount and tether it to a nearby fence for travel departure.
+     * Bypasses the leashMountsOnDismount toggle — used when the bot must leave an animal
+     * behind (e.g. cross-dimension fast travel).
+     *
+     * @return true if the mount is now tethered to a fence (LeashKnotEntity holder)
+     */
+    public static boolean secureMountForTravel(ServerPlayerEntity bot, Entity vehicle) {
+        if (bot == null || vehicle == null) return false;
+        secureMountIfPossible(bot, vehicle);
+        if (vehicle instanceof MobEntity mob && mob.isLeashed()
+                && mob.getLeashHolder() instanceof net.minecraft.entity.decoration.LeashKnotEntity) {
+            return true;
+        }
+        return false;
+    }
+
     public static void secureLeashedMountOnDisconnect(ServerPlayerEntity bot) {
         if (bot == null) {
             return;
