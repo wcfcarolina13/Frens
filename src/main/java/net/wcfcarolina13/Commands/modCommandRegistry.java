@@ -6297,7 +6297,7 @@ public class modCommandRegistry {
 
         if (!bots.isEmpty()) {
             String summary = formatBotList(bots, isAll);
-            String label = "WALK".equals(mode) ? "walk" : "teleport with delay";
+            String label = "WALK".equals(mode) ? "walk" : "fast travel";
             ChatUtils.sendSystemMessage(source, summary + " navigation mode set to " + label + ".");
         }
         return successes;

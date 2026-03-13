@@ -132,7 +132,7 @@ public final class NavigationArtifactService {
         return seconds * 20;
     }
 
-    // ── Delayed teleport travel system ────────────────────────────────────
+    // ── Fast travel system ────────────────────────────────────
 
     /** Tracks a bot that is currently in transit (removed from world, awaiting respawn). */
     public record PendingTravel(UUID botUuid, String botAlias, BlockPos destination,

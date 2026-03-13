@@ -238,6 +238,13 @@ final class BotHomeCommands {
                                 .executes(context -> modCommandRegistry.executeNavModeSetTargets(
                                         context,
                                         StringArgumentType.getString(context, "target"),
+                                        "TELEPORT_DELAY"))))
+                .then(CommandManager.literal("fast_travel")
+                        .executes(context -> modCommandRegistry.executeNavModeSetTargets(context, null, "TELEPORT_DELAY"))
+                        .then(CommandManager.argument("target", StringArgumentType.string())
+                                .executes(context -> modCommandRegistry.executeNavModeSetTargets(
+                                        context,
+                                        StringArgumentType.getString(context, "target"),
                                         "TELEPORT_DELAY"))));
     }
 }

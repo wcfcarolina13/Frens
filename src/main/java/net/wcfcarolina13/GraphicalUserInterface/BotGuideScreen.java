@@ -1052,7 +1052,7 @@ public final class BotGuideScreen extends Screen {
                                 "Both you and your companion must hold at least one Ender Pearl.",
                                 "Choose destination: guide to your location or to a known base.",
                                 "Both pearls are consumed when travel begins.",
-                                "Travel uses your configured navigation mode (walk or teleport with delay).",
+                                "Travel uses your configured navigation mode (walk or fast travel).",
                                 "Open the Spells menu to cast this spell."
                         ),
                         "UI-only action (Spells menu)",
@@ -1078,17 +1078,17 @@ public final class BotGuideScreen extends Screen {
                         "settings_nav_modes",
                         "Settings",
                         "Navigation Modes",
-                        "Choose how your companion travels long distances: walk or delayed teleport.",
+                        "Choose how your companion travels long distances: walk or fast travel.",
                         List.of(
                                 "Walk mode: bot pathfinds in 32-block segments. Realistic but slow, can get stuck.",
-                                "Teleport-delay mode (default): bot disappears for ~1 second per chunk of distance, then reappears at destination.",
+                                "Fast travel mode (default): bot disappears for ~1 second per chunk of distance, then reappears at destination.",
                                 "Cross-dimension adds 30 seconds. Minimum 5s, maximum 5 minutes.",
                                 "Eye of Ender holders bypass delay entirely — always instant.",
-                                "Configure via /bot config <alias> nav_mode walk or teleport."
+                                "Configure via /bot config <alias> nav_mode walk or fast_travel."
                         ),
                         "/bot config <alias> nav_mode walk",
-                        "/bot config <alias> nav_mode teleport",
-                        "navigation mode walk teleport delay config setting"
+                        "/bot config <alias> nav_mode fast_travel",
+                        "navigation mode walk fast travel config setting"
                 ),
                 new GuideTopic(
                         "items_spell_ingredients",

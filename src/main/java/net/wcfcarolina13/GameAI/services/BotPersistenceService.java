@@ -142,7 +142,7 @@ public final class BotPersistenceService {
                     shouldLoadSnapshot,
                     server.getTicks(),
                     vitalsSnapshot(bot));
-                // Skip position restore if the bot is mid-travel (delayed teleport).
+                // Skip position restore if the bot is mid-travel (fast travel).
                 // The travel system will teleport the bot to the destination on arrival.
                 if (NavigationArtifactService.isTraveling(bot.getUuid())) {
                     LOGGER.info("Skipping position restore for {} — bot is mid-travel", bot.getName().getString());
