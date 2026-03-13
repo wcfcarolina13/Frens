@@ -509,6 +509,7 @@ public class Frens implements ModInitializer {
         PayloadTypeRegistry.playS2C().register(net.wcfcarolina13.network.BotNavTierPayload.ID, net.wcfcarolina13.network.BotNavTierPayload.CODEC);
         PayloadTypeRegistry.playS2C().register(net.wcfcarolina13.network.NavigationRequestPayload.ID, net.wcfcarolina13.network.NavigationRequestPayload.CODEC);
         PayloadTypeRegistry.playC2S().register(net.wcfcarolina13.network.NavigationResponsePayload.ID, net.wcfcarolina13.network.NavigationResponsePayload.CODEC);
+        PayloadTypeRegistry.playC2S().register(net.wcfcarolina13.network.SpellGuidancePayload.ID, net.wcfcarolina13.network.SpellGuidancePayload.CODEC);
 
         net.wcfcarolina13.network.BaseNetworkManager.registerReceiversOnce();
         net.wcfcarolina13.network.CraftingHistoryNetworkManager.registerReceiversOnce();

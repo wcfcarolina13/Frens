@@ -1,6 +1,10 @@
 # Changelog & History
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
+## 2026-03-13
+
+- **SpellGuidancePayload + server handlers (Task 7):** New C2S network payload `SpellGuidancePayload` (record with `botAlias`, `spellType`, `destination`) registered in `Frens.java`. `SpellNavigationNetworkManager` now handles two spell types: **Remote Guidance** (consumes ender pearl from both player and bot, navigates bot to player or named base via `setReturnToBase`) and **Chorus Recall** (consumes ender pearl + chorus fruit from both, instant teleport in either direction — bot-to-player or player-to-bot). Sound effects play on cast and arrival. Added `calculateDelayTicks()` stub to `NavigationArtifactService` for Task 8's delayed-travel system.
+
 ## 2026-03-12
 
 - **Fix scaffold escape never firing (quick-nudge blocked it):** `ReturnBaseStuckService.tryQuickNudge()` returned `true` and early-exited the method every tick, preventing the scaffold escape check from ever being reached — even after 2000+ stagnant ticks. Once past the scaffold threshold (50 ticks), quick-nudge no longer returns early, allowing the scaffold escape to fire as designed.

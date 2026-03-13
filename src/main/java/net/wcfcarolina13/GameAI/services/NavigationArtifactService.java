@@ -56,6 +56,22 @@ public final class NavigationArtifactService {
         return false;
     }
 
+    /**
+     * Estimate how many ticks a delayed-travel sequence should take based on distance.
+     * Stub for Task 8 — will be expanded with full delayed-travel system.
+     *
+     * @param distance      Euclidean distance in blocks between origin and destination.
+     * @param crossDimension true if the travel crosses dimensions (e.g. Overworld to Nether).
+     * @return delay in game ticks (20 ticks = 1 second).
+     */
+    public static int calculateDelayTicks(double distance, boolean crossDimension) {
+        int chunks = Math.max(1, (int) Math.ceil(distance / 16.0));
+        int seconds = chunks;
+        if (crossDimension) seconds += 30;
+        seconds = Math.max(5, Math.min(300, seconds));
+        return seconds * 20;
+    }
+
     private static boolean hasItemInInventory(ServerPlayerEntity player, net.minecraft.item.Item item) {
         if (player == null) return false;
         var inv = player.getInventory();
