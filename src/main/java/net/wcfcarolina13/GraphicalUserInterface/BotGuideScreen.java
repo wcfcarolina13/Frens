@@ -1027,6 +1027,85 @@ public final class BotGuideScreen extends Screen {
                         "bot follow toggle <bot> | bot go_to_look | bot stop <bot> | bot resume <bot>",
                         "Minecraft Controls: Follow, Go To Look, Open Guide, Stop, Leash, Resume, Open Spells, Recruit Contact",
                         "shortcut hotkey keybind follow stop goto go to look"
+                ),
+                new GuideTopic(
+                        "items_nav_artifacts",
+                        "Items",
+                        "Navigation Artifacts",
+                        "Give your companion a Compass, Map, or Eye of Ender to unlock autonomous navigation.",
+                        List.of(
+                                "Compass / Map (basic): bot can navigate to its nearest or preferred base, same dimension only.",
+                                "Eye of Ender (enhanced): navigate to any named base, cross-dimension, instant teleport. Either you or the bot can hold it.",
+                                "Use /bot open <alias> to give items to your companion via its inventory screen.",
+                                "Navigation artifacts are reusable — they are not consumed."
+                        ),
+                        "/bot open <alias>",
+                        "Give item via Bot Inventory screen",
+                        "compass map eye ender navigation artifact tier"
+                ),
+                new GuideTopic(
+                        "spells_remote_guidance",
+                        "Spells",
+                        "Remote Guidance",
+                        "Uses paired ender pearls to guide your companion across any distance.",
+                        List.of(
+                                "Both you and your companion must hold at least one Ender Pearl.",
+                                "Choose destination: guide to your location or to a known base.",
+                                "Both pearls are consumed when travel begins.",
+                                "Travel uses your configured navigation mode (walk or teleport with delay).",
+                                "Open the Spells menu to cast this spell."
+                        ),
+                        "UI-only action (Spells menu)",
+                        "Shortcut: bind key.frens.open_spells",
+                        "spell guidance ender pearl paired navigation remote"
+                ),
+                new GuideTopic(
+                        "spells_chorus_recall",
+                        "Spells",
+                        "Chorus Recall",
+                        "Consumes paired ender pearls and chorus fruit for an instant teleport.",
+                        List.of(
+                                "Both you and your companion must hold one Ender Pearl AND one Chorus Fruit.",
+                                "Choose direction: teleport bot to you, or you to bot.",
+                                "Works across dimensions. Always instant — no delay.",
+                                "All four items are consumed (one pearl + one chorus from each)."
+                        ),
+                        "UI-only action (Spells menu)",
+                        "Shortcut: bind key.frens.open_spells",
+                        "spell recall chorus fruit ender pearl teleport instant paired"
+                ),
+                new GuideTopic(
+                        "settings_nav_modes",
+                        "Settings",
+                        "Navigation Modes",
+                        "Choose how your companion travels long distances: walk or delayed teleport.",
+                        List.of(
+                                "Walk mode: bot pathfinds in 32-block segments. Realistic but slow, can get stuck.",
+                                "Teleport-delay mode (default): bot disappears for ~1 second per chunk of distance, then reappears at destination.",
+                                "Cross-dimension adds 30 seconds. Minimum 5s, maximum 5 minutes.",
+                                "Eye of Ender holders bypass delay entirely — always instant.",
+                                "Configure via /bot config <alias> nav_mode walk or teleport."
+                        ),
+                        "/bot config <alias> nav_mode walk",
+                        "/bot config <alias> nav_mode teleport",
+                        "navigation mode walk teleport delay config setting"
+                ),
+                new GuideTopic(
+                        "items_spell_ingredients",
+                        "Items",
+                        "Spell Ingredients",
+                        "Quick reference for all spell-related items and what they unlock.",
+                        List.of(
+                                "Wizard's Tome: full access to all companion spells anywhere.",
+                                "Enchanting Table (nearby): full access to all spells.",
+                                "Goat Horn: regroup only (player holds).",
+                                "Eye of Ender: summon only with 60s cooldown (player holds); enhanced navigation (either holds).",
+                                "Ender Pearl (paired): Remote Guidance spell — both must hold, consumed.",
+                                "Ender Pearl + Chorus Fruit (paired): Chorus Recall — instant teleport, consumed."
+                        ),
+                        "UI-only action (Spells menu)",
+                        "Hold item or be near Enchanting Table to unlock spells",
+                        "spell ingredient wizard tome eye ender pearl chorus goat horn enchanting"
                 )
         );
     }
