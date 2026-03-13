@@ -24,6 +24,11 @@ import net.wcfcarolina13.GameAI.BotEventHandler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import net.minecraft.entity.Entity;
+import net.minecraft.entity.EntityType;
+import net.minecraft.entity.SpawnReason;
+import net.minecraft.registry.Registries;
+
 import java.io.IOException;
 import java.io.Reader;
 import java.io.Writer;
@@ -55,6 +60,7 @@ public final class NavigationArtifactService {
         public long departureTick;
         public long arrivalTick;
         public String ownerUuid;
+        public String mountEntityTypeId;
     }
 
     private static Path travelFile() {
@@ -137,7 +143,7 @@ public final class NavigationArtifactService {
     /** Tracks a bot that is currently in transit (removed from world, awaiting respawn). */
     public record PendingTravel(UUID botUuid, String botAlias, BlockPos destination,
                                 RegistryKey<World> dimension, long departureTick, long arrivalTick,
-                                UUID ownerUuid) {}
+                                UUID ownerUuid, String mountEntityTypeId) {}
 
     /** Bots currently in transit, keyed by bot UUID. */
     private static final Map<UUID, PendingTravel> PENDING_TRAVELS = new ConcurrentHashMap<>();
@@ -180,12 +186,43 @@ public final class NavigationArtifactService {
             return;
         }
 
+        // ── Mount evaluation ──────────────────────────────────────────────
+        ServerWorld destWorld = server.getWorld(dimension);
+        TravelMountHandler.MountTravelResult mountResult =
+                TravelMountHandler.evaluateTravel(bot, destination, dimension, destWorld);
+
+        String mountEntityTypeId = null;
+        switch (mountResult.decision()) {
+            case REFUSE_FULL_INVENTORY, REFUSE_NO_ROOM_AT_DEST, REFUSE_CROSS_DIM_ANIMAL -> {
+                notifyOwner(server, ownerUuid, "\u00A7c" + mountResult.message() + "\u00A7r");
+                return; // Abort travel
+            }
+            case TETHERED_CROSS_DIM -> {
+                notifyOwner(server, ownerUuid, "\u00A7e" + mountResult.message() + "\u00A7r");
+                // Fall through — travel proceeds without animal
+            }
+            case PROCEED_WITH_ANIMAL -> {
+                // Record the entity type so we can recreate it at the destination
+                Entity mount = mountResult.mountEntity();
+                if (mount != null) {
+                    bot.stopRiding();
+                    Identifier typeId = EntityType.getId(mount.getType());
+                    mountEntityTypeId = typeId != null ? typeId.toString() : null;
+                    TravelMountHandler.ensureMountPersistence(mount);
+                    mount.discard();
+                    LOGGER.info("Mount '{}' ({}) will be recreated at destination for bot '{}'",
+                            mount.getName().getString(), mountEntityTypeId, botAlias);
+                }
+            }
+            default -> {} // PROCEED_NO_MOUNT, PROCEED_VEHICLE_COLLECTED — nothing extra
+        }
+
         UUID botUuid = bot.getUuid();
         long now = server.getOverworld().getTime();
         long arrival = now + delayTicks;
 
         PendingTravel travel = new PendingTravel(botUuid, botAlias, destination, dimension,
-                now, arrival, ownerUuid);
+                now, arrival, ownerUuid, mountEntityTypeId);
         PENDING_TRAVELS.put(botUuid, travel);
 
         // Set mode to TRAVELING so other systems ignore this bot.
@@ -353,6 +390,38 @@ public final class NavigationArtifactService {
                 cmdState.mode = BotEventHandler.Mode.IDLE;
             }
 
+            // Recreate co-traveling mount if one was stored.
+            if (travel.mountEntityTypeId() != null) {
+                try {
+                    Identifier typeId = Identifier.of(travel.mountEntityTypeId());
+                    if (Registries.ENTITY_TYPE.containsId(typeId)) {
+                        EntityType<?> mountType = Registries.ENTITY_TYPE.get(typeId);
+                        Entity mount = mountType.create(finalWorld, SpawnReason.COMMAND);
+                        if (mount != null) {
+                            // Place mount at a safe spot near the destination.
+                            BlockPos safeSpot = TravelMountHandler.findSafeAnimalSpot(
+                                    finalWorld, finalDest, mount);
+                            BlockPos mountPos = safeSpot != null ? safeSpot : finalDest;
+                            mount.refreshPositionAndAngles(
+                                    mountPos.getX() + 0.5, mountPos.getY(),
+                                    mountPos.getZ() + 0.5, 0, 0);
+                            finalWorld.spawnEntity(mount);
+                            TravelMountHandler.ensureMountPersistence(mount);
+                            MountPersistenceService.recordMount(bot, mount, true);
+                            LOGGER.info("Recreated mount '{}' at {} after travel for '{}'",
+                                    mount.getName().getString(), mountPos.toShortString(),
+                                    travel.botAlias());
+                        }
+                    } else {
+                        LOGGER.warn("Unknown mount type '{}' for bot '{}'",
+                                travel.mountEntityTypeId(), travel.botAlias());
+                    }
+                } catch (Exception e) {
+                    LOGGER.warn("Failed to recreate mount for '{}': {}",
+                            travel.botAlias(), e.getMessage());
+                }
+            }
+
             // Play arrival sound at the destination.
             finalWorld.playSound(
                     null,  // all nearby players hear it
@@ -415,6 +484,7 @@ public final class NavigationArtifactService {
                     s.departureTick = t.departureTick();
                     s.arrivalTick = t.arrivalTick();
                     s.ownerUuid = t.ownerUuid() != null ? t.ownerUuid().toString() : null;
+                    s.mountEntityTypeId = t.mountEntityTypeId();
                     list.add(s);
                 }
 
@@ -463,7 +533,7 @@ public final class NavigationArtifactService {
                         long newArrival = now + remainingTicks;
 
                         PendingTravel travel = new PendingTravel(botUuid, s.botAlias, dest, dim,
-                                now, newArrival, ownerUuid);
+                                now, newArrival, ownerUuid, s.mountEntityTypeId);
                         PENDING_TRAVELS.put(botUuid, travel);
 
                         LOGGER.info("Restored pending travel for '{}': destination {} in {}, ETA {} ticks",
