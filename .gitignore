@@ -121,3 +121,15 @@ Questing Development Guide.md
 
 # Resource packs (local assets)
 Wizards_Tome_Pack_v2/
+
+# Scratch files (review later)
+*.code-workspace
+BotControlScreen_backup.java
+BotControlScreen_rewritten.java
+fix_constructor.py
+fix_fields.py
+rewrite_render.py
+rewriter.py
+Super Dialogue Audio Pack v1.zip
+docs/PRD-vanilla-movement-refactor.md
+/net/
