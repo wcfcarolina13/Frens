@@ -577,6 +577,9 @@ public class Frens implements ModInitializer {
                 String worldId = world.getRegistryKey().getValue().toString();
                 net.wcfcarolina13.GameAI.services.ProtectedZoneService.loadZones(server, worldId);
             });
+
+            // Restore in-flight bot travels that were persisted before shutdown.
+            net.wcfcarolina13.GameAI.services.NavigationArtifactService.loadPendingTravels(server);
         });
 
         ServerLifecycleEvents.SERVER_STOPPING.register(server -> {

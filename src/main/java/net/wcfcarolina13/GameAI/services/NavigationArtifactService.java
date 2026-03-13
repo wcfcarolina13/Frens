@@ -1,13 +1,19 @@
 package net.wcfcarolina13.GameAI.services;
 
+import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
+import com.google.gson.reflect.TypeToken;
+import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.item.Items;
 import net.minecraft.registry.RegistryKey;
+import net.minecraft.registry.RegistryKeys;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.sound.SoundCategory;
 import net.minecraft.sound.SoundEvents;
 import net.minecraft.text.Text;
+import net.minecraft.util.Identifier;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.GameMode;
@@ -18,7 +24,15 @@ import net.wcfcarolina13.GameAI.BotEventHandler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.IOException;
+import java.io.Reader;
+import java.io.Writer;
+import java.lang.reflect.Type;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -26,8 +40,26 @@ import java.util.concurrent.ConcurrentHashMap;
 public final class NavigationArtifactService {
 
     private static final Logger LOGGER = LoggerFactory.getLogger("nav-artifact");
+    private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
+    private static final Object LOCK = new Object();
+    private static final String TRAVEL_FILE = "pending_travels.json";
 
     private NavigationArtifactService() {}
+
+    /** Gson-serializable DTO mirroring {@link PendingTravel} with primitive/String fields. */
+    public static class SavedTravel {
+        public String botUuid;
+        public String botAlias;
+        public int destX, destY, destZ;
+        public String dimension;
+        public long departureTick;
+        public long arrivalTick;
+        public String ownerUuid;
+    }
+
+    private static Path travelFile() {
+        return FabricLoader.getInstance().getConfigDir().resolve("frens").resolve(TRAVEL_FILE);
+    }
 
     // ── Navigation tiers ──────────────────────────────────────────────────
 
@@ -190,6 +222,8 @@ public final class NavigationArtifactService {
                         false);
             }
         }
+
+        flushPendingTravels();
     }
 
     /**
@@ -208,6 +242,7 @@ public final class NavigationArtifactService {
             PendingTravel travel = entry.getValue();
             if (now >= travel.arrivalTick()) {
                 it.remove();
+                flushPendingTravels();
                 try {
                     respawnBotAtDestination(server, travel);
                 } catch (Throwable t) {
@@ -308,6 +343,94 @@ public final class NavigationArtifactService {
                     travel.botAlias(), dest.toShortString(), travel.dimension().getValue(),
                     travel.arrivalTick() - travel.departureTick());
         });
+    }
+
+    // ── Persistence ────────────────────────────────────────────────────────
+
+    /**
+     * Write the current {@link #PENDING_TRAVELS} map to JSON so in-flight travels
+     * survive a server restart.
+     */
+    public static void flushPendingTravels() {
+        synchronized (LOCK) {
+            try {
+                Path file = travelFile();
+                Files.createDirectories(file.getParent());
+
+                List<SavedTravel> list = new ArrayList<>();
+                for (PendingTravel t : PENDING_TRAVELS.values()) {
+                    SavedTravel s = new SavedTravel();
+                    s.botUuid = t.botUuid().toString();
+                    s.botAlias = t.botAlias();
+                    s.destX = t.destination().getX();
+                    s.destY = t.destination().getY();
+                    s.destZ = t.destination().getZ();
+                    s.dimension = t.dimension().getValue().toString();
+                    s.departureTick = t.departureTick();
+                    s.arrivalTick = t.arrivalTick();
+                    s.ownerUuid = t.ownerUuid() != null ? t.ownerUuid().toString() : null;
+                    list.add(s);
+                }
+
+                try (Writer writer = Files.newBufferedWriter(file)) {
+                    GSON.toJson(list, writer);
+                }
+            } catch (IOException e) {
+                LOGGER.warn("Failed to save pending travels: {}", e.getMessage());
+            }
+        }
+    }
+
+    /**
+     * Reload pending travels from JSON after a server restart. Rebases arrival ticks
+     * to current server time, preserving the remaining travel duration.
+     *
+     * @param server the freshly started server
+     */
+    public static void loadPendingTravels(MinecraftServer server) {
+        synchronized (LOCK) {
+            Path file = travelFile();
+            if (!Files.exists(file)) {
+                return;
+            }
+            try (Reader reader = Files.newBufferedReader(file)) {
+                Type listType = new TypeToken<List<SavedTravel>>() {}.getType();
+                List<SavedTravel> list = GSON.fromJson(reader, listType);
+                if (list == null || list.isEmpty()) {
+                    return;
+                }
+
+                long now = server.getOverworld().getTime();
+
+                for (SavedTravel s : list) {
+                    try {
+                        UUID botUuid = UUID.fromString(s.botUuid);
+                        UUID ownerUuid = s.ownerUuid != null ? UUID.fromString(s.ownerUuid) : null;
+                        BlockPos dest = new BlockPos(s.destX, s.destY, s.destZ);
+                        RegistryKey<World> dim = RegistryKey.of(RegistryKeys.WORLD,
+                                Identifier.of(s.dimension));
+
+                        // Rebase: preserve the remaining travel duration from the
+                        // original schedule. On restart we don't know wall-clock elapsed
+                        // time, so we use the full planned duration as remaining ticks.
+                        long remainingTicks = Math.max(0, s.arrivalTick - s.departureTick);
+                        long newArrival = now + remainingTicks;
+
+                        PendingTravel travel = new PendingTravel(botUuid, s.botAlias, dest, dim,
+                                now, newArrival, ownerUuid);
+                        PENDING_TRAVELS.put(botUuid, travel);
+
+                        LOGGER.info("Restored pending travel for '{}': destination {} in {}, ETA {} ticks",
+                                s.botAlias, dest.toShortString(), s.dimension, remainingTicks);
+                    } catch (Exception e) {
+                        LOGGER.warn("Skipping malformed saved travel entry for '{}': {}",
+                                s.botAlias, e.getMessage());
+                    }
+                }
+            } catch (IOException e) {
+                LOGGER.warn("Failed to load pending travels: {}", e.getMessage());
+            }
+        }
     }
 
     // ── Internals ─────────────────────────────────────────────────────────
