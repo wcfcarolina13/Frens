@@ -85,6 +85,7 @@ import net.minecraft.registry.Registries;
 import net.minecraft.resource.featuretoggle.FeatureFlags;
 import net.wcfcarolina13.items.ModItems;
 import net.wcfcarolina13.GameAI.services.LearningModeService;
+import net.wcfcarolina13.GameAI.services.NavigationArtifactService;
 import net.wcfcarolina13.network.LearningInputSamplePayload;
 import net.wcfcarolina13.network.LearningSessionStatusPayload;
 
@@ -797,6 +798,7 @@ public class Frens implements ModInitializer {
         ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.GhastFireballDeflectService::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.CompanionOverheadHologramService::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(LearningModeService::onServerTick);
+        ServerTickEvents.END_SERVER_TICK.register(NavigationArtifactService::tickPendingTravels);
 
         ServerMessageEvents.CHAT_MESSAGE.register((message, sender, params) -> {
             String raw = message.getContent().getString();

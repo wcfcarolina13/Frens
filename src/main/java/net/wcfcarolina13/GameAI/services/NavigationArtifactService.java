@@ -1,11 +1,35 @@
 package net.wcfcarolina13.GameAI.services;
 
 import net.minecraft.item.Items;
+import net.minecraft.registry.RegistryKey;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
+import net.minecraft.server.world.ServerWorld;
+import net.minecraft.sound.SoundCategory;
+import net.minecraft.sound.SoundEvents;
+import net.minecraft.text.Text;
+import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Vec3d;
+import net.minecraft.world.GameMode;
+import net.minecraft.world.World;
+import net.wcfcarolina13.Entity.AutoFaceEntity;
+import net.wcfcarolina13.Entity.createFakePlayer;
+import net.wcfcarolina13.GameAI.BotEventHandler;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.util.Iterator;
+import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 public final class NavigationArtifactService {
 
+    private static final Logger LOGGER = LoggerFactory.getLogger("nav-artifact");
+
     private NavigationArtifactService() {}
+
+    // ── Navigation tiers ──────────────────────────────────────────────────
 
     public enum NavTier { NONE, BASIC, ENHANCED }
 
@@ -58,7 +82,11 @@ public final class NavigationArtifactService {
 
     /**
      * Estimate how many ticks a delayed-travel sequence should take based on distance.
-     * Stub for Task 8 — will be expanded with full delayed-travel system.
+     * <ul>
+     *   <li>1 real second per chunk (distance / 16)</li>
+     *   <li>Cross-dimension adds 30 seconds</li>
+     *   <li>Min 5 seconds, max 5 minutes</li>
+     * </ul>
      *
      * @param distance      Euclidean distance in blocks between origin and destination.
      * @param crossDimension true if the travel crosses dimensions (e.g. Overworld to Nether).
@@ -71,6 +99,218 @@ public final class NavigationArtifactService {
         seconds = Math.max(5, Math.min(300, seconds));
         return seconds * 20;
     }
+
+    // ── Delayed teleport travel system ────────────────────────────────────
+
+    /** Tracks a bot that is currently in transit (removed from world, awaiting respawn). */
+    public record PendingTravel(UUID botUuid, String botAlias, BlockPos destination,
+                                RegistryKey<World> dimension, long departureTick, long arrivalTick,
+                                UUID ownerUuid) {}
+
+    /** Bots currently in transit, keyed by bot UUID. */
+    private static final Map<UUID, PendingTravel> PENDING_TRAVELS = new ConcurrentHashMap<>();
+
+    /** Check if a bot is currently in transit. */
+    public static boolean isTraveling(UUID botUuid) {
+        return botUuid != null && PENDING_TRAVELS.containsKey(botUuid);
+    }
+
+    /** Get the pending travel record for a bot, or null if not traveling. */
+    public static PendingTravel getPendingTravel(UUID botUuid) {
+        return botUuid != null ? PENDING_TRAVELS.get(botUuid) : null;
+    }
+
+    /**
+     * Begin a delayed travel for a bot. The bot is removed from the world and will be
+     * respawned at the destination after {@code delayTicks} have elapsed.
+     *
+     * @param server      the Minecraft server
+     * @param bot         the fake player bot to send traveling
+     * @param botAlias    the bot's display name / alias
+     * @param destination the target block position
+     * @param dimension   the target dimension
+     * @param delayTicks  how many ticks until arrival
+     * @param ownerUuid   UUID of the player who owns this bot (for notifications)
+     */
+    public static void beginDelayedTravel(MinecraftServer server, ServerPlayerEntity bot,
+                                          String botAlias, BlockPos destination,
+                                          RegistryKey<World> dimension, int delayTicks,
+                                          UUID ownerUuid) {
+        if (server == null || bot == null || botAlias == null || destination == null || dimension == null) {
+            LOGGER.warn("beginDelayedTravel called with null arguments; ignoring.");
+            return;
+        }
+
+        UUID botUuid = bot.getUuid();
+        long now = server.getOverworld().getTime();
+        long arrival = now + delayTicks;
+
+        PendingTravel travel = new PendingTravel(botUuid, botAlias, destination, dimension,
+                now, arrival, ownerUuid);
+        PENDING_TRAVELS.put(botUuid, travel);
+
+        // Set mode to TRAVELING so other systems ignore this bot.
+        BotCommandStateService.State state = BotCommandStateService.stateFor(botUuid);
+        if (state != null) {
+            state.mode = BotEventHandler.Mode.TRAVELING;
+        }
+
+        // Persist bot state (inventory, position) before removal so it survives the trip.
+        // Save explicitly, then disconnect the bot cleanly.
+        try {
+            BotPersistenceService.onBotDisconnect(bot);
+        } catch (Throwable t) {
+            LOGGER.warn("Failed to persist bot '{}' before travel: {}", botAlias, t.getMessage());
+        }
+
+        // Remove the bot from the world. Use kill(Text) for a clean disconnect
+        // that removes the entity from the player list without triggering onDeath logic.
+        try {
+            if (bot instanceof createFakePlayer fake) {
+                fake.kill(Text.literal("Traveling"));
+            } else {
+                bot.discard();
+            }
+        } catch (Throwable t) {
+            LOGGER.warn("Failed to remove bot '{}' from world for travel: {}", botAlias, t.getMessage());
+        }
+
+        int delaySeconds = delayTicks / 20;
+        LOGGER.info("Bot '{}' departed for {} in {} (ETA: {}s, {} ticks)",
+                botAlias, destination.toShortString(),
+                dimension.getValue(), delaySeconds, delayTicks);
+
+        // Notify the owner that the bot has departed.
+        if (ownerUuid != null) {
+            ServerPlayerEntity owner = server.getPlayerManager().getPlayer(ownerUuid);
+            if (owner != null) {
+                owner.sendMessage(
+                        Text.literal("\u00A7e" + botAlias + " has departed and will arrive in ~"
+                                + delaySeconds + " seconds.\u00A7r"),
+                        false);
+            }
+        }
+    }
+
+    /**
+     * Called every server tick. Checks pending travels and respawns bots whose arrival time
+     * has been reached.
+     */
+    public static void tickPendingTravels(MinecraftServer server) {
+        if (PENDING_TRAVELS.isEmpty()) {
+            return;
+        }
+
+        long now = server.getOverworld().getTime();
+        Iterator<Map.Entry<UUID, PendingTravel>> it = PENDING_TRAVELS.entrySet().iterator();
+        while (it.hasNext()) {
+            Map.Entry<UUID, PendingTravel> entry = it.next();
+            PendingTravel travel = entry.getValue();
+            if (now >= travel.arrivalTick()) {
+                it.remove();
+                try {
+                    respawnBotAtDestination(server, travel);
+                } catch (Throwable t) {
+                    LOGGER.error("Failed to respawn bot '{}' at destination: {}",
+                            travel.botAlias(), t.getMessage(), t);
+                }
+            }
+        }
+    }
+
+    /**
+     * Respawn a bot at its travel destination. Creates a new fake player entity at the
+     * destination coordinates, restores persisted state (inventory, etc.), registers
+     * the bot with mod systems, and notifies the owner.
+     */
+    private static void respawnBotAtDestination(MinecraftServer server, PendingTravel travel) {
+        ServerWorld targetWorld = server.getWorld(travel.dimension());
+        if (targetWorld == null) {
+            LOGGER.error("Cannot respawn bot '{}': target dimension {} not found.",
+                    travel.botAlias(), travel.dimension().getValue());
+            return;
+        }
+
+        BlockPos dest = travel.destination();
+        Vec3d spawnPos = Vec3d.ofBottomCenter(dest);
+
+        LOGGER.info("Respawning bot '{}' at {} in {}",
+                travel.botAlias(), dest.toShortString(), travel.dimension().getValue());
+
+        // Create the fake player at the destination.
+        // createFake handles GameProfile resolution, skin, connection, and teleport.
+        createFakePlayer.createFake(
+                travel.botAlias(),
+                server,
+                spawnPos,
+                0.0,   // yaw — will face north; owner can adjust
+                0.0,   // pitch
+                travel.dimension(),
+                GameMode.SURVIVAL,
+                false   // not flying
+        );
+
+        // Schedule post-spawn setup for next tick to let the player entity fully initialize.
+        server.execute(() -> {
+            ServerPlayerEntity bot = server.getPlayerManager().getPlayer(travel.botAlias());
+            if (bot == null || bot.isRemoved()) {
+                LOGGER.warn("Bot '{}' not found after travel respawn; it may have failed to connect.",
+                        travel.botAlias());
+                return;
+            }
+
+            // Teleport to exact destination in case onBotJoin restored a stale position.
+            bot.teleport(targetWorld, spawnPos.x, spawnPos.y, spawnPos.z,
+                    java.util.Set.of(), 0.0F, 0.0F, true);
+
+            // Register with mod systems.
+            try {
+                BotEventHandler.registerBot(bot);
+            } catch (Throwable t) {
+                LOGGER.warn("Failed to register bot '{}' after travel: {}", travel.botAlias(), t.getMessage());
+            }
+
+            // Start auto-face idle head rotation.
+            try {
+                AutoFaceEntity.startAutoFace(bot);
+            } catch (Throwable t) {
+                LOGGER.debug("AutoFaceEntity start failed for '{}': {}", travel.botAlias(), t.getMessage());
+            }
+
+            // Set mode back to IDLE now that travel is complete.
+            BotCommandStateService.State cmdState = BotCommandStateService.stateFor(bot);
+            if (cmdState != null) {
+                cmdState.mode = BotEventHandler.Mode.IDLE;
+            }
+
+            // Play arrival sound at the destination.
+            targetWorld.playSound(
+                    null,  // all nearby players hear it
+                    dest,
+                    SoundEvents.ENTITY_ENDER_PEARL_THROW,
+                    SoundCategory.PLAYERS,
+                    1.0F,  // volume
+                    0.8F   // pitch
+            );
+
+            // Notify the owner.
+            if (travel.ownerUuid() != null) {
+                ServerPlayerEntity owner = server.getPlayerManager().getPlayer(travel.ownerUuid());
+                if (owner != null) {
+                    owner.sendMessage(
+                            Text.literal("\u00A7aYour companion " + travel.botAlias()
+                                    + " has arrived at the destination.\u00A7r"),
+                            false);
+                }
+            }
+
+            LOGGER.info("Bot '{}' arrived at {} in {} after {} ticks of travel.",
+                    travel.botAlias(), dest.toShortString(), travel.dimension().getValue(),
+                    travel.arrivalTick() - travel.departureTick());
+        });
+    }
+
+    // ── Internals ─────────────────────────────────────────────────────────
 
     private static boolean hasItemInInventory(ServerPlayerEntity player, net.minecraft.item.Item item) {
         if (player == null) return false;

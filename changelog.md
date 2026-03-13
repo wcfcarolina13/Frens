@@ -3,6 +3,8 @@
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 ## 2026-03-13
 
+- **Delayed teleport travel system (Task 8):** `NavigationArtifactService` now implements a full delayed-travel system. `PendingTravel` record tracks in-transit bots (UUID, alias, destination, dimension, departure/arrival ticks, owner UUID). `beginDelayedTravel()` saves bot state via `BotPersistenceService`, sets mode to `TRAVELING`, disconnects the fake player cleanly, and notifies the owner with ETA. `tickPendingTravels()` runs every server tick and respawns arrived bots via `createFakePlayer.createFake()`, registers them with `BotEventHandler.registerBot()` + `AutoFaceEntity.startAutoFace()`, sets mode back to `IDLE`, plays ender pearl sound, and notifies the owner. Hooked into `ServerTickEvents.END_SERVER_TICK` in `Frens.java`. Helper methods `isTraveling()` and `getPendingTravel()` exposed for other systems to query transit state.
+
 - **SpellGuidancePayload + server handlers (Task 7):** New C2S network payload `SpellGuidancePayload` (record with `botAlias`, `spellType`, `destination`) registered in `Frens.java`. `SpellNavigationNetworkManager` now handles two spell types: **Remote Guidance** (consumes ender pearl from both player and bot, navigates bot to player or named base via `setReturnToBase`) and **Chorus Recall** (consumes ender pearl + chorus fruit from both, instant teleport in either direction — bot-to-player or player-to-bot). Sound effects play on cast and arrival. Added `calculateDelayTicks()` stub to `NavigationArtifactService` for Task 8's delayed-travel system.
 
 ## 2026-03-12
