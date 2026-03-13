@@ -222,4 +222,22 @@ final class BotHomeCommands {
                                         context,
                                         StringArgumentType.getString(context, "target")))));
     }
+
+    static ArgumentBuilder<ServerCommandSource, ?> buildNavMode() {
+        return CommandManager.literal("nav_mode")
+                .then(CommandManager.literal("walk")
+                        .executes(context -> modCommandRegistry.executeNavModeSetTargets(context, null, "WALK"))
+                        .then(CommandManager.argument("target", StringArgumentType.string())
+                                .executes(context -> modCommandRegistry.executeNavModeSetTargets(
+                                        context,
+                                        StringArgumentType.getString(context, "target"),
+                                        "WALK"))))
+                .then(CommandManager.literal("teleport")
+                        .executes(context -> modCommandRegistry.executeNavModeSetTargets(context, null, "TELEPORT_DELAY"))
+                        .then(CommandManager.argument("target", StringArgumentType.string())
+                                .executes(context -> modCommandRegistry.executeNavModeSetTargets(
+                                        context,
+                                        StringArgumentType.getString(context, "target"),
+                                        "TELEPORT_DELAY"))));
+    }
 }
