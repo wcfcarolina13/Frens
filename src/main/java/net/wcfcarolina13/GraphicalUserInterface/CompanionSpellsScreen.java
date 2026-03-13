@@ -27,17 +27,26 @@ public class CompanionSpellsScreen extends Screen {
     private ButtonWidget comeBtn;
     private ButtonWidget summonBtn;
     private ButtonWidget homeBtn;
+    private ButtonWidget guidanceBtn;
+    private ButtonWidget recallBtn;
     private ButtonWidget openInvBtn;
 
     private static final class AccessState {
         final boolean full;
         final boolean eye;
         final boolean horn;
+        final boolean playerHasPearl;
+        final boolean playerHasChorus;
+        final int botNavTier; // 0=NONE, 1=BASIC, 2=ENHANCED
 
-        private AccessState(boolean full, boolean eye, boolean horn) {
+        private AccessState(boolean full, boolean eye, boolean horn,
+                            boolean playerHasPearl, boolean playerHasChorus, int botNavTier) {
             this.full = full;
             this.eye = eye;
             this.horn = horn;
+            this.playerHasPearl = playerHasPearl;
+            this.playerHasChorus = playerHasChorus;
+            this.botNavTier = botNavTier;
         }
     }
 
@@ -68,12 +77,22 @@ public class CompanionSpellsScreen extends Screen {
                 .dimensions(cx - w / 2, top + 2 * (h + gap), w, h)
                 .build());
 
-        openInvBtn = this.addDrawableChild(ButtonWidget.builder(Text.literal("Remote Inventory"), (btn) -> sendSpell(withBotAlias("bot companion open")))
+        guidanceBtn = this.addDrawableChild(ButtonWidget.builder(
+                Text.literal("Remote Guidance"), (btn) -> openGuidanceConfirm())
                 .dimensions(cx - w / 2, top + 3 * (h + gap), w, h)
                 .build());
 
+        recallBtn = this.addDrawableChild(ButtonWidget.builder(
+                Text.literal("Chorus Recall"), (btn) -> openRecallConfirm())
+                .dimensions(cx - w / 2, top + 4 * (h + gap), w, h)
+                .build());
+
+        openInvBtn = this.addDrawableChild(ButtonWidget.builder(Text.literal("Remote Inventory"), (btn) -> sendSpell(withBotAlias("bot companion open")))
+                .dimensions(cx - w / 2, top + 5 * (h + gap), w, h)
+                .build());
+
         this.addDrawableChild(ButtonWidget.builder(Text.literal("Back"), (btn) -> close())
-                .dimensions(cx - w / 2, top + 4 * (h + gap) + 10, w, h)
+                .dimensions(cx - w / 2, top + 6 * (h + gap) + 10, w, h)
                 .build());
 
         refreshEnabledState();
@@ -90,20 +109,25 @@ public class CompanionSpellsScreen extends Screen {
         boolean eyeReady = state.eye && !FrensClient.isEyeSpellOnCooldown();
         if (comeBtn != null) comeBtn.active = state.full || state.horn;
         if (summonBtn != null) summonBtn.active = state.full || eyeReady;
-        if (homeBtn != null) homeBtn.active = state.full;
+        if (homeBtn != null) homeBtn.active = state.full || state.botNavTier >= 1;
+        if (guidanceBtn != null) guidanceBtn.active = state.full || state.playerHasPearl;
+        if (recallBtn != null) recallBtn.active = state.full || state.playerHasChorus;
         if (openInvBtn != null) openInvBtn.active = state.full;
     }
 
     private AccessState getAccessState() {
         MinecraftClient client = this.client;
         if (client == null || client.player == null) {
-            return new AccessState(false, false, false);
+            return new AccessState(false, false, false, false, false, 0);
         }
 
         boolean full = isNearEnchantingTable(client, 4) || hasSpellbookToken(client);
         boolean eye = !full && hasEyeOfEnderToken(client);
         boolean horn = !full && hasGoatHornToken(client);
-        return new AccessState(full, eye, horn);
+        boolean playerHasPearl = hasEnderPearlInInventory(client);
+        boolean playerHasChorus = playerHasPearl && hasChorusFruitInInventory(client);
+        int botNavTier = FrensClient.getCachedBotNavTier();
+        return new AccessState(full, eye, horn, playerHasPearl, playerHasChorus, botNavTier);
     }
 
     private boolean isNearEnchantingTable(MinecraftClient client, int radius) {
@@ -187,6 +211,38 @@ public class CompanionSpellsScreen extends Screen {
             }
         }
         return false;
+    }
+
+    private boolean hasEnderPearlInInventory(MinecraftClient client) {
+        if (client == null || client.player == null) return false;
+        var inv = client.player.getInventory();
+        for (int i = 0; i < inv.size(); i++) {
+            var stack = inv.getStack(i);
+            if (stack != null && !stack.isEmpty() && stack.isOf(Items.ENDER_PEARL)) return true;
+        }
+        return false;
+    }
+
+    private boolean hasChorusFruitInInventory(MinecraftClient client) {
+        if (client == null || client.player == null) return false;
+        var inv = client.player.getInventory();
+        for (int i = 0; i < inv.size(); i++) {
+            var stack = inv.getStack(i);
+            if (stack != null && !stack.isEmpty() && stack.isOf(Items.CHORUS_FRUIT)) return true;
+        }
+        return false;
+    }
+
+    private void openGuidanceConfirm() {
+        if (this.client != null) {
+            this.client.setScreen(new NavigationConfirmScreen(this, botAlias, "guidance"));
+        }
+    }
+
+    private void openRecallConfirm() {
+        if (this.client != null) {
+            this.client.setScreen(new NavigationConfirmScreen(this, botAlias, "recall"));
+        }
     }
 
     private void castSummon() {

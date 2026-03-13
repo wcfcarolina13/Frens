@@ -216,6 +216,15 @@ public class FrensClient implements ClientModInitializer {
         eyeSpellCooldownUntilMs = System.currentTimeMillis() + 60_000L;
     }
 
+    /**
+     * Returns the cached navigation tier for the current companion bot.
+     * 0 = NONE, 1 = BASIC, 2 = ENHANCED.
+     * Stub implementation — full implementation comes in Task 11.
+     */
+    public static int getCachedBotNavTier() {
+        return 0;
+    }
+
     private static boolean isGameplayTipsEnabled() {
         return Frens.CONFIG == null || Frens.CONFIG.isGameplayTipsEnabled();
     }
