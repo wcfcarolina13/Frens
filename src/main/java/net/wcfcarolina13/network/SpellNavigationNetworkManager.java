@@ -9,10 +9,12 @@ import net.minecraft.sound.SoundCategory;
 import net.minecraft.sound.SoundEvents;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
+import net.minecraft.text.Text;
 import net.wcfcarolina13.ChatUtils.ChatUtils;
 import net.wcfcarolina13.GameAI.BotEventHandler;
 import net.wcfcarolina13.GameAI.services.BotHomeService;
 import net.wcfcarolina13.GameAI.services.NavigationArtifactService;
+import net.wcfcarolina13.GameAI.services.TravelMountHandler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -152,6 +154,27 @@ public final class SpellNavigationNetworkManager {
             return;
         }
 
+        // ── Mount evaluation (bot_to_player only) ────────────────────────
+        // Must run BEFORE consuming items so refusals don't waste reagents.
+        TravelMountHandler.MountTravelResult mountResult = null;
+        if ("bot_to_player".equalsIgnoreCase(direction)) {
+            ServerWorld targetWorld = (ServerWorld) commander.getEntityWorld();
+            BlockPos targetPos = commander.getBlockPos();
+            mountResult = TravelMountHandler.evaluateTravel(
+                    bot, targetPos, targetWorld.getRegistryKey(), targetWorld);
+
+            switch (mountResult.decision()) {
+                case REFUSE_FULL_INVENTORY, REFUSE_NO_ROOM_AT_DEST, REFUSE_CROSS_DIM_ANIMAL -> {
+                    commander.sendMessage(Text.literal("\u00A7c" + mountResult.message()), false);
+                    return;
+                }
+                case TETHERED_CROSS_DIM -> {
+                    commander.sendMessage(Text.literal("\u00A7e" + mountResult.message()), false);
+                }
+                default -> {}
+            }
+        }
+
         // Consume all 4 items (pearl + chorus from both)
         NavigationArtifactService.consumeItem(commander, Items.ENDER_PEARL);
         NavigationArtifactService.consumeItem(commander, Items.CHORUS_FRUIT);
@@ -169,6 +192,14 @@ public final class SpellNavigationNetworkManager {
             teleportEntity(bot, commanderWorld, commander.getBlockPos(), commander.getYaw(), commander.getPitch());
             LOGGER.info("Chorus Recall: teleported bot '{}' to player {}", bot.getName().getString(),
                     commander.getName().getString());
+
+            // Co-teleport animal mount if applicable
+            if (mountResult != null
+                    && mountResult.decision() == TravelMountHandler.MountTravelDecision.PROCEED_WITH_ANIMAL
+                    && mountResult.mountEntity() != null) {
+                TravelMountHandler.teleportAnimalWithBot(bot, mountResult.mountEntity(),
+                        commanderWorld, commander.getBlockPos());
+            }
         } else if ("player_to_bot".equalsIgnoreCase(direction)) {
             // Teleport commander to bot
             ServerWorld botWorld = (ServerWorld) bot.getEntityWorld();
