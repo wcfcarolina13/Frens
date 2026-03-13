@@ -142,6 +142,13 @@ public final class NavigationArtifactService {
     /** Bots currently in transit, keyed by bot UUID. */
     private static final Map<UUID, PendingTravel> PENDING_TRAVELS = new ConcurrentHashMap<>();
 
+    /** Retry counts for failed respawn attempts, keyed by bot UUID. Max 3 retries. */
+    private static final Map<UUID, Integer> RESPAWN_RETRY_COUNTS = new ConcurrentHashMap<>();
+    private static final int MAX_RESPAWN_RETRIES = 3;
+
+    /** Messages queued for owners who were offline when the notification was sent. */
+    private static final Map<UUID, List<String>> QUEUED_NOTIFICATIONS = new ConcurrentHashMap<>();
+
     /** Check if a bot is currently in transit. */
     public static boolean isTraveling(UUID botUuid) {
         return botUuid != null && PENDING_TRAVELS.containsKey(botUuid);
@@ -218,16 +225,10 @@ public final class NavigationArtifactService {
                 botAlias, destination.toShortString(),
                 dimension.getValue(), delaySeconds, delayTicks);
 
-        // Notify the owner that the bot has departed.
-        if (ownerUuid != null) {
-            ServerPlayerEntity owner = server.getPlayerManager().getPlayer(ownerUuid);
-            if (owner != null) {
-                owner.sendMessage(
-                        Text.literal("\u00A7e" + botAlias + " has departed and will arrive in ~"
-                                + delaySeconds + " seconds.\u00A7r"),
-                        false);
-            }
-        }
+        // Notify the owner that the bot has departed (queues if offline).
+        notifyOwner(server, ownerUuid,
+                "\u00A7e" + botAlias + " has departed and will arrive in ~"
+                + delaySeconds + " seconds.\u00A7r");
 
         flushPendingTravels();
     }
@@ -247,13 +248,28 @@ public final class NavigationArtifactService {
             Map.Entry<UUID, PendingTravel> entry = it.next();
             PendingTravel travel = entry.getValue();
             if (now >= travel.arrivalTick()) {
-                it.remove();
-                flushPendingTravels();
                 try {
                     respawnBotAtDestination(server, travel);
+                    // Success — remove from map and clean up retry state.
+                    it.remove();
+                    RESPAWN_RETRY_COUNTS.remove(travel.botUuid());
+                    flushPendingTravels();
                 } catch (Throwable t) {
-                    LOGGER.error("Failed to respawn bot '{}' at destination: {}",
-                            travel.botAlias(), t.getMessage(), t);
+                    int retries = RESPAWN_RETRY_COUNTS.merge(travel.botUuid(), 1, Integer::sum);
+                    if (retries > MAX_RESPAWN_RETRIES) {
+                        LOGGER.error("Permanently failed to respawn bot '{}' after {} retries: {}",
+                                travel.botAlias(), retries, t.getMessage(), t);
+                        it.remove();
+                        RESPAWN_RETRY_COUNTS.remove(travel.botUuid());
+                        flushPendingTravels();
+                        // Notify owner of permanent failure.
+                        notifyOwner(server, travel.ownerUuid(),
+                                "\u00A7cTravel failed: your companion " + travel.botAlias()
+                                + " could not be respawned at the destination.\u00A7r");
+                    } else {
+                        LOGGER.warn("Respawn attempt {}/{} failed for bot '{}': {} (will retry next tick)",
+                                retries, MAX_RESPAWN_RETRIES, travel.botAlias(), t.getMessage());
+                    }
                 }
             }
         }
@@ -347,18 +363,13 @@ public final class NavigationArtifactService {
                     0.8F   // pitch
             );
 
-            // Notify the owner.
-            if (travel.ownerUuid() != null) {
-                ServerPlayerEntity owner = server.getPlayerManager().getPlayer(travel.ownerUuid());
-                if (owner != null) {
-                    String msg = dimensionFallback
-                            ? "\u00A7eYour companion " + travel.botAlias()
-                              + " arrived at Overworld spawn (target dimension was unavailable).\u00A7r"
-                            : "\u00A7aYour companion " + travel.botAlias()
-                              + " has arrived at the destination.\u00A7r";
-                    owner.sendMessage(Text.literal(msg), false);
-                }
-            }
+            // Notify the owner (queues if offline).
+            String msg = dimensionFallback
+                    ? "\u00A7eYour companion " + travel.botAlias()
+                      + " arrived at Overworld spawn (target dimension was unavailable).\u00A7r"
+                    : "\u00A7aYour companion " + travel.botAlias()
+                      + " has arrived at the destination.\u00A7r";
+            notifyOwner(server, travel.ownerUuid(), msg);
 
             LOGGER.info("Bot '{}' arrived at {} in {} after {} ticks of travel.",
                     travel.botAlias(), finalDest.toShortString(), finalDim.getValue(),
@@ -376,6 +387,8 @@ public final class NavigationArtifactService {
     public static void resetSession() {
         flushPendingTravels();
         PENDING_TRAVELS.clear();
+        RESPAWN_RETRY_COUNTS.clear();
+        QUEUED_NOTIFICATIONS.clear();
     }
 
     // ── Persistence ────────────────────────────────────────────────────────
@@ -467,6 +480,30 @@ public final class NavigationArtifactService {
     }
 
     // ── Internals ─────────────────────────────────────────────────────────
+
+    /** Send a message to a player if online, otherwise queue it for delivery on next login. */
+    private static void notifyOwner(MinecraftServer server, UUID ownerUuid, String message) {
+        if (server == null || ownerUuid == null) return;
+        ServerPlayerEntity owner = server.getPlayerManager().getPlayer(ownerUuid);
+        if (owner != null) {
+            owner.sendMessage(Text.literal(message), false);
+        } else {
+            QUEUED_NOTIFICATIONS.computeIfAbsent(ownerUuid, k -> new ArrayList<>()).add(message);
+        }
+    }
+
+    /**
+     * Send all queued travel notifications to a player who just joined.
+     * Call from {@code Frens.java} ServerPlayConnectionEvents.JOIN handler.
+     */
+    public static void drainQueuedNotifications(ServerPlayerEntity player) {
+        if (player == null) return;
+        List<String> messages = QUEUED_NOTIFICATIONS.remove(player.getUuid());
+        if (messages == null || messages.isEmpty()) return;
+        for (String msg : messages) {
+            player.sendMessage(Text.literal(msg), false);
+        }
+    }
 
     private static boolean hasItemInInventory(ServerPlayerEntity player, net.minecraft.item.Item item) {
         if (player == null) return false;

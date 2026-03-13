@@ -642,6 +642,8 @@ public class Frens implements ModInitializer {
             // Sync survival recruitment state to real players on join.
             if (!(player instanceof net.wcfcarolina13.Entity.createFakePlayer)) {
                 net.wcfcarolina13.GameAI.services.SurvivalRecruitmentService.sendRecruitmentState(player);
+                // Deliver any travel notifications queued while this player was offline.
+                net.wcfcarolina13.GameAI.services.NavigationArtifactService.drainQueuedNotifications(player);
             }
             
             // Check if bot spawned in a wall and needs to dig out
