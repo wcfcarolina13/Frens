@@ -1,5 +1,6 @@
 package net.wcfcarolina13.GameAI.services;
 
+import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
@@ -9,10 +10,12 @@ import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.World;
 import net.wcfcarolina13.GameAI.BotEventHandler;
 import net.wcfcarolina13.GameAI.services.BotCommandStateService;
+import net.wcfcarolina13.network.NavigationRequestPayload;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
@@ -165,19 +168,56 @@ public final class BotAutoReturnSunsetService {
 
             LOGGER.info("Auto-return at sunset triggered for {} (day={} tod={})", bot.getName().getString(), day, tod);
 
-            // Choose where to return.
-            BlockPos homePos = resolveSunsetHomeTarget(bot, world);
-            if (homePos != null) {
-                BotEventHandler.setReturnToBase(bot, Vec3d.ofCenter(homePos));
-            } else {
-                BotEventHandler.setReturnToBase(bot, (ServerPlayerEntity) null);
+            // If the owner is online, send a non-obstructive HUD notification instead of
+            // directly triggering the return.  The player can Accept (which triggers
+            // setReturnToBase via SpellNavigationNetworkManager) or Dismiss.
+            boolean notifiedOwner = false;
+            try {
+                ServerPlayerEntity owner = CompanionCommunicationPolicy.resolveController(server, bot);
+                if (owner != null && !owner.isRemoved()) {
+                    String alias = bot.getName().getString();
+                    Optional<BlockPos> homeOpt = BotHomeService.resolveHomeTarget(bot);
+                    if (homeOpt.isPresent()) {
+                        BlockPos home = homeOpt.get();
+                        double dist = Math.sqrt(bot.squaredDistanceTo(Vec3d.ofCenter(home)));
+                        boolean crossDim = false; // Auto-return is same-dimension (Overworld gate above)
+                        int seconds = NavigationArtifactService.calculateDelayTicks(dist, crossDim) / 20;
+                        ServerPlayNetworking.send(owner, new NavigationRequestPayload(alias, "home", seconds));
+                        notifiedOwner = true;
+                        LOGGER.info("Sent sunset auto-return notification to {} for bot {}",
+                                owner.getName().getString(), alias);
+                    }
+                }
+            } catch (Throwable t) {
+                LOGGER.debug("Failed to send sunset notification for {}: {}", bot.getName().getString(), t.getMessage());
             }
 
-            // Track where "home" is so we can attempt sleep once the bot arrives.
-            BotCommandStateService.State st = BotCommandStateService.stateFor(bot);
-            Vec3d baseTarget = st != null ? st.baseTarget : null;
-            if (baseTarget != null) {
-                PENDING_SLEEP.put(bot.getUuid(), new PendingSleep(baseTarget, serverTick, day, serverTick + 200L));
+            if (notifiedOwner) {
+                // Owner was notified — don't auto-return yet.  The player will Accept
+                // (handled by SpellNavigationNetworkManager) or Dismiss.  Either way,
+                // we still register a pending-sleep entry so that if the bot DOES arrive
+                // home (via accepted response), the sleep logic can kick in.
+                Optional<BlockPos> homeOpt = BotHomeService.resolveHomeTarget(bot);
+                if (homeOpt.isPresent()) {
+                    Vec3d homeCenter = Vec3d.ofCenter(homeOpt.get());
+                    PENDING_SLEEP.put(bot.getUuid(), new PendingSleep(homeCenter, serverTick, day, serverTick + 200L));
+                }
+            } else {
+                // Fallback: owner offline or no home resolved — proceed with direct return
+                // (existing behavior).
+                BlockPos homePos = resolveSunsetHomeTarget(bot, world);
+                if (homePos != null) {
+                    BotEventHandler.setReturnToBase(bot, Vec3d.ofCenter(homePos));
+                } else {
+                    BotEventHandler.setReturnToBase(bot, (ServerPlayerEntity) null);
+                }
+
+                // Track where "home" is so we can attempt sleep once the bot arrives.
+                BotCommandStateService.State st = BotCommandStateService.stateFor(bot);
+                Vec3d baseTarget = st != null ? st.baseTarget : null;
+                if (baseTarget != null) {
+                    PENDING_SLEEP.put(bot.getUuid(), new PendingSleep(baseTarget, serverTick, day, serverTick + 200L));
+                }
             }
         }
     }
