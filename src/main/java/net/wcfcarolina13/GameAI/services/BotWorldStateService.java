@@ -146,6 +146,21 @@ public final class BotWorldStateService {
         flush();
     }
 
+    /**
+     * Write a position directly without needing a live {@link ServerPlayerEntity}.
+     * Used by the delayed-travel system to pre-write the destination as the bot's
+     * saved position before removing the bot from the world.
+     */
+    public static void saveStateManual(MinecraftServer server, String alias,
+                                       double x, double y, double z, float yaw, float pitch) {
+        if (server == null || alias == null || alias.isBlank()) return;
+        ensureLoaded();
+        String key = worldKey(server);
+        Map<String, BotState> worldMap = STATE.computeIfAbsent(normalizeAlias(alias), k -> new HashMap<>());
+        worldMap.put(key, new BotState(x, y, z, yaw, Math.max(-90.0F, Math.min(90.0F, pitch))));
+        flush();
+    }
+
     public static void saveAll(MinecraftServer server) {
         if (server == null) return;
         ensureLoaded();

@@ -142,18 +142,24 @@ public final class BotPersistenceService {
                     shouldLoadSnapshot,
                     server.getTicks(),
                     vitalsSnapshot(bot));
-                BotWorldStateService.loadState(server, bot.getName().getString()).ifPresentOrElse(state -> {
-                    LOGGER.info("Restoring {} to last position in world {}: {},{},{}, yaw={}, pitch={}",
-                            bot.getName().getString(),
-                            BotWorldStateService.currentWorldKey(server),
-                            state.x(), state.y(), state.z(), state.yaw(), state.pitch());
-                    float clampedPitch = Math.max(-90.0F, Math.min(90.0F, state.pitch()));
-                    bot.refreshPositionAndAngles(state.x(), state.y(), state.z(), state.yaw(), clampedPitch);
-                }, () -> {
-                LOGGER.info("No prior world-state for {} in world {}; resetting pitch to 0",
-                        bot.getName().getString(), BotWorldStateService.currentWorldKey(server));
-                bot.setPitch(0.0F);
-            });
+                // Skip position restore if the bot is mid-travel (delayed teleport).
+                // The travel system will teleport the bot to the destination on arrival.
+                if (NavigationArtifactService.isTraveling(bot.getUuid())) {
+                    LOGGER.info("Skipping position restore for {} — bot is mid-travel", bot.getName().getString());
+                } else {
+                    BotWorldStateService.loadState(server, bot.getName().getString()).ifPresentOrElse(state -> {
+                        LOGGER.info("Restoring {} to last position in world {}: {},{},{}, yaw={}, pitch={}",
+                                bot.getName().getString(),
+                                BotWorldStateService.currentWorldKey(server),
+                                state.x(), state.y(), state.z(), state.yaw(), state.pitch());
+                        float clampedPitch = Math.max(-90.0F, Math.min(90.0F, state.pitch()));
+                        bot.refreshPositionAndAngles(state.x(), state.y(), state.z(), state.yaw(), clampedPitch);
+                    }, () -> {
+                        LOGGER.info("No prior world-state for {} in world {}; resetting pitch to 0",
+                                bot.getName().getString(), BotWorldStateService.currentWorldKey(server));
+                        bot.setPitch(0.0F);
+                    });
+                }
                 // Safety: if pitch is at an extreme after restore (looking straight up/down), normalize it.
                 // This catches stale world-state files that saved a bugged -90 pitch.
                 if (Math.abs(bot.getPitch()) > 80.0F) {

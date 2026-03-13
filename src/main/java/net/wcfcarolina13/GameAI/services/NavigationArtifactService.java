@@ -187,6 +187,12 @@ public final class NavigationArtifactService {
             state.mode = BotEventHandler.Mode.TRAVELING;
         }
 
+        // Pre-write destination as the bot's saved world-state position. This is a safety
+        // net: if onBotJoin's isTraveling guard doesn't fire, the bot restores to the
+        // destination rather than the departure point.
+        BotWorldStateService.saveStateManual(server, botAlias,
+                destination.getX() + 0.5, destination.getY(), destination.getZ() + 0.5, 0, 0);
+
         // Persist bot state (inventory, position) before removal so it survives the trip.
         // Save explicitly, then disconnect the bot cleanly.
         try {
