@@ -718,6 +718,12 @@ public final class BotDialogueSounds {
         return SOUND_EVENTS.get(path);
     }
 
+    // Spell sound helpers — vanilla SoundEvents, not registered via sounds.json
+    public static final net.minecraft.sound.SoundEvent SPELL_GUIDANCE_PROMPT = net.minecraft.sound.SoundEvents.BLOCK_AMETHYST_BLOCK_CHIME;
+    public static final net.minecraft.sound.SoundEvent SPELL_GUIDANCE_ACCEPT = net.minecraft.sound.SoundEvents.ENTITY_ENDER_EYE_LAUNCH;
+    public static final net.minecraft.sound.SoundEvent SPELL_GUIDANCE_CONSUME = net.minecraft.sound.SoundEvents.ENTITY_ENDER_PEARL_THROW;
+    public static final net.minecraft.sound.SoundEvent SPELL_CHORUS_RECALL = net.minecraft.sound.SoundEvents.ENTITY_ENDERMAN_TELEPORT;
+
     /**
      * Initialize and register all sound events with the game registry.
      * Call this from the mod initializer.
