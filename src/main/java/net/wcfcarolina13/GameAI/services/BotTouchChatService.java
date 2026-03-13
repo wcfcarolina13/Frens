@@ -136,6 +136,11 @@ public final class BotTouchChatService {
                     "Nothing urgent—I'm here if you need me.",
                     "Enjoying the calm."
             );
+            case TRAVELING -> choose(
+                    "On the move — I'll catch up.",
+                    "Traveling. Back soon.",
+                    "Heading somewhere. What's up?"
+            );
             };
         }
 

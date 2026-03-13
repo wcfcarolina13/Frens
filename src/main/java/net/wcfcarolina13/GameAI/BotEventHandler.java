@@ -223,7 +223,8 @@ public class BotEventHandler {
         GUARD,
         PATROL,
         STAY,
-        RETURNING_BASE
+        RETURNING_BASE,
+        TRAVELING
     }
     private static long lastRespawnHandledTick = -1;
 
@@ -1868,7 +1869,8 @@ public class BotEventHandler {
             if (stack.isOf(net.minecraft.item.Items.COMPASS)
                     || stack.isOf(net.minecraft.item.Items.RECOVERY_COMPASS)
                     || stack.isOf(net.minecraft.item.Items.FILLED_MAP)
-                    || stack.isOf(net.minecraft.item.Items.MAP)) {
+                    || stack.isOf(net.minecraft.item.Items.MAP)
+                    || stack.isOf(net.minecraft.item.Items.ENDER_EYE)) {
                 return true;
             }
         }
