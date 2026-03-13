@@ -216,13 +216,18 @@ public class FrensClient implements ClientModInitializer {
         eyeSpellCooldownUntilMs = System.currentTimeMillis() + 60_000L;
     }
 
+    private static int cachedBotNavTier = 0;
+
     /**
      * Returns the cached navigation tier for the current companion bot.
      * 0 = NONE, 1 = BASIC, 2 = ENHANCED.
-     * Stub implementation — full implementation comes in Task 11.
      */
     public static int getCachedBotNavTier() {
-        return 0;
+        return cachedBotNavTier;
+    }
+
+    public static void setCachedBotNavTier(int tier) {
+        cachedBotNavTier = tier;
     }
 
     private static boolean isGameplayTipsEnabled() {
@@ -475,6 +480,15 @@ public class FrensClient implements ClientModInitializer {
             tickNoBotsRestoreState(client);
             if (client.currentScreen != null) {
                 return;
+            }
+
+            if (net.wcfcarolina13.GraphicalUserInterface.NavigationHudOverlay.isVisible()) {
+                long window = MinecraftClient.getInstance().getWindow().getHandle();
+                if (org.lwjgl.glfw.GLFW.glfwGetKey(window, org.lwjgl.glfw.GLFW.GLFW_KEY_Y) == org.lwjgl.glfw.GLFW.GLFW_PRESS) {
+                    net.wcfcarolina13.GraphicalUserInterface.NavigationHudOverlay.accept();
+                } else if (org.lwjgl.glfw.GLFW.glfwGetKey(window, org.lwjgl.glfw.GLFW.GLFW_KEY_N) == org.lwjgl.glfw.GLFW.GLFW_PRESS) {
+                    net.wcfcarolina13.GraphicalUserInterface.NavigationHudOverlay.dismiss();
+                }
             }
 
             if (modeSelectionAutoOpenPending && modeSelectionRequired && modeSelectionCanChoose) {
@@ -788,6 +802,18 @@ public class FrensClient implements ClientModInitializer {
             context.client().execute(() -> applyLearningSessionStatus(payload));
         });
 
+        ClientPlayNetworking.registerGlobalReceiver(net.wcfcarolina13.network.NavigationRequestPayload.ID, (payload, context) -> {
+            net.wcfcarolina13.GraphicalUserInterface.NavigationHudOverlay.show(payload.botAlias(), payload.destination(), payload.estimatedSeconds());
+            MinecraftClient mc = MinecraftClient.getInstance();
+            if (mc != null && mc.player != null) {
+                mc.player.playSound(SoundEvents.BLOCK_AMETHYST_BLOCK_CHIME, 0.8f, 1.0f);
+            }
+        });
+
+        ClientPlayNetworking.registerGlobalReceiver(net.wcfcarolina13.network.BotNavTierPayload.ID, (payload, context) -> {
+            FrensClient.setCachedBotNavTier(payload.tier());
+        });
+
         HudRenderCallback.EVENT.register((context, tickDelta) -> resetTopTipLayout(context));
         HudRenderCallback.EVENT.register((context, tickDelta) -> renderResumeDecisionHint(context));
         HudRenderCallback.EVENT.register((context, tickDelta) -> renderLeashButton(context));
@@ -804,6 +830,8 @@ public class FrensClient implements ClientModInitializer {
         HudRenderCallback.EVENT.register((context, tickDelta) -> renderLookedAtBotInventoryHint(context));
         HudRenderCallback.EVENT.register((context, tickDelta) ->
                 net.wcfcarolina13.GraphicalUserInterface.HuntTargetPickerOverlay.render(context));
+        HudRenderCallback.EVENT.register((context, tickDelta) ->
+                net.wcfcarolina13.GraphicalUserInterface.NavigationHudOverlay.render(context));
 
         // Update schematic preview box every client tick
         ClientTickEvents.END_CLIENT_TICK.register(FrensClient::updateSchematicPreviewBox);
