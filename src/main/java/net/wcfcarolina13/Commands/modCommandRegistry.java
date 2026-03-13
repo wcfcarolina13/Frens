@@ -4763,12 +4763,10 @@ public class modCommandRegistry {
         if (isNearEnchantingTable(commander, 4)) return true;
         if (hasGoatHornToken(commander)) return true;
         if (hasEyeOfEnderToken(commander)) return true;
-        if (hasEnderPearlToken(commander)) return true;
         // Bot-side checks (bidirectional)
         if (bot != null) {
             if (hasSpellbookToken(bot)) return true;
             if (hasEyeOfEnderToken(bot)) return true;
-            if (hasEnderPearlToken(bot)) return true;
         }
         return st != null && isNearCompanionAnchor(server, commander, st, 12.0D);
     }
@@ -4781,12 +4779,10 @@ public class modCommandRegistry {
         if (hasSpellbookToken(commander)) return true;
         if (isNearEnchantingTable(commander, 4)) return true;
         if (hasEyeOfEnderToken(commander)) return true;
-        if (hasEnderPearlToken(commander)) return true;
         // Bot-side checks (bidirectional)
         if (bot != null) {
             if (hasSpellbookToken(bot)) return true;
             if (hasEyeOfEnderToken(bot)) return true;
-            if (hasEnderPearlToken(bot)) return true;
         }
         return st != null && isNearCompanionAnchor(server, commander, st, 12.0D);
     }
@@ -4850,12 +4846,10 @@ public class modCommandRegistry {
         if (hasSpellbookToken(commander)) return true;
         if (isNearEnchantingTable(commander, 4)) return true;
         if (hasEyeOfEnderToken(commander)) return true;
-        if (hasEnderPearlToken(commander)) return true;
         // Bot-side checks (bidirectional)
         if (bot != null) {
             if (hasSpellbookToken(bot)) return true;
             if (hasEyeOfEnderToken(bot)) return true;
-            if (hasEnderPearlToken(bot)) return true;
         }
         return st != null && isNearCompanionAnchor(server, commander, st, 16.0D);
     }
