@@ -80,6 +80,32 @@ public final class MountPersistenceService {
                 health);
     }
 
+    /**
+     * Record a mount with explicit position coordinates (e.g., at destination rather than current pos).
+     */
+    public static void recordMountAtPosition(ServerPlayerEntity bot, Entity mount,
+                                              double x, double y, double z, boolean wasMounted) {
+        if (bot == null || mount == null || bot.getCommandSource().getServer() == null) {
+            return;
+        }
+        if (mount instanceof MobEntity mob && !mob.isPersistent()) {
+            mob.setPersistent();
+        }
+        ensureLoaded();
+        String alias = bot.getName().getString().toLowerCase();
+        String saveWorldKey = BotWorldStateService.currentWorldKey(bot.getCommandSource().getServer());
+        String worldId = mount.getEntityWorld().getRegistryKey().getValue().toString();
+        String mountType = EntityType.getId(mount.getType()).toString();
+        boolean saddled = mount instanceof MobEntity mob && mob.hasSaddleEquipped();
+        float health = mount instanceof LivingEntity living ? living.getHealth() : -1.0f;
+        MountState state = new MountState(mount.getUuid(), worldId, x, y, z,
+                mountType, saddled, health, wasMounted);
+        STATE.computeIfAbsent(alias, k -> new HashMap<>()).put(saveWorldKey, state);
+        flush();
+        LOGGER.info("Mount record (manual pos): bot={} mount={} type={} pos=({},{},{}) wasMounted={}",
+                alias, mount.getUuid(), mountType, (int)x, (int)y, (int)z, wasMounted);
+    }
+
     public static void onBotJoin(ServerPlayerEntity bot) {
         if (bot == null) {
             return;

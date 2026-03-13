@@ -10,6 +10,7 @@ import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.World;
 import net.wcfcarolina13.GameAI.BotEventHandler;
 import net.wcfcarolina13.GameAI.services.BotCommandStateService;
+import net.wcfcarolina13.GameAI.services.TravelMountHandler;
 import net.wcfcarolina13.network.NavigationRequestPayload;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -205,6 +206,12 @@ public final class BotAutoReturnSunsetService {
             } else {
                 // Fallback: owner offline or no home resolved — proceed with direct return
                 // (existing behavior).
+
+                // Harden mount against despawn during the return trip.
+                if (bot.hasVehicle()) {
+                    TravelMountHandler.ensureMountPersistence(bot.getVehicle());
+                }
+
                 BlockPos homePos = resolveSunsetHomeTarget(bot, world);
                 if (homePos != null) {
                     BotEventHandler.setReturnToBase(bot, Vec3d.ofCenter(homePos));
