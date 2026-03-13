@@ -259,18 +259,31 @@ public final class NavigationArtifactService {
      * the bot with mod systems, and notifies the owner.
      */
     private static void respawnBotAtDestination(MinecraftServer server, PendingTravel travel) {
+        final boolean dimensionFallback;
+        final ServerWorld finalWorld;
+        final BlockPos finalDest;
+        final RegistryKey<World> finalDim;
+
         ServerWorld targetWorld = server.getWorld(travel.dimension());
         if (targetWorld == null) {
-            LOGGER.error("Cannot respawn bot '{}': target dimension {} not found.",
-                    travel.botAlias(), travel.dimension().getValue());
-            return;
+            LOGGER.warn("Target dimension {} unloaded for bot '{}'; falling back to Overworld spawn.",
+                    travel.dimension().getValue(), travel.botAlias());
+            targetWorld = server.getOverworld();
+            finalWorld = targetWorld;
+            net.minecraft.world.WorldProperties.SpawnPoint sp = targetWorld.getSpawnPoint();
+            finalDest = (sp != null && sp.getPos() != null) ? sp.getPos() : BlockPos.ORIGIN;
+            finalDim = World.OVERWORLD;
+            dimensionFallback = true;
+        } else {
+            finalWorld = targetWorld;
+            finalDest = travel.destination();
+            finalDim = travel.dimension();
+            dimensionFallback = false;
         }
-
-        BlockPos dest = travel.destination();
-        Vec3d spawnPos = Vec3d.ofBottomCenter(dest);
+        final Vec3d spawnPos = Vec3d.ofBottomCenter(finalDest);
 
         LOGGER.info("Respawning bot '{}' at {} in {}",
-                travel.botAlias(), dest.toShortString(), travel.dimension().getValue());
+                travel.botAlias(), finalDest.toShortString(), finalDim.getValue());
 
         // Create the fake player at the destination.
         // createFake handles GameProfile resolution, skin, connection, and teleport.
@@ -280,7 +293,7 @@ public final class NavigationArtifactService {
                 spawnPos,
                 0.0,   // yaw — will face north; owner can adjust
                 0.0,   // pitch
-                travel.dimension(),
+                finalDim,
                 GameMode.SURVIVAL,
                 false   // not flying
         );
@@ -295,7 +308,7 @@ public final class NavigationArtifactService {
             }
 
             // Teleport to exact destination in case onBotJoin restored a stale position.
-            bot.teleport(targetWorld, spawnPos.x, spawnPos.y, spawnPos.z,
+            bot.teleport(finalWorld, spawnPos.x, spawnPos.y, spawnPos.z,
                     java.util.Set.of(), 0.0F, 0.0F, true);
 
             // Register with mod systems.
@@ -319,9 +332,9 @@ public final class NavigationArtifactService {
             }
 
             // Play arrival sound at the destination.
-            targetWorld.playSound(
+            finalWorld.playSound(
                     null,  // all nearby players hear it
-                    dest,
+                    finalDest,
                     SoundEvents.ENTITY_ENDER_PEARL_THROW,
                     SoundCategory.PLAYERS,
                     1.0F,  // volume
@@ -332,17 +345,31 @@ public final class NavigationArtifactService {
             if (travel.ownerUuid() != null) {
                 ServerPlayerEntity owner = server.getPlayerManager().getPlayer(travel.ownerUuid());
                 if (owner != null) {
-                    owner.sendMessage(
-                            Text.literal("\u00A7aYour companion " + travel.botAlias()
-                                    + " has arrived at the destination.\u00A7r"),
-                            false);
+                    String msg = dimensionFallback
+                            ? "\u00A7eYour companion " + travel.botAlias()
+                              + " arrived at Overworld spawn (target dimension was unavailable).\u00A7r"
+                            : "\u00A7aYour companion " + travel.botAlias()
+                              + " has arrived at the destination.\u00A7r";
+                    owner.sendMessage(Text.literal(msg), false);
                 }
             }
 
             LOGGER.info("Bot '{}' arrived at {} in {} after {} ticks of travel.",
-                    travel.botAlias(), dest.toShortString(), travel.dimension().getValue(),
+                    travel.botAlias(), finalDest.toShortString(), finalDim.getValue(),
                     travel.arrivalTick() - travel.departureTick());
         });
+    }
+
+    // ── Session lifecycle ──────────────────────────────────────────────────
+
+    /**
+     * Flush pending travels to disk, then clear all in-memory state.
+     * Called from {@code Frens.java} SERVER_STOPPED to prevent stale state
+     * leaking across integrated-server world reloads.
+     */
+    public static void resetSession() {
+        flushPendingTravels();
+        PENDING_TRAVELS.clear();
     }
 
     // ── Persistence ────────────────────────────────────────────────────────

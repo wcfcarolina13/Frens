@@ -631,6 +631,8 @@ public class Frens implements ModInitializer {
             }
             MODEL_LOAD_ENQUEUED.set(false);
             net.wcfcarolina13.GameAI.services.BotControlApplier.resetSession();
+            // Flush pending bot travels to disk, then clear in-memory state.
+            net.wcfcarolina13.GameAI.services.NavigationArtifactService.resetSession();
         });
 
         ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> {
