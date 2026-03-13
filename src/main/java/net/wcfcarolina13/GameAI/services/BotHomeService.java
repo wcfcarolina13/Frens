@@ -486,6 +486,46 @@ public final class BotHomeService {
         }
     }
 
+    /** Get navigation mode for a bot. Returns "TELEPORT_DELAY" (default) or "WALK". */
+    public static String getNavMode(ServerPlayerEntity bot) {
+        if (bot == null || !(bot.getEntityWorld() instanceof ServerWorld world)) {
+            return "TELEPORT_DELAY";
+        }
+        MinecraftServer server = world.getServer();
+        if (server == null) return "TELEPORT_DELAY";
+        String botId = botKey(bot);
+        if (botId.isBlank()) return "TELEPORT_DELAY";
+
+        WorldData wd = worldData(server, world);
+        synchronized (LOCK) {
+            if (wd.navModeByBot == null) {
+                return "TELEPORT_DELAY";
+            }
+            return wd.navModeByBot.getOrDefault(botId, "TELEPORT_DELAY");
+        }
+    }
+
+    /** Set navigation mode for a bot ("WALK" or "TELEPORT_DELAY"). */
+    public static void setNavMode(ServerPlayerEntity bot, String mode) {
+        if (bot == null || !(bot.getEntityWorld() instanceof ServerWorld world)) {
+            return;
+        }
+        MinecraftServer server = world.getServer();
+        if (server == null) return;
+        String botId = botKey(bot);
+        if (botId.isBlank()) return;
+        String normalized = "WALK".equalsIgnoreCase(mode) ? "WALK" : "TELEPORT_DELAY";
+
+        WorldData wd = worldData(server, world);
+        synchronized (LOCK) {
+            if (wd.navModeByBot == null) {
+                wd.navModeByBot = new HashMap<>();
+            }
+            wd.navModeByBot.put(botId, normalized);
+        }
+        flush();
+    }
+
     public static boolean addBase(MinecraftServer server, ServerWorld world, String label, BlockPos pos) {
         if (server == null || world == null || label == null || label.isBlank() || pos == null) {
             return false;
@@ -805,6 +845,7 @@ public final class BotHomeService {
         Map<String, Boolean> autoHuntStarvingEnabledByBot = new HashMap<>();
         Map<String, SavedBase> basesByLabel = new HashMap<>();
         Map<String, String> preferredHomeBaseByBot = new HashMap<>();
+        Map<String, String> navModeByBot = new HashMap<>();
     }
 
     private static final class SavedBase {
