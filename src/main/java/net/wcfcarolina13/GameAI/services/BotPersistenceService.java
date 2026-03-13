@@ -147,8 +147,19 @@ public final class BotPersistenceService {
                             bot.getName().getString(),
                             BotWorldStateService.currentWorldKey(server),
                             state.x(), state.y(), state.z(), state.yaw(), state.pitch());
-                    bot.refreshPositionAndAngles(state.x(), state.y(), state.z(), state.yaw(), state.pitch());
-                }, () -> LOGGER.info("No prior world-state for {} in world {}", bot.getName().getString(), BotWorldStateService.currentWorldKey(server)));
+                    float clampedPitch = Math.max(-90.0F, Math.min(90.0F, state.pitch()));
+                    bot.refreshPositionAndAngles(state.x(), state.y(), state.z(), state.yaw(), clampedPitch);
+                }, () -> {
+                LOGGER.info("No prior world-state for {} in world {}; resetting pitch to 0",
+                        bot.getName().getString(), BotWorldStateService.currentWorldKey(server));
+                bot.setPitch(0.0F);
+            });
+                // Safety: if pitch is at an extreme after restore (looking straight up/down), normalize it.
+                // This catches stale world-state files that saved a bugged -90 pitch.
+                if (Math.abs(bot.getPitch()) > 80.0F) {
+                    LOGGER.warn("Clamping extreme pitch {} for {} after join restore", bot.getPitch(), bot.getName().getString());
+                    bot.setPitch(0.0F);
+                }
                 MountPersistenceService.onBotJoin(bot);
                 LAST_APPLIED_RESTORE_SEQUENCE.put(bot.getUuid(), restoreSeq);
                 LOGGER.info("[PersistCheck] join-restore-complete bot={} tick={} pos={} vitals={}",
@@ -225,8 +236,9 @@ public final class BotPersistenceService {
         boolean autoRespawn = false;
         try {
             String alias = bot.getName().getString();
+            String wk = net.wcfcarolina13.GameAI.services.BotWorldStateService.currentWorldKey(server);
             ManualConfig.BotControlSettings ctrl = Frens.CONFIG != null
-                    ? Frens.CONFIG.getEffectiveBotControl(alias) : null;
+                    ? Frens.CONFIG.getEffectiveBotControl(alias, wk) : null;
             if (ctrl != null) {
                 autoRespawn = ctrl.isAutoRespawnOnDeath();
             }
@@ -244,7 +256,19 @@ public final class BotPersistenceService {
         } catch (Throwable t) {
             LOGGER.debug("Failed to clear world state for {} after death: {}", bot.getName().getString(), t.getMessage());
         }
-        
+        // Clear auto-saved BotSpawn so the respawn chain falls through to failsafe (world_spawn).
+        // Without this, the bot respawns near its death location because BotSpawn was auto-recorded
+        // during the last autosave tick.
+        try {
+            String deathAlias = bot.getName().getString();
+            String deathWk = BotWorldStateService.currentWorldKey(server);
+            Frens.CONFIG.clearBotSpawn(deathAlias, deathWk);
+            Frens.CONFIG.save();
+            LOGGER.info("Cleared BotSpawn config for {} after death.", deathAlias);
+        } catch (Throwable t) {
+            LOGGER.debug("Failed to clear BotSpawn for {}: {}", bot.getName().getString(), t.getMessage());
+        }
+
         SkillResumeService.handleDeath(bot);
         LAST_SAVE_TICK.remove(bot.getUuid());
         RESTORE_SEQUENCE.remove(bot.getUuid());
@@ -551,6 +575,7 @@ public final class BotPersistenceService {
             world = server.getOverworld();
         }
         String dimensionId = world.getRegistryKey().getValue().toString();
+        String worldKey = BotWorldStateService.currentWorldKey(server);
         ManualConfig.BotSpawn spawn = new ManualConfig.BotSpawn(
                 server.getSaveProperties().getLevelName(),
                 dimensionId,
@@ -558,9 +583,9 @@ public final class BotPersistenceService {
                 bot.getY(),
                 bot.getZ(),
                 bot.getYaw(),
-                bot.getPitch()
+                Math.max(-90.0F, Math.min(90.0F, bot.getPitch()))
         );
-        Frens.CONFIG.setBotSpawn(bot.getName().getString(), spawn);
+        Frens.CONFIG.setBotSpawn(bot.getName().getString(), worldKey, spawn);
         Frens.CONFIG.save();
     }
 

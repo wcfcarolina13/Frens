@@ -694,7 +694,7 @@ public final class BotGuideScreen extends Screen {
                                 "Stop clears the current task and lets you issue a new one."
                         ),
                         "bot stop " + target,
-                        "Shortcut: \\\\ (Stop looked-at bot)",
+                        "Shortcut: \\ (Stop looked-at bot)",
                         "cancel halt panic"
                 ),
                 new GuideTopic(
@@ -757,15 +757,16 @@ public final class BotGuideScreen extends Screen {
                 new GuideTopic(
                         "move_come",
                         "Movement",
-                        "Come (Regroup)",
-                        "Asks the companion to regroup toward you safely.",
+                    "Regroup",
+                    "Calls the companion back toward you using the safer regroup behavior.",
                         List.of(
-                                "Useful when pathing is awkward and normal follow is struggling.",
-                                "Come uses recovery logic intended for hard terrain."
+                        "Use this when follow is struggling or you want the bot to come back to you deliberately.",
+                        "Preferred command: /bot regroup. Legacy alias: /bot come.",
+                        "Safe regroup avoids the more aggressive recovery behavior used by the older come wording."
                         ),
-                        "bot companion come",
+                    "bot companion regroup (legacy: bot companion come)",
                         "No keybind by default",
-                        "regroup come stuck"
+                    "regroup come stuck follow recovery"
                 ),
                 new GuideTopic(
                         "move_return",
@@ -960,16 +961,30 @@ public final class BotGuideScreen extends Screen {
                         "No keybind by default",
                         "direct admin"
                 ),
+                    new GuideTopic(
+                        "admin_learning_mode",
+                        "Admin",
+                        "Learning Mode (Admin)",
+                        "Operator-only demonstration capture used to record player examples for later bot-control tuning.",
+                        List.of(
+                            "Admin entries like Learning Status / Start / Stop control a recording session, not normal companion progression.",
+                            "Captured traces can include movement, camera, interactions, and local context for analysis.",
+                            "Use this for testing and tuning; see the Roadmap topic for the larger ML / LLM direction."
+                        ),
+                        "bot learn status | arm | start | stop | list | report",
+                        "No keybind by default",
+                        "learning admin ml llm demo trace tuning"
+                    ),
                 new GuideTopic(
                     "roadmap_overview",
                     "Roadmap",
                     "Roadmap (High-Level)",
-                    "Short overview of near-term companion quality and dialogue priorities.",
+                    "High-level summary of what already exists, what is being polished now, and what optional AI work is planned next.",
                     List.of(
-                        "Dialogue controls: keep global per-world toggles for text, voice, or both off.",
-                        "Voice library expansion: current voiced lines ship with a male voice set.",
-                        "If players strongly request female or alternate voice packs, that work can be prioritized on the roadmap.",
-                        "UX polish: continue improving guide clarity, mode onboarding, and admin controls."
+                        "Available now: per-bot controls, recruitment progression, admin permissions, optional LLM toggles, and Learning Mode v1 demonstration capture.",
+                        "Active polish: fortify tower reliability, cavity reporting, guide clarity, keybind/help cleanup, and learning trace playtesting.",
+                        "Optional AI work: better LLM provider UX, memory/tool routing polish, and turning learning captures into safer bot-control improvements.",
+                        "Voice expansion is still on the list, but current voiced dialogue remains an optional add-on rather than a core requirement."
                     ),
                     "UI-only reference",
                     "Guide topic only",
@@ -998,17 +1013,19 @@ public final class BotGuideScreen extends Screen {
                         "Quick reference for the most-used controls.",
                         List.of(
                             "Guide -> " + guideKey + " -> open in-game companion guide",
-                                "Follow -> ` -> bot follow toggle <bot>",
+                                "Follow toggle -> ` -> bot follow toggle <bot>",
+                                "Go to look / context action -> - -> go_to_look, recruitment contact, or spells (depends on context)",
                             "Switch bot in inventory -> [ / ] -> previous / next companion",
                                 "Sleep -> (hold \\ then 5) -> bot sleep <bot>",
-                                "- key -> spells / go_to_look / direction confirm (contextual)",
-                                "Stop -> \\\\ -> bot stop <bot>",
+                                "Stop -> \\ -> bot stop <bot>",
+                                "Leash / tether helper -> ' -> leash action when available",
                                 "Resume -> (bind key.frens.resume) -> bot resume <bot>",
                                 "Open Spells -> (bind key.frens.open_spells) -> opens spells menu when unlocked",
-                                "Tip: hold Stop (\\\\) for the 1-0 hotkey overlay menu."
+                                "Recruit Contact -> (optional bind key.frens.recruit_contact) -> opens recruitment contact flow",
+                                "Tip: hold Stop (\\) for the 1-0 hotkey overlay menu."
                         ),
                         "bot follow toggle <bot> | bot go_to_look | bot stop <bot> | bot resume <bot>",
-                        "Minecraft Controls: Follow, Go To Look, Stop, Resume, Open Spells",
+                        "Minecraft Controls: Follow, Go To Look, Open Guide, Stop, Leash, Resume, Open Spells, Recruit Contact",
                         "shortcut hotkey keybind follow stop goto go to look"
                 )
         );

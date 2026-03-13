@@ -454,6 +454,7 @@ public class Frens implements ModInitializer {
         PayloadTypeRegistry.playC2S().register(net.wcfcarolina13.network.BaseSetPayload.ID, net.wcfcarolina13.network.BaseSetPayload.CODEC);
         PayloadTypeRegistry.playC2S().register(net.wcfcarolina13.network.BaseRemovePayload.ID, net.wcfcarolina13.network.BaseRemovePayload.CODEC);
         PayloadTypeRegistry.playC2S().register(net.wcfcarolina13.network.BaseRenamePayload.ID, net.wcfcarolina13.network.BaseRenamePayload.CODEC);
+        PayloadTypeRegistry.playC2S().register(net.wcfcarolina13.network.BaseSetRadiusPayload.ID, net.wcfcarolina13.network.BaseSetRadiusPayload.CODEC);
         PayloadTypeRegistry.playC2S().register(net.wcfcarolina13.network.BaseSetHomePayload.ID, net.wcfcarolina13.network.BaseSetHomePayload.CODEC);
         PayloadTypeRegistry.playC2S().register(net.wcfcarolina13.network.BaseGoToPayload.ID, net.wcfcarolina13.network.BaseGoToPayload.CODEC);
         PayloadTypeRegistry.playC2S().register(net.wcfcarolina13.network.BaseClaimWallPayload.ID, net.wcfcarolina13.network.BaseClaimWallPayload.CODEC);
@@ -557,6 +558,11 @@ public class Frens implements ModInitializer {
             net.wcfcarolina13.GameAI.services.BotControlApplier.applyPersistentSettings(server);
             net.wcfcarolina13.PathFinding.PathFinder.USE_BARITONE_STYLE =
                     CONFIG != null && CONFIG.isBaritonePathfinderEnabled();
+
+            if (CONFIG != null) {
+                net.wcfcarolina13.GameAI.services.CompanionSafeZoneService.setFortBufferRadius(
+                        CONFIG.getFortBufferRadius());
+            }
 
             // Load protected zones for all worlds
             server.getWorlds().forEach(world -> {
@@ -730,8 +736,10 @@ public class Frens implements ModInitializer {
                                 killer, new net.wcfcarolina13.network.HuntDiscoveryPayload(label));
                     }
                 }
-                // Combat callout: bot killed something
+                // Combat callout + kill position tracking: bot killed something
                 if (attacker instanceof ServerPlayerEntity killer2 && BotEventHandler.isRegisteredBot(killer2)) {
+                    net.minecraft.util.math.Vec3d killPos = new net.minecraft.util.math.Vec3d(dead.getX(), dead.getY(), dead.getZ());
+                    net.wcfcarolina13.GameAI.services.BotCombatCalloutService.noteKillPosition(killer2.getUuid(), killPos);
                     if (dead instanceof net.minecraft.entity.mob.HostileEntity) {
                         net.wcfcarolina13.GameAI.services.BotCombatCalloutService.onKill(killer2, dead);
                     }

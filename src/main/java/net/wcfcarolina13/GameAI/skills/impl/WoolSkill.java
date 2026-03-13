@@ -1,6 +1,7 @@
 package net.wcfcarolina13.GameAI.skills.impl;
 
 import net.minecraft.block.BlockState;
+import net.minecraft.block.Blocks;
 import net.minecraft.block.entity.ChestBlockEntity;
 import net.minecraft.entity.ItemEntity;
 import net.minecraft.entity.passive.SheepEntity;
@@ -9,6 +10,7 @@ import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
 import net.minecraft.registry.tag.BlockTags;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
@@ -19,6 +21,10 @@ import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 import net.wcfcarolina13.ChatUtils.ChatUtils;
 import net.wcfcarolina13.GameAI.BotActions;
+import net.wcfcarolina13.GameAI.BotEventHandler;
+import net.wcfcarolina13.GameAI.DropSweeper;
+import net.wcfcarolina13.GameAI.services.BotHomeService;
+import net.wcfcarolina13.GameAI.services.SafePositionService;
 import net.wcfcarolina13.GameAI.services.ToolProvisionService;
 import net.wcfcarolina13.GameAI.services.MovementService;
 import net.wcfcarolina13.GameAI.services.BlockInteractionService;
@@ -50,10 +56,8 @@ public class WoolSkill implements Skill {
     private static final int CHEST_SEARCH_RADIUS = 10;
     private static final int SUNSET_TIME_OF_DAY = 12000; // day phase; stop when sun starts going down
     private static final long MAX_JOB_MILLIS = 30 * 60_000L; // hard cap (day is ~20 minutes)
-    private static final int DROP_SWEEP_RADIUS = 18;
-    private static final int DROP_SWEEP_PASSES = 4;
     private static final int DEFAULT_MIN_WOOL = 16;
-    private static final long POST_SHEAR_SWEEP_BUDGET_MS = 9000L;
+    private static final double SHEAR_RANGE_SQ = 16.0; // 4 blocks linear — Minecraft interaction range
     private static final List<Item> DEPOSIT_PREFERRED = List.of(
             Items.COBBLESTONE, Items.COBBLED_DEEPSLATE, Items.STONE, Items.ANDESITE, Items.DIORITE, Items.GRANITE,
             Items.DIRT, Items.GRASS_BLOCK, Items.COARSE_DIRT, Items.ROOTED_DIRT, Items.SAND, Items.RED_SAND,
@@ -63,6 +67,9 @@ public class WoolSkill implements Skill {
             Items.DARK_OAK_PLANKS, Items.MANGROVE_PLANKS, Items.CHERRY_PLANKS, Items.CRIMSON_PLANKS, Items.WARPED_PLANKS
     );
     private static final Map<UUID, BlockPos> LAST_SEEN_SHEEP = new HashMap<>();
+    /** Per-bot zone visit timestamps for smarter exploration. Key = packed (cellX, cellZ), value = visit epoch ms. */
+    private static final Map<UUID, Map<Long, Long>> EXPLORED_ZONES = new HashMap<>();
+    private static final long ZONE_COOLDOWN_MS = 3 * 60_000L; // 3 minutes before revisiting a zone
 
     @Override
     public String name() {
@@ -82,8 +89,9 @@ public class WoolSkill implements Skill {
             return SkillExecutionResult.failure("Missing shears and cannot craft.");
         }
 
-        int radius = detectFenceNearby(world, bot.getBlockPos()) ? PEN_SEARCH_RADIUS : WILD_SEARCH_RADIUS;
+        int radius = detectFenceNearby(world, bot.getBlockPos()) ? PEN_SEARCH_RADIUS : parseRange(context.parameters());
         BlockPos startPos = bot.getBlockPos();
+        UUID followTargetUuid = BotEventHandler.getFollowTargetUuid(bot);
         int minWoolToCollect = parseCount(context.parameters());
         if (minWoolToCollect <= 0) {
             minWoolToCollect = DEFAULT_MIN_WOOL;
@@ -119,13 +127,20 @@ public class WoolSkill implements Skill {
             }
             int now = (int) (world.getTimeOfDay() % 24000L);
             if (now >= SUNSET_TIME_OF_DAY) {
-                ChatUtils.sendSystemMessage(source, "It's getting late; I'm returning to base.");
-                moveTo(bot, source, startPos, false);
+                ChatUtils.sendSystemMessage(source, "It's getting late; I'm heading back.");
+                returnFromWool(bot, source, startPos, followTargetUuid);
                 break;
             }
 
             if (!ensureWoolCapacityOrDeposit(bot, world, source)) {
                 break;
+            }
+
+            // Opportunistic sweep: pick up nearby drops before finding next sheep
+            if (!world.getEntitiesByClass(ItemEntity.class,
+                    Box.from(Vec3d.of(bot.getBlockPos())).expand(8, 4, 8),
+                    e -> e.isAlive()).isEmpty()) {
+                DropSweeper.sweep(source, 8.0, 4.0, 4, 3000L);
             }
 
             List<SheepEntity> candidates = visibleSheep(bot, world, radius);
@@ -149,19 +164,18 @@ public class WoolSkill implements Skill {
             LOGGER.debug("Found {} shearable sheep candidates (radius={})", candidates.size(), radius);
             SheepEntity target = candidates.get(0); // Already sorted by distance
             LAST_SEEN_SHEEP.put(bot.getUuid(), target.getBlockPos());
-            
-            if (!moveNextTo(bot, source, target.getBlockPos())) {
-                // Mark this sheep as failed and try a different one next iteration
+
+            if (!approachSheep(bot, source, target)) {
                 failedSheepIds.add(target.getUuid());
                 LOGGER.debug("Failed to reach sheep {}, marking as unreachable", target.getUuid());
                 continue;
             }
-            
+
             // Re-check if sheep is still shearable after we moved to it
             if (!target.isAlive() || !target.isShearable() || target.isBaby()) {
                 continue;
             }
-            
+
             // CRITICAL: Ensure shears are equipped before each shearing attempt
             if (!ensureShearsEquipped(bot)) {
                 LOGGER.warn("Lost shears, attempting to re-equip or craft");
@@ -169,17 +183,29 @@ public class WoolSkill implements Skill {
                     return SkillExecutionResult.failure("Lost shears and cannot replace.");
                 }
             }
-            
-            BotActions.interactEntity(bot, target, Hand.MAIN_HAND);
-            sheared++;
-            bot.swingHand(Hand.MAIN_HAND, true);
-            
-            // Give the drops a tick to spawn, then immediately collect THIS sheep's drops
-            sleep(250);
-            
-            // Collect drops BEFORE moving to next sheep - use shorter budget, focused area
-            collectImmediateDrops(bot, world, target.getBlockPos());
-            
+
+            // Final range check — interactEntity has no distance guard
+            if (bot.squaredDistanceTo(target) > SHEAR_RANGE_SQ) {
+                MovementService.nudgeTowardUntilClose(bot, target.getBlockPos(), SHEAR_RANGE_SQ, 1500L, 0.2, "wool-shear-close");
+            }
+            if (bot.squaredDistanceTo(target) > SHEAR_RANGE_SQ) {
+                failedSheepIds.add(target.getUuid());
+                continue;
+            }
+
+            boolean shearSuccess = BotActions.interactEntity(bot, target, Hand.MAIN_HAND);
+            if (shearSuccess) {
+                sheared++;
+                LOGGER.info("Sheared sheep {} (total={})", target.getUuid(), sheared);
+            } else {
+                LOGGER.debug("interactEntity returned false for sheep {}", target.getUuid());
+                continue;
+            }
+
+            // Give the drops a tick to spawn, then sweep
+            sleep(300);
+            DropSweeper.sweep(source, 8.0, 4.0, 6, 4000L);
+
             if (SkillManager.shouldAbortSkill(bot)) {
                 BotActions.stop(bot);
                 return SkillExecutionResult.failure("Wool job stopped.");
@@ -188,13 +214,13 @@ public class WoolSkill implements Skill {
             int collected = countWoolItems(bot.getInventory()) - woolAtStart;
             if (collected >= minWoolToCollect) {
                 ChatUtils.sendSystemMessage(source, "Collected at least " + minWoolToCollect + " wool; heading back.");
-                dropSweepWool(bot, world, source, bot.getBlockPos(), 7000L);
-                moveTo(bot, source, startPos, false);
+                DropSweeper.sweep(source, 14.0, 6.0, 12, 7000L);
+                returnFromWool(bot, source, startPos, followTargetUuid);
                 return SkillExecutionResult.success("Collected " + collected + " wool and sheared " + sheared + " sheep.");
             }
         }
 
-        dropSweepWool(bot, world, source, bot.getBlockPos(), 9000L);
+        DropSweeper.sweep(source, 14.0, 6.0, 12, 9000L);
 
         ensureInventorySpace(bot, world, source); // final deposit pass
 
@@ -202,6 +228,22 @@ public class WoolSkill implements Skill {
             return SkillExecutionResult.failure("No shearable sheep found nearby.");
         }
         return SkillExecutionResult.success("Sheared " + sheared + " sheep and gathered wool.");
+    }
+
+    private int parseRange(Map<String, Object> params) {
+        if (params != null) {
+            Object value = params.get("range");
+            if (value instanceof Number number) {
+                return Math.max(16, Math.min(128, number.intValue()));
+            }
+            if (value instanceof String s) {
+                try {
+                    return Math.max(16, Math.min(128, Integer.parseInt(s)));
+                } catch (NumberFormatException ignored) {
+                }
+            }
+        }
+        return WILD_SEARCH_RADIUS;
     }
 
     private int parseCount(Map<String, Object> params) {
@@ -292,43 +334,129 @@ public class WoolSkill implements Skill {
     }
 
     /**
-     * Immediately collect wool drops in a small radius around the sheared sheep.
-     * This is a quick, focused collection before moving to the next target.
+     * Approach a sheep using entity-pursuit pattern (like HuntSkill).
+     * Uses planLootApproach for initial move, then nudge pursuit to handle sheep wandering.
      */
-    private void collectImmediateDrops(ServerPlayerEntity bot, ServerWorld world, BlockPos sheepPos) {
-        // Small radius, quick collection - don't wander far
-        Box box = Box.from(Vec3d.of(sheepPos)).expand(5, 3, 5);
-        List<ItemEntity> drops = world.getEntitiesByClass(ItemEntity.class, box,
-                e -> e.getStack().getItem().getTranslationKey().contains("wool"));
-        
-        if (drops.isEmpty()) {
-            return;
+    private boolean approachSheep(ServerPlayerEntity bot, ServerCommandSource source, SheepEntity sheep) {
+        if (sheep == null || sheep.isRemoved()) {
+            return false;
         }
-        
-        drops.sort((a, b) -> Double.compare(bot.squaredDistanceTo(a), bot.squaredDistanceTo(b)));
-        
-        long deadline = System.currentTimeMillis() + 3000L; // Max 3 seconds for immediate pickup
-        for (ItemEntity drop : drops) {
-            if (System.currentTimeMillis() >= deadline) {
-                break;
+
+        // Initial approach via planLootApproach (proven pattern from HuntSkill)
+        BlockPos targetPos = sheep.getBlockPos();
+        java.util.Optional<MovementService.MovementPlan> planOpt =
+                MovementService.planLootApproach(bot, targetPos, MovementService.MovementOptions.skillLoot());
+        if (planOpt.isPresent()) {
+            MovementService.MovementResult result = MovementService.execute(source, bot, planOpt.get(), false, true);
+            if (result.success() || bot.squaredDistanceTo(sheep) <= SHEAR_RANGE_SQ) {
+                return true;
             }
+        } else {
+            // Fallback: direct pathfind to sheep position
+            moveTo(bot, source, targetPos, true);
+            if (bot.squaredDistanceTo(sheep) <= SHEAR_RANGE_SQ) {
+                return true;
+            }
+        }
+
+        // Pursuit loop: sheep may have moved while we were walking
+        long pursuitDeadline = System.currentTimeMillis() + 5000L;
+        for (int i = 0; i < 3 && System.currentTimeMillis() < pursuitDeadline; i++) {
             if (SkillManager.shouldAbortSkill(bot)) {
-                return;
+                return false;
             }
-            BlockPos dropPos = drop.getBlockPos();
-            // Only pick up drops that are reasonably close and at similar Y level
-            if (Math.abs(dropPos.getY() - bot.getBlockY()) > 2) {
-                continue;
+            if (!sheep.isAlive() || sheep.isRemoved()) {
+                return false;
             }
-            double distSq = bot.squaredDistanceTo(drop);
-            if (distSq > 49.0) { // Don't chase drops more than 7 blocks away
-                continue;
+            // Re-read sheep's CURRENT position each iteration
+            BlockPos currentPos = sheep.getBlockPos();
+            boolean close = MovementService.nudgeTowardUntilClose(
+                    bot, currentPos, SHEAR_RANGE_SQ, 1500L, 0.18, "wool-pursuit");
+            if (close || bot.squaredDistanceTo(sheep) <= SHEAR_RANGE_SQ) {
+                return true;
             }
-            
-            // Quick nudge toward drop
-            MovementService.nudgeTowardUntilClose(bot, dropPos, 1.5, 1200L, 0.2, "wool-pickup");
-            sleep(80);
         }
+
+        return bot.squaredDistanceTo(sheep) <= SHEAR_RANGE_SQ;
+    }
+
+    /**
+     * Return to the best available destination after wool collection.
+     * Priority: follow target player > home service (base/bed) > start position.
+     */
+    private void returnFromWool(ServerPlayerEntity bot, ServerCommandSource source,
+                                BlockPos startPos, UUID followTargetUuid) {
+        BlockPos returnTarget = null;
+
+        // Priority 1: return to the player we were following
+        if (followTargetUuid != null) {
+            MinecraftServer server = source.getServer();
+            if (server != null) {
+                ServerPlayerEntity commander = server.getPlayerManager().getPlayer(followTargetUuid);
+                if (commander != null && commander.isAlive() && !commander.isRemoved()) {
+                    returnTarget = commander.getBlockPos();
+                    LOGGER.info("Returning to follow target {} at {}",
+                            commander.getName().getString(), returnTarget.toShortString());
+                }
+            }
+        }
+
+        // Priority 2: home service (preferred base > last bed > nearest base)
+        if (returnTarget == null) {
+            java.util.Optional<BlockPos> homeTarget = BotHomeService.resolveHomeTarget(bot);
+            if (homeTarget.isPresent()) {
+                returnTarget = homeTarget.get();
+                LOGGER.info("Returning to home target {}", returnTarget.toShortString());
+            }
+        }
+
+        // Priority 3: original start position
+        if (returnTarget == null) {
+            returnTarget = startPos;
+            LOGGER.info("Returning to start position {}", returnTarget.toShortString());
+        }
+
+        // If return target is in water, find nearest dry shore instead
+        ServerWorld world = source.getWorld();
+        if (world.getBlockState(returnTarget).isOf(Blocks.WATER)) {
+            BlockPos shore = findNearestShore(world, returnTarget, 24);
+            if (shore != null) {
+                LOGGER.info("Return target {} is in water; rerouting to shore {}",
+                        returnTarget.toShortString(), shore.toShortString());
+                returnTarget = shore;
+            }
+        }
+
+        if (bot.getBlockPos().getSquaredDistance(returnTarget) > 16.0) {
+            moveTo(bot, source, returnTarget, false);
+        }
+    }
+
+    /**
+     * Spiral outward from a water position to find the nearest dry, standable block.
+     */
+    private BlockPos findNearestShore(ServerWorld world, BlockPos center, int maxRadius) {
+        for (int r = 1; r <= maxRadius; r++) {
+            for (int dx = -r; dx <= r; dx++) {
+                for (int dz = -r; dz <= r; dz++) {
+                    if (Math.abs(dx) != r && Math.abs(dz) != r) continue; // perimeter only
+                    BlockPos candidate = center.add(dx, 0, dz);
+                    // Search a few Y levels around center height
+                    for (int dy = -2; dy <= 2; dy++) {
+                        BlockPos check = candidate.add(0, dy, 0);
+                        BlockState feet = world.getBlockState(check);
+                        BlockState below = world.getBlockState(check.down());
+                        BlockState head = world.getBlockState(check.up());
+                        if (!feet.isOf(Blocks.WATER) && feet.isAir()
+                                && head.isAir()
+                                && !below.isAir() && below.isOpaque()) {
+                            return check;
+                        }
+                    }
+                }
+            }
+        }
+        return null;
     }
 
     private List<SheepEntity> visibleSheep(ServerPlayerEntity bot, ServerWorld world, int radius) {
@@ -348,84 +476,85 @@ public class WoolSkill implements Skill {
     private boolean exploreForSheep(ServerPlayerEntity bot, ServerWorld world, ServerCommandSource source, int radius) {
         BlockPos last = LAST_SEEN_SHEEP.get(bot.getUuid());
         BlockPos anchor = last != null ? last : bot.getBlockPos();
-        // Small spiral exploration around the last seen region (or current position).
-        int[] rings = {0, 4, 8, 12, 16};
-        for (int r : rings) {
-            for (int dx : new int[]{r, -r, 0}) {
-                for (int dz : new int[]{0, r, -r}) {
-                    if (SkillManager.shouldAbortSkill(bot)) {
-                        BotActions.stop(bot);
-                        return false;
-                    }
-                    BlockPos probe = anchor.add(dx, 0, dz);
-                    probe = probe.withY(anchor.getY());
-                    if (moveTo(bot, source, probe, true)) {
-                        if (!visibleSheep(bot, world, radius).isEmpty()) {
-                            return true;
-                        }
-                    }
+
+        Map<Long, Long> zones = EXPLORED_ZONES.computeIfAbsent(bot.getUuid(), k -> new HashMap<>());
+        long now = System.currentTimeMillis();
+
+        // Generate candidates: 8 directions at increasing radii, skip recently visited zones
+        int[] radii = {16, 32, 48, 64};
+        int[][] directions = {{1,0},{-1,0},{0,1},{0,-1},{1,1},{1,-1},{-1,1},{-1,-1}};
+
+        List<BlockPos> candidates = new ArrayList<>();
+        for (int r : radii) {
+            for (int[] dir : directions) {
+                BlockPos probe = anchor.add(dir[0] * r, 0, dir[1] * r);
+                long zoneKey = packZone(probe);
+                Long visitedAt = zones.get(zoneKey);
+                if (visitedAt == null || (now - visitedAt) > ZONE_COOLDOWN_MS) {
+                    candidates.add(probe);
                 }
             }
         }
-        // Even if we didn't find sheep, we still explored.
-        return true;
-    }
 
-    private void collectNearbyWool(ServerPlayerEntity bot, ServerWorld world) {
-        Box box = Box.from(Vec3d.of(bot.getBlockPos())).expand(6, 3, 6);
-        List<ItemEntity> drops = world.getEntitiesByClass(ItemEntity.class, box, e -> e.getStack().isOf(Items.WHITE_WOOL) || e.getStack().getItem().getTranslationKey().contains("wool"));
-        for (ItemEntity drop : drops) {
-            moveNextTo(bot, bot.getCommandSource(), drop.getBlockPos());
-            sleep(40);
+        if (candidates.isEmpty()) {
+            ChatUtils.sendSystemMessage(source, "All nearby areas explored recently; sheep may need time to regrow wool.");
+            return false;
         }
-    }
 
-    private void dropSweepWool(ServerPlayerEntity bot, ServerWorld world, ServerCommandSource source, BlockPos center, long budgetMs) {
-        long deadline = System.currentTimeMillis() + Math.max(1500L, budgetMs);
-        Map<BlockPos, Integer> attempts = new HashMap<>();
-        int emptyScans = 0;
+        // Prefer unexplored zones first, then closest to bot
+        candidates.sort((a, b) -> {
+            boolean aVisited = zones.containsKey(packZone(a));
+            boolean bVisited = zones.containsKey(packZone(b));
+            if (aVisited != bVisited) return aVisited ? 1 : -1;
+            return Double.compare(
+                    bot.getBlockPos().getSquaredDistance(a),
+                    bot.getBlockPos().getSquaredDistance(b));
+        });
 
-        while (System.currentTimeMillis() < deadline) {
+        int consecutiveFails = 0;
+        for (BlockPos probe : candidates) {
             if (SkillManager.shouldAbortSkill(bot)) {
                 BotActions.stop(bot);
-                return;
+                return false;
             }
-            Box box = Box.from(Vec3d.of(center)).expand(DROP_SWEEP_RADIUS, 6, DROP_SWEEP_RADIUS);
-            List<ItemEntity> drops = world.getEntitiesByClass(ItemEntity.class, box,
-                    e -> e.getStack().getItem().getTranslationKey().contains("wool"));
-            drops.removeIf(d -> attempts.getOrDefault(d.getBlockPos(), 0) >= 2);
-            drops.sort((a, b) -> Double.compare(bot.squaredDistanceTo(a), bot.squaredDistanceTo(b)));
-
-            if (drops.isEmpty()) {
-                emptyScans++;
-                if (emptyScans >= 2) {
-                    return;
+            probe = probe.withY(anchor.getY());
+            if (moveTo(bot, source, probe, true)) {
+                consecutiveFails = 0;
+                zones.put(packZone(probe), now);
+                if (!visibleSheep(bot, world, radius).isEmpty()) {
+                    return true;
                 }
-                sleep(160);
-                continue;
+            } else {
+                consecutiveFails++;
+                // After 2 consecutive failures, bot is likely stuck below terrain —
+                // use SafePositionService to find the surface and navigate up
+                if (consecutiveFails >= 2) {
+                    BlockPos surface = SafePositionService.findSafeSurface(
+                            world, bot.getBlockPos(), 4, 8);
+                    if (surface != null && surface.getY() > bot.getBlockY()) {
+                        LOGGER.info("Terrain recovery: bot at Y={}, surface at Y={} ({})",
+                                bot.getBlockY(), surface.getY(), surface.toShortString());
+                        if (moveTo(bot, source, surface, true)) {
+                            consecutiveFails = 0;
+                            continue; // recovered — retry exploration from surface
+                        }
+                    }
+                    // Still stuck after recovery attempt — bail out of this cycle
+                    LOGGER.warn("Exploration stuck after {} failures at Y={}; aborting explore cycle",
+                            consecutiveFails, bot.getBlockY());
+                    return true; // return true to keep the main loop alive for next iteration
+                }
             }
-            emptyScans = 0;
-
-            // Sweep what we can reach quickly; don't ping-pong between distant goals.
-            for (ItemEntity drop : drops) {
-                if (System.currentTimeMillis() >= deadline) {
-                    break;
-                }
-                if (SkillManager.shouldAbortSkill(bot)) {
-                    BotActions.stop(bot);
-                    return;
-                }
-                BlockPos pos = drop.getBlockPos();
-                if (Math.abs(pos.getY() - bot.getBlockY()) > 3) {
-                    continue;
-                }
-                attempts.put(pos, attempts.getOrDefault(pos, 0) + 1);
-                moveNextTo(bot, source, pos);
-                sleep(80);
-            }
-            sleep(160);
         }
+        return true; // explored but found nothing
     }
+
+    private static long packZone(BlockPos pos) {
+        int cellX = pos.getX() >> 4;
+        int cellZ = pos.getZ() >> 4;
+        return ((long) cellX << 32) | (cellZ & 0xFFFFFFFFL);
+    }
+
 
     private boolean detectFenceNearby(ServerWorld world, BlockPos origin) {
         int scan = 12;

@@ -9,6 +9,7 @@ import net.minecraft.client.gui.Click;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.widget.ButtonWidget;
+import net.minecraft.client.gui.tooltip.Tooltip;
 import net.minecraft.client.gui.widget.TextFieldWidget;
 import net.minecraft.text.Text;
 import net.minecraft.util.Identifier;
@@ -133,37 +134,55 @@ public class HuntablesScreen extends Screen {
         this.countField = new TextFieldWidget(this.textRenderer, cx - 110, y, 100, 18, Text.literal("Count"));
         this.countField.setMaxLength(5);
         this.countField.setPlaceholder(Text.literal("Count"));
+        this.countField.setTooltip(Tooltip.of(Text.literal("How many animals to hunt. Leave empty to hunt until sunset.")));
         this.addDrawableChild(this.countField);
 
-        this.addDrawableChild(ButtonWidget.builder(Text.literal("Refresh"), btn -> requestRefresh())
-                .dimensions(cx + 10, y, 60, BUTTON_H).build());
+        ButtonWidget refreshBtn = ButtonWidget.builder(Text.literal("Refresh"), btn -> requestRefresh())
+                .dimensions(cx + 10, y, 60, BUTTON_H).build();
+        refreshBtn.setTooltip(Tooltip.of(Text.literal("Reload the list of available prey")));
+        this.addDrawableChild(refreshBtn);
 
         // Row 2: Depopulation toggle + Zone size
         y += 24;
-        this.addDrawableChild(ButtonWidget.builder(
+        ButtonWidget depopBtn = ButtonWidget.builder(
                 Text.literal(depopLabel()), btn -> {
                     depopulationEnabled = !depopulationEnabled;
                     btn.setMessage(Text.literal(depopLabel()));
                     saveConfig();
-                }).dimensions(cx - 110, y, 110, BUTTON_H).build());
+                }).dimensions(cx - 110, y, 110, BUTTON_H).build();
+        depopBtn.setTooltip(Tooltip.of(Text.literal("When ON, your companion won't overhunt an area. Turn OFF to hunt freely regardless of animal numbers.")));
+        this.addDrawableChild(depopBtn);
 
-        this.addDrawableChild(ButtonWidget.builder(
+        ButtonWidget zoneBtn = ButtonWidget.builder(
                 Text.literal("Zone: " + ZONE_LABELS[zoneIndex]), btn -> {
                     zoneIndex = (zoneIndex + 1) % ZONE_NAMES.length;
                     btn.setMessage(Text.literal("Zone: " + ZONE_LABELS[zoneIndex]));
                     saveConfig();
-                }).dimensions(cx + 10, y, 100, BUTTON_H).build());
+                }).dimensions(cx + 10, y, 100, BUTTON_H).build();
+        zoneBtn.setTooltip(Tooltip.of(Text.literal("How far your companion will roam to find prey. Larger zones mean longer trips.")));
+        this.addDrawableChild(zoneBtn);
 
         // Row 3: Hunt + Target + All Edible + Close
         y += 24;
-        this.addDrawableChild(ButtonWidget.builder(Text.literal("Hunt"), btn -> huntSelected())
-                .dimensions(cx - 110, y, 50, BUTTON_H).build());
-        this.addDrawableChild(ButtonWidget.builder(Text.literal("Target"), btn -> activateTargetPicker())
-                .dimensions(cx - 52, y, 52, BUTTON_H).build());
-        this.addDrawableChild(ButtonWidget.builder(Text.literal("All Edible"), btn -> selectAllEdible())
-                .dimensions(cx + 8, y, 70, BUTTON_H).build());
-        this.addDrawableChild(ButtonWidget.builder(Text.literal("Close"), btn -> close())
-                .dimensions(cx + 86, y, 50, BUTTON_H).build());
+        ButtonWidget huntBtn = ButtonWidget.builder(Text.literal("Hunt"), btn -> huntSelected())
+                .dimensions(cx - 110, y, 50, BUTTON_H).build();
+        huntBtn.setTooltip(Tooltip.of(Text.literal("Send your companion out to hunt the selected animals")));
+        this.addDrawableChild(huntBtn);
+
+        ButtonWidget targetBtn = ButtonWidget.builder(Text.literal("Target"), btn -> activateTargetPicker())
+                .dimensions(cx - 52, y, 52, BUTTON_H).build();
+        targetBtn.setTooltip(Tooltip.of(Text.literal("Pick a specific animal in the world for your companion to hunt")));
+        this.addDrawableChild(targetBtn);
+
+        ButtonWidget allEdibleBtn = ButtonWidget.builder(Text.literal("All Edible"), btn -> selectAllEdible())
+                .dimensions(cx + 8, y, 70, BUTTON_H).build();
+        allEdibleBtn.setTooltip(Tooltip.of(Text.literal("Select every unlocked animal type at once")));
+        this.addDrawableChild(allEdibleBtn);
+
+        ButtonWidget closeBtn = ButtonWidget.builder(Text.literal("Close"), btn -> close())
+                .dimensions(cx + 86, y, 50, BUTTON_H).build();
+        closeBtn.setTooltip(Tooltip.of(Text.literal("Close this menu")));
+        this.addDrawableChild(closeBtn);
 
         requestRefresh();
     }
@@ -359,12 +378,13 @@ public class HuntablesScreen extends Screen {
             command.append(" ").append(botTarget);
         }
         this.client.getNetworkHandler().sendChatCommand(command.toString().trim());
+        this.client.setScreen(null);
     }
 
     private Rect listRect() {
         int cx = this.width / 2;
         // Below the 3 control rows
-        int listY = TOP_Y + 24 + 24 + BUTTON_H + 8;
+        int listY = TOP_Y + 24 + 24 + BUTTON_H + 20;
         int listW = 220;
         int listH = MathHelper.clamp(this.height - listY - LIST_BOTTOM_MARGIN, LIST_MIN_H, 220);
         return new Rect(cx - listW / 2, listY, listW, listH);

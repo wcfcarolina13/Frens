@@ -8,7 +8,7 @@ import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
-import net.wcfcarolina13.GameAI.services.ProtectedZoneService;
+import net.wcfcarolina13.GameAI.services.CompanionSafeZoneService;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -165,7 +165,7 @@ public final class TreeDetector {
             if (isNearHumanBlocks(world, candidate, 3)) {
                 continue;
             }
-            if (ProtectedZoneService.isProtected(candidate, world, null)) {
+            if (CompanionSafeZoneService.isProtected(world, candidate, null)) {
                 continue;
             }
             double distSq = origin.getSquaredDistance(candidate);
@@ -199,7 +199,7 @@ public final class TreeDetector {
             if (!isLog(state)) {
                 continue;
             }
-            if (isNearHumanBlocks(world, candidate, 3) || ProtectedZoneService.isProtected(candidate, world, null)) {
+            if (isNearHumanBlocks(world, candidate, 3) || CompanionSafeZoneService.isProtected(world, candidate, null)) {
                 continue;
             }
             boolean hasLogNeighbor = false;
@@ -246,7 +246,7 @@ public final class TreeDetector {
             }
         }
 
-        if (ProtectedZoneService.isProtected(base, world, null)) {
+        if (CompanionSafeZoneService.isProtected(world, base, null)) {
             return Optional.empty();
         }
 
@@ -363,7 +363,7 @@ public final class TreeDetector {
     }
 
     public static boolean isProtected(ServerWorld world, BlockPos pos) {
-        return ProtectedZoneService.isProtected(pos, world, null);
+        return CompanionSafeZoneService.isProtected(world, pos, null);
     }
 
     private static boolean isLog(BlockState state) {

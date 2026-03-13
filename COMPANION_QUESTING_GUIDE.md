@@ -11,12 +11,13 @@ It’s written for players (not mod devs). The rules are **server-authoritative*
 - The companion questline has stages **0 → 4**.
 - **Stage 4 (“Permanent”)** is the key unlock:
   - The companion becomes a **permanent companion**.
-  - **Companion spells/commands** (Come / Summon / Home) stop being rejected with “not a permanent companion yet”.
+  - **Companion spells/commands** (Regroup / Summon / Home) stop being rejected with “not a permanent companion yet”.
 
 Separately, *how you access spells* depends on items/nearby blocks:
 
 - **Enchanting Table nearby** → full spells, no cooldown
 - **Spellbook token** → full spells anywhere, no cooldown
+- **Goat Horn** → *limited* access (Regroup-only)
 - **Eye of Ender** → *limited* spells (Summon-only), with a cooldown
 
 > Note: Right now there isn’t “per-spell progression”; the limitation is based on access method (Eye vs full).
@@ -126,9 +127,12 @@ If the server says:
 
 Even with a permanent companion, you still need an access method:
 
-- **Enchanting Table nearby**: full spells (Come / Summon / Home)
+- **Enchanting Table nearby**: full spells (Regroup / Summon / Home)
 - **Spellbook token**: full spells anywhere
+- **Goat Horn**: limited access (Regroup-only)
 - **Eye of Ender**: limited spells (Summon-only) + cooldown
+
+> Note: the older `/bot come` wording is still supported as a legacy alias, but current UI copy increasingly prefers **Regroup** because it better describes the intent.
 
 ---
 
@@ -151,6 +155,30 @@ Stage 4 should set the companion to **Permanent** immediately.
 ### Useful admin checks
 
 - **Admin → Status**: shows recruited/permanent/stage/anchor state for the world.
+
+### Learning Mode (what that admin area is)
+
+The admin overlay also includes **Learning** actions such as:
+
+- **Learning Status**
+- **Learning Start**
+- **Learning Stop (Success / Failure / Abort)**
+
+These are **operator-only tuning tools**, not quest progression steps.
+
+What they do:
+
+- record demonstration traces from a player session
+- capture movement / camera / interaction context for later analysis
+- support bot-control tuning and future ML / optional LLM roadmap work
+
+What they do **not** do:
+
+- they do not advance companion quest stages
+- they do not unlock spells by themselves
+- they are not required for normal survival progression
+
+If you just want normal companion gameplay, you can ignore the Learning section entirely.
 
 ---
 

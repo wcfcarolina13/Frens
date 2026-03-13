@@ -9,11 +9,10 @@ import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
-import net.wcfcarolina13.Entity.LookController;
-import net.wcfcarolina13.GameAI.BotActions;
-import net.wcfcarolina13.GameAI.services.MovementService;
 import net.wcfcarolina13.GameAI.services.BotTerritoryAuthorizationService;
+import net.wcfcarolina13.GameAI.services.MovementService;
 import net.wcfcarolina13.GameAI.skills.SkillManager;
+import net.wcfcarolina13.Entity.LookController;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -109,7 +108,7 @@ public final class DoorwayAccessService {
         // Check north edge (Z = 0)
         for (int x = 1; x < sizeX - 1; x++) {
             BlockPos pos = origin.add(x, doorYOffset, 0);
-            if (isDoorwayOpening(world, pos)) {
+            if (isDoorwayOpening(world, pos, Direction.NORTH)) {
                 doorways.add(Doorway.create(pos, Direction.NORTH));
             }
         }
@@ -117,7 +116,7 @@ public final class DoorwayAccessService {
         // Check south edge (Z = sizeZ - 1)
         for (int x = 1; x < sizeX - 1; x++) {
             BlockPos pos = origin.add(x, doorYOffset, sizeZ - 1);
-            if (isDoorwayOpening(world, pos)) {
+            if (isDoorwayOpening(world, pos, Direction.SOUTH)) {
                 doorways.add(Doorway.create(pos, Direction.SOUTH));
             }
         }
@@ -125,7 +124,7 @@ public final class DoorwayAccessService {
         // Check west edge (X = 0)
         for (int z = 1; z < sizeZ - 1; z++) {
             BlockPos pos = origin.add(0, doorYOffset, z);
-            if (isDoorwayOpening(world, pos)) {
+            if (isDoorwayOpening(world, pos, Direction.WEST)) {
                 doorways.add(Doorway.create(pos, Direction.WEST));
             }
         }
@@ -133,7 +132,7 @@ public final class DoorwayAccessService {
         // Check east edge (X = sizeX - 1)
         for (int z = 1; z < sizeZ - 1; z++) {
             BlockPos pos = origin.add(sizeX - 1, doorYOffset, z);
-            if (isDoorwayOpening(world, pos)) {
+            if (isDoorwayOpening(world, pos, Direction.EAST)) {
                 doorways.add(Doorway.create(pos, Direction.EAST));
             }
         }
@@ -145,14 +144,50 @@ public final class DoorwayAccessService {
     /**
      * Check if a position is a doorway opening (2 blocks high air/door).
      */
-    private static boolean isDoorwayOpening(ServerWorld world, BlockPos pos) {
+    private static boolean isDoorwayOpening(ServerWorld world, BlockPos pos, Direction outward) {
+        if (world == null || pos == null || outward == null) {
+            return false;
+        }
+
         BlockState bottom = world.getBlockState(pos);
         BlockState top = world.getBlockState(pos.up());
         
         boolean bottomClear = bottom.isAir() || bottom.getBlock() instanceof DoorBlock;
         boolean topClear = top.isAir() || top.getBlock() instanceof DoorBlock;
-        
-        return bottomClear && topClear;
+
+        if (!bottomClear || !topClear) {
+            return false;
+        }
+
+        BlockState support = world.getBlockState(pos.down());
+        if (support.isAir() || support.isReplaceable()) {
+            return false;
+        }
+
+        Direction left = outward.rotateYCounterclockwise();
+        Direction right = outward.rotateYClockwise();
+        return hasDoorJamb(world, pos, left) && hasDoorJamb(world, pos, right);
+    }
+
+    private static boolean hasDoorJamb(ServerWorld world, BlockPos bottomPos, Direction side) {
+        if (world == null || bottomPos == null || side == null) {
+            return false;
+        }
+
+        BlockPos sideBottom = bottomPos.offset(side);
+        BlockPos sideTop = sideBottom.up();
+        return isSolidJambBlock(world.getBlockState(sideBottom))
+                && isSolidJambBlock(world.getBlockState(sideTop));
+    }
+
+    private static boolean isSolidJambBlock(BlockState state) {
+        if (state == null) {
+            return false;
+        }
+        if (state.isAir() || state.isReplaceable()) {
+            return false;
+        }
+        return !(state.getBlock() instanceof DoorBlock);
     }
 
     /**
@@ -361,7 +396,7 @@ public final class DoorwayAccessService {
                                                  ServerPlayerEntity bot,
                                                  Doorway doorway) {
         // First clear any obstructions
-        AccessResult clearResult = clearDoorwayAccess(world, source, bot, doorway);
+        clearDoorwayAccess(world, source, bot, doorway);
         
         // Check doorway dimensions
         BlockState bottomState = world.getBlockState(doorway.bottomPos());

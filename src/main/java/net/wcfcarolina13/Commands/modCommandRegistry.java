@@ -3808,8 +3808,7 @@ public class modCommandRegistry {
         boolean isAll = targetArg != null && "all".equalsIgnoreCase(targetArg.trim());
         int successes = 0;
         for (ServerPlayerEntity bot : bots) {
-            // Regroup now allows recovery skills (pillar-up, stair, stripmine) same as come.
-            successes += executeCome(context, bot, commander, true);
+            successes += executeRegroup(context, bot, commander);
         }
         if (!bots.isEmpty() && successes > 0) {
             String summary = formatBotList(bots, isAll);
@@ -3817,6 +3816,30 @@ public class modCommandRegistry {
             ChatUtils.sendSystemMessage(context.getSource(), summary + " " + verb + " regrouping to you.");
         }
         return successes;
+    }
+
+    /**
+     * Simplified regroup: no item gate, no mining/pillar recovery.
+     * Pure pathfinding to the commander's snapshot position.
+     */
+    private static int executeRegroup(CommandContext<ServerCommandSource> context,
+                                      ServerPlayerEntity bot,
+                                      ServerPlayerEntity commander) {
+        if (bot == null || commander == null) return 0;
+        interruptAmbientHobbyIfAny(bot, "§cInterrupted by /bot regroup.");
+        net.wcfcarolina13.GameAI.services.TaskService.forceAbort(bot.getUuid(), "§cInterrupted by /bot regroup.");
+        net.wcfcarolina13.GameAI.services.BotIdleHobbiesService.snoozeFor(bot, 3_600L);
+
+        BlockPos goal = commander.getBlockPos().toImmutable();
+        net.minecraft.server.world.ServerWorld sw = commander.getEntityWorld() instanceof net.minecraft.server.world.ServerWorld s ? s : null;
+        if (sw != null) {
+            BlockPos safe = net.wcfcarolina13.GameAI.services.SafePositionService.findForwardSafeSpot(sw, commander);
+            if (safe == null) safe = net.wcfcarolina13.GameAI.services.SafePositionService.findSafeNear(sw, goal, 8);
+            if (safe != null) goal = safe;
+        }
+        // No recovery skills — pure pathfinding only
+        BotEventHandler.setComeModeWalk(bot, commander, goal, 3.2D, false);
+        return 1;
     }
 
     static int executeGoToLookTargets(CommandContext<ServerCommandSource> context, String targetArg) throws CommandSyntaxException {
@@ -4341,15 +4364,7 @@ public class modCommandRegistry {
             }
         }
 
-        if (!canUseCompanionCome(server, commander, st)) {
-            if (recruitmentMode) {
-                ChatUtils.sendSystemMessage(source, "To call your companion, cast the spell at an Enchanting Table (or use your Wizard's Tome / Goat Horn)." );
-            } else {
-                ChatUtils.sendSystemMessage(source, "To call the bot, cast at an Enchanting Table (or use your Wizard's Tome / Goat Horn).");
-            }
-            return 0;
-        }
-
+        // Resolve bot early so we can do bidirectional tool checks
         ServerPlayerEntity bot = server.getPlayerManager().getPlayer(alias);
         if (bot == null || bot.isRemoved() || !bot.isAlive()) {
             ChatUtils.sendSystemMessage(source, alias + " isn't here right now. Try: /bot companion summon");
@@ -4359,6 +4374,16 @@ public class modCommandRegistry {
             ChatUtils.sendSystemMessage(source, "Can't control a real player as a companion.");
             return 0;
         }
+
+        if (!canUseCompanionCome(server, commander, bot, st)) {
+            if (recruitmentMode) {
+                ChatUtils.sendSystemMessage(source, "To call your companion, cast the spell at an Enchanting Table (or use your Wizard's Tome / Eye of Ender / Goat Horn)." );
+            } else {
+                ChatUtils.sendSystemMessage(source, "To call the bot, cast at an Enchanting Table (or use your Wizard's Tome / Eye of Ender / Goat Horn).");
+            }
+            return 0;
+        }
+
         if (!(commander.getEntityWorld() instanceof ServerWorld commanderWorld)) {
             return 0;
         }
@@ -4366,6 +4391,37 @@ public class modCommandRegistry {
                 || botWorld.getRegistryKey() != commanderWorld.getRegistryKey()) {
             ChatUtils.sendSystemMessage(source, alias + " can't come to you across dimensions.");
             return 0;
+        }
+
+        // Immersive contact message based on which tool qualified
+        String contactMsg;
+        if (hasSpellbookToken(commander) || isNearEnchantingTable(commander, 4)) {
+            contactMsg = "You cast a summoning spell. " + alias + " senses your call.";
+        } else if (hasEyeOfEnderToken(commander) || hasEnderPearlToken(commander)) {
+            contactMsg = "The ender energy pulses. " + alias + " feels a tug toward you.";
+        } else if (hasGoatHornToken(commander)) {
+            contactMsg = "The horn echoes across the land. " + alias + " hears your call.";
+        } else if (hasSpellbookToken(bot) || hasEyeOfEnderToken(bot) || hasEnderPearlToken(bot)) {
+            contactMsg = alias + " senses your presence through their arcane focus and sets out to find you.";
+        } else {
+            contactMsg = alias + " is coming to you.";
+        }
+        ChatUtils.sendSystemMessage(source, contactMsg);
+
+        // Immersive sound effect at the commander's position
+        if (hasSpellbookToken(commander) || isNearEnchantingTable(commander, 4)) {
+            commanderWorld.playSound(null, commander.getX(), commander.getY(), commander.getZ(),
+                    net.minecraft.sound.SoundEvents.BLOCK_ENCHANTMENT_TABLE_USE, net.minecraft.sound.SoundCategory.PLAYERS, 1.0f, 1.2f);
+        } else if (hasEyeOfEnderToken(commander) || hasEnderPearlToken(commander)
+                || hasEyeOfEnderToken(bot) || hasEnderPearlToken(bot)) {
+            commanderWorld.playSound(null, commander.getX(), commander.getY(), commander.getZ(),
+                    net.minecraft.sound.SoundEvents.ENTITY_ENDERMAN_TELEPORT, net.minecraft.sound.SoundCategory.PLAYERS, 0.6f, 1.4f);
+        } else if (hasGoatHornToken(commander)) {
+            commanderWorld.playSound(null, commander.getX(), commander.getY(), commander.getZ(),
+                    net.minecraft.sound.SoundEvents.BLOCK_NOTE_BLOCK_BELL.value(), net.minecraft.sound.SoundCategory.PLAYERS, 1.0f, 0.7f);
+        } else if (hasSpellbookToken(bot)) {
+            commanderWorld.playSound(null, commander.getX(), commander.getY(), commander.getZ(),
+                    net.minecraft.sound.SoundEvents.BLOCK_AMETHYST_BLOCK_CHIME, net.minecraft.sound.SoundCategory.PLAYERS, 0.8f, 1.4f);
         }
 
         TaskService.forceAbort(bot.getUuid(), "§cInterrupted by /bot companion come.");
@@ -4423,11 +4479,13 @@ public class modCommandRegistry {
             }
         }
 
-        if (!canUseCompanionSummon(server, commander, st)) {
+        // Pre-lookup bot for bidirectional tool check (may be null if not yet spawned)
+        ServerPlayerEntity existingBot = server.getPlayerManager().getPlayer(alias);
+        if (!canUseCompanionSummon(server, commander, existingBot, st)) {
             if (recruitmentMode) {
-                ChatUtils.sendSystemMessage(source, "To summon your companion, cast the spell at an Enchanting Table (or use your Wizard's Tome), or carry an Eye of Ender (cooldown)." );
+                ChatUtils.sendSystemMessage(source, "To summon your companion, cast the spell at an Enchanting Table (or use your Wizard's Tome / Eye of Ender / Ender Pearl)." );
             } else {
-                ChatUtils.sendSystemMessage(source, "To summon the bot, cast at an Enchanting Table (or use your Wizard's Tome), or carry an Eye of Ender (cooldown).");
+                ChatUtils.sendSystemMessage(source, "To summon the bot, cast at an Enchanting Table (or use your Wizard's Tome / Eye of Ender / Ender Pearl).");
             }
             return 0;
         }
@@ -4459,7 +4517,8 @@ public class modCommandRegistry {
         }
         boolean crossDim = botWorld.getRegistryKey() != commanderWorld.getRegistryKey();
         if (crossDim) {
-            boolean fullAccess = hasSpellbookToken(commander) || isNearEnchantingTable(commander, 4);
+            boolean fullAccess = hasSpellbookToken(commander) || isNearEnchantingTable(commander, 4)
+                    || hasSpellbookToken(bot);
             if (!fullAccess) {
                 ChatUtils.sendSystemMessage(source,
                     alias + " can't be summoned across dimensions. Use an Enchanting Table or Wizard's Tome.");
@@ -4507,7 +4566,32 @@ public class modCommandRegistry {
             COMPANION_EYE_SPELL_LAST_TICK.put(commander.getUuid(), nowTick);
         }
 
-        ChatUtils.sendSystemMessage(source, "Summoned " + alias + " to your location.");
+        // Immersive summon message based on which tool qualified
+        String summonMsg;
+        if (hasSpellbookToken(commander) || isNearEnchantingTable(commander, 4)) {
+            summonMsg = "A flash of arcane energy — " + alias + " materializes beside you.";
+        } else if (hasEyeOfEnderToken(commander) || hasEnderPearlToken(commander)) {
+            summonMsg = "The ender energy warps space. " + alias + " appears in a shimmer of violet particles.";
+        } else if (hasSpellbookToken(bot) || hasEyeOfEnderToken(bot) || hasEnderPearlToken(bot)) {
+            summonMsg = alias + "'s arcane focus flares — they vanish and reappear at your side.";
+        } else {
+            summonMsg = "Summoned " + alias + " to your location.";
+        }
+        ChatUtils.sendSystemMessage(source, summonMsg);
+
+        // Immersive sound effect at the summon destination
+        if (hasSpellbookToken(commander) || isNearEnchantingTable(commander, 4)) {
+            commanderWorld.playSound(null, center.x, center.y, center.z,
+                    net.minecraft.sound.SoundEvents.BLOCK_ENCHANTMENT_TABLE_USE, net.minecraft.sound.SoundCategory.PLAYERS, 1.0f, 1.2f);
+        } else if (hasEyeOfEnderToken(commander) || hasEnderPearlToken(commander)
+                || hasEyeOfEnderToken(bot) || hasEnderPearlToken(bot)) {
+            commanderWorld.playSound(null, center.x, center.y, center.z,
+                    net.minecraft.sound.SoundEvents.ENTITY_ENDERMAN_TELEPORT, net.minecraft.sound.SoundCategory.PLAYERS, 0.6f, 1.4f);
+        } else if (hasSpellbookToken(bot)) {
+            commanderWorld.playSound(null, center.x, center.y, center.z,
+                    net.minecraft.sound.SoundEvents.BLOCK_AMETHYST_BLOCK_CHIME, net.minecraft.sound.SoundCategory.PLAYERS, 0.8f, 1.4f);
+        }
+
         return 1;
     }
 
@@ -4606,16 +4690,15 @@ public class modCommandRegistry {
             }
         }
 
-        if (!canUseCompanionHome(server, commander, st)) {
+        ServerPlayerEntity bot = server.getPlayerManager().getPlayer(alias);
+        if (!canUseCompanionHome(server, commander, bot, st)) {
             if (recruitmentMode) {
-                ChatUtils.sendSystemMessage(source, "To send your companion home, cast the spell at an Enchanting Table (or use your Wizard's Tome)." );
+                ChatUtils.sendSystemMessage(source, "To send your companion home, cast the spell at an Enchanting Table (or use your Wizard's Tome / Eye of Ender / Ender Pearl)." );
             } else {
-                ChatUtils.sendSystemMessage(source, "To send the bot home, cast at an Enchanting Table (or use your Wizard's Tome).");
+                ChatUtils.sendSystemMessage(source, "To send the bot home, cast at an Enchanting Table (or use your Wizard's Tome / Eye of Ender / Ender Pearl).");
             }
             return 0;
         }
-
-        ServerPlayerEntity bot = server.getPlayerManager().getPlayer(alias);
         if (bot == null || bot.isRemoved() || !bot.isAlive()) {
             ChatUtils.sendSystemMessage(source, alias + " isn't here right now.");
             return 0;
@@ -4671,36 +4754,39 @@ public class modCommandRegistry {
         return Frens.isOperator(player);
     }
 
-    private static boolean canUseCompanionCome(MinecraftServer server, ServerPlayerEntity commander, ManualConfig.SurvivalRecruitmentState st) {
+    private static boolean canUseCompanionCome(MinecraftServer server, ServerPlayerEntity commander, ServerPlayerEntity bot, ManualConfig.SurvivalRecruitmentState st) {
         if (commander == null || server == null) {
             return false;
         }
-        if (hasSpellbookToken(commander)) {
-            return true;
-        }
-        if (isNearEnchantingTable(commander, 4)) {
-            return true;
-        }
-        // Mid-game convenience: Goat Horn can call them (come-only).
-        if (hasGoatHornToken(commander)) {
-            return true;
+        // Commander-side checks
+        if (hasSpellbookToken(commander)) return true;
+        if (isNearEnchantingTable(commander, 4)) return true;
+        if (hasGoatHornToken(commander)) return true;
+        if (hasEyeOfEnderToken(commander)) return true;
+        if (hasEnderPearlToken(commander)) return true;
+        // Bot-side checks (bidirectional)
+        if (bot != null) {
+            if (hasSpellbookToken(bot)) return true;
+            if (hasEyeOfEnderToken(bot)) return true;
+            if (hasEnderPearlToken(bot)) return true;
         }
         return st != null && isNearCompanionAnchor(server, commander, st, 12.0D);
     }
 
-    private static boolean canUseCompanionSummon(MinecraftServer server, ServerPlayerEntity commander, ManualConfig.SurvivalRecruitmentState st) {
+    private static boolean canUseCompanionSummon(MinecraftServer server, ServerPlayerEntity commander, ServerPlayerEntity bot, ManualConfig.SurvivalRecruitmentState st) {
         if (commander == null || server == null) {
             return false;
         }
-        if (hasSpellbookToken(commander)) {
-            return true;
-        }
-        if (isNearEnchantingTable(commander, 4)) {
-            return true;
-        }
-        // Emergency/limited access: Eye of Ender (cooldown handled at cast time).
-        if (hasEyeOfEnderToken(commander)) {
-            return true;
+        // Commander-side checks
+        if (hasSpellbookToken(commander)) return true;
+        if (isNearEnchantingTable(commander, 4)) return true;
+        if (hasEyeOfEnderToken(commander)) return true;
+        if (hasEnderPearlToken(commander)) return true;
+        // Bot-side checks (bidirectional)
+        if (bot != null) {
+            if (hasSpellbookToken(bot)) return true;
+            if (hasEyeOfEnderToken(bot)) return true;
+            if (hasEnderPearlToken(bot)) return true;
         }
         return st != null && isNearCompanionAnchor(server, commander, st, 12.0D);
     }
@@ -4739,15 +4825,37 @@ public class modCommandRegistry {
         return false;
     }
 
-    private static boolean canUseCompanionHome(MinecraftServer server, ServerPlayerEntity commander, ManualConfig.SurvivalRecruitmentState st) {
+    private static boolean hasEnderPearlToken(ServerPlayerEntity player) {
+        if (player == null) {
+            return false;
+        }
+        var inv = player.getInventory();
+        for (int i = 0; i < inv.size(); i++) {
+            ItemStack stack = inv.getStack(i);
+            if (stack == null || stack.isEmpty()) {
+                continue;
+            }
+            if (stack.isOf(Items.ENDER_PEARL)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean canUseCompanionHome(MinecraftServer server, ServerPlayerEntity commander, ServerPlayerEntity bot, ManualConfig.SurvivalRecruitmentState st) {
         if (commander == null || server == null) {
             return false;
         }
-        if (hasSpellbookToken(commander)) {
-            return true;
-        }
-        if (isNearEnchantingTable(commander, 4)) {
-            return true;
+        // Commander-side checks
+        if (hasSpellbookToken(commander)) return true;
+        if (isNearEnchantingTable(commander, 4)) return true;
+        if (hasEyeOfEnderToken(commander)) return true;
+        if (hasEnderPearlToken(commander)) return true;
+        // Bot-side checks (bidirectional)
+        if (bot != null) {
+            if (hasSpellbookToken(bot)) return true;
+            if (hasEyeOfEnderToken(bot)) return true;
+            if (hasEnderPearlToken(bot)) return true;
         }
         return st != null && isNearCompanionAnchor(server, commander, st, 16.0D);
     }

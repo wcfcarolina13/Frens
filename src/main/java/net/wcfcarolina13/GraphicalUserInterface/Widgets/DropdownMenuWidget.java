@@ -22,7 +22,7 @@ public class DropdownMenuWidget extends ClickableWidget {
     private int selectedIndex;
     private int width;
     private int height;
-    private static final boolean DEBUG = true; // Enable debug logging
+    private static final boolean DEBUG = false;
 
     // scrolling support
     private int scrollIndex = 0; // first visible option when open
@@ -120,16 +120,18 @@ public class DropdownMenuWidget extends ClickableWidget {
                 drawCenteredText(context, textRenderer, Text.of(options.get(optionIndex)), x + this.width / 2, optionTop + (this.height - 8) / 2, 0xFFFFFFFF);
             }
 
-            // Simple scrollbar if there is more content than we can show
+            // Scrollbar — wider track for easier interaction
             if (options.size() > visibleCount) {
-                int trackX0 = right - 4;
+                int trackX0 = right - 8;
                 int trackX1 = right - 2;
-                context.fill(trackX0, menuTop, trackX1, menuBottom, 0xFF303030);
+                // Separator line between option text and scrollbar
+                context.fill(trackX0 - 1, menuTop, trackX0, menuBottom, 0xFF303030);
+                context.fill(trackX0, menuTop, trackX1, menuBottom, 0xFF1A1A1A);
 
                 float frac = (float) scrollIndex / (float) Math.max(1, options.size() - visibleCount);
-                int thumbH = Math.max(6, (menuBottom - menuTop) * visibleCount / options.size());
+                int thumbH = Math.max(12, (menuBottom - menuTop) * visibleCount / options.size());
                 int thumbY = menuTop + Math.round(((menuBottom - menuTop - thumbH) * frac));
-                context.fill(trackX0, thumbY, trackX1, thumbY + thumbH, 0xFFA0A0A0);
+                context.fill(trackX0 + 1, thumbY, trackX1 - 1, thumbY + thumbH, 0xFFA0A0A0);
             }
         }
     }

@@ -629,7 +629,8 @@ public final class BotDialoguePlayer {
 
         // Check if voiced dialogue is enabled for this bot
         String botName = bot.getName().getString();
-        ManualConfig.BotControlSettings settings = Frens.CONFIG.getEffectiveBotControl(botName);
+        String wk = bot.getCommandSource().getServer() != null ? net.wcfcarolina13.GameAI.services.BotWorldStateService.currentWorldKey(bot.getCommandSource().getServer()) : null;
+        ManualConfig.BotControlSettings settings = Frens.CONFIG.getEffectiveBotControl(botName, wk);
         if (settings == null || !settings.isVoicedDialogue()) {
             LOGGER.info("[VoicedDialogue] Disabled for bot: {}", botName);
             return DialogueAttemptResult.DISABLED;
@@ -803,7 +804,8 @@ public final class BotDialoguePlayer {
         }
 
         String botName = bot.getName().getString();
-        ManualConfig.BotControlSettings settings = Frens.CONFIG.getEffectiveBotControl(botName);
+        String wk = bot.getCommandSource().getServer() != null ? net.wcfcarolina13.GameAI.services.BotWorldStateService.currentWorldKey(bot.getCommandSource().getServer()) : null;
+        ManualConfig.BotControlSettings settings = Frens.CONFIG.getEffectiveBotControl(botName, wk);
         if (settings == null || !settings.isVoicedDialogue()) {
             return PlayResult.DISABLED;
         }

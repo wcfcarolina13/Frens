@@ -80,6 +80,9 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
     private static final int SKILL_WOOL_COUNT_MIN = 1;
     private static final int SKILL_WOOL_COUNT_MAX = 256;
     private static final int SKILL_WOOL_COUNT_DEFAULT = 16;
+    private static final int SKILL_WOOL_RANGE_MIN = 16;
+    private static final int SKILL_WOOL_RANGE_MAX = 128;
+    private static final int SKILL_WOOL_RANGE_DEFAULT = 48;
     private static final int SKILL_STRIPMINE_COUNT_MIN = 1;
     private static final int SKILL_STRIPMINE_COUNT_MAX = 128;
     private static final int SKILL_STRIPMINE_COUNT_DEFAULT = 8;
@@ -149,12 +152,31 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
     private int woodcutTreeCount = WOODCUT_TREE_COUNT_DEFAULT;
     private int fishTargetCount = SKILL_COUNT_UNSET;
     private int woolTargetCount = SKILL_COUNT_UNSET;
+    private int woolSearchRange = SKILL_WOOL_RANGE_DEFAULT;
+    private boolean woolAdjustingRange = false;
     private int stripmineLength = SKILL_COUNT_UNSET;
     private int ascentBlocks = SKILL_COUNT_UNSET;
     private int descentBlocks = SKILL_COUNT_UNSET;
     private boolean ascentSurfaceMode = false;
     private String topicSearchQuery = "";
     private boolean topicSearchFocused = false;
+
+    // Hold-repeat state for +/- control buttons.
+    private Runnable heldAdjustAction = null;
+    private int heldAdjustTicks = 0;
+    private static final int HOLD_REPEAT_INITIAL_DELAY = 10; // ticks before first repeat (0.5s)
+    private static final int HOLD_REPEAT_SLOW_INTERVAL = 4;  // ticks between repeats at first
+    private static final int HOLD_REPEAT_FAST_AT = 40;       // tick count to switch to fast
+    private static final int HOLD_REPEAT_FAST_INTERVAL = 2;  // ticks between repeats when fast
+    private static final int HOLD_REPEAT_FASTEST_AT = 80;    // tick count to switch to fastest
+    private static final int HOLD_REPEAT_FASTEST_INTERVAL = 1; // every tick
+
+    // Double-click direct input for value labels.
+    private TopicAction directInputAction = null;
+    private String directInputBuffer = "";
+    private long lastValueLabelClickMs = 0L;
+    private TopicAction lastValueLabelClickAction = null;
+    private static final long DOUBLE_CLICK_MS = 400L;
 
     // Best-effort: request server stage/permanent snapshot once per overlay open (used for stage-gated dialogue topics).
     private boolean companionQuestStateRequested = false;
@@ -1948,9 +1970,11 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         if (!open) {
             overlayDraggingSplit = false;
             overlayDraggingListScroll = false;
+            clearHeldAdjust();
         }
         if (!open) {
             topicSearchFocused = false;
+            cancelDirectInput();
             companionQuestStateRequested = false;
             adminResetConfirmArmed = false;
             adminResetConfirmArmedAtMs = 0L;
@@ -2049,6 +2073,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         Rect searchRect = computeOverlaySearchRect(listX, listY, listW);
         if (searchRect.contains(mouseX, mouseY)) {
             topicSearchFocused = true;
+            cancelDirectInput();
             return true;
         }
         topicSearchFocused = false;
@@ -2079,18 +2104,44 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             int adjust = getFollowAdjustDirectionInOverlay(mouseX, mouseY);
             if (adjust != 0) {
                 adjustFollowDistance(adjust);
+                beginHeldAdjust(() -> adjustFollowDistance(adjust));
                 return true;
             }
             int woodcutAdjust = getWoodcutAdjustDirectionInOverlay(mouseX, mouseY);
             if (woodcutAdjust != 0) {
                 adjustWoodcutTreeCount(woodcutAdjust);
+                beginHeldAdjust(() -> adjustWoodcutTreeCount(woodcutAdjust));
                 return true;
             }
             SkillAdjustHit skillAdjust = getAdjustableSkillHitInOverlay(mouseX, mouseY);
             if (skillAdjust != null) {
                 applySkillAdjust(skillAdjust);
+                if (skillAdjust.control() != SkillAdjustControl.TOGGLE_MODE) {
+                    beginHeldAdjust(() -> applySkillAdjust(skillAdjust));
+                }
                 return true;
             }
+
+            // Double-click on value label → direct numeric input.
+            TopicAction valueLabelHit = getValueLabelHitInOverlay(mouseX, mouseY);
+            if (valueLabelHit != null) {
+                long now = System.currentTimeMillis();
+                if (lastValueLabelClickAction == valueLabelHit
+                        && (now - lastValueLabelClickMs) <= DOUBLE_CLICK_MS) {
+                    activateDirectInput(valueLabelHit);
+                    lastValueLabelClickAction = null;
+                    lastValueLabelClickMs = 0L;
+                } else {
+                    lastValueLabelClickAction = valueLabelHit;
+                    lastValueLabelClickMs = now;
+                }
+                return true;
+            }
+        }
+
+        // If direct input is active and the click landed outside the value label, close it.
+        if (directInputAction != null) {
+            commitDirectInput();
         }
 
         // Dialogue response prompts (left column). Only active when the Dialogue tab is selected.
@@ -2118,6 +2169,18 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
                 enabled = (entry.action == null || isEntryEnabled(entry.action));
             }
             if (enabled) {
+                // For skill actions, the icon + label text triggers execution.
+                // Clicking empty space past the label does nothing — prevents accidental fires.
+                if (entry.category == TopicCategory.SKILL && entry.action != null) {
+                    SkillEntryHit hit = getSkillEntryHitAtOverlay(mouseX, mouseY);
+                    if (hit != null) {
+                        int labelStartX = hit.rect().x + 4 + SKILL_ICON_SLOT_W + entry.indent * 10;
+                        int labelEndX = labelStartX + this.textRenderer.getWidth(entry.label);
+                        if (mouseX >= labelEndX) {
+                            return true; // clicked past label — consume but don't execute
+                        }
+                    }
+                }
                 handleTopicEntry(entry);
                 return true;
             }
@@ -2269,7 +2332,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
                 }
             }
             int labelX = getSkillLabelStartX(rowRect.x, action, entry != null ? entry.indent : 0);
-            int controlCount = action == TopicAction.SKILL_ASCENT ? 3 : 2;
+            int controlCount = (action == TopicAction.SKILL_ASCENT || action == TopicAction.SKILL_WOOL) ? 3 : 2;
             int controlY = rowRect.y + 1;
             int controlRight = getCompactControlRight(rowRect.x, rowRect.w, labelX, this.textRenderer.getWidth(getAdjustableSkillValueLabel(action)), controlCount);
             int plusX = controlRight - controlSize;
@@ -2283,11 +2346,75 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             if (mouseX >= minusX && mouseX < minusX + controlSize) {
                 return new SkillAdjustHit(action, SkillAdjustControl.DECREMENT);
             }
-            if (action == TopicAction.SKILL_ASCENT) {
+            if (action == TopicAction.SKILL_ASCENT || action == TopicAction.SKILL_WOOL) {
                 int modeX = minusX - TOPIC_CONTROL_GAP - controlSize;
                 if (mouseX >= modeX && mouseX < modeX + controlSize) {
                     return new SkillAdjustHit(action, SkillAdjustControl.TOGGLE_MODE);
                 }
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Returns the TopicAction whose value label was clicked, or null.
+     * Only matches clicks inside the value cluster box but outside any +/- or toggle control.
+     */
+    private TopicAction getValueLabelHitInOverlay(double mouseX, double mouseY) {
+        if (overlayCategory != TopicCategory.SKILL) {
+            return null;
+        }
+        int controlSize = TOPIC_ROW_HEIGHT - 2;
+
+        // Check woodcut.
+        {
+            Rect rowRect = getSkillEntryRectInOverlay(TopicAction.SKILL_WOODCUT);
+            if (rowRect != null) {
+                int labelX = getSkillLabelStartX(rowRect.x, TopicAction.SKILL_WOODCUT, 0);
+                String countLabel = "Trees " + woodcutTreeCount;
+                int controlRight = getCompactControlRight(rowRect.x, rowRect.w, labelX, this.textRenderer.getWidth(countLabel), 2);
+                int plusX = controlRight - controlSize;
+                int minusX = plusX - TOPIC_CONTROL_GAP - controlSize;
+                int countX = minusX - TOPIC_CONTROL_GAP - this.textRenderer.getWidth(countLabel);
+                if (countX < labelX + 44) countX = labelX + 44;
+                int clusterLeft = countX - 4;
+                int clusterRight = minusX; // up to but not including the first control
+                int controlY = rowRect.y + 1;
+                if (mouseX >= clusterLeft && mouseX < clusterRight
+                        && mouseY >= controlY && mouseY < controlY + controlSize) {
+                    return TopicAction.SKILL_WOODCUT;
+                }
+            }
+        }
+
+        // Check generic adjustable skills (fish, wool, stripmine, ascent, descent).
+        for (TopicAction action : getAdjustableSkillActions()) {
+            Rect rowRect = getSkillEntryRectInOverlay(action);
+            if (rowRect == null) continue;
+            TopicEntry entry = null;
+            for (TopicEntry candidate : SKILL_TOPIC_ENTRIES) {
+                if (candidate != null && candidate.action == action) {
+                    entry = candidate;
+                    break;
+                }
+            }
+            int labelX = getSkillLabelStartX(rowRect.x, action, entry != null ? entry.indent : 0);
+            int controlCount = (action == TopicAction.SKILL_ASCENT || action == TopicAction.SKILL_WOOL) ? 3 : 2;
+            String valueLabel = getAdjustableSkillValueLabel(action);
+            int controlRight = getCompactControlRight(rowRect.x, rowRect.w, labelX, this.textRenderer.getWidth(valueLabel), controlCount);
+            int plusX = controlRight - controlSize;
+            int minusX = plusX - TOPIC_CONTROL_GAP - controlSize;
+            int leftmostControl = minusX;
+            if (action == TopicAction.SKILL_ASCENT || action == TopicAction.SKILL_WOOL) {
+                leftmostControl = minusX - TOPIC_CONTROL_GAP - controlSize;
+            }
+            int valueX = leftmostControl - TOPIC_CONTROL_GAP - this.textRenderer.getWidth(valueLabel);
+            if (valueX < labelX + 42) valueX = labelX + 42;
+            int clusterLeft = valueX - 4;
+            int controlY = rowRect.y + 1;
+            if (mouseX >= clusterLeft && mouseX < leftmostControl
+                    && mouseY >= controlY && mouseY < controlY + controlSize) {
+                return action;
             }
         }
         return null;
@@ -2353,7 +2480,12 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
 
         int textY = rowY + Math.max(1, (TOPIC_ROW_HEIGHT - this.textRenderer.fontHeight) / 2);
         context.drawText(this.textRenderer, "Woodcut", labelX, textY, COLOR_TEXT_PARCHMENT, false);
-        context.drawText(this.textRenderer, countLabel, countX, textY, 0xFFE6D7A3, false);
+
+        if (directInputAction == TopicAction.SKILL_WOODCUT) {
+            drawDirectInputField(context, countX, controlY, minusX - TOPIC_CONTROL_GAP - countX, controlSize, textY);
+        } else {
+            context.drawText(this.textRenderer, countLabel, countX, textY, 0xFFE6D7A3, false);
+        }
 
         drawControlBox(context, minusX, controlY, controlSize, "-", mouseX, mouseY);
         drawControlBox(context, plusX, controlY, controlSize, "+", mouseX, mouseY);
@@ -2405,27 +2537,43 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         String label = entry.label;
         String valueLabel = getAdjustableSkillValueLabel(entry.action);
         int labelX = drawSkillRowIcon(context, rowX, rowY, entry.action) + entry.indent * 10;
-        int controlCount = entry.action == TopicAction.SKILL_ASCENT ? 3 : 2;
+        int controlCount = (entry.action == TopicAction.SKILL_ASCENT || entry.action == TopicAction.SKILL_WOOL) ? 3 : 2;
         int controlSize = TOPIC_ROW_HEIGHT - 2;
         int controlY = rowY + 1;
         int controlRight = getCompactControlRight(rowX, rowW, labelX, this.textRenderer.getWidth(valueLabel), controlCount);
         int plusX = controlRight - controlSize;
         int minusX = plusX - TOPIC_CONTROL_GAP - controlSize;
         int valueX = minusX - TOPIC_CONTROL_GAP - this.textRenderer.getWidth(valueLabel);
-        if (entry.action == TopicAction.SKILL_ASCENT) {
-            int modeX = minusX - TOPIC_CONTROL_GAP - controlSize;
+        int modeX = -1;
+        if (entry.action == TopicAction.SKILL_ASCENT || entry.action == TopicAction.SKILL_WOOL) {
+            modeX = minusX - TOPIC_CONTROL_GAP - controlSize;
             valueX = modeX - TOPIC_CONTROL_GAP - this.textRenderer.getWidth(valueLabel);
-            drawControlBox(context, modeX, controlY, controlSize, "☀", mouseX, mouseY, ascentSurfaceMode);
         }
 
         if (valueX < labelX + 42) {
             valueX = labelX + 42;
         }
+        int leftmostControl = modeX >= 0 ? modeX : minusX;
         drawValueClusterBox(context, valueX - 4, rowY, plusX + controlSize + 3, hover);
         int textY = rowY + Math.max(1, (TOPIC_ROW_HEIGHT - this.textRenderer.fontHeight) / 2);
         context.drawText(this.textRenderer, label, labelX, textY, COLOR_TEXT_PARCHMENT, false);
-        context.drawText(this.textRenderer, valueLabel, valueX, textY, 0xFFE6D7A3, false);
 
+        if (directInputAction == entry.action) {
+            drawDirectInputField(context, valueX, controlY, leftmostControl - TOPIC_CONTROL_GAP - valueX, controlSize, textY);
+        } else {
+            int valueLabelColor = (entry.action == TopicAction.SKILL_WOOL && woolAdjustingRange)
+                    ? 0xFF8CB8D0   // blue tint when showing range
+                    : 0xFFE6D7A3;  // default parchment
+            context.drawText(this.textRenderer, valueLabel, valueX, textY, valueLabelColor, false);
+        }
+
+        if (modeX >= 0) {
+            if (entry.action == TopicAction.SKILL_WOOL) {
+                drawControlBox(context, modeX, controlY, controlSize, "\u2194", mouseX, mouseY, woolAdjustingRange);
+            } else {
+                drawControlBox(context, modeX, controlY, controlSize, "☀", mouseX, mouseY, ascentSurfaceMode);
+            }
+        }
         drawControlBox(context, minusX, controlY, controlSize, "-", mouseX, mouseY);
         drawControlBox(context, plusX, controlY, controlSize, "+", mouseX, mouseY);
     }
@@ -2433,7 +2581,9 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
     private String getAdjustableSkillValueLabel(TopicAction action) {
         return switch (action) {
             case SKILL_FISH -> fishTargetCount > 0 ? "Catches " + fishTargetCount : "Until sunset";
-            case SKILL_WOOL -> "Wool " + (woolTargetCount > 0 ? woolTargetCount : SKILL_WOOL_COUNT_DEFAULT);
+            case SKILL_WOOL -> woolAdjustingRange
+                    ? "Range " + woolSearchRange
+                    : "Wool " + (woolTargetCount > 0 ? woolTargetCount : SKILL_WOOL_COUNT_DEFAULT);
             case SKILL_STRIPMINE -> "Length " + (stripmineLength > 0 ? stripmineLength : SKILL_STRIPMINE_COUNT_DEFAULT);
             case SKILL_ASCENT -> ascentSurfaceMode
                     ? "Surface"
@@ -2690,14 +2840,27 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
                             "Lowers the value for " + readableSkillLabel(hit.action()) + "."
                     )
             );
-            case TOGGLE_MODE -> new OverlayControlHover(
-                    key,
-                    java.util.List.of(
-                            "Surface Mode",
-                            "Ascent digs upward until open sky when ON.",
-                            "Default ascent is " + SKILL_ASCENT_COUNT_DEFAULT + " blocks."
-                    )
-            );
+            case TOGGLE_MODE -> {
+                if (hit.action() == TopicAction.SKILL_WOOL) {
+                    yield new OverlayControlHover(
+                            key,
+                            java.util.List.of(
+                                    "Range Mode",
+                                    "Toggle to adjust search range instead of wool count.",
+                                    "Range: " + SKILL_WOOL_RANGE_MIN + "–" + SKILL_WOOL_RANGE_MAX + " blocks (steps of 16).",
+                                    "Default range is " + SKILL_WOOL_RANGE_DEFAULT + " blocks."
+                            )
+                    );
+                }
+                yield new OverlayControlHover(
+                        key,
+                        java.util.List.of(
+                                "Surface Mode",
+                                "Ascent digs upward until open sky when ON.",
+                                "Default ascent is " + SKILL_ASCENT_COUNT_DEFAULT + " blocks."
+                        )
+                );
+            }
         };
     }
 
@@ -2955,7 +3118,8 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case SKILL_WOOL -> java.util.List.of(
                 "Wool",
                 "Shears adult sheep and gathers wool without killing them.",
-                "Set a wool target before starting; standalone runs stop at sunset."
+                "Set a wool target before starting; standalone runs stop at sunset.",
+                "Toggle [\u2194] to switch +/- between wool count and search range."
             );
             case SKILL_FARM -> java.util.List.of(
                 "Farming",
@@ -3152,6 +3316,20 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         context.drawText(this.textRenderer, label, textX, textY, COLOR_TEXT_PARCHMENT, false);
     }
 
+    private void drawDirectInputField(DrawContext context, int x, int y, int w, int h, int textY) {
+        context.fill(x, y, x + w, y + h, 0xFF0A0A0A);
+        context.fill(x, y, x + w, y + 1, 0xFFB08C40);
+        context.fill(x, y + h - 1, x + w, y + h, 0xFFB08C40);
+        context.fill(x, y, x + 1, y + h, 0xFFB08C40);
+        context.fill(x + w - 1, y, x + w, y + h, 0xFFB08C40);
+        String display = directInputBuffer;
+        boolean showCursor = (System.currentTimeMillis() / 500L) % 2L == 0L;
+        if (showCursor) {
+            display = display + "_";
+        }
+        context.drawText(this.textRenderer, display, x + 2, textY, 0xFFFFFFFF, false);
+    }
+
     private String formatFollowDistance() {
         double value = getFollowDistance();
         if (value <= 0.0D) {
@@ -3225,6 +3403,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
 
     @Override
     public boolean mouseReleased(net.minecraft.client.gui.Click click) {
+        clearHeldAdjust();
         if (overlayDraggingSplit) {
             overlayDraggingSplit = false;
             return true;
@@ -3262,7 +3441,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
 
     @Override
     public boolean keyPressed(KeyInput input) {
-        if (input != null && !(topicsExpanded && topicSearchFocused)) {
+        if (input != null && !(topicsExpanded && topicSearchFocused) && directInputAction == null) {
             int key = input.key();
             if (key == GLFW.GLFW_KEY_LEFT_BRACKET || key == GLFW.GLFW_KEY_RIGHT_BRACKET) {
                 int direction = key == GLFW.GLFW_KEY_LEFT_BRACKET ? -1 : 1;
@@ -3278,6 +3457,35 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
 
         if (input != null && topicsExpanded) {
             int key = input.key();
+            if (directInputAction != null) {
+                if (key == 259 /* BACKSPACE */) {
+                    if (!directInputBuffer.isEmpty()) {
+                        directInputBuffer = directInputBuffer.substring(0, directInputBuffer.length() - 1);
+                    }
+                    return true;
+                }
+                if (key >= 48 && key <= 57) { // 0-9
+                    if (directInputBuffer.length() < 5) {
+                        directInputBuffer += (char) ('0' + (key - 48));
+                    }
+                    return true;
+                }
+                if (key >= 320 && key <= 329) { // numpad 0-9
+                    if (directInputBuffer.length() < 5) {
+                        directInputBuffer += (char) ('0' + (key - 320));
+                    }
+                    return true;
+                }
+                if (key == 257 || key == 335) { // ENTER / KP_ENTER
+                    commitDirectInput();
+                    return true;
+                }
+                if (key == 256 /* ESC */) {
+                    cancelDirectInput();
+                    return true;
+                }
+                return true; // absorb all other keys while input is active
+            }
             if (topicSearchFocused) {
                 if (key == 259 /* BACKSPACE */) {
                     if (!topicSearchQuery.isEmpty()) {
@@ -3963,6 +4171,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
     private void runSkillCommand(String skillName, String action) {
         String command = buildSkillCommand(skillName, action);
         sendChatCommand(command);
+        this.close();
     }
 
     private void queueDirectionalMiningCommand(String actionLabel, String skillName, String action) {
@@ -3982,6 +4191,10 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
 
     private void runWoolSkillCommand() {
         String arg = woolTargetCount > 0 ? Integer.toString(woolTargetCount) : null;
+        if (woolSearchRange != SKILL_WOOL_RANGE_DEFAULT) {
+            String rangeArg = "range=" + woolSearchRange;
+            arg = arg != null ? arg + " " + rangeArg : rangeArg;
+        }
         runSkillCommand("wool", arg);
     }
 
@@ -4268,6 +4481,28 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         return false;
     }
 
+    @Override
+    protected void handledScreenTick() {
+        super.handledScreenTick();
+        if (heldAdjustAction != null) {
+            heldAdjustTicks++;
+            if (heldAdjustTicks >= HOLD_REPEAT_INITIAL_DELAY) {
+                int elapsed = heldAdjustTicks - HOLD_REPEAT_INITIAL_DELAY;
+                int interval;
+                if (heldAdjustTicks >= HOLD_REPEAT_FASTEST_AT) {
+                    interval = HOLD_REPEAT_FASTEST_INTERVAL;
+                } else if (heldAdjustTicks >= HOLD_REPEAT_FAST_AT) {
+                    interval = HOLD_REPEAT_FAST_INTERVAL;
+                } else {
+                    interval = HOLD_REPEAT_SLOW_INTERVAL;
+                }
+                if (elapsed % interval == 0) {
+                    heldAdjustAction.run();
+                }
+            }
+        }
+    }
+
     private boolean isFollowActive() {
         return this.handler != null && this.handler.isBotFollowing();
     }
@@ -4340,12 +4575,23 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             }
             return;
         }
+        if (hit.action() == TopicAction.SKILL_WOOL && hit.control() == SkillAdjustControl.TOGGLE_MODE) {
+            woolAdjustingRange = !woolAdjustingRange;
+            return;
+        }
         int delta = hit.control() == SkillAdjustControl.INCREMENT ? 1 : -1;
         switch (hit.action()) {
             case SKILL_FISH -> fishTargetCount = adjustOptionalCount(fishTargetCount, delta,
                     SKILL_FISH_COUNT_DEFAULT, SKILL_FISH_COUNT_MIN, SKILL_FISH_COUNT_MAX);
-            case SKILL_WOOL -> woolTargetCount = adjustOptionalCount(woolTargetCount, delta,
-                    SKILL_WOOL_COUNT_DEFAULT, SKILL_WOOL_COUNT_MIN, SKILL_WOOL_COUNT_MAX);
+            case SKILL_WOOL -> {
+                if (woolAdjustingRange) {
+                    woolSearchRange = MathHelper.clamp(woolSearchRange + delta * 16,
+                            SKILL_WOOL_RANGE_MIN, SKILL_WOOL_RANGE_MAX);
+                } else {
+                    woolTargetCount = adjustOptionalCount(woolTargetCount, delta,
+                            SKILL_WOOL_COUNT_DEFAULT, SKILL_WOOL_COUNT_MIN, SKILL_WOOL_COUNT_MAX);
+                }
+            }
             case SKILL_STRIPMINE -> stripmineLength = adjustOptionalCount(stripmineLength, delta,
                     SKILL_STRIPMINE_COUNT_DEFAULT, SKILL_STRIPMINE_COUNT_MIN, SKILL_STRIPMINE_COUNT_MAX);
             case SKILL_ASCENT -> {
@@ -4359,6 +4605,70 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
                     SKILL_DESCENT_COUNT_DEFAULT, SKILL_DESCENT_COUNT_MIN, SKILL_DESCENT_COUNT_MAX);
             default -> {
             }
+        }
+    }
+
+    private void beginHeldAdjust(Runnable action) {
+        heldAdjustAction = action;
+        heldAdjustTicks = 0;
+    }
+
+    private void clearHeldAdjust() {
+        heldAdjustAction = null;
+        heldAdjustTicks = 0;
+    }
+
+    private void activateDirectInput(TopicAction action) {
+        directInputAction = action;
+        directInputBuffer = "";
+        topicSearchFocused = false;
+        clearHeldAdjust();
+    }
+
+    private void cancelDirectInput() {
+        directInputAction = null;
+        directInputBuffer = "";
+    }
+
+    private void commitDirectInput() {
+        if (directInputAction == null) {
+            return;
+        }
+        TopicAction action = directInputAction;
+        String text = directInputBuffer.trim();
+        directInputAction = null;
+        directInputBuffer = "";
+        if (text.isEmpty()) {
+            return;
+        }
+        int value;
+        try {
+            value = Integer.parseInt(text);
+        } catch (NumberFormatException e) {
+            return;
+        }
+        if (value <= 0) {
+            return;
+        }
+        switch (action) {
+            case SKILL_WOODCUT -> woodcutTreeCount = MathHelper.clamp(value,
+                    WOODCUT_TREE_COUNT_MIN, WOODCUT_TREE_COUNT_MAX);
+            case SKILL_FISH -> fishTargetCount = MathHelper.clamp(value,
+                    SKILL_FISH_COUNT_MIN, SKILL_FISH_COUNT_MAX);
+            case SKILL_WOOL -> woolTargetCount = MathHelper.clamp(value,
+                    SKILL_WOOL_COUNT_MIN, SKILL_WOOL_COUNT_MAX);
+            case SKILL_STRIPMINE -> stripmineLength = MathHelper.clamp(value,
+                    SKILL_STRIPMINE_COUNT_MIN, SKILL_STRIPMINE_COUNT_MAX);
+            case SKILL_ASCENT -> {
+                if (ascentSurfaceMode) {
+                    ascentSurfaceMode = false;
+                }
+                ascentBlocks = MathHelper.clamp(value,
+                        SKILL_ASCENT_COUNT_MIN, SKILL_ASCENT_COUNT_MAX);
+            }
+            case SKILL_DESCENT -> descentBlocks = MathHelper.clamp(value,
+                    SKILL_DESCENT_COUNT_MIN, SKILL_DESCENT_COUNT_MAX);
+            default -> {}
         }
     }
 

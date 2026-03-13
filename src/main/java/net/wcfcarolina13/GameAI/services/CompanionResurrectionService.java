@@ -162,7 +162,8 @@ public final class CompanionResurrectionService {
         Vec3d spawn = new Vec3d(player.getX() + 1.0, player.getY(), player.getZ() + 1.0);
         GameMode desiredMode = GameMode.SURVIVAL;
         if (Frens.CONFIG != null) {
-            ManualConfig.BotControlSettings ctrl = Frens.CONFIG.getEffectiveBotControl(alias);
+            String wk = net.wcfcarolina13.GameAI.services.BotWorldStateService.currentWorldKey(server);
+            ManualConfig.BotControlSettings ctrl = Frens.CONFIG.getEffectiveBotControl(alias, wk);
             if (ctrl != null && "creative".equalsIgnoreCase(ctrl.getGameMode())) {
                 desiredMode = GameMode.CREATIVE;
             }

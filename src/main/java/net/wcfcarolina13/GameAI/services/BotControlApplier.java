@@ -68,7 +68,8 @@ public final class BotControlApplier {
         if (bot == null || Frens.CONFIG == null) {
             return;
         }
-        ManualConfig.BotControlSettings settings = Frens.CONFIG.getEffectiveBotControl(bot.getName().getString());
+        String worldKey = BotWorldStateService.currentWorldKey(bot.getCommandSource().getServer());
+        ManualConfig.BotControlSettings settings = Frens.CONFIG.getEffectiveBotControl(bot.getName().getString(), worldKey);
         if (settings == null) {
             return;
         }
@@ -88,43 +89,80 @@ public final class BotControlApplier {
                 && !net.wcfcarolina13.GameAI.services.SurvivalRecruitmentService.isWorldRecruited(server)) {
             return;
         }
-        for (Map.Entry<String, ManualConfig.BotControlSettings> entry : Frens.CONFIG.getBotControls().entrySet()) {
-            String alias = entry.getKey();
+
+        String currentWorldKey = BotWorldStateService.currentWorldKey(server);
+
+        // Collect aliases that explicitly have spawn data or world-state in the current world.
+        java.util.Set<String> candidates = new java.util.LinkedHashSet<>();
+        Map<String, Map<String, ManualConfig.BotSpawn>> spawnsByWorld = Frens.CONFIG.getBotSpawnPointsByWorld();
+        Map<String, Map<String, ManualConfig.BotControlSettings>> controlsByWorld = Frens.CONFIG.getBotControlsByWorld();
+        // Only include aliases that have an entry specifically for the current world key
+        // (not just any world). This prevents bots from auto-spawning into worlds
+        // they've never visited.
+        if (spawnsByWorld != null) {
+            for (Map.Entry<String, Map<String, ManualConfig.BotSpawn>> e : spawnsByWorld.entrySet()) {
+                if (e.getValue() != null && e.getValue().containsKey(currentWorldKey)) {
+                    candidates.add(e.getKey());
+                }
+            }
+        }
+        if (controlsByWorld != null) {
+            for (Map.Entry<String, Map<String, ManualConfig.BotControlSettings>> e : controlsByWorld.entrySet()) {
+                if (e.getValue() != null && e.getValue().containsKey(currentWorldKey)) {
+                    candidates.add(e.getKey());
+                }
+            }
+        }
+        // Also check BotWorldStateService for bots that have position saved in this world
+        // but may not have a BotSpawn entry yet (e.g., manually spawned bots).
+        Map<String, Integer> worldCounts = BotWorldStateService.debugAliasWorldCounts();
+        if (worldCounts != null) {
+            for (String wAlias : worldCounts.keySet()) {
+                if (BotWorldStateService.loadState(server, wAlias).isPresent()) {
+                    candidates.add(wAlias);
+                }
+            }
+        }
+
+        for (String alias : candidates) {
             if (alias == null || alias.equalsIgnoreCase("default")) {
                 continue;
             }
-            // Auto-spawn is now implicit for all bots that have saved spawn data
-            // matching the current world.  The old per-bot autoSpawn toggle is no longer checked.
-            ManualConfig.BotControlSettings settings = entry.getValue();
-            // Must have saved spawn data to auto-spawn; skip bots that only have config but no position.
-            ManualConfig.BotSpawn spawn = Frens.CONFIG.getBotSpawn(alias);
+            // Must have a saved spawn point for the current world, OR world state for the current world.
+            ManualConfig.BotSpawn spawn = Frens.CONFIG.getBotSpawn(alias, currentWorldKey);
+            boolean hasWorldState = false;
             if (spawn == null) {
-                continue;
-            }
-            // Skip auto-spawn if bot was saved in a different world
-            if (spawn.levelName() != null && !spawn.levelName().isBlank()
-                    && !spawn.levelName().equals(server.getSaveProperties().getLevelName())) {
-                continue;
+                // Check BotWorldStateService for position in this world
+                hasWorldState = BotWorldStateService.loadState(server, alias).isPresent();
+                if (!hasWorldState) continue;
             }
             ServerPlayerEntity existing = server.getPlayerManager().getPlayer(alias);
             String normalizedAlias = alias.toLowerCase(Locale.ROOT);
             if (existing != null || !AUTO_SPAWNED_THIS_SESSION.add(normalizedAlias)) {
                 continue;
             }
-            String mode = settings.getSpawnMode();
+            // Resolve spawn mode from per-world controls, falling back to "training"
+            ManualConfig.BotControlSettings settings = Frens.CONFIG.getOrCreateBotControl(alias, currentWorldKey);
+            String mode = settings != null ? settings.getSpawnMode() : "training";
+            ManualConfig.BotSpawn finalSpawn = spawn;
+            boolean finalHasWorldState = hasWorldState;
             Runnable task = () -> {
                 CommandDispatcher<ServerCommandSource> dispatcher = server.getCommandManager().getDispatcher();
                 ServerCommandSource source = server.getCommandSource().withSilent().withPermissions(net.wcfcarolina13.Frens.OPERATOR_PERMISSIONS);
-                Identifier id = Identifier.tryParse(spawn.dimension());
-                if (id != null) {
-                    RegistryKey<World> key = RegistryKey.of(RegistryKeys.WORLD, id);
-                    ServerWorld targetWorld = server.getWorld(key);
-                    if (targetWorld != null) {
-                        source = source.withWorld(targetWorld)
-                                .withPosition(new Vec3d(spawn.x(), spawn.y(), spawn.z()))
-                                .withRotation(new Vec2f(spawn.yaw(), spawn.pitch()));
+                if (finalSpawn != null) {
+                    Identifier id = Identifier.tryParse(finalSpawn.dimension());
+                    if (id != null) {
+                        RegistryKey<World> key = RegistryKey.of(RegistryKeys.WORLD, id);
+                        ServerWorld targetWorld = server.getWorld(key);
+                        if (targetWorld != null) {
+                            source = source.withWorld(targetWorld)
+                                    .withPosition(new Vec3d(finalSpawn.x(), finalSpawn.y(), finalSpawn.z()))
+                                    .withRotation(new Vec2f(finalSpawn.pitch(), finalSpawn.yaw()));
+                        }
                     }
                 }
+                // If no BotSpawn but world state exists, the bot's position will be
+                // restored by BotWorldStateService during onBotJoin, so just spawn at world spawn.
                 try {
                     dispatcher.execute("bot spawn " + alias + " " + mode, source);
                 } catch (CommandSyntaxException e) {

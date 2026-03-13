@@ -4,6 +4,7 @@ import net.minecraft.item.Item;
 import net.minecraft.item.Items;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
+import net.minecraft.util.Hand;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
@@ -14,6 +15,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Handles scaffolding (pillaring) operations for construction.
@@ -35,7 +37,7 @@ public final class ScaffoldService {
             Items.DIRT, Items.COBBLESTONE, Items.COBBLED_DEEPSLATE, Items.STONE, Items.NETHERRACK
     );
 
-    private static final int MAX_SCAFFOLD_HEIGHT = 12;
+    private static final int MAX_SCAFFOLD_HEIGHT = ConstructionPlacementRules.DEFAULT_MAX_SCAFFOLD_HEIGHT;
     private static final long JUMP_TIMEOUT_MS = 800L;
     private static final long LAND_TIMEOUT_MS = 1200L;
     private static final long PILLAR_INTERSECT_RETRY_SLEEP_MS = 35L;
@@ -74,7 +76,9 @@ public final class ScaffoldService {
 
         public void track(BlockPos pos) {
             if (pos != null) {
-                tracked.add(pos.toImmutable());
+                BlockPos key = pos.toImmutable();
+                tracked.add(key);
+                getScaffoldMemory(bot).add(key);
             }
         }
     }
@@ -83,7 +87,7 @@ public final class ScaffoldService {
      * Tracked scaffold positions per bot (UUID -> positions).
      * This allows multiple bots to build simultaneously without interference.
      */
-    private static final Map<UUID, Set<BlockPos>> scaffoldMemory = new HashMap<>();
+    private static final Map<UUID, Set<BlockPos>> scaffoldMemory = new ConcurrentHashMap<>();
 
     private record ScaffoldPlaceAttemptResult(boolean success, BlockPos placedPos, String reason) {}
 
@@ -95,7 +99,15 @@ public final class ScaffoldService {
      * Get or create the scaffold memory set for a bot.
      */
     public static Set<BlockPos> getScaffoldMemory(ServerPlayerEntity bot) {
-        return scaffoldMemory.computeIfAbsent(bot.getUuid(), k -> new HashSet<>());
+        return scaffoldMemory.computeIfAbsent(bot.getUuid(), k -> ConcurrentHashMap.newKeySet());
+    }
+
+    public static boolean isTrackedScaffold(UUID botId, BlockPos pos) {
+        if (botId == null || pos == null) {
+            return false;
+        }
+        Set<BlockPos> memory = scaffoldMemory.get(botId);
+        return memory != null && memory.contains(pos);
     }
 
     /**
@@ -359,6 +371,13 @@ public final class ScaffoldService {
             return 0;
         }
         int removed = teardownScaffolds(bot, world, new ArrayList<>(session.tracked), keepBlocks);
+        Set<BlockPos> memory = scaffoldMemory.get(session.botId());
+        if (memory != null) {
+            memory.removeAll(session.tracked);
+            if (memory.isEmpty()) {
+                scaffoldMemory.remove(session.botId());
+            }
+        }
         session.tracked.clear();
         return removed;
     }
@@ -401,8 +420,9 @@ public final class ScaffoldService {
                 sleepQuiet(100L);
             }
 
-            // Schedule world mutations on the server thread to avoid
-            // LegacyRandomSource multi-thread access crash
+            // Schedule block breaking on the server thread via the bot's
+            // interaction manager so the break is vanilla-compliant (physical,
+            // not remote world mutation).
             var future = new java.util.concurrent.CompletableFuture<Boolean>();
             server.execute(() -> {
                 try {
@@ -419,7 +439,11 @@ public final class ScaffoldService {
                             future.complete(false);
                             return;
                         }
-                        future.complete(world.breakBlock(pos, true));
+                        boolean broke = bot.interactionManager.tryBreakBlock(pos);
+                        if (broke) {
+                            bot.swingHand(Hand.MAIN_HAND, true);
+                        }
+                        future.complete(broke);
                     } else {
                         future.complete(false);
                     }

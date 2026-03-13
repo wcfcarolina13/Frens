@@ -34,7 +34,7 @@ public final class BaseNetworkManager {
     private BaseNetworkManager() {}
 
     /** @param wallStatus null for regular bases; "complete" or "2/14 edges" for fortification walls */
-    public record BaseDto(String label, int x, int y, int z, boolean home, String wallStatus, String ownerName) {}
+    public record BaseDto(String label, int x, int y, int z, boolean home, String wallStatus, String ownerName, int radius) {}
 
     public static void registerReceiversOnce() {
         if (REGISTERED) {
@@ -127,6 +127,29 @@ public final class BaseNetworkManager {
                     ChatUtils.sendSystemMessage(player.getCommandSource(), ok
                             ? "Renamed '" + oldLabel + "' -> '" + newLabel + "'."
                             : "Rename failed (does it exist? is the new name already used?).");
+                    sendBasesList(player, currentBotAliasContext(player));
+                }));
+
+        ServerPlayNetworking.registerGlobalReceiver(BaseSetRadiusPayload.ID, (payload, context) ->
+                context.server().execute(() -> {
+                    ServerPlayerEntity player = context.player();
+                    if (player == null) return;
+                    ServerWorld world = player.getCommandSource().getWorld();
+                    if (world.getRegistryKey() != World.OVERWORLD) {
+                        ChatUtils.sendSystemMessage(player.getCommandSource(), "Bases are only managed in the Overworld.");
+                        return;
+                    }
+                    String label = payload.label();
+                    if (label == null || label.isBlank()) {
+                        ChatUtils.sendSystemMessage(player.getCommandSource(), "Select a base first.");
+                        return;
+                    }
+                    int radius = Math.max(1, Math.min(payload.radius(), 128));
+                    MinecraftServer srv = player.getCommandSource().getServer();
+                    boolean ok = BotHomeService.setBaseRadius(srv, world, label, radius);
+                    ChatUtils.sendSystemMessage(player.getCommandSource(), ok
+                            ? "Set protection radius for '" + label + "' to " + radius + " blocks."
+                            : "No base named '" + label + "' found.");
                     sendBasesList(player, currentBotAliasContext(player));
                 }));
 
@@ -442,7 +465,7 @@ public final class BaseNetworkManager {
             if (b == null || b.pos() == null) continue;
             String label = b.label() != null ? b.label() : "";
             boolean home = !homeNorm.isBlank() && homeNorm.equals(label.trim().toLowerCase(java.util.Locale.ROOT));
-            out.add(new BaseDto(label, b.pos().getX(), b.pos().getY(), b.pos().getZ(), home, null, null));
+            out.add(new BaseDto(label, b.pos().getX(), b.pos().getY(), b.pos().getZ(), home, null, null, b.radius()));
         }
 
         // Include saved fortification walls
@@ -460,7 +483,7 @@ public final class BaseNetworkManager {
             int totalEdges = f.getHullWallPoints().size();
             String status = f.isComplete() ? "complete"
                     : f.getCompletedEdges().size() + "/" + totalEdges + " edges";
-                out.add(new BaseDto(fName, center.getX(), center.getY(), center.getZ(), false, status, f.getOwnerName()));
+                out.add(new BaseDto(fName, center.getX(), center.getY(), center.getZ(), false, status, f.getOwnerName(), 0));
         }
 
         String json = GSON.toJson(out);

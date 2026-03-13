@@ -1,16 +1,17 @@
 # Frens
 
-**An NPC companion mod for Minecraft that adds intelligent, personality-driven bots with survival skills, natural language understanding, and autonomous behaviors (that's the direction, at least. WIP).**
+**An NPC companion mod for Minecraft that adds personality-driven bots with survival skills, optional AI/LLM hooks, and autonomous companion behaviors.**
 
-> This project is a heavily modified fork of [shasankp000/AI-Player](https://github.com/shasankp000/AI-player). The original project aimed to add a "second player" to the game. This fork has evolved into a comprehensive NPC companion system with extensive skill automation and survival mechanics. More AI/LLM elements will be incorporated in the future.
+> This project is a heavily modified fork of [shasankp000/AI-Player](https://github.com/shasankp000/AI-player). The original project aimed to add a "second player" to the game. This fork has evolved into a companion-focused NPC system with extensive skill automation, survival mechanics, optional AI/LLM infrastructure, and active UX/roadmap work.
 
 ## Features
 
 ### 🤖 Intelligent Bot Companions
 - **Multiple bots** can run concurrently, each with persistent inventory, stats, and personality
-- **Natural language chat (planned)** - higher-level conversational features are planned but not required for core operation
+- **Optional AI / natural-language infrastructure** - the repo already includes optional LLM routing, tool-calling, provider hooks, and per-bot controls, but core play does not depend on any provider
 - **Distinct personalities** - Jake is a pragmatic engineer, Bob is a sardonic ranger
 - **Death recovery** - bots ask if they should continue their last job after respawning
+- **Learning Mode v1** - operator-only demonstration capture for recording traces used to tune movement/build behavior offline
 
 ### ⚒️ Survival Skills
 | Skill | Description |
@@ -33,8 +34,27 @@
 - **Combat** - defends itself and nearby allies from hostiles
 - **Day/night cycle** - returns to base at sunset, sleeps, resumes at dawn
 
-### 💬 Planned LLM Integration
-LLM-based conversational features are planned but not included in this release. Core bot functionality does not require an LLM provider.
+### 💬 Optional AI / LLM Features
+Core bot functionality does **not** require an LLM provider.
+
+This repo already contains optional AI-facing infrastructure, including:
+
+- world-level and per-bot LLM toggles
+- provider/client plumbing for optional runtime integrations
+- tool-calling / routing code paths
+- Learning Mode v1 demonstration capture for offline tuning and future ML/LLM workflows
+
+These systems are still partial and actively evolving, so they should be treated as optional layers on top of the main companion gameplay loop rather than mandatory setup.
+
+### 🗺️ High-Level Roadmap
+
+Verified near-term work in the repo currently points at three big buckets:
+
+- **Active polish:** fortify tower reliability, cavity/callout verification, guide clarity, keybind/help cleanup, and learning-trace playtesting/tuning
+- **Current optional AI work:** improving provider UX, memory/tool routing, and tightening the safety/clarity of AI-assisted control paths
+- **Future exploration:** using captured learning traces and optional LLM systems to improve control quality without making core companion gameplay depend on online AI services
+
+Roadmap items here are intentionally high-level and based only on tracked tasks, current code, and changelog history.
 
 
 ### ⚙️ Building with AI/LLM support (optional)
@@ -79,7 +99,7 @@ If you do not bundle the AI runtime, you'll still need to provide a compatible L
 2. Install [Fabric API](https://modrinth.com/mod/fabric-api)
 3. (Recommended) Install [Carpet Mod](https://modrinth.com/mod/carpet) for fake-player support
 4. Drop the Frens JAR into your `mods/` folder
-5. (Optional) Install an LLM provider only if you plan to enable future conversational features (not required for current functionality)
+5. (Optional) Install/configure an LLM provider only if you want to experiment with the optional AI/LLM features (not required for normal gameplay)
 
 ### Creating Downloadable GitHub Releases
 
@@ -101,6 +121,7 @@ After the workflow completes, the jar is attached to the matching release page.
 ```bash
 /bot spawn Jake training    # Spawn a bot named Jake
 /bot follow Jake            # Make Jake follow you
+/bot regroup Jake           # Safely call Jake back to you (/bot come still works)
 /bot open Jake              # Open Jake's inventory/actions screen
 /bot skill woodcut 10 Jake  # Cut 10 trees
 /bot skill mining 32 Jake   # Mine 32 stone blocks
@@ -131,6 +152,7 @@ Switching uses `/bot open <alias>` under the hood, so normal ownership/permissio
 | `/bot stop [alias&#124;all]` | Stop current task and movement |
 | `/bot resume [alias&#124;all]` | Resume a paused skill |
 | `/bot follow [alias&#124;all]` | Follow the commander |
+| `/bot regroup [alias&#124;all]` | Safely regroup the bot back toward you (`/bot come` remains a legacy alias) |
 | `/bot open [alias]` | Open bot inventory/actions UI (no alias = last targeted fallback) |
 | `/bot heal [alias&#124;all]` | Force immediate eating |
 | `/bot inventory [alias&#124;all]` | Show inventory summary |

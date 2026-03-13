@@ -41,6 +41,9 @@ import java.util.concurrent.TimeUnit;
 public final class HovelPerimeterBuilder {
 
     private static final Logger LOGGER = LoggerFactory.getLogger("skill-shelter");
+    private static final boolean USE_OPTIMIZED_LEVELING_ROUTE = true;
+    private static final boolean USE_TARGETED_FOUNDATION_REPAIR = true;
+    private static final boolean USE_CACHED_FLOOR_SCAN = true;
     private static final double REACH_DISTANCE_SQ = 20.25D; 
     private static final long PLACEMENT_DELAY_MS = 20L;
     private static final long REACH_STALL_PERIMETER_WALK_MS = 2000L;
@@ -76,6 +79,10 @@ public final class HovelPerimeterBuilder {
     // Tracks repeated attempts to reach the same destination. If we spend >6s trying, do a perimeter walk.
     private final Map<BlockPos, Long> reachAttemptSinceMs = new HashMap<>();
 
+    // Small build-local cache for repeated floor scans at the same anchor.
+    private BlockPos cachedFloorScanCenter;
+    private Integer cachedFloorBlockY;
+
     // Cache for foundation beam progress so we don't re-check already placed beam segments.
     private final Set<BlockPos> confirmedFoundationBeams = new HashSet<>();
     private final Set<BlockPos> pendingFoundationBeams = new LinkedHashSet<>();
@@ -96,7 +103,6 @@ public final class HovelPerimeterBuilder {
         String s = raw.toString().trim();
         if (s.isEmpty()) return fallback;
         for (Direction d : Direction.values()) {
-            if (d == null) continue;
             if (d.asString().equalsIgnoreCase(s) || d.name().equalsIgnoreCase(s)) {
                 return d;
             }
@@ -128,6 +134,8 @@ public final class HovelPerimeterBuilder {
 
     private void resetBuildState(boolean clearScaffoldMemory) {
         reachAttemptSinceMs.clear();
+        cachedFloorScanCenter = null;
+        cachedFloorBlockY = null;
         if (clearScaffoldMemory) {
             usedScaffoldBasesXZ.clear();
         }
@@ -369,6 +377,15 @@ public final class HovelPerimeterBuilder {
         int floorBlockY = detectFloorBlockY(world, requestedStand);
         BlockPos buildCenter = new BlockPos(requestedStand.getX(), floorBlockY, requestedStand.getZ());
         BlockPos standCenter = buildCenter.up();
+        LOGGER.info("Hovel anchor: requestedStand={} floorBlockY={} buildCenter={} standCenter={} radius={} wallHeight={} doorSide={} botPos={}",
+            requestedStand.toShortString(),
+            floorBlockY,
+            buildCenter.toShortString(),
+            standCenter.toShortString(),
+            radius,
+            wallHeight,
+            doorSide,
+            bot.getBlockPos().toShortString());
 
         // (persistence already attached above)
 
@@ -465,6 +482,8 @@ public final class HovelPerimeterBuilder {
 
         List<BlockPos> walls = HovelBlueprint.generateWallBlueprint(buildCenter, radius, wallHeight, doorSide);
         List<BlockPos> roof = HovelBlueprint.generateRoofBlueprint(buildCenter, radius, wallHeight);
+        logBlueprintSummary("walls", walls);
+        logBlueprintSummary("roof", roof);
 
         StandableCache standableCache = new StandableCache();
 
@@ -583,6 +602,41 @@ public final class HovelPerimeterBuilder {
         LOGGER.warn("Hovel [{}] {}", stage, detail);
     }
 
+    private void logBlueprintSummary(String label, List<BlockPos> blueprint) {
+        if (blueprint == null || blueprint.isEmpty()) {
+            LOGGER.info("Hovel blueprint [{}]: empty", label);
+            return;
+        }
+        int minX = Integer.MAX_VALUE;
+        int minY = Integer.MAX_VALUE;
+        int minZ = Integer.MAX_VALUE;
+        int maxX = Integer.MIN_VALUE;
+        int maxY = Integer.MIN_VALUE;
+        int maxZ = Integer.MIN_VALUE;
+        for (BlockPos pos : blueprint) {
+            if (pos == null) continue;
+            minX = Math.min(minX, pos.getX());
+            minY = Math.min(minY, pos.getY());
+            minZ = Math.min(minZ, pos.getZ());
+            maxX = Math.max(maxX, pos.getX());
+            maxY = Math.max(maxY, pos.getY());
+            maxZ = Math.max(maxZ, pos.getZ());
+        }
+        BlockPos first = blueprint.get(0);
+        BlockPos last = blueprint.get(blueprint.size() - 1);
+        LOGGER.info("Hovel blueprint [{}]: count={} bounds=({}, {}, {}) -> ({}, {}, {}) first={} last={}",
+                label,
+                blueprint.size(),
+                minX,
+                minY,
+                minZ,
+                maxX,
+                maxY,
+                maxZ,
+                first != null ? first.toShortString() : "null",
+                last != null ? last.toShortString() : "null");
+    }
+
     private void sendStageMessage(String key, String message) {
         ServerCommandSource source = stageMessageSource;
         if (source == null || key == null || message == null) return;
@@ -609,10 +663,10 @@ public final class HovelPerimeterBuilder {
                 new BlockPos(center.getX() - radius + 1, y, center.getZ()),
                 new BlockPos(center.getX() + radius - 1, y, center.getZ()),
                 // fallback corners
-                center.add(radius - 1, 1, radius - 1),
-                center.add(-(radius - 1), 1, radius - 1),
-                center.add(radius - 1, 1, -(radius - 1)),
-                center.add(-(radius - 1), 1, -(radius - 1))
+            new BlockPos(center.getX() + radius - 1, center.getY() + 1, center.getZ() + radius - 1),
+            new BlockPos(center.getX() - radius + 1, center.getY() + 1, center.getZ() + radius - 1),
+            new BlockPos(center.getX() + radius - 1, center.getY() + 1, center.getZ() - radius + 1),
+            new BlockPos(center.getX() - radius + 1, center.getY() + 1, center.getZ() - radius + 1)
         );
         for (BlockPos p : candidates) {
             if (p == null) continue;
@@ -673,14 +727,24 @@ public final class HovelPerimeterBuilder {
         int noProgressStreak = 0;
         int lastMissing = missing0;
         while (attempts++ < 3 && !SkillManager.shouldAbortSkill(bot)) {
+            List<BlockPos> repairCorners = USE_TARGETED_FOUNDATION_REPAIR
+                    ? findCornersNeedingBeamRepair(world, corners, baseY, roofY)
+                    : new ArrayList<>(corners);
+            if (repairCorners.isEmpty()) {
+                repairCorners = new ArrayList<>(corners);
+            }
+            repairCorners = sortByDistanceToBot(bot, repairCorners);
+
             // Ensure corner footings are solid so placement doesn't fail due to holes.
-            for (BlockPos c : corners) {
+            for (BlockPos c : repairCorners) {
                 if (SkillManager.shouldAbortSkill(bot)) return false;
                 lastTarget = c;
                 ensureCornerFooting(world, source, bot, center, radius, c);
             }
 
-            buildCornerBeamsEarly(world, source, bot, center, radius, wallHeight, counters);
+            buildCornerBeamsEarly(world, source, bot, center, radius, wallHeight, counters,
+                    USE_TARGETED_FOUNDATION_REPAIR ? new LinkedHashSet<>(repairCorners) : null,
+                    USE_TARGETED_FOUNDATION_REPAIR);
             int missing = countMissingFoundationBeams(world, required);
             LOGGER.info("Foundation beams: attempt {} missing {}", attempts, missing);
             if (missing == 0) {
@@ -752,6 +816,37 @@ public final class HovelPerimeterBuilder {
             }
         }
         return missing;
+    }
+
+    private List<BlockPos> findCornersNeedingBeamRepair(ServerWorld world,
+                                                        List<BlockPos> corners,
+                                                        int baseY,
+                                                        int roofY) {
+        if (world == null || corners == null || corners.isEmpty()) {
+            return Collections.emptyList();
+        }
+        ArrayList<BlockPos> needingRepair = new ArrayList<>();
+        for (BlockPos corner : corners) {
+            if (corner == null) {
+                continue;
+            }
+            if (cornerNeedsBeamRepair(world, corner, baseY, roofY)) {
+                needingRepair.add(corner);
+            }
+        }
+        return needingRepair;
+    }
+
+    private boolean cornerNeedsBeamRepair(ServerWorld world, BlockPos corner, int baseY, int roofY) {
+        if (world == null || corner == null) {
+            return false;
+        }
+        for (int y = baseY + 1; y <= roofY; y++) {
+            if (isMissing(world, corner.withY(y))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private void patchPendingFoundationBeams(ServerWorld world,
@@ -2634,7 +2729,11 @@ public final class HovelPerimeterBuilder {
             }
         }
 
-        for (BlockPos seed : stationSeeds) {
+        List<BlockPos> orderedStationSeeds = USE_OPTIMIZED_LEVELING_ROUTE
+                ? sortByDistanceToBot(bot, stationSeeds)
+                : new ArrayList<>(stationSeeds);
+
+        for (BlockPos seed : orderedStationSeeds) {
             if (SkillManager.shouldAbortSkill(bot)) {
                 logStageWarn("leveling", "abort requested before station seed=" + seed);
                 return;
@@ -2755,7 +2854,16 @@ public final class HovelPerimeterBuilder {
      * This helps us patch holes even if the chosen Y represents the player's standing cell.
      */
     private int detectFloorBlockY(ServerWorld world, BlockPos center) {
-        return HovelTerrainService.detectFloorBlockY(world, center);
+        if (!USE_CACHED_FLOOR_SCAN || center == null) {
+            return HovelTerrainService.detectFloorBlockY(world, center);
+        }
+        if (cachedFloorBlockY != null && center.equals(cachedFloorScanCenter)) {
+            return cachedFloorBlockY;
+        }
+        int resolved = HovelTerrainService.detectFloorBlockY(world, center);
+        cachedFloorScanCenter = center.toImmutable();
+        cachedFloorBlockY = resolved;
+        return resolved;
     }
 
     @SuppressWarnings("unused")
@@ -2862,6 +2970,18 @@ public final class HovelPerimeterBuilder {
                                        int radius,
                                        int wallHeight,
                                        BuildCounters counters) {
+        buildCornerBeamsEarly(world, source, bot, center, radius, wallHeight, counters, null, false);
+    }
+
+    private void buildCornerBeamsEarly(ServerWorld world,
+                                       ServerCommandSource source,
+                                       ServerPlayerEntity bot,
+                                       BlockPos center,
+                                       int radius,
+                                       int wallHeight,
+                                       BuildCounters counters,
+                                       Set<BlockPos> targetCorners,
+                                       boolean allowUsedBaseReuse) {
         if (world == null || source == null || bot == null || center == null) return;
         if (radius <= 0 || wallHeight <= 0) return;
 
@@ -2876,14 +2996,17 @@ public final class HovelPerimeterBuilder {
 
         // Build each corner from a diagonal outside stance.
         int outside = radius + 2;
-        for (BlockPos c : corners) {
+        List<BlockPos> orderedCorners = sortByDistanceToBot(bot, corners);
+        for (BlockPos c : orderedCorners) {
             if (SkillManager.shouldAbortSkill(bot)) return;
+            if (targetCorners != null && !targetCorners.contains(c)) continue;
 
             int sx = Integer.signum(c.getX() - center.getX());
             int sz = Integer.signum(c.getZ() - center.getZ());
             BlockPos stanceSeed = center.add(sx * outside, 0, sz * outside).withY(standY);
             BlockPos base = findNearbyStandableFiltered(world, stanceSeed, 6, (p) -> {
-                if (isForbiddenScaffoldBase(p) || isScaffoldBaseUsed(p)) return false;
+                if (isForbiddenScaffoldBase(p)) return false;
+                if (!allowUsedBaseReuse && isScaffoldBaseUsed(p)) return false;
                 int dx = p.getX() - center.getX();
                 int dz = p.getZ() - center.getZ();
                 if (Integer.signum(dx) != sx || Integer.signum(dz) != sz) return false;

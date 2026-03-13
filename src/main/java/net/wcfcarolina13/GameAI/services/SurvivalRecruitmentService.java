@@ -881,7 +881,8 @@ public final class SurvivalRecruitmentService {
 
         GameMode desiredMode = GameMode.SURVIVAL;
         if (Frens.CONFIG != null) {
-            ManualConfig.BotControlSettings ctrl = Frens.CONFIG.getEffectiveBotControl(alias);
+            String wk = net.wcfcarolina13.GameAI.services.BotWorldStateService.currentWorldKey(server);
+            ManualConfig.BotControlSettings ctrl = Frens.CONFIG.getEffectiveBotControl(alias, wk);
             if (ctrl != null && "creative".equalsIgnoreCase(ctrl.getGameMode())) {
                 desiredMode = GameMode.CREATIVE;
             }

@@ -79,6 +79,8 @@ public final class BotCombatCalloutService {
     private static final ConcurrentHashMap<UUID, Long> LAST_HOSTILES_PRESENT_TICK = new ConcurrentHashMap<>();
     /** Bot position when hostiles first cleared — the sweep walks back here if the bot drifted. */
     private static final ConcurrentHashMap<UUID, net.minecraft.util.math.Vec3d> LAST_COMBAT_CENTER = new ConcurrentHashMap<>();
+    /** Death positions of mobs killed by this bot during the current combat session (max 12, FIFO). */
+    private static final ConcurrentHashMap<UUID, java.util.List<net.minecraft.util.math.Vec3d>> RECENT_KILL_POSITIONS = new ConcurrentHashMap<>();
 
     private static final class CombatMetadata {
         int maxDangerousMobCount = 0;
@@ -517,15 +519,44 @@ public final class BotCombatCalloutService {
         return botId == null ? null : LAST_COMBAT_CENTER.get(botId);
     }
 
+    /** Records a mob's death position for post-combat sweep. Capped at 12 entries (FIFO). */
+    public static void noteKillPosition(UUID botId, net.minecraft.util.math.Vec3d pos) {
+        if (botId == null || pos == null) return;
+        java.util.List<net.minecraft.util.math.Vec3d> list =
+                RECENT_KILL_POSITIONS.computeIfAbsent(botId, k -> new java.util.concurrent.CopyOnWriteArrayList<>());
+        if (list.size() >= 24) {
+            list.remove(0);
+        }
+        list.add(pos);
+    }
+
+    /** Returns a snapshot of recent kill positions for the bot, or an empty list. */
+    public static java.util.List<net.minecraft.util.math.Vec3d> getRecentKillPositions(UUID botId) {
+        if (botId == null) return java.util.Collections.emptyList();
+        java.util.List<net.minecraft.util.math.Vec3d> list = RECENT_KILL_POSITIONS.get(botId);
+        return list != null ? new java.util.ArrayList<>(list) : java.util.Collections.emptyList();
+    }
+
     /**
-     * Clears the post-combat sweep flag.  Call when sweep completes, new hostiles
-     * appear, or the bot dies/is removed.
+     * Fully clears all post-combat sweep state including accumulated kill positions
+     * and combat center.  Call when the sweep finishes or the bot dies/is removed.
      */
     public static void clearPostCombatSweep(UUID botId) {
         if (botId == null) return;
         POST_COMBAT_SWEEP_TRIGGER_MS.remove(botId);
         LAST_HOSTILES_PRESENT_TICK.remove(botId);
         LAST_COMBAT_CENTER.remove(botId);
+        RECENT_KILL_POSITIONS.remove(botId);
+    }
+
+    /**
+     * Cancels the pending sweep timer without clearing accumulated kill positions
+     * or combat center.  Call when hostiles reappear during combat — the accumulated
+     * data will be used once combat fully ends and the sweep fires.
+     */
+    public static void cancelPendingSweep(UUID botId) {
+        if (botId == null) return;
+        POST_COMBAT_SWEEP_TRIGGER_MS.remove(botId);
     }
 
     /**

@@ -28,6 +28,8 @@ import net.wcfcarolina13.PathFinding.GoTo;
 import net.wcfcarolina13.PathFinding.PathFinder;
 import net.wcfcarolina13.PathFinding.Segment;
 import net.wcfcarolina13.PlayerUtils.MiningTool;
+import net.wcfcarolina13.GameAI.services.construction.ConstructionProtectionService;
+import net.wcfcarolina13.GameAI.services.construction.ConstructionRepairService;
 import net.minecraft.item.ItemStack;
 import net.minecraft.state.property.Properties;
 import org.slf4j.Logger;
@@ -770,10 +772,13 @@ public final class MovementService {
                                      String label,
                                      boolean fastReplan,
                                      boolean allowSnap) {
+        if (player == null) {
+            return new WalkResult(false, destination, label + ": no player for walking");
+        }
         ServerWorld world = getWorld(player);
-        BlockPos currentPos = player != null ? player.getBlockPos() : null;
+        BlockPos currentPos = player.getBlockPos();
         if (world == null || destination == null) {
-            return recordAttempt(player != null ? player.getUuid() : null, destination,
+            return recordAttempt(player.getUuid(), destination,
                     new WalkResult(false, currentPos, label + ": no world/destination for walking"));
         }
         // Guard: if the caller requests a non-standable destination, adjust to a nearby standable tile.
@@ -2568,6 +2573,13 @@ public final class MovementService {
         if (!AutoFaceEntity.isBotExecutingTask()) {
             return false;
         }
+        if (ConstructionProtectionService.hasActiveProtection(bot.getUuid())) {
+            LOGGER.info("movement obstruction disabled [{}]: bot={} goal={} reason=active-construction-protection",
+                    label,
+                    bot.getName().getString(),
+                    goal.toShortString());
+            return false;
+        }
         ServerWorld world = getWorld(bot);
         if (world == null) {
             return false;
@@ -2636,12 +2648,21 @@ public final class MovementService {
             if (!isWithinReach(bot, pos)) {
                 continue;
             }
-            if (!obstructionMineAllowed(bot.getUuid(), pos)) {
-                continue;
-            }
-
             BlockState state = world.getBlockState(pos);
             if (state.isAir() || state.isReplaceable()) {
+                continue;
+            }
+            String protectionReason = ConstructionProtectionService.protectionReason(bot.getUuid(), pos);
+            if (protectionReason != null) {
+                LOGGER.info("movement obstruction skip [{}]: bot={} pos={} state={} protection={}",
+                        label,
+                        bot.getName().getString(),
+                        pos.toShortString(),
+                        state.getBlock().getTranslationKey(),
+                        protectionReason);
+                continue;
+            }
+            if (!obstructionMineAllowed(bot.getUuid(), pos)) {
                 continue;
             }
             if (state.getBlock() instanceof DoorBlock) {
@@ -2665,6 +2686,17 @@ public final class MovementService {
             }
             // Avoid ripping up common build materials during generic movement.
             if (state.isIn(BlockTags.LOGS) || state.isIn(BlockTags.PLANKS) || state.isIn(BlockTags.WOOL)) {
+                continue;
+            }
+            // Never tunnel through natural terrain — go around instead.
+            if (state.isIn(BlockTags.DIRT) || state.isOf(Blocks.GRAVEL)
+                    || state.isOf(Blocks.SAND) || state.isOf(Blocks.RED_SAND)
+                    || state.isOf(Blocks.CLAY)) {
+                continue;
+            }
+            // Protect placed furnaces (block entity check above should catch these,
+            // but add explicit guard as a safety net for race conditions).
+            if (state.isOf(Blocks.FURNACE) || state.isOf(Blocks.BLAST_FURNACE) || state.isOf(Blocks.SMOKER)) {
                 continue;
             }
             // Only attempt when it actually blocks movement space (has collision).
@@ -2691,7 +2723,17 @@ public final class MovementService {
                 MiningTool.mineBlock(bot, pos).get(6, TimeUnit.SECONDS);
                 // Small pause to let physics/collision settle.
                 sleep(120L);
-                return world.getBlockState(pos).isAir();
+                boolean mined = world.getBlockState(pos).isAir();
+                if (mined && ConstructionRepairService.hasActiveSession(bot.getUuid())) {
+                    ConstructionRepairService.noteDamageAndAttemptImmediateRepair(
+                            bot,
+                            world,
+                            pos,
+                            "movement-obstruction-mine:" + label,
+                            20.25D
+                    );
+                }
+                return mined;
             } catch (Exception ignored) {
                 // Cooldown is already marked; treat this as a failed attempt.
                 return false;
@@ -2952,36 +2994,17 @@ public final class MovementService {
     }
 
     /**
-     * Keep the bot buoyant so that shallow water crossings look like proper wading instead of sinking.
+     * Let vanilla handle all water physics. No artificial buoyancy, no forced
+     * swim mode. Bot sinks, swims, and wades exactly like a real player.
+     * Only unsneaks if the bot was sneaking without a lock (prevents drowning
+     * from sneak-sinking).
      */
             private static void encourageSurfaceDrift(ServerPlayerEntity player) {
-        if (player == null) {
-            return;
-        }
-        ServerWorld world = getWorld(player);
-        if (world == null) {
-            return;
-        }
-        BlockPos feet = player.getBlockPos();
-        FluidState fluidState = world.getFluidState(feet);
-        if (!fluidState.isIn(FluidTags.WATER)) {
-            player.setSwimming(false);
-            return;
-        }
-        
-        player.setSwimming(true);
-        if (player.isSneaking() && !SneakLockService.isLocked(player.getUuid())) {
+        if (player == null) return;
+        // Unsneak in water to prevent sneak-sinking (unless locked)
+        if (player.isTouchingWater() && player.isSneaking()
+                && !SneakLockService.isLocked(player.getUuid())) {
             player.setSneaking(false);
-        }
-
-        boolean headSubmerged = world.getFluidState(feet.up()).isIn(FluidTags.WATER);
-        if (headSubmerged) {
-            // Gentle swim up if submerged
-            Vec3d velocity = player.getVelocity();
-            if (velocity.y < 0.05D) {
-                player.addVelocity(0.0D, 0.04D, 0.0D); // Reduced lift
-                player.velocityDirty = true;
-            }
         }
     }
 }

@@ -197,7 +197,9 @@ public final class BotWorldStateService {
 
     public static record BotState(double x, double y, double z, float yaw, float pitch) {
         static BotState from(ServerPlayerEntity bot) {
-            return new BotState(bot.getX(), bot.getY(), bot.getZ(), bot.getYaw(), bot.getPitch());
+            float rawPitch = bot.getPitch();
+            float clampedPitch = Math.max(-90.0F, Math.min(90.0F, rawPitch));
+            return new BotState(bot.getX(), bot.getY(), bot.getZ(), bot.getYaw(), clampedPitch);
         }
     }
 }

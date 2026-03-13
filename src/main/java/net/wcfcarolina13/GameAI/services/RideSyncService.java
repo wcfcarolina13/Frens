@@ -1291,7 +1291,7 @@ public final class RideSyncService {
             return;
         }
         float yaw = (float) Math.toDegrees(Math.atan2(-dx, dz));
-        float pitch = (float) Math.toDegrees(-Math.atan2(dy, horiz));
+        float pitch = (float) Math.max(-90.0, Math.min(90.0, Math.toDegrees(-Math.atan2(dy, horiz))));
         bot.setYaw(yaw);
         bot.setHeadYaw(yaw);
         bot.setBodyYaw(yaw);

@@ -175,10 +175,11 @@ public final class BotArrowRecoveryService {
         long nowTick = server.getTicks();
         BotState st = stateFor(bot);
 
-        if (st.lastShotTick < 0L) {
+        long lastActivity = Math.max(st.lastShotTick, st.lastHostileSeenTick);
+        if (lastActivity < 0L) {
             return;
         }
-        if (nowTick - st.lastShotTick > SHOT_MEMORY_TICKS) {
+        if (nowTick - lastActivity > SHOT_MEMORY_TICKS) {
             st.clearAll();
             return;
         }
@@ -188,7 +189,7 @@ public final class BotArrowRecoveryService {
         }
         st.nextScanTick = nowTick + ARROW_SCAN_PERIOD_TICKS;
 
-        scanForBotArrows(bot, nowTick, hostilesPresent);
+        scanForRecoverableArrows(bot, nowTick, hostilesPresent);
     }
 
     /**
@@ -224,8 +225,19 @@ public final class BotArrowRecoveryService {
         long nowTick = server.getTicks();
         BotState st = stateFor(bot);
 
-        // Only recover if we've shot recently.
-        if (st.lastShotTick < 0L || nowTick - st.lastShotTick > SHOT_MEMORY_TICKS) {
+        // Recover if we've been in combat/shot recently, OR if there are arrows nearby.
+        long lastActivity = Math.max(st.lastShotTick, st.lastHostileSeenTick);
+        if (lastActivity < 0L) {
+            // No combat recorded for this bot. Do a speculative scan — if arrows are
+            // nearby (e.g. from other bots' fights), bootstrap recovery state.
+            scanForRecoverableArrows(bot, nowTick, false);
+            if (st.tracked.isEmpty()) {
+                return false;
+            }
+            // Bootstrap: set lastHostileSeenTick past the safe-delay so recovery starts immediately.
+            st.lastHostileSeenTick = nowTick - SAFE_DELAY_TICKS - 1L;
+            st.lastCombatAnchorPos = new Vec3d(bot.getX(), bot.getY(), bot.getZ());
+        } else if (nowTick - lastActivity > SHOT_MEMORY_TICKS) {
             st.clearAll();
             return false;
         }
@@ -243,7 +255,7 @@ public final class BotArrowRecoveryService {
         double maxRadiusSq = maxRadiusFromAnchor > 0.0D ? maxRadiusFromAnchor * maxRadiusFromAnchor : Double.POSITIVE_INFINITY;
 
         // Ensure tracking is fresh.
-        scanForBotArrows(bot, nowTick, false);
+        scanForRecoverableArrows(bot, nowTick, false);
 
         // If we have no tracked arrows, stop.
         if (st.tracked.isEmpty()) {
@@ -328,7 +340,7 @@ public final class BotArrowRecoveryService {
         return true;
     }
 
-    private static void scanForBotArrows(ServerPlayerEntity bot, long nowTick, boolean hostilesPresent) {
+    private static void scanForRecoverableArrows(ServerPlayerEntity bot, long nowTick, boolean hostilesPresent) {
         if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
             return;
         }
@@ -350,15 +362,15 @@ public final class BotArrowRecoveryService {
                 p -> p instanceof ArrowEntity
         );
 
-        // Mark all as unseen this tick, then prune.
         for (PersistentProjectileEntity p : projectiles) {
             if (!(p instanceof ArrowEntity arrow)) {
                 continue;
             }
+
+            // Track ALL arrows for recovery, but only callout misses for bot-owned ones.
             Entity owner = arrow.getOwner();
-            if (owner == null || owner.getUuid() == null || !owner.getUuid().equals(bot.getUuid())) {
-                continue;
-            }
+            boolean botOwned = owner != null && owner.getUuid() != null
+                    && owner.getUuid().equals(bot.getUuid());
 
             UUID id = arrow.getUuid();
             Vec3d pos = new Vec3d(arrow.getX(), arrow.getY(), arrow.getZ());
@@ -375,11 +387,13 @@ public final class BotArrowRecoveryService {
             if (stationary) {
                 if (t.stationarySinceTick == 0L) {
                     t.stationarySinceTick = nowTick;
-                    // A new stationary arrow is a strong "miss" signal (likely stuck in ground).
-                    if (hostilesPresent) {
-                        BotActions.noteRangedMiss(bot, nowTick);
+                    // "I missed!" callout only for bot-owned arrows.
+                    if (botOwned) {
+                        if (hostilesPresent) {
+                            BotActions.noteRangedMiss(bot, nowTick);
+                        }
+                        maybeCalloutMiss(bot, nowTick, hostilesPresent);
                     }
-                    maybeCalloutMiss(bot, nowTick, hostilesPresent);
                 }
             } else {
                 t.stationarySinceTick = 0L;

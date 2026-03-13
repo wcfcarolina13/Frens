@@ -54,17 +54,27 @@ public final class BotIdentityService {
         Map<String, ManualConfig.BotSpawn> spawnMap = config != null && config.getBotSpawnPoints() != null
                 ? config.getBotSpawnPoints()
                 : Collections.emptyMap();
+        // Also include aliases from per-world spawn data
+        Set<String> spawnKeySet = new java.util.LinkedHashSet<>(spawnMap.keySet());
+        if (config != null && config.getBotSpawnPointsByWorld() != null) {
+            spawnKeySet.addAll(config.getBotSpawnPointsByWorld().keySet());
+        }
         Map<String, ManualConfig.BotControlSettings> controlMap = config != null && config.getBotControls() != null
                 ? config.getBotControls()
                 : Collections.emptyMap();
+        // Also include aliases from per-world control data
+        Set<String> controlKeySet = new java.util.LinkedHashSet<>(controlMap.keySet());
+        if (config != null && config.getBotControlsByWorld() != null) {
+            controlKeySet.addAll(config.getBotControlsByWorld().keySet());
+        }
         Map<String, ManualConfig.BotQuestMemory> questMap = config != null && config.getBotQuestMemory() != null
                 ? config.getBotQuestMemory()
                 : Collections.emptyMap();
 
         List<String> profileAliasKeys = matchingAliasKeys(profileMap.keySet(), normalizedAlias);
         List<String> ownerAliasKeys = matchingAliasKeys(ownerMap.keySet(), normalizedAlias);
-        List<String> spawnAliasKeys = matchingAliasKeys(spawnMap.keySet(), normalizedAlias);
-        List<String> controlAliasKeys = matchingAliasKeys(controlMap.keySet(), normalizedAlias);
+        List<String> spawnAliasKeys = matchingAliasKeys(spawnKeySet, normalizedAlias);
+        List<String> controlAliasKeys = matchingAliasKeys(controlKeySet, normalizedAlias);
         List<String> questAliasKeys = matchingAliasKeys(questMap.keySet(), normalizedAlias);
 
         List<String> warnings = new ArrayList<>();

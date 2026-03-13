@@ -40,7 +40,8 @@ public final class FollowPathService {
     public static final long PLAN_COOLDOWN_MS = 1200L;
     public static final int MAX_REGION_RADIUS = 24; // -> max dimension 49
     public static final int MIN_REGION_MARGIN = 8;
-    public static final int MAX_Y_SPAN = 6; // +/- 3
+    public static final int MIN_Y_SPAN = 6; // +/- 3 for flat terrain
+    public static final int MAX_Y_SPAN_CAP = 20; // hard upper bound for dynamic Y span
     public static final double WAYPOINT_REACH_SQ = 2.25D;
     private static final ThreadLocal<Integer> LAST_TRANSITION_REJECT_COUNT = ThreadLocal.withInitial(() -> 0);
     private static final ThreadLocal<Integer> LAST_SWIM_TRANSITION_REJECT_COUNT = ThreadLocal.withInitial(() -> 0);
@@ -158,9 +159,11 @@ public final class FollowPathService {
 
         int minY = Math.min(startPos.getY(), goalPos.getY()) - 2;
         int maxY = Math.max(startPos.getY(), goalPos.getY()) + 2;
-        int desiredMinY = startPos.getY() - (MAX_Y_SPAN / 2);
-        int desiredMaxY = startPos.getY() + (MAX_Y_SPAN / 2);
-        if (maxY - minY > MAX_Y_SPAN) {
+        int absDeltaY = Math.abs(startPos.getY() - goalPos.getY());
+        int effectiveYSpan = Math.max(MIN_Y_SPAN, Math.min(MAX_Y_SPAN_CAP, absDeltaY + 4));
+        int desiredMinY = startPos.getY() - (effectiveYSpan / 2);
+        int desiredMaxY = startPos.getY() + (effectiveYSpan / 2);
+        if (maxY - minY > effectiveYSpan) {
             minY = Math.max(minY, desiredMinY);
             maxY = Math.min(maxY, desiredMaxY);
         }
@@ -170,7 +173,7 @@ public final class FollowPathService {
         int sizeY = Math.max(1, maxY - minY + 1);
 
         // Hard cap to avoid pathological lag if constraints drift.
-        if (sizeX > maxSize || sizeZ > maxSize || sizeY > MAX_Y_SPAN + 1) {
+        if (sizeX > maxSize || sizeZ > maxSize || sizeY > MAX_Y_SPAN_CAP + 1) {
             return null;
         }
 

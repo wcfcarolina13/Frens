@@ -3,6 +3,7 @@ package net.wcfcarolina13.GameAI.skills.impl;
 import net.minecraft.component.DataComponentTypes;
 import net.minecraft.component.type.FoodComponent;
 import net.minecraft.entity.Entity;
+import net.minecraft.entity.ItemEntity;
 import net.minecraft.entity.passive.AbstractHorseEntity;
 import net.minecraft.entity.passive.TameableEntity;
 import net.minecraft.entity.LivingEntity;
@@ -37,7 +38,8 @@ import net.wcfcarolina13.GameAI.services.HuntHistoryService;
 import net.wcfcarolina13.GameAI.services.HuntSessionService;
 import net.wcfcarolina13.GameAI.services.SkillResumeService;
 import net.wcfcarolina13.GameAI.services.MovementService;
-import net.wcfcarolina13.GameAI.services.ProtectedZoneService;
+import net.wcfcarolina13.GameAI.services.CompanionSafeZoneService;
+import net.minecraft.entity.mob.ZombieEntity;
 import net.wcfcarolina13.GameAI.services.CompanionOverheadDialogueService;
 import net.wcfcarolina13.GameAI.services.ReturnBaseStuckService;
 import net.wcfcarolina13.GameAI.services.SmeltingService;
@@ -70,8 +72,6 @@ public final class HuntSkill implements Skill {
     private static final int FOOD_CONTAINER_RADIUS = 12;
     private static final int FOOD_CONTAINER_YSPAN = 4;
     private static final int MIN_PEACEFUL_COUNT = 3;
-    private static final int HOBBY_BASE_BUFFER_RADIUS = 24;
-    private static final int HOBBY_PROTECTED_BUFFER_RADIUS = 28;
     private static final double ATTACK_RANGE_SQ = 9.0D;
     private static final long ATTACK_TIMEOUT_MS = 12_000L;
     private static final long SWEEP_INTERVAL_MS = 12_000L;
@@ -257,6 +257,16 @@ public final class HuntSkill implements Skill {
                 return SkillExecutionResult.failure("I need a weapon to hunt.");
             }
 
+            // Opportunistic sweep: pick up nearby drops before finding next target
+            if (System.currentTimeMillis() - lastSweep > SWEEP_INTERVAL_MS) {
+                if (!world.getEntitiesByClass(ItemEntity.class,
+                        Box.from(Vec3d.of(bot.getBlockPos())).expand(8, 4, 8),
+                        e -> e.isAlive()).isEmpty()) {
+                    DropSweeper.sweep(source, 8.0, 4.0, 4, 3000L);
+                    lastSweep = System.currentTimeMillis();
+                }
+            }
+
             // Check for targeted entity (from TARGET button in UI)
             HuntCandidate candidate = findTargetedEntity(world, bot);
             if (candidate == null) {
@@ -311,7 +321,14 @@ public final class HuntSkill implements Skill {
                 continue;
             }
 
+            BlockPos killPos = candidate.entity.getBlockPos();
             kills++;
+            // Walk toward kill location before sweeping — mob may have fled far before dying
+            if (bot.getBlockPos().getSquaredDistance(killPos) > 25) {
+                MovementService.planLootApproach(bot, killPos, MovementService.MovementOptions.skillLoot())
+                        .ifPresent(plan -> MovementService.execute(source, bot, plan,
+                                SkillPreferences.teleportDuringSkills(bot), true));
+            }
             runDropSweep(source, bot);
             if (System.currentTimeMillis() - lastSweep > SWEEP_INTERVAL_MS) {
                 runDropSweep(source, bot);
@@ -625,24 +642,29 @@ public final class HuntSkill implements Skill {
         if (living.isBaby()) {
             return false;
         }
-        if (!hobbyMode) {
-            return true;
-        }
-        BlockPos pos = living.getBlockPos();
         if (isDomesticated(living)) {
             return false;
         }
-        if (isNearSavedBase(bot, world, pos, HOBBY_BASE_BUFFER_RADIUS)) {
-            return false;
+
+        // Zone protection applies in ALL modes: peaceful mobs inside protected
+        // zones are off-limits. Zombies (the only hostile on the hunt catalog)
+        // can still be hunted anywhere.
+        if (!(living instanceof ZombieEntity)) {
+            BlockPos pos = living.getBlockPos();
+            if (CompanionSafeZoneService.isProtected(world, pos, null)) {
+                return false;
+            }
         }
-        if (isNearProtectedZone(world, pos, HOBBY_PROTECTED_BUFFER_RADIUS)) {
-            return false;
-        }
-        if (isLikelyEnclosedByPlayerBuild(world, pos)) {
-            return false;
-        }
-        if (TreeDetector.isNearHumanBlocks(world, pos, 5)) {
-            return false;
+
+        // Additional hobby-mode heuristics (structural enclosure, near player blocks)
+        if (hobbyMode) {
+            BlockPos pos = living.getBlockPos();
+            if (isLikelyEnclosedByPlayerBuild(world, pos)) {
+                return false;
+            }
+            if (TreeDetector.isNearHumanBlocks(world, pos, 5)) {
+                return false;
+            }
         }
         return true;
     }
@@ -655,47 +677,6 @@ public final class HuntSkill implements Skill {
             return true;
         }
         return living.hasCustomName();
-    }
-
-    private static boolean isNearSavedBase(ServerPlayerEntity bot, ServerWorld world, BlockPos pos, int radius) {
-        if (bot == null || world == null || pos == null || radius <= 0) {
-            return false;
-        }
-        double rSq = (double) radius * radius;
-        Optional<BlockPos> bed = BotHomeService.getLastSleep(bot);
-        if (bed.isPresent() && bed.get().getSquaredDistance(pos) <= rSq) {
-            return true;
-        }
-        if (world.getServer() != null) {
-            for (BotHomeService.BaseEntry base : BotHomeService.listBases(world.getServer(), world)) {
-                if (base.pos() != null && base.pos().getSquaredDistance(pos) <= rSq) {
-                    return true;
-                }
-            }
-        }
-        return false;
-    }
-
-    private static boolean isNearProtectedZone(ServerWorld world, BlockPos pos, int radius) {
-        if (world == null || pos == null || radius <= 0) {
-            return false;
-        }
-        if (ProtectedZoneService.isProtected(pos, world, null)) {
-            return true;
-        }
-        double r = Math.max(1, radius);
-        double rSq = r * r;
-        for (ProtectedZoneService.ProtectedZone zone : ProtectedZoneService.listZones(world)) {
-            if (zone == null || zone.getCenter() == null) {
-                continue;
-            }
-            double buffer = zone.getRadius() + r;
-            double dSq = zone.getCenter().getSquaredDistance(pos);
-            if (dSq <= buffer * buffer || dSq <= rSq) {
-                return true;
-            }
-        }
-        return false;
     }
 
     private static boolean isLikelyEnclosedByPlayerBuild(ServerWorld world, BlockPos origin) {
@@ -1071,7 +1052,7 @@ public final class HuntSkill implements Skill {
                     return;
                 }
             }
-            DropSweeper.sweep(source.withSilent(), 6.0D, 4.0D, 8, 8_000L);
+            DropSweeper.sweep(source.withSilent(), 12.0D, 6.0D, 16, 12_000L);
         } catch (Exception e) {
             LOGGER.warn("Drop sweep failed during hunt: {}", e.getMessage());
         }
@@ -1120,8 +1101,39 @@ public final class HuntSkill implements Skill {
                     }
                 }
             }
+
+            // Last resort: jettison disposable items to free space
+            if (bot.getInventory().getEmptySlot() == -1) {
+                jettisonDisposables(bot);
+            }
         } catch (Exception e) {
             LOGGER.warn("Inventory offload failed during hunt: {}", e.getMessage());
+        }
+    }
+
+    /** Drop outright-disposable items (boats, extra crafting tables) when no chest is available. */
+    private static void jettisonDisposables(ServerPlayerEntity bot) {
+        if (bot == null) return;
+        Set<net.minecraft.item.Item> disposable = Set.of(
+                net.minecraft.item.Items.OAK_BOAT, net.minecraft.item.Items.SPRUCE_BOAT,
+                net.minecraft.item.Items.BIRCH_BOAT, net.minecraft.item.Items.JUNGLE_BOAT,
+                net.minecraft.item.Items.ACACIA_BOAT, net.minecraft.item.Items.DARK_OAK_BOAT,
+                net.minecraft.item.Items.MANGROVE_BOAT, net.minecraft.item.Items.CHERRY_BOAT,
+                net.minecraft.item.Items.BAMBOO_RAFT,
+                net.minecraft.item.Items.OAK_CHEST_BOAT, net.minecraft.item.Items.SPRUCE_CHEST_BOAT,
+                net.minecraft.item.Items.BIRCH_CHEST_BOAT, net.minecraft.item.Items.JUNGLE_CHEST_BOAT,
+                net.minecraft.item.Items.ACACIA_CHEST_BOAT, net.minecraft.item.Items.DARK_OAK_CHEST_BOAT,
+                net.minecraft.item.Items.MANGROVE_CHEST_BOAT, net.minecraft.item.Items.CHERRY_CHEST_BOAT,
+                net.minecraft.item.Items.BAMBOO_CHEST_RAFT,
+                net.minecraft.item.Items.CRAFTING_TABLE
+        );
+        for (int i = 0; i < bot.getInventory().size(); i++) {
+            ItemStack stack = bot.getInventory().getStack(i);
+            if (!stack.isEmpty() && disposable.contains(stack.getItem())) {
+                bot.dropItem(stack, false);
+                bot.getInventory().setStack(i, ItemStack.EMPTY);
+                LOGGER.info("Jettisoned {} to clear inventory space", stack.getItem().getName().getString());
+            }
         }
     }
 
@@ -1229,6 +1241,10 @@ public final class HuntSkill implements Skill {
 
     private static void runWoodcutPrerequisite(ServerPlayerEntity bot, ServerWorld world,
                                                 ServerCommandSource source, ServerPlayerEntity commander) {
+        if (ToolProvisionService.hasPlanksOrLogsInInventory(bot)) {
+            LOGGER.info("Hunt prerequisite: already has planks/logs, skipping woodcut");
+            return;
+        }
         try {
             ChatUtils.sendSystemMessage(source, "Need wood for a chest. Chopping some trees first.");
 

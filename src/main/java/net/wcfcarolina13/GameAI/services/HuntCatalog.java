@@ -36,7 +36,12 @@ public final class HuntCatalog {
             EntityType.COD,
             EntityType.SALMON,
             EntityType.TROPICAL_FISH,
-            EntityType.PUFFERFISH
+            EntityType.PUFFERFISH,
+            EntityType.FOX,
+            EntityType.TURTLE,
+            EntityType.GOAT,
+            EntityType.SQUID,
+            EntityType.GLOW_SQUID
     );
 
     static {
@@ -51,6 +56,11 @@ public final class HuntCatalog {
         register(EntityType.SALMON, true, true, false, "Salmon", "salmon");
         register(EntityType.TROPICAL_FISH, true, true, false, "Tropical Fish", "tropical_fish", "tropicalfish", "tropical");
         register(EntityType.PUFFERFISH, true, true, false, "Pufferfish", "pufferfish", "puffer");
+        register(EntityType.FOX, true, true, false, "Fox", "fox", "foxes");
+        register(EntityType.TURTLE, true, true, false, "Turtle", "turtle", "turtles");
+        register(EntityType.GOAT, true, true, false, "Goat", "goat", "goats");
+        register(EntityType.SQUID, true, true, false, "Squid", "squid");
+        register(EntityType.GLOW_SQUID, true, true, false, "Glow Squid", "glow_squid", "glowsquid", "glowing_squid");
     }
 
     private HuntCatalog() {

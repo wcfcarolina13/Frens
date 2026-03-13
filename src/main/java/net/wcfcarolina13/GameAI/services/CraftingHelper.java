@@ -65,7 +65,14 @@ public final class CraftingHelper {
             Items.COBBLESTONE,
             Items.COBBLED_DEEPSLATE,
             Items.BLACKSTONE,
-            Items.CRAFTING_TABLE
+            Items.CRAFTING_TABLE,
+            // Boats — deposited to chest or jettisoned when inventory is full
+            Items.OAK_BOAT, Items.SPRUCE_BOAT, Items.BIRCH_BOAT, Items.JUNGLE_BOAT,
+            Items.ACACIA_BOAT, Items.DARK_OAK_BOAT, Items.MANGROVE_BOAT, Items.CHERRY_BOAT,
+            Items.BAMBOO_RAFT,
+            Items.OAK_CHEST_BOAT, Items.SPRUCE_CHEST_BOAT, Items.BIRCH_CHEST_BOAT,
+            Items.JUNGLE_CHEST_BOAT, Items.ACACIA_CHEST_BOAT, Items.DARK_OAK_CHEST_BOAT,
+            Items.MANGROVE_CHEST_BOAT, Items.CHERRY_CHEST_BOAT, Items.BAMBOO_CHEST_RAFT
     );
     private static final int CRAFTING_TABLE_SEARCH_RADIUS = 40;
     private static final int CRAFTING_TABLE_SEARCH_YSPAN = 6;

@@ -61,21 +61,19 @@ All active criteria above marked `[x]`, with build verification plus in-game evi
 
 ---
 
-# Current Hot Task: Fix Post-Recovery Mining Loop (P0+P1)
+# Recently Completed: Navigation + Combat + Companion Overhaul (2026-03-13)
 
-After come-mode recovery (collect_dirt ascent), the bot enters a destructive mining loop in its own stairwell tunnel. Three root causes:
+All criteria met and verified in-game:
 
-## Active Criteria
-
-- [ ] **P1: Clear stale stagnant counter on come-mode exit** — `ReturnBaseStuckService.clear()` not called when come-mode early-exits (line 2156) or when recovery skills finish. Stale stagnant=1296 carries over and triggers mine-escape immediately.
-- [ ] **P0: Suppress mine-escape when bot can see target** — If bot has line-of-sight to player within ~10 blocks, mine-escape should not fire. The issue is navigation, not obstruction.
-- [ ] **P0: Clear stagnant state when recovery skill completes** — Come-recovery skill callbacks (lines 4053, 4180) should call `ReturnBaseStuckService.clear()` so the bot starts fresh.
-- [ ] **P2: Fix misleading regroup message** — "Use /bot regroup" keeps firing when auto-regroup is imminent.
-
-## Files to Modify
-
-1. `ReturnBaseStuckService.java` — Add `suppressMining` parameter variant
-2. `BotEventHandler.java` — Clear stuck state on come-mode exit; pass canSee to suppress mining; clear on recovery skill completion
+- [x] **Ranged kill drop recovery** — Bots record mob death positions via AFTER_DEATH hook (all bot kills). Post-combat sweep walks to kill sites with items (cap 24, 12-block radius, waypoint-step navigation for terrain).
+- [x] **Reachability probe** — `PathFinder.canReach()` uses Baritone 150-200ms timeout. Integrated into come-early-exit fallback and `triggerComeRecoverySkill` pre-check to skip mining when surface path exists.
+- [x] **Simplified regroup** — `/bot regroup` uses pure pathfinding (no mining/pillar). Snapshots player position, stops with contextual wait message if player moves >128 blocks.
+- [x] **Conservative surface detection** — `isOnSurface()` now requires ≥2 of 4 cardinal neighbors to also be at surface Y. 1×1 shaft openings no longer trigger false surface detection.
+- [x] **Kill position accumulation fix** — Kill positions and combat center are no longer wiped every tick while hostiles exist. `cancelPendingSweep()` only removes the timer; full clear only on sweep completion or bot death.
+- [x] **Companion spell bidirectional tools** — `canUseCompanionCome/Summon/Home` check both commander AND bot inventories for Eye of Ender, Ender Pearl, Wizard's Tome. Immersive themed messages and sounds per tool type.
+- [x] **Questing-mode base navigation** — Non-HOME bases >256 blocks require compass/map. HOME always reachable. Recovery skills enabled during base nav. `BotHomeService.resolvePreferredHomeBase` made public.
+- [x] **Opportunistic idle drop-sweep** — After 15s idle (FOLLOW/STAY/IDLE mode, no hostiles), bot sweeps ground items within 20 blocks. Cancels if player moves >1 block (block-distance, not sub-pixel). Committed target tracking prevents flip-flopping with follow mode.
+- [x] **Pillar-up escape** — Verified working in-game.
 
 ---
 

@@ -56,7 +56,7 @@ public class CompanionSpellsScreen extends Screen {
         int h = 20;
         int gap = 6;
 
-        comeBtn = this.addDrawableChild(ButtonWidget.builder(Text.literal("Come"), (btn) -> sendSpell(withBotAlias("bot companion come")))
+        comeBtn = this.addDrawableChild(ButtonWidget.builder(Text.literal("Regroup"), (btn) -> sendSpell(withBotAlias("bot companion come")))
                 .dimensions(cx - w / 2, top, w, h)
                 .build());
 
@@ -256,12 +256,12 @@ public class CompanionSpellsScreen extends Screen {
         } else if (state.eye && state.horn) {
             if (FrensClient.isEyeSpellOnCooldown()) {
                 long sec = Math.max(1L, FrensClient.getEyeSpellCooldownRemainingMs() / 1000L);
-                hint = "Partial access: Horn (come-only) + Eye (summon-only, cooldown " + sec + "s).";
+                hint = "Partial access: Goat Horn (regroup only) + Eye of Ender (summon only, cooldown " + sec + "s).";
             } else {
-                hint = "Partial access: Horn (come-only) + Eye (summon-only).";
+                hint = "Partial access: Goat Horn (regroup only) + Eye of Ender (summon only).";
             }
         } else if (state.horn) {
-            hint = "Goat Horn access: Come only.";
+            hint = "Goat Horn access: Regroup only.";
         } else if (state.eye) {
             if (FrensClient.isEyeSpellOnCooldown()) {
                 long sec = Math.max(1L, FrensClient.getEyeSpellCooldownRemainingMs() / 1000L);

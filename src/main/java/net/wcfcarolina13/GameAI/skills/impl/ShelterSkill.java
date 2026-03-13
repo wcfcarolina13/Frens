@@ -82,10 +82,10 @@ public final class ShelterSkill implements Skill {
         if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
             return SkillExecutionResult.failure("No world available for shelter.");
         }
-        BlockPos origin = bot.getBlockPos();
         String type = getOption(context, "hovel");
         if ("burrow".equalsIgnoreCase(type)) {
             LOGGER.info("Burrow sequence start: descend 5 -> strip 5 -> descend 3 -> hollow");
+            BlockPos origin = bot.getBlockPos();
             SkillExecutionResult burrowResult = new BurrowBuilder().build(context, source, bot, world, origin);
             if (!burrowResult.success()) {
                 return burrowResult;
@@ -112,10 +112,30 @@ public final class ShelterSkill implements Skill {
             preferredDoorSide = dir;
         }
 
+        boolean hasExplicitTarget = hasTargetOverride(context);
+        BlockPos origin = hasExplicitTarget
+                ? new BlockPos(
+                getInt(context, "targetX", bot.getBlockPos().getX()),
+                getInt(context, "targetY", bot.getBlockPos().getY()),
+                getInt(context, "targetZ", bot.getBlockPos().getZ()))
+                : bot.getBlockPos();
+        LOGGER.info("Shelter request: type={} botPos={} requestedOrigin={} explicitTarget={} radius={} preferredDoorSide={}",
+                type,
+                bot.getBlockPos().toShortString(),
+                origin.toShortString(),
+                hasExplicitTarget,
+                radius,
+                preferredDoorSide);
+
+        if (hasExplicitTarget) {
+            LOGGER.info("Shelter: using explicit target anchor for hovel placement; skipping bot-position drift corrections.");
+        }
+
         // If we're in water (common at shorelines), step onto nearby dry land first.
         // Otherwise the "underground" check can misclassify shallow riverbeds and try to mine upward.
-        if (tryStepOutOfWater(source, bot, world)) {
+        if (!hasExplicitTarget && tryStepOutOfWater(source, bot, world)) {
             origin = bot.getBlockPos();
+            LOGGER.info("Shelter: adjusted origin after water escape -> {}", origin.toShortString());
         }
 
         // If we're clearly underground, get to the surface first (then re-plan the hovel site).
@@ -125,13 +145,13 @@ public final class ShelterSkill implements Skill {
 
         // If we fell far below the surface (common when dropping into a deep hole mid-task),
         // don't try to mine our way out here. Regroup and let follow-walk / teleport handle recovery.
-        if (!skyVisible && !underArtificialRoof && bot.getBlockY() < surfaceY - DEEP_UNDERGROUND_SURFACE_DELTA_Y) {
+        if (!hasExplicitTarget && !skyVisible && !underArtificialRoof && bot.getBlockY() < surfaceY - DEEP_UNDERGROUND_SURFACE_DELTA_Y) {
             if (triggerEmergencyRegroupFromDeepUnderground(context, source, bot, world)) {
                 return SkillExecutionResult.failure("Regrouping: fell deep underground.");
             }
         }
 
-        if (!skyVisible && !underArtificialRoof && bot.getBlockY() < surfaceY - 3) {
+        if (!hasExplicitTarget && !skyVisible && !underArtificialRoof && bot.getBlockY() < surfaceY - 3) {
             // If we're simply under a roof/walls near the surface, relocate to a nearby sky-visible opening
             // instead of trying to mine upward (which can hit shoreline water and abort).
             if (tryRelocateToNearbySurfaceOpening(source, bot, world, origin, 8)) {
@@ -147,14 +167,14 @@ public final class ShelterSkill implements Skill {
             }
         }
         surfaceY = world.getTopY(net.minecraft.world.Heightmap.Type.MOTION_BLOCKING_NO_LEAVES, origin.getX(), origin.getZ());
-        if (!world.isSkyVisible(origin.up()) && !underArtificialRoof && bot.getBlockY() < surfaceY - 2) {
+        if (!hasExplicitTarget && !world.isSkyVisible(origin.up()) && !underArtificialRoof && bot.getBlockY() < surfaceY - 2) {
             return SkillExecutionResult.failure("I can't build a surface shelter while underground; I couldn't reach the surface.");
         }
 
         // If we're near a cave mouth / low overhang, the footprint can include tight headroom that causes
         // repeated in-wall clipping and "mining out" loops. Prefer relocating a short distance to a more
         // open patch of ground before starting the build.
-        if (!isOpenFootprint(world, origin, radius)) {
+        if (!hasExplicitTarget && !isOpenFootprint(world, origin, radius)) {
             BlockPos relocated = findNearbyOpenFootprint(world, origin, radius, 12);
             if (relocated != null) {
                 boolean moved = moveToBuildSite(source, bot, relocated);
@@ -163,6 +183,13 @@ public final class ShelterSkill implements Skill {
                 }
             }
         }
+
+        LOGGER.info("Shelter: final hovel origin={} botPos={} explicitTarget={} skyVisible={} surfaceY={}",
+                origin.toShortString(),
+                bot.getBlockPos().toShortString(),
+                hasExplicitTarget,
+                world.isSkyVisible(origin.up()),
+                surfaceY);
 
         SkillExecutionResult hovelResult = new HovelPerimeterBuilder()
                 .build(context, source, bot, world, origin, radius, wallHeight, preferredDoorSide, resumeRequested);
@@ -569,6 +596,15 @@ public final class ShelterSkill implements Skill {
             }
         }
         return fallback;
+    }
+
+    private boolean hasTargetOverride(SkillContext context) {
+        if (context == null) {
+            return false;
+        }
+        return context.parameters().containsKey("targetX")
+                && context.parameters().containsKey("targetY")
+                && context.parameters().containsKey("targetZ");
     }
 
     private void sweepDrops(ServerCommandSource source, double radius, double vRange, int maxTargets, long durationMs) {

@@ -94,7 +94,25 @@ public final class FollowStateService {
     public static final Map<UUID, Integer> FOLLOW_NO_PATH_STREAK = new ConcurrentHashMap<>();
     public static final Map<UUID, Long> FOLLOW_LAST_NO_PATH_TICK = new ConcurrentHashMap<>();
     public static final Map<UUID, Long> FOLLOW_NEXT_REGROUP_PROMPT_TICK = new ConcurrentHashMap<>();
+    public static final Map<UUID, Long> FOLLOW_LAST_AUTO_REGROUP_TICK = new ConcurrentHashMap<>();
+    public static final Map<UUID, Integer> FOLLOW_AUTO_REGROUP_ATTEMPTS = new ConcurrentHashMap<>();
     public static final Map<UUID, VerticalClimbLock> FOLLOW_VERTICAL_CLIMB_LOCK = new ConcurrentHashMap<>();
+    /** Tick when "waiting by the opening" was last announced (avoids spam). */
+    public static final Map<UUID, Long> FOLLOW_WAIT_ABOVE_ANNOUNCED_TICK = new ConcurrentHashMap<>();
+    /** Tick when the bot first started waiting at a drop-off (for auto-regroup timer). */
+    public static final Map<UUID, Long> FOLLOW_WAIT_ABOVE_START_TICK = new ConcurrentHashMap<>();
+
+    // ---- Opportunistic idle drop-sweep ----
+    /** Tick when the bot/player became idle (no movement, no hostiles). Reset on movement. */
+    public static final Map<UUID, Long> IDLE_SWEEP_START_TICK = new ConcurrentHashMap<>();
+    /** Player block position snapshot (movement uses block-distance, not sub-block). */
+    public static final Map<UUID, net.minecraft.util.math.BlockPos> IDLE_SWEEP_PLAYER_BLOCK = new ConcurrentHashMap<>();
+    /** Bot block position snapshot (movement uses block-distance, not sub-block). */
+    public static final Map<UUID, net.minecraft.util.math.BlockPos> IDLE_SWEEP_BOT_BLOCK = new ConcurrentHashMap<>();
+    /** Whether the idle sweep is currently active (bot is collecting drops). */
+    public static final Map<UUID, Boolean> IDLE_SWEEP_ACTIVE = new ConcurrentHashMap<>();
+    /** Current sweep target entity ID — committed for the duration of the walk. */
+    public static final Map<UUID, net.minecraft.util.math.BlockPos> IDLE_SWEEP_TARGET = new ConcurrentHashMap<>();
 
     private FollowStateService() {}
 
@@ -198,7 +216,11 @@ public final class FollowStateService {
         FOLLOW_NO_PATH_STREAK.remove(botId);
         FOLLOW_LAST_NO_PATH_TICK.remove(botId);
         FOLLOW_NEXT_REGROUP_PROMPT_TICK.remove(botId);
+        FOLLOW_LAST_AUTO_REGROUP_TICK.remove(botId);
+        FOLLOW_AUTO_REGROUP_ATTEMPTS.remove(botId);
         FOLLOW_VERTICAL_CLIMB_LOCK.remove(botId);
+        FOLLOW_WAIT_ABOVE_ANNOUNCED_TICK.remove(botId);
+        FOLLOW_WAIT_ABOVE_START_TICK.remove(botId);
     }
 
     /**
@@ -223,7 +245,11 @@ public final class FollowStateService {
         FOLLOW_NO_PATH_STREAK.remove(botId);
         FOLLOW_LAST_NO_PATH_TICK.remove(botId);
         FOLLOW_NEXT_REGROUP_PROMPT_TICK.remove(botId);
+        FOLLOW_LAST_AUTO_REGROUP_TICK.remove(botId);
+        FOLLOW_AUTO_REGROUP_ATTEMPTS.remove(botId);
         FOLLOW_VERTICAL_CLIMB_LOCK.remove(botId);
+        FOLLOW_WAIT_ABOVE_ANNOUNCED_TICK.remove(botId);
+        FOLLOW_WAIT_ABOVE_START_TICK.remove(botId);
     }
 
     /**
@@ -248,6 +274,16 @@ public final class FollowStateService {
         FOLLOW_LAST_BLOCKED_PROBE_BOTPOS.remove(botId);
         FOLLOW_LAST_BLOCKED_PROBE_RESULT.remove(botId);
         FOLLOW_VERTICAL_CLIMB_LOCK.remove(botId);
+        clearIdleSweep(botId);
+    }
+
+    public static void clearIdleSweep(UUID botId) {
+        if (botId == null) return;
+        IDLE_SWEEP_START_TICK.remove(botId);
+        IDLE_SWEEP_PLAYER_BLOCK.remove(botId);
+        IDLE_SWEEP_BOT_BLOCK.remove(botId);
+        IDLE_SWEEP_ACTIVE.remove(botId);
+        IDLE_SWEEP_TARGET.remove(botId);
     }
 
     public static void reset() {
@@ -308,7 +344,11 @@ public final class FollowStateService {
         FOLLOW_NO_PATH_STREAK.clear();
         FOLLOW_LAST_NO_PATH_TICK.clear();
         FOLLOW_NEXT_REGROUP_PROMPT_TICK.clear();
+        FOLLOW_LAST_AUTO_REGROUP_TICK.clear();
+        FOLLOW_AUTO_REGROUP_ATTEMPTS.clear();
         FOLLOW_VERTICAL_CLIMB_LOCK.clear();
+        FOLLOW_WAIT_ABOVE_ANNOUNCED_TICK.clear();
+        FOLLOW_WAIT_ABOVE_START_TICK.clear();
     }
 
     /**

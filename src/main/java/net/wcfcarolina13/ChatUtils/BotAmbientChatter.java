@@ -478,7 +478,8 @@ public final class BotAmbientChatter {
 
             // Check if voiced dialogue is enabled
             String botName = bot.getName().getString();
-            ManualConfig.BotControlSettings settings = Frens.CONFIG.getEffectiveBotControl(botName);
+            String wk = net.wcfcarolina13.GameAI.services.BotWorldStateService.currentWorldKey(server);
+            ManualConfig.BotControlSettings settings = Frens.CONFIG.getEffectiveBotControl(botName, wk);
             if (settings == null || !settings.isVoicedDialogue()) {
                 continue;
             }

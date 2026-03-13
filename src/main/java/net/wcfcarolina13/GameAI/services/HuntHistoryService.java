@@ -105,31 +105,38 @@ public final class HuntHistoryService {
         }
     }
 
-    public static void recordHunt(ServerPlayerEntity player, Identifier entityId) {
+    /**
+     * Records a hunt kill. Returns {@code true} if this is the first time the player has killed
+     * this mob type (i.e., a new discovery), {@code false} if already recorded.
+     */
+    public static boolean recordHunt(ServerPlayerEntity player, Identifier entityId) {
         if (player == null || entityId == null || !(player.getEntityWorld() instanceof ServerWorld world)) {
-            return;
+            return false;
         }
         MinecraftServer server = world.getServer();
         if (server == null) {
-            return;
+            return false;
         }
         String playerId = playerKey(player);
         if (playerId.isBlank()) {
-            return;
+            return false;
         }
 
         WorldData wd = worldData(server, world);
+        boolean isNew;
         synchronized (LOCK) {
             if (wd.huntedByPlayer == null) {
                 wd.huntedByPlayer = new HashMap<>();
             }
             List<String> list = wd.huntedByPlayer.computeIfAbsent(playerId, k -> new java.util.ArrayList<>());
             String idStr = entityId.toString();
-            if (!list.contains(idStr)) {
+            isNew = !list.contains(idStr);
+            if (isNew) {
                 list.add(idStr);
             }
         }
         flush();
+        return isNew;
     }
 
     public static Set<Identifier> getHistory(ServerPlayerEntity player) {

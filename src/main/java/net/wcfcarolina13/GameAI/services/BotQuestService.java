@@ -68,7 +68,9 @@ public final class BotQuestService {
             "curiosity_step_into_the_light",
             "exploration_find_something_built",
             "curiosity_take_a_look_around_here",
-            "curiosity_check_the_lighting_here"
+            "curiosity_check_the_lighting_here",
+            // Disabled: ambient combat quests need full rework.
+            "combat_clear_the_nearby_threat"
     );
 
     // Cached environment scan for structure-like clusters (cheap + avoids repeated block scans).

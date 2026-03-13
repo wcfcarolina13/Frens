@@ -77,15 +77,16 @@ public final class BotTaskPeekNetworkManager {
         if (taskName == null || taskName.isBlank()) {
             return "working";
         }
-        String raw = taskName;
-        if (raw.startsWith("skill:")) {
+        String raw = taskName.trim();
+        if (raw.regionMatches(true, 0, "skill:", 0, "skill:".length())) {
             raw = raw.substring("skill:".length());
         }
-        raw = raw.replace('_', ' ').trim();
+        raw = raw.replace('_', ' ').trim().replaceAll("\\s+", " ");
         if (raw.isEmpty()) {
             return "working";
         }
-        switch (raw.toLowerCase(Locale.ROOT)) {
+        String normalized = raw.toLowerCase(Locale.ROOT);
+        switch (normalized) {
             case "farm":
                 return "farming";
             case "collect dirt":
@@ -95,6 +96,7 @@ public final class BotTaskPeekNetworkManager {
             case "woodcut":
                 return "woodcutting";
             case "stripmine":
+            case "strip mine":
                 return "strip mining";
             case "hangout":
                 return "hanging out";
@@ -102,6 +104,10 @@ public final class BotTaskPeekNetworkManager {
                 return "hunting";
             case "fish":
                 return "fishing";
+            case "shelter":
+                return "building shelter";
+            case "build":
+                return "building";
             case "flowers":
                 return "collecting flowers";
             case "leaf litter":
@@ -112,6 +118,23 @@ public final class BotTaskPeekNetworkManager {
                 return "feeding animals";
             case "wander":
                 return "wandering";
+            case "fortify":
+            case "fortify village":
+                return "fortifying the village";
+            case "fortify patch":
+                return "repairing fortifications";
+            case "fortify moat":
+                return "digging the moat";
+            case "fortify drift":
+                return "checking wall drift";
+            case "fortify expand":
+                return "expanding the wall";
+            case "fortify status":
+                return "reviewing wall status";
+            case "fortify list":
+                return "reviewing saved walls";
+            case "fortify resume":
+                return "resuming wall construction";
             default:
                 return raw;
         }

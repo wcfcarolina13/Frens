@@ -177,7 +177,7 @@ public final class SurvivalCompanionQuestService {
                 if (!canAdvance) {
                     yield Response.ofLines(List.of("This isn't your call to make."), stage, permanent);
                 }
-                int newStage = tryAdvanceStage(st, progress);
+                int newStage = tryAdvanceStage(st, progress, server);
                 boolean nowPermanent = st.isPermanentCompanion();
                 List<String> out = new ArrayList<>();
                 if (newStage != stage) {
@@ -473,7 +473,7 @@ public final class SurvivalCompanionQuestService {
         return out;
     }
 
-    private static int tryAdvanceStage(ManualConfig.SurvivalRecruitmentState st, Progress p) {
+    private static int tryAdvanceStage(ManualConfig.SurvivalRecruitmentState st, Progress p, MinecraftServer server) {
         int stage = st.getCompanionQuestStage();
         boolean advanced = false;
 
@@ -492,7 +492,7 @@ public final class SurvivalCompanionQuestService {
         if (stage == 3 && p.perimeterRing >= PERIMETER_REQUIRED_COUNT) {
             stage = 4;
             st.setPermanentCompanion(true);
-            enableAutoSpawnForPermanentCompanion(st);
+            enableAutoSpawnForPermanentCompanion(st, server);
             advanced = true;
         }
 
@@ -504,7 +504,7 @@ public final class SurvivalCompanionQuestService {
         return st.getCompanionQuestStage();
     }
 
-    private static void enableAutoSpawnForPermanentCompanion(ManualConfig.SurvivalRecruitmentState st) {
+    private static void enableAutoSpawnForPermanentCompanion(ManualConfig.SurvivalRecruitmentState st, MinecraftServer server) {
         if (st == null || Frens.CONFIG == null) {
             return;
         }
@@ -513,7 +513,8 @@ public final class SurvivalCompanionQuestService {
             return;
         }
         try {
-            ManualConfig.BotControlSettings ctrl = Frens.CONFIG.getOrCreateBotControl(alias);
+            String wk = server != null ? BotWorldStateService.currentWorldKey(server) : null;
+            ManualConfig.BotControlSettings ctrl = Frens.CONFIG.getOrCreateBotControl(alias, wk);
             if (ctrl != null) {
                 // Server-start auto-spawn is now implicit (no toggle).
                 // Just ensure spawn mode is "play" for permanent companions.

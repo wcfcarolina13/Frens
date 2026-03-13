@@ -48,6 +48,8 @@ public class ManualConfig {
     private Map<String, String> botGameProfile = new HashMap<>();
     private Map<String, BotOwnership> botOwnership = new HashMap<>();
     private Map<String, BotSpawn> botSpawnPoints = new HashMap<>();
+    // Per-world bot spawn points: alias → worldKey → BotSpawn.
+    private Map<String, Map<String, BotSpawn>> botSpawnPointsByWorld = new HashMap<>();
     private boolean defaultLlmWorldEnabled = true;
     private boolean textDialogueEnabled = true;
     private boolean voicedDialogueEnabled = true;
@@ -55,9 +57,12 @@ public class ManualConfig {
     private boolean idleHobbiesAnywhereEnabled = false;
     private boolean baritonePathfinderEnabled = false;
     private boolean fortifyForcePlaceEnabled = false;
+    private int fortBufferRadius = 8;
     private Map<String, String> botSkins = new HashMap<>();
     private Map<String, BotSkinSelection> botSkinSelections = new HashMap<>();
     private Map<String, BotControlSettings> botControls = new HashMap<>();
+    // Per-world bot control settings: alias → worldKey → BotControlSettings.
+    private Map<String, Map<String, BotControlSettings>> botControlsByWorld = new HashMap<>();
     // Seed-agnostic, bot-persistent quest continuity (non-power progression).
     private Map<String, BotQuestMemory> botQuestMemory = new HashMap<>();
 
@@ -237,6 +242,16 @@ public class ManualConfig {
             if (loadedConfig.survivalRecruitment == null) {
                 loadedConfig.survivalRecruitment = new HashMap<>();
             }
+            if (loadedConfig.botSpawnPointsByWorld == null) {
+                loadedConfig.botSpawnPointsByWorld = new HashMap<>();
+            }
+            if (loadedConfig.botControlsByWorld == null) {
+                loadedConfig.botControlsByWorld = new HashMap<>();
+            }
+            // ── Legacy migration: global → per-world ──
+            // Old configs stored one BotSpawn per alias; migrate to per-world under "_legacy" key.
+            // The first real access with a worldKey will resolve the _legacy entry.
+            loadedConfig.migrateLegacyToPerWorld();
             loadedConfig.normalizeAliasBackedMaps();
             return loadedConfig;
         } catch (IOException e) {
@@ -449,6 +464,8 @@ public class ManualConfig {
         return key != null ? getBotOwnership().get(key) : null;
     }
 
+    /** @deprecated Legacy accessor. Use {@link #getBotSpawnPointsByWorld()} instead. */
+    @Deprecated
     public Map<String, BotSpawn> getBotSpawnPoints() {
         if (botSpawnPoints == null) {
             botSpawnPoints = new HashMap<>();
@@ -456,10 +473,14 @@ public class ManualConfig {
         return botSpawnPoints;
     }
 
+    /** @deprecated Legacy setter. Use {@link #setBotSpawn(String, String, BotSpawn)} instead. */
+    @Deprecated
     public void setBotSpawnPoints(Map<String, BotSpawn> botSpawnPoints) {
         this.botSpawnPoints = normalizeAliasMap(botSpawnPoints);
     }
 
+    /** @deprecated Legacy setter. Use {@link #setBotSpawn(String, String, BotSpawn)} instead. */
+    @Deprecated
     public void setBotSpawn(String alias, BotSpawn spawn) {
         if (alias == null || alias.isBlank() || spawn == null) {
             return;
@@ -467,9 +488,146 @@ public class ManualConfig {
         putAliasValue(getBotSpawnPoints(), alias, spawn);
     }
 
+    /** @deprecated Legacy getter. Use {@link #getBotSpawn(String, String)} instead. */
+    @Deprecated
     public BotSpawn getBotSpawn(String alias) {
         String key = resolveAliasKey(getBotSpawnPoints(), alias);
         return key != null ? getBotSpawnPoints().get(key) : null;
+    }
+
+    // ── Per-world BotSpawn accessors ──
+
+    public Map<String, Map<String, BotSpawn>> getBotSpawnPointsByWorld() {
+        if (botSpawnPointsByWorld == null) {
+            botSpawnPointsByWorld = new HashMap<>();
+        }
+        return botSpawnPointsByWorld;
+    }
+
+    /**
+     * Returns the BotSpawn for the given alias in the given world.
+     * If a legacy entry exists (from pre-per-world config) and no world-specific
+     * entry is found, migrates the legacy entry to the provided worldKey.
+     */
+    public BotSpawn getBotSpawn(String alias, String worldKey) {
+        if (alias == null || alias.isBlank()) return null;
+        Map<String, BotSpawn> worldMap = resolveNestedAliasEntry(getBotSpawnPointsByWorld(), alias);
+        if (worldMap == null) return null;
+        if (worldKey != null && !worldKey.isBlank()) {
+            BotSpawn spawn = worldMap.get(worldKey);
+            if (spawn != null) return spawn;
+            // Migrate legacy entry on first per-world access.
+            BotSpawn legacy = worldMap.remove("_legacy");
+            if (legacy != null) {
+                worldMap.put(worldKey, legacy);
+                return legacy;
+            }
+        }
+        return null;
+    }
+
+    public void setBotSpawn(String alias, String worldKey, BotSpawn spawn) {
+        if (alias == null || alias.isBlank() || worldKey == null || worldKey.isBlank() || spawn == null) {
+            return;
+        }
+        String key = resolveAliasKey(getBotSpawnPointsByWorld(), alias);
+        if (key == null) key = alias.trim();
+        Map<String, BotSpawn> worldMap = getBotSpawnPointsByWorld().computeIfAbsent(key, ignored -> new HashMap<>());
+        worldMap.put(worldKey, spawn);
+        // Clear legacy entry if present since we now have a real worldKey.
+        worldMap.remove("_legacy");
+    }
+
+    public void clearBotSpawn(String alias, String worldKey) {
+        if (alias == null || alias.isBlank() || worldKey == null || worldKey.isBlank()) return;
+        Map<String, BotSpawn> worldMap = resolveNestedAliasEntry(getBotSpawnPointsByWorld(), alias);
+        if (worldMap != null) {
+            worldMap.remove(worldKey);
+        }
+    }
+
+    // ── Per-world BotControlSettings accessors ──
+
+    public Map<String, Map<String, BotControlSettings>> getBotControlsByWorld() {
+        if (botControlsByWorld == null) {
+            botControlsByWorld = new HashMap<>();
+        }
+        return botControlsByWorld;
+    }
+
+    /**
+     * Returns or creates per-world BotControlSettings for the given alias and worldKey.
+     * If a legacy entry exists, migrates it to the provided worldKey.
+     */
+    public BotControlSettings getOrCreateBotControl(String alias, String worldKey) {
+        if (alias == null || alias.isBlank()) alias = "default";
+        if (worldKey != null && !worldKey.isBlank()) {
+            String key = resolveAliasKey(getBotControlsByWorld(), alias);
+            if (key == null) key = alias.trim();
+            Map<String, BotControlSettings> worldMap = getBotControlsByWorld()
+                    .computeIfAbsent(key, ignored -> new HashMap<>());
+            BotControlSettings settings = worldMap.get(worldKey);
+            if (settings != null) return settings;
+            // Migrate legacy entry.
+            BotControlSettings legacy = worldMap.remove("_legacy");
+            if (legacy != null) {
+                worldMap.put(worldKey, legacy);
+                return legacy;
+            }
+            // Create new entry for this world.
+            BotControlSettings created = new BotControlSettings();
+            worldMap.put(worldKey, created);
+            return created;
+        }
+        // No worldKey — fall back to old global accessor.
+        return getOrCreateBotControl(alias);
+    }
+
+    /**
+     * Returns the per-world effective bot control (specific alias, then "default" alias).
+     */
+    public BotControlSettings getEffectiveBotControl(String alias, String worldKey) {
+        if (alias != null && worldKey != null && !worldKey.isBlank()) {
+            Map<String, BotControlSettings> worldMap = resolveNestedAliasEntry(getBotControlsByWorld(), alias);
+            if (worldMap != null) {
+                BotControlSettings specific = worldMap.get(worldKey);
+                if (specific != null) return specific;
+                // Check legacy
+                BotControlSettings legacy = worldMap.remove("_legacy");
+                if (legacy != null) {
+                    worldMap.put(worldKey, legacy);
+                    return legacy;
+                }
+            }
+        }
+        // Fall back to "default" alias
+        if (worldKey != null && !worldKey.isBlank()) {
+            Map<String, BotControlSettings> defaultWorld = resolveNestedAliasEntry(getBotControlsByWorld(), "default");
+            if (defaultWorld != null) {
+                BotControlSettings d = defaultWorld.get(worldKey);
+                if (d != null) return d;
+            }
+        }
+        // Final fallback: old global lookup.
+        return getEffectiveBotControl(alias);
+    }
+
+    /**
+     * Returns the set of all bot aliases that have per-world spawn or control entries.
+     * Useful for GUI alias lists and autocomplete where no world context is needed.
+     */
+    public java.util.Set<String> getAllBotAliases() {
+        java.util.Set<String> aliases = new java.util.LinkedHashSet<>();
+        // From per-world maps
+        if (botSpawnPointsByWorld != null) aliases.addAll(botSpawnPointsByWorld.keySet());
+        if (botControlsByWorld != null) aliases.addAll(botControlsByWorld.keySet());
+        // From legacy maps (in case migration hasn't happened yet)
+        if (botSpawnPoints != null) aliases.addAll(botSpawnPoints.keySet());
+        if (botControls != null) aliases.addAll(botControls.keySet());
+        // From identity maps
+        if (botGameProfile != null) aliases.addAll(botGameProfile.keySet());
+        aliases.remove("default");
+        return aliases;
     }
 
     public boolean isDefaultLlmWorldEnabled() {
@@ -518,6 +676,11 @@ public class ManualConfig {
     public boolean isFortifyForcePlaceEnabled() { return fortifyForcePlaceEnabled; }
     public void setFortifyForcePlaceEnabled(boolean v) { this.fortifyForcePlaceEnabled = v; }
 
+    public int getFortBufferRadius() { return fortBufferRadius > 0 ? fortBufferRadius : 8; }
+    public void setFortBufferRadius(int r) { this.fortBufferRadius = r; }
+
+    /** @deprecated Legacy accessor. Use {@link #getBotControlsByWorld()} or {@link #getAllBotAliases()} instead. */
+    @Deprecated
     public Map<String, BotControlSettings> getBotControls() {
         if (botControls == null) {
             botControls = new HashMap<>();
@@ -577,10 +740,14 @@ public class ManualConfig {
         return botQuestMemory.computeIfAbsent(key, ignored -> new BotQuestMemory());
     }
 
+    /** @deprecated Legacy setter. Use per-world methods instead. */
+    @Deprecated
     public void setBotControls(Map<String, BotControlSettings> botControls) {
         this.botControls = normalizeAliasMap(botControls);
     }
 
+    /** @deprecated Legacy global accessor. Use {@link #getOrCreateBotControl(String, String)} with worldKey. */
+    @Deprecated
     public BotControlSettings getOrCreateBotControl(String alias) {
         if (alias == null || alias.isBlank()) {
             alias = "default";
@@ -593,6 +760,8 @@ public class ManualConfig {
         return botControls.computeIfAbsent(key, ignored -> new BotControlSettings());
     }
 
+    /** @deprecated Legacy global accessor. Use {@link #getEffectiveBotControl(String, String)} with worldKey. */
+    @Deprecated
     public BotControlSettings getEffectiveBotControl(String alias) {
         if (alias != null) {
             String key = resolveAliasKey(getBotControls(), alias);
@@ -629,6 +798,8 @@ public class ManualConfig {
         removeAliasVariants(botQuestMemory, alias);
         removeAliasVariants(botSkins, alias);
         removeAliasVariants(botSkinSelections, alias);
+        removeNestedAliasVariants(botSpawnPointsByWorld, alias);
+        removeNestedAliasVariants(botControlsByWorld, alias);
     }
 
     private void normalizeAliasBackedMaps() {
@@ -739,6 +910,78 @@ public class ManualConfig {
             if (!key.equals(canonicalAlias) && normalizeAlias(key).equals(normalized)) {
                 it.remove();
             }
+        }
+    }
+
+    // ── Nested (per-world) map helpers ──
+
+    /**
+     * Resolve an alias key in a nested map (alias → worldKey → T).
+     * Returns the inner map for the alias, or null.
+     */
+    private static <T> Map<String, T> resolveNestedAliasEntry(Map<String, Map<String, T>> map, String alias) {
+        if (map == null || map.isEmpty() || alias == null || alias.isBlank()) return null;
+        String key = resolveAliasKey(map, alias);
+        return key != null ? map.get(key) : null;
+    }
+
+    private static <T> void removeNestedAliasVariants(Map<String, Map<String, T>> map, String alias) {
+        if (map == null || map.isEmpty() || alias == null || alias.isBlank()) return;
+        String normalized = normalizeAlias(alias);
+        Iterator<String> it = map.keySet().iterator();
+        while (it.hasNext()) {
+            if (normalizeAlias(it.next()).equals(normalized)) {
+                it.remove();
+            }
+        }
+    }
+
+    /**
+     * Migrates legacy global botSpawnPoints and botControls into per-world maps.
+     * Legacy entries are stored under the "_legacy" worldKey and resolved on first
+     * per-world access (see getBotSpawn/getOrCreateBotControl).
+     */
+    private void migrateLegacyToPerWorld() {
+        // Migrate botSpawnPoints → botSpawnPointsByWorld
+        if (botSpawnPoints != null && !botSpawnPoints.isEmpty()) {
+            if (botSpawnPointsByWorld == null) botSpawnPointsByWorld = new HashMap<>();
+            for (Map.Entry<String, BotSpawn> entry : botSpawnPoints.entrySet()) {
+                String alias = entry.getKey();
+                BotSpawn spawn = entry.getValue();
+                if (alias == null || alias.isBlank() || spawn == null) continue;
+                // Only migrate if no per-world entry exists for this alias yet.
+                Map<String, BotSpawn> existing = resolveNestedAliasEntry(botSpawnPointsByWorld, alias);
+                if (existing == null || existing.isEmpty()) {
+                    Map<String, BotSpawn> worldMap = new HashMap<>();
+                    // If the BotSpawn has a levelName, use it as the worldKey hint;
+                    // otherwise store under _legacy for deferred resolution.
+                    String worldKey = (spawn.levelName() != null && !spawn.levelName().isBlank())
+                            ? spawn.levelName()
+                            : "_legacy";
+                    worldMap.put(worldKey, spawn);
+                    botSpawnPointsByWorld.put(alias.trim(), worldMap);
+                }
+            }
+            botSpawnPoints = new HashMap<>(); // clear legacy
+            LOGGER.info("[Frens] Migrated {} legacy BotSpawn entries to per-world format.", botSpawnPointsByWorld.size());
+        }
+
+        // Migrate botControls → botControlsByWorld
+        if (botControls != null && !botControls.isEmpty()) {
+            if (botControlsByWorld == null) botControlsByWorld = new HashMap<>();
+            for (Map.Entry<String, BotControlSettings> entry : botControls.entrySet()) {
+                String alias = entry.getKey();
+                BotControlSettings settings = entry.getValue();
+                if (alias == null || alias.isBlank() || settings == null) continue;
+                Map<String, BotControlSettings> existing = resolveNestedAliasEntry(botControlsByWorld, alias);
+                if (existing == null || existing.isEmpty()) {
+                    Map<String, BotControlSettings> worldMap = new HashMap<>();
+                    worldMap.put("_legacy", settings);
+                    botControlsByWorld.put(alias.trim(), worldMap);
+                }
+            }
+            botControls = new HashMap<>(); // clear legacy
+            LOGGER.info("[Frens] Migrated {} legacy BotControlSettings entries to per-world format.", botControlsByWorld.size());
         }
     }
 
@@ -941,6 +1184,7 @@ public class ManualConfig {
         private boolean llmEnabled = true;
         private boolean voicedDialogue = true;
         private String failsafeSpawnMode = "world_spawn";  // owner_bed | world_spawn | saved_base
+        private boolean autoRegroupOnLost = false;  // auto-regroup when bot loses contact at a drop-off
 
         /** @deprecated Use {@link #isAutoRespawnOnDeath()} instead. Kept for JSON compat. */
         @Deprecated
@@ -1066,6 +1310,14 @@ public class ManualConfig {
 
         public void setFailsafeSpawnMode(String failsafeSpawnMode) {
             this.failsafeSpawnMode = failsafeSpawnMode;
+        }
+
+        public boolean isAutoRegroupOnLost() {
+            return autoRegroupOnLost;
+        }
+
+        public void setAutoRegroupOnLost(boolean autoRegroupOnLost) {
+            this.autoRegroupOnLost = autoRegroupOnLost;
         }
     }
 

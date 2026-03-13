@@ -134,6 +134,7 @@ public final class WoodcutSkill implements Skill {
 
         boolean internal = getBooleanParameter(context.parameters(), "internal", false);
         boolean replantSaplings = getBooleanParameter(context.parameters(), "replantSaplings", !internal);
+        boolean isHuntPrerequisite = "hunt_prerequisite".equals(context.parameters().get("_origin"));
         boolean openEnded = isOpenEnded(context.parameters());
         int targetTrees;
         if (openEnded) {
@@ -152,6 +153,7 @@ public final class WoodcutSkill implements Skill {
         prepareWoodcutTooling(source, bot);
 
         Set<BlockPos> visitedBases = new HashSet<>();
+        Set<BlockPos> pendingFloaters = new HashSet<>();
         int felled = 0;
         int consecutiveFailures = 0;
         int totalFailures = 0;
@@ -180,7 +182,7 @@ public final class WoodcutSkill implements Skill {
                     }
                 }
 
-                if (!ensureWoodSpaceOrDeposit(source, bot)) {
+                if (!ensureWoodSpaceOrDeposit(source, bot, isHuntPrerequisite)) {
                     totalFailures++;
                     consecutiveFailures++;
                     ChatUtils.sendSystemMessage(source, "Inventory is full and I couldn't store items; stopping woodcut.");
@@ -231,7 +233,7 @@ public final class WoodcutSkill implements Skill {
                     consecutiveFailures++;
                     continue;
                 }
-                if (!fellTree(source, bot, target, sharedState, replantSaplings)) {
+                if (!fellTree(source, bot, target, sharedState, replantSaplings, pendingFloaters)) {
                     totalFailures++;
                     consecutiveFailures++;
                     continue;
@@ -254,6 +256,21 @@ public final class WoodcutSkill implements Skill {
                 }
             }
 
+            // Second-pass cleanup: attempt unreachable logs from partial harvests from a fresh position
+            if (!pendingFloaters.isEmpty() && !abortRequested && bot.getEntityWorld() instanceof ServerWorld floaterWorld) {
+                LOGGER.info("Woodcut: attempting cleanup of {} floater log(s) from partial harvests", pendingFloaters.size());
+                for (BlockPos floater : new HashSet<>(pendingFloaters)) {
+                    if (!floaterWorld.getBlockState(floater).isIn(BlockTags.LOGS)) continue;
+                    if (isAbortRequested(bot)) break;
+                    // Approach from below — different angle than original attempt
+                    MovementService.planLootApproach(bot, floater.down(),
+                            MovementService.MovementOptions.skillLoot())
+                            .ifPresent(plan -> MovementService.execute(source, bot, plan,
+                                    SkillPreferences.teleportDuringSkills(bot), true));
+                    mineWithRetries(bot, source, floater, new ArrayList<>(), false, sharedState);
+                }
+            }
+
             if (abortRequested) {
                 finalResult = SkillExecutionResult.failure("woodcut paused due to nearby threat.");
             } else if (felled == 0) {
@@ -270,7 +287,7 @@ public final class WoodcutSkill implements Skill {
             // wide drop sweep at the end so items don't get left on the ground even after termination.
             if ((felled > 0 || !visitedBases.isEmpty() || totalFailures > 0)) {
                 try {
-                    ensureWoodSpaceOrDeposit(source, bot);
+                    ensureWoodSpaceOrDeposit(source, bot, isHuntPrerequisite);
                 } catch (Exception ignored) {
                 }
 
@@ -430,7 +447,8 @@ public final class WoodcutSkill implements Skill {
                              ServerPlayerEntity bot,
                              TreeDetector.TreeTarget target,
                              Map<String, Object> sharedState,
-                             boolean replantSaplings) {
+                             boolean replantSaplings,
+                             Set<BlockPos> pendingFloaters) {
         if (!(source.getWorld() instanceof ServerWorld world)) {
             return false;
         }
@@ -478,6 +496,7 @@ public final class WoodcutSkill implements Skill {
                 } else {
                     LOGGER.warn("Abandoning unreachable log {} for base {}", next.toShortString(), target.base().toShortString());
                     remaining.remove(next);
+                    pendingFloaters.add(next.toImmutable());
                     unreachable++;
                     if (unreachable >= 4) {
                         LOGGER.warn("Stopping cleanup for base {} after {} unreachable logs", target.base().toShortString(), unreachable);
@@ -565,13 +584,15 @@ public final class WoodcutSkill implements Skill {
         }
     }
 
-    private boolean ensureWoodSpaceOrDeposit(ServerCommandSource source, ServerPlayerEntity bot) {
+    private boolean ensureWoodSpaceOrDeposit(ServerCommandSource source, ServerPlayerEntity bot, boolean huntPrerequisite) {
         if (bot == null || source == null) {
             return true;
         }
         int empty = countEmptySlots(bot);
         int woodCount = countWood(bot);
-        boolean needsDeposit = empty <= 2 || woodCount > 256;
+        // Hunt prerequisite only needs ~8 logs; 1 empty slot is enough. Normal runs need more room.
+        int minEmptySlots = huntPrerequisite ? 0 : 2;
+        boolean needsDeposit = empty <= minEmptySlots || woodCount > 256;
         LOGGER.info("Woodcut inventory: emptySlots={} woodCount={} needsDeposit={}", empty, woodCount, needsDeposit);
         if (!needsDeposit) {
             return true;

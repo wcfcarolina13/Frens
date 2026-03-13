@@ -20,6 +20,7 @@ import net.wcfcarolina13.network.BaseGoToPayload;
 import net.wcfcarolina13.network.BaseGrantWallAccessPayload;
 import net.wcfcarolina13.network.BaseRemovePayload;
 import net.wcfcarolina13.network.BaseRenamePayload;
+import net.wcfcarolina13.network.BaseSetRadiusPayload;
 import net.wcfcarolina13.network.BaseRevokeWallAccessPayload;
 import net.wcfcarolina13.network.BaseSetHomePayload;
 import net.wcfcarolina13.network.BaseSetPayload;
@@ -48,7 +49,7 @@ public class BaseManagerScreen extends Screen {
             .resolve("frens")
             .resolve("base_manager_ui.json");
 
-    public record BaseDto(String label, int x, int y, int z, boolean home, String wallStatus, String ownerName) {
+    public record BaseDto(String label, int x, int y, int z, boolean home, String wallStatus, String ownerName, int radius) {
         boolean isWall() {
             return wallStatus != null && !wallStatus.isBlank();
         }
@@ -138,6 +139,7 @@ public class BaseManagerScreen extends Screen {
 
     private TextFieldWidget nameField;
     private ButtonWidget resetLayoutButton;
+    private ButtonWidget constructionButton;
 
     private int selectedIndex = -1;
 
@@ -213,6 +215,12 @@ public class BaseManagerScreen extends Screen {
         resetLayoutButton.setTooltip(Tooltip.of(Text.literal("Reset window layout to default size + position")));
         this.addDrawableChild(resetLayoutButton);
 
+        constructionButton = ButtonWidget.builder(Text.literal("Builds"), b -> openConstructionScreen())
+                .dimensions(0, 0, 58, 18)
+                .build();
+        constructionButton.setTooltip(Tooltip.of(Text.literal("Open Construction jobs and preview-based builds")));
+        this.addDrawableChild(constructionButton);
+
         int y = TOP_Y;
 
         // Name field
@@ -241,6 +249,10 @@ public class BaseManagerScreen extends Screen {
                 this::sendGoToSelected);
         addBtn("Refresh", "Reload the base list from the server", y, 2,
                 this::requestRefresh);
+        y += BUTTON_H + BUTTON_ROW_GAP;
+
+        addBtn("Set Radius", "Set the protection radius for the selected base (type number above)", y, 0,
+                this::sendSetRadiusSelected);
         y += BUTTON_H + SECTION_GAP;
 
         // Section 2: Fortification
@@ -372,6 +384,11 @@ public class BaseManagerScreen extends Screen {
         resetLayoutButton.setY(panelY + Math.max(2, (HEADER_H - resetLayoutButton.getHeight()) / 2));
         resetLayoutButton.visible = true;
         resetLayoutButton.active = true;
+
+        constructionButton.setX(panelX + panelW - constructionButton.getWidth() - 6);
+        constructionButton.setY(panelY + Math.max(2, (HEADER_H - constructionButton.getHeight()) / 2));
+        constructionButton.visible = true;
+        constructionButton.active = true;
     }
 
     private String elideForWidth(String raw, int maxWidth) {
@@ -386,6 +403,13 @@ public class BaseManagerScreen extends Screen {
             return "";
         }
         return this.textRenderer.trimToWidth(raw, maxWidth - ellipsisW) + "…";
+    }
+
+    private String fitRowText(String raw, int maxWidth) {
+        if (maxWidth <= 0) {
+            return "";
+        }
+        return elideForWidth(raw, maxWidth);
     }
 
     @Override
@@ -412,7 +436,7 @@ public class BaseManagerScreen extends Screen {
         // Header
         context.fill(panelX, panelY, panelX + panelW, panelY + HEADER_H, COL_HEADER);
         int headerTextLeft = resetLayoutButton.getX() + resetLayoutButton.getWidth() + HEADER_TEXT_PAD;
-        int headerTextRight = panelX + panelW - PANEL_PAD;
+        int headerTextRight = constructionButton.getX() - HEADER_TEXT_PAD;
 
         String titleRaw = this.title != null ? this.title.getString() : "Bases";
         String titleText = elideForWidth(titleRaw, Math.max(0, headerTextRight - headerTextLeft));
@@ -477,20 +501,33 @@ public class BaseManagerScreen extends Screen {
                 String owner = (b.ownerName != null && !b.ownerName.isBlank()) ? b.ownerName : "Unclaimed";
                 rightInfo = "(" + b.x + "," + b.z + ") §7[" + b.wallStatus + "] §6{" + owner + "}";
             } else {
-                rightInfo = b != null ? ("(" + b.x + ", " + b.y + ", " + b.z + ")") : "";
+                rightInfo = b != null ? ("(" + b.x + ", " + b.y + ", " + b.z + ") §7r=" + b.radius) : "";
             }
 
-            int rightW = this.textRenderer.getWidth(rightInfo);
-            int maxLabelW = list.w - 12 - rightW - 8;
-            String drawLabel = label;
-            if (this.textRenderer.getWidth(drawLabel) > maxLabelW && maxLabelW > 20) {
-                drawLabel = this.textRenderer.trimToWidth(drawLabel,
-                        maxLabelW - this.textRenderer.getWidth("..")) + "..";
+            int innerLeft = list.x + 6;
+            int innerRight = list.right() - 6;
+            int totalInnerWidth = Math.max(24, innerRight - innerLeft);
+            int gap = 8;
+
+            int desiredRightWidth = this.textRenderer.getWidth(rightInfo);
+            int maxRightWidth = Math.max(48, totalInnerWidth / 2);
+            int minLabelWidth = Math.max(54, totalInnerWidth / 3);
+            int rightWidth = Math.min(desiredRightWidth, maxRightWidth);
+            int labelWidth = totalInnerWidth - rightWidth - gap;
+
+            if (labelWidth < minLabelWidth) {
+                labelWidth = minLabelWidth;
+                rightWidth = Math.max(24, totalInnerWidth - labelWidth - gap);
             }
 
-            context.drawTextWithShadow(this.textRenderer, drawLabel, list.x + 6, rowY + 2, 0xFFEFEFEF);
-            context.drawTextWithShadow(this.textRenderer, rightInfo,
-                    list.right() - 6 - rightW, rowY + 2, 0xFFB0B0B0);
+            String drawLabel = fitRowText(label, labelWidth);
+            String drawRightInfo = fitRowText(rightInfo, rightWidth);
+            int drawRightWidth = this.textRenderer.getWidth(drawRightInfo);
+            int labelX = innerLeft;
+            int rightX = innerRight - drawRightWidth;
+
+            context.drawTextWithShadow(this.textRenderer, drawLabel, labelX, rowY + 2, 0xFFEFEFEF);
+            context.drawTextWithShadow(this.textRenderer, drawRightInfo, rightX, rowY + 2, 0xFFB0B0B0);
         }
 
         context.disableScissor();
@@ -519,6 +556,7 @@ public class BaseManagerScreen extends Screen {
 
         // Header widgets are outside content scissor
         resetLayoutButton.render(context, mouseX, mouseY, delta);
+        constructionButton.render(context, mouseX, mouseY, delta);
     }
 
     private int[] computeThumb(int trackTop, int trackH, int maxScroll) {
@@ -554,8 +592,8 @@ public class BaseManagerScreen extends Screen {
         double mx = click.x();
         double my = click.y();
 
-        // Reset button takes priority.
-        if (resetLayoutButton.isMouseOver(mx, my)) {
+        // Header buttons take priority.
+        if (resetLayoutButton.isMouseOver(mx, my) || constructionButton.isMouseOver(mx, my)) {
             return super.mouseClicked(click, isInside);
         }
 
@@ -576,7 +614,7 @@ public class BaseManagerScreen extends Screen {
         }
 
         // Header move drag (excluding reset button area).
-        if (isInHeader(mx, my) && !isInResetRegion(mx, my)) {
+        if (isInHeader(mx, my) && !isInHeaderButtonRegion(mx, my)) {
             draggingMove = true;
             draggingResize = false;
             draggingScroll = false;
@@ -737,11 +775,16 @@ public class BaseManagerScreen extends Screen {
         return mx >= panelX && mx < panelX + panelW && my >= panelY && my < panelY + HEADER_H;
     }
 
-    private boolean isInResetRegion(double mx, double my) {
-        return mx >= resetLayoutButton.getX()
-                && mx < resetLayoutButton.getX() + resetLayoutButton.getWidth()
-                && my >= resetLayoutButton.getY()
-                && my < resetLayoutButton.getY() + resetLayoutButton.getHeight();
+    private boolean isInHeaderButtonRegion(double mx, double my) {
+        return isOverButton(resetLayoutButton, mx, my) || isOverButton(constructionButton, mx, my);
+    }
+
+    private boolean isOverButton(ButtonWidget button, double mx, double my) {
+        return button != null
+                && mx >= button.getX()
+                && mx < button.getX() + button.getWidth()
+                && my >= button.getY()
+                && my < button.getY() + button.getHeight();
     }
 
     private int resizeMaskFor(double mx, double my) {
@@ -886,6 +929,33 @@ public class BaseManagerScreen extends Screen {
         }
         if (ClientPlayNetworking.canSend(BaseRenamePayload.ID)) {
             ClientPlayNetworking.send(new BaseRenamePayload(selected.label, newLabel));
+        }
+        requestRefresh();
+    }
+
+    private void sendSetRadiusSelected() {
+        BaseDto selected = getSelected();
+        if (selected == null || selected.label == null || selected.label.isBlank()) {
+            return;
+        }
+        if (selected.isWall()) {
+            return; // walls use fort buffer, not per-base radius
+        }
+        String text = nameField != null ? nameField.getText() : "";
+        if (text == null || text.isBlank()) {
+            return;
+        }
+        int radius;
+        try {
+            radius = Integer.parseInt(text.trim());
+        } catch (NumberFormatException e) {
+            return;
+        }
+        if (radius < 1 || radius > 128) {
+            return;
+        }
+        if (ClientPlayNetworking.canSend(BaseSetRadiusPayload.ID)) {
+            ClientPlayNetworking.send(new BaseSetRadiusPayload(selected.label, radius));
         }
         requestRefresh();
     }
@@ -1049,6 +1119,26 @@ public class BaseManagerScreen extends Screen {
             return;
         }
         player.networkHandler.sendChatCommand(command);
+    }
+
+    private void openConstructionScreen() {
+        MinecraftClient client = this.client;
+        if (client == null) {
+            return;
+        }
+        if (this.parent instanceof ConstructionScreen) {
+            client.setScreen(this.parent);
+            return;
+        }
+        client.setScreen(new ConstructionScreen(this, formatBotTarget(botAlias)));
+    }
+
+    private static String formatBotTarget(String alias) {
+        String value = alias != null ? alias.trim() : "";
+        if (value.length() >= 2 && value.startsWith("\"") && value.endsWith("\"")) {
+            return value;
+        }
+        return value.contains(" ") ? "\"" + value + "\"" : value;
     }
 
     @Override

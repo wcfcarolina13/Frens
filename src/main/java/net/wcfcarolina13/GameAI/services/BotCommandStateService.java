@@ -56,6 +56,8 @@ public final class BotCommandStateService {
          * Used for stale in-flight timeout cleanup.
          */
         public long comeRecoverySkillStartTick = 0L;
+        /** Total recovery skill attempts in this come session (pillar, stair, stripmine). */
+        public int comeRecoverySkillAttempts = 0;
         /**
          * When true, the bot may launch short "recovery" skills (e.g., collect_dirt ascent / stripmine)
          * while trying to reach a fixed /come goal. When false ("safe regroup"), it will only path/walk

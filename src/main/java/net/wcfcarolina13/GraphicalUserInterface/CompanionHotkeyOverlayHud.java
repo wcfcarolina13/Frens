@@ -31,7 +31,7 @@ public final class CompanionHotkeyOverlayHud {
             "3 ✨ Spells",
             "4 🏠 Home",
             "5 🛌 Sleep",
-            "6 📣 Come",
+            "6 📣 Regroup",
             "7 ⛏ Stripmine",
             "8 🪜 Ascent",
             "9 🕳 Descent",

@@ -193,23 +193,29 @@ public class BaritoneStylePathFinder {
 
         int cx = current.x, cy = current.y, cz = current.z;
 
-        // Cardinal flat moves
-        tryAddNeighbor(cx + 1, cy, cz, current, 1.0, tx, ty, tz, cache, openSet, openMap, closedSet, bestSoFar, bestScores);
-        tryAddNeighbor(cx - 1, cy, cz, current, 1.0, tx, ty, tz, cache, openSet, openMap, closedSet, bestSoFar, bestScores);
-        tryAddNeighbor(cx, cy, cz + 1, current, 1.0, tx, ty, tz, cache, openSet, openMap, closedSet, bestSoFar, bestScores);
-        tryAddNeighbor(cx, cy, cz - 1, current, 1.0, tx, ty, tz, cache, openSet, openMap, closedSet, bestSoFar, bestScores);
+        // Cardinal flat moves — require solid floor
+        tryAddNeighbor(cx + 1, cy, cz, current, 1.0, true, tx, ty, tz, cache, openSet, openMap, closedSet, bestSoFar, bestScores);
+        tryAddNeighbor(cx - 1, cy, cz, current, 1.0, true, tx, ty, tz, cache, openSet, openMap, closedSet, bestSoFar, bestScores);
+        tryAddNeighbor(cx, cy, cz + 1, current, 1.0, true, tx, ty, tz, cache, openSet, openMap, closedSet, bestSoFar, bestScores);
+        tryAddNeighbor(cx, cy, cz - 1, current, 1.0, true, tx, ty, tz, cache, openSet, openMap, closedSet, bestSoFar, bestScores);
 
-        // Down
-        tryAddNeighbor(cx, cy - 1, cz, current, 1.0, tx, ty, tz, cache, openSet, openMap, closedSet, bestSoFar, bestScores);
+        // Down — require floor at landing position
+        tryAddNeighbor(cx, cy - 1, cz, current, 1.0, true, tx, ty, tz, cache, openSet, openMap, closedSet, bestSoFar, bestScores);
 
-        // Up (raw vertical climb — only if head+2 clear)
-        tryAddNeighbor(cx, cy + 1, cz, current, 1.5, tx, ty, tz, cache, openSet, openMap, closedSet, bestSoFar, bestScores);
+        // Up (raw vertical climb) — no floor required at jump destination
+        tryAddNeighbor(cx, cy + 1, cz, current, 1.5, false, tx, ty, tz, cache, openSet, openMap, closedSet, bestSoFar, bestScores);
 
         // Smart step-up moves: step onto solid block in front (4 cardinals)
         tryStepUp(cx + 1, cy, cz, current, tx, ty, tz, cache, openSet, openMap, closedSet, bestSoFar, bestScores);
         tryStepUp(cx - 1, cy, cz, current, tx, ty, tz, cache, openSet, openMap, closedSet, bestSoFar, bestScores);
         tryStepUp(cx, cy, cz + 1, current, tx, ty, tz, cache, openSet, openMap, closedSet, bestSoFar, bestScores);
         tryStepUp(cx, cy, cz - 1, current, tx, ty, tz, cache, openSet, openMap, closedSet, bestSoFar, bestScores);
+
+        // Smart step-down moves: drop one block for staircase descents (4 cardinals)
+        tryStepDown(cx + 1, cy, cz, current, tx, ty, tz, cache, openSet, openMap, closedSet, bestSoFar, bestScores);
+        tryStepDown(cx - 1, cy, cz, current, tx, ty, tz, cache, openSet, openMap, closedSet, bestSoFar, bestScores);
+        tryStepDown(cx, cy, cz + 1, current, tx, ty, tz, cache, openSet, openMap, closedSet, bestSoFar, bestScores);
+        tryStepDown(cx, cy, cz - 1, current, tx, ty, tz, cache, openSet, openMap, closedSet, bestSoFar, bestScores);
     }
 
     private static void tryStepUp(int nx, int cy, int nz,
@@ -222,7 +228,27 @@ public class BaritoneStylePathFinder {
         if (isSolidBlock(cache, nx, cy, nz)
                 && isPassable(cache, nx, cy + 1, nz)
                 && isPassable(cache, nx, cy + 2, nz)) {
-            tryAddNeighbor(nx, cy + 1, nz, parent, 1.5, tx, ty, tz, cache,
+            tryAddNeighbor(nx, cy + 1, nz, parent, 1.5, false, tx, ty, tz, cache,
+                    openSet, openMap, closedSet, bestSoFar, bestScores);
+        }
+    }
+
+    /**
+     * Step-down move: when the flat position (nx, cy, nz) lacks a floor (staircase),
+     * check if we can drop to (nx, cy-1, nz) with solid ground below.
+     * Mirrors tryStepUp for downhill navigation.
+     */
+    private static void tryStepDown(int nx, int cy, int nz,
+                                    Node parent, int tx, int ty, int tz,
+                                    ChunkCache cache,
+                                    PriorityQueue<Node> openSet, Map<Long, Node> openMap,
+                                    Map<Long, Node> closedSet,
+                                    Node[] bestSoFar, double[] bestScores) {
+        int dropY = cy - 1;
+        if (isPassable(cache, nx, dropY, nz)
+                && isPassable(cache, nx, dropY + 1, nz)
+                && hasSupportedFloor(cache, nx, dropY, nz)) {
+            tryAddNeighbor(nx, dropY, nz, parent, 1.2, false, tx, ty, tz, cache,
                     openSet, openMap, closedSet, bestSoFar, bestScores);
         }
     }
@@ -230,6 +256,7 @@ public class BaritoneStylePathFinder {
     private static void tryAddNeighbor(
             int nx, int ny, int nz,
             Node parent, double moveCost,
+            boolean requireFloor,
             int tx, int ty, int tz,
             ChunkCache cache,
             PriorityQueue<Node> openSet, Map<Long, Node> openMap, Map<Long, Node> closedSet,
@@ -240,6 +267,9 @@ public class BaritoneStylePathFinder {
 
         // Walkability check using chunk cache (body + head passable)
         if (!isPassable(cache, nx, ny, nz) || !isPassable(cache, nx, ny + 1, nz)) return;
+
+        // Floor support: reject air-walking nodes (prevents impossible floating paths)
+        if (requireFloor && !hasSupportedFloor(cache, nx, ny, nz)) return;
 
         // Cheap hazard checks: magma floor and direct campfire contact only.
         // The expensive 75-block-area campfire scan is NOT done here — it was the
@@ -255,7 +285,8 @@ public class BaritoneStylePathFinder {
         BlockState bodyState = cache.getBlockState(nx, ny, nz);
         if (bodyState.getBlock() instanceof CampfireBlock && bodyState.get(CampfireBlock.LIT)) return;
 
-        double tentativeG = parent.gScore + moveCost;
+        double waterPenalty = cache.getBlockState(nx, ny, nz).isOf(Blocks.WATER) ? 2.0 : 0.0;
+        double tentativeG = parent.gScore + moveCost + waterPenalty;
         double h = heuristic(nx, ny, nz, tx, ty, tz);
 
         Node existing = openMap.get(packed);
@@ -354,6 +385,20 @@ public class BaritoneStylePathFinder {
     private static boolean isSolidBlock(ChunkCache cache, int x, int y, int z) {
         BlockState state = cache.getBlockState(x, y, z);
         return !state.isAir() && state.isOpaque();
+    }
+
+
+    /**
+     * Returns true if position (nx, ny, nz) has a supported floor: solid ground
+     * below, or water (provides buoyancy — bot can swim). Only rejects pure air
+     * positions with nothing below (prevents impossible floating paths).
+     * Water paths are discouraged via the +2.0 cost penalty in tryAddNeighbor.
+     */
+    private static boolean hasSupportedFloor(ChunkCache cache, int nx, int ny, int nz) {
+        if (isSolidBlock(cache, nx, ny - 1, nz)) return true;
+        // Water provides buoyancy — bot can swim through it
+        if (cache.getBlockState(nx, ny, nz).isOf(Blocks.WATER)) return true;
+        return false;
     }
 
     // --- Path reconstruction ---

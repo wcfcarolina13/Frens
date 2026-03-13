@@ -6,6 +6,7 @@ import net.minecraft.block.DoorBlock;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.mob.HostileEntity;
+import net.wcfcarolina13.EntityUtil;
 import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.item.BlockItem;
 import net.minecraft.item.Item;
@@ -43,6 +44,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -76,6 +78,14 @@ public final class BotActions {
     private static final int RANGED_REPOSITION_SUPPRESS_FIRE_TICKS = 10;
     private static final int RANGED_MISS_RECENT_SHOT_WINDOW_TICKS = 80;
     private static final double RANGED_REPOSITION_MIN_DISTANCE_SQ = 4.5D * 4.5D;
+    // Extended search ring: 12 directions at 3 distances when close candidates all fail.
+    private static final int EXTENDED_SEARCH_DIRECTIONS = 12;
+    private static final double[] EXTENDED_SEARCH_DISTANCES = {3.0D, 4.5D, 6.0D};
+    // Defilade: bonus for positions where the target's return fire is partially blocked.
+    private static final double DEFILADE_COVER_BONUS = 5.0D;
+    // Committed reposition: persist target across ticks for distant moves.
+    private static final double COMMITTED_REPOSITION_ARRIVE_SQ = 1.5D * 1.5D;
+    private static final int COMMITTED_REPOSITION_TIMEOUT_TICKS = 60;
     private static final double SURVIVAL_REACH_SQ = 4.5D * 4.5D;
 
     private static final Map<UUID, RangedAttackState> RANGED_STATE = new HashMap<>();
@@ -282,15 +292,11 @@ public final class BotActions {
 
     public static boolean selectBestWeapon(ServerPlayerEntity bot) {
         int weaponSlot = findWeaponSlot(bot);
-        if (weaponSlot == -1) {
-            weaponSlot = findAnyOccupiedSlot(bot);
-        }
-
         if (weaponSlot != -1) {
             selectHotbarSlot(bot, weaponSlot);
             return true;
         }
-
+        // No weapon found — use fists rather than swinging food/blocks.
         return false;
     }
 
@@ -396,7 +402,8 @@ public final class BotActions {
 
     public static void attackNearest(ServerPlayerEntity bot, List<Entity> nearbyEntities) {
         Entity target = nearbyEntities.stream()
-                .filter(entity -> entity instanceof HostileEntity)
+                .filter(EntityUtil::isHostile)
+                .filter(e -> e.getType() != net.minecraft.entity.EntityType.GHAST) // ranged/deflect only
                 .min(Comparator.comparingDouble(entity -> entity.squaredDistanceTo(bot)))
                 .orElse(null);
 
@@ -655,8 +662,8 @@ public final class BotActions {
                 }
             }
 
-            Support support = resolvePlacementSupport(world, target, face);
-            if (support == null) {
+            List<Support> supports = resolvePlacementSupports(world, bot, target, face);
+            if (supports.isEmpty()) {
                 return new PlaceResult(false, "no-solid-support");
             }
 
@@ -672,12 +679,27 @@ public final class BotActions {
             }
             selectHotbarSlot(bot, slot);
 
-            BlockHitResult hit = computePlacementHit(world, bot, support);
+            Support support = null;
+            BlockHitResult hit = null;
+            for (Support candidate : supports) {
+                BlockHitResult candidateHit = computePlacementHit(world, bot, candidate);
+                if (candidateHit != null) {
+                    support = candidate;
+                    hit = candidateHit;
+                    break;
+                }
+            }
+            if (support == null) {
+                support = supports.get(0);
+            }
             if (hit == null) {
                 if (allowIntersecting || (isIntersecting && allowJumpPillar)) {
                     hit = new BlockHitResult(Vec3d.ofCenter(support.clickPos()), support.face(), support.clickPos(), false);
                 } else {
-                    return new PlaceResult(false, "no-line-of-sight-to-support support=" + support.clickPos().toShortString() + " face=" + support.face());
+                    return new PlaceResult(false, "no-line-of-sight-to-support support="
+                            + support.clickPos().toShortString()
+                            + " face=" + support.face()
+                            + " candidates=" + supports.size());
                 }
             }
             ItemUsageContext usage = new ItemUsageContext(bot, Hand.MAIN_HAND, hit);
@@ -777,31 +799,66 @@ public final class BotActions {
      * Resolve the actual block face we'd "right click" to place into {@code target}.
      * This prevents phantom placements where the support check passes but the clickPos is air.
      */
-    private static Support resolvePlacementSupport(ServerWorld world, BlockPos target, Direction preferredFace) {
+    private static List<Support> resolvePlacementSupports(ServerWorld world,
+                                                          ServerPlayerEntity bot,
+                                                          BlockPos target,
+                                                          Direction preferredFace) {
         if (world == null || target == null) {
-            return null;
+            return List.of();
         }
         Direction preferred = preferredFace == null ? Direction.UP : preferredFace;
+        LinkedHashSet<Support> ordered = new LinkedHashSet<>();
 
-        // Prefer placing by clicking the block below (common for floors, pillars, etc).
         BlockPos below = target.down();
-        if (preferred == Direction.UP && isClickablePlacementSupport(world, below)) {
-            return new Support(below, Direction.UP);
+        if (preferred == Direction.UP) {
+            maybeAddSupport(ordered, world, below, Direction.UP);
         }
 
-        // Otherwise use a solid horizontal neighbor face pointing toward the target.
-        for (Direction dir : Direction.Type.HORIZONTAL) {
-            BlockPos neighbor = target.offset(dir);
-            if (isClickablePlacementSupport(world, neighbor)) {
-                return new Support(neighbor, dir.getOpposite());
-            }
+        List<Direction> horizontal = new ArrayList<>(List.of(Direction.NORTH, Direction.SOUTH, Direction.EAST, Direction.WEST));
+        horizontal.sort((left, right) -> Double.compare(
+                supportPriorityScore(bot, target, preferred, left),
+                supportPriorityScore(bot, target, preferred, right)));
+        for (Direction dir : horizontal) {
+            maybeAddSupport(ordered, world, target.offset(dir), dir.getOpposite());
         }
 
-        // Last resort: if below is solid, allow non-UP preferred faces to still click below.
-        if (isClickablePlacementSupport(world, below)) {
-            return new Support(below, Direction.UP);
+        if (preferred != Direction.UP) {
+            maybeAddSupport(ordered, world, below, Direction.UP);
         }
-        return null;
+
+        return List.copyOf(ordered);
+    }
+
+    private static void maybeAddSupport(LinkedHashSet<Support> ordered,
+                                        ServerWorld world,
+                                        BlockPos clickPos,
+                                        Direction face) {
+        if (ordered == null || world == null || clickPos == null || face == null) {
+            return;
+        }
+        if (isClickablePlacementSupport(world, clickPos)) {
+            ordered.add(new Support(clickPos.toImmutable(), face));
+        }
+    }
+
+    private static double supportPriorityScore(ServerPlayerEntity bot,
+                                               BlockPos target,
+                                               Direction preferredFace,
+                                               Direction supportOffsetDirection) {
+        double score = 0.0D;
+        if (preferredFace != null && preferredFace.getAxis().isHorizontal()
+                && supportOffsetDirection == preferredFace.getOpposite()) {
+            score -= 4.0D;
+        }
+        if (bot == null || target == null || supportOffsetDirection == null) {
+            return score;
+        }
+        BlockPos clickPos = target.offset(supportOffsetDirection);
+        Direction face = supportOffsetDirection.getOpposite();
+        Vec3d eye = bot.getEyePos();
+        Vec3d facePoint = pointOnFace(clickPos, face);
+        score += eye.squaredDistanceTo(facePoint);
+        return score;
     }
 
     private static BlockHitResult computePlacementHit(ServerWorld world, ServerPlayerEntity bot, Support support) {
@@ -843,40 +900,64 @@ public final class BotActions {
         }
         double o = 0.32D;
         double f = 0.49D;
-        List<Vec3d> points = new ArrayList<>(5);
+        List<Vec3d> points = new ArrayList<>(9);
         points.add(pointOnFace(pos, face));
         switch (face) {
             case UP -> {
+                points.add(center.add(o, f, 0));
+                points.add(center.add(-o, f, 0));
+                points.add(center.add(0, f, o));
+                points.add(center.add(0, f, -o));
                 points.add(center.add(o, f, o));
                 points.add(center.add(-o, f, o));
                 points.add(center.add(o, f, -o));
                 points.add(center.add(-o, f, -o));
             }
             case DOWN -> {
+                points.add(center.add(o, -f, 0));
+                points.add(center.add(-o, -f, 0));
+                points.add(center.add(0, -f, o));
+                points.add(center.add(0, -f, -o));
                 points.add(center.add(o, -f, o));
                 points.add(center.add(-o, -f, o));
                 points.add(center.add(o, -f, -o));
                 points.add(center.add(-o, -f, -o));
             }
             case NORTH -> {
+                points.add(center.add(o, 0, -f));
+                points.add(center.add(-o, 0, -f));
+                points.add(center.add(0, o, -f));
+                points.add(center.add(0, -o, -f));
                 points.add(center.add(o, o, -f));
                 points.add(center.add(-o, o, -f));
                 points.add(center.add(o, -o, -f));
                 points.add(center.add(-o, -o, -f));
             }
             case SOUTH -> {
+                points.add(center.add(o, 0, f));
+                points.add(center.add(-o, 0, f));
+                points.add(center.add(0, o, f));
+                points.add(center.add(0, -o, f));
                 points.add(center.add(o, o, f));
                 points.add(center.add(-o, o, f));
                 points.add(center.add(o, -o, f));
                 points.add(center.add(-o, -o, f));
             }
             case EAST -> {
+                points.add(center.add(f, 0, o));
+                points.add(center.add(f, 0, -o));
+                points.add(center.add(f, o, 0));
+                points.add(center.add(f, -o, 0));
                 points.add(center.add(f, o, o));
                 points.add(center.add(f, o, -o));
                 points.add(center.add(f, -o, o));
                 points.add(center.add(f, -o, -o));
             }
             case WEST -> {
+                points.add(center.add(-f, 0, o));
+                points.add(center.add(-f, 0, -o));
+                points.add(center.add(-f, o, 0));
+                points.add(center.add(-f, -o, 0));
                 points.add(center.add(-f, o, o));
                 points.add(center.add(-f, o, -o));
                 points.add(center.add(-f, -o, o));
@@ -1042,13 +1123,17 @@ public final class BotActions {
         return 0;
     }
 
-    private static int findAnyOccupiedSlot(ServerPlayerEntity bot) {
-        for (int i = 0; i < 9; i++) {
-            if (!bot.getInventory().getStack(i).isEmpty()) {
-                return i;
-            }
+    /**
+     * Non-mutating check: does the bot have any melee weapon in inventory?
+     * Unlike {@link #selectBestMeleeWeapon}, this does NOT change the selected hotbar slot.
+     */
+    public static boolean hasMeleeWeapon(ServerPlayerEntity bot) {
+        if (bot == null) return false;
+        PlayerInventory inventory = bot.getInventory();
+        for (int slot = 0; slot < inventory.size(); slot++) {
+            if (meleeWeaponScore(inventory.getStack(slot)) > 0) return true;
         }
-        return -1;
+        return false;
     }
 
     private static boolean isLikelyWeapon(ItemStack stack) {
@@ -1371,7 +1456,8 @@ public final class BotActions {
         double dy = targetY - bot.getEyeY();
         double dz = targetZ - bot.getZ();
         float yaw = (float) (Math.toDegrees(Math.atan2(-dx, dz)));
-        float pitch = (float) (Math.toDegrees(-Math.atan2(dy, Math.sqrt(dx * dx + dz * dz))));
+        float pitch = (float) Math.max(-90.0, Math.min(90.0,
+                Math.toDegrees(-Math.atan2(dy, Math.sqrt(dx * dx + dz * dz)))));
         bot.setYaw(yaw);
         bot.setHeadYaw(yaw);
         bot.setBodyYaw(yaw);
@@ -1424,6 +1510,13 @@ public final class BotActions {
                 state.chargeStartTick = serverTick - 1;
             }
             if (serverTick - state.chargeStartTick >= minChargeTicks) {
+                // Don't release into blocked terrain — cancel the draw and let approach logic take over.
+                if (bot.getEntityWorld() instanceof ServerWorld sw
+                        && isRangedLineBlocked(sw, bot, bot.getEyePos(), target)) {
+                    cancelRangedUseSafely(bot);
+                    state.chargeStartTick = 0L;
+                    return false;
+                }
                 bot.stopUsingItem();
                 state.cooldownTick = serverTick + RANGED_COOLDOWN_TICKS;
                 state.chargeStartTick = 0L;
@@ -1431,6 +1524,12 @@ public final class BotActions {
                 BotArrowRecoveryService.noteRangedShot(bot, serverTick);
             }
             return true;
+        }
+
+        // Don't start drawing if line is already blocked — save the arrow.
+        if (bot.getEntityWorld() instanceof ServerWorld sw
+                && isRangedLineBlocked(sw, bot, bot.getEyePos(), target)) {
+            return false;
         }
 
         bot.setCurrentHand(hand);
@@ -1448,6 +1547,11 @@ public final class BotActions {
         }
 
         if (net.minecraft.item.CrossbowItem.isCharged(stack)) {
+            // Don't fire into blocked terrain — let approach logic take over.
+            if (bot.getEntityWorld() instanceof ServerWorld sw
+                    && isRangedLineBlocked(sw, bot, bot.getEyePos(), target)) {
+                return false;
+            }
             float velocity = 1.6F;
             float divergence = 14 - bot.getEntityWorld().getDifficulty().getId() * 4;
             crossbow.shootAll(bot.getEntityWorld(), bot, hand, stack, velocity, divergence, target);
@@ -1476,7 +1580,17 @@ public final class BotActions {
     }
 
     public static boolean hasRangedWeapon(ServerPlayerEntity bot) {
-        return selectBestRangedWeapon(bot) != null;
+        if (bot == null) return false;
+        // Non-mutating check: scan inventory without equipping anything.
+        // The actual weapon equip happens inside performRangedAttack() -> selectBestRangedWeapon().
+        if (isRangedWeapon(bot.getMainHandStack()) || isRangedWeapon(bot.getOffHandStack())) {
+            return true;
+        }
+        PlayerInventory inventory = bot.getInventory();
+        for (int i = 0; i < inventory.size(); i++) {
+            if (isRangedWeapon(inventory.getStack(i))) return true;
+        }
+        return false;
     }
 
     private static Selection selectBestRangedWeapon(ServerPlayerEntity bot) {
@@ -1507,9 +1621,10 @@ public final class BotActions {
         if (stack.isEmpty()) {
             return false;
         }
+        // Trident excluded: canFire() fails because tridents don't use getProjectileType().
+        // Treating them as ranged causes the bot to waste ticks on failed ranged attacks.
         return stack.getItem() instanceof net.minecraft.item.BowItem ||
-                stack.getItem() instanceof net.minecraft.item.CrossbowItem ||
-                stack.getItem() instanceof net.minecraft.item.TridentItem;
+                stack.getItem() instanceof net.minecraft.item.CrossbowItem;
     }
 
     public static void resetRangedState(ServerPlayerEntity bot) {
@@ -1558,6 +1673,31 @@ public final class BotActions {
         if (state.forceMelee) {
             return false;
         }
+
+        // --- Committed multi-tick movement: continue driving toward a distant reposition target ---
+        if (state.committedRepositionTarget != null) {
+            if (serverTick - state.committedRepositionStartTick > COMMITTED_REPOSITION_TIMEOUT_TICKS) {
+                state.committedRepositionTarget = null;
+                return false;
+            }
+            // If LoS cleared mid-move, stop and let the bot fire from here.
+            if (!isRangedLineBlocked(world, bot, bot.getEyePos(), target)) {
+                state.committedRepositionTarget = null;
+                return false;
+            }
+            double distSq = new Vec3d(bot.getX(), bot.getY(), bot.getZ()).squaredDistanceTo(state.committedRepositionTarget);
+            if (distSq <= COMMITTED_REPOSITION_ARRIVE_SQ) {
+                state.committedRepositionTarget = null;
+                state.repositioningUntilTick = serverTick + RANGED_REPOSITION_SUPPRESS_FIRE_TICKS;
+                state.repositionCooldownTick = serverTick + RANGED_REPOSITION_COOLDOWN_TICKS;
+                return false; // arrived — let combat loop re-evaluate
+            }
+            // Cancel active bow draw so we can move freely.
+            cancelRangedUseSafely(bot);
+            moveToward(bot, state.committedRepositionTarget, 0.9D);
+            return true;
+        }
+
         if (bot.hasVehicle() || bot.isUsingItem()) {
             return false;
         }
@@ -1586,8 +1726,21 @@ public final class BotActions {
             return false;
         }
 
-        // Drive a gentle step.
-        // If the chosen stance is vertically offset (uneven caves), prefer the step/clearance move logic.
+        Vec3d botPos = new Vec3d(bot.getX(), bot.getY(), bot.getZ());
+        double distToBest = botPos.distanceTo(best);
+
+        // Distant repositions (>2 blocks): commit to reaching the target over multiple ticks.
+        if (distToBest > 2.0D) {
+            state.committedRepositionTarget = best;
+            state.committedRepositionStartTick = serverTick;
+            cancelRangedUseSafely(bot);
+            moveToward(bot, best, 0.9D);
+            state.missStreak = 0;
+            state.blockedShotStreak = 0;
+            return true;
+        }
+
+        // Close repositions: single-tick step (original behavior).
         double dyToBest = best.y - bot.getY();
         if (Math.abs(dyToBest) > 0.35D) {
             moveToward(bot, best, 0.9D);
@@ -1605,6 +1758,8 @@ public final class BotActions {
         return true;
     }
 
+    private record ScoredPosition(Vec3d stand, double score) {}
+
     private static Vec3d pickRangedReposition(ServerWorld world, ServerPlayerEntity bot, LivingEntity target) {
         // Compute a local strafe basis around the target.
         Vec3d toTarget = new Vec3d(target.getX() - bot.getX(), 0.0D, target.getZ() - bot.getZ());
@@ -1616,8 +1771,12 @@ public final class BotActions {
         Vec3d left = new Vec3d(-dir.z, 0.0D, dir.x);
         Vec3d right = new Vec3d(dir.z, 0.0D, -dir.x);
 
-        // Candidate offsets (in blocks). Keep them small to avoid running off ledges in caves.
-        List<Vec3d> offsets = List.of(
+        Vec3d botPos = new Vec3d(bot.getX(), bot.getY(), bot.getZ());
+        double eyeHeight = bot.getStandingEyeHeight();
+        ScoredPosition best = null;
+
+        // --- Phase 1: Close candidates (original 7, within ~1.5 blocks) ---
+        List<Vec3d> closeOffsets = List.of(
                 left.multiply(1.45D),
                 right.multiply(1.45D),
                 dir.multiply(-1.35D),
@@ -1627,38 +1786,91 @@ public final class BotActions {
                 right.multiply(0.95D)
         );
 
-        Vec3d botPos = new Vec3d(bot.getX(), bot.getY(), bot.getZ());
-        Vec3d bestPos = null;
-        double bestScore = Double.NEGATIVE_INFINITY;
-
-        for (Vec3d off : offsets) {
-            BlockPos base = BlockPos.ofFloored(botPos.x + off.x, botPos.y, botPos.z + off.z);
-            Vec3d stand = resolveNearbyStandPos(world, base);
-            if (stand == null) {
-                continue;
-            }
-            double moveCost = stand.squaredDistanceTo(botPos);
-            Vec3d eye = stand.add(0.0D, bot.getStandingEyeHeight(), 0.0D);
-
-            double visibility = rangedVisibilityScore(world, bot, eye, target);
-            // Prefer clear LoS (huge score), then prefer minimal movement.
-            double score = visibility - moveCost * 2.0D;
-            if (score > bestScore) {
-                bestScore = score;
-                bestPos = stand;
+        for (Vec3d off : closeOffsets) {
+            ScoredPosition sp = scoreCandidate(world, bot, target, botPos, eyeHeight, off);
+            if (sp != null && (best == null || sp.score > best.score)) {
+                best = sp;
             }
         }
 
-        // Only reposition if we found a meaningfully better angle.
-        if (bestPos == null) {
+        // --- Phase 2: Extended ring (12 directions × 3 distances) when close ring lacks clear LoS ---
+        if (best == null || best.score < 1_000_000.0D) {
+            double angleStep = 2.0D * Math.PI / EXTENDED_SEARCH_DIRECTIONS;
+            for (int i = 0; i < EXTENDED_SEARCH_DIRECTIONS; i++) {
+                double angle = i * angleStep;
+                double ox = Math.cos(angle);
+                double oz = Math.sin(angle);
+                for (double dist : EXTENDED_SEARCH_DISTANCES) {
+                    Vec3d off = new Vec3d(ox * dist, 0.0D, oz * dist);
+                    ScoredPosition sp = scoreCandidate(world, bot, target, botPos, eyeHeight, off);
+                    if (sp != null && (best == null || sp.score > best.score)) {
+                        best = sp;
+                    }
+                }
+            }
+        }
+
+        // Only reposition if we found a meaningfully better angle than current stance.
+        if (best == null) {
             return null;
         }
         Vec3d curEye = bot.getEyePos();
-        double curScore = rangedVisibilityScore(world, bot, curEye, target);
-        if (bestScore <= curScore + 0.5D) {
+        double curVisibility = rangedVisibilityScore(world, bot, curEye, target);
+        double curCover = defiladeScore(world, botPos, eyeHeight, target);
+        double curScore = curVisibility + curCover;
+        if (best.score <= curScore + 0.5D) {
             return null;
         }
-        return bestPos;
+        return best.stand;
+    }
+
+    /**
+     * Score a single candidate offset for ranged repositioning.
+     * Evaluates visibility (can we hit the target?), defilade cover (is return fire blocked?),
+     * and movement cost (how far do we have to move?).
+     */
+    private static ScoredPosition scoreCandidate(ServerWorld world, ServerPlayerEntity bot, LivingEntity target,
+                                                  Vec3d botPos, double eyeHeight, Vec3d offset) {
+        BlockPos base = BlockPos.ofFloored(botPos.x + offset.x, botPos.y, botPos.z + offset.z);
+        Vec3d stand = resolveNearbyStandPos(world, base);
+        if (stand == null) {
+            return null;
+        }
+        double moveCost = stand.squaredDistanceTo(botPos);
+        Vec3d eye = stand.add(0.0D, eyeHeight, 0.0D);
+
+        double visibility = rangedVisibilityScore(world, bot, eye, target);
+        double cover = defiladeScore(world, stand, eyeHeight, target);
+        double score = visibility + cover - moveCost * 2.0D;
+        return new ScoredPosition(stand, score);
+    }
+
+    /**
+     * Evaluate how much cover a candidate position provides from the target's return fire.
+     * Checks raycasts from target's eye to 3 points on the bot (head, torso, legs).
+     * More blocked rays = better defilade cover.
+     */
+    private static double defiladeScore(ServerWorld world, Vec3d candidateStandPos, double eyeHeight, LivingEntity target) {
+        Vec3d targetEye = target.getEyePos();
+        Vec3d[] botPoints = {
+                candidateStandPos.add(0.0D, eyeHeight, 0.0D),        // head
+                candidateStandPos.add(0.0D, eyeHeight * 0.5D, 0.0D), // torso
+                candidateStandPos.add(0.0D, 0.3D, 0.0D)              // legs
+        };
+        int blocked = 0;
+        for (Vec3d point : botPoints) {
+            RaycastContext ctx = new RaycastContext(
+                    targetEye, point,
+                    RaycastContext.ShapeType.COLLIDER,
+                    RaycastContext.FluidHandling.NONE,
+                    target
+            );
+            BlockHitResult hit = world.raycast(ctx);
+            if (hit.getType() == HitResult.Type.BLOCK) {
+                blocked++;
+            }
+        }
+        return blocked * DEFILADE_COVER_BONUS;
     }
 
     private static Vec3d resolveNearbyStandPos(ServerWorld world, BlockPos base) {
@@ -1770,6 +1982,29 @@ public final class BotActions {
         return hit.getType() != HitResult.Type.MISS;
     }
 
+    /**
+     * Returns true if the bot's current ranged line to the target is blocked by terrain.
+     * Used by engageHostiles to decide whether to fall through to melee approach.
+     */
+    public static boolean isRangedLineCurrentlyBlocked(ServerPlayerEntity bot, LivingEntity target) {
+        if (bot == null || target == null) {
+            return false;
+        }
+        if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
+            return false;
+        }
+        return isRangedLineBlocked(world, bot, bot.getEyePos(), target);
+    }
+
+    /** Cancel any committed reposition in progress (e.g. when LoS clears or target changes). */
+    public static void cancelCommittedReposition(ServerPlayerEntity bot) {
+        if (bot == null) return;
+        RangedAttackState state = RANGED_STATE.get(bot.getUuid());
+        if (state != null) {
+            state.committedRepositionTarget = null;
+        }
+    }
+
     public static void resetRangedState(UUID uuid) {
         if (uuid == null) {
             return;
@@ -1847,6 +2082,10 @@ public final class BotActions {
         long repositionCooldownTick = 0L;
         long repositioningUntilTick = 0L;
 
+        // Committed multi-tick reposition for distant moves.
+        Vec3d committedRepositionTarget = null;
+        long committedRepositionStartTick = 0L;
+
         void ensureTarget(LivingEntity target) {
             UUID targetUuid = target.getUuid();
             if (!Objects.equals(currentTarget, targetUuid)) {
@@ -1860,6 +2099,8 @@ public final class BotActions {
                 blockedShotStreak = 0;
                 repositionCooldownTick = 0L;
                 repositioningUntilTick = 0L;
+                committedRepositionTarget = null;
+                committedRepositionStartTick = 0L;
             }
         }
 

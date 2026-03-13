@@ -36,7 +36,7 @@ public final class MountPersistenceService {
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
     private static final String FILE_NAME = "bot_mount_state.json";
 
-    private static final Map<String, MountState> STATE = new HashMap<>();
+    private static final Map<String, Map<String, MountState>> STATE = new HashMap<>();
     private static boolean loaded = false;
     private static final Map<UUID, PendingRestore> PENDING_RESTORE = new HashMap<>();
     private static final int MAX_RESTORE_ATTEMPTS = 10;
@@ -61,13 +61,14 @@ public final class MountPersistenceService {
         }
         ensureLoaded();
         String alias = bot.getName().getString().toLowerCase();
+        String saveWorldKey = BotWorldStateService.currentWorldKey(bot.getCommandSource().getServer());
         String worldId = mount.getEntityWorld().getRegistryKey().getValue().toString();
         String mountType = EntityType.getId(mount.getType()).toString();
         boolean saddled = mount instanceof MobEntity mob && mob.hasSaddleEquipped();
         float health = mount instanceof LivingEntity living ? living.getHealth() : -1.0f;
         MountState state = new MountState(mount.getUuid(), worldId, mount.getX(), mount.getY(), mount.getZ(),
                 mountType, saddled, health, wasMounted);
-        STATE.put(alias, state);
+        STATE.computeIfAbsent(alias, k -> new HashMap<>()).put(saveWorldKey, state);
         flush();
         LOGGER.info("Mount record: bot={} mount={} type={} pos={} wasMounted={} saddled={} health={}",
                 alias,
@@ -89,11 +90,23 @@ public final class MountPersistenceService {
         }
         ensureLoaded();
         String alias = bot.getName().getString().toLowerCase();
-        MountState state = STATE.get(alias);
+        String saveWorldKey = BotWorldStateService.currentWorldKey(server);
+        Map<String, MountState> worldMap = STATE.get(alias);
+        MountState state = worldMap != null ? worldMap.get(saveWorldKey) : null;
+        if (state == null && worldMap != null) {
+            // Promote legacy entry on first access
+            MountState legacy = worldMap.remove("_legacy");
+            if (legacy != null) {
+                worldMap.put(saveWorldKey, legacy);
+                flush();
+                state = legacy;
+            }
+        }
         if (state == null) {
             return;
         }
-        server.execute(() -> scheduleRestore(server, bot, alias, state));
+        final MountState finalState = state;
+        server.execute(() -> scheduleRestore(server, bot, alias, saveWorldKey, finalState));
     }
 
     public static void onServerTick(MinecraftServer server) {
@@ -113,7 +126,7 @@ public final class MountPersistenceService {
             if (bot == null || bot.isRemoved()) {
                 return true;
             }
-            boolean restored = restoreMount(server, bot, pending.alias(), pending.state(), pending.attempt());
+            boolean restored = restoreMount(server, bot, pending.alias(), pending.saveWorldKey(), pending.state(), pending.attempt());
             if (restored) {
                 return true;
             }
@@ -133,7 +146,27 @@ public final class MountPersistenceService {
         }
         ensureLoaded();
         String alias = bot.getName().getString().toLowerCase();
-        return STATE.get(alias);
+        MinecraftServer server = bot.getCommandSource().getServer();
+        if (server == null) {
+            return null;
+        }
+        String saveWorldKey = BotWorldStateService.currentWorldKey(server);
+        Map<String, MountState> worldMap = STATE.get(alias);
+        if (worldMap == null) {
+            return null;
+        }
+        MountState state = worldMap.get(saveWorldKey);
+        if (state != null) {
+            return state;
+        }
+        // Promote legacy entry to current world on first access
+        MountState legacy = worldMap.remove("_legacy");
+        if (legacy != null) {
+            worldMap.put(saveWorldKey, legacy);
+            flush();
+            return legacy;
+        }
+        return null;
     }
 
     public static Entity findRecordedMount(ServerWorld world, MountState state) {
@@ -151,14 +184,14 @@ public final class MountPersistenceService {
         return world.getEntity(state.mountUuid());
     }
 
-    private static void scheduleRestore(MinecraftServer server, ServerPlayerEntity bot, String alias, MountState state) {
+    private static void scheduleRestore(MinecraftServer server, ServerPlayerEntity bot, String alias, String saveWorldKey, MountState state) {
         if (server == null || bot == null || state == null) {
             return;
         }
-        PENDING_RESTORE.put(bot.getUuid(), new PendingRestore(alias, state, 0, server.getTicks()));
+        PENDING_RESTORE.put(bot.getUuid(), new PendingRestore(alias, saveWorldKey, state, 0, server.getTicks()));
     }
 
-    private static boolean restoreMount(MinecraftServer server, ServerPlayerEntity bot, String alias, MountState state, int attempt) {
+    private static boolean restoreMount(MinecraftServer server, ServerPlayerEntity bot, String alias, String saveWorldKey, MountState state, int attempt) {
         RegistryKey<net.minecraft.world.World> worldKey =
                 RegistryKey.of(RegistryKeys.WORLD, Identifier.of(state.worldId()));
         ServerWorld world = server.getWorld(worldKey);
@@ -178,12 +211,12 @@ public final class MountPersistenceService {
         if (entity instanceof MobEntity mob) {
             mob.setPersistent();
             LOGGER.info("Mount restore: found {} at {}", state.mountType(), pos.toShortString());
-            maybeSecureOnRejoin(bot, entity, alias, state);
+            maybeSecureOnRejoin(bot, entity, alias, saveWorldKey, state);
             return true;
         }
         if (entity != null) {
             LOGGER.info("Mount restore: found non-mob {} at {}", state.mountType(), pos.toShortString());
-            maybeSecureOnRejoin(bot, entity, alias, state);
+            maybeSecureOnRejoin(bot, entity, alias, saveWorldKey, state);
             return true;
         }
         if (!state.wasMounted()) {
@@ -208,10 +241,10 @@ public final class MountPersistenceService {
             mob.setPersistent();
             MountState updated = new MountState(nearby.getUuid(), state.worldId(), nearby.getX(), nearby.getY(),
                     nearby.getZ(), state.mountType(), state.saddled(), state.health(), state.wasMounted());
-            STATE.put(alias, updated);
+            STATE.computeIfAbsent(alias, k -> new HashMap<>()).put(saveWorldKey, updated);
             flush();
             LOGGER.warn("Mount restore: matched existing {} near {}", state.mountType(), pos.toShortString());
-            maybeSecureOnRejoin(bot, nearby, alias, updated);
+            maybeSecureOnRejoin(bot, nearby, alias, saveWorldKey, updated);
             return true;
         }
         if (attempt + 1 >= MAX_RESTORE_ATTEMPTS) {
@@ -266,8 +299,27 @@ public final class MountPersistenceService {
                 if (raw != null) {
                     for (Map.Entry<?, ?> entry : raw.entrySet()) {
                         String alias = entry.getKey().toString();
-                        MountState st = GSON.fromJson(GSON.toJson(entry.getValue()), MountState.class);
-                        STATE.put(alias, st);
+                        Object value = entry.getValue();
+                        if (value instanceof Map<?, ?> innerMap) {
+                            // Check if this is old format (MountState fields directly)
+                            // or new format (worldKey → MountState nested objects)
+                            if (innerMap.containsKey("mountUuid") || innerMap.containsKey("worldId")) {
+                                // Old format: alias → MountState directly
+                                MountState st = GSON.fromJson(GSON.toJson(value), MountState.class);
+                                Map<String, MountState> worldMap = new HashMap<>();
+                                worldMap.put("_legacy", st);
+                                STATE.put(alias, worldMap);
+                            } else {
+                                // New format: alias → { worldKey → MountState }
+                                Map<String, MountState> worldMap = new HashMap<>();
+                                for (Map.Entry<?, ?> worldEntry : innerMap.entrySet()) {
+                                    String worldKey = worldEntry.getKey().toString();
+                                    MountState st = GSON.fromJson(GSON.toJson(worldEntry.getValue()), MountState.class);
+                                    worldMap.put(worldKey, st);
+                                }
+                                STATE.put(alias, worldMap);
+                            }
+                        }
                     }
                 }
             } catch (Exception e) {
@@ -304,25 +356,27 @@ public final class MountPersistenceService {
                              float health,
                              boolean wasMounted) {}
 
-    private static void maybeSecureOnRejoin(ServerPlayerEntity bot, Entity mount, String alias, MountState state) {
+    private static void maybeSecureOnRejoin(ServerPlayerEntity bot, Entity mount, String alias, String saveWorldKey, MountState state) {
         if (bot == null || mount == null || state == null || !state.wasMounted()) {
             return;
         }
         RideSyncService.secureMountAfterRejoin(bot, mount);
         MountState updated = new MountState(state.mountUuid(), state.worldId(), state.x(), state.y(), state.z(),
                 state.mountType(), state.saddled(), state.health(), false);
-        STATE.put(alias, updated);
+        STATE.computeIfAbsent(alias, k -> new HashMap<>()).put(saveWorldKey, updated);
         flush();
     }
 
     private static final class PendingRestore {
         private final String alias;
+        private final String saveWorldKey;
         private final MountState state;
         private int attempt;
         private long nextTick;
 
-        private PendingRestore(String alias, MountState state, int attempt, long nextTick) {
+        private PendingRestore(String alias, String saveWorldKey, MountState state, int attempt, long nextTick) {
             this.alias = alias;
+            this.saveWorldKey = saveWorldKey;
             this.state = state;
             this.attempt = attempt;
             this.nextTick = nextTick;
@@ -330,6 +384,10 @@ public final class MountPersistenceService {
 
         private String alias() {
             return alias;
+        }
+
+        private String saveWorldKey() {
+            return saveWorldKey;
         }
 
         private MountState state() {

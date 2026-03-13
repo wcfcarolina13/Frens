@@ -1333,7 +1333,10 @@ public class BotEventHandler {
         if (augmentedHostiles.isEmpty()) {
             BotCombatCalloutService.noteHostilesCleared(bot, server.getTicks());
         } else {
-            BotCombatCalloutService.clearPostCombatSweep(bot.getUuid());
+            // Hostiles present — cancel any active drop sweep but do NOT clear kill positions
+            // or combat center. Those accumulate during the entire combat session and are only
+            // cleared when the post-combat sweep finishes (or times out at 30s).
+            BotCombatCalloutService.cancelPendingSweep(bot.getUuid());
             DropSweepService.requestCancel(bot, "hostiles-reappeared");
         }
         if (augmentedHostiles.isEmpty()
@@ -1352,6 +1355,18 @@ public class BotEventHandler {
                 moveToward(bot, positionOf(nearDrop), 0.25D, false);
             }
             return true; // suppress follow movement during linger
+        }
+
+        // ---- Opportunistic idle drop-sweep (FOLLOW / STAY / IDLE) ----
+        // After 15 s of idle (no hostiles, player/bot stationary), the bot walks to nearby
+        // ground items.  Cancels the moment the player moves >1 block (FOLLOW) or hostiles appear.
+        if (augmentedHostiles.isEmpty() && (mode == Mode.FOLLOW || mode == Mode.STAY || mode == Mode.IDLE)) {
+            if (tickOpportunisticIdleSweep(bot, state, server, mode)) {
+                return true;
+            }
+        } else {
+            // Reset idle timer when hostiles are present or mode doesn't qualify.
+            FollowStateService.clearIdleSweep(bot.getUuid());
         }
 
         switch (mode) {
@@ -1729,12 +1744,27 @@ public class BotEventHandler {
         return "Bot will hold position.";
     }
 
+    /** Distance (in blocks) beyond which questing-mode bots need a compass/map for non-HOME bases. */
+    private static final double BASE_NAV_TOOL_DISTANCE = 256.0D;
+
     public static String setReturnToBase(ServerPlayerEntity bot, Vec3d base) {
         registerBot(bot);
         if (base == null) {
             return "No base location available.";
         }
-        
+
+        // Questing-mode: distant non-HOME bases require compass or map
+        MinecraftServer srv = bot.getCommandSource().getServer();
+        boolean questingMode = srv != null && net.wcfcarolina13.GameAI.services.SurvivalRecruitmentService.isEnabled(srv);
+        if (questingMode) {
+            double distSq = bot.squaredDistanceTo(base.x, base.y, base.z);
+            boolean isHome = isPreferredHomeBase(bot, base);
+            if (distSq > BASE_NAV_TOOL_DISTANCE * BASE_NAV_TOOL_DISTANCE && !isHome && !botHasNavigationTool(bot)) {
+                sendBotMessage(bot, "I need a compass or map to find my way to a base that far away.");
+                return "Bot needs a compass or map for distant bases.";
+            }
+        }
+
         // Guard: if already returning to the same (or very close) base, don't reset state
         // This prevents repeated calls from resetting stuck detection counters
         if (isReturningToBase(bot)) {
@@ -1742,14 +1772,14 @@ public class BotEventHandler {
             if (existingState != null && existingState.baseTarget != null) {
                 double dx = base.x - existingState.baseTarget.x;
                 double dz = base.z - existingState.baseTarget.z;
-                double distSq = dx * dx + dz * dz;
-                if (distSq < 9.0D) { // Within 3 blocks of same target
+                double distSq2 = dx * dx + dz * dz;
+                if (distSq2 < 9.0D) { // Within 3 blocks of same target
                     LOGGER.debug("setReturnToBase: already returning to nearby base, skipping reset");
                     return "Bot is already returning to base.";
                 }
             }
         }
-        
+
         // Preserve baseTarget so sunset automation can track "home" for auto-sleep.
         setBaseTarget(bot, base);
 
@@ -1770,8 +1800,8 @@ public class BotEventHandler {
             state.comeNextSkillTick = 0L;
             state.comeRecoverySkillInFlight = false;
             state.comeRecoverySkillStartTick = 0L;
-            // For "head home", prefer safe walking/pathing over digging recovery skills.
-            state.comeAllowRecoverySkills = false;
+            // Enable recovery skills so bot can mine out of caves/crevices en route home.
+            state.comeAllowRecoverySkills = true;
         }
         setMode(bot, Mode.FOLLOW);
         clearGuard(bot);
@@ -1818,6 +1848,31 @@ public class BotEventHandler {
         ServerWorld world = bot.getCommandSource().getWorld();
         BlockPos spawn = resolveSpawnPoint(world);
         return setReturnToBase(bot, Vec3d.ofCenter(spawn));
+    }
+
+    /** Returns true if the given base position matches the bot's preferred HOME base (within 3 blocks). */
+    private static boolean isPreferredHomeBase(ServerPlayerEntity bot, Vec3d target) {
+        java.util.Optional<BlockPos> home = net.wcfcarolina13.GameAI.services.BotHomeService.resolvePreferredHomeBase(bot);
+        if (home.isEmpty()) return false;
+        BlockPos h = home.get();
+        double dx = target.x - (h.getX() + 0.5);
+        double dz = target.z - (h.getZ() + 0.5);
+        return dx * dx + dz * dz < 9.0D;
+    }
+
+    /** Returns true if the bot has a compass, recovery compass, map, or filled map. */
+    private static boolean botHasNavigationTool(ServerPlayerEntity bot) {
+        if (bot == null) return false;
+        for (int slot = 0; slot < bot.getInventory().size(); slot++) {
+            net.minecraft.item.ItemStack stack = bot.getInventory().getStack(slot);
+            if (stack.isOf(net.minecraft.item.Items.COMPASS)
+                    || stack.isOf(net.minecraft.item.Items.RECOVERY_COMPASS)
+                    || stack.isOf(net.minecraft.item.Items.FILLED_MAP)
+                    || stack.isOf(net.minecraft.item.Items.MAP)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     public static String toggleAssistAllies(ServerPlayerEntity bot, boolean enable) {
@@ -2165,7 +2220,18 @@ public class BotEventHandler {
             Vec3d liveTargetPos = new Vec3d(target.getX(), target.getY(), target.getZ());
             double liveHorizSq = horizontalDistanceSq(bot, liveTargetPos);
             double liveDeltaY = Math.abs(target.getY() - bot.getY());
-            if (liveHorizSq <= 8.0D * 8.0D && liveDeltaY <= 10.0D && bot.canSee(target)) {
+            boolean canSeeTarget = bot.canSee(target);
+            // Reachability fallback: if can't see but within 64 blocks, probe pathfinding (150ms budget).
+            // Prevents bot from walking back down its own tunnel after surfacing on a hill.
+            // Cooldown: only probe every 2 seconds to avoid tick-by-tick pathfinding storms.
+            boolean reachable = canSeeTarget;
+            if (!reachable && liveHorizSq <= 64.0D * 64.0D
+                    && server.getTicks() % 40 == 0
+                    && bot.getEntityWorld() instanceof net.minecraft.server.world.ServerWorld reachWorld) {
+                reachable = net.wcfcarolina13.PathFinding.PathFinder.canReach(
+                        bot.getBlockPos(), target.getBlockPos(), reachWorld, 150L);
+            }
+            if (liveHorizSq <= 8.0D * 8.0D && liveDeltaY <= 10.0D && reachable) {
                 state.followFixedGoal = null;
                 state.comeBestGoalDistSq = Double.NaN;
                 state.comeTicksSinceBest = 0;
@@ -2194,6 +2260,30 @@ public class BotEventHandler {
                         + (liveHorizSq > 8.0D * 8.0D ? " [horiz>8]" : "")
                         + (liveDeltaY > 10.0D ? " [deltaY>10]" : "")
                         + (!hasLos ? " [no-LOS]" : ""));
+            }
+        }
+
+        // Regroup distance safeguard: if the player has moved >128 blocks from the snapshot goal
+        // and recovery skills are disabled (pure pathfinding regroup), stop and wait.
+        if (fixedGoal != null && target != null && state != null
+                && !state.comeAllowRecoverySkills && state.baseTarget == null) {
+            double playerToGoalDx = target.getX() - fixedGoal.getX();
+            double playerToGoalDz = target.getZ() - fixedGoal.getZ();
+            double playerToGoalDistSq = playerToGoalDx * playerToGoalDx + playerToGoalDz * playerToGoalDz;
+            if (playerToGoalDistSq > 128.0D * 128.0D) {
+                // Player moved far from where they were when regroup started — stop and wait
+                setMode(bot, Mode.STAY);
+                setGuardState(bot, positionOf(bot), 8.0D);
+                String coords = fixedGoal.getX() + ", " + fixedGoal.getY() + ", " + fixedGoal.getZ();
+                boolean sunsetReturn = net.wcfcarolina13.GameAI.services.BotHomeService.isAutoReturnAtSunset(bot);
+                String botName2 = bot.getName().getString();
+                if (sunsetReturn) {
+                    sendBotMessage(bot, botName2 + " will wait for you to return to " + coords + ", or return home at sunset.");
+                } else {
+                    sendBotMessage(bot, botName2 + " will wait for you to return to " + coords + ".");
+                }
+                state.followFixedGoal = null;
+                return true;
             }
         }
 
@@ -2404,7 +2494,8 @@ public class BotEventHandler {
                                 goal = safe;
                             }
                         }
-                        setComeModeWalk(bot, target, goal, 3.2D, true);
+                        // No recovery skills — pure pathfinding, same as manual regroup
+                        setComeModeWalk(bot, target, goal, 3.2D, false);
                         return true;
                     }
                 }
@@ -2483,8 +2574,10 @@ public class BotEventHandler {
                     // Drops exist near combat center — walk back to collect them.
                     LOGGER.info("[PostCombatSweep] {} drops found near combat center ({},{},{}) — walking back",
                             botName, (int) combatCenter.x, (int) combatCenter.y, (int) combatCenter.z);
-                    boolean sprint = bot.squaredDistanceTo(combatCenter) > 64.0D;
-                    moveToward(bot, combatCenter, 2.0D, sprint);
+                    BlockPos ccBlock = BlockPos.ofFloored(combatCenter.x, combatCenter.y, combatCenter.z);
+                    double ccDistSq = bot.squaredDistanceTo(combatCenter);
+                    FollowMovementService.followWaypointStep(bot, ccBlock, ccDistSq,
+                            64.0D, () -> lowerShieldTracking(bot));
                     return true;
                 }
             }
@@ -2494,6 +2587,32 @@ public class BotEventHandler {
                         nearestItem.getBlockPos().toShortString());
                 collectNearbyDrops(bot, sweepRadius);
                 if (DropSweepService.isInProgressFor(bot)) {
+                    return true;
+                }
+            }
+        }
+
+        // Step 3b: check near recorded kill positions (ranged kills, mob death sites).
+        // Uses a wider 12-block radius and waypoint-step movement for better terrain navigation.
+        if (bot.getEntityWorld() instanceof ServerWorld killSw) {
+            java.util.List<Vec3d> killPositions = BotCombatCalloutService.getRecentKillPositions(bot.getUuid());
+            Vec3d botPos = positionOf(bot);
+            killPositions.sort(java.util.Comparator.comparingDouble(kp -> botPos.squaredDistanceTo(kp)));
+            for (Vec3d kp : killPositions) {
+                double distToKp = botPos.distanceTo(kp);
+                if (distToKp < 3.0D) continue; // already here, normal pickup handles it
+                Box kpBox = new Box(kp.x - 12, kp.y - 6, kp.z - 12, kp.x + 12, kp.y + 6, kp.z + 12);
+                boolean hasItems = !killSw.getEntitiesByClass(ItemEntity.class, kpBox,
+                        d -> d.isAlive() && !d.isRemoved()).isEmpty();
+                if (hasItems) {
+                    LOGGER.info("[PostCombatSweep] {} walking to kill site ({},{},{}) dist={}",
+                            botName, (int) kp.x, (int) kp.y, (int) kp.z,
+                            String.format(Locale.ROOT, "%.1f", distToKp));
+                    // Use waypoint-step for better obstacle handling (tree trunks, hills)
+                    BlockPos kpBlock = BlockPos.ofFloored(kp.x, kp.y, kp.z);
+                    double distSq = bot.squaredDistanceTo(kp);
+                    FollowMovementService.followWaypointStep(bot, kpBlock, distSq,
+                            64.0D, () -> lowerShieldTracking(bot));
                     return true;
                 }
             }
@@ -2535,6 +2654,173 @@ public class BotEventHandler {
         LOGGER.debug("[PostCombatSweep] {} sweep complete, nothing left to collect", botName);
         BotCombatCalloutService.clearPostCombatSweep(bot.getUuid());
         return false;
+    }
+
+    /** Ticks required before idle drop-sweep activates (15 seconds). */
+    private static final long IDLE_SWEEP_DELAY_TICKS = 300L;
+    /** Maximum distance the bot will walk for an idle sweep. */
+    private static final double IDLE_SWEEP_RADIUS = 20.0D;
+
+    /**
+     * Opportunistic idle drop-sweep.  When the player and bot are standing still for 15 s,
+     * the bot walks over to collect any ground items within range.  In FOLLOW mode the sweep
+     * cancels the instant the player moves &gt;1 block from their snapshot block position.
+     * Uses block-distance (integer positions) so looking around or sub-block jitter
+     * doesn't count as movement.
+     */
+    private static boolean tickOpportunisticIdleSweep(ServerPlayerEntity bot,
+                                                      BotCommandStateService.State state,
+                                                      MinecraftServer server,
+                                                      Mode mode) {
+        if (bot == null || server == null) return false;
+        UUID botId = bot.getUuid();
+        long nowTick = server.getTicks();
+
+        // Resolve the player for FOLLOW mode movement check.
+        ServerPlayerEntity commander = null;
+        if (mode == Mode.FOLLOW && state != null && state.followTargetUuid != null) {
+            commander = server.getPlayerManager().getPlayer(state.followTargetUuid);
+        }
+
+        BlockPos botBlock = bot.getBlockPos();
+
+        // ===== ACTIVE SWEEP: bot is walking to / collecting drops =====
+        Boolean active = FollowStateService.IDLE_SWEEP_ACTIVE.get(botId);
+        if (active != null && active) {
+            // Cancel if player moved >1 block (FOLLOW mode).
+            if (mode == Mode.FOLLOW && commander != null) {
+                BlockPos snapPlayer = FollowStateService.IDLE_SWEEP_PLAYER_BLOCK.get(botId);
+                if (snapPlayer != null) {
+                    int pdx = commander.getBlockX() - snapPlayer.getX();
+                    int pdz = commander.getBlockZ() - snapPlayer.getZ();
+                    if (pdx * pdx + pdz * pdz > 1) {
+                        LOGGER.debug("[IdleSweep] {} cancelled — player moved", bot.getName().getString());
+                        FollowStateService.clearIdleSweep(botId);
+                        DropSweepService.requestCancel(bot, "player-moved");
+                        return false;
+                    }
+                }
+            }
+
+            // Drive a running DropSweepService sweep.
+            if (DropSweepService.isInProgressFor(bot) && !DropSweepService.isCancelRequestedFor(bot)) {
+                return true;
+            }
+
+            // Walk toward committed target (or find a new one).
+            BlockPos target = FollowStateService.IDLE_SWEEP_TARGET.get(botId);
+            if (target != null) {
+                double distSq = bot.squaredDistanceTo(target.getX() + 0.5, target.getY(), target.getZ() + 0.5);
+                if (distSq <= 2.25D) {
+                    // Arrived — start formal pickup and look for the next item.
+                    FollowStateService.IDLE_SWEEP_TARGET.remove(botId);
+                    if (!DropSweepService.isInProgress()) {
+                        collectNearbyDrops(bot, IDLE_SWEEP_RADIUS);
+                        if (DropSweepService.isInProgressFor(bot)) {
+                            return true;
+                        }
+                    }
+                } else {
+                    // Still walking to the target.
+                    FollowMovementService.followWaypointStep(bot, target, distSq,
+                            64.0D, () -> lowerShieldTracking(bot));
+                    return true;
+                }
+            }
+
+            // No committed target — look for the next drop.
+            Entity nearDrop = findNearestDrop(bot, IDLE_SWEEP_RADIUS);
+            if (nearDrop != null) {
+                BlockPos dropBlock = nearDrop.getBlockPos();
+                double distSq = bot.squaredDistanceTo(nearDrop);
+                if (distSq > 2.25D) {
+                    FollowStateService.IDLE_SWEEP_TARGET.put(botId, dropBlock);
+                    FollowMovementService.followWaypointStep(bot, dropBlock, distSq,
+                            64.0D, () -> lowerShieldTracking(bot));
+                    return true;
+                }
+                if (!DropSweepService.isInProgress()) {
+                    collectNearbyDrops(bot, IDLE_SWEEP_RADIUS);
+                    if (DropSweepService.isInProgressFor(bot)) {
+                        return true;
+                    }
+                }
+                // Even if formal sweep can't start, stay active and keep trying.
+                return true;
+            }
+
+            // Nothing left — sweep done.
+            LOGGER.debug("[IdleSweep] {} complete — no more drops", bot.getName().getString());
+            FollowStateService.clearIdleSweep(botId);
+            return false;
+        }
+
+        // ===== ACCUMULATING: count idle ticks =====
+        // Use block positions: looking around or sub-block jitter doesn't reset the timer.
+        BlockPos snapBot = FollowStateService.IDLE_SWEEP_BOT_BLOCK.get(botId);
+        if (snapBot != null && !snapBot.equals(botBlock)) {
+            // Bot changed block position — reset timer.
+            FollowStateService.IDLE_SWEEP_START_TICK.put(botId, nowTick);
+            FollowStateService.IDLE_SWEEP_BOT_BLOCK.put(botId, botBlock);
+            if (commander != null) {
+                FollowStateService.IDLE_SWEEP_PLAYER_BLOCK.put(botId, commander.getBlockPos());
+            }
+            return false;
+        }
+        if (mode == Mode.FOLLOW && commander != null) {
+            BlockPos snapPlayer = FollowStateService.IDLE_SWEEP_PLAYER_BLOCK.get(botId);
+            if (snapPlayer != null) {
+                int pdx = commander.getBlockX() - snapPlayer.getX();
+                int pdz = commander.getBlockZ() - snapPlayer.getZ();
+                if (pdx * pdx + pdz * pdz > 1) {
+                    // Player moved >1 block — reset timer.
+                    FollowStateService.IDLE_SWEEP_START_TICK.put(botId, nowTick);
+                    FollowStateService.IDLE_SWEEP_PLAYER_BLOCK.put(botId, commander.getBlockPos());
+                    FollowStateService.IDLE_SWEEP_BOT_BLOCK.put(botId, botBlock);
+                    return false;
+                }
+            }
+        }
+
+        // Initialize idle timer if not set.
+        Long idleStart = FollowStateService.IDLE_SWEEP_START_TICK.get(botId);
+        if (idleStart == null) {
+            FollowStateService.IDLE_SWEEP_START_TICK.put(botId, nowTick);
+            FollowStateService.IDLE_SWEEP_BOT_BLOCK.put(botId, botBlock);
+            if (commander != null) {
+                FollowStateService.IDLE_SWEEP_PLAYER_BLOCK.put(botId, commander.getBlockPos());
+            }
+            return false;
+        }
+
+        // Check if idle threshold reached.
+        if (nowTick - idleStart < IDLE_SWEEP_DELAY_TICKS) {
+            return false;
+        }
+
+        // Threshold reached — check for nearby drops.
+        Entity nearDrop = findNearestDrop(bot, IDLE_SWEEP_RADIUS);
+        if (nearDrop == null) {
+            return false;
+        }
+
+        // Activate idle sweep.
+        LOGGER.info("[IdleSweep] {} activating — idle for {}s, nearest drop at {}",
+                bot.getName().getString(),
+                (nowTick - idleStart) / 20L,
+                nearDrop.getBlockPos().toShortString());
+        FollowStateService.IDLE_SWEEP_ACTIVE.put(botId, true);
+        FollowStateService.IDLE_SWEEP_TARGET.put(botId, nearDrop.getBlockPos());
+        if (commander != null) {
+            FollowStateService.IDLE_SWEEP_PLAYER_BLOCK.put(botId, commander.getBlockPos());
+        }
+
+        // Start moving toward the drop.
+        BlockPos dropBlock = nearDrop.getBlockPos();
+        double distSq = bot.squaredDistanceTo(nearDrop);
+        FollowMovementService.followWaypointStep(bot, dropBlock, distSq,
+                64.0D, () -> lowerShieldTracking(bot));
+        return true;
     }
 
     public static void collectNearbyDrops(ServerPlayerEntity bot, double radius) {
@@ -4074,6 +4360,16 @@ public class BotEventHandler {
 
         int dyBlocks = (int) Math.round(deltaY);
         double horizDist = Math.sqrt(Math.max(0.0D, horizDistSq));
+
+        // Pre-check: if a walkable path to the goal exists, skip mining/pillar recovery entirely.
+        // This prevents unnecessary terrain destruction when the bot just surfaced on a hill.
+        if (bot.getEntityWorld() instanceof net.minecraft.server.world.ServerWorld probeWorld) {
+            if (net.wcfcarolina13.PathFinding.PathFinder.canReach(bot.getBlockPos(), goal, probeWorld, 200L)) {
+                LOGGER.info("[ComeRecovery] surface path exists to {} — skipping mining recovery",
+                        goal.toShortString());
+                return false; // let normal follow-walk take over
+            }
+        }
 
         // Priority 0: Pillar-up when bot is below goal with open sky above (shallow hole escape).
         if (dyBlocks >= 3 && horizDist <= 8.0D && bot.getEntityWorld() instanceof ServerWorld world) {

@@ -2409,12 +2409,29 @@ public class CollectDirtSkill implements Skill {
         BlockPos botPos = player.getBlockPos();
 
         // Use MOTION_BLOCKING_NO_LEAVES so tree canopy doesn't prevent surface detection.
-        // The bot should stop mining once it's under open sky or only leaves overhead.
         int surfaceY = world.getTopY(Heightmap.Type.MOTION_BLOCKING_NO_LEAVES, botPos.getX(), botPos.getZ());
         if (botPos.getY() < surfaceY - 1) {
             return false;
         }
-        return !world.getBlockState(botPos.down()).getCollisionShape(world, botPos.down()).isEmpty();
+        // Must be standing on solid ground.
+        if (world.getBlockState(botPos.down()).getCollisionShape(world, botPos.down()).isEmpty()) {
+            return false;
+        }
+        // Conservative check: a 1x1 shaft opening is NOT surface. Require at least 2 of 4
+        // cardinal neighbors to also have sky visibility at the bot's Y level, proving the
+        // bot has emerged onto actual terrain rather than poking through a narrow hole.
+        int openCardinals = 0;
+        for (net.minecraft.util.math.Direction dir : new net.minecraft.util.math.Direction[]{
+                net.minecraft.util.math.Direction.NORTH, net.minecraft.util.math.Direction.SOUTH,
+                net.minecraft.util.math.Direction.EAST, net.minecraft.util.math.Direction.WEST}) {
+            BlockPos neighbor = botPos.offset(dir);
+            int neighborSurface = world.getTopY(Heightmap.Type.MOTION_BLOCKING_NO_LEAVES,
+                    neighbor.getX(), neighbor.getZ());
+            if (neighbor.getY() >= neighborSurface - 1) {
+                openCardinals++;
+            }
+        }
+        return openCardinals >= 2;
     }
 
     @SuppressWarnings("unchecked")

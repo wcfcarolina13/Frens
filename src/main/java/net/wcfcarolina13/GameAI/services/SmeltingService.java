@@ -309,10 +309,12 @@ public final class SmeltingService {
             BlockPos placeAt = botPos.offset(bot.getHorizontalFacing());
             BotActions.placeBlockAt(bot, placeAt, java.util.List.of(invFurnace.getItem()));
             LOGGER.info("Placed furnace-like {} at {}", invFurnace.getItem().getName().getString(), placeAt.toShortString());
-            BlockPos approach = chooseApproach(world, placeAt);
-            if (approach != null) {
-                return new StationTarget(placeAt, approach);
-            }
+            try { Thread.sleep(150L); } catch (InterruptedException ignored) { Thread.currentThread().interrupt(); }
+            // Re-scan to confirm block entity is ready (avoids race condition)
+            BlockPos confirmed = findNearestFurnace(world, botPos, 4, 2);
+            BlockPos target3 = confirmed != null ? confirmed : placeAt;
+            BlockPos approach3 = chooseApproach(world, target3);
+            if (approach3 != null) return new StationTarget(target3.toImmutable(), approach3);
         }
 
         // 4) Craft furnace if possible, then place
@@ -322,10 +324,12 @@ public final class SmeltingService {
                 BlockPos placeAt = botPos.offset(bot.getHorizontalFacing());
                 BotActions.placeBlockAt(bot, placeAt, java.util.List.of(crafted.getItem()));
                 LOGGER.info("Crafted and placed furnace at {}", placeAt.toShortString());
-                BlockPos approach = chooseApproach(world, placeAt);
-                if (approach != null) {
-                    return new StationTarget(placeAt, approach);
-                }
+                try { Thread.sleep(150L); } catch (InterruptedException ignored) { Thread.currentThread().interrupt(); }
+                // Re-scan to confirm block entity is ready (avoids race condition)
+                BlockPos confirmed = findNearestFurnace(world, botPos, 4, 2);
+                BlockPos target4 = confirmed != null ? confirmed : placeAt;
+                BlockPos approach4 = chooseApproach(world, target4);
+                if (approach4 != null) return new StationTarget(target4.toImmutable(), approach4);
             }
         }
         return null;

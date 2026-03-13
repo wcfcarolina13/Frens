@@ -3,11 +3,15 @@ package net.wcfcarolina13.GameAI.skills.impl.shelter;
 import net.minecraft.block.BlockState;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Terrain queries specific to hovel building.
  */
 final class HovelTerrainService {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger("skill-shelter");
 
     private HovelTerrainService() {
     }
@@ -25,9 +29,15 @@ final class HovelTerrainService {
             BlockState s = world.getBlockState(p);
             if (!world.getFluidState(p).isEmpty()) continue;
             if (!s.getCollisionShape(world, p).isEmpty()) {
+                LOGGER.info("Hovel terrain: floor scan center={} startY={} resolvedY={} state={}",
+                        center.toShortString(),
+                        start,
+                        y,
+                        s.getBlock().getName().getString());
                 return y;
             }
         }
+        LOGGER.info("Hovel terrain: floor scan center={} startY={} fell back to {}", center.toShortString(), start, start - 1);
         return start - 1;
     }
 }

@@ -827,7 +827,7 @@ public final class ToolProvisionService {
     }
 
     private static boolean canCraftChest(ServerPlayerEntity commander) {
-        return canCraftExact(commander, Identifier.of("minecraft", "chest"));
+        return true; // Universally known recipe — no crafting history required
     }
 
     private static boolean canCraftFurnace(ServerPlayerEntity commander) {
@@ -989,6 +989,11 @@ public final class ToolProvisionService {
             }
         }
         return false;
+    }
+
+    /** Quick bot-inventory-only check for planks or logs (no world scan). */
+    public static boolean hasPlanksOrLogsInInventory(ServerPlayerEntity bot) {
+        return bot != null && (hasTaggedItem(bot, ItemTags.PLANKS) || hasTaggedItem(bot, ItemTags.LOGS));
     }
 
     private static boolean hasPlanksOrLogs(ServerPlayerEntity bot, ServerWorld world) {

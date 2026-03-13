@@ -50,7 +50,10 @@ public final class BotHomeService {
     private static RootData DATA = new RootData();
     private static boolean loaded = false;
 
-    public record BaseEntry(String label, BlockPos pos) {}
+    /** Default protection radius (blocks) applied when a base has no explicit radius. */
+    public static final int DEFAULT_BASE_PROTECTION_RADIUS = 24;
+
+    public record BaseEntry(String label, BlockPos pos, int radius) {}
 
     private BotHomeService() {}
 
@@ -500,6 +503,25 @@ public final class BotHomeService {
         return true;
     }
 
+    /**
+     * Set the protection radius for a saved base. Values &le; 0 reset to default.
+     */
+    public static boolean setBaseRadius(MinecraftServer server, ServerWorld world, String label, int radius) {
+        if (server == null || world == null || label == null || label.isBlank()) {
+            return false;
+        }
+        String normalized = normalizeLabelKey(label);
+        WorldData wd = worldData(server, world);
+        synchronized (LOCK) {
+            if (wd.basesByLabel == null) return false;
+            SavedBase base = wd.basesByLabel.get(normalized);
+            if (base == null) return false;
+            base.radius = Math.max(0, radius);
+        }
+        flush();
+        return true;
+    }
+
     public static Optional<BlockPos> getBaseByLabel(MinecraftServer server, ServerWorld world, String label) {
         if (server == null || world == null || label == null || label.isBlank()) {
             return Optional.empty();
@@ -668,7 +690,8 @@ public final class BotHomeService {
                 if (b == null || b.pos == null) {
                     continue;
                 }
-                out.add(new BaseEntry(b.label, b.pos.toBlockPos()));
+                out.add(new BaseEntry(b.label, b.pos.toBlockPos(),
+                        b.radius > 0 ? b.radius : DEFAULT_BASE_PROTECTION_RADIUS));
             }
             return out;
         }
@@ -738,7 +761,7 @@ public final class BotHomeService {
         return sleptSq <= baseSq ? slept : base;
     }
 
-    private static Optional<BlockPos> resolvePreferredHomeBase(ServerPlayerEntity bot) {
+    public static Optional<BlockPos> resolvePreferredHomeBase(ServerPlayerEntity bot) {
         if (bot == null || !(bot.getEntityWorld() instanceof ServerWorld world)) {
             return Optional.empty();
         }
@@ -787,6 +810,7 @@ public final class BotHomeService {
     private static final class SavedBase {
         final String label;
         final SavedPos pos;
+        int radius; // 0 = use DEFAULT_BASE_PROTECTION_RADIUS; Gson defaults missing field to 0
 
         private SavedBase(String label, SavedPos pos) {
             this.label = label;

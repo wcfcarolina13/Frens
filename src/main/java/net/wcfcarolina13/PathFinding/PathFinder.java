@@ -98,6 +98,15 @@ public class PathFinder {
         return result;
     }
 
+    /**
+     * Quick reachability probe. Returns true if the Baritone pathfinder finds ANY path
+     * (even partial) within the given time budget. Does NOT cache or return the path.
+     * Use for "can I walk there?" decisions without committing to full navigation.
+     */
+    public static boolean canReach(BlockPos start, BlockPos goal, ServerWorld world, long timeoutMs) {
+        return !BaritoneStylePathFinder.calculatePath(start, goal, world, timeoutMs).isEmpty();
+    }
+
     /** Original bidirectional A* implementation. */
     private static List<PathNode> calculatePathBidirectional(BlockPos start, BlockPos target, ServerWorld world) {
         LOGGER.info("Starting Bi-directional A* pathfinding with block tagging...");
@@ -138,6 +147,7 @@ public class PathFinder {
                 if (closedForward.containsKey(neighbor)) continue;
 
                 double tentativeG = currentForward.gScore + getDistance(currentForward.position, neighbor);
+                if (world.getBlockState(neighbor).isOf(Blocks.WATER)) tentativeG += 2.0;
 
                 if (openMapForward.containsKey(neighbor)) {
                     Node existing = openMapForward.get(neighbor);
@@ -171,6 +181,7 @@ public class PathFinder {
                 if (closedBackward.containsKey(neighbor)) continue;
 
                 double tentativeG = currentBackward.gScore + getDistance(currentBackward.position, neighbor);
+                if (world.getBlockState(neighbor).isOf(Blocks.WATER)) tentativeG += 2.0;
 
                 if (openMapBackward.containsKey(neighbor)) {
                     Node existing = openMapBackward.get(neighbor);
@@ -520,6 +531,14 @@ public class PathFinder {
         return !state.isAir() && state.isOpaque();
     }
 
+    private static boolean hasSupportedFloor(ServerWorld world, BlockPos pos) {
+        if (isSolidBlock(world, pos.down())) return true;
+        // Water provides buoyancy — bot can swim through it.
+        // Water paths are discouraged via the +2.0 cost penalty in expansion loops.
+        if (world.getBlockState(pos).isOf(Blocks.WATER)) return true;
+        return false;
+    }
+
 
     private static boolean isWalkableBlock(String blockType) {
         return blockType.equals("air") || blockType.contains("water");
@@ -587,6 +606,20 @@ public class PathFinder {
             }
         }
 
+        // Smart step-down moves: when flat neighbor has no floor, check one block lower
+        for (BlockPos flatNeighbor : List.of(
+                pos.add(1, 0, 0),
+                pos.add(-1, 0, 0),
+                pos.add(0, 0, 1),
+                pos.add(0, 0, -1))) {
+
+            BlockPos dropPos = flatNeighbor.down();
+            if (isPassable(world, dropPos) && isPassable(world, flatNeighbor)
+                    && hasSupportedFloor(world, dropPos)) {
+                candidates.add(dropPos);
+            }
+        }
+
         // Filter out positions near exposed campfires and dangerous floor blocks
         for (BlockPos candidate : candidates) {
             // Skip positions that are too close to exposed campfires
@@ -597,6 +630,11 @@ public class PathFinder {
             // Never path onto magma blocks (solid, but deal contact damage)
             BlockState floorState = world.getBlockState(candidate.down());
             if (floorState.isOf(Blocks.MAGMA_BLOCK)) {
+                continue;
+            }
+            // Floor check: flat and downward moves require supported floor
+            int dy = candidate.getY() - pos.getY();
+            if (dy <= 0 && !hasSupportedFloor(world, candidate)) {
                 continue;
             }
             neighbors.add(candidate);

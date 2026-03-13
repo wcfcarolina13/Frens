@@ -1,7 +1,6 @@
 package net.wcfcarolina13.GameAI.skills.impl;
 
 import net.minecraft.block.BlockState;
-import net.minecraft.block.Blocks;
 import net.minecraft.item.BlockItem;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
@@ -12,18 +11,23 @@ import net.minecraft.server.world.ServerWorld;
 import net.minecraft.state.property.Properties;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
-import net.minecraft.util.math.Vec3d;
 import net.wcfcarolina13.ChatUtils.ChatUtils;
 import net.wcfcarolina13.GameAI.BotActions;
 import net.wcfcarolina13.GameAI.schematic.SchematicData;
 import net.wcfcarolina13.GameAI.schematic.SchematicReader;
 import net.wcfcarolina13.GameAI.schematic.SimpleSchematicBuilder;
 import net.wcfcarolina13.GameAI.services.MovementService;
+import net.wcfcarolina13.GameAI.services.construction.ActiveBuildRepairSession;
+import net.wcfcarolina13.GameAI.services.construction.BlockReplacementService;
 import net.wcfcarolina13.GameAI.services.construction.ConstructionBlueprintService;
 import net.wcfcarolina13.GameAI.services.construction.ConstructionBlueprintService.ConstructionPlan;
+import net.wcfcarolina13.GameAI.services.construction.ConstructionPlacementRules;
+import net.wcfcarolina13.GameAI.services.construction.ConstructionProtectionService;
+import net.wcfcarolina13.GameAI.services.construction.ConstructionRepairService;
 import net.wcfcarolina13.GameAI.services.construction.DoorPlacementService;
 import net.wcfcarolina13.GameAI.services.construction.DoorwayAccessService;
 import net.wcfcarolina13.GameAI.services.construction.PerimeterService;
+import net.wcfcarolina13.GameAI.services.construction.RoofAccessService;
 import net.wcfcarolina13.GameAI.services.construction.ScaffoldService;
 import net.wcfcarolina13.GameAI.services.construction.execution.ConstructionExecutionService;
 import net.wcfcarolina13.GameAI.services.construction.execution.ConstructionRecoveryService;
@@ -40,13 +44,16 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.EnumMap;
 
 /**
  * Skill for building structures from schematic/blueprint files.
@@ -64,9 +71,9 @@ import java.util.Set;
 public final class BuildSchematicSkill implements Skill {
 
     private static final Logger LOGGER = LoggerFactory.getLogger("skill-build-schematic");
-    private static final double REACH_DISTANCE_SQ = 20.25D; // ~4.5 blocks
-    private static final int BLOCK_PLACE_DELAY_MS = 50; // Delay between block placements
-    private static final int MAX_SCAFFOLD_HEIGHT = 8; // Maximum height to pillar up
+    private static final double REACH_DISTANCE_SQ = ConstructionPlacementRules.REACH_DISTANCE_SQ;
+    private static final int MAX_SCAFFOLD_HEIGHT = ConstructionPlacementRules.DEFAULT_MAX_SCAFFOLD_HEIGHT;
+    private static final int DEFAULT_FLOOR_SCAN_DEPTH = 8;
 
     // Blocks suitable for scaffolding (will be torn down after)
     private static final List<Item> SCAFFOLD_BLOCKS = List.of(
@@ -113,6 +120,13 @@ public final class BuildSchematicSkill implements Skill {
         }
 
         SchematicData schematic = schematicOpt.get();
+        String displayName = schematic.name();
+        int rotationTurns = Math.floorMod(getIntParameter(context, "rotation", 0), 4);
+        if (rotationTurns != 0) {
+            schematic = schematic.rotated(rotationTurns);
+            LOGGER.info("Applying preview rotation: schematic={} turns={} effectiveSize={}x{}x{}",
+                displayName, rotationTurns, schematic.sizeX(), schematic.sizeY(), schematic.sizeZ());
+        }
         
         // Check for special requirements (small_hut needs torch)
         if ("small_hut".equals(schematicName)) {
@@ -157,52 +171,72 @@ public final class BuildSchematicSkill implements Skill {
             return SkillExecutionResult.failure("Bot has no building blocks! Give the bot some cobblestone, dirt, or planks.");
         }
 
-        // Calculate origin - use exact target position from context if provided (from build_look command)
-        // Otherwise fall back to centering on bot's position
-        BlockPos origin;
-        if (context.parameters().containsKey("targetX") && 
-            context.parameters().containsKey("targetY") && 
-            context.parameters().containsKey("targetZ")) {
-            // Target position is center of preview (with forward offset applied)
-            int targetX = getIntParameter(context, "targetX", bot.getBlockPos().getX());
-            int targetY = getIntParameter(context, "targetY", bot.getBlockPos().getY());
-            int targetZ = getIntParameter(context, "targetZ", bot.getBlockPos().getZ());
-            BlockPos centerPos = new BlockPos(targetX, targetY, targetZ);
-            
-            // Calculate origin (corner) from center using actual schematic dimensions
-            int offsetX = -schematic.sizeX() / 2;
-            int offsetZ = -schematic.sizeZ() / 2;
-            origin = centerPos.add(offsetX, 0, offsetZ);
-            
-            // Bot walks to a corner for better building access
-            BlockPos buildCorner = origin.add(schematic.sizeX() - 1, 0, 0);
-            
-            LOGGER.info("Building centered at {}, origin at {}, bot moving to corner at {}", 
-                centerPos.toShortString(), origin.toShortString(), buildCorner.toShortString());
-                
-            // Move bot to corner before building (no teleport, no snap for survival-style movement)
-            Optional<MovementService.MovementPlan> plan = MovementService.planLootApproach(
-                    bot, buildCorner, MovementService.MovementOptions.skillLoot());
-            if (plan.isPresent()) {
-                MovementService.execute(source, bot, plan.get(), false, true, true, false);
+        boolean hasExplicitTarget = context.parameters().containsKey("targetX")
+            && context.parameters().containsKey("targetY")
+            && context.parameters().containsKey("targetZ");
+        BlockPos requestedCenter = hasExplicitTarget
+            ? new BlockPos(
+            getIntParameter(context, "targetX", bot.getBlockPos().getX()),
+            getIntParameter(context, "targetY", bot.getBlockPos().getY()),
+            getIntParameter(context, "targetZ", bot.getBlockPos().getZ()))
+            : bot.getBlockPos();
+
+        SchematicAnchorResolution anchor = resolveSchematicAnchor(world, schematic, requestedCenter);
+
+        int offsetX = -schematic.sizeX() / 2;
+        int offsetZ = -schematic.sizeZ() / 2;
+        BlockPos centerPos = new BlockPos(requestedCenter.getX(), anchor.originY() + anchor.anchorLocalY(), requestedCenter.getZ());
+        BlockPos origin = new BlockPos(centerPos.getX() + offsetX, anchor.originY(), centerPos.getZ() + offsetZ);
+
+        // Compute perimeter build stations around the schematic, then pick the
+        // one closest to the bot's current position.  This avoids the old
+        // behaviour of always walking to a fixed corner (which created movement
+        // thrashing when the bot was already near a different viable station).
+        Set<BlockPos> earlyPlanned = new HashSet<>();
+        for (var bp : schematic.blocks()) {
+            BlockState st = schematic.getState(bp.paletteIndex());
+            if (st != null && !st.isAir()) {
+                earlyPlanned.add(origin.add(bp.relativePos()));
             }
+        }
+        List<BlockPos> earlyStations = computeBuildStations(earlyPlanned);
+        BlockPos buildCorner;
+        if (earlyStations.isEmpty()) {
+            buildCorner = origin.add(schematic.sizeX() - 1, 0, 0);
         } else {
-            // Fall back to bot's current position as center
-            BlockPos centerPos = bot.getBlockPos();
-            int offsetX = -schematic.sizeX() / 2;
-            int offsetZ = -schematic.sizeZ() / 2;
-            origin = centerPos.add(offsetX, 0, offsetZ);
-            LOGGER.info("Building with bot position as center, origin at: {}", origin.toShortString());
+            BlockPos botPos = bot.getBlockPos();
+            buildCorner = earlyStations.stream()
+                    .min(Comparator.comparingDouble(s -> s.getSquaredDistance(botPos)))
+                    .orElse(origin.add(schematic.sizeX() - 1, 0, 0));
+        }
+
+        LOGGER.info(
+            "Resolved schematic anchor: schematic={} requestedCenter={} explicitTarget={} floorY={} minLocalY={} anchorLocalY={} origin={} buildCorner={}",
+            displayName,
+            requestedCenter.toShortString(),
+            hasExplicitTarget,
+            anchor.floorBlockY(),
+            anchor.minOccupiedLocalY(),
+            anchor.anchorLocalY(),
+            origin.toShortString(),
+            buildCorner.toShortString());
+
+        // Move bot to nearest station before building (no teleport, no snap for survival-style movement)
+        Optional<MovementService.MovementPlan> plan = MovementService.planLootApproach(
+            bot, buildCorner, MovementService.MovementOptions.skillLoot());
+        if (plan.isPresent()) {
+            MovementService.execute(source, bot, plan.get(), false, true, true, false);
         }
         
         // Build the schematic
-        ChatUtils.sendSystemMessage(source, "Building schematic '" + schematic.name() + "' (" + schematic.blockCount() + " blocks) at " + origin.toShortString() + "...");
+        String rotationSuffix = rotationTurns == 0 ? "" : (" [rotated " + (rotationTurns * 90) + "°]");
+        ChatUtils.sendSystemMessage(source, "Building schematic '" + displayName + "'" + rotationSuffix + " (" + schematic.blockCount() + " blocks) at " + origin.toShortString() + "...");
         int blocksPlaced = buildSchematic(source, bot, world, schematic, origin);
 
         if (blocksPlaced > 0) {
-            return SkillExecutionResult.success("Built schematic '" + schematic.name() + "': " + blocksPlaced + "/" + schematic.blockCount() + " blocks placed.");
+            return SkillExecutionResult.success("Built schematic '" + displayName + "'" + rotationSuffix + ": " + blocksPlaced + "/" + schematic.blockCount() + " blocks placed.");
         } else {
-            return SkillExecutionResult.failure("Failed to place any blocks from schematic '" + schematic.name() + "'. Check bot has materials and is in a clear area.");
+            return SkillExecutionResult.failure("Failed to place any blocks from schematic '" + displayName + "'" + rotationSuffix + ". Check bot has materials and is in a clear area.");
         }
     }
 
@@ -298,7 +332,7 @@ public final class BuildSchematicSkill implements Skill {
 
             Item item = state.getBlock().asItem();
             if (item != Items.AIR) {
-                materials.merge(item, 1, Integer::sum);
+                materials.merge(item, 1, (current, added) -> Integer.valueOf(current + added));
             }
         }
 
@@ -317,7 +351,7 @@ public final class BuildSchematicSkill implements Skill {
             
             Item item = stack.getItem();
             if (item instanceof BlockItem && needed.containsKey(item)) {
-                available.merge(item, stack.getCount(), Integer::sum);
+                available.merge(item, stack.getCount(), (current, added) -> Integer.valueOf(current + added));
             }
         }
 
@@ -333,20 +367,33 @@ public final class BuildSchematicSkill implements Skill {
                                SchematicData schematic, BlockPos origin) {
         // Clear legacy scaffold memory from earlier implementations.
         ScaffoldService.clearScaffoldMemory(bot);
+        RoofAccessService.clearRoofPillars(bot);
+        String taskId = "build:" + schematic.name();
 
         // Generate construction plan with intelligent ordering
         Direction facing = bot.getHorizontalFacing();
         ConstructionPlan plan = ConstructionBlueprintService.planConstruction(schematic, origin, facing);
 
         List<PlacementTarget> orderedTargets = ConstructionBlueprintService.toPlacementTargets(plan);
+        boolean useCenterPillarPhases = shouldUseCenterPillarPhases(schematic, plan);
+        List<PlacementTarget> mainTargets = useCenterPillarPhases
+            ? orderCentroidPhaseTargets(orderedTargets, plan.center())
+            : orderedTargets;
+        List<PlacementTarget> deferredRoofTargets = useCenterPillarPhases
+            ? orderedTargets.stream().filter(target -> target.kind() == PlacementTarget.TargetKind.ROOF).toList()
+                : List.of();
         Map<BlockPos, BlockState> blockStates = new HashMap<>();
         Set<BlockPos> remainingForVantage = new HashSet<>();
         for (PlacementTarget target : orderedTargets) {
             blockStates.put(target.pos(), target.desiredState());
-            remainingForVantage.add(target.pos());
+            if (!useCenterPillarPhases || target.kind() != PlacementTarget.TargetKind.ROOF) {
+                remainingForVantage.add(target.pos());
+            }
         }
 
         int totalBlocks = orderedTargets.size();
+        List<BlockPos> buildStations = computeBuildStations(blockStates.keySet());
+        ActiveBuildRepairSession repairSession = ActiveBuildRepairSession.begin(taskId, world, blockStates);
 
         // Log construction plan info
         LOGGER.info("Construction plan: {} blocks, {} corners, {} roof, suggested door side: {}",
@@ -358,98 +405,409 @@ public final class BuildSchematicSkill implements Skill {
         int maxPasses = Math.max(6, Math.min(12, 3 + (totalBlocks / 120)));
         long maxBuildMs = Math.max(6 * 60_000L, Math.min(20 * 60_000L, 2_000L * maxPasses));
         int[] repositionAttempt = new int[]{0};
+        boolean[] centeredAfterFirstPass = new boolean[]{false};
         ScaffoldService.ScaffoldSession scaffoldSession = ScaffoldService.beginSession(bot);
+        Set<BlockPos> protectedPlannedPositions = Set.copyOf(blockStates.keySet());
 
-        ConstructionTaskSpec spec = new ConstructionTaskSpec(
-                "build:" + schematic.name(),
-                world,
-                bot,
-                source,
-                orderedTargets,
-                new ExecutionPolicy(maxPasses, 3, 2, maxBuildMs),
-                new ConstructionTaskSpec.SupportPolicy(true, true, MAX_SCAFFOLD_HEIGHT),
-                (target, pass) -> {
-                    int blockHeight = target.pos().getY() - origin.getY();
-                    return ensureCanReachBlockWithEffort(source, bot, world, target.pos(), blockHeight, pass, scaffoldSession);
-                },
-                (target, pass) -> {
-                    BotActions.PlaceResult placed = tryPlaceBlockWithRecovery(
-                            source, bot, world, target.pos(), target.desiredState(), blockStates, scaffoldSession);
-                    if (placed.success()) {
-                        remainingForVantage.remove(target.pos());
-                        return ConstructionTaskSpec.PlacementOutcome.ok();
-                    }
-                    FailureReason reason = FailureReason.fromPlaceReason(placed.reason());
-                    return ConstructionTaskSpec.PlacementOutcome.fail(reason);
-                },
-                progress -> {
-                    remainingForVantage.removeIf(pos -> {
-                        BlockState desired = blockStates.get(pos);
-                        return desired != null && world.getBlockState(pos).equals(desired);
-                    });
-                    ChatUtils.sendChatMessages(source, "§7[Build] Pass " + progress.passNumber() + "/" + maxPasses
-                            + " complete - " + progress.placedThisPass() + " placed, "
-                            + progress.remaining() + " remaining.");
-                },
-                (progress, streak) -> {
-                    if (!remainingForVantage.isEmpty()) {
-                        ChatUtils.sendChatMessages(source, "§7[Build] Repositioning for better access...");
-                        moveToVantagePosition(source, bot, remainingForVantage, repositionAttempt[0]);
-                        repositionAttempt[0]++;
-                    }
-                },
-                scaffoldSession,
-                true,
-                Set.of()
+        ConstructionProtectionService.activate(
+                bot.getUuid(),
+                taskId,
+                protectedPlannedPositions,
+            Set.copyOf(buildStations)
         );
+        ConstructionRepairService.register(bot.getUuid(), repairSession);
+        LOGGER.info("Activated schematic protection: bot={} schematic={} planned={} stations={}",
+            bot.getName().getString(),
+            schematic.name(),
+            protectedPlannedPositions.size(),
+            buildStations.size());
 
-        ExecutionReport report = ConstructionExecutionService.execute(spec);
-        if (report.scaffoldsRemoved() > 0) {
-            ChatUtils.sendChatMessages(source, "§7[Build] Cleaned up " + report.scaffoldsRemoved() + " scaffold blocks.");
+        try {
+            ConstructionTaskSpec spec = new ConstructionTaskSpec(
+                    taskId,
+                    world,
+                    bot,
+                    source,
+                    mainTargets,
+                    new ExecutionPolicy(maxPasses, 3, 2, maxBuildMs),
+                    new ConstructionTaskSpec.SupportPolicy(true, true, MAX_SCAFFOLD_HEIGHT),
+                    (target, pass) -> {
+                        int blockHeight = target.pos().getY() - origin.getY();
+                        return ensureCanReachBlockWithEffort(source, bot, world, target, blockHeight, pass, scaffoldSession);
+                    },
+                    (target, pass) -> {
+                        BotActions.PlaceResult placed = tryPlaceBlockWithRecovery(
+                                source, bot, world, target.pos(), target.desiredState(), blockStates, scaffoldSession);
+                        if (placed.success()) {
+                            remainingForVantage.remove(target.pos());
+                            repairSession.markPlaced(target.pos());
+                            return ConstructionTaskSpec.PlacementOutcome.ok();
+                        }
+                        FailureReason reason = FailureReason.fromPlaceReason(placed.reason());
+                        return ConstructionTaskSpec.PlacementOutcome.fail(reason);
+                    },
+                    progress -> {
+                        remainingForVantage.removeIf(pos -> {
+                            BlockState desired = blockStates.get(pos);
+                            return desired != null && BlockReplacementService.stateSatisfies(world.getBlockState(pos), desired);
+                        });
+                        ActiveBuildRepairSession.RepairSweepResult repairSweep = repairSession.sweep(
+                                source, bot, world, REACH_DISTANCE_SQ, false);
+                        ChatUtils.sendChatMessages(source, "§7[Build] Pass " + progress.passNumber() + "/" + maxPasses
+                                + " complete - " + progress.placedThisPass() + " placed, "
+                                + progress.remaining() + " remaining.");
+                        if (repairSweep.repairedCount() > 0 || repairSweep.queuedCount() > 0 || repairSweep.damagedCount() > 0) {
+                            LOGGER.info("Active-build repair pass: task={} pass={} damaged={} repaired={} queued={} remainingQueue={} throttled={}",
+                                    taskId,
+                                    progress.passNumber(),
+                                    repairSweep.damagedCount(),
+                                    repairSweep.repairedCount(),
+                                    repairSweep.queuedCount(),
+                                    repairSweep.remainingQueue(),
+                                    repairSweep.throttled());
+                            if (repairSweep.repairedCount() > 0 || repairSweep.queuedCount() > 0) {
+                                ChatUtils.sendChatMessages(source, "§7[Build] Repair sweep: "
+                                        + repairSweep.repairedCount() + " repaired, "
+                                        + repairSweep.remainingQueue() + " queued.");
+                            }
+                        }
+                        if (useCenterPillarPhases && progress.passNumber() == 1 && !centeredAfterFirstPass[0]) {
+                            ChatUtils.sendChatMessages(source, "§7[Build] Switching to centroid fill...");
+                            moveToReachBlock(source, bot, plan.center());
+                            centeredAfterFirstPass[0] = true;
+                        }
+                    },
+                    (progress, streak) -> {
+                        if (useCenterPillarPhases) {
+                            moveToReachBlock(source, bot, plan.center());
+                        } else if (!remainingForVantage.isEmpty()) {
+                            ChatUtils.sendChatMessages(source, "§7[Build] Repositioning for better access...");
+                            moveToVantagePosition(source, bot, buildStations, remainingForVantage, repositionAttempt[0]);
+                            repositionAttempt[0]++;
+                        }
+                    },
+                    scaffoldSession,
+                    true,
+                    Set.of()
+            );
+
+            ExecutionReport report = ConstructionExecutionService.execute(spec);
+            if (report.scaffoldsRemoved() > 0) {
+                ChatUtils.sendChatMessages(source, "§7[Build] Cleaned up " + report.scaffoldsRemoved() + " scaffold blocks.");
+            }
+
+            CenterPillarPhaseResult centerPhase = CenterPillarPhaseResult.empty();
+            if (useCenterPillarPhases && !report.aborted() && !report.timedOut()) {
+                List<PlacementTarget> unresolvedTargets = unresolvedStructuralTargets(world, orderedTargets);
+                if (!unresolvedTargets.isEmpty()) {
+                    centerPhase = completeFromCenterPillar(source, bot, world, plan, unresolvedTargets, blockStates, repairSession);
+                }
+            }
+
+            ActiveBuildRepairSession.RepairSweepResult finalRepairSweep = repairSession.sweep(
+                    source, bot, world, REACH_DISTANCE_SQ, true);
+            int repairRemaining = repairSession.remainingDamageCount(world);
+            if (finalRepairSweep.repairedCount() > 0 || finalRepairSweep.remainingQueue() > 0 || repairRemaining > 0) {
+                LOGGER.info("Active-build repair final sweep: task={} repaired={} queued={} remainingDamage={} throttled={}",
+                        taskId,
+                        finalRepairSweep.repairedCount(),
+                        finalRepairSweep.remainingQueue(),
+                        repairRemaining,
+                        finalRepairSweep.throttled());
+                ChatUtils.sendChatMessages(source, "§7[Build] Final repair sweep: "
+                        + finalRepairSweep.repairedCount() + " repaired, "
+                        + repairRemaining + " structure issues remaining.");
+            }
+
+                Map<FailureReason, Integer> finalFailures = new EnumMap<>(FailureReason.class);
+                int totalPlaced;
+                int finalRemaining;
+                if (useCenterPillarPhases && !report.aborted() && !report.timedOut()) {
+                    finalFailures.putAll(centerPhase.remainingByReason());
+                    totalPlaced = report.placedCount() + centerPhase.placedCount();
+                    finalRemaining = centerPhase.remainingCount();
+                } else {
+                    finalFailures.putAll(report.remainingByReason());
+                    totalPlaced = report.placedCount();
+                    finalRemaining = report.remainingCount();
+                    if (useCenterPillarPhases && finalRemaining == 0 && !deferredRoofTargets.isEmpty()) {
+                        finalRemaining = countRemainingTargets(world, deferredRoofTargets);
+                        if (finalRemaining > 0) {
+                            finalFailures.put(FailureReason.MOVEMENT_FAILED, finalRemaining);
+                        }
+                    }
+                }
+                // Allow door placement even if a few repair items remain (e.g. scaffold-gap
+                // patch couldn't reach one block).  The structure is functionally complete.
+                boolean shouldProcessDoors = repairRemaining <= 2 && finalRemaining <= Math.max(4, totalBlocks / 10);
+
+                // Clear doorway access paths and place doors using DoorwayAccessService and DoorPlacementService
+                if (!SkillManager.shouldAbortSkill(bot) && shouldProcessDoors) {
+                DoorwayAccessService.AccessResult doorwayResult = DoorwayAccessService.clearAllDoorways(
+                        world, source, bot, origin, schematic.sizeX(), schematic.sizeZ(), origin.getY());
+                if (doorwayResult.blocksCleared() > 0) {
+                    ChatUtils.sendChatMessages(source, "§7[Build] Cleared " + doorwayResult.blocksCleared() +
+                            " doorway obstructions.");
+                }
+
+                // Place doors at detected doorways if bot has door items
+                if (DoorPlacementService.hasDoorItem(bot)) {
+                    List<DoorwayAccessService.Doorway> doorways = DoorwayAccessService.detectDoorways(
+                            world, origin, schematic.sizeX(), schematic.sizeZ(), origin.getY());
+                    for (DoorwayAccessService.Doorway doorway : doorways) {
+                        if (SkillManager.shouldAbortSkill(bot)) break;
+                        // Place door facing outward (toward exterior approach)
+                        boolean placed = DoorPlacementService.placeDoor(
+                                world, source, bot, doorway.bottomPos(), doorway.facingOutward());
+                        if (placed) {
+                            ChatUtils.sendChatMessages(source, "§7[Build] Placed door at " +
+                                    doorway.bottomPos().toShortString());
+                        }
+                    }
+                }
+            } else if (!SkillManager.shouldAbortSkill(bot) && finalRemaining > 0) {
+                LOGGER.info("Skipping doorway placement for incomplete schematic build: schematic={} placed={}/{} remaining={} repairRemaining={}",
+                        schematic.name(), totalPlaced, totalBlocks, finalRemaining, repairRemaining);
+            }
+
+            // Final status
+            if (finalRemaining > 0 || repairRemaining > 0) {
+                String summary = formatFailureSummary(finalFailures);
+                ChatUtils.sendChatMessages(source, "§e[Build] Completed with " + totalPlaced + "/" + totalBlocks +
+                        " blocks. " + finalRemaining + " blocks couldn't be placed, " + repairRemaining
+                        + " active-build repairs remain." + (summary.isEmpty() ? "" : (" " + summary)));
+                if (!finalFailures.isEmpty()) {
+                    LOGGER.info("Remaining placement failures: {}", finalFailures);
+                }
+            } else {
+                ChatUtils.sendChatMessages(source, "§a[Build] Construction complete! " + totalPlaced + " blocks placed.");
+            }
+
+            // Navigate the bot outside through the doorway before clearing
+            // protection, so that follow/movement won't mine through a wall.
+            if (!SkillManager.shouldAbortSkill(bot)) {
+                List<DoorwayAccessService.Doorway> exitDoorways = DoorwayAccessService.detectDoorways(
+                        world, origin, schematic.sizeX(), schematic.sizeZ(), origin.getY());
+                if (!exitDoorways.isEmpty()) {
+                    DoorwayAccessService.Doorway exitDoor = exitDoorways.get(0);
+                    BlockPos outsidePos = exitDoor.bottomPos().offset(exitDoor.facingOutward(), 2);
+                    LOGGER.info("Navigating bot outside through doorway at {} -> {}",
+                            exitDoor.bottomPos().toShortString(), outsidePos.toShortString());
+                    moveToReachBlock(source, bot, outsidePos);
+                }
+            }
+
+            LOGGER.info("Schematic build complete: {} placed, {} remaining, repairRemaining={} (aborted={}, timeout={})",
+                    totalPlaced, finalRemaining, repairRemaining, report.aborted(), report.timedOut());
+            return totalPlaced;
+        } finally {
+            LOGGER.info("Clearing schematic protection: bot={} schematic={}",
+                    bot.getName().getString(),
+                    schematic.name());
+            ConstructionRepairService.clear(bot.getUuid());
+            ConstructionProtectionService.clear(bot.getUuid());
+            ScaffoldService.clearScaffoldMemory(bot);
+            RoofAccessService.clearRoofPillars(bot);
+        }
+    }
+
+    private boolean shouldUseCenterPillarPhases(SchematicData schematic, ConstructionPlan plan) {
+        if (schematic == null || plan == null || plan.roofPositions().isEmpty()) {
+            return false;
+        }
+        if (!"small_shelter".equalsIgnoreCase(schematic.name())) {
+            return false;
+        }
+        int roofY = plan.roofPositions().get(0).getY();
+        for (BlockPos pos : plan.roofPositions()) {
+            if (pos.getY() != roofY) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private List<PlacementTarget> orderCentroidPhaseTargets(List<PlacementTarget> orderedTargets, BlockPos center) {
+        if (orderedTargets == null || orderedTargets.isEmpty() || center == null) {
+            return orderedTargets == null ? List.of() : orderedTargets;
         }
 
-        // Clear doorway access paths and place doors using DoorwayAccessService and DoorPlacementService
-        if (!SkillManager.shouldAbortSkill(bot)) {
-            DoorwayAccessService.AccessResult doorwayResult = DoorwayAccessService.clearAllDoorways(
-                    world, source, bot, origin, schematic.sizeX(), schematic.sizeZ(), origin.getY());
-            if (doorwayResult.blocksCleared() > 0) {
-                ChatUtils.sendChatMessages(source, "§7[Build] Cleared " + doorwayResult.blocksCleared() + 
-                        " doorway obstructions.");
+        List<PlacementTarget> corners = orderedTargets.stream()
+                .filter(target -> target.kind() == PlacementTarget.TargetKind.CORNER)
+                .toList();
+        List<PlacementTarget> body = orderedTargets.stream()
+                .filter(target -> target.kind() != PlacementTarget.TargetKind.CORNER
+                        && target.kind() != PlacementTarget.TargetKind.ROOF)
+                .sorted(Comparator
+                        .comparingInt((PlacementTarget target) -> centroidBand(target.kind()))
+                        .thenComparingDouble(target -> target.pos().getSquaredDistance(center))
+                        .thenComparingInt(PlacementTarget::priorityBand))
+                .toList();
+
+        List<PlacementTarget> ordered = new ArrayList<>(corners.size() + body.size());
+        ordered.addAll(corners);
+        ordered.addAll(body);
+        return List.copyOf(ordered);
+    }
+
+    private int centroidBand(PlacementTarget.TargetKind kind) {
+        if (kind == null) {
+            return 99;
+        }
+        return switch (kind) {
+            case FOUNDATION -> 0;
+            case WALL -> 1;
+            case INTERIOR, DECORATION -> 2;
+            case DOOR -> 3;
+            case ROOF -> 4;
+            default -> 5;
+        };
+    }
+
+    private CenterPillarPhaseResult completeFromCenterPillar(ServerCommandSource source,
+                                                             ServerPlayerEntity bot,
+                                                             ServerWorld world,
+                                                             ConstructionPlan plan,
+                                                             List<PlacementTarget> unresolvedTargets,
+                                                             Map<BlockPos, BlockState> plannedStates,
+                                                             ActiveBuildRepairSession repairSession) {
+        if (unresolvedTargets == null || unresolvedTargets.isEmpty() || plan == null) {
+            return CenterPillarPhaseResult.empty();
+        }
+
+        int roofY = plan.roofPositions().get(0).getY();
+        int groundY = plan.minY();
+        int placed = 0;
+        Map<FailureReason, Integer> failures = new EnumMap<>(FailureReason.class);
+
+        ChatUtils.sendChatMessages(source, "§7[Build] Pillaring from center for remaining blocks...");
+        moveToReachBlock(source, bot, plan.center());
+
+        BlockPos perch = RoofAccessService.buildRoofAccessPillar(world, source, bot, roofY, null);
+        if (perch == null) {
+            int remaining = countRemainingTargets(world, unresolvedTargets);
+            if (remaining > 0) {
+                failures.put(FailureReason.MOVEMENT_FAILED, remaining);
             }
-            
-            // Place doors at detected doorways if bot has door items
-            if (DoorPlacementService.hasDoorItem(bot)) {
-                List<DoorwayAccessService.Doorway> doorways = DoorwayAccessService.detectDoorways(
-                        world, origin, schematic.sizeX(), schematic.sizeZ(), origin.getY());
-                for (DoorwayAccessService.Doorway doorway : doorways) {
-                    if (SkillManager.shouldAbortSkill(bot)) break;
-                    // Place door facing outward (toward exterior approach)
-                    boolean placed = DoorPlacementService.placeDoor(
-                            world, source, bot, doorway.bottomPos(), doorway.facingOutward());
-                    if (placed) {
-                        ChatUtils.sendChatMessages(source, "§7[Build] Placed door at " + 
-                                doorway.bottomPos().toShortString());
+            return new CenterPillarPhaseResult(0, remaining, Map.copyOf(failures));
+        }
+
+        List<PlacementTarget> orderedTargets = unresolvedTargets.stream()
+                .sorted(Comparator
+                        .comparingInt((PlacementTarget target) -> target.kind() == PlacementTarget.TargetKind.CORNER ? 0 : 1)
+                        .thenComparingDouble((PlacementTarget target) -> -target.pos().getSquaredDistance(plan.center()))
+                        .thenComparingInt(PlacementTarget::priorityBand))
+                .toList();
+
+        int placedFromPerch = 0;
+        for (PlacementTarget target : orderedTargets) {
+            if (SkillManager.shouldAbortSkill(bot)) {
+                break;
+            }
+            if (!world.getBlockState(target.pos()).equals(target.desiredState())) {
+                if (!ConstructionRecoveryService.isWithinReach(bot, target.pos(), REACH_DISTANCE_SQ)) {
+                    continue;
+                }
+
+                BotActions.PlaceResult result = tryPlaceBlockWithRecovery(
+                        null,
+                        bot,
+                        world,
+                        target.pos(),
+                        target.desiredState(),
+                        plannedStates,
+                        null);
+                if (result.success()) {
+                    placed++;
+                    placedFromPerch++;
+                    if (repairSession != null) {
+                        repairSession.markPlaced(target.pos());
                     }
                 }
             }
         }
 
-        // Final status
-        int finalRemaining = report.remainingCount();
-        if (finalRemaining > 0) {
-            String summary = formatFailureSummary(report.remainingByReason());
-            ChatUtils.sendChatMessages(source, "§e[Build] Completed with " + report.placedCount() + "/" + totalBlocks +
-                    " blocks. " + finalRemaining + " blocks couldn't be placed." + (summary.isEmpty() ? "" : (" " + summary)));
-            if (!report.remainingByReason().isEmpty()) {
-                LOGGER.info("Remaining placement failures: {}", report.remainingByReason());
-            }
-        } else {
-            ChatUtils.sendChatMessages(source, "§a[Build] Construction complete! " + report.placedCount() + " blocks placed.");
+        LOGGER.info("Center pillar phase: perch={} placed={} remaining={}",
+                perch.toShortString(),
+                placedFromPerch,
+                countRemainingTargets(world, unresolvedTargets));
+
+        RoofAccessService.descendFromRoof(world, source, bot, groundY);
+        int cleanupRemoved = RoofAccessService.cleanupAllRoofPillars(bot, world);
+        if (cleanupRemoved > 0) {
+            ChatUtils.sendChatMessages(source, "§7[Build] Cleaned up " + cleanupRemoved + " center-pillar scaffold blocks.");
         }
 
-        LOGGER.info("Schematic build complete: {} placed, {} remaining (aborted={}, timeout={})",
-                report.placedCount(), finalRemaining, report.aborted(), report.timedOut());
-        return report.placedCount();
+        // Patch pass: the scaffold column may have overlapped planned positions
+        // (typically the roof block directly above the pillar).  Re-pillar and fill.
+        if (!SkillManager.shouldAbortSkill(bot) && cleanupRemoved > 0) {
+            List<PlacementTarget> scaffoldGaps = new ArrayList<>();
+            for (PlacementTarget t : unresolvedTargets) {
+                if (world.getBlockState(t.pos()).isAir() && plannedStates.containsKey(t.pos())) {
+                    scaffoldGaps.add(t);
+                }
+            }
+            if (!scaffoldGaps.isEmpty()) {
+                ChatUtils.sendChatMessages(source, "§7[Build] Patching " + scaffoldGaps.size() + " scaffold-gap blocks...");
+                moveToReachBlock(source, bot, plan.center());
+                BlockPos patchPerch = RoofAccessService.buildRoofAccessPillar(world, source, bot, roofY, null);
+                if (patchPerch != null) {
+                    for (PlacementTarget gap : scaffoldGaps) {
+                        if (SkillManager.shouldAbortSkill(bot)) break;
+                        if (!world.getBlockState(gap.pos()).isAir()) continue;
+                        if (!ConstructionRecoveryService.isWithinReach(bot, gap.pos(), REACH_DISTANCE_SQ)) continue;
+                        BotActions.PlaceResult result = tryPlaceBlockWithRecovery(
+                                null, bot, world, gap.pos(), gap.desiredState(), plannedStates, null);
+                        if (result.success()) {
+                            placed++;
+                            if (repairSession != null) repairSession.markPlaced(gap.pos());
+                        }
+                    }
+                    RoofAccessService.descendFromRoof(world, source, bot, groundY);
+                    RoofAccessService.cleanupAllRoofPillars(bot, world);
+                }
+            }
+        }
+
+        int remaining = countRemainingTargets(world, unresolvedTargets);
+        if (remaining > 0) {
+            failures.put(FailureReason.MOVEMENT_FAILED, remaining);
+        }
+        return new CenterPillarPhaseResult(placed, remaining, Map.copyOf(failures));
+    }
+
+    private int countRemainingTargets(ServerWorld world, List<PlacementTarget> targets) {
+        int remaining = 0;
+        for (PlacementTarget target : targets) {
+            if (!world.getBlockState(target.pos()).equals(target.desiredState())) {
+                remaining++;
+            }
+        }
+        return remaining;
+    }
+
+    private List<PlacementTarget> unresolvedStructuralTargets(ServerWorld world, List<PlacementTarget> targets) {
+        if (targets == null || targets.isEmpty() || world == null) {
+            return List.of();
+        }
+        List<PlacementTarget> unresolved = new ArrayList<>();
+        for (PlacementTarget target : targets) {
+            if (target.kind() == PlacementTarget.TargetKind.DOOR) {
+                continue;
+            }
+            if (!world.getBlockState(target.pos()).equals(target.desiredState())) {
+                unresolved.add(target);
+            }
+        }
+        return List.copyOf(unresolved);
+    }
+
+    private record CenterPillarPhaseResult(int placedCount,
+                                           int remainingCount,
+                                           Map<FailureReason, Integer> remainingByReason) {
+        private static CenterPillarPhaseResult empty() {
+            return new CenterPillarPhaseResult(0, 0, Map.of());
+        }
     }
 
     private String formatFailureSummary(Map<FailureReason, Integer> buckets) {
@@ -484,9 +842,48 @@ public final class BuildSchematicSkill implements Skill {
      * Move the bot to a new vantage point based on the remaining blocks.
      * Uses PerimeterService corners and centroid cycling for better approach angles.
      */
-    private void moveToVantagePosition(ServerCommandSource source, ServerPlayerEntity bot, Set<BlockPos> remaining, int attempt) {
-        if (remaining == null || remaining.isEmpty() || bot == null) {
+    private void moveToVantagePosition(ServerCommandSource source,
+                                       ServerPlayerEntity bot,
+                                       List<BlockPos> buildStations,
+                                       Set<BlockPos> remaining,
+                                       int attempt) {
+        if (remaining == null || remaining.isEmpty() || bot == null || buildStations == null || buildStations.isEmpty()) {
             return;
+        }
+
+        double avgX = 0.0;
+        double avgZ = 0.0;
+
+        for (BlockPos pos : remaining) {
+            avgX += pos.getX();
+            avgZ += pos.getZ();
+        }
+        avgX /= remaining.size();
+        avgZ /= remaining.size();
+
+        BlockPos focus = new BlockPos((int) Math.round(avgX), bot.getBlockY(), (int) Math.round(avgZ));
+        List<BlockPos> orderedStations = new ArrayList<>(buildStations);
+        orderedStations.sort((a, b) -> {
+            int byFocus = Double.compare(a.getSquaredDistance(focus), b.getSquaredDistance(focus));
+            if (byFocus != 0) {
+                return byFocus;
+            }
+            return Double.compare(a.getSquaredDistance(bot.getBlockPos()), b.getSquaredDistance(bot.getBlockPos()));
+        });
+
+        BlockPos targetPos = orderedStations.get(Math.floorMod(attempt, orderedStations.size()));
+        LOGGER.debug("Repositioning to build station {} / {} at {} (focus={})",
+                Math.floorMod(attempt, orderedStations.size()) + 1,
+                orderedStations.size(),
+                targetPos.toShortString(),
+                focus.toShortString());
+
+        moveToReachBlock(source, bot, targetPos);
+    }
+
+    private List<BlockPos> computeBuildStations(Set<BlockPos> plannedPositions) {
+        if (plannedPositions == null || plannedPositions.isEmpty()) {
+            return List.of();
         }
 
         int minX = Integer.MAX_VALUE;
@@ -494,10 +891,13 @@ public final class BuildSchematicSkill implements Skill {
         int minZ = Integer.MAX_VALUE;
         int maxZ = Integer.MIN_VALUE;
         int minY = Integer.MAX_VALUE;
-        double avgX = 0.0;
-        double avgZ = 0.0;
+        double avgX = 0.0D;
+        double avgZ = 0.0D;
 
-        for (BlockPos pos : remaining) {
+        for (BlockPos pos : plannedPositions) {
+            if (pos == null) {
+                continue;
+            }
             minX = Math.min(minX, pos.getX());
             maxX = Math.max(maxX, pos.getX());
             minZ = Math.min(minZ, pos.getZ());
@@ -506,70 +906,59 @@ public final class BuildSchematicSkill implements Skill {
             avgX += pos.getX();
             avgZ += pos.getZ();
         }
-        avgX /= remaining.size();
-        avgZ /= remaining.size();
-        
-        // Use PerimeterService to get proper corner positions with offset
+
+        avgX /= plannedPositions.size();
+        avgZ /= plannedPositions.size();
+
         BlockPos center = new BlockPos((int) Math.round(avgX), minY, (int) Math.round(avgZ));
-        int radiusX = (maxX - minX) / 2 + 2; // +2 for standing offset
-        int radiusZ = (maxZ - minZ) / 2 + 2;
-        List<BlockPos> cornerPositions = PerimeterService.getCornerPositions(center, radiusX, radiusZ, minY);
+        int radiusX = Math.max(1, (maxX - minX) / 2 + 2);
+        int radiusZ = Math.max(1, (maxZ - minZ) / 2 + 2);
 
-        // Cycle through corner positions (0-3), then centroid (4), then edge centers (5-8)
-        int mode = Math.floorMod(attempt, 9);
-        BlockPos targetPos;
-        
-        if (mode < 4 && mode < cornerPositions.size()) {
-            // Use PerimeterService corner positions
-            targetPos = cornerPositions.get(mode);
-            LOGGER.debug("Repositioning to corner {} at {}", mode, targetPos.toShortString());
-        } else if (mode == 4) {
-            // Centroid
-            targetPos = center;
-            LOGGER.debug("Repositioning to centroid at {}", targetPos.toShortString());
-        } else {
-            // Edge centers (5-8)
-            int edgeMode = mode - 5;
-            int tx, tz;
-            switch (edgeMode) {
-                case 0 -> { tx = (int) Math.round(avgX); tz = minZ - 2; } // North edge
-                case 1 -> { tx = maxX + 2; tz = (int) Math.round(avgZ); } // East edge
-                case 2 -> { tx = (int) Math.round(avgX); tz = maxZ + 2; } // South edge
-                default -> { tx = minX - 2; tz = (int) Math.round(avgZ); } // West edge
-            }
-            targetPos = new BlockPos(tx, minY, tz);
-            LOGGER.debug("Repositioning to edge {} at {}", edgeMode, targetPos.toShortString());
-        }
+        LinkedHashSet<BlockPos> stations = new LinkedHashSet<>();
+        stations.addAll(PerimeterService.getCornerPositions(center, radiusX, radiusZ, minY));
+        stations.add(new BlockPos((int) Math.round(avgX), minY, minZ - 2));
+        stations.add(new BlockPos(maxX + 2, minY, (int) Math.round(avgZ)));
+        stations.add(new BlockPos((int) Math.round(avgX), minY, maxZ + 2));
+        stations.add(new BlockPos(minX - 2, minY, (int) Math.round(avgZ)));
 
-        moveToReachBlock(source, bot, targetPos);
+        return List.copyOf(stations);
     }
 
     /**
      * Ensure the bot can reach the target block with variable effort based on pass number.
      */
-    private ConstructionRecoveryService.RecoveryResult ensureCanReachBlockWithEffort(
+        private ConstructionRecoveryService.RecoveryResult ensureCanReachBlockWithEffort(
             ServerCommandSource source,
             ServerPlayerEntity bot,
             ServerWorld world,
-            BlockPos target,
+            PlacementTarget target,
             int heightAboveGround,
             int passNumber,
             ScaffoldService.ScaffoldSession scaffoldSession
     ) {
-        if (heightAboveGround > MAX_SCAFFOLD_HEIGHT + 3 && !isWithinReach(bot, target)) {
+        if (target == null) {
+            return ConstructionRecoveryService.RecoveryResult.failure(FailureReason.MOVEMENT_FAILED, false);
+        }
+        BlockPos targetPos = target.pos();
+        int verticalDiff = targetPos.getY() - bot.getBlockPos().getY();
+        if (verticalDiff > MAX_SCAFFOLD_HEIGHT + 3
+            && !ConstructionRecoveryService.isWithinReach(bot, targetPos, REACH_DISTANCE_SQ)) {
             return ConstructionRecoveryService.RecoveryResult.failure(FailureReason.OUT_OF_REACH, false);
         }
 
-        int scaffoldCap = heightAboveGround <= MAX_SCAFFOLD_HEIGHT ? MAX_SCAFFOLD_HEIGHT : 0;
+        boolean aggressiveScaffold = target.kind() == PlacementTarget.TargetKind.CORNER
+            || target.kind() == PlacementTarget.TargetKind.ROOF;
+
         return ConstructionRecoveryService.ensureReachWithScaffold(
                 source,
                 bot,
                 world,
-                target,
+            targetPos,
                 passNumber,
                 REACH_DISTANCE_SQ,
-                scaffoldCap,
-                scaffoldSession
+                MAX_SCAFFOLD_HEIGHT,
+            scaffoldSession,
+            aggressiveScaffold
         );
     }
 
@@ -625,11 +1014,7 @@ public final class BuildSchematicSkill implements Skill {
 
         // Find matching or substitute block in inventory
         Item targetItem = targetState.getBlock().asItem();
-        List<Item> candidates = new ArrayList<>();
-        candidates.add(targetItem);
-        
-        // Add fallback blocks for common materials
-        addFallbacks(candidates, targetItem);
+        List<Item> candidates = new ArrayList<>(BlockReplacementService.buildReplacementCandidates(targetState, false));
 
         // Check if bot has any of the candidate items
         boolean hasAny = false;
@@ -650,12 +1035,11 @@ public final class BuildSchematicSkill implements Skill {
         }
 
         // Log reach info before attempting placement
-        Vec3d eye = bot.getEyePos();
-        double distSq = eye.squaredDistanceTo(Vec3d.ofCenter(pos));
+        double distSq = bot.squaredDistanceTo(pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5);
         boolean inReach = distSq <= REACH_DISTANCE_SQ;
         LOGGER.debug("Placing {} at {} - botPos={}, eyeY={}, dist={}, inReach={}",
                 targetState.getBlock().getName().getString(), pos.toShortString(),
-                bot.getBlockPos().toShortString(), String.format("%.2f", eye.y), String.format("%.2f", Math.sqrt(distSq)), inReach);
+            bot.getBlockPos().toShortString(), String.format("%.2f", bot.getEyeY()), String.format("%.2f", Math.sqrt(distSq)), inReach);
 
         Direction preferredFace = preferredFaceFor(targetState);
         BotActions.PlaceResult result = BotActions.tryPlaceBlockAt(bot, pos, preferredFace, candidates);
@@ -744,43 +1128,6 @@ public final class BuildSchematicSkill implements Skill {
     }
 
     /**
-     * Add fallback block options for common materials.
-     */
-    private void addFallbacks(List<Item> candidates, Item primary) {
-        // Wood substitutions
-        if (primary == Items.OAK_PLANKS) {
-            candidates.add(Items.SPRUCE_PLANKS);
-            candidates.add(Items.BIRCH_PLANKS);
-            candidates.add(Items.JUNGLE_PLANKS);
-            candidates.add(Items.ACACIA_PLANKS);
-            candidates.add(Items.DARK_OAK_PLANKS);
-        }
-        if (primary == Items.OAK_LOG) {
-            candidates.add(Items.SPRUCE_LOG);
-            candidates.add(Items.BIRCH_LOG);
-            candidates.add(Items.JUNGLE_LOG);
-        }
-        // Stone substitutions
-        if (primary == Items.COBBLESTONE) {
-            candidates.add(Items.STONE);
-            candidates.add(Items.COBBLED_DEEPSLATE);
-            candidates.add(Items.ANDESITE);
-        }
-        // Universal fallbacks
-        candidates.add(Items.DIRT);
-        candidates.add(Items.COBBLESTONE);
-    }
-
-    /**
-     * Check if a position is within the bot's reach (3D distance).
-     */
-    private boolean isWithinReach(ServerPlayerEntity bot, BlockPos pos) {
-        Vec3d eye = bot.getEyePos();
-        double distSq = eye.squaredDistanceTo(Vec3d.ofCenter(pos));
-        return distSq <= REACH_DISTANCE_SQ;
-    }
-
-    /**
      * Get the schematic argument from context.
      * The rawArgs are parsed into the "options" list by modCommandRegistry.
      */
@@ -831,5 +1178,62 @@ public final class BuildSchematicSkill implements Skill {
             }
         }
         return false;
+    }
+
+    private SchematicAnchorResolution resolveSchematicAnchor(ServerWorld world, SchematicData schematic, BlockPos requestedCenter) {
+        int minOccupiedLocalY = Integer.MAX_VALUE;
+        boolean hasGradeLayer = false;
+
+        for (SchematicData.BlockPlacement placement : schematic.blocks()) {
+            if (placement == null || placement.relativePos() == null) {
+                continue;
+            }
+            int localY = placement.relativePos().getY();
+            minOccupiedLocalY = Math.min(minOccupiedLocalY, localY);
+            if (localY == 0) {
+                hasGradeLayer = true;
+            }
+        }
+
+        if (minOccupiedLocalY == Integer.MAX_VALUE) {
+            minOccupiedLocalY = 0;
+        }
+
+        int anchorLocalY = hasGradeLayer ? 0 : minOccupiedLocalY;
+        int floorBlockY = detectPlacementFloorBlockY(world, requestedCenter, DEFAULT_FLOOR_SCAN_DEPTH);
+        int requestedAnchorY = requestedCenter != null ? requestedCenter.getY() : floorBlockY + 1;
+        int resolvedAnchorWorldY = Math.max(requestedAnchorY, floorBlockY + 1);
+        int originY = resolvedAnchorWorldY - anchorLocalY;
+
+        return new SchematicAnchorResolution(originY, floorBlockY, minOccupiedLocalY, anchorLocalY);
+    }
+
+    private int detectPlacementFloorBlockY(ServerWorld world, BlockPos center, int scanDepth) {
+        if (center == null) {
+            return 0;
+        }
+        if (world == null) {
+            return center.getY() - 1;
+        }
+
+        int startY = center.getY();
+        int minY = Math.max(world.getBottomY(), startY - Math.max(1, scanDepth));
+        for (int y = startY; y >= minY; y--) {
+            BlockPos pos = new BlockPos(center.getX(), y, center.getZ());
+            BlockState state = world.getBlockState(pos);
+            if (!world.getFluidState(pos).isEmpty()) {
+                continue;
+            }
+            if (!state.getCollisionShape(world, pos).isEmpty()) {
+                return y;
+            }
+        }
+        return startY - 1;
+    }
+
+    private record SchematicAnchorResolution(int originY,
+                                             int floorBlockY,
+                                             int minOccupiedLocalY,
+                                             int anchorLocalY) {
     }
 }
