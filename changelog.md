@@ -1,6 +1,17 @@
 # Changelog & History
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
+## 2026-03-15
+
+- **Spells tab & fast travel wiring:**
+  1. **Spells promoted to 4th top-level tab:** Added `TopicCategory.SPELL` to the inventory screen's tab system. Tab bar now shows Actions | Dialogue | Spells | Admin. Three spell entries: Remote Guidance, Chorus Recall, Soul of Ender — each with hover tooltips (1700ms delay, existing system). Remote Guidance and Chorus Recall open NavigationConfirmScreen; Soul of Ender casts directly.
+  2. **Status bar:** Spells tab footer shows per-player/bot artifact status (Eye of Ender, Pearl, Chorus, Enchanting Table, Wizard's Tome, bot nav tier). Falls back to "Spells require artifacts. No artifacts detected." when nothing is held.
+  3. **Fast travel wired for Remote Guidance:** Replaced `setReturnToBase()` (bot walks) with `beginDelayedTravel()` (bot disappears, reappears at destination after ~1s/chunk delay). Remote Guidance always uses fast travel — no nav_mode check since ender pearls are consumed. Feedback message shows ETA.
+  4. **CompanionSpellsScreen cleaned up:** Removed Remote Guidance, Chorus Recall, and Soul of Ender buttons (now in Spells tab). Remaining buttons: Regroup, Summon, Home, Remote Inventory. Updated status bar text.
+  5. **"Spells >" removed from Admin tab:** No longer needed — spells have their own tab.
+  6. **Guide entries updated:** Remote Guidance entry now says "always uses fast travel". All "Spells menu" references changed to "Spells tab".
+  7. **"Delayed travel" → "fast travel" in comments:** Updated javadoc comments in NavigationArtifactService, BotHomeService, BotWorldStateService.
+
 ## 2026-03-14
 
 - **Guide remote inventory gating — full Admin-only mode:**

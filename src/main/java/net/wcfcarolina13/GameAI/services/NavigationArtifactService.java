@@ -125,7 +125,7 @@ public final class NavigationArtifactService {
     }
 
     /**
-     * Estimate how many ticks a delayed-travel sequence should take based on distance.
+     * Estimate how many ticks a fast travel sequence should take based on distance.
      * <ul>
      *   <li>1 real second per chunk (distance / 16)</li>
      *   <li>Cross-dimension adds 30 seconds</li>
@@ -172,7 +172,7 @@ public final class NavigationArtifactService {
     }
 
     /**
-     * Begin a delayed travel for a bot. The bot is removed from the world and will be
+     * Begin fast travel for a bot. The bot is removed from the world and will be
      * respawned at the destination after {@code delayTicks} have elapsed.
      *
      * @param server      the Minecraft server

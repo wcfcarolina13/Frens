@@ -1091,10 +1091,10 @@ public final class BotGuideScreen extends Screen {
                                 "Both you and your companion must hold at least one Ender Pearl.",
                                 "Choose destination: guide to your location or to a known base.",
                                 "Both pearls are consumed when travel begins.",
-                                "Travel uses your configured navigation mode (walk or fast travel).",
-                                "Open the Spells menu to cast this spell."
+                                "Travel always uses fast travel \u2014 the bot disappears briefly and reappears at your location.",
+                                "Open the Spells tab to cast this spell."
                         ),
-                        "UI-only action (Spells menu)",
+                        "UI-only action (Spells tab)",
                         "Shortcut: bind key.frens.open_spells",
                         "spell guidance ender pearl paired navigation remote"
                 ),
@@ -1109,7 +1109,7 @@ public final class BotGuideScreen extends Screen {
                                 "Works across dimensions. Always instant — no delay.",
                                 "All four items are consumed (one pearl + one chorus from each)."
                         ),
-                        "UI-only action (Spells menu)",
+                        "UI-only action (Spells tab)",
                         "Shortcut: bind key.frens.open_spells",
                         "spell recall chorus fruit ender pearl teleport instant paired"
                 ),
@@ -1142,7 +1142,7 @@ public final class BotGuideScreen extends Screen {
                                 "Ender Pearl (paired): Remote Guidance spell — both must hold, consumed.",
                                 "Ender Pearl + Chorus Fruit (paired): Chorus Recall — instant teleport, consumed."
                         ),
-                        "UI-only action (Spells menu)",
+                        "UI-only action (Spells tab)",
                         "Hold item or be near Enchanting Table to unlock spells",
                         "spell ingredient wizard tome eye ender pearl chorus goat horn enchanting"
                 )

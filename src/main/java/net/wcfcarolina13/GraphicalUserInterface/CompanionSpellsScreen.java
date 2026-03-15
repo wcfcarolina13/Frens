@@ -27,9 +27,6 @@ public class CompanionSpellsScreen extends Screen {
     private ButtonWidget comeBtn;
     private ButtonWidget summonBtn;
     private ButtonWidget homeBtn;
-    private ButtonWidget guidanceBtn;
-    private ButtonWidget recallBtn;
-    private ButtonWidget soulOfEnderBtn;
     private ButtonWidget openInvBtn;
 
     private static final class AccessState {
@@ -78,29 +75,12 @@ public class CompanionSpellsScreen extends Screen {
                 .dimensions(cx - w / 2, top + 2 * (h + gap), w, h)
                 .build());
 
-        guidanceBtn = this.addDrawableChild(ButtonWidget.builder(
-                Text.literal("Remote Guidance"), (btn) -> openGuidanceConfirm())
+        openInvBtn = this.addDrawableChild(ButtonWidget.builder(Text.literal("Remote Inventory"), (btn) -> sendSpell(withBotAlias("bot companion open")))
                 .dimensions(cx - w / 2, top + 3 * (h + gap), w, h)
                 .build());
 
-        recallBtn = this.addDrawableChild(ButtonWidget.builder(
-                Text.literal("Chorus Recall"), (btn) -> openRecallConfirm())
-                .dimensions(cx - w / 2, top + 4 * (h + gap), w, h)
-                .build());
-
-        soulOfEnderBtn = this.addDrawableChild(ButtonWidget.builder(
-                Text.literal("Soul of Ender"), (btn) -> sendSpell(withBotAlias("bot companion soulofender")))
-                .dimensions(cx - w / 2, top + 5 * (h + gap), w, h)
-                .tooltip(net.minecraft.client.gui.tooltip.Tooltip.of(Text.literal(
-                        "Consumes a chorus fruit while the bot holds an Eye of Ender, granting temporary teleportation freedom during all actions. Teleportation locks are ignored for the duration.")))
-                .build());
-
-        openInvBtn = this.addDrawableChild(ButtonWidget.builder(Text.literal("Remote Inventory"), (btn) -> sendSpell(withBotAlias("bot companion open")))
-                .dimensions(cx - w / 2, top + 6 * (h + gap), w, h)
-                .build());
-
         this.addDrawableChild(ButtonWidget.builder(Text.literal("Back"), (btn) -> close())
-                .dimensions(cx - w / 2, top + 7 * (h + gap) + 10, w, h)
+                .dimensions(cx - w / 2, top + 4 * (h + gap) + 10, w, h)
                 .build());
 
         refreshEnabledState();
@@ -118,9 +98,6 @@ public class CompanionSpellsScreen extends Screen {
         if (comeBtn != null) comeBtn.active = state.full || state.horn;
         if (summonBtn != null) summonBtn.active = state.full || eyeReady;
         if (homeBtn != null) homeBtn.active = state.full || state.botNavTier >= 1;
-        if (guidanceBtn != null) guidanceBtn.active = state.full || state.playerHasPearl;
-        if (recallBtn != null) recallBtn.active = state.full || state.playerHasChorus;
-        if (soulOfEnderBtn != null) soulOfEnderBtn.active = state.full || state.eye || state.playerHasPearl;
         if (openInvBtn != null) openInvBtn.active = state.full;
     }
 
@@ -242,18 +219,6 @@ public class CompanionSpellsScreen extends Screen {
         return false;
     }
 
-    private void openGuidanceConfirm() {
-        if (this.client != null) {
-            this.client.setScreen(new NavigationConfirmScreen(this, botAlias, "guidance"));
-        }
-    }
-
-    private void openRecallConfirm() {
-        if (this.client != null) {
-            this.client.setScreen(new NavigationConfirmScreen(this, botAlias, "recall"));
-        }
-    }
-
     private void castSummon() {
         AccessState state = getAccessState();
         // When full access is unavailable, Eye of Ender enables summon-only with cooldown.
@@ -319,23 +284,13 @@ public class CompanionSpellsScreen extends Screen {
         if (state.full) {
             hint = "Full access: Enchanting Table or Wizard's Tome.";
         } else if (state.eye && state.horn) {
-            if (FrensClient.isEyeSpellOnCooldown()) {
-                long sec = Math.max(1L, FrensClient.getEyeSpellCooldownRemainingMs() / 1000L);
-                hint = "Partial access: Goat Horn (regroup only) + Eye of Ender (summon only, cooldown " + sec + "s).";
-            } else {
-                hint = "Partial access: Goat Horn (regroup only) + Eye of Ender (summon only).";
-            }
+            hint = "Partial access: Goat Horn (regroup) + Eye of Ender (summon).";
         } else if (state.horn) {
             hint = "Goat Horn access: Regroup only.";
         } else if (state.eye) {
-            if (FrensClient.isEyeSpellOnCooldown()) {
-                long sec = Math.max(1L, FrensClient.getEyeSpellCooldownRemainingMs() / 1000L);
-                hint = "Eye of Ender access: Summon only (cooldown " + sec + "s).";
-            } else {
-                hint = "Eye of Ender access: Summon only (cooldown after cast).";
-            }
+            hint = "Eye of Ender access: Summon only.";
         } else {
-            hint = "Requires Enchanting Table, Wizard's Tome, Goat Horn, or Eye of Ender.";
+            hint = "Companion actions. Spells are in the Spells tab.";
         }
         context.drawCenteredTextWithShadow(this.textRenderer, Text.literal(hint), cx, this.height - 28, 0xFFB0B0B0);
     }

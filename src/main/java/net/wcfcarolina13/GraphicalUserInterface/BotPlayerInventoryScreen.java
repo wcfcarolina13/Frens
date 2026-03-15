@@ -163,6 +163,8 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
     private int dialogueScrollIndex;
     // Admin list scroll (only used for overlay when Admin tab is selected).
     private int adminScrollIndex;
+    // Spell list scroll (only used for overlay when Spell tab is selected).
+    private int spellScrollIndex;
     private TopicCategory overlayCategory = TopicCategory.SKILL;
     private int woodcutTreeCount = WOODCUT_TREE_COUNT_DEFAULT;
     private int fishTargetCount = SKILL_COUNT_UNSET;
@@ -431,6 +433,9 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         COMPANION_SUMMON,
         COMPANION_HOME,
         OPEN_SPELLS,
+        SPELL_REMOTE_GUIDANCE,
+        SPELL_CHORUS_RECALL,
+        SPELL_SOUL_OF_ENDER,
         OPEN_GUIDE,
         STOP,
         RESUME,
@@ -478,6 +483,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
     private enum TopicCategory {
         SKILL,
         DIALOGUE,
+        SPELL,
         ADMIN
     }
 
@@ -519,6 +525,14 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
 
         private static TopicEntry adminHeader(String label) {
             return new TopicEntry(label, TopicCategory.ADMIN, null, false, 0, "__header__");
+        }
+
+        private static TopicEntry spell(String label, TopicAction action) {
+            return new TopicEntry(label, TopicCategory.SPELL, action, false, 0, null);
+        }
+
+        private static TopicEntry spellHeader(String label) {
+            return new TopicEntry(label, TopicCategory.SPELL, null, false, 0, "__header__");
         }
     }
 
@@ -565,6 +579,12 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             TopicEntry.skill("Descent", TopicAction.SKILL_DESCENT, false, 1)
     );
 
+    private static final List<TopicEntry> SPELL_TOPIC_ENTRIES = List.of(
+            TopicEntry.spell("Remote Guidance", TopicAction.SPELL_REMOTE_GUIDANCE),
+            TopicEntry.spell("Chorus Recall", TopicAction.SPELL_CHORUS_RECALL),
+            TopicEntry.spell("Soul of Ender", TopicAction.SPELL_SOUL_OF_ENDER)
+    );
+
             // Curated, non-scroll quick actions for the collapsed panel.
             // (These are intentionally short labels; the expanded overlay still shows the full list.)
             private static final List<TopicEntry> QUICK_TOPIC_ENTRIES = List.of(
@@ -606,7 +626,6 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
                 new TopicEntry("Preview as Non-Admin", TopicCategory.ADMIN, TopicAction.ADMIN_PREVIEW_NON_ADMIN, true, 0, null),
 
                 TopicEntry.adminHeader("🧙 Magic & Skins"),
-                new TopicEntry("Spells >", TopicCategory.ADMIN, TopicAction.OPEN_SPELLS, false, 0, null),
                 new TopicEntry("Change Skin >", TopicCategory.ADMIN, TopicAction.OPEN_SKIN_CHOOSER, false, 0, null),
                 new TopicEntry("Allow Skin Changes for Everyone", TopicCategory.ADMIN, TopicAction.SKIN_POLICY_EVERYONE, true, 0, null),
                 new TopicEntry("Allow Custom URL Skins", TopicCategory.ADMIN, TopicAction.SKIN_POLICY_CUSTOM, true, 0, null),
@@ -860,12 +879,13 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
     }
 
     private boolean isActionsOverlayFullWidth() {
-        return overlayCategory == TopicCategory.SKILL;
+        return overlayCategory == TopicCategory.SKILL || overlayCategory == TopicCategory.SPELL;
     }
 
     private String getOverlayHeaderTitle() {
         return switch (overlayCategory) {
             case DIALOGUE -> "Dialogue";
+            case SPELL -> "Spells";
             case ADMIN -> "Admin";
             default -> TOPIC_PANEL_TITLE;
         };
@@ -878,8 +898,48 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         return switch (overlayCategory) {
             case SKILL -> "Scroll or drag scrollbar; click an action; [ and ] switch bot; Esc closes";
             case DIALOGUE -> "Scroll or drag scrollbar; click a topic; [ and ] switch bot; Esc closes";
+            case SPELL -> buildSpellStatusBar();
             case ADMIN -> "Scroll or drag scrollbar; click an admin action; [ and ] switch bot; Esc closes";
         };
+    }
+
+    private String buildSpellStatusBar() {
+        MinecraftClient mc = MinecraftClient.getInstance();
+        if (mc == null || mc.player == null || mc.world == null) {
+            return "Spells require artifacts. No artifacts detected.";
+        }
+
+        StringBuilder sb = new StringBuilder();
+        String alias = this.botAlias != null ? this.botAlias.trim() : "";
+
+        // Player artifacts.
+        java.util.List<String> playerArtifacts = new java.util.ArrayList<>();
+        if (isNearEnchantingTable(mc, 4)) playerArtifacts.add("Enchanting Table");
+        if (hasSpellbookToken(mc)) playerArtifacts.add("Wizard's Tome");
+        if (hasEyeOfEnderToken(mc)) playerArtifacts.add("Eye of Ender");
+        if (hasEnderPearlInInventory(mc)) playerArtifacts.add("Pearl");
+        if (hasChorusFruitInInventory(mc)) playerArtifacts.add("Chorus");
+
+        // Bot artifacts from cached nav tier.
+        int botNavTier = FrensClient.getCachedBotNavTier();
+        java.util.List<String> botArtifacts = new java.util.ArrayList<>();
+        if (botNavTier >= 2) botArtifacts.add("Eye of Ender");
+        if (botNavTier >= 1) botArtifacts.add("Compass/Map");
+
+        if (playerArtifacts.isEmpty() && botArtifacts.isEmpty()) {
+            return "Spells require artifacts. No artifacts detected.";
+        }
+
+        // Format: "You: Pearl, Eye \u00B7 Jake: Eye of Ender"
+        if (!playerArtifacts.isEmpty()) {
+            sb.append("You: ").append(String.join(", ", playerArtifacts));
+        }
+        if (!botArtifacts.isEmpty()) {
+            if (sb.length() > 0) sb.append(" \u00B7 ");
+            sb.append(alias.isEmpty() ? "Bot" : alias).append(": ").append(String.join(", ", botArtifacts));
+        }
+
+        return sb.toString();
     }
 
     private int getOverlayListX(OverlayColumns cols) {
@@ -1796,17 +1856,19 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         int totalRows = skillRows != null ? skillRows.size() : entries.size();
         Rect scrollThumb = computeOverlayListScrollbarThumb(scrollTrack, totalRows, visibleRows);
 
-        // Tabs (Skills / Dialogue / Admin)
+        // Tabs (Skills / Dialogue / Spells / Admin)
         int tabY = listY + 2;
         int tabH = TOPICS_OVERLAY_LIST_HEADER_H - 4;
-        int tabW = Math.max(44, (listW - 8) / 3);
+        int tabW = Math.max(44, (listW - 10) / 4);
         int tabGap = 2;
         int skillsTabX = listX + 2;
         int dialogueTabX = skillsTabX + tabW + tabGap;
-        int adminTabX = dialogueTabX + tabW + tabGap;
+        int spellsTabX = dialogueTabX + tabW + tabGap;
+        int adminTabX = spellsTabX + tabW + tabGap;
         boolean guideRestricted = guideRemoteOpen && !guideRemoteFullAccess;
         drawOverlayTab(context, skillsTabX, tabY, tabW, tabH, TOPIC_PANEL_TITLE, overlayCategory == TopicCategory.SKILL, !guideRestricted);
         drawOverlayTab(context, dialogueTabX, tabY, tabW, tabH, "Dialogue", overlayCategory == TopicCategory.DIALOGUE, !guideRestricted);
+        drawOverlayTab(context, spellsTabX, tabY, tabW, tabH, "Spells", overlayCategory == TopicCategory.SPELL, !guideRestricted);
         drawOverlayTab(context, adminTabX, tabY, tabW, tabH, "Admin", overlayCategory == TopicCategory.ADMIN, isAdminTabEnabled());
 
         Rect searchRect = computeOverlaySearchRect(listX, listY, listW);
@@ -2151,18 +2213,19 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             return true;
         }
 
-        // Tabs (Skills / Dialogue / Admin).
+        // Tabs (Skills / Dialogue / Spells / Admin).
         int listX = getOverlayListX(cols);
         int listY = cols.contentY;
         int listW = getOverlayListW(cols);
 
         int tabY = listY + 2;
         int tabH = TOPICS_OVERLAY_LIST_HEADER_H - 4;
-        int tabW = Math.max(44, (listW - 8) / 3);
+        int tabW = Math.max(44, (listW - 10) / 4);
         int tabGap = 2;
         int skillsTabX = listX + 2;
         int dialogueTabX = skillsTabX + tabW + tabGap;
-        int adminTabX = dialogueTabX + tabW + tabGap;
+        int spellsTabX = dialogueTabX + tabW + tabGap;
+        int adminTabX = spellsTabX + tabW + tabGap;
 
         if (mouseY >= tabY && mouseY < tabY + tabH) {
             if (mouseX >= skillsTabX && mouseX < skillsTabX + tabW) {
@@ -2177,6 +2240,11 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
                 if (!companionQuestStateRequested) {
                     requestCompanionQuestState();
                 }
+                return true;
+            }
+            if (mouseX >= spellsTabX && mouseX < spellsTabX + tabW) {
+                if (guideRestricted) return true; // Admin-only mode — block Spells tab
+                overlayCategory = TopicCategory.SPELL;
                 return true;
             }
             if (mouseX >= adminTabX && mouseX < adminTabX + tabW) {
@@ -2300,6 +2368,8 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
                 enabled = isDialogueEntryEnabled(entry);
             } else if (entry.category == TopicCategory.ADMIN) {
                 enabled = isAdminEntryEnabled(entry);
+            } else if (entry.category == TopicCategory.SPELL) {
+                enabled = isSpellEntryEnabled(entry);
             } else {
                 enabled = (entry.action == null || isEntryEnabled(entry.action));
             }
@@ -2460,6 +2530,9 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         if (entry.category == TopicCategory.ADMIN) {
             return isAdminEntryEnabled(entry);
         }
+        if (entry.category == TopicCategory.SPELL) {
+            return isSpellEntryEnabled(entry);
+        }
         return isEntryEnabled(entry.action);
     }
 
@@ -2482,8 +2555,8 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             return isClickOnActionTarget(mouseX, mouseY, rowRect, entry) ? entry : null;
         }
 
-        if (overlayCategory == TopicCategory.ADMIN) {
-            // Compute the admin entry and its row rect at the mouse position.
+        if (overlayCategory == TopicCategory.ADMIN || overlayCategory == TopicCategory.SPELL) {
+            // Compute the entry and its row rect at the mouse position.
             Rect r = computeTopicsOverlayRect();
             int headerH = this.textRenderer.fontHeight + TOPICS_OVERLAY_HEADER_PAD * 2;
             int footerH = this.textRenderer.fontHeight + TOPICS_OVERLAY_FOOTER_PAD * 2;
@@ -2877,6 +2950,8 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             enabled = isDialogueEntryEnabled(entry);
         } else if (entry.category == TopicCategory.ADMIN) {
             enabled = isAdminEntryEnabled(entry);
+        } else if (entry.category == TopicCategory.SPELL) {
+            enabled = isSpellEntryEnabled(entry);
         } else {
             enabled = entry.action == null || isEntryEnabled(entry.action);
         }
@@ -3162,6 +3237,35 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         }
 
         if (isSkillHeaderEntry(entry)) {
+            return java.util.List.of();
+        }
+
+        // Spell tooltips.
+        if (entry.category == TopicCategory.SPELL) {
+            if (entry.action == TopicAction.SPELL_REMOTE_GUIDANCE) {
+                return java.util.List.of(
+                        "Remote Guidance",
+                        "Consumes an Ender Pearl from both you and your companion.",
+                        "The bot fast-travels to your current location \u2014",
+                        "disappearing briefly, then reappearing at your coordinates."
+                );
+            }
+            if (entry.action == TopicAction.SPELL_CHORUS_RECALL) {
+                return java.util.List.of(
+                        "Chorus Recall",
+                        "Consumes an Ender Pearl and Chorus Fruit from both",
+                        "you and your companion. Instantly teleports the bot",
+                        "to you, or you to the bot."
+                );
+            }
+            if (entry.action == TopicAction.SPELL_SOUL_OF_ENDER) {
+                return java.util.List.of(
+                        "Soul of Ender",
+                        "Consumes a Chorus Fruit while the bot holds an Eye of Ender.",
+                        "Grants 75 seconds of teleportation freedom \u2014",
+                        "all movement locks are bypassed."
+                );
+            }
             return java.util.List.of();
         }
 
@@ -4007,6 +4111,9 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case COMPANION_SUMMON -> runCompanionSummon();
             case COMPANION_HOME -> runCompanionHome();
             case OPEN_SPELLS -> openSpellsMenu();
+            case SPELL_REMOTE_GUIDANCE -> openSpellGuidanceConfirm();
+            case SPELL_CHORUS_RECALL -> openSpellRecallConfirm();
+            case SPELL_SOUL_OF_ENDER -> castSoulOfEnder();
             case OPEN_GUIDE -> openGuideMenu();
             case OPEN_BOT_CONTROLS -> openBotControls();
             case OPEN_PLAYER_SETTINGS -> openAdminPlayerSettings();
@@ -4492,6 +4599,41 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         };
     }
 
+    private boolean isSpellEntryEnabled(TopicEntry entry) {
+        if (entry == null || entry.action == null) return false;
+        MinecraftClient mc = MinecraftClient.getInstance();
+        boolean full = isNearEnchantingTable(mc, 4) || hasSpellbookToken(mc);
+        boolean eye = !full && hasEyeOfEnderToken(mc);
+        boolean playerHasPearl = hasEnderPearlInInventory(mc);
+        boolean playerHasChorus = playerHasPearl && hasChorusFruitInInventory(mc);
+        return switch (entry.action) {
+            case SPELL_REMOTE_GUIDANCE -> full || playerHasPearl;
+            case SPELL_CHORUS_RECALL -> full || playerHasChorus;
+            case SPELL_SOUL_OF_ENDER -> full || eye || playerHasPearl;
+            default -> false;
+        };
+    }
+
+    private boolean hasEnderPearlInInventory(MinecraftClient client) {
+        if (client == null || client.player == null) return false;
+        var inv = client.player.getInventory();
+        for (int i = 0; i < inv.size(); i++) {
+            var stack = inv.getStack(i);
+            if (stack != null && !stack.isEmpty() && stack.isOf(Items.ENDER_PEARL)) return true;
+        }
+        return false;
+    }
+
+    private boolean hasChorusFruitInInventory(MinecraftClient client) {
+        if (client == null || client.player == null) return false;
+        var inv = client.player.getInventory();
+        for (int i = 0; i < inv.size(); i++) {
+            var stack = inv.getStack(i);
+            if (stack != null && !stack.isEmpty() && stack.isOf(Items.CHORUS_FRUIT)) return true;
+        }
+        return false;
+    }
+
     private boolean isAutoReturnAtSunsetActive() {
         return this.handler != null && this.handler.isBotAutoReturnAtSunset();
     }
@@ -4613,6 +4755,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
     private List<TopicEntry> getOverlayEntries() {
         return switch (overlayCategory) {
             case DIALOGUE -> DIALOGUE_TOPIC_ENTRIES;
+            case SPELL -> SPELL_TOPIC_ENTRIES;
             case ADMIN -> getVisibleAdminEntries();
             default -> SKILL_TOPIC_ENTRIES;
         };
@@ -4805,6 +4948,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
     private int getOverlayScrollIndex() {
         return switch (overlayCategory) {
             case DIALOGUE -> dialogueScrollIndex;
+            case SPELL -> spellScrollIndex;
             case ADMIN -> adminScrollIndex;
             default -> skillScrollIndex;
         };
@@ -4813,6 +4957,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
     private void setOverlayScrollIndex(int value) {
         switch (overlayCategory) {
             case DIALOGUE -> dialogueScrollIndex = value;
+            case SPELL -> spellScrollIndex = value;
             case ADMIN -> adminScrollIndex = value;
             default -> skillScrollIndex = value;
         }
@@ -5218,6 +5363,22 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             this.client.player.playSound(SoundEvents.BLOCK_AMETHYST_BLOCK_CHIME, 0.35f, 1.4f);
         }
         this.client.setScreen(new CompanionSpellsScreen(this, this.botAlias));
+    }
+
+    private void openSpellGuidanceConfirm() {
+        if (this.client != null) {
+            this.client.setScreen(new NavigationConfirmScreen(this, this.botAlias, "guidance"));
+        }
+    }
+
+    private void openSpellRecallConfirm() {
+        if (this.client != null) {
+            this.client.setScreen(new NavigationConfirmScreen(this, this.botAlias, "recall"));
+        }
+    }
+
+    private void castSoulOfEnder() {
+        sendChatCommand("bot companion soulofender " + formatBotTarget());
     }
 
     private void openGuideMenu() {

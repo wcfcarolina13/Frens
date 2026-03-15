@@ -148,7 +148,7 @@ public final class BotWorldStateService {
 
     /**
      * Write a position directly without needing a live {@link ServerPlayerEntity}.
-     * Used by the delayed-travel system to pre-write the destination as the bot's
+     * Used by the fast travel system to pre-write the destination as the bot's
      * saved position before removing the bot from the world.
      */
     public static void saveStateManual(MinecraftServer server, String alias,

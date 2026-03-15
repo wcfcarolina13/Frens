@@ -4,12 +4,14 @@ import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.item.Items;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
+import net.minecraft.registry.RegistryKey;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.sound.SoundCategory;
 import net.minecraft.sound.SoundEvents;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.text.Text;
+import net.minecraft.world.World;
 import net.wcfcarolina13.ChatUtils.ChatUtils;
 import net.wcfcarolina13.GameAI.BotEventHandler;
 import net.wcfcarolina13.GameAI.services.BotHomeService;
@@ -132,14 +134,22 @@ public final class SpellNavigationNetworkManager {
         commanderWorld.playSound(null, commander.getX(), commander.getY(), commander.getZ(),
                 SoundEvents.ENTITY_ENDER_EYE_LAUNCH, SoundCategory.PLAYERS, 0.7f, 1.2f);
 
-        // Navigate bot to destination.
-        // TODO: Task 8 will replace this with NavigationArtifactService.beginDelayedTravel()
-        // which adds a configurable delay before teleporting. For now, use direct setReturnToBase.
-        BotEventHandler.setReturnToBase(bot, Vec3d.ofCenter(goal));
+        // Fast travel: bot disappears and reappears at destination after a delay (~1s/chunk).
+        ServerWorld targetWorld = (ServerWorld) commander.getEntityWorld();
+        RegistryKey<World> targetDim = targetWorld.getRegistryKey();
+        double distance = new Vec3d(bot.getX(), bot.getY(), bot.getZ()).distanceTo(Vec3d.ofCenter(goal));
+        boolean crossDim = !((ServerWorld) bot.getEntityWorld()).getRegistryKey().equals(targetDim);
+        int delayTicks = NavigationArtifactService.calculateDelayTicks(distance, crossDim);
 
-        sendFeedback(commander, "Remote Guidance cast. Your companion is on the way.");
-        LOGGER.info("Remote Guidance: {} sent bot '{}' toward {}", commander.getName().getString(),
-                bot.getName().getString(), goal.toShortString());
+        NavigationArtifactService.beginDelayedTravel(
+                server, bot, bot.getName().getString(), goal, targetDim, delayTicks, commander.getUuid());
+
+        int sec = Math.max(1, delayTicks / 20);
+        sendFeedback(commander, "Remote Guidance cast. " + bot.getName().getString()
+                + " is fast-traveling to destination (ETA ~" + sec + "s).");
+        LOGGER.info("Remote Guidance: {} sent bot '{}' via fast travel to {} (delay {}t)",
+                commander.getName().getString(), bot.getName().getString(),
+                goal.toShortString(), delayTicks);
     }
 
     /**

@@ -486,7 +486,7 @@ public final class BotHomeService {
         }
     }
 
-    /** Get navigation mode for a bot. Returns "TELEPORT_DELAY" (default) or "WALK". */
+    /** Get navigation mode for a bot. Returns "TELEPORT_DELAY" (fast travel, default) or "WALK". */
     public static String getNavMode(ServerPlayerEntity bot) {
         if (bot == null || !(bot.getEntityWorld() instanceof ServerWorld world)) {
             return "TELEPORT_DELAY";
@@ -505,7 +505,7 @@ public final class BotHomeService {
         }
     }
 
-    /** Set navigation mode for a bot ("WALK" or "TELEPORT_DELAY"). */
+    /** Set navigation mode for a bot ("WALK" or "TELEPORT_DELAY" / fast travel). */
     public static void setNavMode(ServerPlayerEntity bot, String mode) {
         if (bot == null || !(bot.getEntityWorld() instanceof ServerWorld world)) {
             return;
