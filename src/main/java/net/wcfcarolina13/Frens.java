@@ -512,6 +512,10 @@ public class Frens implements ModInitializer {
         PayloadTypeRegistry.playC2S().register(net.wcfcarolina13.network.NavigationResponsePayload.ID, net.wcfcarolina13.network.NavigationResponsePayload.CODEC);
         PayloadTypeRegistry.playC2S().register(net.wcfcarolina13.network.SpellGuidancePayload.ID, net.wcfcarolina13.network.SpellGuidancePayload.CODEC);
 
+        // Guide -> remote bot inventory open
+        PayloadTypeRegistry.playC2S().register(net.wcfcarolina13.network.GuideOpenInventoryPayload.ID, net.wcfcarolina13.network.GuideOpenInventoryPayload.CODEC);
+        PayloadTypeRegistry.playS2C().register(net.wcfcarolina13.network.GuideInventoryAccessPayload.ID, net.wcfcarolina13.network.GuideInventoryAccessPayload.CODEC);
+
         net.wcfcarolina13.network.BaseNetworkManager.registerReceiversOnce();
         net.wcfcarolina13.network.CraftingHistoryNetworkManager.registerReceiversOnce();
         net.wcfcarolina13.network.CookablesNetworkManager.registerReceiversOnce();
@@ -524,6 +528,7 @@ public class Frens implements ModInitializer {
         net.wcfcarolina13.network.BotSkinNetworkManager.registerReceiversOnce();
         LearningModeService.registerReceiversOnce();
         net.wcfcarolina13.network.SpellNavigationNetworkManager.registerReceiversOnce();
+        net.wcfcarolina13.network.GuideInventoryNetworkManager.registerReceiversOnce();
 
         modCommandRegistry.register();
         configCommand.register();
@@ -633,6 +638,8 @@ public class Frens implements ModInitializer {
             net.wcfcarolina13.GameAI.services.BotControlApplier.resetSession();
             // Flush pending bot travels to disk, then clear in-memory state.
             net.wcfcarolina13.GameAI.services.NavigationArtifactService.resetSession();
+            // Clear Soul of Ender timed buffs.
+            net.wcfcarolina13.GameAI.services.SoulOfEnderService.resetSession();
         });
 
         ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> {
@@ -806,6 +813,7 @@ public class Frens implements ModInitializer {
         ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.CompanionOverheadHologramService::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(LearningModeService::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(NavigationArtifactService::tickPendingTravels);
+        ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.SoulOfEnderService::onServerTick);
 
         ServerMessageEvents.CHAT_MESSAGE.register((message, sender, params) -> {
             String raw = message.getContent().getString();

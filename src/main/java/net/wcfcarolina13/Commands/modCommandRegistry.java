@@ -4661,6 +4661,95 @@ public class modCommandRegistry {
         return 1;
     }
 
+    static int executeCompanionSoulOfEnderTargets(CommandContext<ServerCommandSource> context, String targetArg) {
+        ServerCommandSource source = context.getSource();
+        MinecraftServer server = source.getServer();
+        ServerPlayerEntity commander;
+        try {
+            commander = source.getPlayer();
+        } catch (Exception e) {
+            commander = null;
+        }
+        if (server == null || commander == null) {
+            ChatUtils.sendSystemMessage(source, "Only players can cast Soul of Ender.");
+            return 0;
+        }
+        boolean recruitmentMode = SurvivalRecruitmentService.isEnabled(server);
+        ManualConfig.SurvivalRecruitmentState st = SurvivalRecruitmentService.getState(server);
+        String alias = resolveCompanionAlias(st, targetArg);
+
+        if (recruitmentMode) {
+            if (st == null || !st.isRecruited()) {
+                ChatUtils.sendSystemMessage(source, "This world hasn't recruited a companion yet.");
+                return 0;
+            }
+            if (!st.isPermanentCompanion()) {
+                ChatUtils.sendSystemMessage(source, "They're not a permanent companion yet.");
+                return 0;
+            }
+            if (!isAuthorizedCompanionCommander(commander, st)) {
+                ChatUtils.sendSystemMessage(source, "You aren't the one they pledged to.");
+                return 0;
+            }
+            String recruitedAlias = st.getBotAlias();
+            if (targetArg != null && !targetArg.isBlank() && !recruitedAlias.equalsIgnoreCase(targetArg.trim())) {
+                ChatUtils.sendSystemMessage(source, "This companion command only applies to '" + recruitedAlias + "'.");
+                return 0;
+            }
+        }
+
+        // Access gate: same as Summon (full access, Eye of Ender, or Ender Pearl).
+        ServerPlayerEntity existingBot = server.getPlayerManager().getPlayer(alias);
+        if (!canUseCompanionSummon(server, commander, existingBot, st)) {
+            ChatUtils.sendSystemMessage(source, "To cast Soul of Ender, use an Enchanting Table, Wizard's Tome, Eye of Ender, or Ender Pearl.");
+            return 0;
+        }
+
+        ServerPlayerEntity bot = server.getPlayerManager().getPlayer(alias);
+        if (bot == null || bot.isRemoved() || !bot.isAlive()) {
+            ChatUtils.sendSystemMessage(source, alias + " is not present to receive Soul of Ender.");
+            return 0;
+        }
+
+        // Prevent double-cast.
+        if (net.wcfcarolina13.GameAI.services.SoulOfEnderService.isActive(bot.getUuid())) {
+            long remaining = net.wcfcarolina13.GameAI.services.SoulOfEnderService.remainingTicks(
+                    bot.getUuid(), server.getOverworld().getTime());
+            long sec = Math.max(1L, remaining / 20L);
+            ChatUtils.sendSystemMessage(source, "Soul of Ender is already active on " + alias + " (" + sec + "s remaining).");
+            return 0;
+        }
+
+        // Validate bot has Eye of Ender (kept) + Chorus Fruit (consumed).
+        if (!net.wcfcarolina13.GameAI.services.NavigationArtifactService.botHasSoulOfEnderItems(bot)) {
+            ChatUtils.sendSystemMessage(source, alias + " needs an Eye of Ender and a Chorus Fruit to channel Soul of Ender.");
+            return 0;
+        }
+
+        // Consume only the Chorus Fruit from the bot. Eye of Ender stays.
+        net.wcfcarolina13.GameAI.services.NavigationArtifactService.consumeItem(bot, Items.CHORUS_FRUIT);
+
+        // Activate the timed buff.
+        net.wcfcarolina13.GameAI.services.SoulOfEnderService.activate(
+                bot.getUuid(), server.getOverworld().getTime(),
+                net.wcfcarolina13.GameAI.services.SoulOfEnderService.DEFAULT_DURATION_TICKS,
+                commander.getUuid(), alias);
+
+        // Immersive feedback.
+        ChatUtils.sendSystemMessage(source,
+                "The Eye of Ender flares with void energy. " + alias
+                + "'s movement is unbound for 75 seconds.");
+
+        // Sound effect at the bot's position.
+        if (bot.getEntityWorld() instanceof net.minecraft.server.world.ServerWorld botWorld) {
+            botWorld.playSound(null, bot.getX(), bot.getY(), bot.getZ(),
+                    net.minecraft.sound.SoundEvents.ENTITY_ENDERMAN_TELEPORT,
+                    net.minecraft.sound.SoundCategory.PLAYERS, 0.8f, 1.6f);
+        }
+
+        return 1;
+    }
+
     static int executeCompanionHomeTargets(CommandContext<ServerCommandSource> context, String targetArg) {
         ServerCommandSource source = context.getSource();
         MinecraftServer server = source.getServer();
@@ -4864,7 +4953,7 @@ public class modCommandRegistry {
         return st != null && isNearCompanionAnchor(server, commander, st, 16.0D);
     }
 
-    private static boolean isNearEnchantingTable(ServerPlayerEntity commander, int radius) {
+    public static boolean isNearEnchantingTable(ServerPlayerEntity commander, int radius) {
         if (commander == null) {
             return false;
         }
@@ -4885,7 +4974,7 @@ public class modCommandRegistry {
         return false;
     }
 
-    private static boolean hasSpellbookToken(ServerPlayerEntity commander) {
+    public static boolean hasSpellbookToken(ServerPlayerEntity commander) {
         if (commander == null) {
             return false;
         }

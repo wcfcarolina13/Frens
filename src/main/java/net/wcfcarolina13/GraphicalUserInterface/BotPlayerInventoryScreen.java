@@ -59,6 +59,18 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
     private static final int TOPIC_CONTROL_GAP = 2;
     private static final int SKILL_ICON_SLOT_W = 16;
 
+    /** Set by BotGuideScreen before sending GuideOpenInventoryPayload to start on Admin tab. */
+    static boolean pendingAdminTab = false;
+    /** Cursor position saved by BotGuideScreen so the guide-open transition doesn't center it. */
+    static double pendingAdminCursorX = -1, pendingAdminCursorY = -1;
+
+    /** Set by the GuideInventoryAccessPayload S2C handler to indicate a guide-initiated remote open. */
+    public static boolean guideRemoteOpen = false;
+    /** Whether the guide remote open has full inventory access (proximity/operator/artifacts). */
+    public static boolean guideRemoteFullAccess = false;
+    /** Human-readable reason for remote access (e.g. "Remote Inventory active — Wizard's Tome"). */
+    public static String guideRemoteAccessReason = "";
+
     // Collapsed (shared inventory) quick-actions grid.
     private static final String TOPIC_PANEL_TITLE = "Actions";
     private static final int QUICK_TOPIC_COLS = 3;
@@ -129,7 +141,10 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
     private static final Type ADMIN_PERMISSIONS_CACHE_TYPE = new TypeToken<AdminPermissionsCache>() {}.getType();
     private static final Map<String, AdminPermissionsCache> ADMIN_PERMISSIONS_BY_ALIAS = new HashMap<>();
 
-    private boolean adminPreviewAsNonAdmin = false;
+    private static boolean adminPreviewAsNonAdmin = false;
+
+    // Guards guide-flag init so resize re-inits don't reset guideRemoteOpen.
+    private boolean guideStateInitialized = false;
 
     // Browse state for scrolling past blocked bots in the switcher.
     private int switchBrowseOffset = 0;
@@ -597,7 +612,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
                 new TopicEntry("Allow Custom URL Skins", TopicCategory.ADMIN, TopicAction.SKIN_POLICY_CUSTOM, true, 0, null),
                 TopicEntry.admin("Give Wizard's Tome", "give_wizard_tome"),
 
-                TopicEntry.adminHeader("⚙️ Behavior"),
+                TopicEntry.adminHeader("⚙ Behavior"),
                 new TopicEntry("Gameplay Tips (Hints)", TopicCategory.ADMIN, TopicAction.GAMEPLAY_TIPS, true, 0, null),
                 new TopicEntry("Idle Hobbies Anywhere", TopicCategory.ADMIN, TopicAction.IDLE_HOBBIES_ANYWHERE, true, 0, null),
                 new TopicEntry("Baritone Pathfinder", TopicCategory.ADMIN, TopicAction.BARITONE_PATHFINDER, true, 0, null),
@@ -663,6 +678,37 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         if (isAdminUser()) {
             requestAdminPermissionsSnapshot(this.botAlias);
         }
+
+        // Guide requested opening directly to Admin tab (via ] hotkey remote open).
+        // Start restricted (Admin-only) until the S2C handler (GuideInventoryAccessPayload)
+        // confirms the actual access level — avoids a frame of unrestricted tabs.
+        // Guarded so that resize re-inits (same instance, init() called again) don't reset flags.
+        if (!guideStateInitialized) {
+            guideStateInitialized = true;
+            if (pendingAdminTab) {
+                pendingAdminTab = false;
+                topicsExpanded = true;
+                overlayCategory = TopicCategory.ADMIN;
+                guideRemoteOpen = true;
+                guideRemoteFullAccess = false; // Assume restricted until S2C confirms otherwise
+                // Restore cursor position saved by BotGuideScreen (setScreen centres it).
+                if (pendingAdminCursorX >= 0 && this.client != null) {
+                    long window = this.client.getWindow().getHandle();
+                    GLFW.glfwSetCursorPos(window, pendingAdminCursorX, pendingAdminCursorY);
+                    ((net.wcfcarolina13.mixin.MouseAccessor) (Object) this.client.mouse)
+                            .setX(pendingAdminCursorX);
+                    ((net.wcfcarolina13.mixin.MouseAccessor) (Object) this.client.mouse)
+                            .setY(pendingAdminCursorY);
+                    pendingAdminCursorX = -1;
+                    pendingAdminCursorY = -1;
+                }
+            } else {
+                // Not a guide open — clear any leftover guide-remote state.
+                guideRemoteOpen = false;
+                guideRemoteFullAccess = false;
+                guideRemoteAccessReason = "";
+            }
+        }
     }
 
     private void captureBotSwitchUiState(String targetAlias) {
@@ -720,6 +766,10 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
 
     @Override
     protected void drawBackground(DrawContext context, float delta, int mouseX, int mouseY) {
+        // Guide Admin-only mode: don't draw inventory textures, stats, or topic panel.
+        if (guideRemoteOpen && !guideRemoteFullAccess) {
+            return;
+        }
         int x = (this.width - this.backgroundWidth) / 2;
         int y = (this.height - this.backgroundHeight) / 2;
         context.drawTexture(RenderPipelines.GUI_TEXTURED, BACKGROUND_TEXTURE, x, y, 0f, 0f,
@@ -779,6 +829,10 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
     }
 
     private void drawOverlayBotSwitchControls(DrawContext context, Rect overlayRect, int closeX, int mouseX, int mouseY) {
+        // Guide Admin-only mode: hide bot switch controls entirely.
+        if (guideRemoteOpen && !guideRemoteFullAccess) {
+            return;
+        }
         BotSwitchLayout layout = computeOverlayBotSwitchLayout(overlayRect, closeX);
         if (layout == null) {
             return;
@@ -818,6 +872,9 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
     }
 
     private String getOverlayFooterHint() {
+        if (guideRemoteOpen && !guideRemoteFullAccess) {
+            return "Scroll or drag scrollbar; click an admin action; Esc closes";
+        }
         return switch (overlayCategory) {
             case SKILL -> "Scroll or drag scrollbar; click an action; [ and ] switch bot; Esc closes";
             case DIALOGUE -> "Scroll or drag scrollbar; click a topic; [ and ] switch bot; Esc closes";
@@ -1031,6 +1088,10 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
 
     private boolean handleBotSwitchClick(BotSwitchLayout layout, double mouseX, double mouseY) {
         if (layout == null) {
+            return false;
+        }
+        // Block bot switching in guide Admin-only mode.
+        if (guideRemoteOpen && !guideRemoteFullAccess) {
             return false;
         }
         boolean hitSwitchControl = layout.prevRect().contains(mouseX, mouseY)
@@ -1676,6 +1737,23 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         context.fill(closeX, closeY, closeX + closeSize, closeY + closeSize, closeHover ? 0xFF2A2A2A : 0xFF1A1A1A);
         int closeTextX = closeX + (closeSize - this.textRenderer.getWidth(closeLabel)) / 2;
         context.drawText(this.textRenderer, closeLabel, closeTextX, closeY + 2, 0xFFEFEFEF, false);
+
+        // "Guide" button (left of X) — only in guide Admin-only mode.
+        if (guideRemoteOpen && !guideRemoteFullAccess) {
+            String guideLabel = "Guide";
+            int guideLabelW = this.textRenderer.getWidth(guideLabel);
+            int guideBtnW = guideLabelW + 8;
+            int guideBtnH = closeSize;
+            int guideBtnX = closeX - guideBtnW - 4;
+            int guideBtnY = closeY;
+            boolean guideHover = mouseX >= guideBtnX && mouseX < guideBtnX + guideBtnW
+                    && mouseY >= guideBtnY && mouseY < guideBtnY + guideBtnH;
+            context.fill(guideBtnX, guideBtnY, guideBtnX + guideBtnW, guideBtnY + guideBtnH,
+                    guideHover ? 0xFF2A2A2A : 0xFF1A1A1A);
+            context.drawText(this.textRenderer, guideLabel,
+                    guideBtnX + (guideBtnW - guideLabelW) / 2, guideBtnY + 2, 0xFFB0B0B0, false);
+        }
+
         drawOverlayBotSwitchControls(context, r, closeX, mouseX, mouseY);
 
         // Footer hint.
@@ -1726,8 +1804,9 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         int skillsTabX = listX + 2;
         int dialogueTabX = skillsTabX + tabW + tabGap;
         int adminTabX = dialogueTabX + tabW + tabGap;
-        drawOverlayTab(context, skillsTabX, tabY, tabW, tabH, TOPIC_PANEL_TITLE, overlayCategory == TopicCategory.SKILL, true);
-        drawOverlayTab(context, dialogueTabX, tabY, tabW, tabH, "Dialogue", overlayCategory == TopicCategory.DIALOGUE, true);
+        boolean guideRestricted = guideRemoteOpen && !guideRemoteFullAccess;
+        drawOverlayTab(context, skillsTabX, tabY, tabW, tabH, TOPIC_PANEL_TITLE, overlayCategory == TopicCategory.SKILL, !guideRestricted);
+        drawOverlayTab(context, dialogueTabX, tabY, tabW, tabH, "Dialogue", overlayCategory == TopicCategory.DIALOGUE, !guideRestricted);
         drawOverlayTab(context, adminTabX, tabY, tabW, tabH, "Admin", overlayCategory == TopicCategory.ADMIN, isAdminTabEnabled());
 
         Rect searchRect = computeOverlaySearchRect(listX, listY, listW);
@@ -1891,7 +1970,23 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         // Leave room for the response area.
         int textH = Math.max(20, (respAreaH > 0 ? (respStartY - 2) : (y + h)) - textY);
 
-        java.util.List<String> lines = net.wcfcarolina13.FrensClient.getDialogueLines(botAlias, 18);
+        java.util.List<String> allLines = net.wcfcarolina13.FrensClient.getDialogueLines(botAlias, 18);
+        // When on the Dialogue tab, hide admin action logs so they don't mix with quest conversation.
+        java.util.List<String> lines;
+        if (overlayCategory == TopicCategory.DIALOGUE) {
+            lines = new java.util.ArrayList<>();
+            for (String l : allLines) {
+                if (l != null) {
+                    String trimmed = l.trim();
+                    if (trimmed.startsWith("Admin:") || trimmed.startsWith("You (Admin):")) {
+                        continue;
+                    }
+                }
+                lines.add(l);
+            }
+        } else {
+            lines = allLines;
+        }
         java.util.List<StyledLine> wrapped = new java.util.ArrayList<>();
         for (String line : lines) {
             if (line == null || line.isBlank()) continue;
@@ -2003,9 +2098,14 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
     private boolean clickTopicsOverlay(net.minecraft.client.gui.Click click) {
         double mouseX = click.x();
         double mouseY = click.y();
+        boolean guideRestricted = guideRemoteOpen && !guideRemoteFullAccess;
         Rect r = computeTopicsOverlayRect();
         if (!r.contains(mouseX, mouseY)) {
-            toggleTopicsExpanded(false);
+            if (guideRestricted) {
+                this.close(); // Admin-only mode: clicking outside closes the screen entirely.
+            } else {
+                toggleTopicsExpanded(false);
+            }
             return true;
         }
 
@@ -2014,8 +2114,27 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         int closeX = r.right() - TOPICS_OVERLAY_PADDING - closeSize;
         int closeY = r.y + (headerH - closeSize) / 2;
         if (mouseX >= closeX && mouseX < closeX + closeSize && mouseY >= closeY && mouseY < closeY + closeSize) {
-            toggleTopicsExpanded(false);
+            if (guideRestricted) {
+                this.close(); // Admin-only mode: X closes the screen entirely.
+            } else {
+                toggleTopicsExpanded(false);
+            }
             return true;
+        }
+
+        // "Guide" button (left of X) — navigate back to guide screen.
+        if (guideRestricted) {
+            String guideLabel = "Guide";
+            int guideLabelW = this.textRenderer.getWidth(guideLabel);
+            int guideBtnW = guideLabelW + 8;
+            int guideBtnH = closeSize;
+            int guideBtnX = closeX - guideBtnW - 4;
+            int guideBtnY = closeY;
+            if (mouseX >= guideBtnX && mouseX < guideBtnX + guideBtnW
+                    && mouseY >= guideBtnY && mouseY < guideBtnY + guideBtnH) {
+                openGuideMenu();
+                return true;
+            }
         }
 
         BotSwitchLayout overlaySwitch = computeOverlayBotSwitchLayout(r, closeX);
@@ -2047,11 +2166,13 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
 
         if (mouseY >= tabY && mouseY < tabY + tabH) {
             if (mouseX >= skillsTabX && mouseX < skillsTabX + tabW) {
+                if (guideRestricted) return true; // Admin-only mode — block Actions tab
                 overlayCategory = TopicCategory.SKILL;
                 overlayDraggingSplit = false;
                 return true;
             }
             if (mouseX >= dialogueTabX && mouseX < dialogueTabX + tabW) {
+                if (guideRestricted) return true; // Admin-only mode — block Dialogue tab
                 overlayCategory = TopicCategory.DIALOGUE;
                 if (!companionQuestStateRequested) {
                     requestCompanionQuestState();
@@ -2144,6 +2265,14 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             commitDirectInput();
         }
 
+        // Action control box hit test — only fires when the click lands on the
+        // explicit ON/OFF or ▸ button, not the row label area.
+        TopicEntry controlHit = getActionControlHitInOverlay(mouseX, mouseY);
+        if (controlHit != null) {
+            handleTopicEntry(controlHit);
+            return true;
+        }
+
         // Dialogue response prompts (left column). Only active when the Dialogue tab is selected.
         if (overlayCategory == TopicCategory.DIALOGUE) {
             TopicEntry response = getDialogueResponseEntryAtOverlay(mouseX, mouseY);
@@ -2160,6 +2289,12 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
                     || (entry.category == TopicCategory.SKILL && isSkillHeaderEntry(entry))) {
                 return true;
             }
+            // Entries with explicit control boxes are only actionable via the
+            // control box click (handled above). Row clicks consume the event
+            // but do NOT execute the action.
+            if (hasActionControlBox(entry)) {
+                return true;
+            }
             boolean enabled;
             if (entry.category == TopicCategory.DIALOGUE) {
                 enabled = isDialogueEntryEnabled(entry);
@@ -2169,18 +2304,6 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
                 enabled = (entry.action == null || isEntryEnabled(entry.action));
             }
             if (enabled) {
-                // For skill actions, the icon + label text triggers execution.
-                // Clicking empty space past the label does nothing — prevents accidental fires.
-                if (entry.category == TopicCategory.SKILL && entry.action != null) {
-                    SkillEntryHit hit = getSkillEntryHitAtOverlay(mouseX, mouseY);
-                    if (hit != null) {
-                        int labelStartX = hit.rect().x + 4 + SKILL_ICON_SLOT_W + entry.indent * 10;
-                        int labelEndX = labelStartX + this.textRenderer.getWidth(entry.label);
-                        if (mouseX >= labelEndX) {
-                            return true; // clicked past label — consume but don't execute
-                        }
-                    }
-                }
                 handleTopicEntry(entry);
                 return true;
             }
@@ -2311,6 +2434,145 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             }
         }
         return 0;
+    }
+
+    /**
+     * Returns true if the given entry should be controlled via an explicit action
+     * control box (ON/OFF or ▸) rather than a full-row click.
+     */
+    private boolean hasActionControlBox(TopicEntry entry) {
+        if (entry == null || entry.category == TopicCategory.DIALOGUE) {
+            return false;
+        }
+        if (entry.action == null) {
+            return false;
+        }
+        // Headers have no control box.
+        if (isAdminHeaderEntry(entry) || isSkillHeaderEntry(entry)) {
+            return false;
+        }
+        // Adjustable skills have their own +/- controls, not action control boxes.
+        if (entry.action == TopicAction.FOLLOW || entry.action == TopicAction.SKILL_WOODCUT
+                || isAdjustableSkillAction(entry.action)) {
+            return false;
+        }
+        // Entry must be enabled to have an active control box.
+        if (entry.category == TopicCategory.ADMIN) {
+            return isAdminEntryEnabled(entry);
+        }
+        return isEntryEnabled(entry.action);
+    }
+
+    /**
+     * Hit-tests the explicit action control box (ON/OFF toggle or ▸ button) for the
+     * entry under the mouse. Returns the TopicEntry if the click lands on its control
+     * box, null otherwise.
+     */
+    private TopicEntry getActionControlHitInOverlay(double mouseX, double mouseY) {
+        if (overlayCategory == TopicCategory.SKILL) {
+            SkillEntryHit hit = getSkillEntryHitAtOverlay(mouseX, mouseY);
+            if (hit == null || hit.entry() == null) {
+                return null;
+            }
+            TopicEntry entry = hit.entry();
+            if (!hasActionControlBox(entry)) {
+                return null;
+            }
+            Rect rowRect = hit.rect();
+            return isClickOnActionTarget(mouseX, mouseY, rowRect, entry) ? entry : null;
+        }
+
+        if (overlayCategory == TopicCategory.ADMIN) {
+            // Compute the admin entry and its row rect at the mouse position.
+            Rect r = computeTopicsOverlayRect();
+            int headerH = this.textRenderer.fontHeight + TOPICS_OVERLAY_HEADER_PAD * 2;
+            int footerH = this.textRenderer.fontHeight + TOPICS_OVERLAY_FOOTER_PAD * 2;
+            int footerY = r.bottom() - footerH;
+            int contentY = r.y + headerH + 2;
+            int contentH = (footerY - 2) - contentY;
+
+            OverlayColumns cols = computeOverlayColumns(r);
+            int listX = getOverlayListX(cols);
+            int listY = getOverlayRowsStartY(cols.contentY);
+            int listW = getOverlayListContentWidth(cols);
+            int listH = getOverlayRowsHeight(contentH);
+            int visibleRows = Math.max(1, listH / TOPIC_ROW_HEIGHT);
+            clampOverlayScroll(visibleRows);
+            List<TopicEntry> entries = getFilteredOverlayEntries(getOverlayEntries());
+
+            if (mouseX < listX || mouseX >= listX + listW
+                    || mouseY < listY || mouseY >= listY + listH) {
+                return null;
+            }
+            int rowIndex = (int) ((mouseY - listY) / TOPIC_ROW_HEIGHT);
+            if (rowIndex < 0 || rowIndex >= visibleRows) {
+                return null;
+            }
+            int entryIndex = getOverlayScrollIndex() + rowIndex;
+            if (entryIndex < 0 || entryIndex >= entries.size()) {
+                return null;
+            }
+            TopicEntry entry = entries.get(entryIndex);
+            if (!hasActionControlBox(entry)) {
+                return null;
+            }
+            int rowTop = listY + rowIndex * TOPIC_ROW_HEIGHT;
+            Rect rowRect = new Rect(listX, rowTop, listW, TOPIC_ROW_HEIGHT);
+            return isClickOnActionTarget(mouseX, mouseY, rowRect, entry) ? entry : null;
+        }
+
+        return null;
+    }
+
+    /**
+     * Checks whether the mouse position falls within the control box area of a row.
+     * Uses the same geometry as drawTopicRow's control box rendering.
+     */
+    private boolean isClickOnActionTarget(double mouseX, double mouseY, Rect rowRect, TopicEntry entry) {
+        int controlSize = TOPIC_ROW_HEIGHT;
+        int controlY = rowRect.y;
+        int controlBoxRight = rowRect.x + rowRect.w - 2;
+
+        // Check control box (right side).
+        if (entry.toggle) {
+            boolean active = isEntryActive(entry.action);
+            String status = active ? "ON" : "OFF";
+            int boxW = this.textRenderer.getWidth(status) + 16;
+            int boxX = controlBoxRight - boxW;
+            if (mouseX >= boxX && mouseX < boxX + boxW
+                    && mouseY >= controlY && mouseY < controlY + controlSize) {
+                return true;
+            }
+        } else {
+            int boxW = controlSize + 8;
+            int boxX = controlBoxRight - boxW;
+            if (mouseX >= boxX && mouseX < boxX + boxW
+                    && mouseY >= controlY && mouseY < controlY + controlSize) {
+                return true;
+            }
+        }
+
+        // Check label text area (left side) — title + icon doubles as a button.
+        int labelX = rowRect.x + 4 + entry.indent * 8;
+        if (entry.category == TopicCategory.SKILL) {
+            // Include the icon in the clickable area — start at rowX + 4 (where icon is drawn).
+            labelX = rowRect.x + 4;
+        }
+        String label = displayLabelForEntry(entry);
+        int labelEndX;
+        if (entry.category == TopicCategory.SKILL) {
+            // Icon starts at rowRect.x + 4, label text starts after the icon slot.
+            int textStartX = rowRect.x + 4 + SKILL_ICON_SLOT_W + entry.indent * 10;
+            labelEndX = textStartX + this.textRenderer.getWidth(label);
+        } else {
+            labelEndX = labelX + this.textRenderer.getWidth(label);
+        }
+        if (mouseX >= labelX && mouseX < labelEndX
+                && mouseY >= rowRect.y && mouseY < rowRect.y + TOPIC_ROW_HEIGHT) {
+            return true;
+        }
+
+        return false;
     }
 
     private SkillAdjustHit getAdjustableSkillHitInOverlay(double mouseX, double mouseY) {
@@ -2634,23 +2896,38 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         }
         String label = displayLabelForEntry(entry);
 
-        // UI declutter: only show state for toggles; actions are implicit via clicking the row.
-        String status = entry.toggle ? (active ? "ON" : "OFF") : null;
-        int statusX = status == null ? -1 : (rowX + rowW - 4 - this.textRenderer.getWidth(status));
-        int statusColor = active ? 0xFFE6D7A3 : 0xFFB0B0B0;
-        if (!enabled) {
-            statusColor = 0xFF6F6F6F;
-        }
+        // Draw explicit control box for actionable entries (SKILL and ADMIN categories).
+        // Toggles get an ON/OFF button box; non-toggle actions get a "▸" button box.
+        // Dialogue entries have no control box (they use a different click path).
+        boolean hasControlBox = entry.category != TopicCategory.DIALOGUE
+                && entry.action != null && enabled;
+        int controlSize = TOPIC_ROW_HEIGHT;
+        int controlY = rowY;
+        int controlBoxRight = rowX + rowW - 2;
 
-        int labelMaxW = status == null
-                ? Math.max(0, (rowX + rowW - 4) - labelX)
-                : Math.max(0, (statusX - TOPIC_CONTROL_GAP) - labelX);
-        String drawnLabel = elideToWidth(label, labelMaxW);
-        int labelColor = enabled ? COLOR_TEXT_PARCHMENT : COLOR_TEXT_DISABLED;
-        context.drawText(this.textRenderer, drawnLabel, labelX, textY, labelColor, false);
-
-        if (status != null) {
-            context.drawText(this.textRenderer, status, statusX, textY, statusColor, false);
+        if (hasControlBox && entry.toggle) {
+            String status = active ? "ON" : "OFF";
+            int boxW = this.textRenderer.getWidth(status) + 16;
+            int boxX = controlBoxRight - boxW;
+            drawActionControlBox(context, boxX, controlY, boxW, controlSize, status, mouseX, mouseY, active);
+            int labelMaxW = Math.max(0, (boxX - TOPIC_CONTROL_GAP) - labelX);
+            String drawnLabel = elideToWidth(label, labelMaxW);
+            int labelColor = enabled ? COLOR_TEXT_PARCHMENT : COLOR_TEXT_DISABLED;
+            context.drawText(this.textRenderer, drawnLabel, labelX, textY, labelColor, false);
+        } else if (hasControlBox) {
+            String btnLabel = "\u25B8"; // ▸
+            int boxW = controlSize + 8;
+            int boxX = controlBoxRight - boxW;
+            drawActionControlBox(context, boxX, controlY, boxW, controlSize, btnLabel, mouseX, mouseY, active);
+            int labelMaxW = Math.max(0, (boxX - TOPIC_CONTROL_GAP) - labelX);
+            String drawnLabel = elideToWidth(label, labelMaxW);
+            int labelColor = enabled ? COLOR_TEXT_PARCHMENT : COLOR_TEXT_DISABLED;
+            context.drawText(this.textRenderer, drawnLabel, labelX, textY, labelColor, false);
+        } else {
+            int labelMaxW = Math.max(0, (rowX + rowW - 4) - labelX);
+            String drawnLabel = elideToWidth(label, labelMaxW);
+            int labelColor = enabled ? COLOR_TEXT_PARCHMENT : COLOR_TEXT_DISABLED;
+            context.drawText(this.textRenderer, drawnLabel, labelX, textY, labelColor, false);
         }
     }
 
@@ -2727,7 +3004,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             return "";
         }
         if (entry.category == TopicCategory.ADMIN && entry.action == TopicAction.ADMIN_PREVIEW_NON_ADMIN) {
-            return adminPreviewAsNonAdmin ? "Preview as Non-Admin (ON)" : "Preview as Non-Admin";
+            return "Preview as Non-Admin";
         }
         return entry.label != null ? entry.label : "";
     }
@@ -3316,6 +3593,48 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         context.drawText(this.textRenderer, label, textX, textY, COLOR_TEXT_PARCHMENT, false);
     }
 
+    /**
+     * Draws a variable-width bordered control box — used for toggle ON/OFF buttons and action triggers.
+     * Returns the rect for hit-testing.
+     */
+    private Rect drawActionControlBox(DrawContext context, int x, int y, int w, int h,
+                                       String label, int mouseX, int mouseY, boolean active) {
+        boolean hover = mouseX >= x && mouseX < x + w && mouseY >= y && mouseY < y + h;
+        int fill = active ? 0xFF3A2C14 : 0xFF1A1A1A;
+        if (hover) {
+            fill = active ? 0xFF4A3720 : 0xFF2F2F2F;
+        }
+        context.fill(x, y, x + w, y + h, fill);
+        // 1px border
+        int border = hover ? 0xFF4A4A4A : 0xFF2A2A2A;
+        context.fill(x, y, x + w, y + 1, border);
+        context.fill(x, y + h - 1, x + w, y + h, border);
+        context.fill(x, y, x + 1, y + h, border);
+        context.fill(x + w - 1, y, x + w, y + h, border);
+        int textColor = active ? 0xFFE6D7A3 : COLOR_TEXT_PARCHMENT;
+        if (label.equals("\u25B8")) {
+            // Render ▸ at 1.5x scale to fill the button height.
+            float scale = 1.5f;
+            int centerX = x + w / 2;
+            int centerY = y + h / 2;
+            int glyphW = this.textRenderer.getWidth(label);
+            int glyphH = this.textRenderer.fontHeight;
+            // Target position in scaled coordinates.
+            int sx = (int) Math.floor((centerX - (glyphW * scale) / 2.0) / scale);
+            int sy = (int) Math.floor((centerY - (glyphH * scale) / 2.0) / scale);
+            var matrices = context.getMatrices();
+            matrices.pushMatrix();
+            matrices.scale(scale, scale);
+            context.drawText(this.textRenderer, label, sx, sy, textColor, false);
+            matrices.popMatrix();
+        } else {
+            int textX = x + (w - this.textRenderer.getWidth(label)) / 2;
+            int textY = y + Math.max(1, (h - this.textRenderer.fontHeight) / 2);
+            context.drawText(this.textRenderer, label, textX, textY, textColor, false);
+        }
+        return new Rect(x, y, w, h);
+    }
+
     private void drawDirectInputField(DrawContext context, int x, int y, int w, int h, int textY) {
         context.fill(x, y, x + w, y + h, 0xFF0A0A0A);
         context.fill(x, y, x + w, y + 1, 0xFFB08C40);
@@ -3340,6 +3659,10 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
 
     @Override
     protected void drawForeground(DrawContext context, int mouseX, int mouseY) {
+        // Guide Admin-only mode: don't draw inventory labels.
+        if (guideRemoteOpen && !guideRemoteFullAccess) {
+            return;
+        }
         context.drawText(this.textRenderer, this.botAlias, this.titleX, this.titleY, 0x404040, false);
         context.drawText(this.textRenderer, "Level: " + this.handler.getBotLevel(), this.titleX + 90, this.titleY, 0x404040, false);
         context.drawText(this.textRenderer, this.playerInventoryTitle, this.playerInventoryTitleX, this.playerInventoryTitleY, 0x404040, false);
@@ -3444,6 +3767,10 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         if (input != null && !(topicsExpanded && topicSearchFocused) && directInputAction == null) {
             int key = input.key();
             if (key == GLFW.GLFW_KEY_LEFT_BRACKET || key == GLFW.GLFW_KEY_RIGHT_BRACKET) {
+                // Block bot switching in guide Admin-only mode.
+                if (guideRemoteOpen && !guideRemoteFullAccess) {
+                    return true;
+                }
                 int direction = key == GLFW.GLFW_KEY_LEFT_BRACKET ? -1 : 1;
                 BotSwitchLayout keyboardSwitch = getActiveBotSwitchLayout();
                 resetInventoryTooltipHoverState();
@@ -3512,6 +3839,11 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
                 }
             }
             if (key == 256 /* ESC */) {
+                // Guide Admin-only: ESC closes the screen entirely (no inventory behind it).
+                if (guideRemoteOpen && !guideRemoteFullAccess) {
+                    this.close();
+                    return true;
+                }
                 toggleTopicsExpanded(false);
                 return true;
             }
@@ -3896,6 +4228,22 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
 
     private boolean isAdminTabEnabled() {
         return !getVisibleAdminEntries().isEmpty();
+    }
+
+    /** Called by BotGuideScreen to jump straight to the Admin tab. */
+    public boolean canShowAdminTab() {
+        return isAdminTabEnabled();
+    }
+
+    /** Opens the overlay on the Admin tab. Called by BotGuideScreen. */
+    public void switchToAdminTab() {
+        if (isAdminTabEnabled()) {
+            topicsExpanded = true;
+            overlayCategory = TopicCategory.ADMIN;
+            if (isAdminUser()) {
+                requestAdminPermissionsSnapshot(this.botAlias);
+            }
+        }
     }
 
     private boolean canOpenSpellsMenu() {
@@ -4955,6 +5303,18 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
     public void render(DrawContext context, int mouseX, int mouseY, float delta) {
         this.lastMouseX = mouseX;
         this.lastMouseY = mouseY;
+
+        // Guide Admin-only mode: skip inventory rendering entirely.
+        // drawBackground() and drawForeground() early-return when restricted,
+        // so renderBackground() only produces the dark world overlay.
+        if (guideRemoteOpen && !guideRemoteFullAccess) {
+            this.renderBackground(context, mouseX, mouseY, delta);
+            if (topicsExpanded) {
+                drawTopicsOverlay(context, mouseX, mouseY);
+            }
+            return;
+        }
+
         this.renderBackground(context, mouseX, mouseY, delta);
         super.render(context, mouseX, mouseY, delta);
         this.drawEntities(context, mouseX, mouseY);
@@ -4965,6 +5325,32 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             this.drawMouseoverTooltip(context, mouseX, mouseY);
         }
         drawBotSwitchWarningTooltip(context, mouseX, mouseY);
+        drawRemoteAccessBanner(context);
+    }
+
+    /** Draws a centred banner above the inventory when remote inventory is active via artifacts. */
+    private void drawRemoteAccessBanner(DrawContext context) {
+        if (!guideRemoteOpen || !guideRemoteFullAccess) {
+            return;
+        }
+        String reason = guideRemoteAccessReason;
+        if (reason == null || reason.isEmpty()) {
+            return;
+        }
+        int padH = 4, padW = 8;
+        int maxTextW = this.width - padW * 2 - 4;
+        // Truncate if the text is too wide for the screen.
+        if (this.textRenderer.getWidth(reason) > maxTextW) {
+            reason = this.textRenderer.trimToWidth(reason, maxTextW - this.textRenderer.getWidth("...")) + "...";
+        }
+        int textW = this.textRenderer.getWidth(reason);
+        int bannerW = textW + padW * 2;
+        int bannerH = this.textRenderer.fontHeight + padH * 2;
+        int bx = (this.width - bannerW) / 2;
+        // Position just above the inventory panels; clamp to top of screen.
+        int by = Math.max(1, this.y - bannerH - 2);
+        context.fill(bx, by, bx + bannerW, by + bannerH, 0xC0101010);
+        context.drawText(this.textRenderer, reason, bx + padW, by + padH, 0xFFE0C860, false);
     }
 
     /**

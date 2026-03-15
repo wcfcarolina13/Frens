@@ -103,6 +103,12 @@ public final class NavigationArtifactService {
                 && hasItemInInventory(bot, Items.CHORUS_FRUIT);
     }
 
+    /** Check bot has Eye of Ender (kept) + Chorus Fruit (to consume) for Soul of Ender spell. */
+    public static boolean botHasSoulOfEnderItems(ServerPlayerEntity bot) {
+        return hasItemInInventory(bot, Items.ENDER_EYE)
+                && hasItemInInventory(bot, Items.CHORUS_FRUIT);
+    }
+
     /** Consume one item of a given type from the player's inventory. Returns true if consumed. */
     public static boolean consumeItem(ServerPlayerEntity player, net.minecraft.item.Item item) {
         if (player == null) return false;

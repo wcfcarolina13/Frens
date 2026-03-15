@@ -86,7 +86,23 @@ public final class BotGuideScreen extends Screen {
     @Override
     protected void init() {
         int cx = this.width / 2;
-        this.searchField = new TextFieldWidget(this.textRenderer, cx - 176, 12, 352, 18, Text.literal("Search"));
+
+        // Position search field to the right of the "Guide" label, with room for Admin button
+        int labelEndX = 12 + this.textRenderer.getWidth("\uD83D\uDCD8 Guide") + 8;
+        int searchX = labelEndX + 4;
+        boolean showAdmin;
+        if (parent instanceof BotPlayerInventoryScreen inv) {
+            showAdmin = inv.canShowAdminTab();
+        } else {
+            // Opened via ] hotkey — always show Admin button.
+            // Content within the Admin tab is filtered by permissions.
+            showAdmin = true;
+        }
+        int rightPad = showAdmin ? 62 : 8;
+        int searchW = Math.max(100, this.width - searchX - rightPad);
+        int searchY = (HEADER_H - 18) / 2;
+
+        this.searchField = new TextFieldWidget(this.textRenderer, searchX, searchY, searchW, 18, Text.literal("Search"));
         this.searchField.setMaxLength(128);
         this.searchField.setPlaceholder(Text.literal("Search actions, commands, shortcuts..."));
         this.searchField.setChangedListener(s -> {
@@ -96,6 +112,29 @@ public final class BotGuideScreen extends Screen {
         });
         this.addDrawableChild(this.searchField);
         this.addSelectableChild(this.searchField);
+
+        if (showAdmin) {
+            this.addDrawableChild(ButtonWidget.builder(Text.literal("Admin"), b -> {
+                if (parent instanceof BotPlayerInventoryScreen inv2) {
+                    inv2.switchToAdminTab();
+                    close();
+                } else {
+                    // No parent inventory screen — request server to open it remotely.
+                    BotPlayerInventoryScreen.pendingAdminTab = true;
+                    // Save cursor so the inventory screen can restore it (setScreen centers the cursor).
+                    if (this.client != null) {
+                        long wh = this.client.getWindow().getHandle();
+                        double[] curX = new double[1], curY = new double[1];
+                        org.lwjgl.glfw.GLFW.glfwGetCursorPos(wh, curX, curY);
+                        BotPlayerInventoryScreen.pendingAdminCursorX = curX[0];
+                        BotPlayerInventoryScreen.pendingAdminCursorY = curY[0];
+                    }
+                    net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking.send(
+                            new net.wcfcarolina13.network.GuideOpenInventoryPayload(botAlias));
+                    close();
+                }
+            }).dimensions(this.width - 58, searchY, 50, 18).build());
+        }
 
         this.addDrawableChild(ButtonWidget.builder(Text.literal("Close"), b -> close())
                 .dimensions(cx - 40, this.height - 24, 80, 20)

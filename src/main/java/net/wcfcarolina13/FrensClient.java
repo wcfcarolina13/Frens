@@ -814,6 +814,14 @@ public class FrensClient implements ClientModInitializer {
             FrensClient.setCachedBotNavTier(payload.tier());
         });
 
+        ClientPlayNetworking.registerGlobalReceiver(net.wcfcarolina13.network.GuideInventoryAccessPayload.ID, (payload, context) -> {
+            // Set flags that the inventory screen reads to restrict tab navigation.
+            net.wcfcarolina13.GraphicalUserInterface.BotPlayerInventoryScreen.guideRemoteOpen = true;
+            net.wcfcarolina13.GraphicalUserInterface.BotPlayerInventoryScreen.guideRemoteFullAccess = payload.fullAccess();
+            net.wcfcarolina13.GraphicalUserInterface.BotPlayerInventoryScreen.guideRemoteAccessReason =
+                    payload.fullAccess() ? payload.reason() : "";
+        });
+
         HudRenderCallback.EVENT.register((context, tickDelta) -> resetTopTipLayout(context));
         HudRenderCallback.EVENT.register((context, tickDelta) -> renderResumeDecisionHint(context));
         HudRenderCallback.EVENT.register((context, tickDelta) -> renderLeashButton(context));

@@ -61,6 +61,15 @@ All active criteria above marked `[x]`, with build verification plus in-game evi
 
 ---
 
+# Recently Completed: BaseManagerScreen Feedback Fixes (2026-03-13)
+
+- [x] **Bases screen silent failures fixed** — All 14+ button handlers in `BaseManagerScreen.java` now show a transient status message (2.5s, yellow/red/green) instead of silently returning when preconditions aren't met.
+- [x] **Empty-state list hint** — When no bases are saved, the list area now shows "No bases saved yet. Type a name above, then click 'Set here'." so users understand how to create their first base.
+- [x] **Name field placeholder** — Text field now shows "Base name or radius..." hint so users know to type there before clicking "Set here" or "Set Radius".
+- [x] **All handlers covered**: `sendSetHere`, `sendRemoveSelected`, `sendRenameSelected`, `sendSetRadiusSelected`, `sendSetHomeSelected`, `sendGoToSelected`, `sendResumeWall`, `sendPatchWall`, `sendAutoPatchWall`, `sendWallStatus`, `sendDigMoat`, `sendDriftCheckWall`, `sendExpandWall`, `sendClaimWall`, `sendUnclaimWall`, `sendPermitWallAccess`, `sendRevokeWallAccess`.
+
+---
+
 # Recently Completed: Navigation + Combat + Companion Overhaul (2026-03-13)
 
 All criteria met and verified in-game:

@@ -141,7 +141,14 @@ public class BaseManagerScreen extends Screen {
     private ButtonWidget resetLayoutButton;
     private ButtonWidget constructionButton;
 
+    private static final int STATUS_WARN  = 0xFFFFCC44;
+    private static final int STATUS_ERROR = 0xFFFF6666;
+    private static final int STATUS_OK    = 0xFF66FF66;
+
     private int selectedIndex = -1;
+    private String statusMessage = "";
+    private long statusExpiry = 0;
+    private int statusColor = STATUS_WARN;
 
     private int panelX;
     private int panelY;
@@ -227,6 +234,7 @@ public class BaseManagerScreen extends Screen {
         this.nameField = new TextFieldWidget(this.textRenderer, 0, 0,
                 COL_W * 3 + COL_GAP * 2, 18, Text.literal("Base name"));
         this.nameField.setMaxLength(64);
+        this.nameField.setPlaceholder(Text.literal("Base name or radius...").styled(s -> s.withColor(0xFF666666)));
         this.addDrawableChild(this.nameField);
         controls.add(new ControlSlot(nameField, 0, 3, y));
         y += 22;
@@ -315,6 +323,12 @@ public class BaseManagerScreen extends Screen {
         btn.setTooltip(Tooltip.of(Text.literal(tooltip)));
         this.addDrawableChild(btn);
         controls.add(new ControlSlot(btn, col, 1, relY));
+    }
+
+    private void showStatus(String msg, int color) {
+        this.statusMessage = msg;
+        this.statusColor = color;
+        this.statusExpiry = System.currentTimeMillis() + 4000;
     }
 
     private static List<BaseDto> getBasesSnapshot() {
@@ -446,12 +460,17 @@ public class BaseManagerScreen extends Screen {
             context.drawTextWithShadow(this.textRenderer, titleText, titleX, titleY, COL_TITLE);
         }
 
-        String hintRaw = "Drag edges to resize";
+        boolean statusActive = !statusMessage.isEmpty() && System.currentTimeMillis() < statusExpiry;
+        if (!statusActive && !statusMessage.isEmpty()) {
+            statusMessage = "";
+        }
+        String hintRaw = statusActive ? statusMessage : "Drag edges to resize";
+        int hintColor = statusActive ? statusColor : 0xFF999999;
         int hintMaxW = Math.max(0, headerTextRight - (titleX + this.textRenderer.getWidth(titleText) + 8));
         String hintText = elideForWidth(hintRaw, hintMaxW);
         if (!hintText.isBlank()) {
             int hintX = headerTextRight - this.textRenderer.getWidth(hintText);
-            context.drawTextWithShadow(this.textRenderer, Text.literal(hintText), hintX, titleY, 0xFF999999);
+            context.drawTextWithShadow(this.textRenderer, Text.literal(hintText), hintX, titleY, hintColor);
         }
 
         // Content background
@@ -473,7 +492,18 @@ public class BaseManagerScreen extends Screen {
         }
 
         Rect list = listRect(content);
+
         context.fill(list.x, list.y, list.right(), list.bottom(), 0xCC0F0F0F);
+
+        if (bases.isEmpty()) {
+            String hint1 = "No bases saved yet.";
+            String hint2 = "Type a name above, then click 'Set here'.";
+            int hintY = list.y + (list.h - ROW_H * 2) / 2;
+            int hintX1 = list.x + (list.w - this.textRenderer.getWidth(hint1)) / 2;
+            int hintX2 = list.x + (list.w - this.textRenderer.getWidth(hint2)) / 2;
+            context.drawTextWithShadow(this.textRenderer, hint1, hintX1, hintY, 0xFF888888);
+            context.drawTextWithShadow(this.textRenderer, hint2, hintX2, hintY + ROW_H, 0xFF666666);
+        }
 
         for (int i = 0; i < bases.size(); i++) {
             BaseDto b = bases.get(i);
@@ -899,21 +929,27 @@ public class BaseManagerScreen extends Screen {
     private void sendSetHere() {
         String label = nameField != null ? nameField.getText() : "";
         if (label == null || label.isBlank()) {
+            showStatus("Enter a base name first.", STATUS_WARN);
             return;
         }
-        if (ClientPlayNetworking.canSend(BaseSetPayload.ID)) {
-            ClientPlayNetworking.send(new BaseSetPayload(label));
+        if (!ClientPlayNetworking.canSend(BaseSetPayload.ID)) {
+            showStatus("Not connected to server.", STATUS_ERROR);
+            return;
         }
+        ClientPlayNetworking.send(new BaseSetPayload(label));
+        showStatus("Saving base...", STATUS_OK);
         requestRefresh();
     }
 
     private void sendRemoveSelected() {
         BaseDto selected = getSelected();
         if (selected == null || selected.label == null || selected.label.isBlank()) {
+            showStatus("Select a base to remove.", STATUS_WARN);
             return;
         }
         if (ClientPlayNetworking.canSend(BaseRemovePayload.ID)) {
             ClientPlayNetworking.send(new BaseRemovePayload(selected.label));
+            showStatus("Removing...", STATUS_OK);
         }
         requestRefresh();
     }
@@ -921,14 +957,17 @@ public class BaseManagerScreen extends Screen {
     private void sendRenameSelected() {
         BaseDto selected = getSelected();
         if (selected == null || selected.label == null || selected.label.isBlank()) {
+            showStatus("Select a base to rename.", STATUS_WARN);
             return;
         }
         String newLabel = nameField != null ? nameField.getText() : "";
         if (newLabel == null || newLabel.isBlank()) {
+            showStatus("Enter a new name first.", STATUS_WARN);
             return;
         }
         if (ClientPlayNetworking.canSend(BaseRenamePayload.ID)) {
             ClientPlayNetworking.send(new BaseRenamePayload(selected.label, newLabel));
+            showStatus("Renaming...", STATUS_OK);
         }
         requestRefresh();
     }
@@ -936,48 +975,66 @@ public class BaseManagerScreen extends Screen {
     private void sendSetRadiusSelected() {
         BaseDto selected = getSelected();
         if (selected == null || selected.label == null || selected.label.isBlank()) {
+            showStatus("Select a base first.", STATUS_WARN);
             return;
         }
         if (selected.isWall()) {
-            return; // walls use fort buffer, not per-base radius
+            showStatus("Walls use fort buffer, not radius.", STATUS_WARN);
+            return;
         }
         String text = nameField != null ? nameField.getText() : "";
         if (text == null || text.isBlank()) {
+            showStatus("Enter a number (1-128) above.", STATUS_WARN);
             return;
         }
         int radius;
         try {
             radius = Integer.parseInt(text.trim());
         } catch (NumberFormatException e) {
+            showStatus("Enter a number (1-128) above.", STATUS_WARN);
             return;
         }
         if (radius < 1 || radius > 128) {
+            showStatus("Radius must be 1-128.", STATUS_WARN);
             return;
         }
         if (ClientPlayNetworking.canSend(BaseSetRadiusPayload.ID)) {
             ClientPlayNetworking.send(new BaseSetRadiusPayload(selected.label, radius));
+            showStatus("Updating radius...", STATUS_OK);
         }
         requestRefresh();
     }
 
     private void sendSetHomeSelected() {
         BaseDto selected = getSelected();
-        if (selected == null || selected.label == null || selected.label.isBlank() || botAlias.isBlank()) {
+        if (selected == null || selected.label == null || selected.label.isBlank()) {
+            showStatus("Select a base first.", STATUS_WARN);
+            return;
+        }
+        if (botAlias.isBlank()) {
+            showStatus("No bot selected.", STATUS_WARN);
             return;
         }
         if (ClientPlayNetworking.canSend(BaseSetHomePayload.ID)) {
             ClientPlayNetworking.send(new BaseSetHomePayload(botAlias, selected.label));
+            showStatus("Setting home...", STATUS_OK);
         }
         requestRefresh();
     }
 
     private void sendGoToSelected() {
         BaseDto selected = getSelected();
-        if (selected == null || selected.label == null || selected.label.isBlank() || botAlias.isBlank()) {
+        if (selected == null || selected.label == null || selected.label.isBlank()) {
+            showStatus("Select a base first.", STATUS_WARN);
+            return;
+        }
+        if (botAlias.isBlank()) {
+            showStatus("No bot selected.", STATUS_WARN);
             return;
         }
         if (ClientPlayNetworking.canSend(BaseGoToPayload.ID)) {
             ClientPlayNetworking.send(new BaseGoToPayload(botAlias, selected.label));
+            showStatus("Sending bot...", STATUS_OK);
         }
         requestRefresh();
     }
@@ -991,6 +1048,7 @@ public class BaseManagerScreen extends Screen {
     private void sendResumeWall() {
         BaseDto selected = getSelected();
         if (selected == null || !selected.isWall() || selected.label == null || selected.label.isBlank()) {
+            showStatus("Select a wall first.", STATUS_WARN);
             return;
         }
         MinecraftClient mc = this.client;
@@ -1001,6 +1059,7 @@ public class BaseManagerScreen extends Screen {
     private void sendPatchWall() {
         BaseDto selected = getSelected();
         if (selected == null || !selected.isWall() || selected.label == null || selected.label.isBlank()) {
+            showStatus("Select a wall first.", STATUS_WARN);
             return;
         }
         MinecraftClient mc = this.client;
@@ -1011,6 +1070,7 @@ public class BaseManagerScreen extends Screen {
     private void sendAutoPatchWall() {
         BaseDto selected = getSelected();
         if (selected == null || !selected.isWall() || selected.label == null || selected.label.isBlank()) {
+            showStatus("Select a wall first.", STATUS_WARN);
             return;
         }
         MinecraftClient mc = this.client;
@@ -1021,6 +1081,7 @@ public class BaseManagerScreen extends Screen {
     private void sendWallStatus() {
         BaseDto selected = getSelected();
         if (selected == null || !selected.isWall() || selected.label == null || selected.label.isBlank()) {
+            showStatus("Select a wall first.", STATUS_WARN);
             return;
         }
         MinecraftClient mc = this.client;
@@ -1031,6 +1092,7 @@ public class BaseManagerScreen extends Screen {
     private void sendDigMoat() {
         BaseDto selected = getSelected();
         if (selected == null || !selected.isWall() || selected.label == null || selected.label.isBlank()) {
+            showStatus("Select a wall first.", STATUS_WARN);
             return;
         }
         MinecraftClient mc = this.client;
@@ -1041,6 +1103,7 @@ public class BaseManagerScreen extends Screen {
     private void sendDriftCheckWall() {
         BaseDto selected = getSelected();
         if (selected == null || !selected.isWall() || selected.label == null || selected.label.isBlank()) {
+            showStatus("Select a wall first.", STATUS_WARN);
             return;
         }
         MinecraftClient mc = this.client;
@@ -1051,6 +1114,7 @@ public class BaseManagerScreen extends Screen {
     private void sendExpandWall() {
         BaseDto selected = getSelected();
         if (selected == null || !selected.isWall() || selected.label == null || selected.label.isBlank()) {
+            showStatus("Select a wall first.", STATUS_WARN);
             return;
         }
         MinecraftClient mc = this.client;
@@ -1061,10 +1125,12 @@ public class BaseManagerScreen extends Screen {
     private void sendClaimWall() {
         BaseDto selected = getSelected();
         if (selected == null || !selected.isWall() || selected.label == null || selected.label.isBlank()) {
+            showStatus("Select a wall first.", STATUS_WARN);
             return;
         }
         if (ClientPlayNetworking.canSend(BaseClaimWallPayload.ID)) {
             ClientPlayNetworking.send(new BaseClaimWallPayload(selected.label));
+            showStatus("Claiming wall...", STATUS_OK);
         }
         requestRefresh();
     }
@@ -1072,10 +1138,12 @@ public class BaseManagerScreen extends Screen {
     private void sendUnclaimWall() {
         BaseDto selected = getSelected();
         if (selected == null || !selected.isWall() || selected.label == null || selected.label.isBlank()) {
+            showStatus("Select a wall first.", STATUS_WARN);
             return;
         }
         if (ClientPlayNetworking.canSend(BaseUnclaimWallPayload.ID)) {
             ClientPlayNetworking.send(new BaseUnclaimWallPayload(selected.label));
+            showStatus("Unclaiming wall...", STATUS_OK);
         }
         requestRefresh();
     }
@@ -1083,14 +1151,17 @@ public class BaseManagerScreen extends Screen {
     private void sendPermitWallAccess() {
         BaseDto selected = getSelected();
         if (selected == null || !selected.isWall() || selected.label == null || selected.label.isBlank()) {
+            showStatus("Select a wall first.", STATUS_WARN);
             return;
         }
         String grantee = nameField != null ? nameField.getText() : "";
         if (grantee == null || grantee.isBlank()) {
+            showStatus("Enter player name above.", STATUS_WARN);
             return;
         }
         if (ClientPlayNetworking.canSend(BaseGrantWallAccessPayload.ID)) {
             ClientPlayNetworking.send(new BaseGrantWallAccessPayload(selected.label, grantee.trim()));
+            showStatus("Granting access...", STATUS_OK);
         }
         requestRefresh();
     }
@@ -1098,14 +1169,17 @@ public class BaseManagerScreen extends Screen {
     private void sendRevokeWallAccess() {
         BaseDto selected = getSelected();
         if (selected == null || !selected.isWall() || selected.label == null || selected.label.isBlank()) {
+            showStatus("Select a wall first.", STATUS_WARN);
             return;
         }
         String grantee = nameField != null ? nameField.getText() : "";
         if (grantee == null || grantee.isBlank()) {
+            showStatus("Enter player name above.", STATUS_WARN);
             return;
         }
         if (ClientPlayNetworking.canSend(BaseRevokeWallAccessPayload.ID)) {
             ClientPlayNetworking.send(new BaseRevokeWallAccessPayload(selected.label, grantee.trim()));
+            showStatus("Revoking access...", STATUS_OK);
         }
         requestRefresh();
     }

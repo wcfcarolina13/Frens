@@ -2040,9 +2040,10 @@ public class BotEventHandler {
 	        if (target != null) {
             handleFollowPersonalSpace(bot, target, horizDistSq, targetPos);
 	        }
-        boolean forceWalk = state != null && state.followNoTeleport;
+        boolean soulOfEnderActive = net.wcfcarolina13.GameAI.services.SoulOfEnderService.isActive(bot.getUuid());
+        boolean forceWalk = state != null && state.followNoTeleport && !soulOfEnderActive;
         double stopRange = state != null ? state.followStopRange : 0.0D;
-        boolean allowTeleportPref = SkillPreferences.teleportDuringSkills(bot) && !forceWalk;
+        boolean allowTeleportPref = (SkillPreferences.teleportDuringSkills(bot) || soulOfEnderActive) && !forceWalk;
         boolean canSee = target != null && bot.canSee(target);
         if (fixedGoal != null) {
             canSee = !isDirectRouteBlocked(bot, targetPos, fixedGoal);
@@ -3777,7 +3778,8 @@ public class BotEventHandler {
         // - only when player has allowed teleport generally,
         // - only when far enough or when we've been stuck for a while,
         // - and never spam (cooldown).
-        if (!fixedGoalActive && allowTeleportPref && shouldWolfTeleport(targetDistSq, absDeltaY, canSee, effectiveStagnant, server)) {
+        boolean soulBypass = net.wcfcarolina13.GameAI.services.SoulOfEnderService.isActive(bot.getUuid());
+        if ((!fixedGoalActive || soulBypass) && allowTeleportPref && shouldWolfTeleport(targetDistSq, absDeltaY, canSee, effectiveStagnant, server)) {
             if (tryWolfTeleport(bot, target, server)) {
                 FOLLOW_LAST_DISTANCE_SQ.remove(id);
                 FOLLOW_STAGNANT_TICKS.remove(id);

@@ -1,7 +1,31 @@
 # Changelog & History
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
+## 2026-03-14
+
+- **Guide remote inventory gating — full Admin-only mode:**
+  1. **`adminPreviewAsNonAdmin` persists across screen re-creations:** Changed from instance field to `static` — toggling it ON and exiting/re-entering the menu no longer resets it to OFF.
+  2. **Guide `]` remote open respects artifact access:** `GuideInventoryNetworkManager` checks proximity (≤8 blocks, same dimension) or Remote Inventory spell artifacts (Wizard's Tome / Enchanting Table within 4 blocks) before granting full access. Without these, only the Admin tab is usable. New `GuideInventoryAccessPayload` S2C packet communicates access level + reason to client.
+  3. **Hidden inventory in Admin-only mode:** When guide-restricted, `drawBackground()`, `drawForeground()`, and `render()` all early-return — no inventory textures, slots, stats, labels, or entity models render. Only the dark world overlay + Admin overlay panel are drawn, like the hunting menu.
+  4. **ESC/X/click-outside close entirely:** In restricted mode, all exit paths close the screen to the world instead of collapsing to the inventory view. No way to fall through to the shared inventory.
+  5. **Bot switching blocked:** `<`/`>` arrows hidden, `[`/`]` keys blocked, click handler disabled — can't switch bots in restricted mode.
+  6. **Guide button:** A "Guide" button appears in the overlay header (where bot switch controls normally are), navigating back to the guide screen.
+  7. **Resize-safe:** `guideStateInitialized` instance guard prevents window resize from resetting guide flags via `init()` re-invocation.
+  8. **Cursor position preserved:** BotGuideScreen saves cursor position before the guide→inventory transition; restored in `init()` so the cursor doesn't jump to screen center.
+  9. **Remote Inventory banner:** When full access is granted via artifacts (not proximity), a centred banner above the inventory shows the reason (e.g. "Remote Inventory active — Jake holds a Wizard's Tome"). Truncates on small screens, positions relative to inventory.
+  10. **`hasSpellbookToken` / `isNearEnchantingTable` made public** in `modCommandRegistry` for reuse.
+
 ## 2026-03-13
+
+- **Admin/Actions overlay — 5 bug fixes & UX redesign:**
+  1. **"(ON)ON" duplicate fixed:** `displayLabelForEntry()` no longer appends "(ON)" to the "Preview as Non-Admin" label — the toggle status rendering handles ON/OFF display.
+  2. **Broken ⚙️ emoji fixed:** Removed VS16 variation selector (U+FE0F) from "⚙️ Behavior" header — Minecraft's font renderer can't display it, causing a dotted box glyph.
+  3. **Admin logs filtered from Dialogue tab:** `drawDialogueColumn()` now filters out lines starting with "Admin:" or "You (Admin):" when on the Dialogue tab. Admin messages only appear in the dialogue column when the Admin tab is selected.
+  4. **Preview as Non-Admin does NOT block tabs:** Actions and Dialogue tabs remain accessible in preview mode. The inventory screen is only reachable via direct bot interaction, so non-admin users DO have access to these tabs.
+  5. **Explicit button controls for action/toggle rows:** Replaced full-row clickability with bordered control boxes. Toggle entries show a bordered ON/OFF button box (full row height, +16px padding). Non-toggle actions show a bordered ▸ button (rendered at 1.5x scale, 20px wide). Label text and icon also act as a clickable target (icon+label region); the gap between label and button is dead space. Added `drawActionControlBox()`, `getActionControlHitInOverlay()`, `hasActionControlBox()`, and `isClickOnActionTarget()`. Admin tab entries use the same UX. Adjustable skills retain existing +/- controls.
+  6. **Admin tab accessible from guide via `]` hotkey:** BotGuideScreen now always shows the Admin button, even when opened via `]` with no parent inventory screen. Clicking it sends a new `GuideOpenInventoryPayload` C2S packet to the server, which opens the bot inventory remotely via `BotInventoryAccess.openBotInventoryRemote()` (no distance/dimension restrictions). A `pendingAdminTab` flag tells the new screen to start on the Admin tab. Both admins and non-admins can access — content is filtered by permissions within the Admin tab itself.
+
+- **Soul of Ender spell:** New timed buff spell (75 seconds) that bypasses all teleportation gates — `fixedGoalActive`, `forceWalk`, `allowTeleportPref` — allowing the bot to shadow the player fluidly via wolf-teleport during combat, skill execution, and return-to-base navigation. Activation: bot consumes a Chorus Fruit while holding an Eye of Ender (Eye is kept). New `SoulOfEnderService` tracks buff per bot UUID with tick-based expiry and commander notification on fade. Added `/bot companion soulofender` command, "Soul of Ender" button in CompanionSpellsScreen (with tooltip), and `botHasSoulOfEnderItems()` convenience check in `NavigationArtifactService`. Double-cast prevention returns remaining duration. Server tick handler expires buffs and cleans up on SERVER_STOPPED.
 
 - **Mount-aware travel & "fast travel" rename:** Made all teleportation/travel paths mount-aware. New `TravelMountHandler` service centrally evaluates what to do with a mounted bot before travel: boats/minecarts are collected as inventory items (with container contents transferred), living mounts co-teleport if destination has room (3-block headroom for horses/camels, 2-block for pigs), cross-dimension animal mounts are tethered to fences with coordinates announced in chat, and travel is refused with a notification when inventory is full or destination lacks room. Integrated into `beginDelayedTravel()` (fast travel), `handleChorusRecall()` (Chorus Recall spell), and `BotAutoReturnSunsetService` (sunset return). All mount entities marked persistent via `setPersistent()` at every entry point. Renamed "delayed teleport" to "fast travel" in all player-facing UI: guide screen, command feedback, and added `/bot nav_mode fast_travel` alias.
 
