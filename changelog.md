@@ -3,6 +3,13 @@
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 ## 2026-03-15
 
+- **Spells tab fixes & base picker:**
+  1. **Spells tab icon:** Replaced "Spells" text label with ✦ icon to prevent overflow. Hover tooltip shows "Spells" after 1700ms delay.
+  2. **Status bar shows both player and bot artifacts:** `buildSpellStatusBar()` now scans bot inventory slots (0-40) for Eye of Ender, Pearl, Chorus Fruit instead of relying on nav tier cache. Format: "You: Pearl · Jake: Pearl, Eye of Ender".
+  3. **Regroup added to Actions tab:** Added under Orders & Travel section, using existing `COMPANION_COME` action.
+  4. **Remote Inventory added to Spells tab:** New `SPELL_REMOTE_INVENTORY` action with tooltip. Requires full artifact access.
+  5. **Base picker for Remote Guidance:** Rewrote NavigationConfirmScreen guidance mode as a scrollable destination picker. Options: "Guide to me", "Home (label)" (auto-detected from bot's preferred home), and all saved bases. Reuses existing `RequestBasesPayload`/`BasesListPayload` infrastructure and `BaseManagerScreen.getCachedBases()`. Base list auto-refreshes on tick.
+
 - **Spells tab & fast travel wiring:**
   1. **Spells promoted to 4th top-level tab:** Added `TopicCategory.SPELL` to the inventory screen's tab system. Tab bar now shows Actions | Dialogue | Spells | Admin. Three spell entries: Remote Guidance, Chorus Recall, Soul of Ender — each with hover tooltips (1700ms delay, existing system). Remote Guidance and Chorus Recall open NavigationConfirmScreen; Soul of Ender casts directly.
   2. **Status bar:** Spells tab footer shows per-player/bot artifact status (Eye of Ender, Pearl, Chorus, Enchanting Table, Wizard's Tome, bot nav tier). Falls back to "Spells require artifacts. No artifacts detected." when nothing is held.

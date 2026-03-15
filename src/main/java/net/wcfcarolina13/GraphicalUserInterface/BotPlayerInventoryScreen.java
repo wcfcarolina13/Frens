@@ -177,6 +177,8 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
     private boolean ascentSurfaceMode = false;
     private String topicSearchQuery = "";
     private boolean topicSearchFocused = false;
+    private boolean spellsTabHovered = false;
+    private long spellsTabHoverStartMs = 0L;
 
     // Hold-repeat state for +/- control buttons.
     private Runnable heldAdjustAction = null;
@@ -436,6 +438,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         SPELL_REMOTE_GUIDANCE,
         SPELL_CHORUS_RECALL,
         SPELL_SOUL_OF_ENDER,
+        SPELL_REMOTE_INVENTORY,
         OPEN_GUIDE,
         STOP,
         RESUME,
@@ -543,6 +546,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             TopicEntry.skill("Resume", TopicAction.RESUME, false, 0),
 
             TopicEntry.skillHeader("Orders & Travel"),
+            TopicEntry.skill("Regroup", TopicAction.COMPANION_COME, false, 0),
             TopicEntry.skill("Follow", TopicAction.FOLLOW, true, 0),
             TopicEntry.skill("Guard", TopicAction.GUARD, true, 0),
             TopicEntry.skill("Patrol", TopicAction.PATROL, true, 0),
@@ -582,7 +586,8 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
     private static final List<TopicEntry> SPELL_TOPIC_ENTRIES = List.of(
             TopicEntry.spell("Remote Guidance", TopicAction.SPELL_REMOTE_GUIDANCE),
             TopicEntry.spell("Chorus Recall", TopicAction.SPELL_CHORUS_RECALL),
-            TopicEntry.spell("Soul of Ender", TopicAction.SPELL_SOUL_OF_ENDER)
+            TopicEntry.spell("Soul of Ender", TopicAction.SPELL_SOUL_OF_ENDER),
+            TopicEntry.spell("Remote Inventory", TopicAction.SPELL_REMOTE_INVENTORY)
     );
 
             // Curated, non-scroll quick actions for the collapsed panel.
@@ -920,11 +925,21 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         if (hasEnderPearlInInventory(mc)) playerArtifacts.add("Pearl");
         if (hasChorusFruitInInventory(mc)) playerArtifacts.add("Chorus");
 
-        // Bot artifacts from cached nav tier.
-        int botNavTier = FrensClient.getCachedBotNavTier();
+        // Bot artifacts from actual inventory slots.
         java.util.List<String> botArtifacts = new java.util.ArrayList<>();
-        if (botNavTier >= 2) botArtifacts.add("Eye of Ender");
-        if (botNavTier >= 1) botArtifacts.add("Compass/Map");
+        if (this.handler != null) {
+            boolean botHasEye = false, botHasPearl = false, botHasChorus = false;
+            for (int i = 0; i < 41; i++) {
+                var stack = this.handler.getSlot(i).getStack();
+                if (stack == null || stack.isEmpty()) continue;
+                if (stack.isOf(Items.ENDER_EYE)) botHasEye = true;
+                if (stack.isOf(Items.ENDER_PEARL)) botHasPearl = true;
+                if (stack.isOf(Items.CHORUS_FRUIT)) botHasChorus = true;
+            }
+            if (botHasEye) botArtifacts.add("Eye of Ender");
+            if (botHasPearl) botArtifacts.add("Pearl");
+            if (botHasChorus) botArtifacts.add("Chorus");
+        }
 
         if (playerArtifacts.isEmpty() && botArtifacts.isEmpty()) {
             return "Spells require artifacts. No artifacts detected.";
@@ -1868,7 +1883,15 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         boolean guideRestricted = guideRemoteOpen && !guideRemoteFullAccess;
         drawOverlayTab(context, skillsTabX, tabY, tabW, tabH, TOPIC_PANEL_TITLE, overlayCategory == TopicCategory.SKILL, !guideRestricted);
         drawOverlayTab(context, dialogueTabX, tabY, tabW, tabH, "Dialogue", overlayCategory == TopicCategory.DIALOGUE, !guideRestricted);
-        drawOverlayTab(context, spellsTabX, tabY, tabW, tabH, "Spells", overlayCategory == TopicCategory.SPELL, !guideRestricted);
+        drawOverlayTab(context, spellsTabX, tabY, tabW, tabH, "\u2726", overlayCategory == TopicCategory.SPELL, !guideRestricted);
+        // Spells tab tooltip on hover.
+        if (mouseX >= spellsTabX && mouseX < spellsTabX + tabW && mouseY >= tabY && mouseY < tabY + tabH) {
+            spellsTabHovered = true;
+            if (spellsTabHoverStartMs == 0L) spellsTabHoverStartMs = System.currentTimeMillis();
+        } else {
+            spellsTabHovered = false;
+            spellsTabHoverStartMs = 0L;
+        }
         drawOverlayTab(context, adminTabX, tabY, tabW, tabH, "Admin", overlayCategory == TopicCategory.ADMIN, isAdminTabEnabled());
 
         Rect searchRect = computeOverlaySearchRect(listX, listY, listW);
@@ -1911,6 +1934,12 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
 
         // Delayed hover tooltip (after scissor, so it can draw over the list cleanly).
         drawOverlayHoverTooltip(context, mouseX, mouseY);
+
+        // Spells tab icon tooltip (after main tooltips so it draws on top).
+        if (spellsTabHovered && spellsTabHoverStartMs > 0L
+                && System.currentTimeMillis() - spellsTabHoverStartMs >= OVERLAY_HOVER_TOOLTIP_DELAY_MS) {
+            drawTooltipBox(context, mouseX, mouseY, java.util.List.of("Spells"));
+        }
     }
 
     private void drawOverlaySearchBox(DrawContext context, Rect searchRect, int mouseX, int mouseY) {
@@ -3266,6 +3295,13 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
                         "all movement locks are bypassed."
                 );
             }
+            if (entry.action == TopicAction.SPELL_REMOTE_INVENTORY) {
+                return java.util.List.of(
+                        "Remote Inventory",
+                        "Open your companion's inventory remotely.",
+                        "Requires full access (Enchanting Table or Wizard's Tome)."
+                );
+            }
             return java.util.List.of();
         }
 
@@ -4114,6 +4150,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case SPELL_REMOTE_GUIDANCE -> openSpellGuidanceConfirm();
             case SPELL_CHORUS_RECALL -> openSpellRecallConfirm();
             case SPELL_SOUL_OF_ENDER -> castSoulOfEnder();
+            case SPELL_REMOTE_INVENTORY -> sendChatCommand("bot companion open " + formatBotTarget());
             case OPEN_GUIDE -> openGuideMenu();
             case OPEN_BOT_CONTROLS -> openBotControls();
             case OPEN_PLAYER_SETTINGS -> openAdminPlayerSettings();
@@ -4610,6 +4647,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case SPELL_REMOTE_GUIDANCE -> full || playerHasPearl;
             case SPELL_CHORUS_RECALL -> full || playerHasChorus;
             case SPELL_SOUL_OF_ENDER -> full || eye || playerHasPearl;
+            case SPELL_REMOTE_INVENTORY -> full;
             default -> false;
         };
     }

@@ -336,6 +336,11 @@ public class BaseManagerScreen extends Screen {
         return bases != null ? bases : List.of();
     }
 
+    /** Public snapshot for other screens (e.g. NavigationConfirmScreen base picker). */
+    public static List<BaseDto> getCachedBases() {
+        return getBasesSnapshot();
+    }
+
     private BaseDto getSelected() {
         List<BaseDto> bases = getBasesSnapshot();
         if (selectedIndex < 0 || selectedIndex >= bases.size()) {
