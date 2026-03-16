@@ -424,8 +424,16 @@ public final class NavigationArtifactService {
 
     private static void completePostSpawnSetup(MinecraftServer server, ServerPlayerEntity bot, PostSpawnSetup ps) {
         // Teleport to exact destination (onBotJoin skips position restore for traveling bots).
-        bot.teleport(ps.world(), ps.spawnPos().x, ps.spawnPos().y, ps.spawnPos().z,
+        double dx = ps.spawnPos().x, dy = ps.spawnPos().y, dz = ps.spawnPos().z;
+        bot.teleport(ps.world(), dx, dy, dz,
                 java.util.Set.of(), 0.0F, 0.0F, true);
+        // Force position sync — the entity spawned at 0,0,0 and may not be tracked by clients.
+        bot.setPosition(dx, dy, dz);
+        bot.setVelocity(Vec3d.ZERO);
+        // Explicit network position sync for all tracking clients.
+        if (bot.networkHandler != null) {
+            bot.networkHandler.requestTeleport(dx, dy, dz, 0.0F, 0.0F);
+        }
 
         try { BotEventHandler.registerBot(bot); }
         catch (Throwable t) { LOGGER.warn("Failed to register bot '{}' after travel: {}", ps.botAlias(), t.getMessage()); }
