@@ -293,21 +293,42 @@ public final class NavigationArtifactService {
             while (psIt.hasNext()) {
                 Map.Entry<String, PostSpawnSetup> psEntry = psIt.next();
                 PostSpawnSetup ps = psEntry.getValue();
-                ServerPlayerEntity bot = server.getPlayerManager().getPlayer(ps.botAlias());
-                if (bot != null && !bot.isRemoved()) {
+                // Find the bot by name — must be alive (not the old killed entity).
+                ServerPlayerEntity bot = null;
+                for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
+                    if (p != null && !p.isRemoved() && ps.botAlias().equalsIgnoreCase(p.getName().getString())) {
+                        bot = p;
+                        break;
+                    }
+                }
+                if (bot != null) {
                     LOGGER.info("Bot '{}' appeared after {} real ticks — completing travel setup.",
                             ps.botAlias(), ps.ticksWaited());
                     completePostSpawnSetup(server, bot, ps);
                     psIt.remove();
-                } else if (ps.ticksWaited() >= 40) {
-                    LOGGER.error("Bot '{}' failed to appear after 40 real ticks — travel respawn failed.",
-                            ps.botAlias());
+                } else if (ps.ticksWaited() >= 60) {
+                    // Log all entities with matching name for diagnostics.
+                    ServerPlayerEntity stale = server.getPlayerManager().getPlayer(ps.botAlias());
+                    LOGGER.error("Bot '{}' failed to appear after 60 real ticks. " +
+                            "getPlayer(name) returned: {} (removed={})",
+                            ps.botAlias(), stale, stale != null ? stale.isRemoved() : "n/a");
                     psIt.remove();
                 } else {
-                    // Increment wait counter (records are immutable, so replace).
+                    int nextTick = ps.ticksWaited() + 1;
+                    if (nextTick % 10 == 0) {
+                        // Count matching players in full list for diagnostics.
+                        long matching = server.getPlayerManager().getPlayerList().stream()
+                                .filter(p -> ps.botAlias().equalsIgnoreCase(p.getName().getString()))
+                                .count();
+                        long alive = server.getPlayerManager().getPlayerList().stream()
+                                .filter(p -> ps.botAlias().equalsIgnoreCase(p.getName().getString()) && !p.isRemoved())
+                                .count();
+                        LOGGER.info("Post-spawn poll tick {}: bot='{}' matching={} alive={}",
+                                nextTick, ps.botAlias(), matching, alive);
+                    }
                     psEntry.setValue(new PostSpawnSetup(ps.botAlias(), ps.world(), ps.spawnPos(),
                             ps.dest(), ps.dim(), ps.travel(), ps.dimensionFallback(),
-                            ps.ticksWaited() + 1));
+                            nextTick));
                 }
             }
         }
