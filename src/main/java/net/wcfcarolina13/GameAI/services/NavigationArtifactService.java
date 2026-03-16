@@ -163,6 +163,17 @@ public final class NavigationArtifactService {
     /** Messages queued for owners who were offline when the notification was sent. */
     private static final Map<UUID, List<String>> QUEUED_NOTIFICATIONS = new ConcurrentHashMap<>();
 
+    /** Actions to perform after a bot arrives at its fast travel destination (e.g., withdraw from chest). */
+    public record PostArrivalAction(String type, BlockPos target, UUID ownerUuid, Vec3d returnPos) {}
+    private static final Map<String, PostArrivalAction> PENDING_POST_ARRIVAL = new ConcurrentHashMap<>();
+
+    /** Schedule a post-arrival action for a bot (keyed by lowercase alias). */
+    public static void schedulePostArrival(String botAlias, PostArrivalAction action) {
+        if (botAlias != null && action != null) {
+            PENDING_POST_ARRIVAL.put(botAlias.toLowerCase(java.util.Locale.ROOT), action);
+        }
+    }
+
     /** Post-spawn setup waiting for the bot entity to appear in the player manager. */
     private record PostSpawnSetup(String botAlias, ServerWorld world, Vec3d spawnPos, BlockPos dest,
                                   RegistryKey<World> dim, PendingTravel travel,
@@ -259,20 +270,22 @@ public final class NavigationArtifactService {
             LOGGER.warn("Failed to persist bot '{}' before travel: {}", botAlias, t.getMessage());
         }
 
-        // Remove the bot from the world AND player manager. This sends
-        // PlayerRemoveS2CPacket to all clients so the client clears the entity.
-        // Without this, createFake's reconnect with the same UUID leaves the bot
-        // invisible (client keeps stale reference to the killed entity).
+        // Remove from player manager FIRST (sends PlayerRemoveS2CPacket to clients),
+        // THEN kill the entity. Reversing this order causes the PM removal to fail
+        // because kill() sets the entity to DISCARDED state.
+        try {
+            BotPersistenceService.removeFromPlayerManager(server, bot);
+        } catch (Throwable t) {
+            LOGGER.warn("Failed to remove bot '{}' from player manager: {}", botAlias, t.getMessage());
+        }
         try {
             if (bot instanceof createFakePlayer fake) {
                 fake.kill(Text.literal("Traveling"));
             } else {
                 bot.discard();
             }
-            // Critical: remove from player manager to send remove packet to clients.
-            BotPersistenceService.removeFromPlayerManager(server, bot);
         } catch (Throwable t) {
-            LOGGER.warn("Failed to remove bot '{}' from world for travel: {}", botAlias, t.getMessage());
+            LOGGER.warn("Failed to kill bot '{}' for travel: {}", botAlias, t.getMessage());
         }
 
         int delaySeconds = delayTicks / 20;
@@ -482,6 +495,45 @@ public final class NavigationArtifactService {
         notifyOwner(server, travel.ownerUuid(), msg);
 
         LOGGER.info("Bot '{}' arrived at {} in {}.", ps.botAlias(), ps.dest().toShortString(), ps.dim().getValue());
+
+        // Process post-arrival action (e.g., withdraw from chest, then return).
+        String key = ps.botAlias().toLowerCase(java.util.Locale.ROOT);
+        PostArrivalAction action = PENDING_POST_ARRIVAL.remove(key);
+        if (action != null && "withdraw".equals(action.type())) {
+            // Schedule withdrawal on next tick (bot needs to be fully in world first).
+            server.execute(() -> {
+                ServerPlayerEntity arrBot = server.getPlayerManager().getPlayer(ps.botAlias());
+                if (arrBot == null || arrBot.isRemoved()) return;
+                BlockPos chestPos = action.target();
+                ServerWorld w = (ServerWorld) arrBot.getEntityWorld();
+                var be = w.getBlockEntity(chestPos);
+                if (be instanceof net.minecraft.inventory.Inventory storage) {
+                    int moved = 0;
+                    for (int i = 0; i < storage.size() && moved < 256; i++) {
+                        net.minecraft.item.ItemStack stack = storage.getStack(i);
+                        if (stack == null || stack.isEmpty()) continue;
+                        net.minecraft.item.ItemStack copy = stack.copy();
+                        if (arrBot.getInventory().insertStack(copy)) {
+                            int taken = stack.getCount() - copy.getCount();
+                            stack.decrement(taken);
+                            moved += taken;
+                        }
+                    }
+                    storage.markDirty();
+                    // Update snapshot after withdrawal.
+                    BotChestRegistryService.updateContentsSnapshot(arrBot, chestPos, w, storage);
+                    LOGGER.info("Post-arrival: {} withdrew {} items from chest at {}",
+                            ps.botAlias(), moved, chestPos.toShortString());
+
+                    // Notify owner.
+                    notifyOwner(server, action.ownerUuid(),
+                            "\u00A7a" + ps.botAlias() + " collected " + moved + " items from the chest.\u00A7r");
+                } else {
+                    notifyOwner(server, action.ownerUuid(),
+                            "\u00A7e" + ps.botAlias() + " arrived but no chest found at " + chestPos.toShortString() + ".\u00A7r");
+                }
+            });
+        }
     }
 
     // ── Session lifecycle ──────────────────────────────────────────────────
@@ -497,6 +549,7 @@ public final class NavigationArtifactService {
         RESPAWN_RETRY_COUNTS.clear();
         QUEUED_NOTIFICATIONS.clear();
         PENDING_POST_SPAWN.clear();
+        PENDING_POST_ARRIVAL.clear();
     }
 
     // ── Persistence ────────────────────────────────────────────────────────

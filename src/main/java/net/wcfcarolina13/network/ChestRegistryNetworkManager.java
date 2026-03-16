@@ -48,8 +48,9 @@ public final class ChestRegistryNetworkManager {
         if (bot == null) return;
         if (!(bot.getEntityWorld() instanceof ServerWorld world)) return;
 
-        // Verify chest states before sending
+        // Verify chest states and capture fresh contents snapshots.
         BotChestRegistryService.verifyChests(bot, world);
+        BotChestRegistryService.refreshAllSnapshots(bot, world);
 
         List<BotChestRegistryService.ChestRecord> records = BotChestRegistryService.listChests(bot, world);
         List<Map<String, Object>> out = new ArrayList<>();
@@ -103,19 +104,23 @@ public final class ChestRegistryNetworkManager {
             BlockPos chestPos = new BlockPos(x, y, z);
             double distance = bot.getBlockPos().getManhattanDistance(chestPos);
 
-            if (distance > 100) {
-                // Far away: fast travel to the chest, then withdraw on arrival.
+            // Always fast travel to chest, then withdraw on arrival.
+            {
                 LOGGER.info("Chest collect (fast travel): {} sending {} to chest at {},{},{} (dist={})",
                         player.getName().getString(), botName, x, y, z, (int) distance);
-                boolean crossDim = false; // Same dimension assumed for chest collect
+                boolean crossDim = false;
                 int delayTicks = NavigationArtifactService.calculateDelayTicks(distance, crossDim);
+                // Schedule post-arrival withdrawal.
+                NavigationArtifactService.schedulePostArrival(botName,
+                        new NavigationArtifactService.PostArrivalAction("withdraw", chestPos, player.getUuid(), null));
                 NavigationArtifactService.beginDelayedTravel(
                         server, bot, botName, chestPos,
                         ((ServerWorld) bot.getEntityWorld()).getRegistryKey(), delayTicks, player.getUuid());
                 net.wcfcarolina13.ChatUtils.ChatUtils.sendSystemMessage(
                         player.getCommandSource(),
                         botName + " is fast-traveling to the chest (ETA ~" + Math.max(1, delayTicks / 20) + "s). Items will be collected on arrival.");
-            } else {
+            }
+            if (false) {
                 // Close enough: walk to chest and withdraw.
                 LOGGER.info("Chest collect (walk): {} -> bot store withdraw all {}", player.getName().getString(), botName);
                 // Use regroup-style approach: set return-to-base toward chest position,

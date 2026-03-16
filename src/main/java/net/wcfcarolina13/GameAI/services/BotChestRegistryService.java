@@ -218,6 +218,33 @@ public final class BotChestRegistryService {
         if (changed) flush();
     }
 
+    /** Refresh contents snapshots for all non-destroyed chests by reading the world's block entities. */
+    public static void refreshAllSnapshots(ServerPlayerEntity bot, ServerWorld world) {
+        if (bot == null || world == null) return;
+        MinecraftServer server = world.getServer();
+        if (server == null) return;
+
+        WorldData wd = worldData(server, world);
+        String key = botKey(bot);
+        boolean changed = false;
+        synchronized (LOCK) {
+            if (wd.chestsByBot == null) return;
+            List<ChestRecord> records = wd.chestsByBot.get(key);
+            if (records == null) return;
+            for (ChestRecord r : records) {
+                if (r.destroyed) continue;
+                BlockPos pos = r.toBlockPos();
+                if (!world.isChunkLoaded(pos)) continue;
+                var be = world.getBlockEntity(pos);
+                if (be instanceof net.minecraft.inventory.Inventory inv) {
+                    r.contentsSnapshot = captureContents(inv);
+                    changed = true;
+                }
+            }
+        }
+        if (changed) flush();
+    }
+
     /** Capture a snapshot of a chest's contents (merges duplicate items across slots). */
     public static List<ItemSnapshot> captureContents(net.minecraft.inventory.Inventory inv) {
         if (inv == null) return List.of();
