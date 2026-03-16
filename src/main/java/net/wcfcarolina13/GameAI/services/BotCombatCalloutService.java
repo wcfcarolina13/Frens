@@ -995,6 +995,11 @@ public final class BotCombatCalloutService {
         BotFleeService.reset(botId);
     }
 
+    /** Returns true if the bot is currently tracked as being in combat. */
+    public static boolean isInCombat(UUID botId) {
+        return botId != null && IN_COMBAT.getOrDefault(botId, false);
+    }
+
     /** Record the server tick when a hostile entity dealt damage to this bot. */
     public static void noteHostileDamage(ServerPlayerEntity bot, long serverTick) {
         if (bot != null) {

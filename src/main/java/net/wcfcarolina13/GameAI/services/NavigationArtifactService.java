@@ -252,9 +252,43 @@ public final class NavigationArtifactService {
                                           String botAlias, BlockPos destination,
                                           RegistryKey<World> dimension, int delayTicks,
                                           UUID ownerUuid) {
+        beginDelayedTravel(server, bot, botAlias, destination, dimension, delayTicks, ownerUuid, false);
+    }
+
+    private static void beginDelayedTravel(MinecraftServer server, ServerPlayerEntity bot,
+                                           String botAlias, BlockPos destination,
+                                           RegistryKey<World> dimension, int delayTicks,
+                                           UUID ownerUuid, boolean skipGates) {
         if (server == null || bot == null || botAlias == null || destination == null || dimension == null) {
             LOGGER.warn("beginDelayedTravel called with null arguments; ignoring.");
             return;
+        }
+
+        if (!skipGates) {
+            // ── Combat gate ──────────────────────────────────────────────
+            if (BotCombatCalloutService.isInCombat(bot.getUuid())) {
+                notifyOwner(server, ownerUuid,
+                        "\u00A7c" + botAlias + " cannot fast-travel while in combat.\u00A7r");
+                return;
+            }
+
+            // ── Underground gate (requires Map+Compass or Tier 2+) ──────
+            ServerWorld currentWorld = (ServerWorld) bot.getEntityWorld();
+            if (!currentWorld.isSkyVisible(bot.getBlockPos().up())) {
+                ServerPlayerEntity owner = server.getPlayerManager().getPlayer(ownerUuid);
+                double mult = artifactDelayMultiplier(bot, owner);
+                if (mult <= 1.0) {
+                    // Tier 2+ artifacts — proceed normally, no penalty
+                } else if (hasArtifact(bot, net.minecraft.item.Items.FILLED_MAP)
+                        && hasArtifact(bot, net.minecraft.item.Items.COMPASS)) {
+                    // Map + Compass on bot — allow but with 50% extra delay
+                    delayTicks = (int) (delayTicks * 1.5);
+                } else {
+                    notifyOwner(server, ownerUuid,
+                            "\u00A7c" + botAlias + " cannot fast-travel underground without a Map and Compass.\u00A7r");
+                    return;
+                }
+            }
         }
 
         // ── Mount evaluation ──────────────────────────────────────────────
@@ -316,22 +350,21 @@ public final class NavigationArtifactService {
             LOGGER.warn("Failed to persist bot '{}' before travel: {}", botAlias, t.getMessage());
         }
 
-        // Remove from player manager FIRST (sends PlayerRemoveS2CPacket to clients),
-        // THEN kill the entity. Reversing this order causes the PM removal to fail
-        // because kill() sets the entity to DISCARDED state.
+        // Remove from player manager FIRST (sends PlayerRemoveS2CPacket — clears tab list),
+        // THEN discard the entity (sets removal reason to DISCARDED, which triggers ServerWorld
+        // to remove the entity from chunk tracking and broadcast EntitiesDestroyS2CPacket to all
+        // clients, making the bot visually disappear).
+        // Note: kill() on createFakePlayer is a no-op (FakeClientConnection.handleDisconnection
+        // does nothing), so we must use discard() to actually remove the entity from the world.
         try {
             BotPersistenceService.removeFromPlayerManager(server, bot);
         } catch (Throwable t) {
             LOGGER.warn("Failed to remove bot '{}' from player manager: {}", botAlias, t.getMessage());
         }
         try {
-            if (bot instanceof createFakePlayer fake) {
-                fake.kill(Text.literal("Traveling"));
-            } else {
-                bot.discard();
-            }
+            bot.discard();
         } catch (Throwable t) {
-            LOGGER.warn("Failed to kill bot '{}' for travel: {}", botAlias, t.getMessage());
+            LOGGER.warn("Failed to discard bot '{}' for travel: {}", botAlias, t.getMessage());
         }
 
         int delaySeconds = delayTicks / 20;
@@ -628,7 +661,8 @@ public final class NavigationArtifactService {
             LOGGER.info("Post-collect return: {} -> {} ({}, dist={}, ETA={}s)",
                     botAlias, returnDest.toShortString(), returnLabel, (int) dist, delayTicks / 20);
             beginDelayedTravel(server, bot, botAlias, returnDest,
-                    ((ServerWorld) bot.getEntityWorld()).getRegistryKey(), delayTicks, action.ownerUuid());
+                    ((ServerWorld) bot.getEntityWorld()).getRegistryKey(), delayTicks, action.ownerUuid(),
+                    true /* skipGates: return trip after collection */);
             notifyOwner(server, action.ownerUuid(),
                     "\u00A7e" + botAlias + " is returning to " + returnLabel + " (ETA ~" + Math.max(1, delayTicks / 20) + "s).\u00A7r");
         }
