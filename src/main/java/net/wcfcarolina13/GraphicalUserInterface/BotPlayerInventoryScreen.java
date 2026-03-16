@@ -1871,24 +1871,36 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         int totalRows = skillRows != null ? skillRows.size() : entries.size();
         Rect scrollThumb = computeOverlayListScrollbarThumb(scrollTrack, totalRows, visibleRows);
 
-        // Tabs (Skills / Dialogue / ✦ / Admin)
+        // Tabs: when Spells is active, show "Spells" text (4 equal tabs).
+        // Otherwise, show ✦ icon (compact) so text tabs get more room.
         int tabY = listY + 2;
         int tabH = TOPICS_OVERLAY_LIST_HEADER_H - 4;
         int tabGap = 2;
-        // Spells tab is icon-sized; remaining space shared by 3 text tabs.
-        int spellsTabW = this.textRenderer.getWidth("\u2726") + 10;
-        int textTabsSpace = listW - 4 - spellsTabW - 3 * tabGap; // 4 = 2px margin each side
-        int tabW = Math.max(30, textTabsSpace / 3);
+        boolean spellsActive = overlayCategory == TopicCategory.SPELL;
+        String spellsLabel = spellsActive ? "Spells" : "\u2726";
+        boolean guideRestricted = guideRemoteOpen && !guideRemoteFullAccess;
+
+        int spellsTabW, tabW;
+        if (spellsActive) {
+            // 4 equal-width text tabs.
+            tabW = Math.max(30, (listW - 4 - 3 * tabGap) / 4);
+            spellsTabW = tabW;
+        } else {
+            // Compact icon tab; 3 text tabs share the rest.
+            spellsTabW = this.textRenderer.getWidth("\u2726") + 10;
+            int textTabsSpace = listW - 4 - spellsTabW - 3 * tabGap;
+            tabW = Math.max(30, textTabsSpace / 3);
+        }
         int skillsTabX = listX + 2;
         int dialogueTabX = skillsTabX + tabW + tabGap;
         int spellsTabX = dialogueTabX + tabW + tabGap;
         int adminTabX = spellsTabX + spellsTabW + tabGap;
-        boolean guideRestricted = guideRemoteOpen && !guideRemoteFullAccess;
         drawOverlayTab(context, skillsTabX, tabY, tabW, tabH, TOPIC_PANEL_TITLE, overlayCategory == TopicCategory.SKILL, !guideRestricted);
         drawOverlayTab(context, dialogueTabX, tabY, tabW, tabH, "Dialogue", overlayCategory == TopicCategory.DIALOGUE, !guideRestricted);
-        drawOverlayTab(context, spellsTabX, tabY, spellsTabW, tabH, "\u2726", overlayCategory == TopicCategory.SPELL, true);
-        // Spells tab tooltip on hover.
-        if (mouseX >= spellsTabX && mouseX < spellsTabX + spellsTabW && mouseY >= tabY && mouseY < tabY + tabH) {
+        drawOverlayTab(context, spellsTabX, tabY, spellsTabW, tabH, spellsLabel, spellsActive, true);
+        // Spells tab tooltip on hover (only when showing icon).
+        if (!spellsActive && mouseX >= spellsTabX && mouseX < spellsTabX + spellsTabW
+                && mouseY >= tabY && mouseY < tabY + tabH) {
             spellsTabHovered = true;
             if (spellsTabHoverStartMs == 0L) spellsTabHoverStartMs = System.currentTimeMillis();
         } else {
@@ -2245,7 +2257,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             return true;
         }
 
-        // Tabs (Skills / Dialogue / ✦ / Admin).
+        // Tabs (Skills / Dialogue / ✦ or Spells / Admin).
         int listX = getOverlayListX(cols);
         int listY = cols.contentY;
         int listW = getOverlayListW(cols);
@@ -2253,9 +2265,16 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         int tabY = listY + 2;
         int tabH = TOPICS_OVERLAY_LIST_HEADER_H - 4;
         int tabGap = 2;
-        int spellsTabW = this.textRenderer.getWidth("\u2726") + 10;
-        int textTabsSpace = listW - 4 - spellsTabW - 3 * tabGap;
-        int tabW = Math.max(30, textTabsSpace / 3);
+        boolean spellsActive = overlayCategory == TopicCategory.SPELL;
+        int spellsTabW, tabW;
+        if (spellsActive) {
+            tabW = Math.max(30, (listW - 4 - 3 * tabGap) / 4);
+            spellsTabW = tabW;
+        } else {
+            spellsTabW = this.textRenderer.getWidth("\u2726") + 10;
+            int textTabsSpace = listW - 4 - spellsTabW - 3 * tabGap;
+            tabW = Math.max(30, textTabsSpace / 3);
+        }
         int skillsTabX = listX + 2;
         int dialogueTabX = skillsTabX + tabW + tabGap;
         int spellsTabX = dialogueTabX + tabW + tabGap;
@@ -4644,10 +4663,20 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
     private boolean isSpellEntryEnabled(TopicEntry entry) {
         if (entry == null || entry.action == null) return false;
         MinecraftClient mc = MinecraftClient.getInstance();
+        // Player-side access.
         boolean full = isNearEnchantingTable(mc, 4) || hasSpellbookToken(mc);
         boolean eye = !full && hasEyeOfEnderToken(mc);
         boolean playerHasPearl = hasEnderPearlInInventory(mc);
         boolean playerHasChorus = playerHasPearl && hasChorusFruitInInventory(mc);
+        // Bot-side access: check bot inventory for Wizard's Tome / Eye of Ender.
+        if (!full && this.handler != null) {
+            for (int i = 0; i < 41; i++) {
+                var stack = this.handler.getSlot(i).getStack();
+                if (stack == null || stack.isEmpty()) continue;
+                if (stack.isOf(net.wcfcarolina13.items.ModItems.WIZARD_TOME)) { full = true; break; }
+                if (stack.isOf(Items.ENDER_EYE)) { eye = true; }
+            }
+        }
         return switch (entry.action) {
             case SPELL_REMOTE_GUIDANCE -> full || playerHasPearl;
             case SPELL_CHORUS_RECALL -> full || playerHasChorus;
