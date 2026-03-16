@@ -4638,16 +4638,17 @@ public class modCommandRegistry {
             }
         }
 
-        // Full access required (Wizard's Tome or Enchanting Table) — Eye of Ender is NOT sufficient.
-        boolean fullAccess = hasSpellbookToken(commander) || isNearEnchantingTable(commander, 4);
-        if (!fullAccess) {
-            ChatUtils.sendSystemMessage(source, "Remote inventory requires an Enchanting Table or Wizard's Tome.");
-            return 0;
-        }
-
         ServerPlayerEntity bot = server.getPlayerManager().getPlayer(alias);
         if (bot == null || bot.isRemoved() || !bot.isAlive()) {
             ChatUtils.sendSystemMessage(source, "Couldn't open inventory for " + alias + " (not spawned).");
+            return 0;
+        }
+
+        // Full access required (Wizard's Tome or Enchanting Table) — bidirectional.
+        boolean fullAccess = hasSpellbookToken(commander) || isNearEnchantingTable(commander, 4)
+                || hasSpellbookToken(bot) || isNearEnchantingTable(bot, 4);
+        if (!fullAccess) {
+            ChatUtils.sendSystemMessage(source, "Remote inventory requires an Enchanting Table or Wizard's Tome (either you or your companion).");
             return 0;
         }
 
