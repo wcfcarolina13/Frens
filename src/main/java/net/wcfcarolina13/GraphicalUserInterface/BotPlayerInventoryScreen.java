@@ -1871,21 +1871,24 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         int totalRows = skillRows != null ? skillRows.size() : entries.size();
         Rect scrollThumb = computeOverlayListScrollbarThumb(scrollTrack, totalRows, visibleRows);
 
-        // Tabs (Skills / Dialogue / Spells / Admin)
+        // Tabs (Skills / Dialogue / ✦ / Admin)
         int tabY = listY + 2;
         int tabH = TOPICS_OVERLAY_LIST_HEADER_H - 4;
-        int tabW = Math.max(44, (listW - 10) / 4);
         int tabGap = 2;
+        // Spells tab is icon-sized; remaining space shared by 3 text tabs.
+        int spellsTabW = this.textRenderer.getWidth("\u2726") + 10;
+        int textTabsSpace = listW - 4 - spellsTabW - 3 * tabGap; // 4 = 2px margin each side
+        int tabW = Math.max(30, textTabsSpace / 3);
         int skillsTabX = listX + 2;
         int dialogueTabX = skillsTabX + tabW + tabGap;
         int spellsTabX = dialogueTabX + tabW + tabGap;
-        int adminTabX = spellsTabX + tabW + tabGap;
+        int adminTabX = spellsTabX + spellsTabW + tabGap;
         boolean guideRestricted = guideRemoteOpen && !guideRemoteFullAccess;
         drawOverlayTab(context, skillsTabX, tabY, tabW, tabH, TOPIC_PANEL_TITLE, overlayCategory == TopicCategory.SKILL, !guideRestricted);
         drawOverlayTab(context, dialogueTabX, tabY, tabW, tabH, "Dialogue", overlayCategory == TopicCategory.DIALOGUE, !guideRestricted);
-        drawOverlayTab(context, spellsTabX, tabY, tabW, tabH, "\u2726", overlayCategory == TopicCategory.SPELL, !guideRestricted);
+        drawOverlayTab(context, spellsTabX, tabY, spellsTabW, tabH, "\u2726", overlayCategory == TopicCategory.SPELL, true);
         // Spells tab tooltip on hover.
-        if (mouseX >= spellsTabX && mouseX < spellsTabX + tabW && mouseY >= tabY && mouseY < tabY + tabH) {
+        if (mouseX >= spellsTabX && mouseX < spellsTabX + spellsTabW && mouseY >= tabY && mouseY < tabY + tabH) {
             spellsTabHovered = true;
             if (spellsTabHoverStartMs == 0L) spellsTabHoverStartMs = System.currentTimeMillis();
         } else {
@@ -2242,19 +2245,21 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             return true;
         }
 
-        // Tabs (Skills / Dialogue / Spells / Admin).
+        // Tabs (Skills / Dialogue / ✦ / Admin).
         int listX = getOverlayListX(cols);
         int listY = cols.contentY;
         int listW = getOverlayListW(cols);
 
         int tabY = listY + 2;
         int tabH = TOPICS_OVERLAY_LIST_HEADER_H - 4;
-        int tabW = Math.max(44, (listW - 10) / 4);
         int tabGap = 2;
+        int spellsTabW = this.textRenderer.getWidth("\u2726") + 10;
+        int textTabsSpace = listW - 4 - spellsTabW - 3 * tabGap;
+        int tabW = Math.max(30, textTabsSpace / 3);
         int skillsTabX = listX + 2;
         int dialogueTabX = skillsTabX + tabW + tabGap;
         int spellsTabX = dialogueTabX + tabW + tabGap;
-        int adminTabX = spellsTabX + tabW + tabGap;
+        int adminTabX = spellsTabX + spellsTabW + tabGap;
 
         if (mouseY >= tabY && mouseY < tabY + tabH) {
             if (mouseX >= skillsTabX && mouseX < skillsTabX + tabW) {
@@ -2271,8 +2276,8 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
                 }
                 return true;
             }
-            if (mouseX >= spellsTabX && mouseX < spellsTabX + tabW) {
-                if (guideRestricted) return true; // Admin-only mode — block Spells tab
+            if (mouseX >= spellsTabX && mouseX < spellsTabX + spellsTabW) {
+                // Spells tab is always accessible — spells grey out individually.
                 overlayCategory = TopicCategory.SPELL;
                 return true;
             }
