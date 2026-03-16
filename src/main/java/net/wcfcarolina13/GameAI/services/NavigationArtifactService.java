@@ -4,7 +4,9 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.reflect.TypeToken;
 import net.fabricmc.loader.api.FabricLoader;
+import net.minecraft.entity.EntityPosition;
 import net.minecraft.item.Items;
+import net.minecraft.network.packet.s2c.play.EntityPositionS2CPacket;
 import net.minecraft.registry.RegistryKey;
 import net.minecraft.registry.RegistryKeys;
 import net.minecraft.server.MinecraftServer;
@@ -427,13 +429,15 @@ public final class NavigationArtifactService {
         double dx = ps.spawnPos().x, dy = ps.spawnPos().y, dz = ps.spawnPos().z;
         bot.teleport(ps.world(), dx, dy, dz,
                 java.util.Set.of(), 0.0F, 0.0F, true);
-        // Force position sync — the entity spawned at 0,0,0 and may not be tracked by clients.
+        // Force position + send position packet to ALL clients in the dimension.
         bot.setPosition(dx, dy, dz);
         bot.setVelocity(Vec3d.ZERO);
-        // Explicit network position sync for all tracking clients.
-        if (bot.networkHandler != null) {
-            bot.networkHandler.requestTeleport(dx, dy, dz, 0.0F, 0.0F);
-        }
+        // Broadcast entity position to all players in the dimension (same approach as createFake).
+        EntityPosition ep = EntityPosition.fromEntity(bot).withRotation(0.0F, 0.0F);
+        server.getPlayerManager().sendToDimension(
+                new net.minecraft.network.packet.s2c.play.EntityPositionS2CPacket(
+                        bot.getId(), ep, java.util.Set.of(), bot.isOnGround()),
+                ps.dim());
 
         try { BotEventHandler.registerBot(bot); }
         catch (Throwable t) { LOGGER.warn("Failed to register bot '{}' after travel: {}", ps.botAlias(), t.getMessage()); }
