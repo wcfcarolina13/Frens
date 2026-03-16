@@ -4668,7 +4668,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         boolean eye = !full && hasEyeOfEnderToken(mc);
         boolean playerHasPearl = hasEnderPearlInInventory(mc);
         boolean playerHasChorus = playerHasPearl && hasChorusFruitInInventory(mc);
-        // Bot-side access: check bot inventory for Wizard's Tome / Eye of Ender.
+        // Bot-side access: check bot inventory + proximity to enchanting table.
         if (!full && this.handler != null) {
             for (int i = 0; i < 41; i++) {
                 var stack = this.handler.getSlot(i).getStack();
@@ -4677,6 +4677,9 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
                 if (stack.isOf(Items.ENDER_EYE)) { eye = true; }
             }
         }
+        if (!full) {
+            full = isBotNearEnchantingTable(mc, 4);
+        }
         return switch (entry.action) {
             case SPELL_REMOTE_GUIDANCE -> full || playerHasPearl;
             case SPELL_CHORUS_RECALL -> full || playerHasChorus;
@@ -4684,6 +4687,31 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case SPELL_REMOTE_INVENTORY -> full;
             default -> false;
         };
+    }
+
+    /** Check if the bot entity (looked up by alias) is near an enchanting table in the client world. */
+    private boolean isBotNearEnchantingTable(MinecraftClient client, int radius) {
+        if (client == null || client.world == null || botAlias == null || botAlias.isBlank()) {
+            return false;
+        }
+        // Find bot entity by name in the client world.
+        net.minecraft.util.math.BlockPos botPos = null;
+        for (net.minecraft.client.network.AbstractClientPlayerEntity p : client.world.getPlayers()) {
+            if (p != null && botAlias.equalsIgnoreCase(p.getName().getString())) {
+                botPos = p.getBlockPos();
+                break;
+            }
+        }
+        if (botPos == null) return false;
+        int r = Math.max(1, radius);
+        for (net.minecraft.util.math.BlockPos pos : net.minecraft.util.math.BlockPos.iterate(
+                botPos.add(-r, -2, -r), botPos.add(r, 2, r))) {
+            if (!client.world.isChunkLoaded(pos)) continue;
+            if (client.world.getBlockState(pos).isOf(net.minecraft.block.Blocks.ENCHANTING_TABLE)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private boolean hasEnderPearlInInventory(MinecraftClient client) {

@@ -4865,6 +4865,7 @@ public class modCommandRegistry {
         // Bot-side checks (bidirectional)
         if (bot != null) {
             if (hasSpellbookToken(bot)) return true;
+            if (isNearEnchantingTable(bot, 4)) return true;
             if (hasEyeOfEnderToken(bot)) return true;
         }
         return st != null && isNearCompanionAnchor(server, commander, st, 12.0D);
@@ -4881,6 +4882,7 @@ public class modCommandRegistry {
         // Bot-side checks (bidirectional)
         if (bot != null) {
             if (hasSpellbookToken(bot)) return true;
+            if (isNearEnchantingTable(bot, 4)) return true;
             if (hasEyeOfEnderToken(bot)) return true;
         }
         return st != null && isNearCompanionAnchor(server, commander, st, 12.0D);
@@ -4948,6 +4950,7 @@ public class modCommandRegistry {
         // Bot-side checks (bidirectional)
         if (bot != null) {
             if (hasSpellbookToken(bot)) return true;
+            if (isNearEnchantingTable(bot, 4)) return true;
             if (hasEyeOfEnderToken(bot)) return true;
         }
         return st != null && isNearCompanionAnchor(server, commander, st, 16.0D);
