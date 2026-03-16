@@ -633,6 +633,11 @@ public final class BotPersistenceService {
         }
     }
 
+    /** Public entry point for removing a fake player from the player manager (sends remove packets to clients). */
+    public static boolean removeFromPlayerManager(MinecraftServer server, ServerPlayerEntity bot) {
+        return tryRemoveFromPlayerManager(server, bot);
+    }
+
     private static boolean tryRemoveFromPlayerManager(MinecraftServer server, ServerPlayerEntity bot) {
         if (server == null || bot == null) {
             return false;

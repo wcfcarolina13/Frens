@@ -259,14 +259,18 @@ public final class NavigationArtifactService {
             LOGGER.warn("Failed to persist bot '{}' before travel: {}", botAlias, t.getMessage());
         }
 
-        // Remove the bot from the world. Use kill(Text) for a clean disconnect
-        // that removes the entity from the player list without triggering onDeath logic.
+        // Remove the bot from the world AND player manager. This sends
+        // PlayerRemoveS2CPacket to all clients so the client clears the entity.
+        // Without this, createFake's reconnect with the same UUID leaves the bot
+        // invisible (client keeps stale reference to the killed entity).
         try {
             if (bot instanceof createFakePlayer fake) {
                 fake.kill(Text.literal("Traveling"));
             } else {
                 bot.discard();
             }
+            // Critical: remove from player manager to send remove packet to clients.
+            BotPersistenceService.removeFromPlayerManager(server, bot);
         } catch (Throwable t) {
             LOGGER.warn("Failed to remove bot '{}' from world for travel: {}", botAlias, t.getMessage());
         }
