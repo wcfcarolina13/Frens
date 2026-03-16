@@ -1,6 +1,17 @@
 # Changelog & History
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
+## 2026-03-16
+
+- **Storage screen redesign + fast travel fixes:**
+  1. **Bot disappears during fast travel:** Fixed removal order — `removeFromPlayerManager()` now runs BEFORE `kill()`. Previously `kill()` set DISCARDED state which blocked PM removal.
+  2. **Contents snapshot refresh:** `refreshAllSnapshots()` reads chest BlockEntities every time Storage screen opens. No longer depends on bot deposit/withdrawal.
+  3. **Post-arrival collection:** `PENDING_POST_ARRIVAL_ACTIONS` map stores withdrawal action. `completePostSpawnSetup()` transfers items from chest to bot inventory on arrival.
+  4. **3-button layout:** Go / Collect / Dismiss per chest row. Collect opens sub-menu: "Stay at Chest", "Return to Player", "Return to Home".
+  5. **Post-collect return trip:** After withdrawing, bot can fast-travel back to player, home base, or stay.
+  6. **Artifact tier gating:** Map/Compass = 2x delay, Eye of Ender / Ender Pearls / Wizard's Tome = standard speed.
+  7. **Guide updated:** New "Storage" topic and revised "Fast Travel & Navigation Tiers" with full artifact tier system.
+
 ## 2026-03-15
 
 - **Storage screen: contents snapshot, tooltips, fast travel collect:**

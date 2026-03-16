@@ -139,11 +139,57 @@ public final class NavigationArtifactService {
      * @return delay in game ticks (20 ticks = 1 second).
      */
     public static int calculateDelayTicks(double distance, boolean crossDimension) {
+        return calculateDelayTicks(distance, crossDimension, 1.0);
+    }
+
+    public static int calculateDelayTicks(double distance, boolean crossDimension, double multiplier) {
         int chunks = Math.max(1, (int) Math.ceil(distance / 16.0));
         int seconds = chunks;
         if (crossDimension) seconds += 30;
-        seconds = Math.max(5, Math.min(300, seconds));
+        seconds = Math.max(5, Math.min(300, (int) (seconds * multiplier)));
         return seconds * 20;
+    }
+
+    /** Determine delay multiplier based on bot/player artifact tier. 2x for Tier 1, 1x for Tier 2+. */
+    public static double artifactDelayMultiplier(ServerPlayerEntity bot, ServerPlayerEntity owner) {
+        // Tier 2+: Eye of Ender, Wizard's Tome, Enchanting Table, or both hold Ender Pearls.
+        if (hasArtifact(bot, net.minecraft.item.Items.ENDER_EYE)
+                || hasArtifact(owner, net.minecraft.item.Items.ENDER_EYE)
+                || hasArtifact(bot, net.minecraft.item.Items.WRITTEN_BOOK)    // Wizard's Tome check
+                || isNearBlock(bot, net.minecraft.block.Blocks.ENCHANTING_TABLE, 6)
+                || isNearBlock(owner, net.minecraft.block.Blocks.ENCHANTING_TABLE, 6)
+                || (hasArtifact(bot, net.minecraft.item.Items.ENDER_PEARL)
+                    && hasArtifact(owner, net.minecraft.item.Items.ENDER_PEARL))) {
+            return 1.0;
+        }
+        // Tier 1: Map or Map+Compass on bot → 2x slower.
+        if (hasArtifact(bot, net.minecraft.item.Items.FILLED_MAP)
+                || hasArtifact(bot, net.minecraft.item.Items.COMPASS)) {
+            return 2.0;
+        }
+        // No artifacts: still allow but at 3x delay.
+        return 3.0;
+    }
+
+    private static boolean hasArtifact(ServerPlayerEntity player, net.minecraft.item.Item item) {
+        if (player == null) return false;
+        for (int i = 0; i < player.getInventory().size(); i++) {
+            if (player.getInventory().getStack(i).isOf(item)) return true;
+        }
+        return false;
+    }
+
+    private static boolean isNearBlock(ServerPlayerEntity player, net.minecraft.block.Block block, int radius) {
+        if (player == null) return false;
+        BlockPos center = player.getBlockPos();
+        for (int dx = -radius; dx <= radius; dx++) {
+            for (int dy = -2; dy <= 2; dy++) {
+                for (int dz = -radius; dz <= radius; dz++) {
+                    if (player.getEntityWorld().getBlockState(center.add(dx, dy, dz)).isOf(block)) return true;
+                }
+            }
+        }
+        return false;
     }
 
     // ── Fast travel system ────────────────────────────────────
@@ -499,7 +545,14 @@ public final class NavigationArtifactService {
         // Process post-arrival action (e.g., withdraw from chest, then return).
         String key = ps.botAlias().toLowerCase(java.util.Locale.ROOT);
         PostArrivalAction action = PENDING_POST_ARRIVAL.remove(key);
-        if (action != null && "withdraw".equals(action.type())) {
+        if (action != null && action.type() != null && action.type().startsWith("withdraw")) {
+            // Parse return mode: "withdraw:stay", "withdraw:player", "withdraw:home"
+            String returnMode = "stay";
+            if (action.type().contains(":")) {
+                returnMode = action.type().substring(action.type().indexOf(':') + 1);
+            }
+            final String finalReturnMode = returnMode;
+
             // Schedule withdrawal on next tick (bot needs to be fully in world first).
             server.execute(() -> {
                 ServerPlayerEntity arrBot = server.getPlayerManager().getPlayer(ps.botAlias());
@@ -520,19 +573,64 @@ public final class NavigationArtifactService {
                         }
                     }
                     storage.markDirty();
-                    // Update snapshot after withdrawal.
                     BotChestRegistryService.updateContentsSnapshot(arrBot, chestPos, w, storage);
-                    LOGGER.info("Post-arrival: {} withdrew {} items from chest at {}",
-                            ps.botAlias(), moved, chestPos.toShortString());
+                    LOGGER.info("Post-arrival: {} withdrew {} items from chest at {} (return={})",
+                            ps.botAlias(), moved, chestPos.toShortString(), finalReturnMode);
 
-                    // Notify owner.
                     notifyOwner(server, action.ownerUuid(),
                             "\u00A7a" + ps.botAlias() + " collected " + moved + " items from the chest.\u00A7r");
+
+                    // Handle return trip.
+                    handlePostCollectReturn(server, arrBot, ps.botAlias(), finalReturnMode, action);
                 } else {
                     notifyOwner(server, action.ownerUuid(),
                             "\u00A7e" + ps.botAlias() + " arrived but no chest found at " + chestPos.toShortString() + ".\u00A7r");
                 }
             });
+        }
+    }
+
+    /** After collecting, fast-travel back to the requested destination. */
+    private static void handlePostCollectReturn(MinecraftServer server, ServerPlayerEntity bot,
+                                                 String botAlias, String returnMode, PostArrivalAction action) {
+        if ("stay".equals(returnMode) || returnMode == null) return;
+
+        BlockPos returnDest = null;
+        String returnLabel = null;
+
+        if ("player".equals(returnMode)) {
+            ServerPlayerEntity owner = server.getPlayerManager().getPlayer(action.ownerUuid());
+            if (owner != null && !owner.isRemoved()) {
+                returnDest = owner.getBlockPos();
+                returnLabel = "player";
+            }
+        } else if ("home".equals(returnMode)) {
+            // Use the "home" base label.
+            ServerWorld w = (ServerWorld) bot.getEntityWorld();
+            var homeOpt = BotHomeService.getBaseByLabel(server, w, "home");
+            if (homeOpt.isPresent()) {
+                returnDest = homeOpt.get();
+                returnLabel = "home base";
+            }
+        }
+
+        if (returnDest == null) {
+            // Fall back to origin position stored in the action.
+            if (action.returnPos() != null) {
+                returnDest = BlockPos.ofFloored(action.returnPos());
+                returnLabel = "origin";
+            }
+        }
+
+        if (returnDest != null) {
+            double dist = bot.getBlockPos().getManhattanDistance(returnDest);
+            int delayTicks = calculateDelayTicks(dist, false);
+            LOGGER.info("Post-collect return: {} -> {} ({}, dist={}, ETA={}s)",
+                    botAlias, returnDest.toShortString(), returnLabel, (int) dist, delayTicks / 20);
+            beginDelayedTravel(server, bot, botAlias, returnDest,
+                    ((ServerWorld) bot.getEntityWorld()).getRegistryKey(), delayTicks, action.ownerUuid());
+            notifyOwner(server, action.ownerUuid(),
+                    "\u00A7e" + botAlias + " is returning to " + returnLabel + " (ETA ~" + Math.max(1, delayTicks / 20) + "s).\u00A7r");
         }
     }
 

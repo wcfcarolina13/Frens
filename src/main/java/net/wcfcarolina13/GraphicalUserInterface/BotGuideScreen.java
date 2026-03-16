@@ -1116,18 +1116,20 @@ public final class BotGuideScreen extends Screen {
                 new GuideTopic(
                         "settings_nav_modes",
                         "Settings",
-                        "Navigation Modes",
-                        "Choose how your companion travels long distances: walk or fast travel.",
+                        "Fast Travel & Navigation Tiers",
+                        "Companion fast travel speed depends on held artifacts.",
                         List.of(
-                                "Walk mode: bot pathfinds in 32-block segments. Realistic but slow, can get stuck.",
-                                "Fast travel mode (default): bot disappears for ~1 second per chunk of distance, then reappears at destination.",
-                                "Cross-dimension adds 30 seconds. Minimum 5s, maximum 5 minutes.",
-                                "Eye of Ender holders bypass delay entirely — always instant.",
-                                "Configure via /bot config <alias> nav_mode walk or fast_travel."
+                                "All navigation uses fast travel \u2014 the bot disappears and reappears at the destination.",
+                                "Tier 1 (Map on bot): fast travel to bases at 2x delay (~2s/chunk).",
+                                "Tier 1 (Map + Compass on bot): fast travel to bases AND player at 2x delay.",
+                                "Tier 2 (Eye of Ender, either): standard speed (~1s/chunk) to bases and player.",
+                                "Tier 2 (Ender Pearls, both hold): same as Eye of Ender (pearls NOT consumed for storage/nav).",
+                                "Full Access (Wizard's Tome or Enchanting Table): standard speed everywhere.",
+                                "Cross-dimension travel adds 30 seconds. Minimum 5s, maximum 5 minutes."
                         ),
-                        "/bot config <alias> nav_mode walk",
                         "/bot config <alias> nav_mode fast_travel",
-                        "navigation mode walk fast travel config setting"
+                        "Give bot a Map and Compass for basic navigation; Eye of Ender for faster travel.",
+                        "navigation mode fast travel tier map compass eye ender artifact speed"
                 ),
                 new GuideTopic(
                         "items_spell_ingredients",
@@ -1139,12 +1141,30 @@ public final class BotGuideScreen extends Screen {
                                 "Enchanting Table (nearby): full access to all spells.",
                                 "Goat Horn: regroup only (player holds).",
                                 "Eye of Ender: summon only with 60s cooldown (player holds); enhanced navigation (either holds).",
-                                "Ender Pearl (paired): Remote Guidance spell — both must hold, consumed.",
-                                "Ender Pearl + Chorus Fruit (paired): Chorus Recall — instant teleport, consumed."
+                                "Ender Pearl (paired): Remote Guidance spell \u2014 both must hold, consumed.",
+                                "Ender Pearl + Chorus Fruit (paired): Chorus Recall \u2014 instant teleport, consumed."
                         ),
                         "UI-only action (Spells tab)",
                         "Hold item or be near Enchanting Table to unlock spells",
                         "spell ingredient wizard tome eye ender pearl chorus goat horn enchanting"
+                ),
+                new GuideTopic(
+                        "storage_chests",
+                        "Utilities",
+                        "Storage",
+                        "View and manage supply chests your companions have placed in the world.",
+                        List.of(
+                                "Open via Actions \u2192 Utilities \u2192 Storage.",
+                                "Each chest shows coordinates, status, and a snapshot of its contents.",
+                                "Go: fast-travel the bot to the chest location.",
+                                "Collect: bot fast-travels to chest, withdraws items, optionally returns (to player, home, or stays).",
+                                "Dismiss: removes the chest from the registry (does not break the block).",
+                                "Fast travel speed depends on artifacts: Map/Compass = 2x delay, Eye of Ender or higher = standard speed.",
+                                "Hover a chest row to see a tooltip of its last-known contents."
+                        ),
+                        "UI-only action (Actions \u2192 Utilities \u2192 Storage)",
+                        "Switch between bots with the dropdown in the header",
+                        "storage chest supply collect go dismiss fast travel artifacts"
                 )
         );
     }

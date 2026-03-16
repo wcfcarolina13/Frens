@@ -108,8 +108,9 @@ public class BotStorageScreen extends Screen {
     private static final int ROW_H = 46;
     private static final int GROUP_HEADER_H = 16;
     private static final int BOTTOM_BAR_H = 28;
-    private static final int BUTTON_W = 48;
+    private static final int BUTTON_W = 42;
     private static final int BUTTON_H = 16;
+    private static final int BUTTON_GAP = 3;
 
     // Colors
     private static final int COL_BG = 0xB0101010;
@@ -140,6 +141,10 @@ public class BotStorageScreen extends Screen {
     private long statusMessageExpiry;
     private static final long STATUS_DISPLAY_MS = 3000L;
 
+    // Collect sub-menu popup state.
+    private ChestEntry collectPopupEntry;
+    private int collectPopupX, collectPopupY;
+
     private int panelX, panelY, panelW, panelH;
     private double contentScroll;
     private boolean draggingScroll;
@@ -155,7 +160,7 @@ public class BotStorageScreen extends Screen {
     private ButtonWidget closeButton;
 
     // Cached row layout for click detection (rebuilt each frame in renderContent).
-    private record RowLayout(ChestEntry entry, int y, int h, int collectBtnX, int dismissBtnX, int btnY) {}
+    private record RowLayout(ChestEntry entry, int y, int h, int goBtnX, int collectBtnX, int dismissBtnX, int btnY) {}
     private final List<RowLayout> renderedRows = new ArrayList<>();
 
     public BotStorageScreen(Screen parent, String botTarget) {
@@ -444,8 +449,14 @@ public class BotStorageScreen extends Screen {
             botSelector.renderOnTop(context, mouseX, mouseY, delta);
         }
 
-        // Chest contents tooltip on hover
-        if (hoveredEntry != null && hoveredEntry.contents != null && !hoveredEntry.contents.isEmpty()) {
+        // Collect sub-menu popup
+        if (collectPopupEntry != null) {
+            renderCollectPopup(context, mouseX, mouseY);
+        }
+
+        // Chest contents tooltip on hover (skip if popup is open)
+        if (collectPopupEntry == null && hoveredEntry != null
+                && hoveredEntry.contents != null && !hoveredEntry.contents.isEmpty()) {
             List<String> lines = new java.util.ArrayList<>();
             String title = (hoveredEntry.destroyed ? "Last Known " : "") + "Contents:";
             lines.add(title);
@@ -455,6 +466,60 @@ public class BotStorageScreen extends Screen {
             renderTooltip(context, mouseX, mouseY, lines);
         }
         hoveredEntry = null;
+    }
+
+    // ── Collect popup sub-menu ────────────────────────────────────────
+    private static final int POPUP_W = 130;
+    private static final int POPUP_OPTION_H = 18;
+    private static final String[] POPUP_OPTIONS = { "Stay at Chest", "Return to Player", "Return to Home" };
+    private static final String[] POPUP_TOOLTIPS = {
+            "Bot travels to chest, collects items, and stays there.",
+            "Bot collects items and fast-travels back to you.\nRequires Map + Compass (Tier 1) or higher.",
+            "Bot collects items and fast-travels to home base.\nRequires Map (Tier 1) or higher."
+    };
+
+    private void renderCollectPopup(DrawContext context, int mouseX, int mouseY) {
+        int popupH = POPUP_OPTIONS.length * POPUP_OPTION_H + 6;
+        int px = collectPopupX;
+        int py = collectPopupY;
+        // Clamp to screen
+        if (px + POPUP_W > this.width) px = this.width - POPUP_W - 4;
+        if (py + popupH > this.height) py = this.height - popupH - 4;
+
+        // Background
+        context.fill(px, py, px + POPUP_W, py + popupH, 0xF0181818);
+        drawBorder(context, px, py, POPUP_W, popupH, 0xFF555544);
+
+        int oy = py + 3;
+        for (int i = 0; i < POPUP_OPTIONS.length; i++) {
+            boolean hover = mouseX >= px && mouseX < px + POPUP_W && mouseY >= oy && mouseY < oy + POPUP_OPTION_H;
+            if (hover) {
+                context.fill(px + 1, oy, px + POPUP_W - 1, oy + POPUP_OPTION_H, 0x40B08C40);
+            }
+            context.drawText(this.textRenderer, POPUP_OPTIONS[i], px + 6, oy + 5,
+                    hover ? 0xFFFFE08A : 0xFFD8C7A0, false);
+            oy += POPUP_OPTION_H;
+        }
+
+        // Tooltip for hovered option
+        int hovIdx = popupOptionAt(mouseX, mouseY);
+        if (hovIdx >= 0 && hovIdx < POPUP_TOOLTIPS.length) {
+            List<String> ttLines = List.of(POPUP_TOOLTIPS[hovIdx].split("\n"));
+            renderTooltip(context, mouseX + 10, mouseY, ttLines);
+        }
+    }
+
+    private int popupOptionAt(double mx, double my) {
+        int popupH = POPUP_OPTIONS.length * POPUP_OPTION_H + 6;
+        int px = collectPopupX;
+        int py = collectPopupY;
+        if (px + POPUP_W > this.width) px = this.width - POPUP_W - 4;
+        if (py + popupH > this.height) py = this.height - popupH - 4;
+        if (mx < px || mx >= px + POPUP_W) return -1;
+        int relY = (int) my - (py + 3);
+        if (relY < 0) return -1;
+        int idx = relY / POPUP_OPTION_H;
+        return idx < POPUP_OPTIONS.length ? idx : -1;
     }
 
     private void renderTooltip(DrawContext context, int mx, int my, List<String> lines) {
@@ -553,9 +618,25 @@ public class BotStorageScreen extends Screen {
                             isDestroyed ? 0xFF776666 : 0xFF999977, false);
                 }
 
-                // Custom-drawn Collect button
-                int collectBtnX = cr.right() - BUTTON_W * 2 - 8;
+                // 3-button layout: Go / Collect / Dismiss
+                int totalBtnW = BUTTON_W * 3 + BUTTON_GAP * 2;
+                int goBtnX = cr.right() - totalBtnW - 4;
+                int collectBtnX = goBtnX + BUTTON_W + BUTTON_GAP;
+                int dismissBtnX = collectBtnX + BUTTON_W + BUTTON_GAP;
                 int btnY = y + 4;
+
+                // Go button — sends bot to chest location
+                boolean goHover = !isDestroyed && mouseX >= goBtnX && mouseX < goBtnX + BUTTON_W
+                        && mouseY >= btnY && mouseY < btnY + BUTTON_H;
+                int goBg = isDestroyed ? 0xFF1A1A1A : (goHover ? 0xFF2A4A5A : 0xFF1E2A3A);
+                context.fill(goBtnX, btnY, goBtnX + BUTTON_W, btnY + BUTTON_H, goBg);
+                context.fill(goBtnX, btnY, goBtnX + BUTTON_W, btnY + 1, 0xFF444444);
+                context.fill(goBtnX, btnY + BUTTON_H - 1, goBtnX + BUTTON_W, btnY + BUTTON_H, 0xFF222222);
+                context.drawText(this.textRenderer, "Go",
+                        goBtnX + (BUTTON_W - this.textRenderer.getWidth("Go")) / 2, btnY + 4,
+                        isDestroyed ? 0xFF555555 : (goHover ? 0xFFCCEEFF : 0xFFAABBCC), false);
+
+                // Collect button — opens sub-menu for return destination
                 boolean collectHover = !isDestroyed && mouseX >= collectBtnX && mouseX < collectBtnX + BUTTON_W
                         && mouseY >= btnY && mouseY < btnY + BUTTON_H;
                 int collectBg = isDestroyed ? 0xFF1A1A1A : (collectHover ? 0xFF3A5A2A : 0xFF2A3A1E);
@@ -566,8 +647,7 @@ public class BotStorageScreen extends Screen {
                         collectBtnX + (BUTTON_W - this.textRenderer.getWidth("Collect")) / 2, btnY + 4,
                         isDestroyed ? 0xFF555555 : (collectHover ? 0xFFEEFFCC : 0xFFCCDDAA), false);
 
-                // Custom-drawn Dismiss button
-                int dismissBtnX = collectBtnX + BUTTON_W + 4;
+                // Dismiss button — removes from registry
                 boolean dismissHover = mouseX >= dismissBtnX && mouseX < dismissBtnX + BUTTON_W
                         && mouseY >= btnY && mouseY < btnY + BUTTON_H;
                 int dismissBg = dismissHover ? 0xFF5A2A2A : 0xFF3A1E1E;
@@ -595,7 +675,7 @@ public class BotStorageScreen extends Screen {
                 }
 
                 // Record layout for click detection
-                renderedRows.add(new RowLayout(entry, y, rowH, collectBtnX, dismissBtnX, btnY));
+                renderedRows.add(new RowLayout(entry, y, rowH, goBtnX, collectBtnX, dismissBtnX, btnY));
 
                 y += rowH;
             }
@@ -696,13 +776,42 @@ public class BotStorageScreen extends Screen {
             return super.mouseClicked(click, isInside);
         }
 
+        // Collect popup click (must be checked before row buttons)
+        if (collectPopupEntry != null) {
+            int optIdx = popupOptionAt(mx, my);
+            if (optIdx >= 0) {
+                // 0 = Stay at Chest, 1 = Return to Player, 2 = Return to Home
+                String returnMode = switch (optIdx) {
+                    case 1 -> "player";
+                    case 2 -> "home";
+                    default -> "stay";
+                };
+                sendCollect(collectPopupEntry, returnMode);
+                collectPopupEntry = null;
+                return true;
+            }
+            // Click outside popup → close it
+            collectPopupEntry = null;
+            return true;
+        }
+
         // Custom row button clicks + row selection
         for (RowLayout rl : renderedRows) {
             if (my < rl.y || my >= rl.y + rl.h) continue;
-            // Collect button?
+            // Go button?
+            if (mx >= rl.goBtnX && mx < rl.goBtnX + BUTTON_W
+                    && my >= rl.btnY && my < rl.btnY + BUTTON_H) {
+                if (!rl.entry.destroyed) sendGo(rl.entry);
+                return true;
+            }
+            // Collect button → open popup
             if (mx >= rl.collectBtnX && mx < rl.collectBtnX + BUTTON_W
                     && my >= rl.btnY && my < rl.btnY + BUTTON_H) {
-                if (!rl.entry.destroyed) sendCollect(rl.entry);
+                if (!rl.entry.destroyed) {
+                    collectPopupEntry = rl.entry;
+                    collectPopupX = rl.collectBtnX;
+                    collectPopupY = rl.btnY + BUTTON_H + 2;
+                }
                 return true;
             }
             // Dismiss button?
@@ -843,7 +952,7 @@ public class BotStorageScreen extends Screen {
         }
     }
 
-    private void sendCollect(ChestEntry entry) {
+    private void sendGo(ChestEntry entry) {
         if (botTarget == null || botTarget.isBlank()) return;
         if (!ClientPlayNetworking.canSend(ChestCollectPayload.ID)) return;
         Map<String, Object> out = new LinkedHashMap<>();
@@ -851,8 +960,28 @@ public class BotStorageScreen extends Screen {
         out.put("x", entry.x);
         out.put("y", entry.y);
         out.put("z", entry.z);
+        out.put("mode", "go"); // travel only, no withdrawal
         ClientPlayNetworking.send(new ChestCollectPayload(GSON.toJson(out)));
-        showStatus("Sent to collect from " + entry.x + ", " + entry.y + ", " + entry.z);
+        showStatus("Sending bot to " + entry.x + ", " + entry.y + ", " + entry.z);
+    }
+
+    private void sendCollect(ChestEntry entry, String returnMode) {
+        if (botTarget == null || botTarget.isBlank()) return;
+        if (!ClientPlayNetworking.canSend(ChestCollectPayload.ID)) return;
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("botName", botTarget);
+        out.put("x", entry.x);
+        out.put("y", entry.y);
+        out.put("z", entry.z);
+        out.put("mode", "collect");
+        out.put("returnTo", returnMode); // "stay", "player", "home"
+        ClientPlayNetworking.send(new ChestCollectPayload(GSON.toJson(out)));
+        String returnLabel = switch (returnMode) {
+            case "player" -> " (return to player)";
+            case "home" -> " (return to home)";
+            default -> "";
+        };
+        showStatus("Collecting from " + entry.x + ", " + entry.y + ", " + entry.z + returnLabel);
     }
 
     private void sendDismiss(ChestEntry entry) {

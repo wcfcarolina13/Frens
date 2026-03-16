@@ -101,35 +101,42 @@ public final class ChestRegistryNetworkManager {
             ServerPlayerEntity bot = server.getPlayerManager().getPlayer(botName);
             if (bot == null) return;
 
+            String mode = parsed.get("mode") instanceof String s2 ? s2 : "collect";
+            String returnTo = parsed.get("returnTo") instanceof String s3 ? s3 : "stay";
+
             BlockPos chestPos = new BlockPos(x, y, z);
             double distance = bot.getBlockPos().getManhattanDistance(chestPos);
+            boolean crossDim = false;
+            double mult = NavigationArtifactService.artifactDelayMultiplier(bot, player);
+            int delayTicks = NavigationArtifactService.calculateDelayTicks(distance, crossDim, mult);
 
-            // Always fast travel to chest, then withdraw on arrival.
-            {
-                LOGGER.info("Chest collect (fast travel): {} sending {} to chest at {},{},{} (dist={})",
+            if ("go".equals(mode)) {
+                // Go mode: fast travel to chest, no withdrawal.
+                LOGGER.info("Chest go: {} sending {} to chest at {},{},{} (dist={})",
                         player.getName().getString(), botName, x, y, z, (int) distance);
-                boolean crossDim = false;
-                int delayTicks = NavigationArtifactService.calculateDelayTicks(distance, crossDim);
-                // Schedule post-arrival withdrawal.
-                NavigationArtifactService.schedulePostArrival(botName,
-                        new NavigationArtifactService.PostArrivalAction("withdraw", chestPos, player.getUuid(), null));
                 NavigationArtifactService.beginDelayedTravel(
                         server, bot, botName, chestPos,
                         ((ServerWorld) bot.getEntityWorld()).getRegistryKey(), delayTicks, player.getUuid());
                 net.wcfcarolina13.ChatUtils.ChatUtils.sendSystemMessage(
                         player.getCommandSource(),
-                        botName + " is fast-traveling to the chest (ETA ~" + Math.max(1, delayTicks / 20) + "s). Items will be collected on arrival.");
-            }
-            if (false) {
-                // Close enough: walk to chest and withdraw.
-                LOGGER.info("Chest collect (walk): {} -> bot store withdraw all {}", player.getName().getString(), botName);
-                // Use regroup-style approach: set return-to-base toward chest position,
-                // which uses follow mode with stuck-escape/burrowing logic.
-                net.wcfcarolina13.GameAI.BotEventHandler.setReturnToBase(bot,
-                        net.minecraft.util.math.Vec3d.ofCenter(chestPos));
-                net.wcfcarolina13.ChatUtils.ChatUtils.sendSystemMessage(
-                        player.getCommandSource(),
-                        botName + " is heading to the chest at " + x + ", " + y + ", " + z + ".");
+                        botName + " is fast-traveling to the chest (ETA ~" + Math.max(1, delayTicks / 20) + "s).");
+            } else {
+                // Collect mode: fast travel to chest, withdraw on arrival, then optionally return.
+                LOGGER.info("Chest collect: {} sending {} to chest at {},{},{} (dist={}, return={})",
+                        player.getName().getString(), botName, x, y, z, (int) distance, returnTo);
+                // Store return mode in action type: "withdraw:stay", "withdraw:player", "withdraw:home".
+                NavigationArtifactService.schedulePostArrival(botName,
+                        new NavigationArtifactService.PostArrivalAction(
+                                "withdraw:" + returnTo, chestPos, player.getUuid(),
+                                net.minecraft.util.math.Vec3d.of(bot.getBlockPos())));
+                NavigationArtifactService.beginDelayedTravel(
+                        server, bot, botName, chestPos,
+                        ((ServerWorld) bot.getEntityWorld()).getRegistryKey(), delayTicks, player.getUuid());
+                String etaMsg = botName + " is fast-traveling to the chest (ETA ~" + Math.max(1, delayTicks / 20) + "s).";
+                if (!"stay".equals(returnTo)) {
+                    etaMsg += " Will return to " + returnTo + " after collecting.";
+                }
+                net.wcfcarolina13.ChatUtils.ChatUtils.sendSystemMessage(player.getCommandSource(), etaMsg);
             }
 
         } catch (Exception e) {
