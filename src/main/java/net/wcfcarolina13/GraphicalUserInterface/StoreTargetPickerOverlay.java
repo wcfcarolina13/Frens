@@ -28,6 +28,7 @@ public final class StoreTargetPickerOverlay {
 
     private static boolean active = false;
     private static String botName = null;
+    private static String mode = "store"; // "store" or "fetch"
 
     private static boolean lastAttackDown = false;
     private static boolean lastUseDown = false;
@@ -37,9 +38,10 @@ public final class StoreTargetPickerOverlay {
 
     private StoreTargetPickerOverlay() {}
 
-    public static void activate(String bot) {
+    public static void activate(String bot, String actionMode) {
         active = true;
         botName = bot;
+        mode = actionMode != null ? actionMode : "store";
         lastAttackDown = false;
         lastUseDown = false;
         hoveredContainer = null;
@@ -49,6 +51,7 @@ public final class StoreTargetPickerOverlay {
     public static void deactivate() {
         active = false;
         botName = null;
+        mode = "store";
         hoveredContainer = null;
         hoveredIsContainer = false;
         lastAttackDown = false;
@@ -93,7 +96,9 @@ public final class StoreTargetPickerOverlay {
         int cy = context.getScaledWindowHeight() / 2;
 
         // Instructions below crosshair
-        String line1 = "Point at a chest and click to store items";
+        String line1 = "fetch".equals(mode)
+                ? "Point at a chest and click to take items"
+                : "Point at a chest and click to deposit items";
         String line2 = "Right-click to cancel";
         int w1 = client.textRenderer.getWidth(line1);
         int w2 = client.textRenderer.getWidth(line2);
@@ -150,6 +155,7 @@ public final class StoreTargetPickerOverlay {
         if (!ClientPlayNetworking.canSend(StoreTargetPayload.ID)) return;
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("botName", botName);
+        out.put("mode", mode);
         out.put("x", pos.getX());
         out.put("y", pos.getY());
         out.put("z", pos.getZ());

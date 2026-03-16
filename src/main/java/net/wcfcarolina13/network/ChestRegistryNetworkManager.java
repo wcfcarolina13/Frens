@@ -194,6 +194,9 @@ public final class ChestRegistryNetworkManager {
             String botName = parsed.get("botName") instanceof String s ? s : null;
             if (botName == null || botName.isBlank()) return;
 
+            String mode = parsed.get("mode") instanceof String s2 ? s2 : "store";
+            boolean deposit = "store".equals(mode);
+
             if (!(parsed.get("x") instanceof Number nx)
                     || !(parsed.get("y") instanceof Number ny)
                     || !(parsed.get("z") instanceof Number nz)) {
@@ -208,11 +211,10 @@ public final class ChestRegistryNetworkManager {
                         player.getCommandSource(), "\u00A7c" + botName + " is not available.\u00A7r");
                 return;
             }
-            if (!(bot.getEntityWorld() instanceof ServerWorld world)) return;
 
             BlockPos chestPos = new BlockPos(x, y, z);
 
-            // Check bot is not busy (has active skill task or is in combat)
+            // Check bot is not busy
             if (net.wcfcarolina13.GameAI.services.TaskService.hasActiveTask(bot.getUuid())
                     || net.wcfcarolina13.GameAI.services.BotCombatCalloutService.isInCombat(bot.getUuid())) {
                 net.wcfcarolina13.ChatUtils.ChatUtils.sendSystemMessage(
@@ -220,7 +222,7 @@ public final class ChestRegistryNetworkManager {
                 return;
             }
 
-            // Validate distance
+            // Validate distance (32 blocks max)
             double dist = bot.getBlockPos().getManhattanDistance(chestPos);
             if (dist > 32) {
                 net.wcfcarolina13.ChatUtils.ChatUtils.sendSystemMessage(
@@ -228,69 +230,54 @@ public final class ChestRegistryNetworkManager {
                 return;
             }
 
-            // Validate the block is a container
-            var be = world.getBlockEntity(chestPos);
-            if (!(be instanceof net.minecraft.inventory.Inventory)) {
+            // Acquire task ticket so /bot stop works and concurrent tasks are blocked
+            String taskName = deposit ? "quick-store" : "quick-fetch";
+            var ticketOpt = net.wcfcarolina13.GameAI.services.TaskService.beginSkill(
+                    taskName, bot.getCommandSource(), bot.getUuid());
+            if (ticketOpt.isEmpty()) {
                 net.wcfcarolina13.ChatUtils.ChatUtils.sendSystemMessage(
-                        player.getCommandSource(), "\u00A7cThe block at " + x + ", " + y + ", " + z + " is not a container.\u00A7r");
+                        player.getCommandSource(), "\u00A7c" + botName + " is busy with another task.\u00A7r");
                 return;
             }
+            var ticket = ticketOpt.get();
 
-            // Deposit items directly (bot is close enough — within 32 blocks).
-            // Re-validate container at transfer time.
-            server.execute(() -> {
-                var be2 = world.getBlockEntity(chestPos);
-                if (!(be2 instanceof net.minecraft.inventory.Inventory storage)) {
-                    net.wcfcarolina13.ChatUtils.ChatUtils.sendSystemMessage(
-                            player.getCommandSource(),
-                            "\u00A7eThe chest at " + x + ", " + y + ", " + z + " is no longer there. Items kept in inventory.\u00A7r");
-                    return;
-                }
+            String action = deposit ? "deposit" : "fetch";
+            net.wcfcarolina13.ChatUtils.ChatUtils.sendSystemMessage(
+                    player.getCommandSource(),
+                    botName + " is heading to the chest to " + action + " items...");
 
-                int moved = 0;
-                int kept = 0;
-                // Transfer bot inventory into chest. Items that don't fit stay in inventory.
-                int invSize = bot.getInventory().size();
-                for (int i = 0; i < invSize; i++) {
-                    net.minecraft.item.ItemStack stack = bot.getInventory().getStack(i);
-                    if (stack == null || stack.isEmpty()) continue;
-                    net.minecraft.item.ItemStack copy = stack.copy();
-                    boolean inserted = false;
-                    for (int j = 0; j < storage.size(); j++) {
-                        net.minecraft.item.ItemStack chestStack = storage.getStack(j);
-                        if (chestStack.isEmpty()) {
-                            storage.setStack(j, copy);
-                            inserted = true;
-                            break;
-                        } else if (net.minecraft.item.ItemStack.areItemsAndComponentsEqual(chestStack, copy)
-                                && chestStack.getCount() < chestStack.getMaxCount()) {
-                            int space = chestStack.getMaxCount() - chestStack.getCount();
-                            int toMove = Math.min(copy.getCount(), space);
-                            chestStack.increment(toMove);
-                            copy.decrement(toMove);
-                            if (copy.isEmpty()) { inserted = true; break; }
-                        }
-                    }
-                    if (inserted) {
-                        moved += stack.getCount() - copy.getCount();
-                        bot.getInventory().setStack(i, copy.isEmpty() ? net.minecraft.item.ItemStack.EMPTY : copy);
+            // Run on worker thread — ChestStoreService.depositAll/withdrawAllFrom is blocking (walks, then transfers)
+            java.util.concurrent.CompletableFuture.runAsync(() -> {
+                try {
+                    int moved;
+                    if (deposit) {
+                        moved = net.wcfcarolina13.GameAI.services.ChestStoreService.depositAll(
+                                bot.getCommandSource(), bot, chestPos);
                     } else {
-                        kept += stack.getCount();
+                        moved = net.wcfcarolina13.GameAI.services.ChestStoreService.withdrawAllFrom(
+                                bot.getCommandSource(), bot, chestPos);
                     }
-                }
-                storage.markDirty();
 
-                // Feedback
-                String msg;
-                if (moved > 0 && kept > 0) {
-                    msg = "\u00A7a" + botName + " deposited " + moved + " items. " + kept + " items remained \u2014 chest is full.\u00A7r";
-                } else if (moved > 0) {
-                    msg = "\u00A7a" + botName + " deposited " + moved + " items into the chest.\u00A7r";
-                } else {
-                    msg = "\u00A7e" + botName + " had nothing to deposit, or the chest is full.\u00A7r";
+                    String verb = deposit ? "deposited" : "fetched";
+                    String msg;
+                    if (moved > 0) {
+                        msg = "\u00A7a" + botName + " " + verb + " " + moved + " items.\u00A7r";
+                    } else {
+                        msg = "\u00A7e" + botName + " could not " + action + " any items. "
+                                + (deposit ? "Chest may be full or bot inventory empty." : "Chest may be empty or bot inventory full.")
+                                + "\u00A7r";
+                    }
+                    server.execute(() -> net.wcfcarolina13.ChatUtils.ChatUtils.sendSystemMessage(
+                            player.getCommandSource(), msg));
+                    LOGGER.info("Quick {}: {} {} {} items at {},{},{}", action, botName, verb, moved, x, y, z);
+                } catch (Exception e) {
+                    LOGGER.warn("Quick {} failed for {}: {}", action, botName, e.getMessage());
+                    server.execute(() -> net.wcfcarolina13.ChatUtils.ChatUtils.sendSystemMessage(
+                            player.getCommandSource(),
+                            "\u00A7c" + botName + " failed to " + action + " items: " + e.getMessage() + "\u00A7r"));
+                } finally {
+                    net.wcfcarolina13.GameAI.services.TaskService.complete(ticket, true);
                 }
-                net.wcfcarolina13.ChatUtils.ChatUtils.sendSystemMessage(player.getCommandSource(), msg);
-                LOGGER.info("Store here: {} deposited {} items at {},{},{} (kept {})", botName, moved, x, y, z, kept);
             });
 
         } catch (Exception e) {

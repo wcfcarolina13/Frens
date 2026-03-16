@@ -1149,21 +1149,23 @@ public final class BotGuideScreen extends Screen {
                         "spell ingredient wizard tome eye ender pearl chorus goat horn enchanting"
                 ),
                 new GuideTopic(
-                        "store_here",
+                        "quick_store",
                         "Core Actions",
-                        "Store Here",
-                        "Point at a nearby chest and click to deposit items from your bot.",
+                        "Quick Store & Quick Fetch",
+                        "Point at a nearby chest and click to deposit or take items.",
                         List.of(
-                                "Activate via Actions \u2192 Core Actions \u2192 Store Here.",
-                                "Point at any container (chest, barrel, shulker box) and left-click.",
-                                "The bot deposits its inventory into the targeted chest.",
-                                "If the chest fills up, remaining items stay in the bot\u2019s inventory \u2014 nothing is dropped.",
-                                "The bot does NOT remember chests used this way. Only chests the bot places during automated tasks appear in the Storage screen.",
-                                "Right-click to cancel targeting mode."
+                                "Quick Store: Actions \u2192 Core Actions \u2192 Quick Store. Bot walks to the chest and deposits its inventory.",
+                                "Quick Fetch: Actions \u2192 Core Actions \u2192 Quick Fetch. Bot walks to the chest and takes items into its inventory.",
+                                "Point at any container (chest, barrel, shulker box) and left-click to confirm.",
+                                "The bot physically walks to the chest before interacting \u2014 it must be within 32 blocks.",
+                                "If the chest fills up (store) or the bot\u2019s inventory fills up (fetch), remaining items stay put.",
+                                "The bot does NOT remember chests used this way. Only automated-task chests appear in Storage.",
+                                "Right-click to cancel targeting mode.",
+                                "The bot can be interrupted with /bot stop. Items are never dropped on the ground."
                         ),
-                        "UI-only action (Actions \u2192 Core Actions \u2192 Store Here)",
+                        "UI-only action (Actions \u2192 Core Actions)",
                         "Works with any container block within 6 blocks of your crosshair",
-                        "store here deposit chest point click target container ad-hoc"
+                        "quick store fetch deposit withdraw chest point click target container"
                 ),
                 new GuideTopic(
                         "storage_chests",
@@ -1178,7 +1180,7 @@ public final class BotGuideScreen extends Screen {
                                 "Dismiss: removes the chest from the registry (does not break the block).",
                                 "Fast travel speed depends on artifacts: Map/Compass = 2x delay, Eye of Ender or higher = standard speed.",
                                 "Hover a chest row to see a tooltip of its last-known contents.",
-                                "Note: Only chests the bot places or uses in automated tasks appear here. Chests targeted via Store Here are not tracked."
+                                "Note: Only chests the bot places or uses in automated tasks appear here. Chests targeted via Quick Store/Fetch are not tracked."
                         ),
                         "UI-only action (Actions \u2192 Utilities \u2192 Storage)",
                         "Switch between bots with the dropdown in the header",

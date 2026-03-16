@@ -459,6 +459,14 @@ public final class ChestStoreService {
         return depositAllExcept(source, bot, chestPos, Set.of());
     }
 
+    /** Walk to a specific chest and withdraw all items. Used by Quick Fetch. */
+    public static int withdrawAllFrom(ServerCommandSource source, ServerPlayerEntity bot, BlockPos chestPos) {
+        if (bot == null || chestPos == null || source == null) return 0;
+        if (source.getServer() == null) return 0;
+        return performStoreTransferWithBot(source, bot, chestPos, Integer.MAX_VALUE,
+                stack -> true, false, DEFAULT_MOVEMENT);
+    }
+
     public static int depositAllExcept(ServerCommandSource source, ServerPlayerEntity bot, BlockPos chestPos, Set<Item> excluded) {
         if (bot == null || chestPos == null || source == null) {
             return 0;
