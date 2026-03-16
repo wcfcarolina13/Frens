@@ -134,6 +134,7 @@ public class BotStorageScreen extends Screen {
     private DropdownMenuWidget botSelector;
     private String lastSelectedBot;
     private ChestEntry hoveredEntry;
+    private ChestEntry selectedEntry; // click-to-expand
 
     private String statusMessage;
     private long statusMessageExpiry;
@@ -153,10 +154,9 @@ public class BotStorageScreen extends Screen {
     private ButtonWidget refreshButton;
     private ButtonWidget closeButton;
 
-    // Per-row buttons (rebuilt on data change)
-    private record RowButton(ButtonWidget widget, ChestEntry entry, int relY) {}
-    private final List<RowButton> collectButtons = new ArrayList<>();
-    private final List<RowButton> dismissButtons = new ArrayList<>();
+    // Cached row layout for click detection (rebuilt each frame in renderContent).
+    private record RowLayout(ChestEntry entry, int y, int h, int collectBtnX, int dismissBtnX, int btnY) {}
+    private final List<RowLayout> renderedRows = new ArrayList<>();
 
     public BotStorageScreen(Screen parent, String botTarget) {
         super(Text.literal("Bot Storage"));
@@ -169,13 +169,11 @@ public class BotStorageScreen extends Screen {
     @Override
     protected void init() {
         clearChildren();
-        collectButtons.clear();
-        dismissButtons.clear();
 
         applySavedOrDefaultPanel();
         buildBotSelector();
         buildBottomButtons();
-        buildRowButtons();
+        rebuildContentHeight();
         contentScroll = MathHelper.clamp(contentScroll, 0.0, maxScroll());
         requestRefresh();
     }
@@ -311,46 +309,28 @@ public class BotStorageScreen extends Screen {
         this.addDrawableChild(closeButton);
     }
 
-    // ── Row buttons ─────────────────────────────────────────────────────
+    // ── Content height ─────────────────────────────────────────────────
 
-    private void buildRowButtons() {
-        // Remove old buttons
-        for (RowButton rb : collectButtons) this.remove(rb.widget);
-        for (RowButton rb : dismissButtons) this.remove(rb.widget);
-        collectButtons.clear();
-        dismissButtons.clear();
-
+    private void rebuildContentHeight() {
         List<ChestEntry> chests = getChestsSnapshot();
         Map<String, List<ChestEntry>> grouped = groupByContext(chests);
-
-        int relY = 0;
+        int h = 0;
         for (Map.Entry<String, List<ChestEntry>> group : grouped.entrySet()) {
-            relY += GROUP_HEADER_H;
+            h += GROUP_HEADER_H;
             for (ChestEntry entry : group.getValue()) {
-                int rowRelY = relY;
-
-                ButtonWidget collectBtn = ButtonWidget.builder(Text.literal("Collect"), b -> sendCollect(entry))
-                        .dimensions(0, 0, BUTTON_W, BUTTON_H)
-                        .tooltip(net.minecraft.client.gui.tooltip.Tooltip.of(Text.literal(
-                                "Send bot to withdraw items from this chest.")))
-                        .build();
-                collectBtn.active = !entry.destroyed;
-                this.addDrawableChild(collectBtn);
-                collectButtons.add(new RowButton(collectBtn, entry, rowRelY));
-
-                ButtonWidget dismissBtn = ButtonWidget.builder(Text.literal("Dismiss"), b -> sendDismiss(entry))
-                        .dimensions(0, 0, BUTTON_W, BUTTON_H)
-                        .tooltip(net.minecraft.client.gui.tooltip.Tooltip.of(Text.literal(
-                                "Remove this chest from the registry.")))
-                        .build();
-                this.addDrawableChild(dismissBtn);
-                dismissButtons.add(new RowButton(dismissBtn, entry, rowRelY));
-
-                relY += ROW_H;
+                h += computeRowHeight(entry);
             }
-            relY += 4; // gap between groups
+            h += 4;
         }
-        contentHeight = relY + 4;
+        contentHeight = h + 4;
+    }
+
+    private int computeRowHeight(ChestEntry entry) {
+        if (entry == selectedEntry && entry.contents != null && !entry.contents.isEmpty()) {
+            // Expanded: base row + one line per item
+            return ROW_H + (entry.contents.size() * (this.textRenderer.fontHeight + 1)) + 4;
+        }
+        return ROW_H;
     }
 
     private static Map<String, List<ChestEntry>> groupByContext(List<ChestEntry> chests) {
@@ -383,11 +363,6 @@ public class BotStorageScreen extends Screen {
 
     @Override
     public void render(DrawContext context, int mouseX, int mouseY, float delta) {
-        // Position row buttons before super.render() so widgets draw at correct positions.
-        Rect preCr = contentRect();
-        contentScroll = MathHelper.clamp(contentScroll, 0.0, maxScroll());
-        positionRowButtons(preCr);
-
         super.render(context, mouseX, mouseY, delta);
 
         // Detect bot selector change
@@ -397,7 +372,7 @@ public class BotStorageScreen extends Screen {
                 lastSelectedBot = selected;
                 botTarget = formatBotTarget(selected);
                 requestRefresh();
-                buildRowButtons();
+                rebuildContentHeight();
             }
         }
 
@@ -445,9 +420,6 @@ public class BotStorageScreen extends Screen {
         refreshButton.setY(bottomY);
         closeButton.setX(panelX + panelW - PANEL_PAD - 50);
         closeButton.setY(bottomY);
-
-        // Position row buttons
-        positionRowButtons(cr);
 
         // Chest count status or action feedback
         String status;
@@ -514,6 +486,7 @@ public class BotStorageScreen extends Screen {
     }
 
     private void renderContent(DrawContext context, Rect cr, int mouseX, int mouseY) {
+        renderedRows.clear();
         List<ChestEntry> chests = getChestsSnapshot();
         if (chests.isEmpty()) {
             context.drawText(this.textRenderer, "No chests registered yet.",
@@ -523,23 +496,31 @@ public class BotStorageScreen extends Screen {
 
         Map<String, List<ChestEntry>> grouped = groupByContext(chests);
         int y = cr.y - (int) contentScroll;
+        int fh = this.textRenderer.fontHeight;
 
         for (Map.Entry<String, List<ChestEntry>> group : grouped.entrySet()) {
             // Group header
-            String header = group.getKey();
-            context.drawTextWithShadow(this.textRenderer, header, cr.x + 4, y + 3, 0xFFFFE08A);
+            context.drawTextWithShadow(this.textRenderer, group.getKey(), cr.x + 4, y + 3, 0xFFFFE08A);
             y += GROUP_HEADER_H;
 
             for (ChestEntry entry : group.getValue()) {
-                // Row background
                 boolean isDestroyed = entry.destroyed;
-                int rowBg = isDestroyed ? 0x30662222 : 0x20567832;
-                context.fill(cr.x + 1, y, cr.right() - 1, y + ROW_H - 2, rowBg);
+                boolean isSelected = entry == selectedEntry;
+                int rowH = computeRowHeight(entry);
 
-                // Coordinates (prominent)
+                // Row background
+                int rowBg = isSelected ? 0x40B08C40
+                        : (isDestroyed ? 0x30662222 : 0x20567832);
+                context.fill(cr.x + 1, y, cr.right() - 1, y + rowH - 2, rowBg);
+                if (isSelected) {
+                    // Selection border
+                    context.fill(cr.x + 1, y, cr.x + 3, y + rowH - 2, 0xFFB08C40);
+                }
+
+                // Coordinates
                 String coords = entry.x + ", " + entry.y + ", " + entry.z;
-                int coordColor = isDestroyed ? 0xFF996666 : 0xFFE6D7A3;
-                context.drawText(this.textRenderer, coords, cr.x + 6, y + 3, coordColor, false);
+                context.drawText(this.textRenderer, coords, cr.x + 6, y + 3,
+                        isDestroyed ? 0xFF996666 : 0xFFE6D7A3, false);
 
                 // Status + timestamp
                 String statusLabel = isDestroyed ? "Destroyed" : "Active";
@@ -549,11 +530,10 @@ public class BotStorageScreen extends Screen {
                     try { dateStr = " - " + DATE_FMT.format(Instant.ofEpochMilli(entry.placedAtMs)); }
                     catch (Exception ignored) {}
                 }
-                int statusY = y + 3 + this.textRenderer.fontHeight + 2;
-                context.drawText(this.textRenderer, statusLabel + dateStr,
-                        cr.x + 6, statusY, statusColor, false);
+                int statusY = y + 3 + fh + 2;
+                context.drawText(this.textRenderer, statusLabel + dateStr, cr.x + 6, statusY, statusColor, false);
 
-                // Contents summary (brief inline preview)
+                // Contents summary (brief, third line)
                 if (entry.contents != null && !entry.contents.isEmpty()) {
                     StringBuilder brief = new StringBuilder();
                     int shown = 0;
@@ -561,46 +541,65 @@ public class BotStorageScreen extends Screen {
                         if (shown > 0) brief.append(", ");
                         brief.append(formatItemName(item.id)).append(" x").append(item.n);
                         shown++;
-                        if (shown >= 3) { brief.append(" ..."); break; }
+                        if (shown >= 3) { brief.append("..."); break; }
                     }
-                    int contentsY = statusY + this.textRenderer.fontHeight + 1;
-                    int contentsColor = isDestroyed ? 0xFF776666 : 0xFF999977;
+                    int contentsY = statusY + fh + 1;
                     String contentsStr = brief.toString();
-                    int maxW = cr.w - 12 - BUTTON_W * 2 - 10;
-                    if (this.textRenderer.getWidth(contentsStr) > maxW) {
-                        contentsStr = this.textRenderer.trimToWidth(contentsStr, maxW - 6) + "...";
+                    int maxTextW = cr.w - 12 - BUTTON_W * 2 - 14;
+                    if (this.textRenderer.getWidth(contentsStr) > maxTextW) {
+                        contentsStr = this.textRenderer.trimToWidth(contentsStr, maxTextW - 6) + "...";
                     }
-                    context.drawText(this.textRenderer, contentsStr, cr.x + 6, contentsY, contentsColor, false);
+                    context.drawText(this.textRenderer, contentsStr, cr.x + 6, contentsY,
+                            isDestroyed ? 0xFF776666 : 0xFF999977, false);
+                }
+
+                // Custom-drawn Collect button
+                int collectBtnX = cr.right() - BUTTON_W * 2 - 8;
+                int btnY = y + 4;
+                boolean collectHover = !isDestroyed && mouseX >= collectBtnX && mouseX < collectBtnX + BUTTON_W
+                        && mouseY >= btnY && mouseY < btnY + BUTTON_H;
+                int collectBg = isDestroyed ? 0xFF1A1A1A : (collectHover ? 0xFF3A5A2A : 0xFF2A3A1E);
+                context.fill(collectBtnX, btnY, collectBtnX + BUTTON_W, btnY + BUTTON_H, collectBg);
+                context.fill(collectBtnX, btnY, collectBtnX + BUTTON_W, btnY + 1, 0xFF444444);
+                context.fill(collectBtnX, btnY + BUTTON_H - 1, collectBtnX + BUTTON_W, btnY + BUTTON_H, 0xFF222222);
+                context.drawText(this.textRenderer, "Collect",
+                        collectBtnX + (BUTTON_W - this.textRenderer.getWidth("Collect")) / 2, btnY + 4,
+                        isDestroyed ? 0xFF555555 : (collectHover ? 0xFFEEFFCC : 0xFFCCDDAA), false);
+
+                // Custom-drawn Dismiss button
+                int dismissBtnX = collectBtnX + BUTTON_W + 4;
+                boolean dismissHover = mouseX >= dismissBtnX && mouseX < dismissBtnX + BUTTON_W
+                        && mouseY >= btnY && mouseY < btnY + BUTTON_H;
+                int dismissBg = dismissHover ? 0xFF5A2A2A : 0xFF3A1E1E;
+                context.fill(dismissBtnX, btnY, dismissBtnX + BUTTON_W, btnY + BUTTON_H, dismissBg);
+                context.fill(dismissBtnX, btnY, dismissBtnX + BUTTON_W, btnY + 1, 0xFF444444);
+                context.fill(dismissBtnX, btnY + BUTTON_H - 1, dismissBtnX + BUTTON_W, btnY + BUTTON_H, 0xFF222222);
+                context.drawText(this.textRenderer, "Dismiss",
+                        dismissBtnX + (BUTTON_W - this.textRenderer.getWidth("Dismiss")) / 2, btnY + 4,
+                        dismissHover ? 0xFFFFAAAA : 0xFFCC9999, false);
+
+                // Expanded contents (when selected)
+                if (isSelected && entry.contents != null && !entry.contents.isEmpty()) {
+                    int expandY = y + ROW_H;
+                    for (ItemInfo item : entry.contents) {
+                        String line = "  \u2022 " + formatItemName(item.id) + " x" + item.n;
+                        context.drawText(this.textRenderer, line, cr.x + 10, expandY,
+                                isDestroyed ? 0xFF887777 : 0xFFD8C7A0, false);
+                        expandY += fh + 1;
+                    }
                 }
 
                 // Track hovered row for tooltip
-                if (mouseX >= cr.x && mouseX < cr.right() && mouseY >= y && mouseY < y + ROW_H) {
+                if (mouseX >= cr.x && mouseX < cr.right() && mouseY >= y && mouseY < y + rowH) {
                     hoveredEntry = entry;
                 }
 
-                y += ROW_H;
+                // Record layout for click detection
+                renderedRows.add(new RowLayout(entry, y, rowH, collectBtnX, dismissBtnX, btnY));
+
+                y += rowH;
             }
             y += 4;
-        }
-    }
-
-    private void positionRowButtons(Rect cr) {
-        int btnAreaX = cr.right() - BUTTON_W * 2 - 6;
-        for (RowButton rb : collectButtons) {
-            int y = cr.y + rb.relY - (int) contentScroll + 2;
-            rb.widget.setX(btnAreaX);
-            rb.widget.setY(y);
-            boolean visible = y + BUTTON_H > cr.y && y < cr.bottom();
-            rb.widget.visible = visible;
-            rb.widget.active = visible && !rb.entry.destroyed;
-        }
-        for (RowButton rb : dismissButtons) {
-            int y = cr.y + rb.relY - (int) contentScroll + 2;
-            rb.widget.setX(btnAreaX + BUTTON_W + 4);
-            rb.widget.setY(y);
-            boolean visible = y + BUTTON_H > cr.y && y < cr.bottom();
-            rb.widget.visible = visible;
-            rb.widget.active = visible;
         }
     }
 
@@ -695,6 +694,29 @@ public class BotStorageScreen extends Screen {
         // Let the bot selector dropdown handle clicks first (it's in the header area).
         if (botSelector != null && botSelector.isMouseOver(mx, my)) {
             return super.mouseClicked(click, isInside);
+        }
+
+        // Custom row button clicks + row selection
+        for (RowLayout rl : renderedRows) {
+            if (my < rl.y || my >= rl.y + rl.h) continue;
+            // Collect button?
+            if (mx >= rl.collectBtnX && mx < rl.collectBtnX + BUTTON_W
+                    && my >= rl.btnY && my < rl.btnY + BUTTON_H) {
+                if (!rl.entry.destroyed) sendCollect(rl.entry);
+                return true;
+            }
+            // Dismiss button?
+            if (mx >= rl.dismissBtnX && mx < rl.dismissBtnX + BUTTON_W
+                    && my >= rl.btnY && my < rl.btnY + BUTTON_H) {
+                sendDismiss(rl.entry);
+                return true;
+            }
+            // Row click → toggle selection
+            if (mx >= cr.x && mx < cr.right()) {
+                selectedEntry = (selectedEntry == rl.entry) ? null : rl.entry;
+                rebuildContentHeight();
+                return true;
+            }
         }
 
         // Header drag (move)
