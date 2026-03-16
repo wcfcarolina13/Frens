@@ -383,6 +383,11 @@ public class BotStorageScreen extends Screen {
 
     @Override
     public void render(DrawContext context, int mouseX, int mouseY, float delta) {
+        // Position row buttons before super.render() so widgets draw at correct positions.
+        Rect preCr = contentRect();
+        contentScroll = MathHelper.clamp(contentScroll, 0.0, maxScroll());
+        positionRowButtons(preCr);
+
         super.render(context, mouseX, mouseY, delta);
 
         // Detect bot selector change
