@@ -59,7 +59,26 @@ public class BotStorageScreen extends Screen {
     private static UiPrefs CACHED_PREFS = loadUiPrefs();
 
     // ── Data model ──────────────────────────────────────────────────────
-    public record ChestEntry(int x, int y, int z, String context, long placedAtMs, boolean destroyed) {}
+    public static final class ItemInfo {
+        public String id; // e.g. "minecraft:diamond"
+        public int n;     // count
+    }
+
+    public static final class ChestEntry {
+        public int x, y, z;
+        public String context;
+        public long placedAtMs;
+        public boolean destroyed;
+        public List<ItemInfo> contents; // null if no snapshot
+
+        // Accessors for compatibility with existing code.
+        public int x() { return x; }
+        public int y() { return y; }
+        public int z() { return z; }
+        public String context() { return context; }
+        public long placedAtMs() { return placedAtMs; }
+        public boolean destroyed() { return destroyed; }
+    }
 
     private static volatile List<ChestEntry> LAST_CHESTS = List.of();
 
@@ -67,7 +86,7 @@ public class BotStorageScreen extends Screen {
         if (json == null) { LAST_CHESTS = List.of(); return; }
         try {
             List<ChestEntry> parsed = GSON.fromJson(json, CHEST_LIST_TYPE);
-            LAST_CHESTS = parsed != null ? List.copyOf(parsed) : List.of();
+            LAST_CHESTS = parsed != null ? java.util.Collections.unmodifiableList(new java.util.ArrayList<>(parsed)) : List.of();
         } catch (Exception e) {
             LOGGER.warn("Failed to parse chest registry JSON: {}", e.getMessage());
             LAST_CHESTS = List.of();
@@ -310,13 +329,19 @@ public class BotStorageScreen extends Screen {
                 int rowRelY = relY;
 
                 ButtonWidget collectBtn = ButtonWidget.builder(Text.literal("Collect"), b -> sendCollect(entry))
-                        .dimensions(0, 0, BUTTON_W, BUTTON_H).build();
+                        .dimensions(0, 0, BUTTON_W, BUTTON_H)
+                        .tooltip(net.minecraft.client.gui.tooltip.Tooltip.of(Text.literal(
+                                "Send bot to withdraw items from this chest.")))
+                        .build();
                 collectBtn.active = !entry.destroyed;
                 this.addDrawableChild(collectBtn);
                 collectButtons.add(new RowButton(collectBtn, entry, rowRelY));
 
                 ButtonWidget dismissBtn = ButtonWidget.builder(Text.literal("Dismiss"), b -> sendDismiss(entry))
-                        .dimensions(0, 0, BUTTON_W, BUTTON_H).build();
+                        .dimensions(0, 0, BUTTON_W, BUTTON_H)
+                        .tooltip(net.minecraft.client.gui.tooltip.Tooltip.of(Text.literal(
+                                "Remove this chest from the registry.")))
+                        .build();
                 this.addDrawableChild(dismissBtn);
                 dismissButtons.add(new RowButton(dismissBtn, entry, rowRelY));
 
@@ -581,6 +606,11 @@ public class BotStorageScreen extends Screen {
             dragPanelStartW = panelW;
             dragPanelStartH = panelH;
             return true;
+        }
+
+        // Let the bot selector dropdown handle clicks first (it's in the header area).
+        if (botSelector != null && botSelector.isMouseOver(mx, my)) {
+            return super.mouseClicked(click, isInside);
         }
 
         // Header drag (move)

@@ -60,6 +60,16 @@ public final class ChestRegistryNetworkManager {
             entry.put("context", r.context);
             entry.put("placedAtMs", r.placedAtMs);
             entry.put("destroyed", r.destroyed);
+            if (r.contentsSnapshot != null && !r.contentsSnapshot.isEmpty()) {
+                List<Map<String, Object>> items = new ArrayList<>();
+                for (var snap : r.contentsSnapshot) {
+                    Map<String, Object> item = new LinkedHashMap<>();
+                    item.put("id", snap.itemId);
+                    item.put("n", snap.count);
+                    items.add(item);
+                }
+                entry.put("contents", items);
+            }
             out.add(entry);
         }
         String json = GSON.toJson(out);
@@ -89,8 +99,9 @@ public final class ChestRegistryNetworkManager {
             ServerPlayerEntity bot = server.getPlayerManager().getPlayer(botName);
             if (bot == null) return;
 
-            // Dispatch the bot to walk to the chest and withdraw items
-            String command = "bot skill store withdraw " + x + " " + y + " " + z + " " + botName;
+            // Dispatch withdrawal from the bot's nearest/remembered chest.
+            // TODO: coordinate-targeted withdrawal for specific chests.
+            String command = "bot store withdraw all " + botName;
             LOGGER.info("Chest collect dispatch: {} -> {}", player.getName().getString(), command);
             net.wcfcarolina13.CommandUtils.run(player.getCommandSource(), command);
 

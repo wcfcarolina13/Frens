@@ -614,10 +614,17 @@ public final class ChestStoreService {
             if (!(be2 instanceof Inventory storage)) {
                 return 0;
             }
+            int result;
             if (deposit) {
-                return moveItems(bot.getInventory(), storage, filter, amount);
+                result = moveItems(bot.getInventory(), storage, filter, amount);
+            } else {
+                result = moveItems(storage, bot.getInventory(), filter, amount);
             }
-            return moveItems(storage, bot.getInventory(), filter, amount);
+            // Capture contents snapshot after transfer.
+            if (result > 0 && source.getWorld() instanceof ServerWorld sw) {
+                BotChestRegistryService.updateContentsSnapshot(bot, chestPos, sw, storage);
+            }
+            return result;
         }, 2500, 0);
         int movedCount = moved != null ? moved : 0;
         debugChest("Store transfer done: moved=" + movedCount + " chest=" + chestPos.toShortString());

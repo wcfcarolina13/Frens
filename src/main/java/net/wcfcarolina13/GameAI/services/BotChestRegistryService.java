@@ -41,6 +41,16 @@ public final class BotChestRegistryService {
 
     // ── Data model ──────────────────────────────────────────────────────
 
+    public static final class ItemSnapshot {
+        public String itemId; // e.g. "minecraft:diamond"
+        public int count;
+        public ItemSnapshot() {}
+        public ItemSnapshot(String itemId, int count) {
+            this.itemId = itemId;
+            this.count = count;
+        }
+    }
+
     public static final class ChestRecord {
         public int x;
         public int y;
@@ -48,6 +58,7 @@ public final class BotChestRegistryService {
         public String context;     // "hunt", "woodcut", "manual", etc.
         public long placedAtMs;
         public boolean destroyed;
+        public List<ItemSnapshot> contentsSnapshot; // null if never captured
 
         public ChestRecord() {}
 
@@ -205,6 +216,51 @@ public final class BotChestRegistryService {
             }
         }
         if (changed) flush();
+    }
+
+    /** Capture a snapshot of a chest's contents (merges duplicate items across slots). */
+    public static List<ItemSnapshot> captureContents(net.minecraft.inventory.Inventory inv) {
+        if (inv == null) return List.of();
+        List<ItemSnapshot> items = new ArrayList<>();
+        for (int i = 0; i < inv.size(); i++) {
+            net.minecraft.item.ItemStack stack = inv.getStack(i);
+            if (stack == null || stack.isEmpty()) continue;
+            String id = net.minecraft.registry.Registries.ITEM.getId(stack.getItem()).toString();
+            boolean merged = false;
+            for (ItemSnapshot existing : items) {
+                if (id.equals(existing.itemId)) {
+                    existing.count += stack.getCount();
+                    merged = true;
+                    break;
+                }
+            }
+            if (!merged) items.add(new ItemSnapshot(id, stack.getCount()));
+        }
+        return items;
+    }
+
+    /** Update the contents snapshot for a chest at the given position. */
+    public static void updateContentsSnapshot(ServerPlayerEntity bot, BlockPos pos, ServerWorld world,
+                                               net.minecraft.inventory.Inventory inv) {
+        if (bot == null || pos == null || world == null) return;
+        MinecraftServer server = world.getServer();
+        if (server == null) return;
+
+        List<ItemSnapshot> snapshot = captureContents(inv);
+        WorldData wd = worldData(server, world);
+        String key = botKey(bot);
+        synchronized (LOCK) {
+            if (wd.chestsByBot == null) return;
+            List<ChestRecord> records = wd.chestsByBot.get(key);
+            if (records == null) return;
+            for (ChestRecord r : records) {
+                if (r.x == pos.getX() && r.y == pos.getY() && r.z == pos.getZ()) {
+                    r.contentsSnapshot = snapshot;
+                    break;
+                }
+            }
+        }
+        flush();
     }
 
     /** Remove a specific chest record by position. */
