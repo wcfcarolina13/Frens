@@ -1149,6 +1149,23 @@ public final class BotGuideScreen extends Screen {
                         "spell ingredient wizard tome eye ender pearl chorus goat horn enchanting"
                 ),
                 new GuideTopic(
+                        "store_here",
+                        "Core Actions",
+                        "Store Here",
+                        "Point at a nearby chest and click to deposit items from your bot.",
+                        List.of(
+                                "Activate via Actions \u2192 Core Actions \u2192 Store Here.",
+                                "Point at any container (chest, barrel, shulker box) and left-click.",
+                                "The bot deposits its inventory into the targeted chest.",
+                                "If the chest fills up, remaining items stay in the bot\u2019s inventory \u2014 nothing is dropped.",
+                                "The bot does NOT remember chests used this way. Only chests the bot places during automated tasks appear in the Storage screen.",
+                                "Right-click to cancel targeting mode."
+                        ),
+                        "UI-only action (Actions \u2192 Core Actions \u2192 Store Here)",
+                        "Works with any container block within 6 blocks of your crosshair",
+                        "store here deposit chest point click target container ad-hoc"
+                ),
+                new GuideTopic(
                         "storage_chests",
                         "Utilities",
                         "Storage",
@@ -1160,7 +1177,8 @@ public final class BotGuideScreen extends Screen {
                                 "Collect: bot fast-travels to chest, withdraws items, optionally returns (to player, home, or stays).",
                                 "Dismiss: removes the chest from the registry (does not break the block).",
                                 "Fast travel speed depends on artifacts: Map/Compass = 2x delay, Eye of Ender or higher = standard speed.",
-                                "Hover a chest row to see a tooltip of its last-known contents."
+                                "Hover a chest row to see a tooltip of its last-known contents.",
+                                "Note: Only chests the bot places or uses in automated tasks appear here. Chests targeted via Store Here are not tracked."
                         ),
                         "UI-only action (Actions \u2192 Utilities \u2192 Storage)",
                         "Switch between bots with the dropdown in the header",

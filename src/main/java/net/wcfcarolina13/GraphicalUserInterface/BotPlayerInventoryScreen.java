@@ -480,7 +480,8 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         OPEN_SKIN_CHOOSER,
         SKIN_POLICY_EVERYONE,
         SKIN_POLICY_CUSTOM,
-        STORAGE
+        STORAGE,
+        STORE_HERE
     }
 
     private enum TopicCategory {
@@ -544,6 +545,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             TopicEntry.skill("Guide", TopicAction.OPEN_GUIDE, false, 0),
             TopicEntry.skill("Stop", TopicAction.STOP, false, 0),
             TopicEntry.skill("Resume", TopicAction.RESUME, false, 0),
+            TopicEntry.skill("Store Here", TopicAction.STORE_HERE, false, 0),
 
             TopicEntry.skillHeader("Orders & Travel"),
             TopicEntry.skill("Regroup", TopicAction.COMPANION_COME, false, 0),
@@ -3113,6 +3115,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case COOKING -> "♨";
             case HUNTING -> "🏹";
             case STORAGE -> "📦";
+            case STORE_HERE -> "📥";
             case SKILL_FISH -> "🎣";
             case SKILL_WOODCUT -> "🪓";
             case SKILL_WOODCUT_CLEANUP -> "•";
@@ -3537,6 +3540,11 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case HUNTING -> java.util.List.of(
                 "Hunting",
                 "Open the hunting target menu for meat, leather, and mob-hunt tasks."
+            );
+            case STORE_HERE -> java.util.List.of(
+                "Store Here",
+                "Point at a nearby chest and click to deposit items.",
+                "The bot will not remember this chest."
             );
             case STORAGE -> java.util.List.of(
                 "Storage",
@@ -4203,6 +4211,10 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case CRAFTING -> openCraftingHistory();
             case COOKING -> openCookingMenu();
             case HUNTING -> openHuntingMenu();
+            case STORE_HERE -> {
+                StoreTargetPickerOverlay.activate(formatBotTarget());
+                if (this.client != null) this.client.setScreen(null);
+            }
             case STORAGE -> openStorageMenu();
             case CONSTRUCTION -> openConstructionMenu();
             case SKILL_FISH -> runFishSkillCommand();
