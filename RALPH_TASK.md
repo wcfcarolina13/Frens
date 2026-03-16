@@ -61,6 +61,18 @@ All active criteria above marked `[x]`, with build verification plus in-game evi
 
 ---
 
+# Recently Completed: Spells Tab, Storage Screen, Fast Travel (2026-03-15)
+
+- [x] **Spells promoted to top-level tab** — 4th tab in inventory overlay (Actions | Dialogue | ✦/Spells | Admin). Three spell entries + Remote Inventory with hover tooltips. Access gating is bidirectional (player OR bot artifacts).
+- [x] **Remote Guidance wired to fast travel** — `beginDelayedTravel()` replaces `setReturnToBase()`. Bot disappears and reappears at destination (~1s/chunk). Always uses fast travel.
+- [x] **Base picker in NavigationConfirmScreen** — Guidance mode shows "Guide to me", "Home (label)", plus all saved bases. Reuses existing `RequestBasesPayload`/`BasesListPayload`.
+- [x] **Storage screen: contents snapshot** — `ChestRecord` stores `List<ItemSnapshot>` captured after every deposit/withdrawal. Inline summary + hover tooltip in BotStorageScreen.
+- [x] **Smart chest collect** — Beyond 100 blocks, bot fast-travels to chest. Under 100, walks using `setReturnToBase` (follow mode with stuck-escape). Bot selector dropdown fixed, button tooltips added.
+- [x] **Bidirectional enchanting table access** — Bot near enchanting table grants spell access (both client and server checks).
+- [x] **"Delayed travel" → "fast travel" rename** — All user-facing text updated.
+
+---
+
 # Recently Completed: BaseManagerScreen Feedback Fixes (2026-03-13)
 
 - [x] **Bases screen silent failures fixed** — All 14+ button handlers in `BaseManagerScreen.java` now show a transient status message (2.5s, yellow/red/green) instead of silently returning when preconditions aren't met.

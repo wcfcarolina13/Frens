@@ -3,6 +3,14 @@
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 ## 2026-03-15
 
+- **Storage screen: contents snapshot, tooltips, fast travel collect:**
+  1. **Chest contents snapshot:** `ChestRecord` now stores `List<ItemSnapshot>` captured after every deposit/withdrawal. Contents are serialized in network JSON and displayed as an inline summary (up to 3 items) plus full hover tooltip in `BotStorageScreen`.
+  2. **Smart collect with fast travel:** Collect button now checks distance. Beyond 100 blocks, bot fast-travels to the chest (disappears, reappears after ~1s/chunk). Under 100 blocks, bot walks using `setReturnToBase` (follow mode with stuck-escape/burrowing logic).
+  3. **Bot selector fixed:** Header drag handler was consuming dropdown clicks — now delegates to the widget first.
+  4. **Collect command fixed:** Was dispatching `bot skill store withdraw` (wrong path). Now uses `setReturnToBase` for close chests or `beginDelayedTravel` for far ones.
+  5. **Button tooltips:** Collect ("Send bot to withdraw items") and Dismiss ("Remove from registry") now have hover tooltips.
+  6. **Row height increased:** From 36px to 46px to accommodate the contents summary line.
+
 - **Spells tab fixes & base picker:**
   1. **Spells tab icon:** Replaced "Spells" text label with ✦ icon to prevent overflow. Hover tooltip shows "Spells" after 1700ms delay.
   2. **Status bar shows both player and bot artifacts:** `buildSpellStatusBar()` now scans bot inventory slots (0-40) for Eye of Ender, Pearl, Chorus Fruit instead of relying on nav tier cache. Format: "You: Pearl · Jake: Pearl, Eye of Ender".

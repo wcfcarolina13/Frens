@@ -8,6 +8,7 @@ import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
 import net.wcfcarolina13.GameAI.services.BotChestRegistryService;
+import net.wcfcarolina13.GameAI.services.NavigationArtifactService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -99,11 +100,32 @@ public final class ChestRegistryNetworkManager {
             ServerPlayerEntity bot = server.getPlayerManager().getPlayer(botName);
             if (bot == null) return;
 
-            // Dispatch withdrawal from the bot's nearest/remembered chest.
-            // TODO: coordinate-targeted withdrawal for specific chests.
-            String command = "bot store withdraw all " + botName;
-            LOGGER.info("Chest collect dispatch: {} -> {}", player.getName().getString(), command);
-            net.wcfcarolina13.CommandUtils.run(player.getCommandSource(), command);
+            BlockPos chestPos = new BlockPos(x, y, z);
+            double distance = bot.getBlockPos().getManhattanDistance(chestPos);
+
+            if (distance > 100) {
+                // Far away: fast travel to the chest, then withdraw on arrival.
+                LOGGER.info("Chest collect (fast travel): {} sending {} to chest at {},{},{} (dist={})",
+                        player.getName().getString(), botName, x, y, z, (int) distance);
+                boolean crossDim = false; // Same dimension assumed for chest collect
+                int delayTicks = NavigationArtifactService.calculateDelayTicks(distance, crossDim);
+                NavigationArtifactService.beginDelayedTravel(
+                        server, bot, botName, chestPos,
+                        ((ServerWorld) bot.getEntityWorld()).getRegistryKey(), delayTicks, player.getUuid());
+                net.wcfcarolina13.ChatUtils.ChatUtils.sendSystemMessage(
+                        player.getCommandSource(),
+                        botName + " is fast-traveling to the chest (ETA ~" + Math.max(1, delayTicks / 20) + "s). Items will be collected on arrival.");
+            } else {
+                // Close enough: walk to chest and withdraw.
+                LOGGER.info("Chest collect (walk): {} -> bot store withdraw all {}", player.getName().getString(), botName);
+                // Use regroup-style approach: set return-to-base toward chest position,
+                // which uses follow mode with stuck-escape/burrowing logic.
+                net.wcfcarolina13.GameAI.BotEventHandler.setReturnToBase(bot,
+                        net.minecraft.util.math.Vec3d.ofCenter(chestPos));
+                net.wcfcarolina13.ChatUtils.ChatUtils.sendSystemMessage(
+                        player.getCommandSource(),
+                        botName + " is heading to the chest at " + x + ", " + y + ", " + z + ".");
+            }
 
         } catch (Exception e) {
             LOGGER.warn("Failed to handle chest collect: {}", e.getMessage());

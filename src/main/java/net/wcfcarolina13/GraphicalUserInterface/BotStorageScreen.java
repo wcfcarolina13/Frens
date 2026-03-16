@@ -105,7 +105,7 @@ public class BotStorageScreen extends Screen {
     private static final int THUMB_MIN_H = 16;
     private static final int SCROLL_STEP = 14;
     private static final int RESIZE_GRAB = 5;
-    private static final int ROW_H = 36;
+    private static final int ROW_H = 46;
     private static final int GROUP_HEADER_H = 16;
     private static final int BOTTOM_BAR_H = 28;
     private static final int BUTTON_W = 48;
@@ -133,6 +133,7 @@ public class BotStorageScreen extends Screen {
 
     private DropdownMenuWidget botSelector;
     private String lastSelectedBot;
+    private ChestEntry hoveredEntry;
 
     private String statusMessage;
     private long statusMessageExpiry;
@@ -366,6 +367,18 @@ public class BotStorageScreen extends Screen {
         return Character.toUpperCase(s.charAt(0)) + s.substring(1).toLowerCase();
     }
 
+    /** Convert "minecraft:iron_ingot" → "Iron Ingot". */
+    private static String formatItemName(String itemId) {
+        if (itemId == null) return "?";
+        String raw = itemId.contains(":") ? itemId.substring(itemId.indexOf(':') + 1) : itemId;
+        StringBuilder sb = new StringBuilder();
+        for (String part : raw.split("_")) {
+            if (sb.length() > 0) sb.append(' ');
+            if (!part.isEmpty()) sb.append(Character.toUpperCase(part.charAt(0))).append(part.substring(1));
+        }
+        return sb.toString();
+    }
+
     // ── Rendering ───────────────────────────────────────────────────────
 
     @Override
@@ -453,6 +466,46 @@ public class BotStorageScreen extends Screen {
         if (botSelector != null) {
             botSelector.renderOnTop(context, mouseX, mouseY, delta);
         }
+
+        // Chest contents tooltip on hover
+        if (hoveredEntry != null && hoveredEntry.contents != null && !hoveredEntry.contents.isEmpty()) {
+            List<String> lines = new java.util.ArrayList<>();
+            String title = (hoveredEntry.destroyed ? "Last Known " : "") + "Contents:";
+            lines.add(title);
+            for (ItemInfo item : hoveredEntry.contents) {
+                lines.add("  " + formatItemName(item.id) + " x" + item.n);
+            }
+            renderTooltip(context, mouseX, mouseY, lines);
+        }
+        hoveredEntry = null;
+    }
+
+    private void renderTooltip(DrawContext context, int mx, int my, List<String> lines) {
+        if (lines == null || lines.isEmpty()) return;
+        int pad = 5;
+        int lineH = this.textRenderer.fontHeight + 1;
+        int maxW = 0;
+        for (String line : lines) {
+            maxW = Math.max(maxW, this.textRenderer.getWidth(line));
+        }
+        int boxW = maxW + pad * 2;
+        int boxH = lines.size() * lineH + pad * 2;
+        int x = mx + 12;
+        int y = my - 4;
+        if (x + boxW > this.width) x = mx - boxW - 4;
+        if (y + boxH > this.height) y = this.height - boxH;
+        if (y < 0) y = 0;
+
+        context.fill(x, y, x + boxW, y + boxH, 0xEE101010);
+        context.fill(x, y, x + boxW, y + 1, 0xFF333333);
+        context.fill(x, y + boxH - 1, x + boxW, y + boxH, 0xFF333333);
+        context.fill(x, y, x + 1, y + boxH, 0xFF333333);
+        context.fill(x + boxW - 1, y, x + boxW, y + boxH, 0xFF333333);
+
+        for (int i = 0; i < lines.size(); i++) {
+            int color = i == 0 ? 0xFFFFE08A : 0xFFD8C7A0;
+            context.drawText(this.textRenderer, lines.get(i), x + pad, y + pad + i * lineH, color, false);
+        }
     }
 
     private void renderContent(DrawContext context, Rect cr, int mouseX, int mouseY) {
@@ -491,8 +544,34 @@ public class BotStorageScreen extends Screen {
                     try { dateStr = " - " + DATE_FMT.format(Instant.ofEpochMilli(entry.placedAtMs)); }
                     catch (Exception ignored) {}
                 }
+                int statusY = y + 3 + this.textRenderer.fontHeight + 2;
                 context.drawText(this.textRenderer, statusLabel + dateStr,
-                        cr.x + 6, y + 3 + this.textRenderer.fontHeight + 2, statusColor, false);
+                        cr.x + 6, statusY, statusColor, false);
+
+                // Contents summary (brief inline preview)
+                if (entry.contents != null && !entry.contents.isEmpty()) {
+                    StringBuilder brief = new StringBuilder();
+                    int shown = 0;
+                    for (ItemInfo item : entry.contents) {
+                        if (shown > 0) brief.append(", ");
+                        brief.append(formatItemName(item.id)).append(" x").append(item.n);
+                        shown++;
+                        if (shown >= 3) { brief.append(" ..."); break; }
+                    }
+                    int contentsY = statusY + this.textRenderer.fontHeight + 1;
+                    int contentsColor = isDestroyed ? 0xFF776666 : 0xFF999977;
+                    String contentsStr = brief.toString();
+                    int maxW = cr.w - 12 - BUTTON_W * 2 - 10;
+                    if (this.textRenderer.getWidth(contentsStr) > maxW) {
+                        contentsStr = this.textRenderer.trimToWidth(contentsStr, maxW - 6) + "...";
+                    }
+                    context.drawText(this.textRenderer, contentsStr, cr.x + 6, contentsY, contentsColor, false);
+                }
+
+                // Track hovered row for tooltip
+                if (mouseX >= cr.x && mouseX < cr.right() && mouseY >= y && mouseY < y + ROW_H) {
+                    hoveredEntry = entry;
+                }
 
                 y += ROW_H;
             }
