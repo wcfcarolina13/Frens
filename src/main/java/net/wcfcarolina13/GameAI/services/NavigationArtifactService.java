@@ -363,14 +363,25 @@ public final class NavigationArtifactService {
                 false   // not flying
         );
 
-        // Schedule post-spawn setup for next tick to let the player entity fully initialize.
-        server.execute(() -> {
+        // Poll for the bot entity over several ticks — createFake connection is async
+        // and the entity may not appear in the player manager until a few ticks later.
+        final int MAX_POLL_TICKS = 40; // 2 seconds
+        final int[] pollCount = {0};
+        Runnable[] poll = new Runnable[1];
+        poll[0] = () -> {
             ServerPlayerEntity bot = server.getPlayerManager().getPlayer(travel.botAlias());
             if (bot == null || bot.isRemoved()) {
-                LOGGER.warn("Bot '{}' not found after travel respawn; it may have failed to connect.",
-                        travel.botAlias());
+                if (pollCount[0]++ < MAX_POLL_TICKS) {
+                    server.execute(poll[0]); // retry next tick
+                    return;
+                }
+                LOGGER.error("Bot '{}' failed to appear after {} ticks of polling — travel respawn failed.",
+                        travel.botAlias(), MAX_POLL_TICKS);
                 return;
             }
+
+            LOGGER.info("Bot '{}' appeared after {} poll ticks — completing travel setup.",
+                    travel.botAlias(), pollCount[0]);
 
             // Teleport to exact destination in case onBotJoin restored a stale position.
             bot.teleport(finalWorld, spawnPos.x, spawnPos.y, spawnPos.z,
@@ -404,7 +415,6 @@ public final class NavigationArtifactService {
                         EntityType<?> mountType = Registries.ENTITY_TYPE.get(typeId);
                         Entity mount = mountType.create(finalWorld, SpawnReason.COMMAND);
                         if (mount != null) {
-                            // Place mount at a safe spot near the destination.
                             BlockPos safeSpot = TravelMountHandler.findSafeAnimalSpot(
                                     finalWorld, finalDest, mount);
                             BlockPos mountPos = safeSpot != null ? safeSpot : finalDest;
@@ -429,16 +439,10 @@ public final class NavigationArtifactService {
             }
 
             // Play arrival sound at the destination.
-            finalWorld.playSound(
-                    null,  // all nearby players hear it
-                    finalDest,
-                    SoundEvents.ENTITY_ENDER_PEARL_THROW,
-                    SoundCategory.PLAYERS,
-                    1.0F,  // volume
-                    0.8F   // pitch
-            );
+            finalWorld.playSound(null, finalDest,
+                    SoundEvents.ENTITY_ENDER_PEARL_THROW, SoundCategory.PLAYERS, 1.0F, 0.8F);
 
-            // Notify the owner (queues if offline).
+            // Notify the owner.
             String msg = dimensionFallback
                     ? "\u00A7eYour companion " + travel.botAlias()
                       + " arrived at Overworld spawn (target dimension was unavailable).\u00A7r"
@@ -449,7 +453,8 @@ public final class NavigationArtifactService {
             LOGGER.info("Bot '{}' arrived at {} in {} after {} ticks of travel.",
                     travel.botAlias(), finalDest.toShortString(), finalDim.getValue(),
                     travel.arrivalTick() - travel.departureTick());
-        });
+        };
+        server.execute(poll[0]);
     }
 
     // ── Session lifecycle ──────────────────────────────────────────────────
