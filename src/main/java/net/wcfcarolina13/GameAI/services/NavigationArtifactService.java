@@ -161,6 +161,12 @@ public final class NavigationArtifactService {
     /** Messages queued for owners who were offline when the notification was sent. */
     private static final Map<UUID, List<String>> QUEUED_NOTIFICATIONS = new ConcurrentHashMap<>();
 
+    /** Post-spawn setup waiting for the bot entity to appear in the player manager. */
+    private record PostSpawnSetup(String botAlias, ServerWorld world, Vec3d spawnPos, BlockPos dest,
+                                  RegistryKey<World> dim, PendingTravel travel,
+                                  boolean dimensionFallback, int ticksWaited) {}
+    private static final Map<String, PostSpawnSetup> PENDING_POST_SPAWN = new ConcurrentHashMap<>();
+
     /** Check if a bot is currently in transit. */
     public static boolean isTraveling(UUID botUuid) {
         return botUuid != null && PENDING_TRAVELS.containsKey(botUuid);
@@ -281,6 +287,31 @@ public final class NavigationArtifactService {
      * has been reached.
      */
     public static void tickPendingTravels(MinecraftServer server) {
+        // Process post-spawn setups (waiting for bot entity to appear after createFake).
+        if (!PENDING_POST_SPAWN.isEmpty()) {
+            Iterator<Map.Entry<String, PostSpawnSetup>> psIt = PENDING_POST_SPAWN.entrySet().iterator();
+            while (psIt.hasNext()) {
+                Map.Entry<String, PostSpawnSetup> psEntry = psIt.next();
+                PostSpawnSetup ps = psEntry.getValue();
+                ServerPlayerEntity bot = server.getPlayerManager().getPlayer(ps.botAlias());
+                if (bot != null && !bot.isRemoved()) {
+                    LOGGER.info("Bot '{}' appeared after {} real ticks — completing travel setup.",
+                            ps.botAlias(), ps.ticksWaited());
+                    completePostSpawnSetup(server, bot, ps);
+                    psIt.remove();
+                } else if (ps.ticksWaited() >= 40) {
+                    LOGGER.error("Bot '{}' failed to appear after 40 real ticks — travel respawn failed.",
+                            ps.botAlias());
+                    psIt.remove();
+                } else {
+                    // Increment wait counter (records are immutable, so replace).
+                    psEntry.setValue(new PostSpawnSetup(ps.botAlias(), ps.world(), ps.spawnPos(),
+                            ps.dest(), ps.dim(), ps.travel(), ps.dimensionFallback(),
+                            ps.ticksWaited() + 1));
+                }
+            }
+        }
+
         if (PENDING_TRAVELS.isEmpty()) {
             return;
         }
@@ -363,98 +394,57 @@ public final class NavigationArtifactService {
                 false   // not flying
         );
 
-        // Poll for the bot entity over several ticks — createFake connection is async
-        // and the entity may not appear in the player manager until a few ticks later.
-        final int MAX_POLL_TICKS = 40; // 2 seconds
-        final int[] pollCount = {0};
-        Runnable[] poll = new Runnable[1];
-        poll[0] = () -> {
-            ServerPlayerEntity bot = server.getPlayerManager().getPlayer(travel.botAlias());
-            if (bot == null || bot.isRemoved()) {
-                if (pollCount[0]++ < MAX_POLL_TICKS) {
-                    server.execute(poll[0]); // retry next tick
-                    return;
-                }
-                LOGGER.error("Bot '{}' failed to appear after {} ticks of polling — travel respawn failed.",
-                        travel.botAlias(), MAX_POLL_TICKS);
-                return;
-            }
+        // Enqueue post-spawn setup — processed in tickPendingTravels() which runs
+        // once per real server tick, giving createFake time to fully register the entity.
+        PENDING_POST_SPAWN.put(travel.botAlias().toLowerCase(java.util.Locale.ROOT),
+                new PostSpawnSetup(travel.botAlias(), finalWorld, spawnPos, finalDest,
+                        finalDim, travel, dimensionFallback, 0));
+    }
 
-            LOGGER.info("Bot '{}' appeared after {} poll ticks — completing travel setup.",
-                    travel.botAlias(), pollCount[0]);
+    private static void completePostSpawnSetup(MinecraftServer server, ServerPlayerEntity bot, PostSpawnSetup ps) {
+        // Teleport to exact destination (onBotJoin skips position restore for traveling bots).
+        bot.teleport(ps.world(), ps.spawnPos().x, ps.spawnPos().y, ps.spawnPos().z,
+                java.util.Set.of(), 0.0F, 0.0F, true);
 
-            // Teleport to exact destination in case onBotJoin restored a stale position.
-            bot.teleport(finalWorld, spawnPos.x, spawnPos.y, spawnPos.z,
-                    java.util.Set.of(), 0.0F, 0.0F, true);
+        try { BotEventHandler.registerBot(bot); }
+        catch (Throwable t) { LOGGER.warn("Failed to register bot '{}' after travel: {}", ps.botAlias(), t.getMessage()); }
 
-            // Register with mod systems.
+        try { AutoFaceEntity.startAutoFace(bot); }
+        catch (Throwable t) { LOGGER.debug("AutoFaceEntity start failed for '{}': {}", ps.botAlias(), t.getMessage()); }
+
+        BotCommandStateService.State cmdState = BotCommandStateService.stateFor(bot);
+        if (cmdState != null) { cmdState.mode = BotEventHandler.Mode.IDLE; }
+
+        // Recreate co-traveling mount if one was stored.
+        PendingTravel travel = ps.travel();
+        if (travel.mountEntityTypeId() != null) {
             try {
-                BotEventHandler.registerBot(bot);
-            } catch (Throwable t) {
-                LOGGER.warn("Failed to register bot '{}' after travel: {}", travel.botAlias(), t.getMessage());
-            }
-
-            // Start auto-face idle head rotation.
-            try {
-                AutoFaceEntity.startAutoFace(bot);
-            } catch (Throwable t) {
-                LOGGER.debug("AutoFaceEntity start failed for '{}': {}", travel.botAlias(), t.getMessage());
-            }
-
-            // Set mode back to IDLE now that travel is complete.
-            BotCommandStateService.State cmdState = BotCommandStateService.stateFor(bot);
-            if (cmdState != null) {
-                cmdState.mode = BotEventHandler.Mode.IDLE;
-            }
-
-            // Recreate co-traveling mount if one was stored.
-            if (travel.mountEntityTypeId() != null) {
-                try {
-                    Identifier typeId = Identifier.of(travel.mountEntityTypeId());
-                    if (Registries.ENTITY_TYPE.containsId(typeId)) {
-                        EntityType<?> mountType = Registries.ENTITY_TYPE.get(typeId);
-                        Entity mount = mountType.create(finalWorld, SpawnReason.COMMAND);
-                        if (mount != null) {
-                            BlockPos safeSpot = TravelMountHandler.findSafeAnimalSpot(
-                                    finalWorld, finalDest, mount);
-                            BlockPos mountPos = safeSpot != null ? safeSpot : finalDest;
-                            mount.refreshPositionAndAngles(
-                                    mountPos.getX() + 0.5, mountPos.getY(),
-                                    mountPos.getZ() + 0.5, 0, 0);
-                            finalWorld.spawnEntity(mount);
-                            TravelMountHandler.ensureMountPersistence(mount);
-                            MountPersistenceService.recordMount(bot, mount, true);
-                            LOGGER.info("Recreated mount '{}' at {} after travel for '{}'",
-                                    mount.getName().getString(), mountPos.toShortString(),
-                                    travel.botAlias());
-                        }
-                    } else {
-                        LOGGER.warn("Unknown mount type '{}' for bot '{}'",
-                                travel.mountEntityTypeId(), travel.botAlias());
+                Identifier typeId = Identifier.of(travel.mountEntityTypeId());
+                if (Registries.ENTITY_TYPE.containsId(typeId)) {
+                    EntityType<?> mountType = Registries.ENTITY_TYPE.get(typeId);
+                    Entity mount = mountType.create(ps.world(), SpawnReason.COMMAND);
+                    if (mount != null) {
+                        BlockPos safeSpot = TravelMountHandler.findSafeAnimalSpot(ps.world(), ps.dest(), mount);
+                        BlockPos mountPos = safeSpot != null ? safeSpot : ps.dest();
+                        mount.refreshPositionAndAngles(mountPos.getX() + 0.5, mountPos.getY(), mountPos.getZ() + 0.5, 0, 0);
+                        ps.world().spawnEntity(mount);
+                        TravelMountHandler.ensureMountPersistence(mount);
+                        MountPersistenceService.recordMount(bot, mount, true);
                     }
-                } catch (Exception e) {
-                    LOGGER.warn("Failed to recreate mount for '{}': {}",
-                            travel.botAlias(), e.getMessage());
                 }
+            } catch (Exception e) {
+                LOGGER.warn("Failed to recreate mount for '{}': {}", ps.botAlias(), e.getMessage());
             }
+        }
 
-            // Play arrival sound at the destination.
-            finalWorld.playSound(null, finalDest,
-                    SoundEvents.ENTITY_ENDER_PEARL_THROW, SoundCategory.PLAYERS, 1.0F, 0.8F);
+        ps.world().playSound(null, ps.dest(), SoundEvents.ENTITY_ENDER_PEARL_THROW, SoundCategory.PLAYERS, 1.0F, 0.8F);
 
-            // Notify the owner.
-            String msg = dimensionFallback
-                    ? "\u00A7eYour companion " + travel.botAlias()
-                      + " arrived at Overworld spawn (target dimension was unavailable).\u00A7r"
-                    : "\u00A7aYour companion " + travel.botAlias()
-                      + " has arrived at the destination.\u00A7r";
-            notifyOwner(server, travel.ownerUuid(), msg);
+        String msg = ps.dimensionFallback()
+                ? "\u00A7eYour companion " + ps.botAlias() + " arrived at Overworld spawn (target dimension was unavailable).\u00A7r"
+                : "\u00A7aYour companion " + ps.botAlias() + " has arrived at the destination.\u00A7r";
+        notifyOwner(server, travel.ownerUuid(), msg);
 
-            LOGGER.info("Bot '{}' arrived at {} in {} after {} ticks of travel.",
-                    travel.botAlias(), finalDest.toShortString(), finalDim.getValue(),
-                    travel.arrivalTick() - travel.departureTick());
-        };
-        server.execute(poll[0]);
+        LOGGER.info("Bot '{}' arrived at {} in {}.", ps.botAlias(), ps.dest().toShortString(), ps.dim().getValue());
     }
 
     // ── Session lifecycle ──────────────────────────────────────────────────
@@ -469,6 +459,7 @@ public final class NavigationArtifactService {
         PENDING_TRAVELS.clear();
         RESPAWN_RETRY_COUNTS.clear();
         QUEUED_NOTIFICATIONS.clear();
+        PENDING_POST_SPAWN.clear();
     }
 
     // ── Persistence ────────────────────────────────────────────────────────
