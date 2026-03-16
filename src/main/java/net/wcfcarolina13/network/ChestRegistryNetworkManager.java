@@ -246,35 +246,84 @@ public final class ChestRegistryNetworkManager {
                     player.getCommandSource(),
                     botName + " is heading to the chest to " + action + " items...");
 
-            // Run on worker thread — ChestStoreService.depositAll/withdrawAllFrom is blocking (walks, then transfers)
+            // Run on worker thread — walk is blocking. Retry up to 2 times if combat interrupts.
+            final boolean isDeposit = deposit;
+            final String finalAction = action;
             java.util.concurrent.CompletableFuture.runAsync(() -> {
                 try {
-                    int moved;
-                    if (deposit) {
-                        moved = net.wcfcarolina13.GameAI.services.ChestStoreService.depositAll(
-                                bot.getCommandSource(), bot, chestPos);
-                    } else {
-                        moved = net.wcfcarolina13.GameAI.services.ChestStoreService.withdrawAllFrom(
-                                bot.getCommandSource(), bot, chestPos);
+                    int moved = 0;
+                    int maxAttempts = 3; // initial + 2 retries
+                    for (int attempt = 0; attempt < maxAttempts; attempt++) {
+                        // Wait for combat to end before (re)trying
+                        if (net.wcfcarolina13.GameAI.services.BotCombatCalloutService.isInCombat(bot.getUuid())) {
+                            if (attempt == 0) {
+                                server.execute(() -> net.wcfcarolina13.ChatUtils.ChatUtils.sendSystemMessage(
+                                        player.getCommandSource(),
+                                        "\u00A7e" + botName + " is in combat. Will resume once safe.\u00A7r"));
+                            }
+                            // Poll for combat end (check every 500ms, timeout after 30s)
+                            for (int wait = 0; wait < 60; wait++) {
+                                try { Thread.sleep(500); } catch (InterruptedException ignored) { break; }
+                                if (!net.wcfcarolina13.GameAI.services.BotCombatCalloutService.isInCombat(bot.getUuid())) break;
+                            }
+                            // If still in combat after 30s, give up
+                            if (net.wcfcarolina13.GameAI.services.BotCombatCalloutService.isInCombat(bot.getUuid())) {
+                                server.execute(() -> net.wcfcarolina13.ChatUtils.ChatUtils.sendSystemMessage(
+                                        player.getCommandSource(),
+                                        "\u00A7c" + botName + " is still in combat. Quick " + finalAction + " cancelled.\u00A7r"));
+                                return;
+                            }
+                            // Brief pause after combat ends for bot to settle
+                            try { Thread.sleep(1000); } catch (InterruptedException ignored) {}
+                        }
+
+                        // Check bot is still alive and in world
+                        if (bot.isRemoved() || bot.isDead()) {
+                            server.execute(() -> net.wcfcarolina13.ChatUtils.ChatUtils.sendSystemMessage(
+                                    player.getCommandSource(),
+                                    "\u00A7c" + botName + " is no longer available.\u00A7r"));
+                            return;
+                        }
+
+                        // Attempt walk + transfer
+                        if (isDeposit) {
+                            moved = net.wcfcarolina13.GameAI.services.ChestStoreService.depositAll(
+                                    bot.getCommandSource(), bot, chestPos);
+                        } else {
+                            moved = net.wcfcarolina13.GameAI.services.ChestStoreService.withdrawAllFrom(
+                                    bot.getCommandSource(), bot, chestPos);
+                        }
+
+                        if (moved > 0) break; // Success
+
+                        // If failed and bot entered combat during the attempt, retry
+                        if (net.wcfcarolina13.GameAI.services.BotCombatCalloutService.isInCombat(bot.getUuid())
+                                && attempt < maxAttempts - 1) {
+                            LOGGER.info("Quick {}: {} interrupted by combat, retrying (attempt {})",
+                                    finalAction, botName, attempt + 2);
+                            continue;
+                        }
+                        break; // Failed for non-combat reasons, don't retry
                     }
 
-                    String verb = deposit ? "deposited" : "fetched";
+                    String verb = isDeposit ? "deposited" : "fetched";
+                    final int finalMoved = moved;
                     String msg;
-                    if (moved > 0) {
-                        msg = "\u00A7a" + botName + " " + verb + " " + moved + " items.\u00A7r";
+                    if (finalMoved > 0) {
+                        msg = "\u00A7a" + botName + " " + verb + " " + finalMoved + " items.\u00A7r";
                     } else {
-                        msg = "\u00A7e" + botName + " could not " + action + " any items. "
-                                + (deposit ? "Chest may be full or bot inventory empty." : "Chest may be empty or bot inventory full.")
+                        msg = "\u00A7e" + botName + " could not " + finalAction + " any items. "
+                                + (isDeposit ? "Chest may be full or bot inventory empty." : "Chest may be empty or bot inventory full.")
                                 + "\u00A7r";
                     }
                     server.execute(() -> net.wcfcarolina13.ChatUtils.ChatUtils.sendSystemMessage(
                             player.getCommandSource(), msg));
-                    LOGGER.info("Quick {}: {} {} {} items at {},{},{}", action, botName, verb, moved, x, y, z);
+                    LOGGER.info("Quick {}: {} {} {} items at {},{},{}", finalAction, botName, verb, finalMoved, x, y, z);
                 } catch (Exception e) {
-                    LOGGER.warn("Quick {} failed for {}: {}", action, botName, e.getMessage());
+                    LOGGER.warn("Quick {} failed for {}: {}", finalAction, botName, e.getMessage());
                     server.execute(() -> net.wcfcarolina13.ChatUtils.ChatUtils.sendSystemMessage(
                             player.getCommandSource(),
-                            "\u00A7c" + botName + " failed to " + action + " items: " + e.getMessage() + "\u00A7r"));
+                            "\u00A7c" + botName + " failed to " + finalAction + " items: " + e.getMessage() + "\u00A7r"));
                 } finally {
                     net.wcfcarolina13.GameAI.services.TaskService.complete(ticket, true);
                 }

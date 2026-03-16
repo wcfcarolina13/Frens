@@ -96,9 +96,10 @@ public final class StoreTargetPickerOverlay {
         int cy = context.getScaledWindowHeight() / 2;
 
         // Instructions below crosshair
+        String cleanName = botName != null ? botName.replace("\"", "") : "bot";
         String line1 = "fetch".equals(mode)
-                ? "Point at a chest and click to take items"
-                : "Point at a chest and click to deposit items";
+                ? "Point at a chest and click to direct " + cleanName + " to take items"
+                : "Point at a chest and click to direct " + cleanName + " to deposit items";
         String line2 = "Right-click to cancel";
         int w1 = client.textRenderer.getWidth(line1);
         int w2 = client.textRenderer.getWidth(line2);
