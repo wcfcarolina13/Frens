@@ -334,20 +334,8 @@ public final class BotFleeService {
                                                  boolean phantomsPresent, boolean hasBlocks) {
         // 1. Pillar up — DISABLED: ScaffoldService placement consistently fails
         //    during emergency context (bot moving/being hit). Needs investigation.
-        //    See: place-rejected errors in logs when pillarUp is called from flee.
 
-        // 2. Wall off existing overhang/cave
-        if (hasBlocks && bot.getEntityWorld() instanceof ServerWorld world2) {
-            BlockPos shelter = findNearbyOverhangShelter(world2, bot.getBlockPos(), 10);
-            if (shelter != null) {
-                LOGGER.info("Bot {} trying emergency wall-off at {}",
-                        bot.getName().getString(), shelter.toShortString());
-                emergencyWallOff(bot, shelter);
-                return;
-            }
-        }
-
-        // 3. Dig into cliff face (mining provides blocks to seal with)
+        // 2. Dig into cliff face — most reliable: mine in, seal entrance, fully enclosed.
         if (bot.getEntityWorld() instanceof ServerWorld world3) {
             net.minecraft.util.math.Direction cliffDir = findNearbyCliffFace(world3, bot.getBlockPos(), 6);
             if (cliffDir != null) {
@@ -358,11 +346,15 @@ public final class BotFleeService {
             }
         }
 
-        // 4. Last resort: dig straight down
+        // 3. Dig straight down — always available, self-supplying blocks
         BlockPos digSpot = bot.getBlockPos();
         LOGGER.info("Bot {} trying emergency dig-down at {}",
                 bot.getName().getString(), digSpot.toShortString());
         emergencyDigDown(bot, digSpot);
+
+        // 4. Wall-off — DISABLED: detection finds false positives (bot's own placed blocks,
+        //    partial shelters) and reports success without actually protecting the bot.
+        //    Needs stricter shelter detection before re-enabling.
     }
 
     /**
