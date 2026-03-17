@@ -190,13 +190,25 @@ public final class BotRescueService {
 
         boolean stuckInBlocks = (headBlocked || feetBlocked);
 
-        // getRecentDamageSource() can remain sticky for a short window even after we're no longer clipped.
-        // If head/feet are clear AND we're not currently inside a wall, do not escalate into mining.
-        if (takingSuffocationDamage && !stuckInBlocks && !bot.isInsideWall()) {
-            DebugToggleService.debug(LOGGER, "rescueFromBurial: bot={} was taking transient suffocation damage but not stuck - skipping mining", bot.getName().getString());
-            LAST_SUFFOCATION_ALERT_TICK.remove(bot.getUuid());
-            LAST_STUCK_LOG_MS.remove(bot.getUuid());
-            return false;
+        // If taking suffocation damage but head/feet blocks are clear, the bot's
+        // bounding box edge clips into an adjacent solid block. Nudge it away from
+        // the overlapping wall — no mining needed, just reposition.
+        if (takingSuffocationDamage && !stuckInBlocks) {
+            double botX = bot.getX(), botZ = bot.getZ();
+            for (Direction dir : Direction.Type.HORIZONTAL) {
+                BlockPos adjacent = feet.offset(dir);
+                if (world.getBlockState(adjacent).blocksMovement()) {
+                    double nudgeX = -dir.getOffsetX() * 0.4;
+                    double nudgeZ = -dir.getOffsetZ() * 0.4;
+                    bot.setPosition(botX + nudgeX, bot.getY(), botZ + nudgeZ);
+                    bot.velocityDirty = true;
+                    LOGGER.info("Bot {} nudged away from wall {} to escape collision clip",
+                            bot.getName().getString(), dir.asString());
+                    return true;
+                }
+            }
+            // No adjacent solid block found — try velocity-based escape
+            return attemptEscapeMovement(bot, world, feet, head);
         }
 
         // Exit if not suffocating AND not stuck in blocks
@@ -562,6 +574,21 @@ public final class BotRescueService {
             MinecraftServer srv = bot.getCommandSource().getServer();
             if (srv != null) {
                 LAST_MINING_ESCAPE_ATTEMPT.put(bot.getUuid(), (long) srv.getTicks());
+            }
+        } else if (bot.isInsideWall()) {
+            // Head/feet are air but bounding box clips into adjacent blocks.
+            // Nudge the bot away from the nearest solid block.
+            for (Direction dir : Direction.Type.HORIZONTAL) {
+                BlockPos adjacent = feet.offset(dir);
+                if (world.getBlockState(adjacent).blocksMovement()) {
+                    double nudgeX = -dir.getOffsetX() * 0.4;
+                    double nudgeZ = -dir.getOffsetZ() * 0.4;
+                    bot.setPosition(bot.getX() + nudgeX, bot.getY(), bot.getZ() + nudgeZ);
+                    bot.velocityDirty = true;
+                    LOGGER.info("Bot {} spawn clip — nudged away from {} wall",
+                            bot.getName().getString(), dir.asString());
+                    break;
+                }
             }
         }
     }

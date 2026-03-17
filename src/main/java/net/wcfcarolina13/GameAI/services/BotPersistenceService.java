@@ -1,11 +1,13 @@
 package net.wcfcarolina13.GameAI.services;
 
+import net.minecraft.block.BlockState;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.PlayerConfigEntry;
 import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.entity.Entity;
+import net.minecraft.util.math.BlockPos;
 import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.item.ItemStack;
 import net.minecraft.text.Text;
@@ -154,6 +156,17 @@ public final class BotPersistenceService {
                                 state.x(), state.y(), state.z(), state.yaw(), state.pitch());
                         float clampedPitch = Math.max(-90.0F, Math.min(90.0F, state.pitch()));
                         bot.refreshPositionAndAngles(state.x(), state.y(), state.z(), state.yaw(), clampedPitch);
+
+                        // Validate restored position — if inside solid blocks, find a safe spot nearby
+                        if (bot.getEntityWorld() instanceof ServerWorld world) {
+                            BlockPos safe = findSafeSpawnNearby(world, bot.getBlockPos());
+                            if (safe != null) {
+                                LOGGER.warn("Bot {} restored position {} is inside blocks — nudging to safe position {}",
+                                        bot.getName().getString(), bot.getBlockPos().toShortString(), safe.toShortString());
+                                bot.refreshPositionAndAngles(safe.getX() + 0.5, safe.getY(), safe.getZ() + 0.5,
+                                        state.yaw(), clampedPitch);
+                            }
+                        }
                     }, () -> {
                         LOGGER.info("No prior world-state for {} in world {}; resetting pitch to 0",
                                 bot.getName().getString(), BotWorldStateService.currentWorldKey(server));
@@ -706,5 +719,42 @@ public final class BotPersistenceService {
         } catch (IOException e) {
             LOGGER.error("Failed to delete player data file for UUID {}: {}", playerUuid, e.getMessage());
         }
+    }
+
+    /**
+     * Checks if the bot's restored position is unsafe (inside solid blocks) and returns
+     * a nearby safe position, or null if the current position is fine.
+     */
+    private static BlockPos findSafeSpawnNearby(ServerWorld world, BlockPos center) {
+        // Check if current position is safe
+        if (isPositionSafe(world, center)) return null;
+
+        // Spiral search outward for a safe spot (up to 5 blocks)
+        for (int r = 1; r <= 5; r++) {
+            for (int dx = -r; dx <= r; dx++) {
+                for (int dz = -r; dz <= r; dz++) {
+                    if (Math.abs(dx) != r && Math.abs(dz) != r) continue; // shell only
+                    for (int dy = -1; dy <= 2; dy++) {
+                        BlockPos candidate = center.add(dx, dy, dz);
+                        if (isPositionSafe(world, candidate)) {
+                            return candidate;
+                        }
+                    }
+                }
+            }
+        }
+        return null; // no safe position found within range
+    }
+
+    private static boolean isPositionSafe(ServerWorld world, BlockPos feet) {
+        BlockPos head = feet.up();
+        BlockState feetState = world.getBlockState(feet);
+        BlockState headState = world.getBlockState(head);
+        BlockState floorState = world.getBlockState(feet.down());
+        // Need: solid floor, air at feet and head, no adjacent blocks that would clip the bounding box
+        if (!floorState.isSolidBlock(world, feet.down())) return false;
+        if (feetState.blocksMovement()) return false;
+        if (headState.blocksMovement()) return false;
+        return true;
     }
 }
