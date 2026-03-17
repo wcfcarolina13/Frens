@@ -40,6 +40,8 @@ public final class BotFleeService {
     private static final int COOLDOWN_TICKS = 100;
 
     private static final ConcurrentHashMap<UUID, FleeState> FLEE_STATES = new ConcurrentHashMap<>();
+    /** Per-bot cooldown to prevent spamming proactive shelter attempts. */
+    private static final ConcurrentHashMap<UUID, Long> SHELTER_COOLDOWN = new ConcurrentHashMap<>();
 
     private BotFleeService() {}
 
@@ -90,6 +92,61 @@ public final class BotFleeService {
         }
 
         return false;
+    }
+
+    /**
+     * Proactive shelter check for IDLE bots during a lull after heavy combat.
+     * Called from the IDLE tick path when no hostiles are nearby but the bot
+     * was recently in combat and is hurt. Attempts to build shelter preemptively
+     * before the next wave arrives.
+     *
+     * <p>Trigger conditions (all must be true):
+     * <ul>
+     *   <li>Emergency tactics enabled</li>
+     *   <li>Was damaged by hostile within last 10 seconds (200 ticks)</li>
+     *   <li>Health below 70%</li>
+     *   <li>Not near a base (no baseTarget set)</li>
+     *   <li>Has placeable blocks</li>
+     *   <li>Not on shelter cooldown (60s between attempts)</li>
+     * </ul>
+     *
+     * @return true if the bot is building shelter (caller should skip idle behaviors)
+     */
+    public static boolean tryProactiveShelter(ServerPlayerEntity bot, net.minecraft.server.MinecraftServer server) {
+        if (bot == null || server == null) return false;
+        if (!SkillPreferences.emergencyTactics(bot)) return false;
+
+        long currentTick = server.getTicks();
+
+        // Must have been damaged recently (within 10 seconds)
+        if (!BotCombatCalloutService.wasRecentlyDamagedByHostile(bot, currentTick, 200)) return false;
+
+        // Must be hurt — don't build shelter at full health
+        float healthRatio = bot.getHealth() / bot.getMaxHealth();
+        if (healthRatio > 0.70f) return false;
+
+        // Must not be near a base (has somewhere safe to go)
+        BotCommandStateService.State state = BotCommandStateService.stateFor(bot);
+        if (state != null && state.baseTarget != null) return false;
+
+        // Cooldown: don't spam shelter attempts (60 second cooldown)
+        long lastAttempt = SHELTER_COOLDOWN.getOrDefault(bot.getUuid(), 0L);
+        if (currentTick - lastAttempt < 1200) return false;
+
+        SHELTER_COOLDOWN.put(bot.getUuid(), currentTick);
+
+        LOGGER.info("Bot {} proactively seeking shelter (hp={}/{}, recently damaged)",
+                bot.getName().getString(),
+                String.format("%.1f", bot.getHealth()),
+                String.format("%.1f", bot.getMaxHealth()));
+
+        // Run the tactic chain — same as emergency but during a calm moment
+        boolean hasBlocks = true;
+        Thread t = new Thread(() -> runEmergencyTacticChain(bot, false, hasBlocks),
+                "proactive-shelter-" + bot.getName().getString());
+        t.setDaemon(true);
+        t.start();
+        return true;
     }
 
     private static boolean shouldFlee(ServerPlayerEntity bot, List<Entity> hostiles) {
@@ -271,8 +328,8 @@ public final class BotFleeService {
             }
         }
 
-        // 3. Dig into cliff face
-        if (hasBlocks && bot.getEntityWorld() instanceof ServerWorld world3) {
+        // 3. Dig into cliff face (mining provides blocks to seal with)
+        if (bot.getEntityWorld() instanceof ServerWorld world3) {
             net.minecraft.util.math.Direction cliffDir = findNearbyCliffFace(world3, bot.getBlockPos(), 6);
             if (cliffDir != null) {
                 LOGGER.info("Bot {} trying emergency cliff-dig {}",

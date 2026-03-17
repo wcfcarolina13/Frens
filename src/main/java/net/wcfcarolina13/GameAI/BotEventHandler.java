@@ -1463,6 +1463,10 @@ public class BotEventHandler {
                     }
                     return true; // stay alert, don't start idle behaviors
                 }
+                // Proactive shelter: if recently mauled and hurt, build shelter during this lull
+                if (BotFleeService.tryProactiveShelter(bot, server)) {
+                    return true;
+                }
                 if (BotArrowRecoveryService.tryRecoverMissedArrows(bot, server, null, 24.0D)) {
                     return true;
                 }
