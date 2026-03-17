@@ -265,6 +265,23 @@ public final class BotFleeService {
             }
         }
 
+        // Dig into a nearby cliff/hillside — mine a 1x2 tunnel, step in, seal entrance.
+        // Safer than digging down (no fall, no lava risk, easy to cap).
+        if (hasBlocks && bot.getEntityWorld() instanceof ServerWorld world3) {
+            net.minecraft.util.math.Direction cliffDir = findNearbyCliffFace(world3, bot.getBlockPos(), 6);
+            if (cliffDir != null) {
+                LOGGER.info("Bot {} attempting emergency cliff-dig {} ({} hostiles, hp={}/{})",
+                        bot.getName().getString(), cliffDir.asString(), hostiles.size(),
+                        String.format("%.1f", bot.getHealth()),
+                        String.format("%.1f", bot.getMaxHealth()));
+                Thread t = new Thread(() -> emergencyCliffDig(bot, cliffDir),
+                        "emergency-cliffdig-" + bot.getName().getString());
+                t.setDaemon(true);
+                t.start();
+                return true;
+            }
+        }
+
         // Last resort: dig straight down and cap the hole.
         // The cap block provides overhead protection (even from phantoms).
         {
@@ -504,6 +521,121 @@ public final class BotFleeService {
             Thread.currentThread().interrupt();
         } catch (Exception e) {
             LOGGER.warn("Emergency wall-off failed for {}: {}", bot.getName().getString(), e.getMessage());
+        }
+    }
+
+    /**
+     * Finds a solid cliff/hillside face within searchRadius that the bot can dig into.
+     * A valid cliff face has: 2+ solid blocks tall at feet+head level, with air in front
+     * (the bot's side). Returns the direction TO dig (toward the cliff), or null.
+     */
+    private static net.minecraft.util.math.Direction findNearbyCliffFace(
+            ServerWorld world, BlockPos center, int searchRadius) {
+        net.minecraft.util.math.Direction bestDir = null;
+        double bestDistSq = Double.MAX_VALUE;
+
+        for (net.minecraft.util.math.Direction dir : net.minecraft.util.math.Direction.Type.HORIZONTAL) {
+            for (int dist = 1; dist <= searchRadius; dist++) {
+                BlockPos standPos = center.offset(dir, dist - 1);
+                BlockPos wallFeet = center.offset(dir, dist);
+                BlockPos wallHead = wallFeet.up();
+
+                // The stand position must be open (air at feet + head)
+                if (!world.getBlockState(standPos).isAir()) continue;
+                if (!world.getBlockState(standPos.up()).isAir()) continue;
+                // The wall must be solid at both feet and head level
+                if (!world.getBlockState(wallFeet).isSolidBlock(world, wallFeet)) continue;
+                if (!world.getBlockState(wallHead).isSolidBlock(world, wallHead)) continue;
+                // Must also be solid one block deeper (so the tunnel has a back wall)
+                BlockPos deepFeet = wallFeet.offset(dir);
+                BlockPos deepHead = deepFeet.up();
+                if (!world.getBlockState(deepFeet).isSolidBlock(world, deepFeet)) continue;
+                if (!world.getBlockState(deepHead).isSolidBlock(world, deepHead)) continue;
+                // Solid overhead for the tunnel entrance
+                BlockPos ceiling = wallFeet.up(2);
+                if (!world.getBlockState(ceiling).isSolidBlock(world, ceiling)) continue;
+
+                double distSq = center.getSquaredDistance(wallFeet);
+                if (distSq < bestDistSq) {
+                    bestDistSq = distSq;
+                    bestDir = dir;
+                }
+                break; // found one in this direction, no need to search further
+            }
+        }
+        return bestDir;
+    }
+
+    /**
+     * Emergency cliff-dig: mine a 1x2 tunnel into a cliff face, step inside,
+     * and seal the entrance with a block. Place a torch if available.
+     */
+    private static void emergencyCliffDig(ServerPlayerEntity bot,
+                                          net.minecraft.util.math.Direction digDir) {
+        try {
+            // Stop moving.
+            bot.getCommandSource().getServer().execute(() -> {
+                bot.setSprinting(false);
+                bot.setVelocity(0, bot.getVelocity().y, 0);
+                bot.velocityDirty = true;
+            });
+            Thread.sleep(300);
+
+            BlockPos botPos = bot.getBlockPos();
+            // The wall is 1 block in digDir from the bot
+            BlockPos wallFeet = botPos.offset(digDir);
+            BlockPos wallHead = wallFeet.up();
+
+            // Walk toward the cliff if not adjacent
+            if (bot.squaredDistanceTo(Vec3d.ofCenter(wallFeet)) > 4.0) {
+                bot.getCommandSource().getServer().execute(() ->
+                        FollowMovementService.moveToward(bot, Vec3d.ofCenter(botPos), 1.0, true, null));
+                Thread.sleep(1000);
+            }
+
+            // Mine the two wall blocks (feet + head) to create a 1x2 tunnel
+            LOGGER.debug("Cliff-dig: mining {} and {}", wallFeet.toShortString(), wallHead.toShortString());
+            MiningTool.mineBlock(bot, wallFeet, false).join();
+            Thread.sleep(150);
+            MiningTool.mineBlock(bot, wallHead, false).join();
+            Thread.sleep(150);
+
+            // Step inside the tunnel
+            bot.getCommandSource().getServer().execute(() ->
+                    FollowMovementService.moveToward(bot, Vec3d.ofCenter(wallFeet), 0.5, true, null));
+            Thread.sleep(600);
+
+            // Seal the entrance behind — place block at where we were standing
+            BlockPos sealFeet = botPos;
+            BlockPos sealHead = sealFeet.up();
+            boolean[] sealed = {false};
+            bot.getCommandSource().getServer().execute(() -> {
+                sealed[0] = BotActions.placeBlockAt(bot, sealFeet);
+                if (sealed[0]) {
+                    BotActions.placeBlockAt(bot, sealHead);
+                }
+            });
+            Thread.sleep(200);
+
+            // Place a torch inside if available
+            bot.getCommandSource().getServer().execute(() -> {
+                for (int i = 0; i < bot.getInventory().size(); i++) {
+                    if (bot.getInventory().getStack(i).isOf(net.minecraft.item.Items.TORCH)) {
+                        BotActions.placeBlockAt(bot, wallFeet);
+                        break;
+                    }
+                }
+            });
+
+            LOGGER.info("Bot {} dug emergency cliff shelter {} (sealed={})",
+                    bot.getName().getString(), digDir.asString(), sealed[0]);
+
+            // Wait inside to heal.
+            Thread.sleep(5000);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } catch (Exception e) {
+            LOGGER.warn("Emergency cliff-dig failed for {}: {}", bot.getName().getString(), e.getMessage());
         }
     }
 
