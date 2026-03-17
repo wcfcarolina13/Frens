@@ -51,6 +51,8 @@ public final class BotFleeService {
         Vec3d fleeDirection;
         long fleeCooldownUntilTick;
         boolean emergencyTacticAttempted;
+        /** Position when flee started — used to detect if flee is actually working. */
+        Vec3d fleeStartPos;
     }
 
     /**
@@ -205,6 +207,7 @@ public final class BotFleeService {
         state.isFleeing = true;
         state.fleeStartTick = currentTick;
         state.fleeDirection = fleeDir;
+        state.fleeStartPos = new Vec3d(bot.getX(), bot.getY(), bot.getZ());
         LOGGER.info("Bot {} fleeing from {} hostiles (health={}/{})",
                 bot.getName().getString(), hostiles.size(),
                 String.format("%.1f", bot.getHealth()),
@@ -222,8 +225,24 @@ public final class BotFleeService {
             return false;
         }
 
+        long fleeDuration = currentTick - state.fleeStartTick;
+
+        // Stuck detection: if the bot hasn't moved more than 5 blocks from where it
+        // started fleeing after 3 seconds, it's cornered — stop fleeing and fight.
+        if (fleeDuration >= 60 && state.fleeStartPos != null) {
+            double distFromStartSq = bot.squaredDistanceTo(state.fleeStartPos);
+            if (distFromStartSq < 25.0) { // less than 5 blocks from start
+                LOGGER.info("Bot {} cornered (moved only {} blocks in {}t) — abandoning flee to fight",
+                        bot.getName().getString(),
+                        String.format("%.1f", Math.sqrt(distFromStartSq)),
+                        fleeDuration);
+                stopFleeing(state, currentTick);
+                return false; // let combat take over
+            }
+        }
+
         // Timeout — flee hasn't worked. Try emergency tactics before giving up.
-        if (currentTick - state.fleeStartTick >= MAX_FLEE_TICKS) {
+        if (fleeDuration >= MAX_FLEE_TICKS) {
             if (!state.emergencyTacticAttempted && SkillPreferences.emergencyTactics(bot)) {
                 state.emergencyTacticAttempted = true;
                 if (tryEmergencyTactic(bot, hostiles)) {
@@ -407,21 +426,28 @@ public final class BotFleeService {
             }
 
             // Wait to fall into the hole and auto-collect mined block drops.
-            Thread.sleep(800);
+            // Block drops appear at the mined block's position and take a moment to
+            // settle and be picked up. Longer wait = more reliable collection.
+            Thread.sleep(1500);
 
-            // Cap the top of the hole. Place at the original feet level (digPos).
-            // The bot is now ~3 blocks lower. placeBlockAt uses support-based placement
-            // which should find adjacent wall blocks in the hole as support.
-            BlockPos capPos = digPos;
+            // Cap the hole. Try multiple heights — the bot is ~3 blocks down from digPos.
+            // Place at the closest reachable air block above the bot's head.
             boolean[] capResult = {false};
+            BlockPos botCurrentPos = bot.getBlockPos();
             bot.getCommandSource().getServer().execute(() -> {
-                capResult[0] = BotActions.placeBlockAt(bot, capPos);
-                if (!capResult[0]) {
-                    // Try one block above in case digPos is too far
-                    capResult[0] = BotActions.placeBlockAt(bot, capPos.up());
+                // Try capping at each level from just above head up to original ground
+                for (int dy = 2; dy <= 4; dy++) {
+                    BlockPos capCandidate = botCurrentPos.up(dy);
+                    if (bot.getEntityWorld().getBlockState(capCandidate).isAir()) {
+                        capResult[0] = BotActions.placeBlockAt(bot, capCandidate);
+                        if (capResult[0]) {
+                            LOGGER.debug("Cap placed at {} (dy={})", capCandidate.toShortString(), dy);
+                            break;
+                        }
+                    }
                 }
             });
-            Thread.sleep(200); // let the server thread execute
+            Thread.sleep(300); // let the server thread execute
 
             LOGGER.info("Bot {} dug emergency bunker at {} (mined={}, capPlaced={})",
                     bot.getName().getString(), digPos.toShortString(), blocksMined, capResult[0]);
@@ -644,26 +670,28 @@ public final class BotFleeService {
             // Mine the two wall blocks (feet + head) to create a 1x2 tunnel
             LOGGER.debug("Cliff-dig: mining {} and {}", wallFeet.toShortString(), wallHead.toShortString());
             MiningTool.mineBlock(bot, wallFeet, false).join();
-            Thread.sleep(150);
+            Thread.sleep(200);
             MiningTool.mineBlock(bot, wallHead, false).join();
-            Thread.sleep(150);
+
+            // Wait for mined block drops to be picked up (auto-collect needs time)
+            Thread.sleep(1200);
 
             // Step inside the tunnel
             bot.getCommandSource().getServer().execute(() ->
                     FollowMovementService.moveToward(bot, Vec3d.ofCenter(wallFeet), 0.5, true, null));
-            Thread.sleep(600);
+            Thread.sleep(800);
 
-            // Seal the entrance behind — place block at where we were standing
-            BlockPos sealFeet = botPos;
+            // Seal the entrance behind — place blocks where we were standing.
+            // Use the bot's current position to find the entrance (1 block behind in opposite dir).
+            BlockPos currentPos = bot.getBlockPos();
+            BlockPos sealFeet = currentPos.offset(digDir.getOpposite());
             BlockPos sealHead = sealFeet.up();
             boolean[] sealed = {false};
             bot.getCommandSource().getServer().execute(() -> {
                 sealed[0] = BotActions.placeBlockAt(bot, sealFeet);
-                if (sealed[0]) {
-                    BotActions.placeBlockAt(bot, sealHead);
-                }
+                BotActions.placeBlockAt(bot, sealHead);
             });
-            Thread.sleep(200);
+            Thread.sleep(300);
 
             // Place a torch inside if available
             bot.getCommandSource().getServer().execute(() -> {
