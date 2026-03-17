@@ -1,6 +1,16 @@
 # Changelog & History
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
+## 2026-03-17
+
+- **Fix flee-to-death + post-respawn unresponsiveness:**
+  1. **Flee wall-awareness:** Flee direction now probes 5 candidate directions for traversability (feet+head clearance) before committing. If all directions blocked, bot stands and fights instead of running into a wall.
+  2. **Faster stuck detection:** Reduced from 60 ticks/5 blocks to 25 ticks/2 blocks — bot abandons doomed flee 1.75s sooner.
+  3. **Combat state reset on death/respawn:** `resetCombatState()` called in both AFTER_DEATH and onBotRespawn, clearing stale LAST_HOSTILE_DAMAGE_TICK, LAST_COMBAT_CENTER, PostCombatSweep state. Prevents post-respawn shelter spam and "walking back to death location" loops.
+  4. **Shelter health gate:** `tryProactiveShelter()` now requires HP < 70% — no more sheltering at full health after respawn.
+  5. **Shelter teleport/timeout safety:** SHELTER_ACTIVE now stores position; auto-clears if bot moves >8 blocks (teleport) or after 2 minutes. Prevents shelter flag from permanently suppressing combat after /tp.
+  6. **Shelter cooldown cleared on reset:** `SHELTER_COOLDOWN` now properly cleared alongside `SHELTER_ACTIVE` and `FLEE_STATES` on death/respawn.
+
 ## 2026-03-16
 
 - **Storage screen redesign + fast travel fixes:**

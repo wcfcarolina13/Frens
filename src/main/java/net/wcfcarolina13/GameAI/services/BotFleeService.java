@@ -45,12 +45,37 @@ public final class BotFleeService {
     private static final ConcurrentHashMap<UUID, FleeState> FLEE_STATES = new ConcurrentHashMap<>();
     /** Per-bot cooldown to prevent spamming proactive shelter attempts. */
     private static final ConcurrentHashMap<UUID, Long> SHELTER_COOLDOWN = new ConcurrentHashMap<>();
-    /** Tracks bots currently inside a tactical shelter (value = tick entered). */
-    private static final ConcurrentHashMap<UUID, Long> SHELTER_ACTIVE = new ConcurrentHashMap<>();
+    /** Shelter entry: when the bot entered and where it dug in. */
+    private record ShelterEntry(long enteredTick, Vec3d position) {}
+    /** Tracks bots currently inside a tactical shelter. */
+    private static final ConcurrentHashMap<UUID, ShelterEntry> SHELTER_ACTIVE = new ConcurrentHashMap<>();
 
     /** Returns true if the bot is currently inside a tactical shelter. */
     public static boolean isInShelter(UUID botId) {
         return SHELTER_ACTIVE.containsKey(botId);
+    }
+
+    /**
+     * Validates shelter state: auto-clears if the bot was teleported away (&gt;8 blocks)
+     * or has been sheltered for more than 2 minutes. Returns true if validly sheltered.
+     */
+    public static boolean validateAndTickShelter(ServerPlayerEntity bot, MinecraftServer server) {
+        ShelterEntry entry = SHELTER_ACTIVE.get(bot.getUuid());
+        if (entry == null) return false;
+        // Auto-clear if bot teleported far from shelter
+        if (bot.squaredDistanceTo(entry.position) > 64.0) {
+            SHELTER_ACTIVE.remove(bot.getUuid());
+            LOGGER.info("Bot {} shelter auto-cleared (teleported away from shelter)",
+                    bot.getName().getString());
+            return false;
+        }
+        // Max shelter duration: 2 minutes (2400 ticks)
+        if (server.getTicks() - entry.enteredTick > 2400) {
+            SHELTER_ACTIVE.remove(bot.getUuid());
+            LOGGER.info("Bot {} shelter timed out after 2 minutes", bot.getName().getString());
+            return false;
+        }
+        return true;
     }
 
     private BotFleeService() {}
@@ -102,7 +127,7 @@ public final class BotFleeService {
         // Threat assessment
         if (shouldFlee(bot, hostiles)) {
             startFleeing(bot, state, hostiles, currentTick);
-            return true;
+            return state.isFleeing; // false if all flee paths blocked
         }
 
         return false;
@@ -139,6 +164,9 @@ public final class BotFleeService {
 
         // Must have been damaged recently (within 10 seconds)
         if (!BotCombatCalloutService.wasRecentlyDamagedByHostile(bot, currentTick, 200)) return false;
+
+        // No point sheltering at full health (e.g. stale damage flag after respawn)
+        if (bot.getHealth() >= bot.getMaxHealth() * 0.70f) return false;
 
         // Must not be near a base (has somewhere safe to go)
         BotCommandStateService.State state = BotCommandStateService.stateFor(bot);
@@ -227,7 +255,12 @@ public final class BotFleeService {
 
     private static void startFleeing(ServerPlayerEntity bot, FleeState state,
                                      List<Entity> hostiles, long currentTick) {
-        Vec3d fleeDir = computeFleeDirection(bot, hostiles);
+        Vec3d fleeDir = computeTraversableFleeDirection(bot, hostiles);
+        if (fleeDir == null) {
+            LOGGER.info("Bot {} cornered — no traversable flee direction, standing ground",
+                    bot.getName().getString());
+            return; // don't set isFleeing, let combat engage
+        }
         state.isFleeing = true;
         state.fleeStartTick = currentTick;
         state.fleeDirection = fleeDir;
@@ -251,11 +284,11 @@ public final class BotFleeService {
 
         long fleeDuration = currentTick - state.fleeStartTick;
 
-        // Stuck detection: if the bot hasn't moved more than 5 blocks from where it
-        // started fleeing after 3 seconds, it's cornered — stop fleeing and fight.
-        if (fleeDuration >= 60 && state.fleeStartPos != null) {
+        // Stuck detection: if the bot hasn't moved more than 2 blocks from where it
+        // started fleeing after 1.25 seconds, it's cornered — stop fleeing and fight.
+        if (fleeDuration >= 25 && state.fleeStartPos != null) {
             double distFromStartSq = bot.squaredDistanceTo(state.fleeStartPos);
-            if (distFromStartSq < 25.0) { // less than 5 blocks from start
+            if (distFromStartSq < 4.0) { // less than 2 blocks from start
                 LOGGER.info("Bot {} cornered (moved only {} blocks in {}t) — abandoning flee to fight",
                         bot.getName().getString(),
                         String.format("%.1f", Math.sqrt(distFromStartSq)),
@@ -280,7 +313,14 @@ public final class BotFleeService {
 
         // Recompute direction periodically (hostiles may have shifted)
         if ((currentTick - state.fleeStartTick) % 20 == 0) {
-            state.fleeDirection = computeFleeDirection(bot, hostiles);
+            Vec3d newDir = computeTraversableFleeDirection(bot, hostiles);
+            if (newDir == null) {
+                LOGGER.info("Bot {} flee path blocked mid-flee — abandoning to fight",
+                        bot.getName().getString());
+                stopFleeing(state, currentTick);
+                return false;
+            }
+            state.fleeDirection = newDir;
         }
 
         applyFleeMovement(bot, state);
@@ -296,7 +336,12 @@ public final class BotFleeService {
         FollowMovementService.moveToward(bot, target, 1.0, true, null);
     }
 
-    private static Vec3d computeFleeDirection(ServerPlayerEntity bot, List<Entity> hostiles) {
+    /**
+     * Computes a flee direction that is actually traversable (no wall in the way).
+     * Probes 5 candidate directions: primary (away from hostiles), +/-45deg, +/-90deg.
+     * Returns null if ALL directions are blocked — caller should stand and fight.
+     */
+    private static Vec3d computeTraversableFleeDirection(ServerPlayerEntity bot, List<Entity> hostiles) {
         double cx = 0, cz = 0;
         for (Entity e : hostiles) {
             cx += e.getX();
@@ -309,12 +354,58 @@ public final class BotFleeService {
         double dz = bot.getZ() - cz;
         double len = Math.sqrt(dx * dx + dz * dz);
         if (len < 0.01) {
-            // Surrounded — pick an arbitrary direction
-            dx = 1;
-            dz = 0;
-            len = 1;
+            dx = 1; dz = 0; len = 1;
         }
-        return new Vec3d(dx / len, 0, dz / len);
+        dx /= len;
+        dz /= len;
+
+        if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
+            return new Vec3d(dx, 0, dz); // fallback: can't probe blocks
+        }
+
+        // 5 candidate angles: 0, +45, -45, +90, -90 degrees from primary
+        double[][] rotations = {
+            {dx, dz},                                               // 0 deg
+            {dx * 0.707 - dz * 0.707, dx * 0.707 + dz * 0.707},   // +45 deg
+            {dx * 0.707 + dz * 0.707, -dx * 0.707 + dz * 0.707},  // -45 deg
+            {-dz, dx},                                              // +90 deg
+            {dz, -dx},                                              // -90 deg
+        };
+
+        BlockPos feet = bot.getBlockPos();
+        int bestClearance = -1;
+        int bestIdx = -1;
+
+        for (int i = 0; i < rotations.length; i++) {
+            int rdx = (int) Math.round(rotations[i][0]);
+            int rdz = (int) Math.round(rotations[i][1]);
+            if (rdx == 0 && rdz == 0) rdx = 1; // degenerate case
+
+            int clearance = probeOpenBlocks(world, feet, rdx, rdz, 3);
+            if (clearance > bestClearance) {
+                bestClearance = clearance;
+                bestIdx = i;
+            }
+        }
+
+        if (bestClearance <= 0) {
+            return null; // all directions blocked — stand and fight
+        }
+
+        return new Vec3d(rotations[bestIdx][0], 0, rotations[bestIdx][1]);
+    }
+
+    /** Probes how many blocks are traversable (feet+head clear) in a direction. */
+    private static int probeOpenBlocks(ServerWorld world, BlockPos start, int dx, int dz, int maxDist) {
+        for (int i = 1; i <= maxDist; i++) {
+            BlockPos pos = start.add(dx * i, 0, dz * i);
+            BlockState feetState = world.getBlockState(pos);
+            BlockState headState = world.getBlockState(pos.up());
+            if (feetState.blocksMovement() || headState.blocksMovement()) {
+                return i - 1;
+            }
+        }
+        return maxDist;
     }
 
     private static void stopFleeing(FleeState state, long currentTick) {
@@ -481,7 +572,7 @@ public final class BotFleeService {
             Thread.sleep(300);
 
             // Mark shelter active
-            SHELTER_ACTIVE.put(bot.getUuid(), (long) server.getTicks());
+            SHELTER_ACTIVE.put(bot.getUuid(), new ShelterEntry(server.getTicks(), new Vec3d(bot.getX(), bot.getY(), bot.getZ())));
 
             LOGGER.info("Bot {} dug emergency bunker at {} (mined={}, capPlaced={})",
                     bot.getName().getString(), digPos.toShortString(), blocksMined, capResult[0]);
@@ -768,7 +859,7 @@ public final class BotFleeService {
             Thread.sleep(200);
 
             // Mark shelter active
-            SHELTER_ACTIVE.put(bot.getUuid(), (long) server.getTicks());
+            SHELTER_ACTIVE.put(bot.getUuid(), new ShelterEntry(server.getTicks(), new Vec3d(bot.getX(), bot.getY(), bot.getZ())));
 
             LOGGER.info("Bot {} dug emergency cliff shelter {} (sealed={})",
                     bot.getName().getString(), digDir.asString(), sealed[0]);
@@ -878,5 +969,6 @@ public final class BotFleeService {
     public static void reset(UUID botId) {
         FLEE_STATES.remove(botId);
         SHELTER_ACTIVE.remove(botId);
+        SHELTER_COOLDOWN.remove(botId);
     }
 }

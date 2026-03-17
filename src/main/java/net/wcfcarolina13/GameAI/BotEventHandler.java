@@ -1059,6 +1059,7 @@ public class BotEventHandler {
         registerBot(bot);
         BotStuckService.resetBot(bot.getUuid());
         BotFleeService.reset(bot.getUuid());
+        BotCombatCalloutService.resetCombatState(bot.getUuid());
 
         MinecraftServer srv = bot.getCommandSource().getServer();
         ServerWorld botWorld = bot.getCommandSource().getWorld();
@@ -1452,7 +1453,8 @@ public class BotEventHandler {
             }
             default -> {
                 // Tactical shelter: bot is sealed in — suppress all combat/flee, only check daylight escape
-                if (BotFleeService.isInShelter(bot.getUuid())) {
+                // validateAndTickShelter auto-clears if bot was teleported away or shelter timed out
+                if (BotFleeService.validateAndTickShelter(bot, server)) {
                     BotFleeService.checkDaylightBreakFree(bot, server);
                     return true;
                 }
