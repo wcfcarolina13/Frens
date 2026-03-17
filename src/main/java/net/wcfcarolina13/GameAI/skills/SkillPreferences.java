@@ -15,6 +15,7 @@ public final class SkillPreferences {
     private static final Map<UUID, Boolean> TELEPORT_PREFS = new ConcurrentHashMap<>();
     private static final Map<UUID, Boolean> PAUSE_ON_FULL_INV = new ConcurrentHashMap<>();
     private static final Map<UUID, Boolean> TELEPORT_DROP_SWEEP = new ConcurrentHashMap<>();
+    private static final Map<UUID, Boolean> EMERGENCY_TACTICS = new ConcurrentHashMap<>();
 
     private SkillPreferences() {
     }
@@ -91,6 +92,29 @@ public final class SkillPreferences {
             TELEPORT_DROP_SWEEP.put(uuid, Boolean.TRUE);
         } else {
             TELEPORT_DROP_SWEEP.remove(uuid);
+        }
+    }
+
+    /**
+     * Whether the bot may use emergency combat tactics: creeper block-and-shield,
+     * emergency pillar-up, or dig-down bunker when overwhelmed. Default: ON.
+     */
+    public static boolean emergencyTactics(ServerPlayerEntity player) {
+        if (player == null) return true;
+        return emergencyTactics(player.getUuid());
+    }
+
+    public static boolean emergencyTactics(UUID uuid) {
+        if (uuid == null) return true;
+        return EMERGENCY_TACTICS.getOrDefault(uuid, Boolean.TRUE);
+    }
+
+    public static void setEmergencyTactics(UUID uuid, boolean enabled) {
+        if (uuid == null) return;
+        if (enabled) {
+            EMERGENCY_TACTICS.remove(uuid);
+        } else {
+            EMERGENCY_TACTICS.put(uuid, Boolean.FALSE);
         }
     }
 }

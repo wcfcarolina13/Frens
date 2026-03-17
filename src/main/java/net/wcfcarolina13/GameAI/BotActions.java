@@ -400,10 +400,69 @@ public final class BotActions {
         moveRelative(bot, STEP_DISTANCE * 0.6, false, 0, 0);
     }
 
+    /** Per-bot tick of last crit jump to avoid spam jumping. */
+    private static final Map<UUID, Long> LAST_CRIT_JUMP_TICK = new HashMap<>();
+
+    /**
+     * Attacks a specific pre-selected target if within melee reach, visible,
+     * and the attack cooldown has sufficiently reset (>= 0.9).
+     * <p>
+     * Also initiates a jump for critical hits: when cooldown is mid-reset (0.4–0.6)
+     * and conditions allow, the bot jumps so it is falling by the time it swings.
+     * Vanilla critical hit: 50% bonus damage when falling, not sprinting, not in water.
+     * <p>
+     * Caller is responsible for weapon selection beforehand.
+     */
+    public static void attackTarget(ServerPlayerEntity bot, Entity target) {
+        if (bot == null || target == null) return;
+        double distanceSq = target.squaredDistanceTo(bot);
+        if (distanceSq > 9.0 || !bot.canSee(target)) return;
+
+        float cooldown = bot.getAttackCooldownProgress(0.5f);
+
+        // Crit jump: initiate jump mid-cooldown so we're falling when we swing.
+        // Sweep attacks only work with swords and require staying on ground, so when
+        // surrounded by 2+ hostiles AND holding a sword, prefer sweep over crit.
+        // Non-sword weapons (axe, mace, trident) never sweep, so always prefer crits.
+        // The mace especially benefits — its smash attack deals bonus fall-distance damage.
+        // Spears are excluded — their charge attack benefits from horizontal velocity (sprint),
+        // not from falling. The bot should sprint into targets with a spear, not jump.
+        // Conditions: on ground, not sprinting, not in water, not already jumped recently.
+        ItemStack mainHand = bot.getMainHandStack();
+        if (cooldown >= 0.4f && cooldown <= 0.6f
+                && !isSpear(mainHand)
+                && bot.isOnGround() && !bot.isSprinting()
+                && !bot.isTouchingWater() && !bot.isSubmergedInWater()) {
+            boolean preferSweep = false;
+            if (isSword(mainHand)) {
+                long nearbyHostiles = bot.getEntityWorld()
+                        .getOtherEntities(bot, bot.getBoundingBox().expand(2.0), EntityUtil::isHostile)
+                        .size();
+                preferSweep = nearbyHostiles >= 2;
+            }
+            if (!preferSweep) {
+                long serverTick = bot.getCommandSource().getServer().getTicks();
+                long lastJump = LAST_CRIT_JUMP_TICK.getOrDefault(bot.getUuid(), 0L);
+                if (serverTick - lastJump >= 20) { // at most once per second
+                    bot.jump();
+                    LAST_CRIT_JUMP_TICK.put(bot.getUuid(), serverTick);
+                }
+            }
+        }
+
+        // Swing when cooldown is ready (may be a crit if we're mid-fall from the jump above).
+        if (cooldown >= 0.9f) {
+            bot.attack(target);
+            bot.swingHand(Hand.MAIN_HAND, true);
+        }
+    }
+
     public static void attackNearest(ServerPlayerEntity bot, List<Entity> nearbyEntities) {
         Entity target = nearbyEntities.stream()
                 .filter(EntityUtil::isHostile)
                 .filter(e -> e.getType() != net.minecraft.entity.EntityType.GHAST) // ranged/deflect only
+                .filter(e -> e.getType() != net.minecraft.entity.EntityType.PHANTOM
+                        || (e.getY() - bot.getY()) <= 3.0) // melee only on low phantoms
                 .min(Comparator.comparingDouble(entity -> entity.squaredDistanceTo(bot)))
                 .orElse(null);
 
@@ -411,12 +470,67 @@ public final class BotActions {
             if (!selectBestMeleeWeapon(bot)) {
                 selectBestWeapon(bot);
             }
-            double distanceSq = target.squaredDistanceTo(bot);
-            if (distanceSq <= 9.0 && bot.canSee(target)) {
-                bot.attack(target);
-                bot.swingHand(Hand.MAIN_HAND, true);
-            }
+            attackTarget(bot, target);
         }
+    }
+
+    /**
+     * Returns true if the phantom is in a "shootable" dive state:
+     * descending rapidly and within a reasonable altitude above the bot.
+     * A phantom circling 20 blocks up is NOT shootable.
+     */
+    public static boolean isPhantomDiving(ServerPlayerEntity bot, Entity phantom) {
+        if (bot == null || phantom == null) return false;
+        double altitudeDiff = phantom.getY() - bot.getY();
+        if (altitudeDiff > 10.0) return false;   // too high — still circling
+        if (altitudeDiff < -2.0) return false;    // already past / below bot
+        Vec3d velocity = phantom.getVelocity();
+        return velocity.y < -0.15;                // descending = diving
+    }
+
+    /**
+     * Finds the nearest position within searchRadius blocks that has a solid block
+     * overhead (not sky-visible) and is walkable. Used for phantom evasion when the
+     * bot lacks a ranged weapon. Returns the bot's current position if already covered,
+     * or null if no cover is found.
+     */
+    public static BlockPos findNearestOverheadCover(ServerPlayerEntity bot, int searchRadius) {
+        if (bot == null || !(bot.getEntityWorld() instanceof ServerWorld world)) return null;
+        BlockPos botPos = bot.getBlockPos();
+
+        // Already under cover
+        if (!world.isSkyVisible(botPos.up(2))) return botPos;
+
+        BlockPos best = null;
+        double bestDistSq = Double.MAX_VALUE;
+
+        for (int r = 1; r <= searchRadius; r++) {
+            for (int dx = -r; dx <= r; dx++) {
+                for (int dz = -r; dz <= r; dz++) {
+                    if (Math.abs(dx) != r && Math.abs(dz) != r) continue; // shell only
+                    BlockPos candidate = botPos.add(dx, 0, dz);
+                    // Must have overhead cover and be walkable
+                    if (world.isSkyVisible(candidate.up(2))) continue;
+                    BlockState floor = world.getBlockState(candidate.down());
+                    BlockState feet = world.getBlockState(candidate);
+                    BlockState head = world.getBlockState(candidate.up());
+                    if (!floor.isSolidBlock(world, candidate.down())) continue;
+                    if (!feet.isReplaceable()
+                            && feet.getCollisionShape(world, candidate)
+                            != net.minecraft.util.shape.VoxelShapes.empty()) continue;
+                    if (!head.isReplaceable()
+                            && head.getCollisionShape(world, candidate.up())
+                            != net.minecraft.util.shape.VoxelShapes.empty()) continue;
+                    double distSq = botPos.getSquaredDistance(candidate);
+                    if (distSq < bestDistSq) {
+                        bestDistSq = distSq;
+                        best = candidate.toImmutable();
+                    }
+                }
+            }
+            if (best != null) return best; // found cover at this ring, stop
+        }
+        return best;
     }
 
     public static void useSelectedItem(ServerPlayerEntity bot) {
@@ -1102,25 +1216,26 @@ public final class BotActions {
             return 0;
         }
 
-        // Prefer swords first (player expectation for "defense"), then other melee options.
-        if (stack.isOf(Items.TRIDENT)) {
-            return 40;
-        }
+        if (stack.isOf(Items.TRIDENT)) return 40;  // dual-purpose melee/thrown
 
         String key = stack.getItem().getTranslationKey().toLowerCase(Locale.ROOT);
-        if (key.contains("sword")) {
-            return 100;
-        }
-        if (key.contains("mace")) {
-            return 85;
-        }
-        if (key.contains("axe")) {
-            return 70;
-        }
-        if (key.contains("dagger")) {
-            return 60;
-        }
+        if (key.contains("sword"))  return 100; // sweep attacks
+        if (key.contains("mace"))   return 85;  // smash attack (fall-distance bonus)
+        if (key.contains("spear"))  return 80;  // charge attack (horizontal velocity bonus)
+        if (key.contains("axe"))    return 70;  // can disable shields
         return 0;
+    }
+
+    /** Returns true if the item stack is a sword (supports sweep attacks). */
+    public static boolean isSword(ItemStack stack) {
+        if (stack == null || stack.isEmpty()) return false;
+        return stack.getItem().getTranslationKey().toLowerCase(Locale.ROOT).contains("sword");
+    }
+
+    /** Returns true if the item stack is a spear (benefits from charge/sprint attacks). */
+    public static boolean isSpear(ItemStack stack) {
+        if (stack == null || stack.isEmpty()) return false;
+        return stack.getItem().getTranslationKey().toLowerCase(Locale.ROOT).contains("spear");
     }
 
     /**
@@ -1146,7 +1261,7 @@ public final class BotActions {
         }
 
         String key = stack.getItem().getTranslationKey().toLowerCase(Locale.ROOT);
-        return key.contains("sword") || key.contains("axe") || key.contains("trident") || key.contains("mace") || key.contains("dagger");
+        return key.contains("sword") || key.contains("axe") || key.contains("trident") || key.contains("mace") || key.contains("spear");
     }
 
     private static void moveRelative(ServerPlayerEntity bot, double distance, boolean customDirection, double dirX, double dirZ) {
@@ -1329,6 +1444,23 @@ public final class BotActions {
 
         bot.setCurrentHand(shieldHand);
         return true;
+    }
+
+    /**
+     * Faces the given threat entity and then raises the shield.
+     * Vanilla shields only block damage from the direction the player is facing,
+     * so this ensures the shield actually protects against the incoming threat.
+     */
+    public static boolean raiseShieldFacing(ServerPlayerEntity bot, Entity threat) {
+        if (threat != null) {
+            double dx = threat.getX() - bot.getX();
+            double dz = threat.getZ() - bot.getZ();
+            float yaw = (float) Math.toDegrees(Math.atan2(-dx, dz));
+            bot.setYaw(yaw);
+            bot.setHeadYaw(yaw);
+            bot.setBodyYaw(yaw);
+        }
+        return raiseShield(bot);
     }
 
     public static void lowerShield(ServerPlayerEntity bot) {

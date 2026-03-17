@@ -208,6 +208,8 @@ public class BotEventHandler {
     private static final Map<UUID, Long> FOLLOW_VERTICAL_LOCK_LAST_REPLAN_MS = new ConcurrentHashMap<>();
     private static final Map<UUID, Long> FOLLOW_VERTICAL_LOCK_FAIL_COOLDOWN_UNTIL_MS = new ConcurrentHashMap<>();
     private static final Map<UUID, CommanderLadderHint> FOLLOW_COMMANDER_LADDER_HINT = new ConcurrentHashMap<>();
+    /** Per-bot current combat target UUID for threat-scoring stickiness. */
+    private static final Map<UUID, UUID> COMBAT_TARGET = new ConcurrentHashMap<>();
     // Stage-2 refactor: burial/suffocation rescue moved to BotRescueService.
     private static volatile boolean externalOverrideActive = false;
     // Stage-2 refactor: lifecycle respawn flag moved to BotLifecycleService.
@@ -3098,16 +3100,69 @@ public class BotEventHandler {
         flareThread.start();
     }
 
+    /**
+     * Computes a weighted threat score for a hostile entity.
+     * Higher score = more dangerous / higher priority target.
+     */
+    private static double scoreThreat(ServerPlayerEntity bot, Entity entity) {
+        // --- Base type danger ---
+        double typeDanger;
+        EntityType<?> type = entity.getType();
+        if (type == EntityType.CREEPER)                          typeDanger = 8;
+        else if (type == EntityType.WITCH)                       typeDanger = 7;
+        else if (type.isIn(EntityTypeTags.SKELETONS))            typeDanger = 7;
+        else if (type == EntityType.PILLAGER)                    typeDanger = 6;
+        else if (type == EntityType.PHANTOM)                     typeDanger = BotActions.isPhantomDiving(bot, entity) ? 5 : 1;
+        else if (type == EntityType.ZOMBIE || type == EntityType.HUSK
+                || type == EntityType.DROWNED || type == EntityType.ZOMBIE_VILLAGER) typeDanger = 4;
+        else if (type == EntityType.SPIDER || type == EntityType.CAVE_SPIDER) typeDanger = 4;
+        else if (type == EntityType.ENDERMAN)                    typeDanger = 3;
+        else if (type == EntityType.GHAST)                       typeDanger = 6;
+        else                                                     typeDanger = 3;
+
+        // --- Proximity bonus: closer = more dangerous ---
+        double distance = Math.sqrt(entity.squaredDistanceTo(bot));
+        double proximityBonus = Math.max(0.0, (10.0 - distance) / 2.0);
+
+        // --- State multipliers ---
+        double stateMult = 1.0;
+        if (type == EntityType.CREEPER && entity instanceof net.minecraft.entity.mob.CreeperEntity creeper
+                && creeper.isIgnited()) {
+            stateMult = 2.0;
+        }
+        if (entity instanceof net.minecraft.entity.mob.ZombieEntity zombie && zombie.isBaby()) {
+            stateMult = 1.5;
+        }
+        // Mob actively targeting this bot
+        if (entity instanceof net.minecraft.entity.mob.MobEntity mob
+                && mob.getTarget() != null && mob.getTarget().equals(bot)) {
+            stateMult *= 1.3;
+        }
+
+        // --- Target stickiness: small bonus to avoid flip-flopping ---
+        double stickinessBonus = 0.0;
+        UUID currentTarget = COMBAT_TARGET.get(bot.getUuid());
+        if (currentTarget != null && currentTarget.equals(entity.getUuid())) {
+            stickinessBonus = 3.0;
+        }
+
+        return typeDanger * (1.0 + proximityBonus) * stateMult + stickinessBonus;
+    }
+
     private static boolean engageHostiles(ServerPlayerEntity bot, MinecraftServer server, List<Entity> hostileEntities) {
         if (hostileEntities.isEmpty()) {
+            COMBAT_TARGET.remove(bot.getUuid());
             return false;
         }
         Entity closest = hostileEntities.stream()
-                .min(Comparator.comparingDouble(e -> e.squaredDistanceTo(bot)))
+                .max(Comparator.comparingDouble(e -> scoreThreat(bot, e)))
                 .orElse(null);
         if (closest == null) {
+            COMBAT_TARGET.remove(bot.getUuid());
             return false;
         }
+        // Track current combat target for stickiness scoring.
+        COMBAT_TARGET.put(bot.getUuid(), closest.getUuid());
 
         // Prepare combat loadout (armor, shield, weapon staging) regardless of mode.
         // Guard/Patrol skip the AutoFaceEntity loadout path, so this is their only chance.
@@ -3131,10 +3186,32 @@ public class BotEventHandler {
             return true;
         }
 
-        // Creeper avoidance: sprint away within 6 blocks, shield within 4.5.
+        // Creeper handling: block-and-shield if armed and creeper is the only threat;
+        // otherwise flee as before.
         if (creeperThreat && distance <= 6.0D) {
+            boolean onlyCreepers = hostileEntities.stream()
+                    .allMatch(e -> e.getType() == EntityType.CREEPER);
+            boolean hasMelee = BotActions.hasMeleeWeapon(bot);
+            if (onlyCreepers && hasMelee && distance <= 4.5D
+                    && SkillPreferences.emergencyTactics(bot)) {
+                // Place a block between bot and creeper, then shield.
+                // The block absorbs most of the blast; the shield handles the rest.
+                double cdx = closest.getX() - bot.getX();
+                double cdz = closest.getZ() - bot.getZ();
+                double clen = Math.sqrt(cdx * cdx + cdz * cdz);
+                if (clen > 0.01) {
+                    BlockPos blockPos = bot.getBlockPos().add(
+                            (int) Math.round(cdx / clen),
+                            0,
+                            (int) Math.round(cdz / clen));
+                    BotActions.placeBlockAt(bot, blockPos);
+                }
+                BotActions.raiseShieldFacing(bot, closest);
+                return true;
+            }
+            // Default creeper flee: sprint away within 6 blocks, shield within 4.5.
             if (distance <= 4.5D) {
-                BotActions.raiseShield(bot);
+                BotActions.raiseShieldFacing(bot, closest);
             }
             double dx = bot.getX() - closest.getX();
             double dz = bot.getZ() - closest.getZ();
@@ -3161,8 +3238,77 @@ public class BotEventHandler {
                 }
             }
             // No ranged weapon or can't fire — shield up and hold position (defilade).
-            BotActions.raiseShield(bot);
+            BotActions.raiseShieldFacing(bot, closest);
             return true;
+        }
+
+        // Phantom handling: conserve arrows — only shoot during dive; seek cover if unarmed.
+        if (closest.getType() == EntityType.PHANTOM) {
+            // If a ground hostile is nearby, fight that instead of the phantom.
+            Entity groundThreat = hostileEntities.stream()
+                    .filter(e -> e.getType() != EntityType.PHANTOM)
+                    .min(Comparator.comparingDouble(e -> e.squaredDistanceTo(bot)))
+                    .orElse(null);
+            boolean groundThreatCloser = groundThreat != null
+                    && groundThreat.squaredDistanceTo(bot) < closest.squaredDistanceTo(bot) * 1.5;
+
+            if (groundThreatCloser) {
+                // Re-target the ground threat and fall through to normal combat below.
+                // Works for ALL hostile types — existing creeper/skeleton/generic handlers take over.
+                closest = groundThreat;
+                distance = Math.sqrt(closest.squaredDistanceTo(bot));
+                targetVisible = closest instanceof LivingEntity lv && bot.canSee(lv);
+                hasRanged = targetVisible && BotActions.hasRangedWeapon(bot);
+                projectileThreat = closest.getType().isIn(EntityTypeTags.SKELETONS)
+                        || closest.getName().getString().toLowerCase(Locale.ROOT).contains("pillager");
+                creeperThreat = closest.getType() == EntityType.CREEPER;
+                shouldBlock = (projectileThreat || creeperThreat || multipleThreats || lowHealth) && distance <= 4.5D;
+                // Fall through to the existing combat logic below.
+            } else {
+                boolean diving = BotActions.isPhantomDiving(bot, closest);
+
+                // Shield up when phantom is diving close — brace for impact.
+                if (diving && distance <= 5.0) {
+                    BotActions.raiseShieldFacing(bot, closest);
+                }
+
+                // Melee if phantom dives within reach.
+                if (diving && distance <= 3.0 && closest instanceof LivingEntity) {
+                    lowerShieldTracking(bot);
+                    if (!BotActions.selectBestMeleeWeapon(bot)) {
+                        BotActions.selectBestWeapon(bot);
+                    }
+                    BotActions.attackTarget(bot, closest);
+                    return true;
+                }
+
+                // Ranged fire only during dive.
+                if (diving && hasRanged && closest instanceof LivingEntity living) {
+                    lowerShieldTracking(bot);
+                    if (BotActions.tryRepositionForRanged(bot, living, server.getTicks())) {
+                        return true;
+                    }
+                    if (BotActions.performRangedAttack(bot, living, server.getTicks())) {
+                        return true;
+                    }
+                }
+
+                // No ranged weapon — seek overhead cover.
+                if (!hasRanged) {
+                    BlockPos cover = BotActions.findNearestOverheadCover(bot, 12);
+                    if (cover != null && !cover.equals(bot.getBlockPos())) {
+                        BotActions.sprint(bot, true);
+                        FollowMovementService.moveToward(bot, Vec3d.ofCenter(cover), 1.0, true, null);
+                        return true;
+                    }
+                    BotActions.raiseShieldFacing(bot, closest);
+                    return true;
+                }
+
+                // Has ranged but phantom NOT diving — wait patiently, shield up, save arrows.
+                BotActions.raiseShieldFacing(bot, closest);
+                return true;
+            }
         }
 
         if (hasRanged && distance >= 5.0D && closest instanceof LivingEntity living) {
@@ -3180,9 +3326,31 @@ public class BotEventHandler {
             lowerShieldTracking(bot);
             moveToward(bot, positionOf(closest), 2.5D, true);
         } else if (shouldBlock) {
+            // In melee range with a sword: stop sprinting when 2+ mobs are close so
+            // sweep attacks can trigger (vanilla sweep requires: on ground, not sprinting,
+            // cooldown >= 0.9, low horizontal speed). Non-sword weapons (axe, mace, trident,
+            // spear) don't sweep — and the spear actively benefits from sprinting (charge attack).
+            boolean holdingSword = BotActions.isSword(bot.getMainHandStack());
+            long nearbyMeleeCount = hostileEntities.stream()
+                    .filter(e -> e.squaredDistanceTo(bot) <= 16.0) // within 4 blocks
+                    .filter(e -> e.getType() != EntityType.GHAST && e.getType() != EntityType.PHANTOM)
+                    .count();
+            if (holdingSword && nearbyMeleeCount >= 2) {
+                BotActions.sprint(bot, false);
+            }
+            // Face the most dangerous incoming threat while shielding.
+            // Prefer ranged threats (skeletons, pillagers) since they deal damage at distance;
+            // if none, face the closest mob.
+            Entity shieldFaceThreat = hostileEntities.stream()
+                    .filter(e -> e.getType().isIn(EntityTypeTags.SKELETONS)
+                            || e.getName().getString().toLowerCase(Locale.ROOT).contains("pillager")
+                            || e.getType() == EntityType.WITCH)
+                    .min(Comparator.comparingDouble(e -> e.squaredDistanceTo(bot)))
+                    .orElse(closest);
+
             long now = bot.getCommandSource().getServer().getTicks();
             if (!isShieldRaised(bot)) {
-                if (BotActions.raiseShield(bot)) {
+                if (BotActions.raiseShieldFacing(bot, shieldFaceThreat)) {
                     setShieldRaised(bot, true);
                     setShieldDecisionTick(bot, now);
                     return true;
@@ -3192,7 +3360,7 @@ public class BotEventHandler {
                 if (!BotActions.selectBestMeleeWeapon(bot)) {
                     BotActions.selectBestWeapon(bot);
                 }
-                BotActions.attackNearest(bot, hostileEntities);
+                BotActions.attackTarget(bot, closest);
                 return true;
             }
 
@@ -3201,12 +3369,22 @@ public class BotEventHandler {
                 if (!BotActions.selectBestMeleeWeapon(bot)) {
                     BotActions.selectBestWeapon(bot);
                 }
-                BotActions.attackNearest(bot, hostileEntities);
+                BotActions.attackTarget(bot, closest);
                 setShieldDecisionTick(bot, now);
             }
             return true;
         } else {
             lowerShieldTracking(bot);
+            // Stop sprinting when surrounded with a sword to enable sweep attacks.
+            // Spears benefit from sprinting (charge attack), so never stop sprint for them.
+            boolean holdingSword2 = BotActions.isSword(bot.getMainHandStack());
+            long nearbyMeleeCount2 = hostileEntities.stream()
+                    .filter(e -> e.squaredDistanceTo(bot) <= 16.0)
+                    .filter(e -> e.getType() != EntityType.GHAST && e.getType() != EntityType.PHANTOM)
+                    .count();
+            if (holdingSword2 && nearbyMeleeCount2 >= 2) {
+                BotActions.sprint(bot, false);
+            }
             boolean hasMelee = BotActions.selectBestMeleeWeapon(bot);
             if (!hasMelee && hasRanged && closest instanceof LivingEntity living) {
                 BotActions.clearForceMelee(bot);
@@ -3218,7 +3396,20 @@ public class BotEventHandler {
                 if (!hasMelee) {
                     BotActions.selectBestWeapon(bot);
                 }
-                BotActions.attackNearest(bot, hostileEntities);
+                // Hit-and-retreat kiting: after swinging, backpedal during cooldown reset
+                // to dodge the mob's return hit, then step forward to re-engage.
+                // Only kite against 1-2 mobs — backpedaling when surrounded exposes the back.
+                float cooldown = bot.getAttackCooldownProgress(0.5f);
+                if (nearbyMeleeCount2 <= 2 && hasMelee) {
+                    if (cooldown < 0.3f && distance <= 2.5D) {
+                        // Just swung — backpedal out of mob's reach
+                        BotActions.moveBackward(bot);
+                    } else if (cooldown >= 0.7f && distance > 2.0D) {
+                        // Cooldown almost ready — step forward to re-engage
+                        moveToward(bot, positionOf(closest), 1.5D, false);
+                    }
+                }
+                BotActions.attackTarget(bot, closest);
             }
         }
         return true;
@@ -6525,7 +6716,8 @@ public class BotEventHandler {
                 FOLLOW_VERTICAL_LOCK_LAST_REPLAN_MS.clear();
                 FOLLOW_VERTICAL_LOCK_FAIL_COOLDOWN_UNTIL_MS.clear();
                 FOLLOW_COMMANDER_LADDER_HINT.clear();
-            
+                COMBAT_TARGET.clear();
+
             isExecuting = false;
             externalOverrideActive = false;
             botDied = false;

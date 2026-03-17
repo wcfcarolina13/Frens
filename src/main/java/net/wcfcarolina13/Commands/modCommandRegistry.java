@@ -458,6 +458,19 @@ public class modCommandRegistry {
                                                                 parseToggle(StringArgumentType.getString(context, "mode")))))
                                         )
                                 )
+                                .then(literal("emergencyTactics")
+                                        .then(CommandManager.argument("mode", StringArgumentType.string())
+                                                .executes(context -> executeEmergencyTacticsConfigTargets(
+                                                        context,
+                                                        null,
+                                                        parseToggle(StringArgumentType.getString(context, "mode"))))
+                                                .then(CommandManager.argument("target", StringArgumentType.string())
+                                                        .executes(context -> executeEmergencyTacticsConfigTargets(
+                                                                context,
+                                                                StringArgumentType.getString(context, "target"),
+                                                                parseToggle(StringArgumentType.getString(context, "mode")))))
+                                        )
+                                )
                                 .then(literal("owner")
                                         .then(CommandManager.argument("alias", StringArgumentType.string())
                                                 .then(CommandManager.argument("player", EntityArgumentType.player())
@@ -7164,6 +7177,37 @@ public class modCommandRegistry {
             String summary = formatBotList(bots, isAll);
             ChatUtils.sendSystemMessage(context.getSource(),
                     summary + " will " + (enabled ? "pause" : "continue") + " when inventories fill.");
+        }
+        return successes;
+    }
+
+    private static int executeEmergencyTacticsConfig(CommandContext<ServerCommandSource> context,
+                                                     ServerPlayerEntity bot,
+                                                     boolean enabled) {
+        if (bot == null) {
+            ChatUtils.sendSystemMessage(context.getSource(), "No active bot found. Spawn one with /bot spawn.");
+            return 0;
+        }
+        SkillPreferences.setEmergencyTactics(bot.getUuid(), enabled);
+        String state = enabled ? "enabled" : "disabled";
+        ChatUtils.sendSystemMessage(context.getSource(),
+                "Emergency tactics " + state + " for " + bot.getName().getString() + ".");
+        return 1;
+    }
+
+    private static int executeEmergencyTacticsConfigTargets(CommandContext<ServerCommandSource> context,
+                                                            String targetArg,
+                                                            boolean enabled) throws CommandSyntaxException {
+        List<ServerPlayerEntity> bots = resolveTargetBots(context, targetArg);
+        boolean isAll = targetArg != null && "all".equalsIgnoreCase(targetArg.trim());
+        int successes = 0;
+        for (ServerPlayerEntity bot : bots) {
+            successes += executeEmergencyTacticsConfig(context, bot, enabled);
+        }
+        if (!bots.isEmpty()) {
+            String summary = formatBotList(bots, isAll);
+            ChatUtils.sendSystemMessage(context.getSource(),
+                    summary + " emergency tactics " + (enabled ? "enabled" : "disabled") + ".");
         }
         return successes;
     }
