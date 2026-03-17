@@ -1451,6 +1451,11 @@ public class BotEventHandler {
                 return handleReturnToBase(bot, state);
             }
             default -> {
+                // Tactical shelter: bot is sealed in — suppress all combat/flee, only check daylight escape
+                if (BotFleeService.isInShelter(bot.getUuid())) {
+                    BotFleeService.checkDaylightBreakFree(bot, server);
+                    return true;
+                }
                 // Flee check: if outnumbered/critically wounded and IDLE, sprint to safety
                 if (BotFleeService.tickFlee(bot, server, augmentedHostiles, mode)) {
                     return true;
