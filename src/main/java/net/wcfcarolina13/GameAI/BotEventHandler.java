@@ -858,7 +858,14 @@ public class BotEventHandler {
     public static void tickHunger(MinecraftServer server) {
         if (server == null) return;
         for (ServerPlayerEntity player : getRegisteredBots(server)) {
-            HealingService.autoEat(player);
+            // Pass nearby hostiles so autoEat knows whether it's safe.
+            // Without this, autoEat sees null hostiles and always considers it safe,
+            // causing the bot to eat food mid-combat (and "attack" with food).
+            List<Entity> nearbyHostiles = AutoFaceEntity.detectNearbyEntities(player, 10.0D)
+                    .stream()
+                    .filter(EntityUtil::isHostile)
+                    .toList();
+            HealingService.autoEat(player, nearbyHostiles);
         }
     }
 
@@ -3167,6 +3174,16 @@ public class BotEventHandler {
         }
         // Track current combat target for stickiness scoring.
         COMBAT_TARGET.put(bot.getUuid(), closest.getUuid());
+
+        // Cancel any active food consumption — holding food during combat means
+        // the bot "attacks" with food and the shield check thinks it's already blocking.
+        if (bot.isUsingItem()) {
+            ItemStack activeItem = bot.getActiveItem();
+            if (activeItem != null && !activeItem.isEmpty()
+                    && activeItem.getComponents().contains(net.minecraft.component.DataComponentTypes.FOOD)) {
+                bot.clearActiveItem();
+            }
+        }
 
         // Prepare combat loadout (armor, shield, weapon staging) regardless of mode.
         // Guard/Patrol skip the AutoFaceEntity loadout path, so this is their only chance.
