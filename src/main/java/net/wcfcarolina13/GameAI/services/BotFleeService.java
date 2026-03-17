@@ -227,75 +227,66 @@ public final class BotFleeService {
     // ── Emergency Tactics ──────────────────────────────────────────────────
 
     /**
-     * Attempts a last-ditch survival tactic when fleeing has failed.
-     * Priority: pillar up (if no phantoms) > dig down under tree.
-     * Runs on a daemon worker thread since both tactics are multi-tick blocking ops.
-     * Returns true if a tactic was launched.
+     * Attempts last-ditch survival tactics when fleeing has failed.
+     * Runs all tactics sequentially on a single worker thread — if one fails,
+     * falls through to the next. Returns true if the worker thread was launched.
      */
     private static boolean tryEmergencyTactic(ServerPlayerEntity bot, List<Entity> hostiles) {
         boolean phantomsPresent = hostiles.stream()
                 .anyMatch(e -> e.getType() == EntityType.PHANTOM);
         boolean hasBlocks = hasPlaceableBlocks(bot, 6);
 
-        // Prefer pillaring if no phantoms — fast, reliable, gets out of melee range.
-        if (!phantomsPresent && hasBlocks) {
-            LOGGER.info("Bot {} attempting emergency pillar-up ({} hostiles, hp={}/{})",
-                    bot.getName().getString(), hostiles.size(),
-                    String.format("%.1f", bot.getHealth()),
-                    String.format("%.1f", bot.getMaxHealth()));
-            Thread t = new Thread(() -> emergencyPillarUp(bot), "emergency-pillar-" + bot.getName().getString());
-            t.setDaemon(true);
-            t.start();
-            return true;
-        }
+        LOGGER.info("Bot {} evaluating emergency tactics (hostiles={}, hp={}/{}, phantoms={}, blocks={})",
+                bot.getName().getString(), hostiles.size(),
+                String.format("%.1f", bot.getHealth()),
+                String.format("%.1f", bot.getMaxHealth()),
+                phantomsPresent, hasBlocks);
 
-        // Wall off in a nearby overhang, shallow cave, or cliff recess.
+        Thread t = new Thread(() -> runEmergencyTacticChain(bot, phantomsPresent, hasBlocks),
+                "emergency-tactics-" + bot.getName().getString());
+        t.setDaemon(true);
+        t.start();
+        return true;
+    }
+
+    /**
+     * Runs emergency tactics sequentially on a worker thread. Each tactic is
+     * attempted and verified — if it doesn't actually change the bot's situation,
+     * the next tactic in the chain is tried.
+     */
+    private static void runEmergencyTacticChain(ServerPlayerEntity bot,
+                                                 boolean phantomsPresent, boolean hasBlocks) {
+        // 1. Pillar up — DISABLED: ScaffoldService placement consistently fails
+        //    during emergency context (bot moving/being hit). Needs investigation.
+        //    See: place-rejected errors in logs when pillarUp is called from flee.
+
+        // 2. Wall off existing overhang/cave
         if (hasBlocks && bot.getEntityWorld() instanceof ServerWorld world2) {
             BlockPos shelter = findNearbyOverhangShelter(world2, bot.getBlockPos(), 10);
             if (shelter != null) {
-                LOGGER.info("Bot {} attempting emergency wall-off at shelter {} ({} hostiles, hp={}/{})",
-                        bot.getName().getString(), shelter.toShortString(), hostiles.size(),
-                        String.format("%.1f", bot.getHealth()),
-                        String.format("%.1f", bot.getMaxHealth()));
-                Thread t = new Thread(() -> emergencyWallOff(bot, shelter),
-                        "emergency-walloff-" + bot.getName().getString());
-                t.setDaemon(true);
-                t.start();
-                return true;
+                LOGGER.info("Bot {} trying emergency wall-off at {}",
+                        bot.getName().getString(), shelter.toShortString());
+                emergencyWallOff(bot, shelter);
+                return;
             }
         }
 
-        // Dig into a nearby cliff/hillside — mine a 1x2 tunnel, step in, seal entrance.
-        // Safer than digging down (no fall, no lava risk, easy to cap).
+        // 3. Dig into cliff face
         if (hasBlocks && bot.getEntityWorld() instanceof ServerWorld world3) {
             net.minecraft.util.math.Direction cliffDir = findNearbyCliffFace(world3, bot.getBlockPos(), 6);
             if (cliffDir != null) {
-                LOGGER.info("Bot {} attempting emergency cliff-dig {} ({} hostiles, hp={}/{})",
-                        bot.getName().getString(), cliffDir.asString(), hostiles.size(),
-                        String.format("%.1f", bot.getHealth()),
-                        String.format("%.1f", bot.getMaxHealth()));
-                Thread t = new Thread(() -> emergencyCliffDig(bot, cliffDir),
-                        "emergency-cliffdig-" + bot.getName().getString());
-                t.setDaemon(true);
-                t.start();
-                return true;
+                LOGGER.info("Bot {} trying emergency cliff-dig {}",
+                        bot.getName().getString(), cliffDir.asString());
+                emergencyCliffDig(bot, cliffDir);
+                return;
             }
         }
 
-        // Last resort: dig straight down and cap the hole.
-        // The cap block provides overhead protection (even from phantoms).
-        {
-            BlockPos digSpot = bot.getBlockPos();
-            LOGGER.info("Bot {} attempting emergency dig-down at {} ({} hostiles, hp={}/{})",
-                    bot.getName().getString(), digSpot.toShortString(), hostiles.size(),
-                    String.format("%.1f", bot.getHealth()),
-                    String.format("%.1f", bot.getMaxHealth()));
-            Thread t = new Thread(() -> emergencyDigDown(bot, digSpot),
-                    "emergency-dig-" + bot.getName().getString());
-            t.setDaemon(true);
-            t.start();
-            return true;
-        }
+        // 4. Last resort: dig straight down
+        BlockPos digSpot = bot.getBlockPos();
+        LOGGER.info("Bot {} trying emergency dig-down at {}",
+                bot.getName().getString(), digSpot.toShortString());
+        emergencyDigDown(bot, digSpot);
     }
 
     /**
