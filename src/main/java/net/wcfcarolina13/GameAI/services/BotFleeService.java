@@ -326,25 +326,42 @@ public final class BotFleeService {
             Thread.sleep(300);
 
             // Mine 3 blocks straight down.
+            int blocksMined = 0;
             for (int depth = 0; depth < 3; depth++) {
                 BlockPos below = digPos.down(depth + 1);
                 if (bot.getEntityWorld().getBlockState(below).isAir()) continue;
                 MiningTool.mineBlock(bot, below, false).join();
+                blocksMined++;
                 Thread.sleep(200);
             }
 
-            // Wait briefly to fall into the hole.
-            Thread.sleep(500);
+            if (blocksMined == 0) {
+                LOGGER.info("Bot {} dig-down: nothing to mine at {}", bot.getName().getString(),
+                        digPos.toShortString());
+                return;
+            }
 
-            // Cap the top with a block.
+            // Wait to fall into the hole and auto-collect mined block drops.
+            Thread.sleep(800);
+
+            // Cap the top of the hole. Place at the original feet level (digPos).
+            // The bot is now ~3 blocks lower. placeBlockAt uses support-based placement
+            // which should find adjacent wall blocks in the hole as support.
             BlockPos capPos = digPos;
-            // The bot is now ~3 blocks lower, so cap at the original ground level.
-            bot.getCommandSource().getServer().execute(() -> BotActions.placeBlockAt(bot, capPos));
+            boolean[] capResult = {false};
+            bot.getCommandSource().getServer().execute(() -> {
+                capResult[0] = BotActions.placeBlockAt(bot, capPos);
+                if (!capResult[0]) {
+                    // Try one block above in case digPos is too far
+                    capResult[0] = BotActions.placeBlockAt(bot, capPos.up());
+                }
+            });
+            Thread.sleep(200); // let the server thread execute
 
-            LOGGER.info("Bot {} dug emergency bunker at {}", bot.getName().getString(),
-                    digPos.toShortString());
+            LOGGER.info("Bot {} dug emergency bunker at {} (mined={}, capPlaced={})",
+                    bot.getName().getString(), digPos.toShortString(), blocksMined, capResult[0]);
 
-            // Wait inside for a while to heal.
+            // Wait inside to heal.
             Thread.sleep(5000);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
