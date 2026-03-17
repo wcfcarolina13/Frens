@@ -3270,15 +3270,14 @@ public class BotEventHandler {
 
         // Phantom handling: conserve arrows — only shoot during dive; seek cover if unarmed.
         if (closest.getType() == EntityType.PHANTOM) {
-            // If a ground hostile is nearby, fight that instead of the phantom.
+            // ALWAYS prefer any ground hostile over a phantom — zombies/skeletons are the real threat.
+            // Phantoms deal low damage and can be ignored while ground mobs are present.
             Entity groundThreat = hostileEntities.stream()
                     .filter(e -> e.getType() != EntityType.PHANTOM)
                     .min(Comparator.comparingDouble(e -> e.squaredDistanceTo(bot)))
                     .orElse(null);
-            boolean groundThreatCloser = groundThreat != null
-                    && groundThreat.squaredDistanceTo(bot) < closest.squaredDistanceTo(bot) * 1.5;
 
-            if (groundThreatCloser) {
+            if (groundThreat != null) {
                 // Re-target the ground threat and fall through to normal combat below.
                 // Works for ALL hostile types — existing creeper/skeleton/generic handlers take over.
                 closest = groundThreat;

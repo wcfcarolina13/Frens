@@ -132,6 +132,11 @@ public final class BotFleeService {
 
         long currentTick = server.getTicks();
 
+        // Don't build shelter during daytime — undead burn, no point entombing
+        if (bot.getEntityWorld() instanceof ServerWorld world) {
+            if (world.isDay() && !world.isThundering()) return false;
+        }
+
         // Must have been damaged recently (within 10 seconds)
         if (!BotCombatCalloutService.wasRecentlyDamagedByHostile(bot, currentTick, 200)) return false;
 
@@ -320,6 +325,15 @@ public final class BotFleeService {
      * falls through to the next. Returns true if the worker thread was launched.
      */
     private static boolean tryEmergencyTactic(ServerPlayerEntity bot, List<Entity> hostiles) {
+        // Don't entomb during daytime — undead burn, just fight them
+        if (bot.getEntityWorld() instanceof ServerWorld world) {
+            if (world.isDay() && !world.isThundering()) return false;
+        }
+
+        // Don't entomb at high health — bot can handle the fight
+        float healthRatio = bot.getHealth() / bot.getMaxHealth();
+        if (healthRatio > 0.50f) return false;
+
         boolean phantomsPresent = hostiles.stream()
                 .anyMatch(e -> e.getType() == EntityType.PHANTOM);
         boolean hasBlocks = hasPlaceableBlocks(bot, 6);
