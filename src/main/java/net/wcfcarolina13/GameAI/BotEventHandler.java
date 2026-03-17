@@ -3170,7 +3170,19 @@ public class BotEventHandler {
             COMBAT_TARGET.remove(bot.getUuid());
             return false;
         }
-        Entity closest = hostileEntities.stream()
+        // Filter out non-actionable phantoms: circling too high to hit and not diving.
+        // These aren't real threats and shouldn't influence target selection or trigger
+        // the phantom handler (which would make the bot shield-face the sky).
+        List<Entity> actionable = hostileEntities.stream()
+                .filter(e -> e.getType() != EntityType.PHANTOM
+                        || BotActions.isPhantomDiving(bot, e)
+                        || (e.getY() - bot.getY()) <= 3.0)
+                .toList();
+        if (actionable.isEmpty()) {
+            COMBAT_TARGET.remove(bot.getUuid());
+            return false;
+        }
+        Entity closest = actionable.stream()
                 .max(Comparator.comparingDouble(e -> scoreThreat(bot, e)))
                 .orElse(null);
         if (closest == null) {
@@ -3200,7 +3212,7 @@ public class BotEventHandler {
         double verticalDiff = bot.getY() - closest.getY();
         boolean projectileThreat = closest.getType().isIn(EntityTypeTags.SKELETONS) || closest.getName().getString().toLowerCase(Locale.ROOT).contains("pillager");
         boolean creeperThreat = closest.getType() == EntityType.CREEPER;
-        boolean multipleThreats = hostileEntities.size() > 1;
+        boolean multipleThreats = actionable.size() > 1;
         boolean lowHealth = bot.getHealth() <= bot.getMaxHealth() * 0.5F;
         boolean shouldBlock = (projectileThreat || creeperThreat || multipleThreats || lowHealth) && distance <= 4.5D;
 
@@ -3215,7 +3227,7 @@ public class BotEventHandler {
         // Creeper handling: block-and-shield if armed and creeper is the only threat;
         // otherwise flee as before.
         if (creeperThreat && distance <= 6.0D) {
-            boolean onlyCreepers = hostileEntities.stream()
+            boolean onlyCreepers = actionable.stream()
                     .allMatch(e -> e.getType() == EntityType.CREEPER);
             boolean hasMelee = BotActions.hasMeleeWeapon(bot);
             if (onlyCreepers && hasMelee && distance <= 4.5D
@@ -3272,7 +3284,7 @@ public class BotEventHandler {
         if (closest.getType() == EntityType.PHANTOM) {
             // ALWAYS prefer any ground hostile over a phantom — zombies/skeletons are the real threat.
             // Phantoms deal low damage and can be ignored while ground mobs are present.
-            Entity groundThreat = hostileEntities.stream()
+            Entity groundThreat = actionable.stream()
                     .filter(e -> e.getType() != EntityType.PHANTOM)
                     .min(Comparator.comparingDouble(e -> e.squaredDistanceTo(bot)))
                     .orElse(null);
@@ -3356,7 +3368,7 @@ public class BotEventHandler {
             // cooldown >= 0.9, low horizontal speed). Non-sword weapons (axe, mace, trident,
             // spear) don't sweep — and the spear actively benefits from sprinting (charge attack).
             boolean holdingSword = BotActions.isSword(bot.getMainHandStack());
-            long nearbyMeleeCount = hostileEntities.stream()
+            long nearbyMeleeCount = actionable.stream()
                     .filter(e -> e.squaredDistanceTo(bot) <= 16.0) // within 4 blocks
                     .filter(e -> e.getType() != EntityType.GHAST && e.getType() != EntityType.PHANTOM)
                     .count();
@@ -3366,7 +3378,7 @@ public class BotEventHandler {
             // Face the most dangerous incoming threat while shielding.
             // Prefer ranged threats (skeletons, pillagers) since they deal damage at distance;
             // if none, face the closest mob.
-            Entity shieldFaceThreat = hostileEntities.stream()
+            Entity shieldFaceThreat = actionable.stream()
                     .filter(e -> e.getType().isIn(EntityTypeTags.SKELETONS)
                             || e.getName().getString().toLowerCase(Locale.ROOT).contains("pillager")
                             || e.getType() == EntityType.WITCH)
@@ -3403,7 +3415,7 @@ public class BotEventHandler {
             // Stop sprinting when surrounded with a sword to enable sweep attacks.
             // Spears benefit from sprinting (charge attack), so never stop sprint for them.
             boolean holdingSword2 = BotActions.isSword(bot.getMainHandStack());
-            long nearbyMeleeCount2 = hostileEntities.stream()
+            long nearbyMeleeCount2 = actionable.stream()
                     .filter(e -> e.squaredDistanceTo(bot) <= 16.0)
                     .filter(e -> e.getType() != EntityType.GHAST && e.getType() != EntityType.PHANTOM)
                     .count();

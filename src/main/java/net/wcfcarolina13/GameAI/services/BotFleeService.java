@@ -140,10 +140,6 @@ public final class BotFleeService {
         // Must have been damaged recently (within 10 seconds)
         if (!BotCombatCalloutService.wasRecentlyDamagedByHostile(bot, currentTick, 200)) return false;
 
-        // Must be hurt — don't build shelter at full health
-        float healthRatio = bot.getHealth() / bot.getMaxHealth();
-        if (healthRatio > 0.70f) return false;
-
         // Must not be near a base (has somewhere safe to go)
         BotCommandStateService.State state = BotCommandStateService.stateFor(bot);
         if (state != null && state.baseTarget != null) return false;
@@ -154,15 +150,26 @@ public final class BotFleeService {
 
         SHELTER_COOLDOWN.put(bot.getUuid(), currentTick);
 
-        LOGGER.info("Bot {} proactively seeking shelter (hp={}/{}, recently damaged)",
+        LOGGER.info("Bot {} proactively seeking shelter (hp={}/{}, recently damaged, nighttime)",
                 bot.getName().getString(),
                 String.format("%.1f", bot.getHealth()),
                 String.format("%.1f", bot.getMaxHealth()));
 
-        // Run the tactic chain — same as emergency but during a calm moment
-        boolean hasBlocks = true;
-        Thread t = new Thread(() -> runEmergencyTacticChain(bot, false, hasBlocks),
-                "proactive-shelter-" + bot.getName().getString());
+        // Eat first if hungry, then build shelter
+        Thread t = new Thread(() -> {
+            try {
+                // Give the bot a moment to eat — HungerService/HealingService handle food
+                // consumption on the tick loop. Wait up to 5 seconds for health to recover.
+                if (bot.getHealth() < bot.getMaxHealth() * 0.9f) {
+                    LOGGER.debug("Bot {} eating before shelter", bot.getName().getString());
+                    Thread.sleep(5000);
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+            runEmergencyTacticChain(bot, false, true);
+        }, "proactive-shelter-" + bot.getName().getString());
         t.setDaemon(true);
         t.start();
         return true;
