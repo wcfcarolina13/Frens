@@ -110,7 +110,14 @@ public final class HealingService {
         PlayerInventory inv = bot.getInventory();
         OptionalInt foodSlot = findCheapestSafeFood(inv);
         if (foodSlot.isEmpty()) {
-            return false;
+            // Last resort: eat rotten flesh if starving or hurt with no other food.
+            // Hunger debuff is annoying but better than starving to death.
+            if (emergency || missingHealth) {
+                foodSlot = findDesperateFood(inv);
+            }
+            if (foodSlot.isEmpty()) {
+                return false;
+            }
         }
 
         return consumeFood(bot, foodSlot.getAsInt());
@@ -241,6 +248,27 @@ public final class HealingService {
         }
         
         return bestSlot >= 0 ? OptionalInt.of(bestSlot) : OptionalInt.empty();
+    }
+
+    /**
+     * Last-resort food search: includes rotten flesh (hunger debuff) but still
+     * excludes truly dangerous items (spider eye = poison, pufferfish = nausea+poison).
+     */
+    private static OptionalInt findDesperateFood(PlayerInventory inventory) {
+        // Only rotten flesh is acceptable as desperate food.
+        // Spider eye, pufferfish, poisonous potato are still too dangerous.
+        for (int i = 0; i < PlayerInventory.MAIN_SIZE; i++) {
+            ItemStack stack = inventory.getStack(i);
+            if (stack.isEmpty()) continue;
+            FoodComponent food = getFoodComponent(stack);
+            if (food == null) continue;
+            String itemId = stack.getItem().getTranslationKey().toLowerCase(Locale.ROOT);
+            if (itemId.contains("rotten_flesh")) {
+                LOGGER.info("Desperate food: eating rotten flesh (slot {})", i);
+                return OptionalInt.of(i);
+            }
+        }
+        return OptionalInt.empty();
     }
 
     private static boolean isSafeToEat(ServerPlayerEntity bot, List<Entity> hostiles) {
