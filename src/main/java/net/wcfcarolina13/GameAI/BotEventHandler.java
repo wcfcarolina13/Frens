@@ -1270,9 +1270,8 @@ public class BotEventHandler {
         }
 
         bot.setVelocity(Vec3d.ZERO);
-        bot.setInvulnerable(true);
+        bot.setInvulnerable(false); // ensure no stale invulnerability from a previous respawn
         if (srv != null) {
-            srv.send(new ServerTask(srv.getTicks() + 40, () -> bot.setInvulnerable(false)));
             lastRespawnHandledTick = srv.getTicks();
         }
 

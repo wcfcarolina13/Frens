@@ -12,6 +12,7 @@ Historical record and reasoning. `TODO.md` is the source of truth for what’s n
   6. **Shelter cooldown cleared on reset:** `SHELTER_COOLDOWN` now properly cleared alongside `SHELTER_ACTIVE` and `FLEE_STATES` on death/respawn.
   7. **Shelter doesn't suppress combat:** Hostiles detected while sheltered → normal combat runs. Shelter only suppresses idle behaviors.
   8. **Shelter clears on teleport/damage/commands:** `createFakePlayer.teleportTo()` directly clears shelter. Environmental damage (explosion, drowning, suffocation, lava, fire) clears via ALLOW_DAMAGE. Any mode change (follow, regroup, spell, skill, etc.) clears via `setMode()`.
+  9. **Fix immortal bot after death:** Removed `setInvulnerable(true)` + `ServerTask` delayed clear from respawn — the ServerTask wasn't reliably firing, leaving bots permanently invulnerable. Replaced with explicit `setInvulnerable(false)` to clear any stale flag.
 
 ## 2026-03-16
 
