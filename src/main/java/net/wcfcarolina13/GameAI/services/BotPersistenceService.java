@@ -68,6 +68,9 @@ public final class BotPersistenceService {
             return;
         }
 
+        // Ensure no stale invulnerability from a previous session/crash
+        bot.setInvulnerable(false);
+
         final long joinTick = server.getTicks();
         final long restoreSeq = RESTORE_SEQUENCE.merge(bot.getUuid(), 1L, Long::sum);
         LOGGER.info("[PersistCheck] join-start bot={} tick={} alive={} removed={} vitals={}",

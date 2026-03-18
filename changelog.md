@@ -13,6 +13,8 @@ Historical record and reasoning. `TODO.md` is the source of truth for what’s n
   7. **Shelter doesn't suppress combat:** Hostiles detected while sheltered → normal combat runs. Shelter only suppresses idle behaviors.
   8. **Shelter clears on teleport/damage/commands:** `createFakePlayer.teleportTo()` directly clears shelter. Environmental damage (explosion, drowning, suffocation, lava, fire) clears via ALLOW_DAMAGE. Any mode change (follow, regroup, spell, skill, etc.) clears via `setMode()`.
   9. **Fix immortal bot after death:** Removed `setInvulnerable(true)` + `ServerTask` delayed clear from respawn — the ServerTask wasn't reliably firing, leaving bots permanently invulnerable. Replaced with explicit `setInvulnerable(false)` to clear any stale flag.
+  10. **Hardened invulnerability:** Three layers of defense: (a) `onBotJoin` clears invulnerability on session start, (b) `updateBehavior` tick handler force-clears if stuck, (c) `ALLOW_DAMAGE` handler force-clears before processing damage.
+  11. **PostCombatSweep log spam:** Downgraded per-tick "starting drop sweep" / "walking to kill site" / "walking back to combat center" from INFO to DEBUG. These fired 30+ times/second.
 
 ## 2026-03-16
 

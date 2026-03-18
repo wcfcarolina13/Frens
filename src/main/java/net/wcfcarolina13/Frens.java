@@ -677,6 +677,11 @@ public class Frens implements ModInitializer {
                 LearningModeService.onPlayerDamage(realPlayer, source, amount);
             }
             if (entity instanceof ServerPlayerEntity serverPlayer && BotEventHandler.isRegisteredBot(serverPlayer)) {
+                // Safety net: bots should never be permanently invulnerable
+                if (serverPlayer.isInvulnerable()) {
+                    serverPlayer.setInvulnerable(false);
+                }
+
                 // Notify mood manager of damage (triggers STRESSED state)
                 BotMoodManager.noteDamage(serverPlayer);
 

@@ -1319,6 +1319,15 @@ public class BotEventHandler {
             return false;
         }
 
+        // Safety net: bots should never be permanently invulnerable.
+        // If the flag is stuck on (e.g. from a failed ServerTask), force-clear it.
+        if (bot.isInvulnerable() && bot.isAlive()) {
+            bot.setInvulnerable(false);
+            if (server.getTicks() % 100 == 0) {
+                LOGGER.warn("Cleared stale invulnerability on bot {}", bot.getName().getString());
+            }
+        }
+
         BotCommandStateService.State state = stateFor(bot);
         Mode mode = state != null ? state.mode : Mode.IDLE;
         List<Entity> augmentedHostiles = BotThreatService.augmentHostiles(
@@ -2600,7 +2609,7 @@ public class BotEventHandler {
                         .orElse(null);
                 if (ccItem != null) {
                     // Drops exist near combat center — walk back to collect them.
-                    LOGGER.info("[PostCombatSweep] {} drops found near combat center ({},{},{}) — walking back",
+                    LOGGER.debug("[PostCombatSweep] {} drops found near combat center ({},{},{}) — walking back",
                             botName, (int) combatCenter.x, (int) combatCenter.y, (int) combatCenter.z);
                     BlockPos ccBlock = BlockPos.ofFloored(combatCenter.x, combatCenter.y, combatCenter.z);
                     double ccDistSq = bot.squaredDistanceTo(combatCenter);
@@ -2611,7 +2620,7 @@ public class BotEventHandler {
             }
 
             if (nearestItem != null) {
-                LOGGER.info("[PostCombatSweep] {} starting drop sweep, nearest={}", botName,
+                LOGGER.debug("[PostCombatSweep] {} starting drop sweep, nearest={}", botName,
                         nearestItem.getBlockPos().toShortString());
                 collectNearbyDrops(bot, sweepRadius);
                 if (DropSweepService.isInProgressFor(bot)) {
@@ -2633,7 +2642,7 @@ public class BotEventHandler {
                 boolean hasItems = !killSw.getEntitiesByClass(ItemEntity.class, kpBox,
                         d -> d.isAlive() && !d.isRemoved()).isEmpty();
                 if (hasItems) {
-                    LOGGER.info("[PostCombatSweep] {} walking to kill site ({},{},{}) dist={}",
+                    LOGGER.debug("[PostCombatSweep] {} walking to kill site ({},{},{}) dist={}",
                             botName, (int) kp.x, (int) kp.y, (int) kp.z,
                             String.format(Locale.ROOT, "%.1f", distToKp));
                     // Use waypoint-step for better obstacle handling (tree trunks, hills)
