@@ -3325,6 +3325,12 @@ public class BotEventHandler {
             } else {
                 boolean diving = BotActions.isPhantomDiving(bot, closest);
 
+                // At night with phantom-only threat and no dive in progress,
+                // don't stand around with shield — let shelter logic take over.
+                if (!diving && bot.getEntityWorld() instanceof ServerWorld phantomWorld && !phantomWorld.isDay()) {
+                    return false;
+                }
+
                 // Shield up when phantom is diving close — brace for impact.
                 if (diving && distance <= 5.0) {
                     BotActions.raiseShieldFacing(bot, closest);

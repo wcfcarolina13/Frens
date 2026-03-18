@@ -20,6 +20,8 @@ import net.wcfcarolina13.PlayerUtils.MiningTool;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import net.minecraft.item.Item;
+
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -48,6 +50,16 @@ public final class BotFleeService {
     /** Tracks bots currently inside a tactical shelter (value = tick entered). */
     private static final ConcurrentHashMap<UUID, Long> SHELTER_ACTIVE = new ConcurrentHashMap<>();
 
+    /** Solid blocks suitable for sealing shelter entrances (mined from stone/dirt). */
+    private static final List<Item> SEAL_BLOCKS = List.of(
+            Items.COBBLESTONE, Items.STONE, Items.DIRT, Items.COBBLED_DEEPSLATE,
+            Items.DEEPSLATE, Items.GRANITE, Items.DIORITE, Items.ANDESITE,
+            Items.SANDSTONE, Items.RED_SANDSTONE, Items.NETHERRACK,
+            Items.TUFF, Items.CALCITE, Items.BASALT, Items.GRAVEL, Items.SAND,
+            Items.OAK_PLANKS, Items.SPRUCE_PLANKS, Items.BIRCH_PLANKS,
+            Items.JUNGLE_PLANKS, Items.ACACIA_PLANKS, Items.DARK_OAK_PLANKS,
+            Items.MANGROVE_PLANKS, Items.CHERRY_PLANKS, Items.BAMBOO_PLANKS);
+
     /** Returns true if the bot is currently inside a tactical shelter. */
     public static boolean isInShelter(UUID botId) {
         return SHELTER_ACTIVE.containsKey(botId);
@@ -59,18 +71,27 @@ public final class BotFleeService {
     }
 
     /**
-     * Validates shelter state: auto-clears after 2-minute timeout.
-     * Teleport and environmental damage clear shelter directly via
-     * {@link #clearShelter} from createFakePlayer.teleportTo() and ALLOW_DAMAGE.
+     * Validates shelter state: auto-clears when undead burn (tod ~23460+).
+     * Normal exit is via {@link #checkDaylightBreakFree} (waits until tod 1000).
+     * This is the safety net — if daylight-break-free hasn't fired yet but
+     * undead are burning, there's no reason to stay sheltered.
+     * Abnormal exits via {@link #clearShelter} from teleport, environmental
+     * damage, or mode change.
      */
     public static boolean validateAndTickShelter(ServerPlayerEntity bot, MinecraftServer server) {
         Long enteredTick = SHELTER_ACTIVE.get(bot.getUuid());
         if (enteredTick == null) return false;
-        // Max shelter duration: 2 minutes (2400 ticks)
-        if (server.getTicks() - enteredTick > 2400) {
-            SHELTER_ACTIVE.remove(bot.getUuid());
-            LOGGER.info("Bot {} shelter timed out after 2 minutes", bot.getName().getString());
-            return false;
+        if (bot.getEntityWorld() instanceof ServerWorld world) {
+            long tod = world.getTimeOfDay() % 24000L;
+            // Undead burn at ~23460. Clear shelter once it's safe outside.
+            // Range: 23460 (sunrise burn) through 12000 (noon) — full daytime.
+            // But NOT if thundering (undead don't burn in storms).
+            if (!world.isThundering() && (tod >= 23460 || tod < 12000)) {
+                SHELTER_ACTIVE.remove(bot.getUuid());
+                LOGGER.info("Bot {} shelter cleared — undead burning (tod={})",
+                        bot.getName().getString(), tod);
+                return false;
+            }
         }
         return true;
     }
@@ -756,21 +777,27 @@ public final class BotFleeService {
                 // The wall must be solid at both feet and head level
                 if (!world.getBlockState(wallFeet).isSolidBlock(world, wallFeet)) continue;
                 if (!world.getBlockState(wallHead).isSolidBlock(world, wallHead)) continue;
-                // Second layer must also be solid (will be mined for 2-deep tunnel)
+                // Layers 2-3 must also be solid (will be mined for 3-deep tunnel)
                 BlockPos deepFeet = wallFeet.offset(dir);
                 BlockPos deepHead = deepFeet.up();
                 if (!world.getBlockState(deepFeet).isSolidBlock(world, deepFeet)) continue;
                 if (!world.getBlockState(deepHead).isSolidBlock(world, deepHead)) continue;
-                // Third layer must be solid (back wall of the 2-deep tunnel)
-                BlockPos backFeet = deepFeet.offset(dir);
+                BlockPos deeperFeet = deepFeet.offset(dir);
+                BlockPos deeperHead = deeperFeet.up();
+                if (!world.getBlockState(deeperFeet).isSolidBlock(world, deeperFeet)) continue;
+                if (!world.getBlockState(deeperHead).isSolidBlock(world, deeperHead)) continue;
+                // Fourth layer must be solid (back wall of the 3-deep tunnel)
+                BlockPos backFeet = deeperFeet.offset(dir);
                 BlockPos backHead = backFeet.up();
                 if (!world.getBlockState(backFeet).isSolidBlock(world, backFeet)) continue;
                 if (!world.getBlockState(backHead).isSolidBlock(world, backHead)) continue;
-                // Solid overhead for the tunnel entrance and deep section
+                // Solid overhead for all three tunnel sections
                 BlockPos ceiling = wallFeet.up(2);
                 if (!world.getBlockState(ceiling).isSolidBlock(world, ceiling)) continue;
                 BlockPos deepCeiling = deepFeet.up(2);
                 if (!world.getBlockState(deepCeiling).isSolidBlock(world, deepCeiling)) continue;
+                BlockPos deeperCeiling = deeperFeet.up(2);
+                if (!world.getBlockState(deeperCeiling).isSolidBlock(world, deeperCeiling)) continue;
 
                 double distSq = center.getSquaredDistance(wallFeet);
                 if (distSq < bestDistSq) {
@@ -784,8 +811,11 @@ public final class BotFleeService {
     }
 
     /**
-     * Emergency cliff-dig: mine a 2-deep 1x2 tunnel into a cliff face, step inside,
-     * seal the entrance, and place a torch if available.
+     * Emergency cliff-dig: mine a 3-deep 1x2 tunnel into a cliff face, pathfind to
+     * the back, seal the entrance, and place a torch if available.
+     *
+     * <p>Staged approach: mine entrance → pathfind into entrance (picks up block drops)
+     * → mine deeper layers → pathfind to back (picks up remaining drops) → seal.</p>
      */
     private static void emergencyCliffDig(ServerPlayerEntity bot,
                                           net.minecraft.util.math.Direction digDir) {
@@ -804,9 +834,12 @@ public final class BotFleeService {
             // Layer 1: entrance (1 block in digDir from bot)
             BlockPos wallFeet = botPos.offset(digDir);
             BlockPos wallHead = wallFeet.up();
-            // Layer 2: deep (2 blocks in digDir from bot)
+            // Layer 2: middle (2 blocks in digDir from bot)
             BlockPos deepFeet = wallFeet.offset(digDir);
             BlockPos deepHead = deepFeet.up();
+            // Layer 3: back (3 blocks in digDir from bot)
+            BlockPos deeperFeet = deepFeet.offset(digDir);
+            BlockPos deeperHead = deeperFeet.up();
 
             // Walk toward the cliff if not adjacent
             if (bot.squaredDistanceTo(Vec3d.ofCenter(wallFeet)) > 4.0) {
@@ -815,47 +848,61 @@ public final class BotFleeService {
                 Thread.sleep(1000);
             }
 
-            // Mine 4 blocks: entrance (feet+head) then deep (feet+head)
-            LOGGER.debug("Cliff-dig: mining entrance {} {} and deep {} {}",
-                    wallFeet.toShortString(), wallHead.toShortString(),
-                    deepFeet.toShortString(), deepHead.toShortString());
+            // Stage 1: mine entrance (2 blocks)
+            LOGGER.debug("Cliff-dig: mining 3-deep tunnel {} → {} → {}",
+                    wallFeet.toShortString(), deepFeet.toShortString(), deeperFeet.toShortString());
             MiningTool.mineBlock(bot, wallFeet, false).join();
             Thread.sleep(200);
             MiningTool.mineBlock(bot, wallHead, false).join();
-            Thread.sleep(200);
+            Thread.sleep(500); // let drops settle
 
-            // Step into the entrance so we can reach the deep blocks
-            Vec3d wallCenter = Vec3d.ofCenter(wallFeet);
-            for (int step = 0; step < 4; step++) {
-                server.execute(() ->
-                        FollowMovementService.moveToward(bot, wallCenter, 1.0, true, null));
-                Thread.sleep(250);
-            }
-            Thread.sleep(500);
+            // Stage 2: pathfind into entrance — picks up block drops from layer 1
+            MovementService.MovementPlan entrancePlan = new MovementService.MovementPlan(
+                    MovementService.Mode.DIRECT,
+                    wallFeet, wallFeet,
+                    null, null, null);
+            MovementService.execute(bot.getCommandSource(), bot, entrancePlan, Boolean.FALSE, true);
+            Thread.sleep(600); // item pickup delay (10 ticks = 500ms)
 
+            // Stage 3: mine middle + back layers (4 blocks) from inside entrance
             MiningTool.mineBlock(bot, deepFeet, false).join();
             Thread.sleep(200);
             MiningTool.mineBlock(bot, deepHead, false).join();
-            Thread.sleep(500);
+            Thread.sleep(200);
+            MiningTool.mineBlock(bot, deeperFeet, false).join();
+            Thread.sleep(200);
+            MiningTool.mineBlock(bot, deeperHead, false).join();
+            Thread.sleep(500); // let drops settle
 
-            // Walk deep inside the tunnel (2 blocks in)
-            Vec3d deepCenter = Vec3d.ofCenter(deepFeet);
-            for (int step = 0; step < 6; step++) {
-                server.execute(() ->
-                        FollowMovementService.moveToward(bot, deepCenter, 1.0, true, null));
-                Thread.sleep(250);
+            // Stage 4: pathfind to the back of the tunnel — picks up remaining drops
+            MovementService.MovementPlan backPlan = new MovementService.MovementPlan(
+                    MovementService.Mode.DIRECT,
+                    deeperFeet, deeperFeet,
+                    null, null, null);
+            MovementService.execute(bot.getCommandSource(), bot, backPlan, Boolean.FALSE, true);
+
+            // MovementService "close enough" often stops 1 block short — nudge the rest
+            if (bot.squaredDistanceTo(Vec3d.ofCenter(deeperFeet)) > 1.5) {
+                MovementService.nudgeTowardUntilClose(bot, deeperFeet, 1.0, 3000, 0.20, "shelter-back");
             }
-            Thread.sleep(500);
+            Thread.sleep(600); // item pickup delay
 
-            // Seal the entrance — place blocks at the original wall positions
+            LOGGER.info("Bot {} tunnel position: at {} dest={} distSq={}",
+                    bot.getName().getString(), bot.getBlockPos().toShortString(),
+                    deeperFeet.toShortString(),
+                    String.format("%.1f", bot.squaredDistanceTo(Vec3d.ofCenter(deeperFeet))));
+
+            // Seal the entrance with solid blocks (allowIntersecting=true for bounding box edge cases)
             boolean[] sealed = {false};
             server.execute(() -> {
-                boolean f = BotActions.placeBlockAt(bot, wallFeet);
-                boolean h = BotActions.placeBlockAt(bot, wallHead);
-                sealed[0] = f && h;
+                BotActions.PlaceResult fResult = BotActions.tryPlaceBlockAt(bot, wallFeet,
+                        net.minecraft.util.math.Direction.UP, SEAL_BLOCKS, true);
+                BotActions.PlaceResult hResult = BotActions.tryPlaceBlockAt(bot, wallHead,
+                        net.minecraft.util.math.Direction.UP, SEAL_BLOCKS, true);
+                sealed[0] = fResult.success() && hResult.success();
                 if (!sealed[0]) {
-                    LOGGER.info("Bot {} seal failed (feet={}, head={}), retrying...",
-                            bot.getName().getString(), f, h);
+                    LOGGER.info("Bot {} seal failed (feet={}, head={})",
+                            bot.getName().getString(), fResult.reason(), hResult.reason());
                 }
             });
             Thread.sleep(400);
@@ -863,27 +910,25 @@ public final class BotFleeService {
             if (!sealed[0]) {
                 server.execute(() -> {
                     if (!bot.getEntityWorld().getBlockState(wallFeet).blocksMovement())
-                        BotActions.placeBlockAt(bot, wallFeet);
+                        BotActions.tryPlaceBlockAt(bot, wallFeet, net.minecraft.util.math.Direction.UP, SEAL_BLOCKS, true);
                     if (!bot.getEntityWorld().getBlockState(wallHead).blocksMovement())
-                        BotActions.placeBlockAt(bot, wallHead);
+                        BotActions.tryPlaceBlockAt(bot, wallHead, net.minecraft.util.math.Direction.UP, SEAL_BLOCKS, true);
                     sealed[0] = bot.getEntityWorld().getBlockState(wallFeet).blocksMovement()
                             && bot.getEntityWorld().getBlockState(wallHead).blocksMovement();
                 });
                 Thread.sleep(300);
             }
 
-            // Place a torch inside if available — select torch, place at bot's feet (air on solid floor)
+            // Place a torch inside if available
             server.execute(() -> {
                 for (int i = 0; i < bot.getInventory().size(); i++) {
                     if (bot.getInventory().getStack(i).isOf(Items.TORCH)) {
-                        // Swap torch to hotbar slot 0
                         if (i >= 9) {
                             ItemStack temp = bot.getInventory().getStack(0);
                             bot.getInventory().setStack(0, bot.getInventory().getStack(i));
                             bot.getInventory().setStack(i, temp);
                         }
                         bot.getInventory().setSelectedSlot((i < 9) ? i : 0);
-                        // Place torch at the bot's current position (standing on solid floor)
                         BotActions.placeBlockAt(bot, bot.getBlockPos());
                         break;
                     }

@@ -707,6 +707,8 @@ public class Frens implements ModInitializer {
                         net.wcfcarolina13.GameAI.services.BotCombatCalloutService.onDamageTaken(serverPlayer, attacker, amount);
                         net.wcfcarolina13.GameAI.services.BotCombatCalloutService.noteHostileDamage(
                                 serverPlayer, serverPlayer.getCommandSource().getServer().getTicks());
+                        // Hostile damage clears shelter — bot needs to fight back
+                        net.wcfcarolina13.GameAI.services.BotFleeService.clearShelter(serverPlayer.getUuid());
                     }
                 }
 
