@@ -168,6 +168,12 @@ public final class BotFleeService {
         if (bot.getEntityWorld() instanceof ServerWorld world
                 && world.getDifficulty() == net.minecraft.world.Difficulty.PEACEFUL) return false;
 
+        // Must have a reason to shelter — just being night isn't enough.
+        // Require: any missing health, OR was damaged by hostile within last 5 minutes.
+        boolean hurt = bot.getHealth() + 0.01f < bot.getMaxHealth();
+        boolean recentCombat = BotCombatCalloutService.wasRecentlyDamagedByHostile(bot, currentTick, 6000);
+        if (!hurt && !recentCombat) return false;
+
         // Must not be near a base (has somewhere safe to go)
         BotCommandStateService.State state = BotCommandStateService.stateFor(bot);
         if (state != null && state.baseTarget != null) {
