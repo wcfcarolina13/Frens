@@ -3,6 +3,9 @@
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 ## 2026-03-18
 
+- **Fix bots trapped in shelters after restart:**
+  19. **Enclosed-on-join detection:** `registerBot()` now checks if the bot has no sky visibility and is enclosed on all 4 horizontal sides (5 ticks after spawn). If detected, launches `forceBreakFree()` — generic escape using the same break-free logic (collect torch, try horizontal exits, pillar to surface). Fixes bots trapped in shelters from a previous session since SHELTER_ACTIVE is in-memory only.
+
 - **Smart shelter breakout + command-triggered escape:**
   14. **ShelterInfo metadata:** `SHELTER_ACTIVE` now stores `ShelterInfo(tick, type, capPos, entryDir)` instead of just a tick timestamp. Both `emergencyCliffDig()` and `emergencyDigDown()` record shelter type, cap block position, and entry direction.
   15. **Type-aware break-free:** `breakFreeFromShelter()` uses stored metadata: cliff shelters mine the 2 seal blocks and pathfind outward; dig-down shelters mine the cap block. Falls back to generic 4-direction probe for unknown types.

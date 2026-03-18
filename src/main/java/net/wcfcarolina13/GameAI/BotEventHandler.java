@@ -624,6 +624,26 @@ public class BotEventHandler {
                 srv.send(new net.minecraft.server.ServerTask(srv.getTicks() + 5, () -> {
                     if (!candidate.isRemoved()) {
                         checkForSpawnInBlocks(candidate);
+                        // Detect if bot is enclosed (e.g. inside a shelter from a previous session)
+                        // and launch break-free if needed. SHELTER_ACTIVE is in-memory only, so
+                        // after restart the bot may be physically trapped with no shelter state.
+                        if (candidate.getEntityWorld() instanceof net.minecraft.server.world.ServerWorld sw
+                                && !sw.isSkyVisible(candidate.getBlockPos().up())) {
+                            BlockPos bp = candidate.getBlockPos();
+                            boolean enclosed = true;
+                            for (net.minecraft.util.math.Direction d : net.minecraft.util.math.Direction.Type.HORIZONTAL) {
+                                BlockPos adj = bp.offset(d);
+                                if (sw.getBlockState(adj).isAir() && sw.getBlockState(adj.up()).isAir()) {
+                                    enclosed = false;
+                                    break;
+                                }
+                            }
+                            if (enclosed) {
+                                LOGGER.info("Bot {} appears enclosed on join — launching break-free",
+                                        candidate.getName().getString());
+                                BotFleeService.forceBreakFree(candidate);
+                            }
+                        }
                     }
                 }));
             });

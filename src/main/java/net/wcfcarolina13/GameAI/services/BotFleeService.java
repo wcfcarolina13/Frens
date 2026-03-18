@@ -1099,6 +1099,19 @@ public final class BotFleeService {
     }
 
     /**
+     * Force break-free without shelter metadata (e.g. bot enclosed after server restart).
+     * Uses generic escape: collect torch, try 4 horizontal dirs, then pillar to surface.
+     */
+    public static Thread forceBreakFree(ServerPlayerEntity bot) {
+        SHELTER_ACTIVE.remove(bot.getUuid());
+        Thread t = new Thread(() -> breakFreeFromShelter(bot, null),
+                "shelter-breakfree-" + bot.getName().getString());
+        t.setDaemon(true);
+        t.start();
+        return t;
+    }
+
+    /**
      * Type-aware shelter breakout. Collects torch, mines exit based on shelter type,
      * then escapes to surface if still underground.
      */
