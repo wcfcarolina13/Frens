@@ -275,6 +275,10 @@ public class BotEventHandler {
         if (state != null) {
             state.mode = mode;
         }
+        // Any mode change means an active command — clear shelter
+        if (bot != null) {
+            BotFleeService.clearShelter(bot.getUuid());
+        }
         if (bot != null && mode != Mode.FOLLOW) {
             FOLLOW_COMMANDER_LADDER_HINT.remove(bot.getUuid());
         }
@@ -1452,11 +1456,13 @@ public class BotEventHandler {
                 return handleReturnToBase(bot, state);
             }
             default -> {
-                // Tactical shelter: bot is sealed in — suppress all combat/flee, only check daylight escape
-                // validateAndTickShelter auto-clears if bot was teleported away or shelter timed out
+                // Tactical shelter: suppress idle behaviors but let combat run normally
                 if (BotFleeService.validateAndTickShelter(bot, server)) {
                     BotFleeService.checkDaylightBreakFree(bot, server);
-                    return true;
+                    if (augmentedHostiles.isEmpty()) {
+                        return true; // safe — stay sheltered
+                    }
+                    // hostiles present — fall through to normal combat
                 }
                 // Flee check: if outnumbered/critically wounded and IDLE, sprint to safety
                 if (BotFleeService.tickFlee(bot, server, augmentedHostiles, mode)) {

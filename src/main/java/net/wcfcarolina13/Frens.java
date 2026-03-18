@@ -680,6 +680,17 @@ public class Frens implements ModInitializer {
                 // Notify mood manager of damage (triggers STRESSED state)
                 BotMoodManager.noteDamage(serverPlayer);
 
+                // Environmental damage clears shelter — bot needs to react
+                if (source != null && (source.isOf(DamageTypes.EXPLOSION)
+                        || source.isOf(DamageTypes.PLAYER_EXPLOSION)
+                        || source.isOf(DamageTypes.DROWN)
+                        || source.isOf(DamageTypes.IN_WALL)
+                        || source.isOf(DamageTypes.LAVA)
+                        || source.isOf(DamageTypes.ON_FIRE)
+                        || source.isOf(DamageTypes.HOT_FLOOR))) {
+                    net.wcfcarolina13.GameAI.services.BotFleeService.clearShelter(serverPlayer.getUuid());
+                }
+
                 // Handle damage callouts based on attacker type
                 if (source != null && source.getAttacker() != null && source.getAttacker() != serverPlayer) {
                     Entity attacker = source.getAttacker();

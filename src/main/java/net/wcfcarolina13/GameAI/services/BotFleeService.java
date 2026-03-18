@@ -45,32 +45,29 @@ public final class BotFleeService {
     private static final ConcurrentHashMap<UUID, FleeState> FLEE_STATES = new ConcurrentHashMap<>();
     /** Per-bot cooldown to prevent spamming proactive shelter attempts. */
     private static final ConcurrentHashMap<UUID, Long> SHELTER_COOLDOWN = new ConcurrentHashMap<>();
-    /** Shelter entry: when the bot entered and where it dug in. */
-    private record ShelterEntry(long enteredTick, Vec3d position) {}
-    /** Tracks bots currently inside a tactical shelter. */
-    private static final ConcurrentHashMap<UUID, ShelterEntry> SHELTER_ACTIVE = new ConcurrentHashMap<>();
+    /** Tracks bots currently inside a tactical shelter (value = tick entered). */
+    private static final ConcurrentHashMap<UUID, Long> SHELTER_ACTIVE = new ConcurrentHashMap<>();
 
     /** Returns true if the bot is currently inside a tactical shelter. */
     public static boolean isInShelter(UUID botId) {
         return SHELTER_ACTIVE.containsKey(botId);
     }
 
+    /** Clears shelter state so the bot can fight or act normally. */
+    public static void clearShelter(UUID botId) {
+        SHELTER_ACTIVE.remove(botId);
+    }
+
     /**
-     * Validates shelter state: auto-clears if the bot was teleported away (&gt;8 blocks)
-     * or has been sheltered for more than 2 minutes. Returns true if validly sheltered.
+     * Validates shelter state: auto-clears after 2-minute timeout.
+     * Teleport and environmental damage clear shelter directly via
+     * {@link #clearShelter} from createFakePlayer.teleportTo() and ALLOW_DAMAGE.
      */
     public static boolean validateAndTickShelter(ServerPlayerEntity bot, MinecraftServer server) {
-        ShelterEntry entry = SHELTER_ACTIVE.get(bot.getUuid());
-        if (entry == null) return false;
-        // Auto-clear if bot teleported far from shelter
-        if (bot.squaredDistanceTo(entry.position) > 64.0) {
-            SHELTER_ACTIVE.remove(bot.getUuid());
-            LOGGER.info("Bot {} shelter auto-cleared (teleported away from shelter)",
-                    bot.getName().getString());
-            return false;
-        }
+        Long enteredTick = SHELTER_ACTIVE.get(bot.getUuid());
+        if (enteredTick == null) return false;
         // Max shelter duration: 2 minutes (2400 ticks)
-        if (server.getTicks() - entry.enteredTick > 2400) {
+        if (server.getTicks() - enteredTick > 2400) {
             SHELTER_ACTIVE.remove(bot.getUuid());
             LOGGER.info("Bot {} shelter timed out after 2 minutes", bot.getName().getString());
             return false;
@@ -100,8 +97,8 @@ public final class BotFleeService {
                                    List<Entity> hostiles, BotEventHandler.Mode mode) {
         if (bot == null || server == null) return false;
         if (mode != BotEventHandler.Mode.IDLE) return false;
-        // Bot is in a tactical shelter — shelter thread has control, suppress all flee/combat
-        if (isInShelter(bot.getUuid())) return true;
+        // Bot is in a tactical shelter — don't flee (BotEventHandler handles shelter + combat)
+        if (isInShelter(bot.getUuid())) return false;
         if (hostiles == null || hostiles.isEmpty()) {
             // No threats — stop fleeing if we were
             FleeState state = FLEE_STATES.get(bot.getUuid());
@@ -572,7 +569,7 @@ public final class BotFleeService {
             Thread.sleep(300);
 
             // Mark shelter active
-            SHELTER_ACTIVE.put(bot.getUuid(), new ShelterEntry(server.getTicks(), new Vec3d(bot.getX(), bot.getY(), bot.getZ())));
+            SHELTER_ACTIVE.put(bot.getUuid(), (long) server.getTicks());
 
             LOGGER.info("Bot {} dug emergency bunker at {} (mined={}, capPlaced={})",
                     bot.getName().getString(), digPos.toShortString(), blocksMined, capResult[0]);
@@ -859,7 +856,7 @@ public final class BotFleeService {
             Thread.sleep(200);
 
             // Mark shelter active
-            SHELTER_ACTIVE.put(bot.getUuid(), new ShelterEntry(server.getTicks(), new Vec3d(bot.getX(), bot.getY(), bot.getZ())));
+            SHELTER_ACTIVE.put(bot.getUuid(), (long) server.getTicks());
 
             LOGGER.info("Bot {} dug emergency cliff shelter {} (sealed={})",
                     bot.getName().getString(), digDir.asString(), sealed[0]);

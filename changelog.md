@@ -10,6 +10,8 @@ Historical record and reasoning. `TODO.md` is the source of truth for what’s n
   4. **Shelter health gate:** `tryProactiveShelter()` now requires HP < 70% — no more sheltering at full health after respawn.
   5. **Shelter teleport/timeout safety:** SHELTER_ACTIVE now stores position; auto-clears if bot moves >8 blocks (teleport) or after 2 minutes. Prevents shelter flag from permanently suppressing combat after /tp.
   6. **Shelter cooldown cleared on reset:** `SHELTER_COOLDOWN` now properly cleared alongside `SHELTER_ACTIVE` and `FLEE_STATES` on death/respawn.
+  7. **Shelter doesn't suppress combat:** Hostiles detected while sheltered → normal combat runs. Shelter only suppresses idle behaviors.
+  8. **Shelter clears on teleport/damage/commands:** `createFakePlayer.teleportTo()` directly clears shelter. Environmental damage (explosion, drowning, suffocation, lava, fire) clears via ALLOW_DAMAGE. Any mode change (follow, regroup, spell, skill, etc.) clears via `setMode()`.
 
 ## 2026-03-16
 

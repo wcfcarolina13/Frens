@@ -250,6 +250,9 @@ public class createFakePlayer extends ServerPlayerEntity {
     @Override
     public ServerPlayerEntity teleportTo(TeleportTarget target)
     {
+        // Clear shelter state on teleport — bot should be fully responsive at new location
+        net.wcfcarolina13.GameAI.services.BotFleeService.clearShelter(this.getUuid());
+
         ServerPlayerEntity entity = super.teleportTo(target);
         if (notInAnyWorld) {
             ClientStatusC2SPacket p = new ClientStatusC2SPacket(ClientStatusC2SPacket.Mode.PERFORM_RESPAWN);
