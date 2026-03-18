@@ -7085,6 +7085,13 @@ public class modCommandRegistry {
                 try {
                     net.wcfcarolina13.GameAI.services.DebugFileLogger.log("Command.runSkill preContext name="
                             + skillName + " bot=" + bot.getGameProfile().name());
+                    // Break free from shelter before running skill (synchronous — already on worker thread)
+                    Thread breakFree = net.wcfcarolina13.GameAI.services.BotFleeService.clearShelterAndBreakFree(bot);
+                    if (breakFree != null) {
+                        LOGGER.info("Bot {} breaking free from shelter before skill '{}'",
+                                bot.getGameProfile().name(), skillName);
+                        breakFree.join();
+                    }
                     SkillContext skillContext = new SkillContext(botSource, sharedState, params, source);
                     net.wcfcarolina13.GameAI.services.DebugFileLogger.log("Command.runSkill postContext name="
                             + skillName + " bot=" + bot.getGameProfile().name());

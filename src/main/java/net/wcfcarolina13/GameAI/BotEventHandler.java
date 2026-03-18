@@ -275,9 +275,9 @@ public class BotEventHandler {
         if (state != null) {
             state.mode = mode;
         }
-        // Any mode change means an active command — clear shelter
+        // Any mode change means an active command — break free from shelter if needed
         if (bot != null) {
-            BotFleeService.clearShelter(bot.getUuid());
+            BotFleeService.clearShelterAndBreakFree(bot);
         }
         if (bot != null && mode != Mode.FOLLOW) {
             FOLLOW_COMMANDER_LADDER_HINT.remove(bot.getUuid());

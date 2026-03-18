@@ -3,6 +3,13 @@
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 ## 2026-03-18
 
+- **Smart shelter breakout + command-triggered escape:**
+  14. **ShelterInfo metadata:** `SHELTER_ACTIVE` now stores `ShelterInfo(tick, type, capPos, entryDir)` instead of just a tick timestamp. Both `emergencyCliffDig()` and `emergencyDigDown()` record shelter type, cap block position, and entry direction.
+  15. **Type-aware break-free:** `breakFreeFromShelter()` uses stored metadata: cliff shelters mine the 2 seal blocks and pathfind outward; dig-down shelters mine the cap block. Falls back to generic 4-direction probe for unknown types.
+  16. **Surface escape:** After breaking the seal, `escapeToSurface()` pillars up (mine above + jump + place below) until sky is visible, max 30 blocks. Handles complex cases like extra blocks placed around cap.
+  17. **Command-triggered breakout:** `setMode()` now calls `clearShelterAndBreakFree()` which launches break-free mining on a worker thread. Skill commands (`/bot skill hunt`, fish, etc.) also break free synchronously before executing.
+  18. **Torch in dig-down shelters:** `emergencyDigDown()` now places a torch inside if available (previously cliff-only).
+
 - **Fix shelter breakout + guard auto-hunt/hobbies:**
   12. **Break-free mining on shelter clear:** `validateAndTickShelter()` now launches `breakFreeFromShelter()` when clearing the shelter flag at dawn. Previously, break-free mining never fired because `validateAndTickShelter()` cleared `SHELTER_ACTIVE` before `checkDaylightBreakFree()` could read it.
   13. **Shelter guard for auto-hunt/hobbies:** `BotAutoHuntService` and `BotIdleHobbiesService` now skip when `isInShelter()` is true. Prevents starting tasks into a physically trapped bot.

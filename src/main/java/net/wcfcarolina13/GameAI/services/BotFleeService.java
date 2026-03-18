@@ -21,6 +21,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import net.minecraft.item.Item;
+import net.minecraft.util.math.Direction;
 
 import java.util.List;
 import java.util.UUID;
@@ -45,11 +46,17 @@ public final class BotFleeService {
     /** Cooldown ticks after a flee ends before re-evaluating (5 seconds). */
     private static final int COOLDOWN_TICKS = 100;
 
+    /** Type of tactical shelter the bot is occupying. */
+    public enum ShelterType { CLIFF, DIG_DOWN }
+
+    /** Metadata for an active tactical shelter. */
+    public record ShelterInfo(long enteredTick, ShelterType type, BlockPos capPos, Direction entryDir) {}
+
     private static final ConcurrentHashMap<UUID, FleeState> FLEE_STATES = new ConcurrentHashMap<>();
     /** Per-bot cooldown to prevent spamming proactive shelter attempts. */
     private static final ConcurrentHashMap<UUID, Long> SHELTER_COOLDOWN = new ConcurrentHashMap<>();
-    /** Tracks bots currently inside a tactical shelter (value = tick entered). */
-    private static final ConcurrentHashMap<UUID, Long> SHELTER_ACTIVE = new ConcurrentHashMap<>();
+    /** Tracks bots currently inside a tactical shelter with metadata. */
+    private static final ConcurrentHashMap<UUID, ShelterInfo> SHELTER_ACTIVE = new ConcurrentHashMap<>();
     /** Generation counter — incremented on death/respawn to invalidate stale shelter threads. */
     private static final ConcurrentHashMap<UUID, Long> SHELTER_GENERATION = new ConcurrentHashMap<>();
     /** Mutex to prevent duplicate shelter threads for the same bot. */
@@ -84,8 +91,8 @@ public final class BotFleeService {
      * damage, or mode change.
      */
     public static boolean validateAndTickShelter(ServerPlayerEntity bot, MinecraftServer server) {
-        Long enteredTick = SHELTER_ACTIVE.get(bot.getUuid());
-        if (enteredTick == null) return false;
+        ShelterInfo info = SHELTER_ACTIVE.get(bot.getUuid());
+        if (info == null) return false;
         if (bot.getEntityWorld() instanceof ServerWorld world) {
             long tod = world.getTimeOfDay() % 24000L;
             // Undead burn at ~23460. Clear shelter once it's safe outside.
@@ -96,7 +103,8 @@ public final class BotFleeService {
                 LOGGER.info("Bot {} shelter cleared — safe to emerge (tod={})",
                         bot.getName().getString(), tod);
                 // Launch break-free mining — bot may be physically enclosed
-                Thread t = new Thread(() -> breakFreeFromShelter(bot),
+                final ShelterInfo shelterInfo = info;
+                Thread t = new Thread(() -> breakFreeFromShelter(bot, shelterInfo),
                         "shelter-breakfree-" + bot.getName().getString());
                 t.setDaemon(true);
                 t.start();
@@ -623,7 +631,7 @@ public final class BotFleeService {
             // Cap the hole at the original ground level (digPos).
             // The bot has fallen into the hole, so digPos is now above.
             // Try digPos first, then lower positions closer to the bot.
-            boolean[] capResult = {false};
+            BlockPos[] capPlacedAt = {null};
             MinecraftServer server = bot.getCommandSource().getServer();
             BlockPos botCurrentPos = bot.getBlockPos();
             server.execute(() -> {
@@ -635,8 +643,8 @@ public final class BotFleeService {
                 };
                 for (BlockPos cap : candidates) {
                     if (bot.getEntityWorld().getBlockState(cap).isAir()) {
-                        capResult[0] = BotActions.placeBlockAt(bot, cap);
-                        if (capResult[0]) {
+                        if (BotActions.placeBlockAt(bot, cap)) {
+                            capPlacedAt[0] = cap.toImmutable();
                             LOGGER.debug("Cap placed at {}", cap.toShortString());
                             break;
                         }
@@ -647,15 +655,33 @@ public final class BotFleeService {
 
             // Mark shelter active — only if cap was placed (actually enclosed)
             if (isStaleShelter(bot, gen)) return;
-            if (capResult[0]) {
-                SHELTER_ACTIVE.put(bot.getUuid(), (long) server.getTicks());
+            if (capPlacedAt[0] != null) {
+                SHELTER_ACTIVE.put(bot.getUuid(), new ShelterInfo(
+                        server.getTicks(), ShelterType.DIG_DOWN, capPlacedAt[0], null));
             } else {
                 LOGGER.info("Bot {} dig-down bunker uncapped — not marking as shelter",
                         bot.getName().getString());
             }
 
+            // Place a torch inside if available
+            server.execute(() -> {
+                for (int i = 0; i < bot.getInventory().size(); i++) {
+                    if (bot.getInventory().getStack(i).isOf(Items.TORCH)) {
+                        if (i >= 9) {
+                            ItemStack temp = bot.getInventory().getStack(0);
+                            bot.getInventory().setStack(0, bot.getInventory().getStack(i));
+                            bot.getInventory().setStack(i, temp);
+                        }
+                        bot.getInventory().setSelectedSlot((i < 9) ? i : 0);
+                        BotActions.placeBlockAt(bot, bot.getBlockPos());
+                        break;
+                    }
+                }
+            });
+            Thread.sleep(200);
+
             LOGGER.info("Bot {} dug emergency bunker at {} (mined={}, capPlaced={})",
-                    bot.getName().getString(), digPos.toShortString(), blocksMined, capResult[0]);
+                    bot.getName().getString(), digPos.toShortString(), blocksMined, capPlacedAt[0] != null);
 
             // Eat inside the shelter while waiting to heal
             int shelterBites = HealingService.stabilizeEat(bot, 5);
@@ -1008,7 +1034,8 @@ public final class BotFleeService {
 
             // Mark shelter active — only if thread is still valid
             if (isStaleShelter(bot, gen)) return;
-            SHELTER_ACTIVE.put(bot.getUuid(), (long) server.getTicks());
+            SHELTER_ACTIVE.put(bot.getUuid(), new ShelterInfo(
+                    server.getTicks(), ShelterType.CLIFF, wallFeet.toImmutable(), digDir));
 
             LOGGER.info("Bot {} dug emergency cliff shelter {} (sealed={})",
                     bot.getName().getString(), digDir.asString(), sealed[0]);
@@ -1035,20 +1062,19 @@ public final class BotFleeService {
      * Called from the IDLE tick handler. Returns true if break-free was initiated.
      */
     public static boolean checkDaylightBreakFree(ServerPlayerEntity bot, MinecraftServer server) {
-        if (!SHELTER_ACTIVE.containsKey(bot.getUuid())) return false;
+        ShelterInfo info = SHELTER_ACTIVE.get(bot.getUuid());
+        if (info == null) return false;
         if (!(bot.getEntityWorld() instanceof ServerWorld world)) return false;
 
-        // Safe to emerge: daytime AND not thundering (undead don't burn in thunderstorms)
         if (!world.isDay() || world.isThundering()) return false;
         long tod = world.getTimeOfDay() % 24000L;
-        // Wait until tick 1000 (sunrise fully complete, undead burning)
         if (tod < 1000 || tod >= 12000) return false;
 
         SHELTER_ACTIVE.remove(bot.getUuid());
         LOGGER.info("Bot {} breaking free from tactical shelter (daylight, tod={})",
                 bot.getName().getString(), tod);
 
-        Thread t = new Thread(() -> breakFreeFromShelter(bot),
+        Thread t = new Thread(() -> breakFreeFromShelter(bot, info),
                 "shelter-breakfree-" + bot.getName().getString());
         t.setDaemon(true);
         t.start();
@@ -1056,70 +1082,188 @@ public final class BotFleeService {
     }
 
     /**
-     * Breaks the bot free from a tactical shelter by mining the torch (for pickup)
-     * and then mining surrounding blocks to create an exit.
+     * Clears shelter state and launches break-free mining on a worker thread.
+     * Use when a command (follow, skill, etc.) needs the bot to leave shelter first.
+     * The returned thread can be joined to wait for completion before executing the command.
      */
-    private static void breakFreeFromShelter(ServerPlayerEntity bot) {
+    public static Thread clearShelterAndBreakFree(ServerPlayerEntity bot) {
+        ShelterInfo info = SHELTER_ACTIVE.remove(bot.getUuid());
+        if (info == null) return null;
+        LOGGER.info("Bot {} breaking free from {} shelter for command",
+                bot.getName().getString(), info.type());
+        Thread t = new Thread(() -> breakFreeFromShelter(bot, info),
+                "shelter-breakfree-" + bot.getName().getString());
+        t.setDaemon(true);
+        t.start();
+        return t;
+    }
+
+    /**
+     * Type-aware shelter breakout. Collects torch, mines exit based on shelter type,
+     * then escapes to surface if still underground.
+     */
+    private static void breakFreeFromShelter(ServerPlayerEntity bot, ShelterInfo info) {
         try {
             BlockPos pos = bot.getBlockPos();
             ServerWorld world = (ServerWorld) bot.getEntityWorld();
 
-            // Collect torch first — check all adjacent positions and current position
-            BlockPos[] torchCandidates = {
-                pos, pos.up(),
-                pos.north(), pos.south(), pos.east(), pos.west()
-            };
-            for (BlockPos tp : torchCandidates) {
-                if (world.getBlockState(tp).isOf(net.minecraft.block.Blocks.TORCH)
-                        || world.getBlockState(tp).isOf(net.minecraft.block.Blocks.WALL_TORCH)) {
-                    MiningTool.mineBlock(bot, tp, false).join();
-                    Thread.sleep(500); // wait for torch item drop pickup
-                    break;
-                }
+            // 1. Collect torch — check current position and all adjacent
+            collectNearbyTorch(bot, world, pos);
+
+            // 2. Type-specific exit
+            if (info != null && info.type() == ShelterType.CLIFF && info.capPos() != null) {
+                breakFreeCliff(bot, world, info);
+            } else if (info != null && info.type() == ShelterType.DIG_DOWN && info.capPos() != null) {
+                breakFreeDugDown(bot, world, info);
+            } else {
+                breakFreeGeneric(bot, world, pos);
             }
 
-            // Mine exit: try all 4 horizontal directions, mine feet+head to create opening
-            for (net.minecraft.util.math.Direction dir : net.minecraft.util.math.Direction.Type.HORIZONTAL) {
-                BlockPos exitFeet = pos.offset(dir);
-                BlockPos exitHead = exitFeet.up();
-                boolean feetSolid = world.getBlockState(exitFeet).isSolidBlock(world, exitFeet);
-                boolean headSolid = world.getBlockState(exitHead).isSolidBlock(world, exitHead);
-                if (feetSolid || headSolid) {
-                    if (feetSolid) {
-                        MiningTool.mineBlock(bot, exitFeet, false).join();
-                        Thread.sleep(200);
-                    }
-                    if (headSolid) {
-                        MiningTool.mineBlock(bot, exitHead, false).join();
-                        Thread.sleep(200);
-                    }
-                    // Check if this opened into air (actual exit, not deeper into cliff)
-                    BlockPos beyondFeet = exitFeet.offset(dir);
-                    if (world.getBlockState(beyondFeet).isAir() || !world.getBlockState(beyondFeet).isSolidBlock(world, beyondFeet)) {
-                        // Good exit — step out
-                        bot.getCommandSource().getServer().execute(() ->
-                                FollowMovementService.moveToward(bot, Vec3d.ofCenter(exitFeet), 1.0, true, null));
-                        Thread.sleep(800);
-                        LOGGER.info("Bot {} broke free from shelter toward {}", bot.getName().getString(), dir.asString());
-                        return;
-                    }
-                    // Mined into more rock — continue trying other directions
-                }
-            }
+            // 3. Surface escape — if still underground after breaking seal, pillar up
+            escapeToSurface(bot, world);
 
-            // If horizontal fails, try mining up (dig-down shelter)
-            BlockPos capBlock = pos.up(2);
-            if (world.getBlockState(capBlock).isSolidBlock(world, capBlock)) {
-                MiningTool.mineBlock(bot, capBlock, false).join();
-                Thread.sleep(200);
-            }
-            // Pillar out by jumping
-            LOGGER.info("Bot {} broke free from shelter upward", bot.getName().getString());
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         } catch (Exception e) {
             LOGGER.warn("Break-free failed for {}: {}", bot.getName().getString(), e.getMessage());
         }
+    }
+
+    /** Collect one torch from adjacent positions. */
+    private static void collectNearbyTorch(ServerPlayerEntity bot, ServerWorld world, BlockPos pos)
+            throws InterruptedException {
+        BlockPos[] torchCandidates = {
+            pos, pos.up(),
+            pos.north(), pos.south(), pos.east(), pos.west()
+        };
+        for (BlockPos tp : torchCandidates) {
+            if (world.getBlockState(tp).isOf(Blocks.TORCH)
+                    || world.getBlockState(tp).isOf(Blocks.WALL_TORCH)) {
+                MiningTool.mineBlock(bot, tp, false).join();
+                Thread.sleep(500);
+                break;
+            }
+        }
+    }
+
+    /** Break free from a cliff shelter: mine the 2 seal blocks, pathfind outward. */
+    private static void breakFreeCliff(ServerPlayerEntity bot, ServerWorld world, ShelterInfo info)
+            throws InterruptedException {
+        BlockPos sealFeet = info.capPos();
+        BlockPos sealHead = sealFeet.up();
+        // Mine seal blocks
+        if (world.getBlockState(sealFeet).isSolidBlock(world, sealFeet)) {
+            MiningTool.mineBlock(bot, sealFeet, false).join();
+            Thread.sleep(200);
+        }
+        if (world.getBlockState(sealHead).isSolidBlock(world, sealHead)) {
+            MiningTool.mineBlock(bot, sealHead, false).join();
+            Thread.sleep(200);
+        }
+        // Walk out through the entrance (opposite of dig direction)
+        Direction exitDir = info.entryDir() != null ? info.entryDir().getOpposite() : null;
+        if (exitDir != null) {
+            BlockPos exitTarget = sealFeet.offset(exitDir);
+            MovementService.MovementPlan exitPlan = new MovementService.MovementPlan(
+                    MovementService.Mode.DIRECT, exitTarget, exitTarget, null, null, null);
+            MovementService.execute(bot.getCommandSource(), bot, exitPlan, Boolean.FALSE, true);
+            Thread.sleep(600);
+        }
+        LOGGER.info("Bot {} broke free from cliff shelter", bot.getName().getString());
+    }
+
+    /** Break free from a dig-down shelter: mine the cap block, then pillar up. */
+    private static void breakFreeDugDown(ServerPlayerEntity bot, ServerWorld world, ShelterInfo info)
+            throws InterruptedException {
+        BlockPos capPos = info.capPos();
+        // Mine the cap block
+        if (world.getBlockState(capPos).isSolidBlock(world, capPos)) {
+            MiningTool.mineBlock(bot, capPos, false).join();
+            Thread.sleep(300);
+        }
+        LOGGER.info("Bot {} broke cap of dig-down shelter at {}", bot.getName().getString(),
+                capPos.toShortString());
+        // Pillar up is handled by escapeToSurface()
+    }
+
+    /** Generic break-free: try 4 horizontal directions, then mine up. */
+    private static void breakFreeGeneric(ServerPlayerEntity bot, ServerWorld world, BlockPos pos)
+            throws InterruptedException {
+        for (Direction dir : Direction.Type.HORIZONTAL) {
+            BlockPos exitFeet = pos.offset(dir);
+            BlockPos exitHead = exitFeet.up();
+            boolean feetSolid = world.getBlockState(exitFeet).isSolidBlock(world, exitFeet);
+            boolean headSolid = world.getBlockState(exitHead).isSolidBlock(world, exitHead);
+            if (feetSolid || headSolid) {
+                if (feetSolid) {
+                    MiningTool.mineBlock(bot, exitFeet, false).join();
+                    Thread.sleep(200);
+                }
+                if (headSolid) {
+                    MiningTool.mineBlock(bot, exitHead, false).join();
+                    Thread.sleep(200);
+                }
+                BlockPos beyondFeet = exitFeet.offset(dir);
+                if (world.getBlockState(beyondFeet).isAir()
+                        || !world.getBlockState(beyondFeet).isSolidBlock(world, beyondFeet)) {
+                    bot.getCommandSource().getServer().execute(() ->
+                            FollowMovementService.moveToward(bot, Vec3d.ofCenter(exitFeet), 1.0, true, null));
+                    Thread.sleep(800);
+                    LOGGER.info("Bot {} broke free from shelter toward {}",
+                            bot.getName().getString(), dir.asString());
+                    return;
+                }
+            }
+        }
+        // Fallback: mine one block up
+        BlockPos capBlock = pos.up(2);
+        if (world.getBlockState(capBlock).isSolidBlock(world, capBlock)) {
+            MiningTool.mineBlock(bot, capBlock, false).join();
+            Thread.sleep(200);
+        }
+        LOGGER.info("Bot {} generic break-free (mined upward)", bot.getName().getString());
+    }
+
+    /**
+     * Escape to surface by pillaring up until sky is visible.
+     * Mines the block above, jumps, places block below. Max 30 blocks.
+     */
+    private static void escapeToSurface(ServerPlayerEntity bot, ServerWorld world)
+            throws InterruptedException {
+        if (world.isSkyVisible(bot.getBlockPos().up())) return; // already at surface
+
+        LOGGER.info("Bot {} underground after break-free — escaping to surface", bot.getName().getString());
+        MinecraftServer server = bot.getCommandSource().getServer();
+
+        for (int i = 0; i < 30; i++) {
+            if (world.isSkyVisible(bot.getBlockPos().up())) {
+                LOGGER.info("Bot {} reached surface after {} pillar steps", bot.getName().getString(), i);
+                return;
+            }
+            BlockPos above = bot.getBlockPos().up(2);
+            // Mine block above head if solid
+            if (world.getBlockState(above).isSolidBlock(world, above)) {
+                MiningTool.mineBlock(bot, above, false).join();
+                Thread.sleep(200);
+            }
+            // Also clear the block above that if solid (2-high clearance for jump)
+            BlockPos above2 = above.up();
+            if (world.getBlockState(above2).isSolidBlock(world, above2)) {
+                MiningTool.mineBlock(bot, above2, false).join();
+                Thread.sleep(200);
+            }
+            // Jump + place block below to pillar up
+            BlockPos feet = bot.getBlockPos();
+            server.execute(() -> {
+                bot.jump();
+                bot.velocityDirty = true;
+            });
+            Thread.sleep(400); // wait for peak of jump
+            final BlockPos placeAt = feet;
+            server.execute(() -> BotActions.placeBlockAt(bot, placeAt));
+            Thread.sleep(300);
+        }
+        LOGGER.warn("Bot {} failed to reach surface after 30 pillar steps", bot.getName().getString());
     }
 
     /** Increment generation counter — invalidates all prior shelter threads for this bot. */
