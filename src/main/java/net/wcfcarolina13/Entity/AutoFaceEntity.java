@@ -4,8 +4,8 @@ import net.wcfcarolina13.Entity.RayCasting;
 import net.wcfcarolina13.EntityUtil;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.minecraft.entity.Entity;
+import net.minecraft.entity.EntityType;
 import net.minecraft.entity.LivingEntity;
-// import net.minecraft.entity.mob.HostileEntity;
 import net.minecraft.command.argument.EntityAnchorArgumentType;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
@@ -256,11 +256,18 @@ public class AutoFaceEntity {
                     && (closestHostile instanceof LivingEntity living
                     ? followTarget.canSee(living)
                     : followTarget.canSee(closestHostile));
-            if (botSeesHostile && !playerSeesHostile) {
+            // Non-diving phantoms at night are not actionable — shelter/flee handles them
+            boolean allNonActionablePhantoms = hostileEntities.stream()
+                    .allMatch(e -> e.getType() == EntityType.PHANTOM
+                            && !BotActions.isPhantomDiving(bot, e));
+            boolean phantomSilent = allNonActionablePhantoms
+                    && bot.getEntityWorld() instanceof ServerWorld sw && !sw.isDay();
+
+            if (!phantomSilent && botSeesHostile && !playerSeesHostile) {
                 broadcastDangerAlert(bot);
             }
 
-            if (distanceToHostileEntity <= 10.0) {
+            if (distanceToHostileEntity <= 10.0 && !phantomSilent) {
                 boolean botWasBusy = PathTracer.BotSegmentManager.getBotMovementStatus()
                         || isBotMoving
                         || blockDetectionUnit.getBlockDetectionStatus()

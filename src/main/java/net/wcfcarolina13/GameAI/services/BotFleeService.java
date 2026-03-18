@@ -25,6 +25,7 @@ import net.minecraft.item.Item;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Manages flee behavior for IDLE-mode bots that are outnumbered or critically wounded.
@@ -51,6 +52,8 @@ public final class BotFleeService {
     private static final ConcurrentHashMap<UUID, Long> SHELTER_ACTIVE = new ConcurrentHashMap<>();
     /** Generation counter — incremented on death/respawn to invalidate stale shelter threads. */
     private static final ConcurrentHashMap<UUID, Long> SHELTER_GENERATION = new ConcurrentHashMap<>();
+    /** Mutex to prevent duplicate shelter threads for the same bot. */
+    private static final ConcurrentHashMap<UUID, AtomicBoolean> SHELTER_LOCK = new ConcurrentHashMap<>();
 
     /** Solid blocks suitable for sealing shelter entrances (mined from stone/dirt). */
     private static final List<Item> SEAL_BLOCKS = List.of(
@@ -120,8 +123,16 @@ public final class BotFleeService {
                                    List<Entity> hostiles, BotEventHandler.Mode mode) {
         if (bot == null || server == null) return false;
         if (mode != BotEventHandler.Mode.IDLE) return false;
-        // Bot is in a tactical shelter — don't flee (BotEventHandler handles shelter + combat)
-        if (isInShelter(bot.getUuid())) return false;
+        // Bot is in a tactical shelter — don't flee unless shelter is compromised
+        if (isInShelter(bot.getUuid())) {
+            if (BotCombatCalloutService.wasRecentlyDamagedByHostile(bot, server.getTicks(), 40)) {
+                clearShelter(bot.getUuid());
+                LOGGER.info("Bot {} shelter compromised (taking damage) — clearing for flee",
+                        bot.getName().getString());
+            } else {
+                return false;
+            }
+        }
         if (hostiles == null || hostiles.isEmpty()) {
             // No threats — stop fleeing if we were
             FleeState state = FLEE_STATES.get(bot.getUuid());
@@ -174,33 +185,28 @@ public final class BotFleeService {
         if (bot == null || server == null) return false;
         // Already sheltered — don't dig another hole
         if (isInShelter(bot.getUuid())) return true;
-        if (!SkillPreferences.emergencyTactics(bot)) return false;
+        // Mutex: only one shelter thread per bot at a time
+        AtomicBoolean lock = SHELTER_LOCK.computeIfAbsent(bot.getUuid(), k -> new AtomicBoolean(false));
+        if (!lock.compareAndSet(false, true)) return false;
+        if (!SkillPreferences.emergencyTactics(bot)) { lock.set(false); return false; }
 
         long currentTick = server.getTicks();
 
         // Don't build shelter during daytime — undead burn, no point entombing
         if (bot.getEntityWorld() instanceof ServerWorld world) {
             if (world.isDay() && !world.isThundering()) {
-                if (currentTick % 200 == 0) {
-                    LOGGER.debug("[ShelterCheck] {} skipped: daytime (tod={})",
-                            bot.getName().getString(), world.getTimeOfDay() % 24000L);
-                }
+                lock.set(false);
                 return false;
             }
         }
 
         // Skip shelter on peaceful difficulty — no hostile mobs spawn
         if (bot.getEntityWorld() instanceof ServerWorld world
-                && world.getDifficulty() == net.minecraft.world.Difficulty.PEACEFUL) return false;
+                && world.getDifficulty() == net.minecraft.world.Difficulty.PEACEFUL) { lock.set(false); return false; }
 
         // Must not be near a base (has somewhere safe to go)
         BotCommandStateService.State state = BotCommandStateService.stateFor(bot);
-        if (state != null && state.baseTarget != null) {
-            if (currentTick % 200 == 0) {
-                LOGGER.debug("[ShelterCheck] {} skipped: has base target", bot.getName().getString());
-            }
-            return false;
-        }
+        if (state != null && state.baseTarget != null) { lock.set(false); return false; }
 
         // Skip cooldown when phantoms are the only threat — bot needs immediate cover
         boolean phantomBypass = false;
@@ -218,12 +224,12 @@ public final class BotFleeService {
         // Cooldown: don't spam shelter attempts (30 second cooldown, bypassed for phantom-only threats)
         if (!phantomBypass) {
             long lastAttempt = SHELTER_COOLDOWN.getOrDefault(bot.getUuid(), 0L);
-            if (currentTick - lastAttempt < 600) return false;
+            if (currentTick - lastAttempt < 600) { lock.set(false); return false; }
         }
 
         SHELTER_COOLDOWN.put(bot.getUuid(), currentTick);
 
-        LOGGER.info("Bot {} proactively seeking shelter (hp={}/{}, recently damaged, nighttime)",
+        LOGGER.info("Bot {} proactively seeking shelter (hp={}/{}, nighttime)",
                 bot.getName().getString(),
                 String.format("%.1f", bot.getHealth()),
                 String.format("%.1f", bot.getMaxHealth()));
@@ -231,15 +237,19 @@ public final class BotFleeService {
         // Quick stabilize (1-2 bites) then shelter — don't sit eating in the open
         final long gen = getGeneration(bot.getUuid());
         Thread t = new Thread(() -> {
-            if (isStaleShelter(bot, gen)) return;
-            if (bot.getHealth() < bot.getMaxHealth() * 0.5f) {
-                int eaten = HealingService.stabilizeEat(bot, 2);
-                LOGGER.info("Bot {} stabilized with {} bites before shelter (hp={})",
-                        bot.getName().getString(), eaten,
-                        String.format("%.1f", bot.getHealth()));
+            try {
+                if (isStaleShelter(bot, gen)) return;
+                if (bot.getHealth() < bot.getMaxHealth() * 0.5f) {
+                    int eaten = HealingService.stabilizeEat(bot, 2);
+                    LOGGER.info("Bot {} stabilized with {} bites before shelter (hp={})",
+                            bot.getName().getString(), eaten,
+                            String.format("%.1f", bot.getHealth()));
+                }
+                if (isStaleShelter(bot, gen)) return;
+                runEmergencyTacticChain(bot, gen, false, true);
+            } finally {
+                lock.set(false);
             }
-            if (isStaleShelter(bot, gen)) return;
-            runEmergencyTacticChain(bot, gen, false, true);
         }, "proactive-shelter-" + bot.getName().getString());
         t.setDaemon(true);
         t.start();
@@ -630,9 +640,14 @@ public final class BotFleeService {
             });
             Thread.sleep(300);
 
-            // Mark shelter active — only if thread is still valid
+            // Mark shelter active — only if cap was placed (actually enclosed)
             if (isStaleShelter(bot, gen)) return;
-            SHELTER_ACTIVE.put(bot.getUuid(), (long) server.getTicks());
+            if (capResult[0]) {
+                SHELTER_ACTIVE.put(bot.getUuid(), (long) server.getTicks());
+            } else {
+                LOGGER.info("Bot {} dig-down bunker uncapped — not marking as shelter",
+                        bot.getName().getString());
+            }
 
             LOGGER.info("Bot {} dug emergency bunker at {} (mined={}, capPlaced={})",
                     bot.getName().getString(), digPos.toShortString(), blocksMined, capResult[0]);
@@ -1122,6 +1137,8 @@ public final class BotFleeService {
         FLEE_STATES.remove(botId);
         SHELTER_ACTIVE.remove(botId);
         SHELTER_COOLDOWN.remove(botId);
+        AtomicBoolean lock = SHELTER_LOCK.get(botId);
+        if (lock != null) lock.set(false);
         incrementGeneration(botId);
     }
 }

@@ -3,6 +3,12 @@
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 ## 2026-03-18
 
+- **Fix phantom behavior loop, shelter spam, "Terminating" chat spam:**
+  8. **Shelter thread mutex:** `tryProactiveShelter()` now uses an `AtomicBoolean` per-bot lock to prevent duplicate shelter threads. Previously, 3 threads could launch in the same tick before the cooldown was set.
+  9. **No false shelter on failed cap:** `emergencyDigDown()` only sets `SHELTER_ACTIVE` when `capPlaced=true`. Previously, a capless hole still marked the bot as sheltered, trapping it in a loop where it couldn't flee or re-shelter.
+  10. **Compromised shelter override:** `tickFlee()` now clears shelter if the bot is actively taking hostile damage, allowing flee to resume instead of being permanently suppressed.
+  11. **Suppress "Terminating" for non-diving phantoms:** `AutoFaceEntity.runAutoFaceTick()` skips `broadcastDangerAlert()` and task interruption when the only hostiles are non-diving phantoms at night. Prevents the 4-second chat spam loop.
+
 - **Fix stale shelter threads, immortal bot, phantom flee:**
   1. **Shelter generation counter:** `BotFleeService` tracks a per-bot generation counter incremented on death/respawn. Shelter threads capture gen at start, bail out via `isStaleShelter()` before each mining/movement/sleep step and before setting `SHELTER_ACTIVE`. Prevents stale threads from writing shelter state after bot respawns.
   2. **Reset on death:** `BotFleeService.reset()` now called in AFTER_DEATH handler (previously only on respawn), immediately invalidating shelter threads when the bot dies.
