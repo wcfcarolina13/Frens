@@ -158,10 +158,9 @@ public final class BotFleeService {
             if (world.isDay() && !world.isThundering()) return false;
         }
 
-        // Must be hurt or recently damaged — shelter is pointless at full health on a peaceful night
-        boolean hurt = bot.getHealth() + 0.01f < bot.getMaxHealth();
-        boolean recentHostileDamage = BotCombatCalloutService.wasRecentlyDamagedByHostile(bot, currentTick, 200);
-        if (!hurt && !recentHostileDamage) return false;
+        // Skip shelter on peaceful difficulty — no hostile mobs spawn
+        if (bot.getEntityWorld() instanceof ServerWorld world
+                && world.getDifficulty() == net.minecraft.world.Difficulty.PEACEFUL) return false;
 
         // Must not be near a base (has somewhere safe to go)
         BotCommandStateService.State state = BotCommandStateService.stateFor(bot);
