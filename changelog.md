@@ -15,6 +15,7 @@ Historical record and reasoning. `TODO.md` is the source of truth for what’s n
   9. **Fix immortal bot after death:** Removed `setInvulnerable(true)` + `ServerTask` delayed clear from respawn — the ServerTask wasn't reliably firing, leaving bots permanently invulnerable. Replaced with explicit `setInvulnerable(false)` to clear any stale flag.
   10. **Hardened invulnerability:** Three layers of defense: (a) `onBotJoin` clears invulnerability on session start, (b) `updateBehavior` tick handler force-clears if stuck, (c) `ALLOW_DAMAGE` handler force-clears before processing damage.
   11. **PostCombatSweep log spam:** Downgraded per-tick "starting drop sweep" / "walking to kill site" / "walking back to combat center" from INFO to DEBUG. These fired 30+ times/second.
+  12. **Shelter triggers on low HP alone:** Below 50% HP at night, bot shelters regardless of damage source or recency. Above 50%, still requires recent hostile damage (post-combat lull). Previously bot sat at 0.2 HP at night without sheltering because the "recently damaged by hostile" check had expired.
 
 ## 2026-03-16
 
