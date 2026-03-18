@@ -181,18 +181,13 @@ public final class BotFleeService {
                 String.format("%.1f", bot.getHealth()),
                 String.format("%.1f", bot.getMaxHealth()));
 
-        // Eat first if hungry, then build shelter
+        // Quick stabilize (1-2 bites) then shelter — don't sit eating in the open
         Thread t = new Thread(() -> {
-            try {
-                // Give the bot a moment to eat — HungerService/HealingService handle food
-                // consumption on the tick loop. Wait up to 5 seconds for health to recover.
-                if (bot.getHealth() < bot.getMaxHealth() * 0.9f) {
-                    LOGGER.debug("Bot {} eating before shelter", bot.getName().getString());
-                    Thread.sleep(5000);
-                }
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                return;
+            if (bot.getHealth() < bot.getMaxHealth() * 0.5f) {
+                int eaten = HealingService.stabilizeEat(bot, 2);
+                LOGGER.info("Bot {} stabilized with {} bites before shelter (hp={})",
+                        bot.getName().getString(), eaten,
+                        String.format("%.1f", bot.getHealth()));
             }
             runEmergencyTacticChain(bot, false, true);
         }, "proactive-shelter-" + bot.getName().getString());
@@ -575,8 +570,17 @@ public final class BotFleeService {
             LOGGER.info("Bot {} dug emergency bunker at {} (mined={}, capPlaced={})",
                     bot.getName().getString(), digPos.toShortString(), blocksMined, capResult[0]);
 
-            // Wait inside to heal.
-            Thread.sleep(5000);
+            // Eat inside the shelter while waiting to heal
+            int shelterBites = HealingService.stabilizeEat(bot, 5);
+            if (shelterBites > 0) {
+                LOGGER.info("Bot {} ate {} items inside shelter (hp={})",
+                        bot.getName().getString(), shelterBites,
+                        String.format("%.1f", bot.getHealth()));
+            }
+            // If still hurt and couldn't eat enough, wait for natural regen
+            if (bot.getHealth() < bot.getMaxHealth() * 0.8f) {
+                Thread.sleep(3000);
+            }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         } catch (Exception e) {
@@ -862,8 +866,16 @@ public final class BotFleeService {
             LOGGER.info("Bot {} dug emergency cliff shelter {} (sealed={})",
                     bot.getName().getString(), digDir.asString(), sealed[0]);
 
-            // Wait inside to heal.
-            Thread.sleep(5000);
+            // Eat inside the shelter while waiting to heal
+            int shelterBites = HealingService.stabilizeEat(bot, 5);
+            if (shelterBites > 0) {
+                LOGGER.info("Bot {} ate {} items inside cliff shelter (hp={})",
+                        bot.getName().getString(), shelterBites,
+                        String.format("%.1f", bot.getHealth()));
+            }
+            if (bot.getHealth() < bot.getMaxHealth() * 0.8f) {
+                Thread.sleep(3000);
+            }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         } catch (Exception e) {

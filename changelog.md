@@ -16,6 +16,7 @@ Historical record and reasoning. `TODO.md` is the source of truth for what’s n
   10. **Hardened invulnerability:** Three layers of defense: (a) `onBotJoin` clears invulnerability on session start, (b) `updateBehavior` tick handler force-clears if stuck, (c) `ALLOW_DAMAGE` handler force-clears before processing damage.
   11. **PostCombatSweep log spam:** Downgraded per-tick "starting drop sweep" / "walking to kill site" / "walking back to combat center" from INFO to DEBUG. These fired 30+ times/second.
   12. **Shelter triggers on low HP alone:** Below 50% HP at night, bot shelters regardless of damage source or recency. Above 50%, still requires recent hostile damage (post-combat lull). Previously bot sat at 0.2 HP at night without sheltering because the "recently damaged by hostile" check had expired.
+  13. **Eat-then-shelter priority:** New `HealingService.stabilizeEat(bot, maxBites)` — blocking eat loop for worker threads. Pre-shelter: eat max 2 bites to stabilize (only 1 if rotten flesh), then shelter immediately. Inside shelter: eat up to 5 items while safe. Replaces blind 5-second sleep in both dig-down and cliff shelters.
 
 ## 2026-03-16
 

@@ -122,7 +122,44 @@ public final class HealingService {
 
         return consumeFood(bot, foodSlot.getAsInt());
     }
-    
+
+    /**
+     * Eat up to {@code maxBites} food items, blocking between each bite.
+     * Designed for worker threads (pre-shelter stabilization, in-shelter eating).
+     * Stops early if hunger is high enough for natural regen.
+     * Rotten flesh is only tried as the very first bite (don't waste time on more).
+     *
+     * @return number of items consumed
+     */
+    public static int stabilizeEat(ServerPlayerEntity bot, int maxBites) {
+        int eaten = 0;
+        for (int i = 0; i < maxBites; i++) {
+            if (bot == null || bot.isDead() || bot.isRemoved()) break;
+            HungerManager hunger = bot.getHungerManager();
+            if (hunger.getFoodLevel() >= REGEN_READY_FOOD_LEVEL && hunger.getSaturationLevel() > 0)
+                break; // hunger high enough for natural regen
+
+            PlayerInventory inv = bot.getInventory();
+            OptionalInt slot = findCheapestSafeFood(inv);
+            if (slot.isEmpty()) {
+                // Desperate: try rotten flesh but only as the first bite
+                if (eaten == 0) slot = findDesperateFood(inv);
+                if (slot.isEmpty()) break;
+            }
+
+            final int foodSlot = slot.getAsInt();
+            try {
+                bot.getCommandSource().getServer().execute(() -> consumeFood(bot, foodSlot));
+                Thread.sleep(1700); // vanilla eat time ~1.6s
+                eaten++;
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+        }
+        return eaten;
+    }
+
     /**
      * Manual heal command - eat until fully satiated
      */
