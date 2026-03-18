@@ -139,7 +139,7 @@ public final class BotFleeService {
      * <p>Trigger conditions (all must be true):
      * <ul>
      *   <li>Emergency tactics enabled</li>
-     *   <li>Below 50% HP, OR damaged by hostile within last 10s</li>
+     *   <li>Any missing health, OR damaged by hostile within last 10s</li>
      *   <li>Not near a base (no baseTarget set)</li>
      *   <li>Has placeable blocks</li>
      *   <li>Not on shelter cooldown (60s between attempts)</li>
@@ -158,13 +158,10 @@ public final class BotFleeService {
             if (world.isDay() && !world.isThundering()) return false;
         }
 
-        // Must be hurt — shelter is pointless at full health
-        float healthRatio = bot.getHealth() / bot.getMaxHealth();
-        if (healthRatio >= 0.50f) {
-            // Above 50%: only shelter if damaged by hostile recently (post-combat lull)
-            if (!BotCombatCalloutService.wasRecentlyDamagedByHostile(bot, currentTick, 200)) return false;
-        }
-        // Below 50% HP at night: shelter regardless of damage source or timing
+        // Must be hurt or recently damaged — shelter is pointless at full health on a peaceful night
+        boolean hurt = bot.getHealth() + 0.01f < bot.getMaxHealth();
+        boolean recentHostileDamage = BotCombatCalloutService.wasRecentlyDamagedByHostile(bot, currentTick, 200);
+        if (!hurt && !recentHostileDamage) return false;
 
         // Must not be near a base (has somewhere safe to go)
         BotCommandStateService.State state = BotCommandStateService.stateFor(bot);
