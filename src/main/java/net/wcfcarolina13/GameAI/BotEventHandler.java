@@ -1271,6 +1271,8 @@ public class BotEventHandler {
 
         bot.setVelocity(Vec3d.ZERO);
         bot.setInvulnerable(false); // ensure no stale invulnerability from a previous respawn
+        bot.timeUntilRegen = 0;     // clear vanilla damage-immunity cooldown
+        bot.hurtTime = 0;           // clear vanilla hurt animation timer
         if (srv != null) {
             lastRespawnHandledTick = srv.getTicks();
         }
@@ -1307,10 +1309,13 @@ public class BotEventHandler {
             }
 
             LOGGER.warn("AFTER_RESPAWN did not fire for bot {}; forcing respawn routine", bot.getName().getString());
-            if (bot.isDead()) {
-                bot.setHealth(bot.getMaxHealth());
+            // Resolve the current entity — the captured 'bot' may be stale (old entity from death event)
+            ServerPlayerEntity currentBot = srv.getPlayerManager().getPlayer(bot.getUuid());
+            if (currentBot == null) currentBot = bot;
+            if (currentBot.isDead()) {
+                currentBot.setHealth(currentBot.getMaxHealth());
             }
-            onBotRespawn(bot);
+            onBotRespawn(currentBot);
         }));
     }
 
@@ -1326,6 +1331,15 @@ public class BotEventHandler {
             if (server.getTicks() % 100 == 0) {
                 LOGGER.warn("Cleared stale invulnerability on bot {}", bot.getName().getString());
             }
+        }
+
+        // Diagnostic: log damage-immunity state for 200 ticks after respawn
+        long ticksSinceRespawn = lastRespawnHandledTick > 0 ? server.getTicks() - lastRespawnHandledTick : -1;
+        if (ticksSinceRespawn >= 0 && ticksSinceRespawn <= 200 && ticksSinceRespawn % 20 == 0) {
+            LOGGER.info("[respawn-diag] {} tick+{}: invulnerable={} timeUntilRegen={} hurtTime={} hp={} alive={} removed={}",
+                    bot.getName().getString(), ticksSinceRespawn,
+                    bot.isInvulnerable(), bot.timeUntilRegen, bot.hurtTime,
+                    String.format("%.1f", bot.getHealth()), bot.isAlive(), bot.isRemoved());
         }
 
         BotCommandStateService.State state = stateFor(bot);

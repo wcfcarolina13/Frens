@@ -758,6 +758,7 @@ public class Frens implements ModInitializer {
                                 serverPlayer.getX(), serverPlayer.getY(), serverPlayer.getZ(),
                                 damageSource.getType(), serverPlayer.isAlive());
                         net.wcfcarolina13.GameAI.services.BotCombatCalloutService.resetCombatState(serverPlayer.getUuid());
+                        net.wcfcarolina13.GameAI.services.BotFleeService.reset(serverPlayer.getUuid());
                         QTableStorage.saveLastKnownState(BotEventHandler.getCurrentState(), BotEventHandler.qTableDir + "/lastKnownState.bin");
                         BotEventHandler.botDied = true; // set flag for bot's death.
                         BotEventHandler.ensureRespawnHandled(serverPlayer);

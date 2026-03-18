@@ -49,6 +49,8 @@ public final class BotFleeService {
     private static final ConcurrentHashMap<UUID, Long> SHELTER_COOLDOWN = new ConcurrentHashMap<>();
     /** Tracks bots currently inside a tactical shelter (value = tick entered). */
     private static final ConcurrentHashMap<UUID, Long> SHELTER_ACTIVE = new ConcurrentHashMap<>();
+    /** Generation counter — incremented on death/respawn to invalidate stale shelter threads. */
+    private static final ConcurrentHashMap<UUID, Long> SHELTER_GENERATION = new ConcurrentHashMap<>();
 
     /** Solid blocks suitable for sealing shelter entrances (mined from stone/dirt). */
     private static final List<Item> SEAL_BLOCKS = List.of(
@@ -200,9 +202,24 @@ public final class BotFleeService {
             return false;
         }
 
-        // Cooldown: don't spam shelter attempts (60 second cooldown)
-        long lastAttempt = SHELTER_COOLDOWN.getOrDefault(bot.getUuid(), 0L);
-        if (currentTick - lastAttempt < 600) return false; // 30-second cooldown
+        // Skip cooldown when phantoms are the only threat — bot needs immediate cover
+        boolean phantomBypass = false;
+        if (bot.getEntityWorld() instanceof ServerWorld shelterWorld) {
+            List<? extends net.minecraft.entity.mob.MobEntity> nearbyMobs =
+                    shelterWorld.getEntitiesByClass(
+                            net.minecraft.entity.mob.MobEntity.class,
+                            bot.getBoundingBox().expand(24),
+                            e -> e.isAlive() && !e.isRemoved()
+                                    && e.getTarget() != null && e.getTarget().equals(bot));
+            phantomBypass = !nearbyMobs.isEmpty()
+                    && nearbyMobs.stream().allMatch(e -> e.getType() == EntityType.PHANTOM);
+        }
+
+        // Cooldown: don't spam shelter attempts (30 second cooldown, bypassed for phantom-only threats)
+        if (!phantomBypass) {
+            long lastAttempt = SHELTER_COOLDOWN.getOrDefault(bot.getUuid(), 0L);
+            if (currentTick - lastAttempt < 600) return false;
+        }
 
         SHELTER_COOLDOWN.put(bot.getUuid(), currentTick);
 
@@ -212,14 +229,17 @@ public final class BotFleeService {
                 String.format("%.1f", bot.getMaxHealth()));
 
         // Quick stabilize (1-2 bites) then shelter — don't sit eating in the open
+        final long gen = getGeneration(bot.getUuid());
         Thread t = new Thread(() -> {
+            if (isStaleShelter(bot, gen)) return;
             if (bot.getHealth() < bot.getMaxHealth() * 0.5f) {
                 int eaten = HealingService.stabilizeEat(bot, 2);
                 LOGGER.info("Bot {} stabilized with {} bites before shelter (hp={})",
                         bot.getName().getString(), eaten,
                         String.format("%.1f", bot.getHealth()));
             }
-            runEmergencyTacticChain(bot, false, true);
+            if (isStaleShelter(bot, gen)) return;
+            runEmergencyTacticChain(bot, gen, false, true);
         }, "proactive-shelter-" + bot.getName().getString());
         t.setDaemon(true);
         t.start();
@@ -232,6 +252,13 @@ public final class BotFleeService {
 
         // Critical health — flee regardless
         if (healthRatio <= 0.30f) return true;
+
+        // Phantom-only threat: unarmed bot with no shield can't fight phantoms — flee to cover
+        boolean allPhantoms = hostiles.stream().allMatch(e -> e.getType() == EntityType.PHANTOM);
+        boolean hasShield = bot.getOffHandStack().isOf(Items.SHIELD) || bot.getMainHandStack().isOf(Items.SHIELD);
+        if (allPhantoms && !BotActions.hasRangedWeapon(bot) && !hasShield) {
+            return true;
+        }
 
         // Equipment-based flee threshold: better gear = stand your ground longer.
         // With sweep attacks the bot can handle groups, so well-armed bots stay.
@@ -465,7 +492,8 @@ public final class BotFleeService {
                 String.format("%.1f", bot.getMaxHealth()),
                 phantomsPresent, hasBlocks);
 
-        Thread t = new Thread(() -> runEmergencyTacticChain(bot, phantomsPresent, hasBlocks),
+        final long gen = getGeneration(bot.getUuid());
+        Thread t = new Thread(() -> runEmergencyTacticChain(bot, gen, phantomsPresent, hasBlocks),
                 "emergency-tactics-" + bot.getName().getString());
         t.setDaemon(true);
         t.start();
@@ -477,10 +505,12 @@ public final class BotFleeService {
      * attempted and verified — if it doesn't actually change the bot's situation,
      * the next tactic in the chain is tried.
      */
-    private static void runEmergencyTacticChain(ServerPlayerEntity bot,
+    private static void runEmergencyTacticChain(ServerPlayerEntity bot, long gen,
                                                  boolean phantomsPresent, boolean hasBlocks) {
         // 1. Pillar up — DISABLED: ScaffoldService placement consistently fails
         //    during emergency context (bot moving/being hit). Needs investigation.
+
+        if (isStaleShelter(bot, gen)) return;
 
         // 2. Dig into cliff face — most reliable: mine in, seal entrance, fully enclosed.
         if (bot.getEntityWorld() instanceof ServerWorld world3) {
@@ -488,7 +518,7 @@ public final class BotFleeService {
             if (cliffDir != null) {
                 LOGGER.info("Bot {} trying emergency cliff-dig {}",
                         bot.getName().getString(), cliffDir.asString());
-                emergencyCliffDig(bot, cliffDir);
+                emergencyCliffDig(bot, cliffDir, gen);
                 return;
             }
         }
@@ -497,7 +527,7 @@ public final class BotFleeService {
         BlockPos digSpot = bot.getBlockPos();
         LOGGER.info("Bot {} trying emergency dig-down at {}",
                 bot.getName().getString(), digSpot.toShortString());
-        emergencyDigDown(bot, digSpot);
+        emergencyDigDown(bot, digSpot, gen);
 
         // 4. Wall-off — DISABLED: detection finds false positives (bot's own placed blocks,
         //    partial shelters) and reports success without actually protecting the bot.
@@ -538,8 +568,9 @@ public final class BotFleeService {
      * Emergency dig-down: mine 3 blocks straight down at current position,
      * then cap the hole with a block for overhead protection.
      */
-    private static void emergencyDigDown(ServerPlayerEntity bot, BlockPos digPos) {
+    private static void emergencyDigDown(ServerPlayerEntity bot, BlockPos digPos, long gen) {
         try {
+            if (isStaleShelter(bot, gen)) return;
             // Stop moving before digging.
             bot.getCommandSource().getServer().execute(() -> {
                 bot.setSprinting(false);
@@ -551,6 +582,7 @@ public final class BotFleeService {
             // Mine 3 blocks straight down.
             int blocksMined = 0;
             for (int depth = 0; depth < 3; depth++) {
+                if (isStaleShelter(bot, gen)) return;
                 BlockPos below = digPos.down(depth + 1);
                 if (bot.getEntityWorld().getBlockState(below).isAir()) continue;
                 MiningTool.mineBlock(bot, below, false).join();
@@ -564,10 +596,14 @@ public final class BotFleeService {
                 return;
             }
 
+            if (isStaleShelter(bot, gen)) return;
+
             // Wait to fall into the hole and auto-collect mined block drops.
             // Block drops appear at the mined block's position and take a moment to
             // settle and be picked up. Longer wait = more reliable collection.
             Thread.sleep(1500);
+
+            if (isStaleShelter(bot, gen)) return;
 
             // Cap the hole at the original ground level (digPos).
             // The bot has fallen into the hole, so digPos is now above.
@@ -594,7 +630,8 @@ public final class BotFleeService {
             });
             Thread.sleep(300);
 
-            // Mark shelter active
+            // Mark shelter active — only if thread is still valid
+            if (isStaleShelter(bot, gen)) return;
             SHELTER_ACTIVE.put(bot.getUuid(), (long) server.getTicks());
 
             LOGGER.info("Bot {} dug emergency bunker at {} (mined={}, capPlaced={})",
@@ -818,8 +855,9 @@ public final class BotFleeService {
      * → mine deeper layers → pathfind to back (picks up remaining drops) → seal.</p>
      */
     private static void emergencyCliffDig(ServerPlayerEntity bot,
-                                          net.minecraft.util.math.Direction digDir) {
+                                          net.minecraft.util.math.Direction digDir, long gen) {
         try {
+            if (isStaleShelter(bot, gen)) return;
             MinecraftServer server = bot.getCommandSource().getServer();
 
             // Stop moving.
@@ -848,13 +886,18 @@ public final class BotFleeService {
                 Thread.sleep(1000);
             }
 
+            if (isStaleShelter(bot, gen)) return;
+
             // Stage 1: mine entrance (2 blocks)
             LOGGER.debug("Cliff-dig: mining 3-deep tunnel {} → {} → {}",
                     wallFeet.toShortString(), deepFeet.toShortString(), deeperFeet.toShortString());
             MiningTool.mineBlock(bot, wallFeet, false).join();
             Thread.sleep(200);
+            if (isStaleShelter(bot, gen)) return;
             MiningTool.mineBlock(bot, wallHead, false).join();
             Thread.sleep(500); // let drops settle
+
+            if (isStaleShelter(bot, gen)) return;
 
             // Stage 2: pathfind into entrance — picks up block drops from layer 1
             MovementService.MovementPlan entrancePlan = new MovementService.MovementPlan(
@@ -864,15 +907,22 @@ public final class BotFleeService {
             MovementService.execute(bot.getCommandSource(), bot, entrancePlan, Boolean.FALSE, true);
             Thread.sleep(600); // item pickup delay (10 ticks = 500ms)
 
+            if (isStaleShelter(bot, gen)) return;
+
             // Stage 3: mine middle + back layers (4 blocks) from inside entrance
             MiningTool.mineBlock(bot, deepFeet, false).join();
             Thread.sleep(200);
+            if (isStaleShelter(bot, gen)) return;
             MiningTool.mineBlock(bot, deepHead, false).join();
             Thread.sleep(200);
+            if (isStaleShelter(bot, gen)) return;
             MiningTool.mineBlock(bot, deeperFeet, false).join();
             Thread.sleep(200);
+            if (isStaleShelter(bot, gen)) return;
             MiningTool.mineBlock(bot, deeperHead, false).join();
             Thread.sleep(500); // let drops settle
+
+            if (isStaleShelter(bot, gen)) return;
 
             // Stage 4: pathfind to the back of the tunnel — picks up remaining drops
             MovementService.MovementPlan backPlan = new MovementService.MovementPlan(
@@ -936,7 +986,8 @@ public final class BotFleeService {
             });
             Thread.sleep(200);
 
-            // Mark shelter active
+            // Mark shelter active — only if thread is still valid
+            if (isStaleShelter(bot, gen)) return;
             SHELTER_ACTIVE.put(bot.getUuid(), (long) server.getTicks());
 
             LOGGER.info("Bot {} dug emergency cliff shelter {} (sealed={})",
@@ -1051,10 +1102,26 @@ public final class BotFleeService {
         }
     }
 
+    /** Increment generation counter — invalidates all prior shelter threads for this bot. */
+    private static long incrementGeneration(UUID botId) {
+        return SHELTER_GENERATION.merge(botId, 1L, Long::sum);
+    }
+
+    /** Get current generation for a bot. */
+    private static long getGeneration(UUID botId) {
+        return SHELTER_GENERATION.getOrDefault(botId, 0L);
+    }
+
+    /** Returns true if the shelter thread is stale (bot died/respawned since thread started). */
+    private static boolean isStaleShelter(ServerPlayerEntity bot, long startGen) {
+        return !bot.isAlive() || bot.isRemoved() || getGeneration(bot.getUuid()) != startGen;
+    }
+
     /** Clear flee state for a bot (on death, respawn, or mode change). */
     public static void reset(UUID botId) {
         FLEE_STATES.remove(botId);
         SHELTER_ACTIVE.remove(botId);
         SHELTER_COOLDOWN.remove(botId);
+        incrementGeneration(botId);
     }
 }

@@ -1,6 +1,17 @@
 # Changelog & History
 
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
+## 2026-03-18
+
+- **Fix stale shelter threads, immortal bot, phantom flee:**
+  1. **Shelter generation counter:** `BotFleeService` tracks a per-bot generation counter incremented on death/respawn. Shelter threads capture gen at start, bail out via `isStaleShelter()` before each mining/movement/sleep step and before setting `SHELTER_ACTIVE`. Prevents stale threads from writing shelter state after bot respawns.
+  2. **Reset on death:** `BotFleeService.reset()` now called in AFTER_DEATH handler (previously only on respawn), immediately invalidating shelter threads when the bot dies.
+  3. **Vanilla damage timers:** `onBotRespawn()` now zeroes `timeUntilRegen` and `hurtTime` alongside the boolean `setInvulnerable(false)`. Belt-and-suspenders fix for the immortal-bot-after-respawn bug.
+  4. **Stale entity reference:** `ensureRespawnHandled()` now resolves the current entity from PlayerManager instead of using the captured (possibly stale) death-event reference.
+  5. **Respawn diagnostic logging:** `updateBehavior()` logs invulnerability/damage-immunity state every second for 10 seconds after respawn to help diagnose any remaining immortality issues.
+  6. **Phantom flee:** `shouldFlee()` now triggers for phantom-only threats when bot has no ranged weapon and no shield. Unarmed bots flee immediately to seek cover.
+  7. **Phantom shelter cooldown bypass:** `tryProactiveShelter()` skips the 30s cooldown when nearby hostiles are all phantoms targeting the bot, enabling immediate shelter construction.
+
 ## 2026-03-17
 
 - **Fix flee-to-death + post-respawn unresponsiveness:**
