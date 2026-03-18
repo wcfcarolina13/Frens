@@ -149,6 +149,8 @@ public final class BotFleeService {
      */
     public static boolean tryProactiveShelter(ServerPlayerEntity bot, net.minecraft.server.MinecraftServer server) {
         if (bot == null || server == null) return false;
+        // Already sheltered — don't dig another hole
+        if (isInShelter(bot.getUuid())) return true;
         if (!SkillPreferences.emergencyTactics(bot)) return false;
 
         long currentTick = server.getTicks();
