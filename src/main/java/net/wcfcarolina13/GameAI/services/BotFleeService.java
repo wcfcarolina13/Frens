@@ -181,7 +181,7 @@ public final class BotFleeService {
 
         // Cooldown: don't spam shelter attempts (60 second cooldown)
         long lastAttempt = SHELTER_COOLDOWN.getOrDefault(bot.getUuid(), 0L);
-        if (currentTick - lastAttempt < 1200) return false;
+        if (currentTick - lastAttempt < 600) return false; // 30-second cooldown
 
         SHELTER_COOLDOWN.put(bot.getUuid(), currentTick);
 
@@ -825,21 +825,27 @@ public final class BotFleeService {
             Thread.sleep(200);
 
             // Step into the entrance so we can reach the deep blocks
-            server.execute(() ->
-                    FollowMovementService.moveToward(bot, Vec3d.ofCenter(wallFeet), 0.5, true, null));
-            Thread.sleep(600);
+            Vec3d wallCenter = Vec3d.ofCenter(wallFeet);
+            for (int step = 0; step < 4; step++) {
+                server.execute(() ->
+                        FollowMovementService.moveToward(bot, wallCenter, 1.0, true, null));
+                Thread.sleep(250);
+            }
+            Thread.sleep(500);
 
             MiningTool.mineBlock(bot, deepFeet, false).join();
             Thread.sleep(200);
             MiningTool.mineBlock(bot, deepHead, false).join();
+            Thread.sleep(500);
 
-            // Wait for block drops to settle and be picked up
-            Thread.sleep(1000);
-
-            // Step into the deep position (2 blocks inside the cliff)
-            server.execute(() ->
-                    FollowMovementService.moveToward(bot, Vec3d.ofCenter(deepFeet), 0.5, true, null));
-            Thread.sleep(800);
+            // Walk deep inside the tunnel (2 blocks in)
+            Vec3d deepCenter = Vec3d.ofCenter(deepFeet);
+            for (int step = 0; step < 6; step++) {
+                server.execute(() ->
+                        FollowMovementService.moveToward(bot, deepCenter, 1.0, true, null));
+                Thread.sleep(250);
+            }
+            Thread.sleep(500);
 
             // Seal the entrance — place blocks at the original wall positions
             boolean[] sealed = {false};
@@ -847,8 +853,24 @@ public final class BotFleeService {
                 boolean f = BotActions.placeBlockAt(bot, wallFeet);
                 boolean h = BotActions.placeBlockAt(bot, wallHead);
                 sealed[0] = f && h;
+                if (!sealed[0]) {
+                    LOGGER.info("Bot {} seal failed (feet={}, head={}), retrying...",
+                            bot.getName().getString(), f, h);
+                }
             });
-            Thread.sleep(300);
+            Thread.sleep(400);
+            // Retry seal if first attempt failed
+            if (!sealed[0]) {
+                server.execute(() -> {
+                    if (!bot.getEntityWorld().getBlockState(wallFeet).blocksMovement())
+                        BotActions.placeBlockAt(bot, wallFeet);
+                    if (!bot.getEntityWorld().getBlockState(wallHead).blocksMovement())
+                        BotActions.placeBlockAt(bot, wallHead);
+                    sealed[0] = bot.getEntityWorld().getBlockState(wallFeet).blocksMovement()
+                            && bot.getEntityWorld().getBlockState(wallHead).blocksMovement();
+                });
+                Thread.sleep(300);
+            }
 
             // Place a torch inside if available — select torch, place at bot's feet (air on solid floor)
             server.execute(() -> {
