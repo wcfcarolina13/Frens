@@ -84,6 +84,9 @@ public final class BotAutoHuntService {
             if (BotEventHandler.getCurrentMode(bot) != BotEventHandler.Mode.IDLE) {
                 continue;
             }
+            if (BotFleeService.isInShelter(bot.getUuid())) {
+                continue;
+            }
             if (bot.getHungerManager().getFoodLevel() > STARVING_THRESHOLD) {
                 continue;
             }

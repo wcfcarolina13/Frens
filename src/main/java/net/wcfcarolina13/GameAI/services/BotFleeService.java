@@ -93,8 +93,13 @@ public final class BotFleeService {
             // But NOT if thundering (undead don't burn in storms).
             if (!world.isThundering() && (tod >= 23460 || tod < 12000)) {
                 SHELTER_ACTIVE.remove(bot.getUuid());
-                LOGGER.info("Bot {} shelter cleared — undead burning (tod={})",
+                LOGGER.info("Bot {} shelter cleared — safe to emerge (tod={})",
                         bot.getName().getString(), tod);
+                // Launch break-free mining — bot may be physically enclosed
+                Thread t = new Thread(() -> breakFreeFromShelter(bot),
+                        "shelter-breakfree-" + bot.getName().getString());
+                t.setDaemon(true);
+                t.start();
                 return false;
             }
         }

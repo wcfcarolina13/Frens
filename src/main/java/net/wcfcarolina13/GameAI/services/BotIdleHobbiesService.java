@@ -200,6 +200,10 @@ public final class BotIdleHobbiesService {
                 noteBlocked(bot, nowTick, "active-task");
                 continue;
             }
+            if (BotFleeService.isInShelter(bot.getUuid())) {
+                noteBlocked(bot, nowTick, "sheltered");
+                continue;
+            }
 
             int tod = (int) (world.getTimeOfDay() % 24_000L);
             if (tod >= DONT_START_AFTER_TOD) {

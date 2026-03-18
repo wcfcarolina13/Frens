@@ -1486,9 +1486,9 @@ public class BotEventHandler {
                 return handleReturnToBase(bot, state);
             }
             default -> {
-                // Tactical shelter: suppress idle behaviors but let combat run normally
+                // Tactical shelter: suppress idle behaviors but let combat run normally.
+                // validateAndTickShelter auto-clears + launches break-free mining at dawn.
                 if (BotFleeService.validateAndTickShelter(bot, server)) {
-                    BotFleeService.checkDaylightBreakFree(bot, server);
                     if (augmentedHostiles.isEmpty()) {
                         return true; // safe — stay sheltered
                     }

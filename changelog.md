@@ -3,6 +3,10 @@
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 ## 2026-03-18
 
+- **Fix shelter breakout + guard auto-hunt/hobbies:**
+  12. **Break-free mining on shelter clear:** `validateAndTickShelter()` now launches `breakFreeFromShelter()` when clearing the shelter flag at dawn. Previously, break-free mining never fired because `validateAndTickShelter()` cleared `SHELTER_ACTIVE` before `checkDaylightBreakFree()` could read it.
+  13. **Shelter guard for auto-hunt/hobbies:** `BotAutoHuntService` and `BotIdleHobbiesService` now skip when `isInShelter()` is true. Prevents starting tasks into a physically trapped bot.
+
 - **Fix phantom behavior loop, shelter spam, "Terminating" chat spam:**
   8. **Shelter thread mutex:** `tryProactiveShelter()` now uses an `AtomicBoolean` per-bot lock to prevent duplicate shelter threads. Previously, 3 threads could launch in the same tick before the cooldown was set.
   9. **No false shelter on failed cap:** `emergencyDigDown()` only sets `SHELTER_ACTIVE` when `capPlaced=true`. Previously, a capless hole still marked the bot as sheltered, trapping it in a loop where it couldn't flee or re-shelter.
