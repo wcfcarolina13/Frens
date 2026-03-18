@@ -1380,6 +1380,15 @@ public class BotEventHandler {
             return true; // suppress follow movement during linger
         }
 
+        // ---- Proactive shelter (IDLE only, before idle sweep) ----
+        // At night in survival, idle bots seek shelter. Must run before idle sweep
+        // otherwise ground item collection suppresses shelter indefinitely.
+        if (mode == Mode.IDLE && augmentedHostiles.isEmpty()) {
+            if (BotFleeService.tryProactiveShelter(bot, server)) {
+                return true;
+            }
+        }
+
         // ---- Opportunistic idle drop-sweep (FOLLOW / STAY / IDLE) ----
         // After 15 s of idle (no hostiles, player/bot stationary), the bot walks to nearby
         // ground items.  Cancels the moment the player moves >1 block (FOLLOW) or hostiles appear.
@@ -1491,10 +1500,7 @@ public class BotEventHandler {
                     }
                     return true; // stay alert, don't start idle behaviors
                 }
-                // Proactive shelter: if recently mauled and hurt, build shelter during this lull
-                if (BotFleeService.tryProactiveShelter(bot, server)) {
-                    return true;
-                }
+                // tryProactiveShelter is now called before the mode switch (pre-idle-sweep)
                 if (BotArrowRecoveryService.tryRecoverMissedArrows(bot, server, null, 24.0D)) {
                     return true;
                 }

@@ -155,7 +155,13 @@ public final class BotFleeService {
 
         // Don't build shelter during daytime — undead burn, no point entombing
         if (bot.getEntityWorld() instanceof ServerWorld world) {
-            if (world.isDay() && !world.isThundering()) return false;
+            if (world.isDay() && !world.isThundering()) {
+                if (currentTick % 200 == 0) {
+                    LOGGER.debug("[ShelterCheck] {} skipped: daytime (tod={})",
+                            bot.getName().getString(), world.getTimeOfDay() % 24000L);
+                }
+                return false;
+            }
         }
 
         // Skip shelter on peaceful difficulty — no hostile mobs spawn
@@ -164,7 +170,12 @@ public final class BotFleeService {
 
         // Must not be near a base (has somewhere safe to go)
         BotCommandStateService.State state = BotCommandStateService.stateFor(bot);
-        if (state != null && state.baseTarget != null) return false;
+        if (state != null && state.baseTarget != null) {
+            if (currentTick % 200 == 0) {
+                LOGGER.debug("[ShelterCheck] {} skipped: has base target", bot.getName().getString());
+            }
+            return false;
+        }
 
         // Cooldown: don't spam shelter attempts (60 second cooldown)
         long lastAttempt = SHELTER_COOLDOWN.getOrDefault(bot.getUuid(), 0L);
