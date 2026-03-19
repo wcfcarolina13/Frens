@@ -1,131 +1,123 @@
-# Handoff: Bot Shelter & Combat Bugs
+# Handoff: Shelter System + Auto-Return Improvements
 
-> Created 2026-03-18. Context for a fresh Claude Code session continuing this work.
+> Created 2026-03-19. Context for a fresh Claude Code session.
 
-## What Was Done This Session
+## What Was Done This Session (2026-03-18 → 2026-03-19)
 
-### Fixed (verified working in-game)
-1. **Cliff-dig tunnel** — Now 3-deep with `MovementService.execute()` pathfinding + `nudgeTowardUntilClose` fallback. Bots mine all 6 blocks from outside, pathfind to entrance (picks up drops), mine deeper, pathfind to back, seal.
-2. **Tunnel sealing** — `allowIntersecting=true` on `tryPlaceBlockAt` + `SEAL_BLOCKS` priority list (cobblestone, stone, dirt, planks, etc.). Prevents wheat seeds and fixes bounding-box rejection. Log confirms `sealed=true` for Jake and Steve.
-3. **Shelter timeout** — Replaced tick-duration timeout with time-of-day check: clears when `tod >= 23460` (undead burn) or `tod < 12000` (daytime), unless thundering.
-4. **Phantom night behavior** — Non-diving phantom + nighttime + no ground threats → `engageHostiles()` returns false, letting shelter logic trigger instead of "raise shield and wait."
-5. **Hostile damage clears shelter** — In `ALLOW_DAMAGE` handler, hostile mob hits now call `clearShelter()` so the bot fights back if mobs breach the shelter.
+### Bugs Fixed from Previous HANDOFF
+1. **Immortal bot after respawn** — Zeroed `timeUntilRegen`/`hurtTime` on respawn; fixed stale entity ref in `ensureRespawnHandled()`; diagnostic logging for 200 ticks post-respawn.
+2. **Stale shelter threads** — Generation counter (`SHELTER_GENERATION`) incremented on death/respawn. Shelter threads capture gen at start, bail via `isStaleShelter()` before each blocking step.
+3. **Phantom flee** — `shouldFlee()` triggers for phantom-only threats (no ranged/shield). `tryProactiveShelter()` bypasses 30s cooldown for phantom-only.
 
-### Fixes from earlier in this session (prior to context compaction)
-6. **Traversability-aware flee** — 5 candidate directions probed for wall clearance; null = stand and fight.
-7. **Faster stuck detection** — 60→25 ticks, 5→2 blocks.
-8. **Post-respawn combat state reset** — `BotCombatCalloutService.resetCombatState()` on death and respawn.
-9. **Teleport clears shelter** — `createFakePlayer.teleportTo()` override calls `clearShelter()`.
-10. **Shelter re-dig prevention** — `isInShelter()` check at top of `tryProactiveShelter()`.
-11. **HealingService.stabilizeEat()** — Blocking eat loop for worker threads; caps rotten flesh to 1 bite.
+### Shelter System Overhaul
+4. **ShelterInfo metadata** — `SHELTER_ACTIVE` stores `ShelterInfo(tick, type, capPos, entryDir)` instead of just tick. Both shelter types record cap position and entry direction.
+5. **Type-aware break-free** — Cliff: mine seal blocks + pathfind outward. Dig-down: mine cap + pillar up with sneaking. Generic fallback for unknown types.
+6. **Surface escape** — `escapeToSurface()` pillars up (mine overhead + jump + place block below, sneaking) until sky visible. Max 30 blocks.
+7. **Skylight pathfinding** — `findNearestSkylight(world, center, 16)` scans 16-block radius for sky-visible positions. Used in `escapeToSurface()` (before pillar), `BotStuckService` (before mine-escape), and `ReturnBaseStuck` (before mining toward base).
+8. **Command-triggered breakout** — `setMode()` calls `clearShelterAndBreakFree()`. Skill commands join break-free thread before executing.
+9. **Shelter mutex** — `AtomicBoolean` per-bot prevents duplicate shelter threads.
+10. **Dig-down cap validation** — `SHELTER_ACTIVE` only set when `capPlaced=true`.
+11. **Torch in dig-down** — Both shelter types place torch inside. Dig-down uses `digPos.down(3)` (bunker floor), not `bot.getBlockPos()` (race fix). 500ms settle delay.
+12. **Torch collection on break-free** — `collectNearbyTorch()` mines adjacent torches before exit.
 
-## Open Bugs (Unresolved)
+### Stuck Detection + Escape
+13. **Bounded-movement stuck** — Tracks if bot stays within 2-block radius for 60 ticks (walking into wall). Triggers mine-escape or skylight pathfinding.
+14. **Horizontal enclosure detection** — `analyzeEnvironment()` tracks `horizontallyEnclosed` flag. Mine-escape fires when all 4 directions blocked.
+15. **On-join trap detection** — 2 seconds after spawn, if bot hasn't moved >2 blocks and no sky visible, launches `forceBreakFree()`. Skips if bot already left IDLE mode (prevents race with auto-return).
 
-### Bug 1: Immortal Bot After Respawn (CRITICAL)
-**Symptom**: After death+respawn, the bot takes zero damage from both players and mobs. Persists until server restart.
+### Mining Fixes
+16. **MiningTool LoS check** — Raycasts from bot eye to block center; rejects if different block hit first.
+17. **Progressive break animation** — `world.setBlockBreakingInfo()` sends crack stages 0-9 each tick.
+18. **Mining timeout scales** — `max(12s, requiredTicks * 50ms + 5s)` instead of fixed 12s.
+19. **ReturnBaseStuck delegated to MiningTool** — Was calling `tryBreakBlock()` directly (instant removal). Now uses `MiningTool.mineBlock().join()`.
 
-**What we know**:
-- `setInvulnerable(true)` is never called anywhere in current code
-- Three safety nets exist that call `setInvulnerable(false)`: `onBotRespawn()` (line 1273), `updateBehavior()` tick (line 1324), `ALLOW_DAMAGE` handler (line 681)
-- The `ALLOW_DAMAGE` handler returns `true` (allows damage) — it never blocks damage
-- No `invulnerableTime` manipulation exists in our code
-- Bot health stays at 20.0/20.0 with no `hurt_grunt` sounds after respawn
+### Auto-Return + Notifications
+20. **Notification queue** — `NavigationHudOverlay` uses `ConcurrentLinkedQueue`. Sequential display, "(N more)" indicator, 60s auto-expire.
+21. **Skip-permission toggle** — `BotHomeService.isAutoReturnSkipPermission()` persisted toggle. Config UI button with tooltip. Command: `/bot auto_return_skip_permission toggle <target>`.
+22. **Shelter validation all modes** — `validateAndTickShelter()` runs before mode switch (was IDLE-only). Clears stale shelter at dawn in FOLLOW/GUARD/PATROL.
+23. **Shelter self-clear in hobbies/hunt** — Auto-clears stale shelter if daytime + not thundering.
 
-**Investigation leads**:
-- `createFakePlayer.onDeath()` calls `setHealth(20)` then `kill(deathMessage)` — could `kill()` be interfering? ([createFakePlayer.java:225-232](src/main/java/net/wcfcarolina13/Entity/createFakePlayer.java#L225))
-- `AFTER_RESPAWN did not fire` warning appears — respawn is force-triggered by `ensureRespawnHandled()` at tick+5. Race condition? ([BotEventHandler.java:1293-1315](src/main/java/net/wcfcarolina13/GameAI/BotEventHandler.java#L1293))
-- Is the fake player actually being ticked after respawn? Check if `updateBehavior()` runs (the invulnerability safety net depends on it)
-- Could vanilla `ServerPlayerEntity` respawn set `invulnerableTime` (int counter, different from `invulnerable` boolean)? Our safety nets only check `isInvulnerable()` which reads the boolean flag, NOT the timer.
-- Try: add `bot.timeUntilRegen = 0;` in `onBotRespawn()` — vanilla sets damage immunity ticks after damage
-- Try: log `bot.isInvulnerable()`, `bot.invulnerableTime`, `bot.timeUntilRegen` on every tick after respawn
+### Other
+24. **"Terminating" spam suppressed** — `AutoFaceEntity` skips danger alert for non-diving phantoms at night.
+25. **Night break-free guard** — On-join trap detection at night sets shelter instead of breaking free into danger.
+26. **Wander robustness** — 3-4 steps (was 1-2), `allowPursuit=true`, step clamp ceiling 5.
+27. **Compromised shelter override** — `tickFlee()` clears shelter if bot taking hostile damage.
 
-### Bug 2: Shelter Thread Survives Death/Respawn
-**Symptom**: The `proactive-shelter-*` daemon thread started before death continues running after respawn with stale coordinates. The thread tried to pathfind from the new spawn position (15, 90, -48) to the OLD tunnel location (57, 50, -50) — 2925 blocks² away.
+## Current Architecture
 
-**Evidence** (latest.log):
+### SHELTER_ACTIVE Map
 ```
-[proactive-shelter-Test] Movement execute: dest=(59, 48, -49) player=Test
-[proactive-shelter-Test] [BaritonePathFinder] Start=(15,90,-48) Target=(57,50,-50)  ← NEW spawn, OLD tunnel
-[proactive-shelter-Test] Bot Test tunnel position: at 18, 84, -48 dest=59, 48, -49 distSq=2925.9
+ConcurrentHashMap<UUID, ShelterInfo>
+record ShelterInfo(long enteredTick, ShelterType type, BlockPos capPos, Direction entryDir)
+enum ShelterType { CLIFF, DIG_DOWN }
 ```
 
-**Fix needed**: At the start of `emergencyCliffDig()` and `emergencyDigDown()`, check if the bot died/respawned since the shelter was initiated. Options:
-- Store `bot.deathTime` or a generation counter at shelter start, check it during execution
-- Check `bot.getBlockPos()` distance from the originally computed tunnel positions; abort if wildly different
-- In `onBotRespawn()` / `reset()`, interrupt/cancel the shelter thread (store thread reference in a map)
+### Shelter Entry Flow
+```
+tryProactiveShelter() [server tick, IDLE mode]
+  ├── isInShelter? → return true
+  ├── SHELTER_LOCK mutex check
+  ├── night check, difficulty, base check, phantom-cooldown-bypass
+  └── spawn daemon thread (with generation counter) →
+       ├── stabilizeEat(2 bites)
+       └── runEmergencyTacticChain()
+            ├── findNearbyCliffFace(6) → emergencyCliffDig(gen)
+            │    ├── Mine 6 blocks (3-deep tunnel)
+            │    ├── Pathfind to back
+            │    ├── Seal entrance (SEAL_BLOCKS)
+            │    ├── Place torch
+            │    └── SHELTER_ACTIVE.put(ShelterInfo(CLIFF, wallFeet, digDir))
+            └── emergencyDigDown(gen) [fallback]
+                 ├── Mine 3 blocks down
+                 ├── Cap hole (3 candidates)
+                 ├── Place torch at digPos.down(3)
+                 └── SHELTER_ACTIVE.put(ShelterInfo(DIG_DOWN, capPos, null)) [only if capped]
+```
 
-### Bug 3: Bot Doesn't Shelter After Respawn
-**Symptom**: Test respawned at world spawn, didn't attempt dig-down shelter, just stood there.
+### Shelter Exit Flow
+```
+validateAndTickShelter() [every tick, ALL modes]
+  └── tod >= 23460 OR tod < 12000 (not thundering)
+      → clear SHELTER_ACTIVE + launch breakFreeFromShelter(info)
 
-**Root cause**: The stale shelter thread from Bug 2 was still running. It set `SHELTER_ACTIVE` at the wrong coordinates. When the new tick cycle checked `isInShelter()`, it returned true (stale state from old thread), so `tryProactiveShelter()` returned early.
+breakFreeFromShelter(bot, ShelterInfo):
+  1. collectNearbyTorch()
+  2. CLIFF: mine seal blocks, pathfind outward
+     DIG_DOWN: mine cap block
+     GENERIC: try 4 horizontal dirs, mine up
+  3. escapeToSurface():
+     a. findNearestSkylight(16) → pathfind to daylight
+     b. Fallback: pillar up (sneak, mine overhead, jump+place) x30
 
-**Fix**: Fixing Bug 2 (killing stale shelter threads on respawn) should fix this. Also, `reset()` already clears `SHELTER_ACTIVE`, but it may run before the stale thread sets it again. Need to ensure `SHELTER_ACTIVE.put()` in the shelter methods checks if the bot is still alive and hasn't respawned.
+clearShelterAndBreakFree(bot) — for commands:
+  removes ShelterInfo, launches break-free thread
 
-### Bug 4: Phantom Flee for Unarmed/Unshielded Bots
-**Symptom**: Unarmed bot with no shield stands still when phantoms attack instead of running to cover.
+clearShelter(UUID) — flag-only removal:
+  teleport, damage, mode change
+```
 
-**Current behavior**: In `engageHostiles()`, phantom-only + nighttime now returns false (this session's fix). But the bot needs to actively flee to a tree/cliff, not just wait for `tryProactiveShelter()` to trigger on the next 30s cooldown cycle.
-
-**Fix needed**: In `shouldFlee()` ([BotFleeService.java:210](src/main/java/net/wcfcarolina13/GameAI/services/BotFleeService.java#L210)), add phantom-specific flee logic:
-- If all hostiles are phantoms AND bot has no ranged weapon AND no shield → return true (flee)
-- The flee direction should prefer trees/overhangs (already searched in `findNearbyCliffFace` and `findNearbyTree`)
-- Or: in `tryProactiveShelter()`, skip the cooldown check when phantoms are the only threat
+### Key State Maps (BotFleeService)
+| Map | Type | Purpose |
+|-----|------|---------|
+| `SHELTER_ACTIVE` | `UUID → ShelterInfo` | Active shelter metadata |
+| `SHELTER_COOLDOWN` | `UUID → Long` | 30s cooldown between shelter attempts |
+| `SHELTER_GENERATION` | `UUID → Long` | Incremented on death/respawn, invalidates threads |
+| `SHELTER_LOCK` | `UUID → AtomicBoolean` | Mutex preventing duplicate shelter threads |
 
 ## Key Files
 
-| File | Role | Size |
-|------|------|------|
-| [BotFleeService.java](src/main/java/net/wcfcarolina13/GameAI/services/BotFleeService.java) | Flee direction, shelter state machine, cliff/dig-down shelter, daylight break-free | ~1100 lines |
-| [BotEventHandler.java](src/main/java/net/wcfcarolina13/GameAI/BotEventHandler.java) | Central tick orchestrator, combat dispatch, respawn, mode management | ~199KB |
-| [createFakePlayer.java](src/main/java/net/wcfcarolina13/Entity/createFakePlayer.java) | Fake player entity, `onDeath()`, `teleportTo()` override | ~300 lines |
-| [Frens.java](src/main/java/net/wcfcarolina13/Frens.java) | Server entry, `ALLOW_DAMAGE` handler, `AFTER_DEATH` handler | ~800 lines |
-| [HealingService.java](src/main/java/net/wcfcarolina13/GameAI/services/HealingService.java) | `autoEat()`, `stabilizeEat()`, hunger warnings | ~400 lines |
-| [BotActions.java](src/main/java/net/wcfcarolina13/GameAI/BotActions.java) | `placeBlockAt`, `tryPlaceBlockAt`, combat primitives, phantom diving detection | ~70KB |
-| [MovementService.java](src/main/java/net/wcfcarolina13/GameAI/services/MovementService.java) | Pathfinding + execution, `nudgeTowardUntilClose`, door traversal | ~2300 lines |
-
-## Key State Maps (BotFleeService.java)
-
-| Map | Type | Purpose |
-|-----|------|---------|
-| `SHELTER_ACTIVE` | `ConcurrentHashMap<UUID, Long>` | Tick when bot entered shelter. Cleared by: daylight, teleport, damage, mode change, respawn |
-| `SHELTER_COOLDOWN` | `ConcurrentHashMap<UUID, Long>` | Tick of last shelter attempt. 30s (600 tick) cooldown between attempts |
-| `FLEE_STATES` | `ConcurrentHashMap<UUID, FleeState>` | Active flee direction, start tick, etc. |
-
-## Shelter Entry Flow
-
-```
-tryProactiveShelter() [server tick, IDLE mode]
-  ├── isInShelter? → return true (already sheltered)
-  ├── night check, difficulty check, base check, cooldown check
-  └── spawn daemon thread → stabilizeEat(2 bites) → runEmergencyTacticChain()
-       ├── findNearbyCliffFace(6 blocks) → emergencyCliffDig()
-       │    ├── Mine entrance (2 blocks)
-       │    ├── Pathfind to entrance (picks up drops)
-       │    ├── Mine middle + back (4 blocks)
-       │    ├── Pathfind to back + nudge
-       │    ├── Seal entrance (SEAL_BLOCKS, allowIntersecting=true)
-       │    ├── Place torch
-       │    ├── SHELTER_ACTIVE.put()
-       │    └── stabilizeEat(5 bites)
-       └── emergencyDigDown() [fallback if no cliff]
-```
-
-## Shelter Exit Flow
-
-```
-validateAndTickShelter() [every tick]
-  └── tod >= 23460 OR tod < 12000 (and not thundering) → clear SHELTER_ACTIVE
-
-checkDaylightBreakFree() [every tick, IDLE mode]
-  └── day + not thundering + tod 1000-12000 → clear + breakFreeFromShelter thread
-
-clearShelter() [called from]:
-  ├── createFakePlayer.teleportTo()
-  ├── ALLOW_DAMAGE: environmental damage (explosion, drown, lava, fire, suffocation)
-  ├── ALLOW_DAMAGE: hostile mob damage
-  ├── BotEventHandler.setMode() (any command)
-  └── BotFleeService.reset() (death/removal)
-```
+| File | Role |
+|------|------|
+| [BotFleeService.java](src/main/java/net/wcfcarolina13/GameAI/services/BotFleeService.java) | Shelter state, flee, break-free, skylight scan, escapeToSurface |
+| [BotEventHandler.java](src/main/java/net/wcfcarolina13/GameAI/BotEventHandler.java) | Tick orchestrator, mode management, on-join trap detection |
+| [BotStuckService.java](src/main/java/net/wcfcarolina13/GameAI/services/BotStuckService.java) | Bounded-stuck detection, horizontal enclosure, mine-escape |
+| [ReturnBaseStuckService.java](src/main/java/net/wcfcarolina13/GameAI/services/ReturnBaseStuckService.java) | Return-to-base stuck handling, skylight-before-mining |
+| [MiningTool.java](src/main/java/net/wcfcarolina13/PlayerUtils/MiningTool.java) | All bot mining — LoS check, progressive animation, scaled timeout |
+| [BotAutoReturnSunsetService.java](src/main/java/net/wcfcarolina13/GameAI/services/BotAutoReturnSunsetService.java) | Sunset auto-return, skip-permission check |
+| [NavigationHudOverlay.java](src/main/java/net/wcfcarolina13/GraphicalUserInterface/NavigationHudOverlay.java) | HUD notification queue for auto-return |
+| [BotHomeService.java](src/main/java/net/wcfcarolina13/GameAI/services/BotHomeService.java) | Persisted toggles: auto-return, skip-permission, hobbies, hunt |
+| [AutoFaceEntity.java](src/main/java/net/wcfcarolina13/Entity/AutoFaceEntity.java) | Phantom-aware danger alerts |
+| [WanderSkill.java](src/main/java/net/wcfcarolina13/GameAI/skills/impl/WanderSkill.java) | Wander hobby with pursuit mode |
 
 ## Build & Deploy
 
@@ -134,8 +126,39 @@ clearShelter() [called from]:
 cp build/libs/frens-*.jar "/Users/roti/Library/Application Support/PrismLauncher/instances/1.21.10/minecraft/mods/"
 ```
 
-## Priority Order for Next Session
+## Next Session Tasks
 
-1. **Bug 1 (Immortal)** — Most critical. Bots are useless if unkillable. Start by adding diagnostic logging: `isInvulnerable()`, `invulnerableTime`, `timeUntilRegen` on every tick for 100 ticks after respawn.
-2. **Bug 2 (Stale shelter thread)** — Causes Bug 3. Store a "generation" counter incremented on death; shelter threads check it before each blocking step.
-3. **Bug 4 (Phantom flee)** — Quality of life. Add phantom-specific flee trigger in `shouldFlee()`.
+### 1. Check Up on Recent Changes
+Review in-game behavior of all the shelter, stuck, mining, and auto-return changes. Look at logs and confirm:
+- Bots properly shelter at night, break free at dawn
+- Skylight pathfinding works (bots navigate to tunnel exits)
+- Mining shows progressive cracks, proper timing, LoS enforced
+- Auto-return notifications queue properly, skip-permission toggle works
+- Wander hobby succeeds more often
+
+### 2. Distance-Based Auto-Return Instead of Shelter
+**Feature:** If the bot is near its base at nightfall, it should return home instead of sheltering in place. Need to decide a reasonable distance threshold.
+
+**Design considerations:**
+- Check distance from base in `tryProactiveShelter()` — if within N blocks of home, skip shelter and trigger return-to-base instead
+- Reasonable distance: 64-128 blocks? (pathfinding range, ~30s-60s walk)
+- Should respect the existing `isAutoReturnAtSunset` toggle
+- The base check at `tryProactiveShelter()` line 200 already skips shelter if `state.baseTarget != null` — but that only applies when the bot is actively returning, not when it COULD return
+
+### 3. Bed Placement + Sleep in Tactical Shelters
+**Feature:** After building a tactical shelter (cliff or dig-down), the bot should:
+1. Expand the interior if needed (bed requires 2 blocks of floor space)
+2. Place a bed
+3. Ensure a torch is placed (for light, prevents mob spawns)
+4. Sleep in the bed
+5. On waking/dawn exit: break and collect bed + torches before leaving
+
+**Design details:**
+- **Bed placement:** After shelter is built and torch placed, check if bot has a bed in inventory. If so, expand interior (mine 1 additional block for bed footprint if needed), place bed on the floor.
+- **Sleep:** Call `bot.sleep(bedPos)` or equivalent to put the bot in the bed. Need to check vanilla's `trySleep` conditions (only at night, no hostiles nearby, etc.).
+- **Recovery on exit:** When shelter is cleared (dawn, command, teleport):
+  - If teleported: skip recovery (bot is already elsewhere)
+  - If command or dawn break-free: mine bed + torches, collect drops, then proceed
+  - Implementation: in `breakFreeFromShelter()`, after collecting torch, also mine the bed block. `collectNearbyTorch()` could be extended to `collectShelterFurnishings()` that mines both torches and beds.
+- **If shelter cancelled but not teleported:** Bot should attempt to collect bed/torches from nearby. Could check if bed/torch blocks exist within 3 blocks and mine them before moving on.
+- **Edge cases:** Bed destroyed by mobs, bed obstructed, bot has no bed in inventory (skip bed step), two-part bed block (need to mine the right half).
