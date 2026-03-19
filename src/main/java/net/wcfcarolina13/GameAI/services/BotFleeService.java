@@ -1101,11 +1101,23 @@ public final class BotFleeService {
     /**
      * Force break-free without shelter metadata (e.g. bot enclosed after server restart).
      * Uses generic escape: collect torch, try 4 horizontal dirs, then pillar to surface.
+     * Guarded by SHELTER_LOCK to prevent duplicate concurrent break-free threads.
      */
     public static Thread forceBreakFree(ServerPlayerEntity bot) {
         SHELTER_ACTIVE.remove(bot.getUuid());
-        Thread t = new Thread(() -> breakFreeFromShelter(bot, null),
-                "shelter-breakfree-" + bot.getName().getString());
+        AtomicBoolean lock = SHELTER_LOCK.computeIfAbsent(bot.getUuid(), k -> new AtomicBoolean(false));
+        if (!lock.compareAndSet(false, true)) {
+            LOGGER.debug("forceBreakFree skipped for {} — another break-free already running",
+                    bot.getName().getString());
+            return null;
+        }
+        Thread t = new Thread(() -> {
+            try {
+                breakFreeFromShelter(bot, null);
+            } finally {
+                lock.set(false);
+            }
+        }, "shelter-breakfree-" + bot.getName().getString());
         t.setDaemon(true);
         t.start();
         return t;

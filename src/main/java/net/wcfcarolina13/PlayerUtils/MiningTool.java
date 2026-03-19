@@ -116,7 +116,11 @@ public class MiningTool {
             }
             int requiredTicks = Math.max(1, (int) Math.ceil(1.0f / delta));
             requiredTicksHolder.set(requiredTicks);
-            LOGGER.debug("Prepared mining of {} (delta={}, approx ticks={})", targetBlockPos, delta, requiredTicks);
+            String toolName = bot.getMainHandStack().isEmpty() ? "bare-hands" : bot.getMainHandStack().getItem().toString();
+            LOGGER.info("Mining {} with {} (delta={}, ticks={}, ~{}ms, creative={})",
+                    targetBlockPos, toolName,
+                    String.format("%.4f", delta), requiredTicks, requiredTicks * MINING_TICK_MS,
+                    bot.getAbilities().creativeMode);
         } catch (Throwable t) {
             LOGGER.error("Failed to prepare mining task at {}", targetBlockPos, t);
             miningResult.complete("⚠️ Failed to initialize mining: " + t.getMessage());
