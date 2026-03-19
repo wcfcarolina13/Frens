@@ -3,6 +3,10 @@
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 ## 2026-03-18
 
+- **Fix bots walking into walls instead of mining (bounded-stuck + on-join trap):**
+  22. **Bounded-movement stuck detection:** Bots oscillating within a 2-block radius for 60+ ticks (walking into wall and bouncing back) now trigger `tryMineEscape()` if no sky is visible. The old detector only caught truly stationary bots (< 0.01 movement), which never triggered when the bot was actively walking into a wall.
+  23. **Position-delta on-join trap detection:** Replaced geometry-based enclosed check (required all 4 walls blocked) with position-delta: 2 seconds after spawn, if bot hasn't moved > 2 blocks from restored position and has no sky visibility, launch `forceBreakFree()`. Catches cliff shelters (tunnels with 1 open direction) that the old 4-wall check missed.
+
 - **Mine-escape for enclosed bots (general stuck detection):**
   20. **Horizontal enclosure detection:** `BotStuckService.analyzeEnvironment()` now tracks `horizontallyEnclosed` — true when all 4 horizontal directions are blocked at feet+head level. Previously only detected `enclosed` at 5+ solid neighbors (requires ceiling too).
   21. **Mine-escape fallback:** When a bot is stationary, horizontally enclosed, and hop/stairs escape fails, `tryMineEscape()` mines the 2 wall blocks in the direction with nearest air (scans up to 3 blocks). 60-tick cooldown prevents rapid re-mining. Works for any enclosed space — shelters, caves, player-built rooms.

@@ -31,6 +31,12 @@ public final class BotStuckService {
     private static final Map<UUID, Vec3d> LAST_KNOWN_POSITION = new ConcurrentHashMap<>();
     private static final Map<UUID, Integer> STATIONARY_TICKS = new ConcurrentHashMap<>();
     private static final Map<UUID, Vec3d> LAST_SAFE_POSITION = new ConcurrentHashMap<>();
+    /** Tracks position from N ticks ago for bounded-movement detection (oscillation). */
+    private static final Map<UUID, Vec3d> BOUNDED_CHECK_ORIGIN = new ConcurrentHashMap<>();
+    private static final Map<UUID, Integer> BOUNDED_CHECK_TICKS = new ConcurrentHashMap<>();
+    /** If bot stays within 2 blocks of origin for 60 ticks, it's stuck (even if oscillating). */
+    private static final int BOUNDED_STUCK_THRESHOLD = 60;
+    private static final double BOUNDED_STUCK_RADIUS_SQ = 4.0; // 2 blocks
     /** Cooldown to prevent rapid mine-escape attempts (value = tick of last attempt). */
     private static final Map<UUID, Long> MINE_ESCAPE_COOLDOWN = new ConcurrentHashMap<>();
     private static final long MINE_ESCAPE_COOLDOWN_TICKS = 60; // 3 seconds
@@ -52,6 +58,9 @@ public final class BotStuckService {
         }
         LAST_KNOWN_POSITION.remove(botId);
         STATIONARY_TICKS.remove(botId);
+        BOUNDED_CHECK_ORIGIN.remove(botId);
+        BOUNDED_CHECK_TICKS.remove(botId);
+        MINE_ESCAPE_COOLDOWN.remove(botId);
     }
 
     public static Vec3d getLastSafePosition(UUID botId) {
@@ -223,6 +232,41 @@ public final class BotStuckService {
             LAST_KNOWN_POSITION.put(botId, currentPos);
         }
         STATIONARY_TICKS.put(botId, ticks);
+
+        // Bounded-movement detection: bot oscillating within a small area (e.g. walking into wall)
+        Vec3d boundedOrigin = BOUNDED_CHECK_ORIGIN.get(botId);
+        int boundedTicks = BOUNDED_CHECK_TICKS.getOrDefault(botId, 0);
+        if (boundedOrigin == null) {
+            BOUNDED_CHECK_ORIGIN.put(botId, currentPos);
+            BOUNDED_CHECK_TICKS.put(botId, 0);
+        } else if (currentPos.squaredDistanceTo(boundedOrigin) < BOUNDED_STUCK_RADIUS_SQ) {
+            boundedTicks++;
+            BOUNDED_CHECK_TICKS.put(botId, boundedTicks);
+        } else {
+            // Moved far enough — reset origin
+            BOUNDED_CHECK_ORIGIN.put(botId, currentPos);
+            BOUNDED_CHECK_TICKS.put(botId, 0);
+            boundedTicks = 0;
+        }
+
+        // If oscillating in a small area for 3 seconds, try mine-escape
+        if (boundedTicks >= BOUNDED_STUCK_THRESHOLD && environmentSnapshot != null) {
+            ServerWorld bWorld = bot.getCommandSource().getWorld();
+            boolean noSky = bWorld != null && !bWorld.isSkyVisible(bot.getBlockPos().up());
+            if (noSky) {
+                long nowTick = bWorld.getServer() != null ? bWorld.getServer().getTicks() : 0;
+                long lastMine = MINE_ESCAPE_COOLDOWN.getOrDefault(botId, 0L);
+                if (nowTick - lastMine >= MINE_ESCAPE_COOLDOWN_TICKS) {
+                    MINE_ESCAPE_COOLDOWN.put(botId, nowTick);
+                    LOGGER.info("Bot {} bounded-stuck for {}t (oscillating in {}block radius, no sky) — mining escape",
+                            bot.getName().getString(), boundedTicks,
+                            String.format("%.1f", Math.sqrt(BOUNDED_STUCK_RADIUS_SQ)));
+                    tryMineEscape(bot, bWorld);
+                }
+                BOUNDED_CHECK_ORIGIN.put(botId, currentPos);
+                BOUNDED_CHECK_TICKS.put(botId, 0);
+            }
+        }
 
         BlockState feetState = bot.getCommandSource().getWorld().getBlockState(bot.getBlockPos());
         if (feetState.isOf(Blocks.FARMLAND) && ticks > 5) {

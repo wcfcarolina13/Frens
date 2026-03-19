@@ -620,30 +620,24 @@ public class BotEventHandler {
         // Proactively check if bot spawned inside blocks and needs to mine out
         if (srv != null) {
             srv.execute(() -> {
-                // Delay check by a few ticks to let spawn complete
+                // Immediate check (tick+5): spawn-in-block suffocation
                 srv.send(new net.minecraft.server.ServerTask(srv.getTicks() + 5, () -> {
                     if (!candidate.isRemoved()) {
                         checkForSpawnInBlocks(candidate);
-                        // Detect if bot is enclosed (e.g. inside a shelter from a previous session)
-                        // and launch break-free if needed. SHELTER_ACTIVE is in-memory only, so
-                        // after restart the bot may be physically trapped with no shelter state.
-                        if (candidate.getEntityWorld() instanceof net.minecraft.server.world.ServerWorld sw
-                                && !sw.isSkyVisible(candidate.getBlockPos().up())) {
-                            BlockPos bp = candidate.getBlockPos();
-                            boolean enclosed = true;
-                            for (net.minecraft.util.math.Direction d : net.minecraft.util.math.Direction.Type.HORIZONTAL) {
-                                BlockPos adj = bp.offset(d);
-                                if (sw.getBlockState(adj).isAir() && sw.getBlockState(adj.up()).isAir()) {
-                                    enclosed = false;
-                                    break;
-                                }
-                            }
-                            if (enclosed) {
-                                LOGGER.info("Bot {} appears enclosed on join — launching break-free",
-                                        candidate.getName().getString());
-                                BotFleeService.forceBreakFree(candidate);
-                            }
-                        }
+                    }
+                }));
+                // Delayed check (tick+40, ~2 seconds): if bot hasn't moved and has no sky,
+                // it's likely trapped (shelter from previous session, cave, etc.)
+                final Vec3d spawnPos = new Vec3d(candidate.getX(), candidate.getY(), candidate.getZ());
+                srv.send(new net.minecraft.server.ServerTask(srv.getTicks() + 40, () -> {
+                    if (candidate.isRemoved()) return;
+                    if (!(candidate.getEntityWorld() instanceof net.minecraft.server.world.ServerWorld sw)) return;
+                    if (sw.isSkyVisible(candidate.getBlockPos().up())) return;
+                    double movedSq = candidate.squaredDistanceTo(spawnPos);
+                    if (movedSq < 4.0) { // hasn't moved more than 2 blocks
+                        LOGGER.info("Bot {} trapped on join — hasn't moved ({} blocks) and no sky. Launching break-free.",
+                                candidate.getName().getString(), String.format("%.1f", Math.sqrt(movedSq)));
+                        BotFleeService.forceBreakFree(candidate);
                     }
                 }));
             });
