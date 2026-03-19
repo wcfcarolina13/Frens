@@ -83,6 +83,30 @@ public final class BotFleeService {
     }
 
     /**
+     * Scans horizontally from center for the nearest position where sky is visible.
+     * Useful for underground bots finding natural exits instead of pillaring up.
+     * @return nearest sky-visible BlockPos, or null if none within radius
+     */
+    public static BlockPos findNearestSkylight(ServerWorld world, BlockPos center, int radius) {
+        BlockPos best = null;
+        double bestDistSq = Double.MAX_VALUE;
+        for (int dx = -radius; dx <= radius; dx++) {
+            for (int dz = -radius; dz <= radius; dz++) {
+                if (dx * dx + dz * dz > radius * radius) continue; // circular scan
+                BlockPos check = center.add(dx, 0, dz);
+                if (world.isSkyVisible(check.up())) {
+                    double distSq = center.getSquaredDistance(check);
+                    if (distSq < bestDistSq) {
+                        bestDistSq = distSq;
+                        best = check.toImmutable();
+                    }
+                }
+            }
+        }
+        return best;
+    }
+
+    /**
      * Mark a bot as sheltered on join (enclosed underground from a previous session).
      * Uses best-guess metadata so validateAndTickShelter handles dawn break-free.
      */
@@ -1270,7 +1294,26 @@ public final class BotFleeService {
             throws InterruptedException {
         if (world.isSkyVisible(bot.getBlockPos().up())) return; // already at surface
 
-        LOGGER.info("Bot {} underground after break-free — escaping to surface", bot.getName().getString());
+        // Try skylight scan first — pathfind to nearest sky-visible position instead of pillaring
+        BlockPos skyTarget = findNearestSkylight(world, bot.getBlockPos(), 16);
+        if (skyTarget != null) {
+            double distSq = bot.getBlockPos().getSquaredDistance(skyTarget);
+            LOGGER.info("Bot {} found skylight at {} ({}blocks away) — pathfinding to daylight",
+                    bot.getName().getString(), skyTarget.toShortString(),
+                    String.format("%.0f", Math.sqrt(distSq)));
+            MovementService.MovementPlan plan = new MovementService.MovementPlan(
+                    MovementService.Mode.DIRECT, skyTarget, skyTarget, null, null, null);
+            MovementService.execute(bot.getCommandSource(), bot, plan, Boolean.FALSE, true);
+            Thread.sleep(1000);
+            // Check if we made it
+            if (world.isSkyVisible(bot.getBlockPos().up())) {
+                LOGGER.info("Bot {} reached surface via skylight pathfinding", bot.getName().getString());
+                return;
+            }
+            // If pathfinding didn't get us there, fall through to pillar
+        }
+
+        LOGGER.info("Bot {} underground — pillar-escaping to surface", bot.getName().getString());
         MinecraftServer server = bot.getCommandSource().getServer();
 
         for (int i = 0; i < 30; i++) {

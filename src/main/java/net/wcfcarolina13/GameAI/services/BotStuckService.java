@@ -259,10 +259,19 @@ public final class BotStuckService {
                 long lastMine = MINE_ESCAPE_COOLDOWN.getOrDefault(botId, 0L);
                 if (nowTick - lastMine >= MINE_ESCAPE_COOLDOWN_TICKS) {
                     MINE_ESCAPE_COOLDOWN.put(botId, nowTick);
-                    LOGGER.info("Bot {} bounded-stuck for {}t (oscillating in {}block radius, no sky) — mining escape",
-                            bot.getName().getString(), boundedTicks,
-                            String.format("%.1f", Math.sqrt(BOUNDED_STUCK_RADIUS_SQ)));
-                    tryMineEscape(bot, bWorld);
+                    // Try skylight pathfinding first — find natural exit
+                    BlockPos skyTarget = BotFleeService.findNearestSkylight(bWorld, bot.getBlockPos(), 16);
+                    if (skyTarget != null) {
+                        LOGGER.info("Bot {} bounded-stuck — found skylight at {}, pathfinding to daylight",
+                                bot.getName().getString(), skyTarget.toShortString());
+                        MovementService.MovementPlan plan = new MovementService.MovementPlan(
+                                MovementService.Mode.DIRECT, skyTarget, skyTarget, null, null, null);
+                        MovementService.execute(bot.getCommandSource(), bot, plan, Boolean.FALSE, true);
+                    } else {
+                        LOGGER.info("Bot {} bounded-stuck for {}t (no sky within 16 blocks) — mining escape",
+                                bot.getName().getString(), boundedTicks);
+                        tryMineEscape(bot, bWorld);
+                    }
                 }
                 BOUNDED_CHECK_ORIGIN.put(botId, currentPos);
                 BOUNDED_CHECK_TICKS.put(botId, 0);

@@ -3,6 +3,12 @@
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 ## 2026-03-18
 
+- **Skylight pathfinding + shelter self-clear for hobbies/hunt:**
+  27. **Skylight scanner:** New `findNearestSkylight(world, center, 16)` scans horizontally in a 16-block radius for positions with sky visibility. Underground bots pathfind to natural exits instead of pillaring straight up through terrain.
+  28. **Skylight in escapeToSurface():** Before pillar-up, checks for skylight and pathfinds there if found. Falls back to pillar only if no sky within 16 blocks.
+  29. **Skylight in stuck detection:** `BotStuckService` bounded-stuck handler now tries skylight pathfinding before mine-escape. Bots in shallow caves/passages navigate to daylight naturally.
+  30. **Hobby/hunt shelter self-clear:** `BotIdleHobbiesService` and `BotAutoHuntService` now auto-clear stale shelter state if it's daytime + not thundering, instead of blocking indefinitely. Fixes hobbies being permanently blocked when `validateAndTickShelter` didn't run (low TPS, short session).
+
 - **Fix night break-free loop + remote mining + LoS enforcement:**
   24. **Night guard on break-free:** On-join trap detection now checks time of day. At night, instead of breaking free into danger, sets `SHELTER_ACTIVE` via `setShelterFromJoin()` so the normal dawn break-free path handles escape. Prevents break-free → surface → re-shelter loop.
   25. **MiningTool line-of-sight:** Added raycast check (`world.raycast()`) before mining — if the ray from bot's eye position hits a different block before the target, mining is rejected with "no line of sight." Prevents mining through walls, which was non-vanilla behavior.

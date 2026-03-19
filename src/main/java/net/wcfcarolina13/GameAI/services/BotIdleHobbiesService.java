@@ -201,8 +201,15 @@ public final class BotIdleHobbiesService {
                 continue;
             }
             if (BotFleeService.isInShelter(bot.getUuid())) {
-                noteBlocked(bot, nowTick, "sheltered");
-                continue;
+                // Auto-clear stale shelter if it's daytime — validateAndTickShelter may not have run yet
+                if (world.isDay() && !world.isThundering()) {
+                    BotFleeService.clearShelter(bot.getUuid());
+                    LOGGER.info("Cleared stale shelter for {} (daytime) — hobbies unblocked",
+                            bot.getName().getString());
+                } else {
+                    noteBlocked(bot, nowTick, "sheltered");
+                    continue;
+                }
             }
 
             int tod = (int) (world.getTimeOfDay() % 24_000L);

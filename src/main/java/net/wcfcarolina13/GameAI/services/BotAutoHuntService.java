@@ -85,7 +85,12 @@ public final class BotAutoHuntService {
                 continue;
             }
             if (BotFleeService.isInShelter(bot.getUuid())) {
-                continue;
+                // Auto-clear stale shelter if daytime
+                if (world.isDay() && !world.isThundering()) {
+                    BotFleeService.clearShelter(bot.getUuid());
+                } else {
+                    continue;
+                }
             }
             if (bot.getHungerManager().getFoodLevel() > STARVING_THRESHOLD) {
                 continue;
