@@ -6,8 +6,13 @@ import net.minecraft.item.ItemStack;
 import net.minecraft.registry.tag.BlockTags;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
+import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.Hand;
+import net.minecraft.util.hit.BlockHitResult;
+import net.minecraft.util.hit.HitResult;
 import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Vec3d;
+import net.minecraft.world.RaycastContext;
 import net.wcfcarolina13.Entity.LookController;
 import net.wcfcarolina13.GameAI.services.BotTerritoryAuthorizationService;
 import net.wcfcarolina13.GameAI.skills.SkillManager;
@@ -70,7 +75,21 @@ public class MiningTool {
             return miningResult;
         }
 
-        if (bot.getEntityWorld() instanceof net.minecraft.server.world.ServerWorld serverWorld) {
+        // Line-of-sight check: bot must be able to see the target block (no mining through walls)
+        if (bot.getEntityWorld() instanceof ServerWorld losWorld) {
+            Vec3d eyePos = bot.getEyePos();
+            Vec3d blockCenter = Vec3d.ofCenter(targetBlockPos);
+            BlockHitResult hit = losWorld.raycast(new RaycastContext(
+                    eyePos, blockCenter,
+                    RaycastContext.ShapeType.COLLIDER,
+                    RaycastContext.FluidHandling.NONE, bot));
+            if (hit.getType() == HitResult.Type.BLOCK && !hit.getBlockPos().equals(targetBlockPos)) {
+                miningResult.complete("⚠️ Cannot mine: no line of sight (blocked by " + hit.getBlockPos().toShortString() + ").");
+                return miningResult;
+            }
+        }
+
+        if (bot.getEntityWorld() instanceof ServerWorld serverWorld) {
             var auth = BotTerritoryAuthorizationService.authorizeBlockMutation(bot, serverWorld, targetBlockPos);
             if (!auth.allowed()) {
                 miningResult.complete("⚠️ Cannot mine: protected claim.");

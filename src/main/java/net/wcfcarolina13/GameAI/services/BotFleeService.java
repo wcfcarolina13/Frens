@@ -83,6 +83,19 @@ public final class BotFleeService {
     }
 
     /**
+     * Mark a bot as sheltered on join (enclosed underground from a previous session).
+     * Uses best-guess metadata so validateAndTickShelter handles dawn break-free.
+     */
+    public static void setShelterFromJoin(ServerPlayerEntity bot) {
+        long tick = bot.getCommandSource().getServer() != null
+                ? bot.getCommandSource().getServer().getTicks() : 0;
+        BlockPos capGuess = bot.getBlockPos().up(2); // best guess for overhead cap
+        SHELTER_ACTIVE.put(bot.getUuid(), new ShelterInfo(tick, ShelterType.DIG_DOWN, capGuess, null));
+        LOGGER.info("Bot {} marked as sheltered on join (capGuess={})",
+                bot.getName().getString(), capGuess.toShortString());
+    }
+
+    /**
      * Validates shelter state: auto-clears when undead burn (tod ~23460+).
      * Normal exit is via {@link #checkDaylightBreakFree} (waits until tod 1000).
      * This is the safety net — if daylight-break-free hasn't fired yet but

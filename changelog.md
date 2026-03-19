@@ -3,6 +3,11 @@
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 ## 2026-03-18
 
+- **Fix night break-free loop + remote mining + LoS enforcement:**
+  24. **Night guard on break-free:** On-join trap detection now checks time of day. At night, instead of breaking free into danger, sets `SHELTER_ACTIVE` via `setShelterFromJoin()` so the normal dawn break-free path handles escape. Prevents break-free → surface → re-shelter loop.
+  25. **MiningTool line-of-sight:** Added raycast check (`world.raycast()`) before mining — if the ray from bot's eye position hits a different block before the target, mining is rejected with "no line of sight." Prevents mining through walls, which was non-vanilla behavior.
+  26. **Mine-escape faces block:** `tryMineEscape()` in BotStuckService now calls `LookController.faceBlock()` before mining, ensuring the bot visually turns toward the wall and passes the new LoS check.
+
 - **Fix bots walking into walls instead of mining (bounded-stuck + on-join trap):**
   22. **Bounded-movement stuck detection:** Bots oscillating within a 2-block radius for 60+ ticks (walking into wall and bouncing back) now trigger `tryMineEscape()` if no sky is visible. The old detector only caught truly stationary bots (< 0.01 movement), which never triggered when the bot was actively walking into a wall.
   23. **Position-delta on-join trap detection:** Replaced geometry-based enclosed check (required all 4 walls blocked) with position-delta: 2 seconds after spawn, if bot hasn't moved > 2 blocks from restored position and has no sky visibility, launch `forceBreakFree()`. Catches cliff shelters (tunnels with 1 open direction) that the old 4-wall check missed.

@@ -7,6 +7,7 @@ import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
+import net.wcfcarolina13.Entity.LookController;
 import net.wcfcarolina13.GameAI.BotActions;
 import net.wcfcarolina13.PlayerUtils.MiningTool;
 import org.slf4j.Logger;
@@ -337,6 +338,9 @@ public final class BotStuckService {
         LOGGER.info("Mine-escape for {} toward {} (airDist={})",
                 bot.getName().getString(), mineDir.asString(),
                 bestDir != null ? bestDist : "none");
+
+        // Face the wall before mining (required for LoS check in MiningTool)
+        LookController.faceBlock(bot, wallFeet);
 
         if (world.getBlockState(wallFeet).isSolidBlock(world, wallFeet)) {
             MiningTool.mineBlock(bot, wallFeet, false);

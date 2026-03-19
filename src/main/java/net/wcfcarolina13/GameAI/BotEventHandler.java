@@ -635,9 +635,16 @@ public class BotEventHandler {
                     if (sw.isSkyVisible(candidate.getBlockPos().up())) return;
                     double movedSq = candidate.squaredDistanceTo(spawnPos);
                     if (movedSq < 4.0) { // hasn't moved more than 2 blocks
-                        LOGGER.info("Bot {} trapped on join — hasn't moved ({} blocks) and no sky. Launching break-free.",
-                                candidate.getName().getString(), String.format("%.1f", Math.sqrt(movedSq)));
-                        BotFleeService.forceBreakFree(candidate);
+                        // At night, stay sheltered — don't break free into danger
+                        if (!sw.isDay() && !sw.isThundering()) {
+                            LOGGER.info("Bot {} enclosed on join but nighttime — staying sheltered until dawn",
+                                    candidate.getName().getString());
+                            BotFleeService.setShelterFromJoin(candidate);
+                        } else {
+                            LOGGER.info("Bot {} trapped on join — hasn't moved ({} blocks) and no sky. Launching break-free.",
+                                    candidate.getName().getString(), String.format("%.1f", Math.sqrt(movedSq)));
+                            BotFleeService.forceBreakFree(candidate);
+                        }
                     }
                 }));
             });
