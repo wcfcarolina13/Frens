@@ -3,6 +3,11 @@
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 ## 2026-03-18
 
+- **Fix aimless underground mining + shelter race + skylight in return-base:**
+  35. **Shelter race fix:** On-join trap detection (tick+40) now skips if bot already left IDLE mode. Previously, auto-return set FOLLOW immediately, then tick+40 set shelter — creating a flag nothing would clear.
+  36. **Shelter validation for all modes:** `validateAndTickShelter()` moved from IDLE-only default case to before the mode switch — runs for FOLLOW, GUARD, etc. Stale shelter flags now clear at dawn regardless of mode.
+  37. **ReturnBaseStuck skylight:** Before mining through rock toward a distant base, `tryMineTowardBaseEscape()` now checks `findNearestSkylight(16)`. If daylight is visible within 16 blocks, pathfinds to surface first. Prevents aimless mining through mountains of stone.
+
 - **Wander fixes + shelter torch + auto-return notifications + skip-permission:**
   31. **Wander robustness:** Steps increased from 1-2 to 3-4, step clamp raised to 5, `allowPursuit=true` enabled so bot gets as close as possible instead of hard-failing on first obstacle.
   32. **Dig-down torch placement:** Added 500ms settle delay after cap placement. Torch now placed at fixed `digPos.down(3)` (bunker floor) instead of `bot.getBlockPos()` (race condition). Placement logged at INFO level.

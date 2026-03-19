@@ -803,6 +803,23 @@ public final class ReturnBaseStuckService {
             return;
         }
 
+        // If underground, try skylight pathfinding first — much cheaper than mining through rock
+        if (!world.isSkyVisible(bot.getBlockPos().up())) {
+            BlockPos skyTarget = BotFleeService.findNearestSkylight(world, bot.getBlockPos(), 16);
+            if (skyTarget != null) {
+                LOGGER.info("ReturnBaseStuck: {} found skylight at {} — pathfinding to surface first",
+                        bot.getName().getString(), skyTarget.toShortString());
+                MovementService.MovementPlan plan = new MovementService.MovementPlan(
+                        MovementService.Mode.DIRECT, skyTarget, skyTarget, null, null, null);
+                MovementService.execute(bot.getCommandSource(), bot, plan, Boolean.FALSE, true);
+                sleepQuiet(2000); // wait for pathfinding to progress
+                if (world.isSkyVisible(bot.getBlockPos().up())) {
+                    LOGGER.info("ReturnBaseStuck: {} reached surface via skylight", bot.getName().getString());
+                    return; // let normal return-base pathfinding take over on surface
+                }
+            }
+        }
+
         long deadline = System.currentTimeMillis() + MINE_ESCAPE_MAX_MS;
         int minedTotal = 0;
         int passes = 0;

@@ -632,6 +632,8 @@ public class BotEventHandler {
                 srv.send(new net.minecraft.server.ServerTask(srv.getTicks() + 40, () -> {
                     if (candidate.isRemoved()) return;
                     if (!(candidate.getEntityWorld() instanceof net.minecraft.server.world.ServerWorld sw)) return;
+                    // Skip if bot already left IDLE (e.g. auto-return set FOLLOW) — shelter flag would interfere
+                    if (getCurrentMode(candidate) != Mode.IDLE) return;
                     if (sw.isSkyVisible(candidate.getBlockPos().up())) return;
                     double movedSq = candidate.squaredDistanceTo(spawnPos);
                     if (movedSq < 4.0) { // hasn't moved more than 2 blocks
@@ -1435,6 +1437,10 @@ public class BotEventHandler {
             }
         }
 
+        // Run shelter validation for ALL modes — clears stale shelter at dawn, launches break-free.
+        // Previously only ran in IDLE (default case), so FOLLOW bots kept stale shelter indefinitely.
+        BotFleeService.validateAndTickShelter(bot, server);
+
         switch (mode) {
             case FOLLOW -> {
                 // Arrow recovery during FOLLOW: only allow short, bounded detours when we're not far from
@@ -1508,8 +1514,8 @@ public class BotEventHandler {
             }
             default -> {
                 // Tactical shelter: suppress idle behaviors but let combat run normally.
-                // validateAndTickShelter auto-clears + launches break-free mining at dawn.
-                if (BotFleeService.validateAndTickShelter(bot, server)) {
+                // (validateAndTickShelter runs above for ALL modes; here we just check the flag)
+                if (BotFleeService.isInShelter(bot.getUuid())) {
                     if (augmentedHostiles.isEmpty()) {
                         return true; // safe — stay sheltered
                     }
