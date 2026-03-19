@@ -542,7 +542,7 @@ public final class BotIdleHobbiesService {
 
         if ("wander".equalsIgnoreCase(skillName)) {
             params.put("radius", 10 + RNG.nextInt(6)); // 10-15
-            params.put("steps", 1 + RNG.nextInt(2));   // 1-2
+            params.put("steps", 3 + RNG.nextInt(2));   // 3-4
         }
 
         if ("leaf_litter".equalsIgnoreCase(skillName)) {

@@ -6,50 +6,61 @@ import net.minecraft.client.gui.DrawContext;
 import net.minecraft.text.Text;
 import net.wcfcarolina13.network.NavigationResponsePayload;
 
+import java.util.Queue;
+import java.util.concurrent.ConcurrentLinkedQueue;
+
 public final class NavigationHudOverlay {
-    private static String pendingBotAlias = null;
-    private static String pendingDestination = null;
-    private static int pendingSeconds = 0;
-    private static long showUntilMs = 0L;
+
+    private record PendingRequest(String botAlias, String destination, int seconds, long expireMs) {}
+
+    private static final Queue<PendingRequest> PENDING_QUEUE = new ConcurrentLinkedQueue<>();
 
     private NavigationHudOverlay() {}
 
-    /** Called when server sends NavigationRequestPayload. */
+    /** Called when server sends NavigationRequestPayload. Queues for sequential display. */
     public static void show(String botAlias, String destination, int estimatedSeconds) {
-        pendingBotAlias = botAlias;
-        pendingDestination = destination;
-        pendingSeconds = estimatedSeconds;
-        showUntilMs = System.currentTimeMillis() + 60_000L;
+        PENDING_QUEUE.add(new PendingRequest(botAlias, destination, estimatedSeconds,
+                System.currentTimeMillis() + 60_000L));
     }
 
     public static boolean isVisible() {
-        return pendingBotAlias != null && System.currentTimeMillis() < showUntilMs;
+        expireStale();
+        return !PENDING_QUEUE.isEmpty();
     }
 
     public static void dismiss() {
-        if (pendingBotAlias != null) {
-            ClientPlayNetworking.send(new NavigationResponsePayload(pendingBotAlias, false));
+        PendingRequest front = PENDING_QUEUE.poll();
+        if (front != null) {
+            ClientPlayNetworking.send(new NavigationResponsePayload(front.botAlias, false));
         }
-        clear();
     }
 
     public static void accept() {
-        if (pendingBotAlias != null) {
-            ClientPlayNetworking.send(new NavigationResponsePayload(pendingBotAlias, true));
+        PendingRequest front = PENDING_QUEUE.poll();
+        if (front != null) {
+            ClientPlayNetworking.send(new NavigationResponsePayload(front.botAlias, true));
         }
-        clear();
     }
 
-    private static void clear() {
-        pendingBotAlias = null;
-        pendingDestination = null;
-        pendingSeconds = 0;
-        showUntilMs = 0L;
+    /** Remove expired requests from the front, sending dismiss for each. */
+    private static void expireStale() {
+        long now = System.currentTimeMillis();
+        while (!PENDING_QUEUE.isEmpty()) {
+            PendingRequest front = PENDING_QUEUE.peek();
+            if (front != null && now >= front.expireMs) {
+                PENDING_QUEUE.poll();
+                ClientPlayNetworking.send(new NavigationResponsePayload(front.botAlias, false));
+            } else {
+                break;
+            }
+        }
     }
 
     /** Called from HudRenderCallback. */
     public static void render(DrawContext context) {
         if (!isVisible()) return;
+        PendingRequest front = PENDING_QUEUE.peek();
+        if (front == null) return;
         MinecraftClient client = MinecraftClient.getInstance();
         if (client == null || client.player == null) return;
 
@@ -58,10 +69,15 @@ public final class NavigationHudOverlay {
         int y = screenH - 68;
         int cx = screenW / 2;
 
-        String msg = pendingBotAlias + " wants to return home. (~" + pendingSeconds + "s)";
+        String msg = front.botAlias + " wants to return home. (~" + front.seconds + "s)";
         context.drawCenteredTextWithShadow(client.textRenderer, Text.literal(msg), cx, y, 0xFFFFCC00);
+
+        int queueSize = PENDING_QUEUE.size();
+        String controls = queueSize > 1
+                ? "[Y] Accept   [N] Dismiss   (" + (queueSize - 1) + " more)"
+                : "[Y] Accept   [N] Dismiss";
         context.drawCenteredTextWithShadow(client.textRenderer,
-                Text.literal("[Y] Accept   [N] Dismiss"), cx, y + 12, 0xFFB0B0B0);
+                Text.literal(controls), cx, y + 12, 0xFFB0B0B0);
     }
 
     /** Handle keyboard input for Y/N accept/dismiss. */

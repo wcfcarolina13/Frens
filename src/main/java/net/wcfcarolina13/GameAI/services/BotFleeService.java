@@ -701,7 +701,11 @@ public final class BotFleeService {
                         bot.getName().getString());
             }
 
-            // Place a torch inside if available
+            // Wait for bot to settle inside the bunker before placing torch
+            Thread.sleep(500);
+
+            // Place a torch inside the bunker (at deepest mined level, not bot.getBlockPos())
+            final BlockPos torchTarget = digPos.down(3); // bottom of 3-deep hole
             server.execute(() -> {
                 for (int i = 0; i < bot.getInventory().size(); i++) {
                     if (bot.getInventory().getStack(i).isOf(Items.TORCH)) {
@@ -711,7 +715,10 @@ public final class BotFleeService {
                             bot.getInventory().setStack(i, temp);
                         }
                         bot.getInventory().setSelectedSlot((i < 9) ? i : 0);
-                        BotActions.placeBlockAt(bot, bot.getBlockPos());
+                        boolean placed = BotActions.placeBlockAt(bot, torchTarget);
+                        LOGGER.info("Bot {} torch at {} (inside bunker): {}",
+                                bot.getName().getString(), torchTarget.toShortString(),
+                                placed ? "placed" : "failed");
                         break;
                     }
                 }

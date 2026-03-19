@@ -406,6 +406,7 @@ public class modCommandRegistry {
 	                            .then(BotUtilityCommands.buildIdentityCheck())
 	                            .then(BotHomeCommands.buildAutoReturnSunset())
 	                            .then(BotHomeCommands.buildAutoReturnSunsetGuardPatrolEligible())
+                            .then(BotHomeCommands.buildAutoReturnSkipPermission())
                             .then(BotHomeCommands.buildAutoReturnSunsetPreferLastBed())
                             .then(BotHomeCommands.buildIdleHobbies())
                             .then(BotHomeCommands.buildAutoHuntStarving())
@@ -5888,6 +5889,52 @@ public class modCommandRegistry {
                 boolean on = BotHomeService.isAutoReturnGuardPatrolEligible(bots.getFirst());
                 ChatUtils.sendSystemMessage(source,
                         summary + " guard/patrol eligibility is now " + (on ? "ON" : "OFF") + ".");
+            }
+        }
+        return successes;
+    }
+
+    static int executeAutoReturnSkipPermissionSetTargets(CommandContext<ServerCommandSource> context,
+                                                        String targetArg,
+                                                        boolean enabled) throws CommandSyntaxException {
+        ServerCommandSource source = context.getSource();
+        List<ServerPlayerEntity> bots = resolveTargetBots(context, targetArg);
+        boolean isAll = targetArg != null && "all".equalsIgnoreCase(targetArg.trim());
+        int successes = 0;
+        for (ServerPlayerEntity bot : bots) {
+            if (bot == null) continue;
+            if (BotHomeService.setAutoReturnSkipPermission(bot, enabled)) successes++;
+        }
+        if (!bots.isEmpty()) {
+            String summary = formatBotList(bots, isAll);
+            ChatUtils.sendSystemMessage(source,
+                    summary + " auto-return skip permission is now " + (enabled ? "ON" : "OFF") + ".");
+        }
+        return successes;
+    }
+
+    static int executeAutoReturnSkipPermissionToggleTargets(CommandContext<ServerCommandSource> context,
+                                                            String targetArg) throws CommandSyntaxException {
+        ServerCommandSource source = context.getSource();
+        List<ServerPlayerEntity> bots = resolveTargetBots(context, targetArg);
+        boolean isAll = targetArg != null && "all".equalsIgnoreCase(targetArg.trim());
+        int successes = 0;
+        int enabledCount = 0;
+        for (ServerPlayerEntity bot : bots) {
+            if (bot == null) continue;
+            if (!BotHomeService.toggleAutoReturnSkipPermission(bot)) continue;
+            successes++;
+            if (BotHomeService.isAutoReturnSkipPermission(bot)) enabledCount++;
+        }
+        if (!bots.isEmpty()) {
+            String summary = formatBotList(bots, isAll);
+            if (isAll || bots.size() > 1) {
+                ChatUtils.sendSystemMessage(source,
+                        summary + " skip permission enabled for " + enabledCount + "/" + bots.size() + ".");
+            } else if (bots.size() == 1) {
+                boolean on = BotHomeService.isAutoReturnSkipPermission(bots.getFirst());
+                ChatUtils.sendSystemMessage(source,
+                        summary + " auto-return skip permission is now " + (on ? "ON" : "OFF") + ".");
             }
         }
         return successes;

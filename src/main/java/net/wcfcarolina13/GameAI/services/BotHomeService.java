@@ -380,6 +380,43 @@ public final class BotHomeService {
         }
     }
 
+    // ── Auto-return skip-permission ──────────────────────────────────────────
+
+    public static boolean setAutoReturnSkipPermission(ServerPlayerEntity bot, boolean enabled) {
+        if (bot == null || !(bot.getEntityWorld() instanceof ServerWorld world)) return false;
+        MinecraftServer server = world.getServer();
+        if (server == null) return false;
+        String botId = botKey(bot);
+        if (botId.isBlank()) return false;
+        WorldData wd = worldData(server, world);
+        synchronized (LOCK) {
+            if (wd.autoReturnSkipPermissionByBot == null) wd.autoReturnSkipPermissionByBot = new HashMap<>();
+            wd.autoReturnSkipPermissionByBot.put(botId, enabled);
+        }
+        flush();
+        return true;
+    }
+
+    public static boolean toggleAutoReturnSkipPermission(ServerPlayerEntity bot) {
+        boolean next = !isAutoReturnSkipPermission(bot);
+        return setAutoReturnSkipPermission(bot, next);
+    }
+
+    /** Default: false (bots ask permission before auto-returning). */
+    public static boolean isAutoReturnSkipPermission(ServerPlayerEntity bot) {
+        if (bot == null || !(bot.getEntityWorld() instanceof ServerWorld world)) return false;
+        MinecraftServer server = world.getServer();
+        if (server == null) return false;
+        String botId = botKey(bot);
+        if (botId.isBlank()) return false;
+        WorldData wd = worldData(server, world);
+        synchronized (LOCK) {
+            if (wd.autoReturnSkipPermissionByBot == null) return false;
+            Boolean val = wd.autoReturnSkipPermissionByBot.get(botId);
+            return Boolean.TRUE.equals(val);
+        }
+    }
+
     public static boolean setIdleHobbiesEnabled(ServerPlayerEntity bot, boolean enabled) {
         if (bot == null || !(bot.getEntityWorld() instanceof ServerWorld world)) {
             return false;
@@ -841,6 +878,7 @@ public final class BotHomeService {
         Map<String, Boolean> autoReturnAtSunsetByBot = new HashMap<>();
         Map<String, Boolean> autoReturnPreferLastBedAtSunsetByBot = new HashMap<>();
         Map<String, Boolean> autoReturnGuardPatrolEligibleByBot = new HashMap<>();
+        Map<String, Boolean> autoReturnSkipPermissionByBot = new HashMap<>();
         Map<String, Boolean> idleHobbiesEnabledByBot = new HashMap<>();
         Map<String, Boolean> autoHuntStarvingEnabledByBot = new HashMap<>();
         Map<String, SavedBase> basesByLabel = new HashMap<>();

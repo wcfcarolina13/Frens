@@ -84,6 +84,30 @@ final class BotHomeCommands {
                                         StringArgumentType.getString(context, "target")))));
     }
 
+    static ArgumentBuilder<ServerCommandSource, ?> buildAutoReturnSkipPermission() {
+        return CommandManager.literal("auto_return_skip_permission")
+                .then(CommandManager.literal("on")
+                        .executes(context -> modCommandRegistry.executeAutoReturnSkipPermissionSetTargets(context, null, true))
+                        .then(CommandManager.argument("target", StringArgumentType.string())
+                                .executes(context -> modCommandRegistry.executeAutoReturnSkipPermissionSetTargets(
+                                        context,
+                                        StringArgumentType.getString(context, "target"),
+                                        true))))
+                .then(CommandManager.literal("off")
+                        .executes(context -> modCommandRegistry.executeAutoReturnSkipPermissionSetTargets(context, null, false))
+                        .then(CommandManager.argument("target", StringArgumentType.string())
+                                .executes(context -> modCommandRegistry.executeAutoReturnSkipPermissionSetTargets(
+                                        context,
+                                        StringArgumentType.getString(context, "target"),
+                                        false))))
+                .then(CommandManager.literal("toggle")
+                        .executes(context -> modCommandRegistry.executeAutoReturnSkipPermissionToggleTargets(context, null))
+                        .then(CommandManager.argument("target", StringArgumentType.string())
+                                .executes(context -> modCommandRegistry.executeAutoReturnSkipPermissionToggleTargets(
+                                        context,
+                                        StringArgumentType.getString(context, "target")))));
+    }
+
     static ArgumentBuilder<ServerCommandSource, ?> buildIdleHobbies() {
         return CommandManager.literal("idle_hobbies")
                 .then(CommandManager.literal("on")

@@ -3,6 +3,12 @@
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 ## 2026-03-18
 
+- **Wander fixes + shelter torch + auto-return notifications + skip-permission:**
+  31. **Wander robustness:** Steps increased from 1-2 to 3-4, step clamp raised to 5, `allowPursuit=true` enabled so bot gets as close as possible instead of hard-failing on first obstacle.
+  32. **Dig-down torch placement:** Added 500ms settle delay after cap placement. Torch now placed at fixed `digPos.down(3)` (bunker floor) instead of `bot.getBlockPos()` (race condition). Placement logged at INFO level.
+  33. **Auto-return notification queue:** `NavigationHudOverlay` now uses a `ConcurrentLinkedQueue` instead of single static fields. Multiple bot notifications display sequentially — accept/dismiss front of queue, then next appears. Shows "(N more)" when queued. Stale notifications auto-expire after 60 seconds.
+  34. **Auto-return skip-permission toggle:** New `BotHomeService.isAutoReturnSkipPermission()` persisted toggle. When ON, bots return home at sunset without HUD notification. Button in bot config UI with tooltip "Bots return home at sunset without asking permission first." Command: `/bot auto_return_skip_permission toggle <target>`.
+
 - **Skylight pathfinding + shelter self-clear for hobbies/hunt:**
   27. **Skylight scanner:** New `findNearestSkylight(world, center, 16)` scans horizontally in a 16-block radius for positions with sky visibility. Underground bots pathfind to natural exits instead of pillaring straight up through terrain.
   28. **Skylight in escapeToSurface():** Before pillar-up, checks for skylight and pathfinds there if found. Falls back to pillar only if no sky within 16 blocks.

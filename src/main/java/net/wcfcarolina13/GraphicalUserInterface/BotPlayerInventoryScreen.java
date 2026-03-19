@@ -449,6 +449,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         SLEEP,
         AUTO_RETURN_SUNSET,
         AUTO_RETURN_SUNSET_GUARD_PATROL,
+        AUTO_RETURN_SKIP_PERMISSION,
         IDLE_HOBBIES,
         AUTO_HUNT_STARVING,
         GAMEPLAY_TIPS,
@@ -560,6 +561,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             TopicEntry.skillHeader("Automation"),
             TopicEntry.skill("Auto Home @ Sunset", TopicAction.AUTO_RETURN_SUNSET, true, 0),
             TopicEntry.skill("Guard/Patrol Eligible", TopicAction.AUTO_RETURN_SUNSET_GUARD_PATROL, true, 1),
+            TopicEntry.skill("Skip Permission", TopicAction.AUTO_RETURN_SKIP_PERMISSION, true, 1),
             TopicEntry.skill("Idle Hobbies", TopicAction.IDLE_HOBBIES, true, 0),
             TopicEntry.skill("Auto Hunt (Starving)", TopicAction.AUTO_HUNT_STARVING, true, 1),
             TopicEntry.skill("Unleash Tethered", TopicAction.UNLEASH_TETHERED, true, 0),
@@ -1566,7 +1568,8 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
                  SKILL_ASCENT,
                  SKILL_DESCENT,
                  AUTO_RETURN_SUNSET,
-                 AUTO_RETURN_SUNSET_GUARD_PATROL -> false;
+                 AUTO_RETURN_SUNSET_GUARD_PATROL,
+                 AUTO_RETURN_SKIP_PERMISSION -> false;
             default -> true;
         };
     }
@@ -3106,6 +3109,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case SLEEP -> "🛌";
             case AUTO_RETURN_SUNSET -> "☾";
             case AUTO_RETURN_SUNSET_GUARD_PATROL -> "↔";
+            case AUTO_RETURN_SKIP_PERMISSION -> "⏩";
             case IDLE_HOBBIES -> "✦";
             case AUTO_HUNT_STARVING -> "⚔";
             case UNLEASH_TETHERED -> "✂";
@@ -3503,6 +3507,10 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case AUTO_RETURN_SUNSET_GUARD_PATROL -> java.util.List.of(
                 "Guard/Patrol Eligible",
                 "When ON, Guard and Patrol bots may still auto-return home at sunset."
+            );
+            case AUTO_RETURN_SKIP_PERMISSION -> java.util.List.of(
+                "Skip Permission",
+                "Bots return home at sunset without asking permission first."
             );
             case IDLE_HOBBIES -> java.util.List.of(
                 "Idle Hobbies",
@@ -4207,6 +4215,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case SLEEP -> runSleep();
             case AUTO_RETURN_SUNSET -> toggleAutoReturnSunset();
             case AUTO_RETURN_SUNSET_GUARD_PATROL -> toggleAutoReturnSunsetGuardPatrol();
+            case AUTO_RETURN_SKIP_PERMISSION -> toggleAutoReturnSkipPermission();
             case IDLE_HOBBIES -> toggleIdleHobbies();
             case AUTO_HUNT_STARVING -> toggleAutoHuntStarving();
             case GAMEPLAY_TIPS -> toggleGameplayTips();
@@ -4653,6 +4662,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case RETURN_HOME -> isReturningToBase();
             case AUTO_RETURN_SUNSET -> isAutoReturnAtSunsetActive();
             case AUTO_RETURN_SUNSET_GUARD_PATROL -> isAutoReturnGuardPatrolEligibleActive();
+            case AUTO_RETURN_SKIP_PERMISSION -> isAutoReturnSkipPermissionActive();
             case IDLE_HOBBIES -> isIdleHobbiesActive();
             case AUTO_HUNT_STARVING -> isAutoHuntStarvingActive();
             case GAMEPLAY_TIPS -> isGameplayTipsActive();
@@ -4772,6 +4782,10 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
 
     private boolean isAutoReturnGuardPatrolEligibleActive() {
         return this.handler != null && this.handler.isBotAutoReturnGuardPatrolEligible();
+    }
+
+    private boolean isAutoReturnSkipPermissionActive() {
+        return this.handler != null && this.handler.isBotAutoReturnSkipPermission();
     }
 
     private String buildSkillCommand(String skillName, String action) {
@@ -5365,6 +5379,12 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
     private void toggleAutoReturnSunsetGuardPatrol() {
         String botTarget = formatBotTarget();
         String command = "bot auto_return_sunset_guard_patrol toggle " + botTarget;
+        sendChatCommand(command);
+    }
+
+    private void toggleAutoReturnSkipPermission() {
+        String botTarget = formatBotTarget();
+        String command = "bot auto_return_skip_permission toggle " + botTarget;
         sendChatCommand(command);
     }
 

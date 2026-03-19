@@ -169,6 +169,21 @@ public final class BotAutoReturnSunsetService {
 
             LOGGER.info("Auto-return at sunset triggered for {} (day={} tod={})", bot.getName().getString(), day, tod);
 
+            // If skip-permission is enabled, go directly to return without notification
+            if (BotHomeService.isAutoReturnSkipPermission(bot)) {
+                LOGGER.info("Auto-return skip-permission: {} returning home without asking", bot.getName().getString());
+                if (bot.hasVehicle()) {
+                    TravelMountHandler.ensureMountPersistence(bot.getVehicle());
+                }
+                BlockPos homePos = resolveSunsetHomeTarget(bot, world);
+                if (homePos != null) {
+                    BotEventHandler.setReturnToBase(bot, Vec3d.ofCenter(homePos));
+                } else {
+                    BotEventHandler.setReturnToBase(bot, (ServerPlayerEntity) null);
+                }
+                continue;
+            }
+
             // If the owner is online, send a non-obstructive HUD notification instead of
             // directly triggering the return.  The player can Accept (which triggers
             // setReturnToBase via SpellNavigationNetworkManager) or Dismiss.

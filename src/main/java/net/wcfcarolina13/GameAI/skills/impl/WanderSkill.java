@@ -41,7 +41,7 @@ public final class WanderSkill implements Skill {
         }
 
         int radius = clamp(getInt(context.parameters(), "radius", 12), 6, 20);
-        int steps = clamp(getInt(context.parameters(), "steps", 1), 1, 3);
+        int steps = clamp(getInt(context.parameters(), "steps", 3), 1, 5);
         BlockPos anchor = BotHomeService.resolveHomeTarget(bot).orElse(bot.getBlockPos()).toImmutable();
 
         boolean moved = false;
@@ -78,7 +78,7 @@ public final class WanderSkill implements Skill {
                     plan,
                     Boolean.FALSE,
                     true,
-                    false,
+                    true,   // allowPursuit — get as close as possible instead of hard-failing
                     false
             );
             LOGGER.debug("Wander attempt target={} success={} detail='{}'",
