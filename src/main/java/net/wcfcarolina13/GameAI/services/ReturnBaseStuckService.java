@@ -1821,116 +1821,31 @@ public final class ReturnBaseStuckService {
      * Mining operations are executed on the server thread for thread safety.
      */
     private static boolean tryMineBlock(ServerPlayerEntity bot, BlockPos target, ServerWorld world) {
-        MinecraftServer server = world.getServer();
-        if (server == null) {
-            LOGGER.warn("Stuck pillar: no server available for mining");
-            return false;
-        }
-        
-        // Face the block (can be done from any thread via LookController)
-        LookController.faceBlock(bot, target);
-        sleepQuiet(50);
-        
         BlockState state = world.getBlockState(target);
         if (state.isAir()) {
             LOGGER.info("Stuck pillar: target {} is already air", target.toShortString());
-            return true; // Already air
+            return true;
         }
-        
-        LOGGER.info("Stuck pillar: attempting to mine {} at {}", 
+
+        LOGGER.info("Stuck pillar: mining {} at {} via MiningTool",
                 state.getBlock().getName().getString(), target.toShortString());
-        
-        // Use ToolSelector to pick the best tool for this block
-        ItemStack bestTool = ToolSelector.selectBestToolForBlock(bot, state);
-        if (!bestTool.isEmpty()) {
-            // Find and equip the tool (on server thread)
-            int toolSlot = findToolSlot(bot, bestTool);
-            if (toolSlot >= 0 && toolSlot < 9) {
-                final int slot = toolSlot;
-                server.execute(() -> BotActions.selectHotbarSlot(bot, slot));
-            }
-        }
-        sleepQuiet(100);
-        
-        // Calculate mining time based on hardness and tool
-        float hardness = state.getHardness(world, target);
-        ItemStack tool = bot.getMainHandStack();
-        float speed = tool.isEmpty() ? 1.0f : Math.max(1.0f, tool.getMiningSpeedMultiplier(state));
-        int miningTimeMs = (int) ((hardness / speed) * 1500) + 100;
-        miningTimeMs = Math.min(miningTimeMs, 3000); // Cap at 3 seconds
-        
-        LOGGER.info("Stuck pillar: mining {} (hardness={}, speed={}, time={}ms)", 
-                state.getBlock().getName().getString(), hardness, speed, miningTimeMs);
-        
-        // Use bot's interaction manager to break the block - MUST run on server thread
-        AtomicBoolean startedBreaking = new AtomicBoolean(false);
-        CountDownLatch latch = new CountDownLatch(1);
-        
-        server.execute(() -> {
-            try {
-                var auth = BotTerritoryAuthorizationService.authorizeBlockMutation(bot, world, target);
-                if (!auth.allowed()) {
-                    return;
-                }
-                boolean started = bot.interactionManager.tryBreakBlock(target);
-                startedBreaking.set(started);
-                if (started) {
-                    bot.swingHand(Hand.MAIN_HAND, true);
-                }
-            } catch (Exception e) {
-                LOGGER.warn("Stuck pillar: exception starting block break: {}", e.getMessage());
-            } finally {
-                latch.countDown();
-            }
-        });
-        
-        // Wait for the server thread to process
+
+        // Delegate to MiningTool for proper vanilla-like mining (timing, animation, LoS, tool selection)
         try {
-            latch.await(1, TimeUnit.SECONDS);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            return false;
-        }
-        
-        if (!startedBreaking.get()) {
-            LOGGER.info("Stuck pillar: could not start breaking block at {} (tryBreakBlock returned false)", target.toShortString());
-            return false;
-        }
-        
-        // Wait for mining to complete
-        sleepQuiet(miningTimeMs);
-        
-        // Check if the block is now gone
-        boolean success = world.getBlockState(target).isAir();
-        if (success) {
-            LOGGER.info("Stuck pillar: successfully mined block at {}", target.toShortString());
-        } else {
-            // Try one more time with a longer duration
-            LOGGER.info("Stuck pillar: first attempt did not clear block, trying again");
-            CountDownLatch latch2 = new CountDownLatch(1);
-            server.execute(() -> {
-                try {
-                    var auth = BotTerritoryAuthorizationService.authorizeBlockMutation(bot, world, target);
-                    if (!auth.allowed()) {
-                        return;
-                    }
-                    bot.interactionManager.tryBreakBlock(target);
-                    bot.swingHand(Hand.MAIN_HAND, true);
-                } finally {
-                    latch2.countDown();
-                }
-            });
-            try {
-                latch2.await(1, TimeUnit.SECONDS);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
+            String result = net.wcfcarolina13.PlayerUtils.MiningTool.mineBlock(bot, target, false).join();
+            boolean success = world.getBlockState(target).isAir();
+            if (!success) {
+                LOGGER.info("Stuck pillar: MiningTool returned '{}' but block still present at {}", result, target.toShortString());
             }
-            sleepQuiet(500);
-            success = world.getBlockState(target).isAir();
-            LOGGER.info("Stuck pillar: second attempt result={} at {}", success, target.toShortString());
+            return success;
+        } catch (Exception e) {
+            LOGGER.warn("Stuck pillar: MiningTool failed for {}: {}", target.toShortString(), e.getMessage());
+            return false;
         }
-        return success;
     }
+
+
+
     
     /**
      * Find the hotbar slot containing a matching tool.
