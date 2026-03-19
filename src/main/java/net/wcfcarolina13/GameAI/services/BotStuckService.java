@@ -8,6 +8,7 @@ import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 import net.wcfcarolina13.GameAI.BotActions;
+import net.wcfcarolina13.PlayerUtils.MiningTool;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -30,10 +31,14 @@ public final class BotStuckService {
     private static final Map<UUID, Vec3d> LAST_KNOWN_POSITION = new ConcurrentHashMap<>();
     private static final Map<UUID, Integer> STATIONARY_TICKS = new ConcurrentHashMap<>();
     private static final Map<UUID, Vec3d> LAST_SAFE_POSITION = new ConcurrentHashMap<>();
+    /** Cooldown to prevent rapid mine-escape attempts (value = tick of last attempt). */
+    private static final Map<UUID, Long> MINE_ESCAPE_COOLDOWN = new ConcurrentHashMap<>();
+    private static final long MINE_ESCAPE_COOLDOWN_TICKS = 60; // 3 seconds
 
     private BotStuckService() {}
 
-    public record EnvironmentSnapshot(boolean enclosed, int solidNeighborCount, boolean hasHeadroom, boolean hasEscapeRoute) {}
+    public record EnvironmentSnapshot(boolean enclosed, int solidNeighborCount, boolean hasHeadroom,
+                                          boolean hasEscapeRoute, boolean horizontallyEnclosed) {}
 
     public static void resetAll() {
         LAST_KNOWN_POSITION.clear();
@@ -69,7 +74,7 @@ public final class BotStuckService {
 
     public static EnvironmentSnapshot analyzeEnvironment(ServerPlayerEntity bot) {
         if (bot == null) {
-            return new EnvironmentSnapshot(false, 0, true, true);
+            return new EnvironmentSnapshot(false, 0, true, true, false);
         }
         ServerWorld world = bot.getCommandSource().getWorld();
         BlockPos pos = bot.getBlockPos();
@@ -95,7 +100,17 @@ public final class BotStuckService {
         }
 
         boolean enclosed = solidNeighbors >= 5;
-        return new EnvironmentSnapshot(enclosed, solidNeighbors, headroom, escapeRoute);
+        // Check if all 4 horizontal directions are blocked at feet+head level
+        boolean horizEnclosed = !escapeRoute;
+        for (Direction direction : Direction.Type.HORIZONTAL) {
+            BlockPos fwd = pos.offset(direction);
+            if (!isSolid(world, fwd) || !isSolid(world, fwd.up())) {
+                // At least one horizontal direction has a gap at feet or head
+                horizEnclosed = false;
+                break;
+            }
+        }
+        return new EnvironmentSnapshot(enclosed, solidNeighbors, headroom, escapeRoute, horizEnclosed);
     }
 
     private static boolean isStandable(ServerWorld world, BlockPos stand) {
@@ -230,8 +245,60 @@ public final class BotStuckService {
                 BotActions.escapeStairs(bot);
             }
 
+            // If horizontally enclosed (all 4 walls blocked) and hop/stairs didn't help, mine out
+            boolean horizEnclosed = environmentSnapshot != null && environmentSnapshot.horizontallyEnclosed();
+            if (!escaped && horizEnclosed) {
+                ServerWorld world = bot.getCommandSource().getWorld();
+                long nowTick = world.getServer() != null ? world.getServer().getTicks() : 0;
+                long lastMine = MINE_ESCAPE_COOLDOWN.getOrDefault(botId, 0L);
+                if (nowTick - lastMine >= MINE_ESCAPE_COOLDOWN_TICKS) {
+                    MINE_ESCAPE_COOLDOWN.put(botId, nowTick);
+                    tryMineEscape(bot, world);
+                }
+            }
+
             STATIONARY_TICKS.put(botId, 0);
             LAST_KNOWN_POSITION.put(botId, new Vec3d(bot.getX(), bot.getY(), bot.getZ()));
+        }
+    }
+
+    /**
+     * Mine escape for horizontally enclosed bots. Finds the nearest direction with air
+     * beyond the wall (up to 3 blocks), mines the wall in that direction.
+     * Falls back to mining north if all directions are solid.
+     */
+    private static void tryMineEscape(ServerPlayerEntity bot, ServerWorld world) {
+        BlockPos pos = bot.getBlockPos();
+
+        // Find nearest direction with air beyond the wall
+        Direction bestDir = null;
+        int bestDist = Integer.MAX_VALUE;
+        for (Direction dir : Direction.Type.HORIZONTAL) {
+            for (int dist = 1; dist <= 3; dist++) {
+                BlockPos check = pos.offset(dir, dist);
+                if (world.getBlockState(check).isAir() && world.getBlockState(check.up()).isAir()) {
+                    if (dist < bestDist) {
+                        bestDist = dist;
+                        bestDir = dir;
+                    }
+                    break;
+                }
+            }
+        }
+
+        Direction mineDir = bestDir != null ? bestDir : Direction.NORTH;
+        BlockPos wallFeet = pos.offset(mineDir);
+        BlockPos wallHead = wallFeet.up();
+
+        LOGGER.info("Mine-escape for {} toward {} (airDist={})",
+                bot.getName().getString(), mineDir.asString(),
+                bestDir != null ? bestDist : "none");
+
+        if (world.getBlockState(wallFeet).isSolidBlock(world, wallFeet)) {
+            MiningTool.mineBlock(bot, wallFeet, false);
+        }
+        if (world.getBlockState(wallHead).isSolidBlock(world, wallHead)) {
+            MiningTool.mineBlock(bot, wallHead, false);
         }
     }
 }

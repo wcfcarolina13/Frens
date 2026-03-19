@@ -3,6 +3,10 @@
 Historical record and reasoning. `TODO.md` is the source of truth for what’s next.
 ## 2026-03-18
 
+- **Mine-escape for enclosed bots (general stuck detection):**
+  20. **Horizontal enclosure detection:** `BotStuckService.analyzeEnvironment()` now tracks `horizontallyEnclosed` — true when all 4 horizontal directions are blocked at feet+head level. Previously only detected `enclosed` at 5+ solid neighbors (requires ceiling too).
+  21. **Mine-escape fallback:** When a bot is stationary, horizontally enclosed, and hop/stairs escape fails, `tryMineEscape()` mines the 2 wall blocks in the direction with nearest air (scans up to 3 blocks). 60-tick cooldown prevents rapid re-mining. Works for any enclosed space — shelters, caves, player-built rooms.
+
 - **Fix bots trapped in shelters after restart:**
   19. **Enclosed-on-join detection:** `registerBot()` now checks if the bot has no sky visibility and is enclosed on all 4 horizontal sides (5 ticks after spawn). If detected, launches `forceBreakFree()` — generic escape using the same break-free logic (collect torch, try horizontal exits, pillar to surface). Fixes bots trapped in shelters from a previous session since SHELTER_ACTIVE is in-memory only.
 
