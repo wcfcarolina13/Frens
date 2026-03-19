@@ -12,6 +12,7 @@ import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
+import net.wcfcarolina13.Entity.LookController;
 import net.wcfcarolina13.GameAI.BotActions;
 import net.wcfcarolina13.GameAI.BotEventHandler;
 import net.wcfcarolina13.GameAI.services.construction.ScaffoldService;
@@ -1316,35 +1317,49 @@ public final class BotFleeService {
         LOGGER.info("Bot {} underground — pillar-escaping to surface", bot.getName().getString());
         MinecraftServer server = bot.getCommandSource().getServer();
 
-        for (int i = 0; i < 30; i++) {
-            if (world.isSkyVisible(bot.getBlockPos().up())) {
-                LOGGER.info("Bot {} reached surface after {} pillar steps", bot.getName().getString(), i);
-                return;
+        // Enable sneaking to prevent falling off the pillar
+        server.execute(() -> bot.setSneaking(true));
+        Thread.sleep(100);
+
+        try {
+            for (int i = 0; i < 30; i++) {
+                if (world.isSkyVisible(bot.getBlockPos().up())) {
+                    LOGGER.info("Bot {} reached surface after {} pillar steps", bot.getName().getString(), i);
+                    return;
+                }
+
+                // Clear 2 blocks above head for jump clearance
+                BlockPos headAbove = bot.getBlockPos().up(2);
+                if (world.getBlockState(headAbove).isSolidBlock(world, headAbove)) {
+                    LookController.faceBlock(bot, headAbove);
+                    Thread.sleep(50);
+                    MiningTool.mineBlock(bot, headAbove, false).join();
+                    Thread.sleep(200);
+                }
+                BlockPos headAbove2 = headAbove.up();
+                if (world.getBlockState(headAbove2).isSolidBlock(world, headAbove2)) {
+                    LookController.faceBlock(bot, headAbove2);
+                    Thread.sleep(50);
+                    MiningTool.mineBlock(bot, headAbove2, false).join();
+                    Thread.sleep(200);
+                }
+
+                // Jump + place block below (pillar up one block)
+                BlockPos feet = bot.getBlockPos();
+                server.execute(() -> {
+                    bot.jump();
+                    bot.velocityDirty = true;
+                });
+                Thread.sleep(350); // wait for peak of jump
+                final BlockPos placeAt = feet;
+                server.execute(() -> BotActions.placeBlockAt(bot, placeAt));
+                Thread.sleep(350); // wait for landing on placed block
             }
-            BlockPos above = bot.getBlockPos().up(2);
-            // Mine block above head if solid
-            if (world.getBlockState(above).isSolidBlock(world, above)) {
-                MiningTool.mineBlock(bot, above, false).join();
-                Thread.sleep(200);
-            }
-            // Also clear the block above that if solid (2-high clearance for jump)
-            BlockPos above2 = above.up();
-            if (world.getBlockState(above2).isSolidBlock(world, above2)) {
-                MiningTool.mineBlock(bot, above2, false).join();
-                Thread.sleep(200);
-            }
-            // Jump + place block below to pillar up
-            BlockPos feet = bot.getBlockPos();
-            server.execute(() -> {
-                bot.jump();
-                bot.velocityDirty = true;
-            });
-            Thread.sleep(400); // wait for peak of jump
-            final BlockPos placeAt = feet;
-            server.execute(() -> BotActions.placeBlockAt(bot, placeAt));
-            Thread.sleep(300);
+            LOGGER.warn("Bot {} failed to reach surface after 30 pillar steps", bot.getName().getString());
+        } finally {
+            // Always stop sneaking when done
+            server.execute(() -> bot.setSneaking(false));
         }
-        LOGGER.warn("Bot {} failed to reach surface after 30 pillar steps", bot.getName().getString());
     }
 
     /** Increment generation counter — invalidates all prior shelter threads for this bot. */

@@ -227,12 +227,15 @@ public class MiningTool {
             });
         }, 0, MINING_TICK_MS, TimeUnit.MILLISECONDS);
 
+        // Timeout: actual mining time + 5 second buffer (was fixed 12s, killed slow blocks)
+        long timeoutMs = Math.max(FAILSAFE_TIMEOUT_SECONDS * 1000,
+                requiredTicksHolder.get() * MINING_TICK_MS + 5000);
         ScheduledFuture<?> timeoutTask = MINING_EXECUTOR.schedule(() -> {
             if (!miningResult.isDone()) {
-                LOGGER.warn("Mining timeout reached for {}", targetBlockPos);
+                LOGGER.warn("Mining timeout reached for {} (after {}ms)", targetBlockPos, timeoutMs);
                 miningResult.complete("⚠️ Mining attempt timed out.");
             }
-        }, FAILSAFE_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+        }, timeoutMs, TimeUnit.MILLISECONDS);
 
         miningResult.whenComplete((result, error) -> {
             task.cancel(true);
