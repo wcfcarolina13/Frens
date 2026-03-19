@@ -157,6 +157,8 @@ public class MiningTool {
                 
                 // Check if skill was aborted
                 if (SkillManager.shouldAbortSkill(bot)) {
+                    if (bot.getEntityWorld() instanceof ServerWorld sw)
+                        sw.setBlockBreakingInfo(bot.getId(), targetBlockPos, -1);
                     LOGGER.info("Mining aborted for {} at {}", bot.getName().getString(), targetBlockPos);
                     miningResult.complete("⚠️ Mining aborted.");
                     return;
@@ -164,6 +166,8 @@ public class MiningTool {
 
                 double tickDistSq = bot.squaredDistanceTo(targetBlockPos.getX() + 0.5, targetBlockPos.getY() + 0.5, targetBlockPos.getZ() + 0.5);
                 if (tickDistSq > SURVIVAL_REACH_SQ) {
+                    if (bot.getEntityWorld() instanceof ServerWorld sw)
+                        sw.setBlockBreakingInfo(bot.getId(), targetBlockPos, -1);
                     miningResult.complete("⚠️ Cannot mine: out of reach.");
                     return;
                 }
@@ -183,6 +187,10 @@ public class MiningTool {
                         return;
                     }
                     if (currentState.isAir()) {
+                        // Clear break animation
+                        if (bot.getEntityWorld() instanceof ServerWorld sw) {
+                            sw.setBlockBreakingInfo(bot.getId(), targetBlockPos, -1);
+                        }
                         LOGGER.info("Mining complete at {}", targetBlockPos);
                         miningResult.complete("Mining complete!");
                         return;
@@ -190,7 +198,19 @@ public class MiningTool {
 
                     bot.swingHand(Hand.MAIN_HAND);
                     int tick = ticksElapsed.incrementAndGet();
-                    if (tick >= requiredTicksHolder.get()) {
+                    int required = requiredTicksHolder.get();
+
+                    // Send progressive break animation (0-9 stages)
+                    if (required > 1 && bot.getEntityWorld() instanceof ServerWorld sw) {
+                        int stage = Math.min(9, (int) ((float) tick / required * 10));
+                        sw.setBlockBreakingInfo(bot.getId(), targetBlockPos, stage);
+                    }
+
+                    if (tick >= required) {
+                        // Clear break animation before breaking
+                        if (bot.getEntityWorld() instanceof ServerWorld sw) {
+                            sw.setBlockBreakingInfo(bot.getId(), targetBlockPos, -1);
+                        }
                         boolean broke = bot.interactionManager.tryBreakBlock(targetBlockPos);
                         if (!broke) {
                             int attempts = postThresholdAttempts.incrementAndGet();
@@ -218,6 +238,12 @@ public class MiningTool {
             task.cancel(true);
             timeoutTask.cancel(true);
             canceled.set(true);
+            // Clear any lingering break animation
+            server.execute(() -> {
+                if (bot.getEntityWorld() instanceof ServerWorld sw) {
+                    sw.setBlockBreakingInfo(bot.getId(), targetBlockPos, -1);
+                }
+            });
         });
 
         return miningResult;
