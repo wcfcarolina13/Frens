@@ -10,6 +10,8 @@ import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import net.wcfcarolina13.Frens;
+import net.wcfcarolina13.FilingSystem.ManualConfig;
 
 import java.io.IOException;
 import java.io.Reader;
@@ -22,6 +24,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
+import java.util.UUID;
 
 /**
  * Persistent registry of bot-placed chests per bot per world.
@@ -133,6 +137,23 @@ public final class BotChestRegistryService {
         return bot.getName().getString().toLowerCase(Locale.ROOT);
     }
 
+    private static String shareKey(ServerPlayerEntity bot) {
+        if (bot == null) {
+            return "";
+        }
+        try {
+            if (Frens.CONFIG != null) {
+                ManualConfig.BotOwnership ownership = Frens.CONFIG.getOwner(bot.getName().getString());
+                if (ownership != null && ownership.ownerUuid() != null && !ownership.ownerUuid().isBlank()) {
+                    UUID ownerUuid = UUID.fromString(ownership.ownerUuid());
+                    return "owner:" + ownerUuid;
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+        return "bot:" + botKey(bot);
+    }
+
     private static WorldData worldData(MinecraftServer server, ServerWorld world) {
         ensureLoaded();
         String key = serverWorldKey(server, world);
@@ -187,6 +208,66 @@ public final class BotChestRegistryService {
             List<ChestRecord> records = wd.chestsByBot.get(key);
             return records != null ? Collections.unmodifiableList(new ArrayList<>(records)) : List.of();
         }
+    }
+
+    /**
+     * Returns all non-destroyed chest records placed by bots that share the same owner as {@code bot}.
+     *
+     * <p>Unowned bots only see their own records.
+     */
+    public static List<ChestRecord> listChestsForOwner(ServerPlayerEntity bot, ServerWorld world) {
+        if (bot == null || world == null) {
+            return List.of();
+        }
+        MinecraftServer server = world.getServer();
+        if (server == null) {
+            return List.of();
+        }
+
+        String targetShareKey = shareKey(bot);
+        if (targetShareKey.isBlank()) {
+            return List.of();
+        }
+
+        WorldData wd = worldData(server, world);
+        synchronized (LOCK) {
+            if (wd.chestsByBot == null || wd.chestsByBot.isEmpty()) {
+                return List.of();
+            }
+            List<ChestRecord> out = new ArrayList<>();
+            for (Map.Entry<String, List<ChestRecord>> entry : wd.chestsByBot.entrySet()) {
+                String alias = entry.getKey();
+                if (alias == null || entry.getValue() == null) {
+                    continue;
+                }
+                if (!Objects.equals(targetShareKey, shareKeyForAlias(alias))) {
+                    continue;
+                }
+                for (ChestRecord record : entry.getValue()) {
+                    if (record != null && !record.destroyed) {
+                        out.add(record);
+                    }
+                }
+            }
+            return Collections.unmodifiableList(new ArrayList<>(out));
+        }
+    }
+
+    private static String shareKeyForAlias(String alias) {
+        if (alias == null || alias.isBlank()) {
+            return "";
+        }
+        try {
+            if (Frens.CONFIG != null) {
+                ManualConfig.BotOwnership ownership = Frens.CONFIG.getOwner(alias);
+                if (ownership != null && ownership.ownerUuid() != null && !ownership.ownerUuid().isBlank()) {
+                    UUID ownerUuid = UUID.fromString(ownership.ownerUuid());
+                    return "owner:" + ownerUuid;
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+        return "bot:" + alias.trim().toLowerCase(Locale.ROOT);
     }
 
     /** Verify chest records against the actual world, marking destroyed ones. */

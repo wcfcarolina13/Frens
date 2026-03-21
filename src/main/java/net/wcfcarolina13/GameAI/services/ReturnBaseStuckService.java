@@ -803,21 +803,28 @@ public final class ReturnBaseStuckService {
             return;
         }
 
-        // If underground, try skylight pathfinding first — much cheaper than mining through rock
-        if (!world.isSkyVisible(bot.getBlockPos().up())) {
-            BlockPos skyTarget = BotFleeService.findNearestSkylight(world, bot.getBlockPos(), 16);
-            if (skyTarget != null) {
-                LOGGER.info("ReturnBaseStuck: {} found skylight at {} — pathfinding to surface first",
-                        bot.getName().getString(), skyTarget.toShortString());
-                MovementService.MovementPlan plan = new MovementService.MovementPlan(
-                        MovementService.Mode.DIRECT, skyTarget, skyTarget, null, null, null);
-                MovementService.execute(bot.getCommandSource(), bot, plan, Boolean.FALSE, true);
-                sleepQuiet(2000); // wait for pathfinding to progress
-                if (world.isSkyVisible(bot.getBlockPos().up())) {
-                    LOGGER.info("ReturnBaseStuck: {} reached surface via skylight", bot.getName().getString());
-                    return; // let normal return-base pathfinding take over on surface
-                }
+        // Surface-first strategy: when the goal is significantly above and bot is underground,
+        // pillar up to the surface rather than mining horizontally through stone.
+        // Open-air pathfinding is dramatically faster than grinding through rock.
+        double deltaY = baseTarget.y - bot.getY();
+        boolean underground = !world.isSkyVisible(bot.getBlockPos().up());
+        if (deltaY >= 5.0 && underground) {
+            LOGGER.info("ReturnBaseStuck: {} is underground (deltaY={}) — using pillar-up to reach surface",
+                    bot.getName().getString(), String.format("%.0f", deltaY));
+            try {
+                BotFleeService.escapeToSurface(bot, world);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
             }
+            // If we reached the surface, let normal pathfinding handle the rest
+            if (world.isSkyVisible(bot.getBlockPos().up())) {
+                LOGGER.info("ReturnBaseStuck: {} reached surface via pillar-up, resuming pathfinding",
+                        bot.getName().getString());
+                return;
+            }
+            // If pillar-up didn't reach surface, fall through to horizontal mine-escape
+            LOGGER.info("ReturnBaseStuck: {} pillar-up didn't reach surface, falling through to horizontal mining",
+                    bot.getName().getString());
         }
 
         long deadline = System.currentTimeMillis() + MINE_ESCAPE_MAX_MS;
@@ -900,13 +907,21 @@ public final class ReturnBaseStuckService {
                     remaining = MINE_ESCAPE_MAX_BLOCKS - (minedTotal + minedThisPass);
 
                     // After mining, attempt a short nudge to exploit the opening.
-                    // Prefer stepping up onto the front block if possible.
-                    if (isPassable(world, step)) {
+                    // Validate headroom (bot is 1.8 blocks tall, needs 2 passable blocks) to prevent
+                    // the bot's bounding box from clipping into adjacent solid blocks.
+                    if (isPassable(world, step) && isPassable(world, step.up())) {
                         LOGGER.info("ReturnBaseStuck: mine-escape nudging up onto step {}", step.toShortString());
                         MovementService.nudgeTowardUntilClose(bot, step, 2.25D, 1600L, 0.22, "mine-escape-step");
-                    } else if (isPassable(world, front)) {
+                    } else if (isPassable(world, front) && isPassable(world, front.up())) {
                         LOGGER.info("ReturnBaseStuck: mine-escape nudging into {}", front.toShortString());
                         MovementService.nudgeTowardUntilClose(bot, front, 2.25D, 1400L, 0.20, "mine-escape-forward");
+                    }
+
+                    // Guard: if nudge embedded bot in a wall, trigger rescue immediately
+                    if (bot.isInsideWall()) {
+                        LOGGER.warn("ReturnBaseStuck: bot embedded in wall after nudge at {}, attempting rescue",
+                                bot.getBlockPos().toShortString());
+                        BotRescueService.rescueFromBurial(bot);
                     }
                 }
             }
@@ -1120,21 +1135,30 @@ public final class ReturnBaseStuckService {
         if (lenSq < 1.0e-6) {
             return false;
         }
+        LookController.faceBlock(bot, best);
+        BotActions.sprint(bot, false);
         if (isWaterLikeContext(bot, world)) {
-            LookController.faceBlock(bot, best);
-            BotActions.sprint(bot, false);
             BotActions.jump(bot);
-            BotActions.applyMovementInput(bot, tgt, 0.14D);
+            BotActions.applyMovementInput(bot, tgt, 0.12D);
         } else {
-            double len = Math.sqrt(lenSq);
-            Vec3d horiz = new Vec3d(dir.x / len, 0.0, dir.z / len);
-            Vec3d curVel = bot.getVelocity();
-            bot.setVelocity(horiz.x * 0.32, curVel.y, horiz.z * 0.32);
-            bot.velocityDirty = true;
+            if (tgt.y - bot.getY() > 0.6D) {
+                BotActions.jump(bot);
+            } else {
+                BotActions.autoJumpIfNeeded(bot);
+            }
+            BotActions.applyMovementInput(bot, tgt, 0.18D);
         }
 
         // Face the direction as well (helps if the movement controller expects facing).
         LookController.faceBlock(bot, best);
+
+        if (bot.isInsideWall()) {
+            LOGGER.warn("ReturnBaseStuck: quick-nudge clipped {} into a wall at {}, triggering rescue",
+                    bot.getName().getString(),
+                    bot.getBlockPos().toShortString());
+            BotRescueService.rescueFromBurial(bot);
+            return false;
+        }
 
         LOGGER.info("ReturnBaseStuck: quick-nudge to {} (stagnant={}, score={}, failedMem={})",
                 best.toShortString(), stagnant, String.format("%.2f", bestScore), failedDirs.size());

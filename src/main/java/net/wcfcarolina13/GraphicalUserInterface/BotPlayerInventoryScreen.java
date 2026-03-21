@@ -255,6 +255,8 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         Map<String, Boolean> globalDefaults = new HashMap<>();
         Map<String, Map<String, Boolean>> userOverrides = new HashMap<>();
         Map<String, String> knownUsers = new HashMap<>();
+        boolean autonomousRescuesEnabled;
+        int ownedSunsetSelfSufficientState = -2;
     }
 
     private record BotSwitchUiState(String targetAlias,
@@ -328,6 +330,8 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
                     cache.knownUsers.put(userUuid, userName);
                 }
             }
+            cache.autonomousRescuesEnabled = parsed.autonomousRescuesEnabled;
+            cache.ownedSunsetSelfSufficientState = parsed.ownedSunsetSelfSufficientState;
 
             synchronized (ADMIN_PERMISSIONS_BY_ALIAS) {
                 ADMIN_PERMISSIONS_BY_ALIAS.put(aliasKey, cache);
@@ -448,6 +452,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         RETURN_HOME,
         SLEEP,
         AUTO_RETURN_SUNSET,
+        AUTO_RETURN_SELF_SUFFICIENT,
         AUTO_RETURN_SUNSET_GUARD_PATROL,
         AUTO_RETURN_SKIP_PERMISSION,
         IDLE_HOBBIES,
@@ -478,6 +483,8 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         OPEN_BOT_CONTROLS,
         OPEN_PLAYER_SETTINGS,
         ADMIN_PREVIEW_NON_ADMIN,
+        AUTONOMOUS_RESCUES,
+        OWNED_SUNSET_SS,
         OPEN_SKIN_CHOOSER,
         SKIN_POLICY_EVERYONE,
         SKIN_POLICY_CUSTOM,
@@ -560,6 +567,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
 
             TopicEntry.skillHeader("Automation"),
             TopicEntry.skill("Auto Home @ Sunset", TopicAction.AUTO_RETURN_SUNSET, true, 0),
+            TopicEntry.skill("Self-Sufficiency", TopicAction.AUTO_RETURN_SELF_SUFFICIENT, true, 1),
             TopicEntry.skill("Guard/Patrol Eligible", TopicAction.AUTO_RETURN_SUNSET_GUARD_PATROL, true, 1),
             TopicEntry.skill("Skip Permission", TopicAction.AUTO_RETURN_SKIP_PERMISSION, true, 1),
             TopicEntry.skill("Idle Hobbies", TopicAction.IDLE_HOBBIES, true, 0),
@@ -646,6 +654,8 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
                 new TopicEntry("Gameplay Tips (Hints)", TopicCategory.ADMIN, TopicAction.GAMEPLAY_TIPS, true, 0, null),
                 new TopicEntry("Idle Hobbies Anywhere", TopicCategory.ADMIN, TopicAction.IDLE_HOBBIES_ANYWHERE, true, 0, null),
                 new TopicEntry("Baritone Pathfinder", TopicCategory.ADMIN, TopicAction.BARITONE_PATHFINDER, true, 0, null),
+                new TopicEntry("Allow Autonomous Rescues", TopicCategory.ADMIN, TopicAction.AUTONOMOUS_RESCUES, true, 0, null),
+                new TopicEntry("Owned Sunset SS", TopicCategory.ADMIN, TopicAction.OWNED_SUNSET_SS, true, 0, null),
 
                 TopicEntry.adminHeader("🎓 Learning"),
                 TopicEntry.admin("Learning Status", "learning_status"),
@@ -1568,6 +1578,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
                  SKILL_ASCENT,
                  SKILL_DESCENT,
                  AUTO_RETURN_SUNSET,
+                 AUTO_RETURN_SELF_SUFFICIENT,
                  AUTO_RETURN_SUNSET_GUARD_PATROL,
                  AUTO_RETURN_SKIP_PERMISSION -> false;
             default -> true;
@@ -2668,8 +2679,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
 
         // Check control box (right side).
         if (entry.toggle) {
-            boolean active = isEntryActive(entry.action);
-            String status = active ? "ON" : "OFF";
+            String status = toggleStatusLabelForEntry(entry);
             int boxW = this.textRenderer.getWidth(status) + 16;
             int boxX = controlBoxRight - boxW;
             if (mouseX >= boxX && mouseX < boxX + boxW
@@ -3041,7 +3051,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         int controlBoxRight = rowX + rowW - 2;
 
         if (hasControlBox && entry.toggle) {
-            String status = active ? "ON" : "OFF";
+            String status = toggleStatusLabelForEntry(entry);
             int boxW = this.textRenderer.getWidth(status) + 16;
             int boxX = controlBoxRight - boxW;
             drawActionControlBox(context, boxX, controlY, boxW, controlSize, status, mouseX, mouseY, active);
@@ -3064,6 +3074,14 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             int labelColor = enabled ? COLOR_TEXT_PARCHMENT : COLOR_TEXT_DISABLED;
             context.drawText(this.textRenderer, drawnLabel, labelX, textY, labelColor, false);
         }
+    }
+
+    private String toggleStatusLabelForEntry(TopicEntry entry) {
+        if (entry != null && entry.action == TopicAction.OWNED_SUNSET_SS) {
+            return ownedSunsetSelfSufficientStatusLabel();
+        }
+        boolean active = entry != null && entry.action != null && isEntryActive(entry.action);
+        return active ? "ON" : "OFF";
     }
 
     private int drawSkillRowIcon(DrawContext context, int rowX, int rowY, TopicAction action) {
@@ -3108,6 +3126,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case RETURN_HOME -> "🏠";
             case SLEEP -> "🛌";
             case AUTO_RETURN_SUNSET -> "☾";
+            case AUTO_RETURN_SELF_SUFFICIENT -> "🏕";
             case AUTO_RETURN_SUNSET_GUARD_PATROL -> "↔";
             case AUTO_RETURN_SKIP_PERMISSION -> "⏩";
             case IDLE_HOBBIES -> "✦";
@@ -3358,6 +3377,21 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
                         "Current: " + (adminPreviewAsNonAdmin ? "ON" : "OFF")
                 );
             }
+            if (entry.action == TopicAction.AUTONOMOUS_RESCUES) {
+                return java.util.List.of(
+                        "Allow Autonomous Rescues",
+                        "When ON, bots may perform emergency self-sufficiency rescues for same-owner bots.",
+                        "This affects all players on the server.",
+                        "Current: " + (isAutonomousRescuesActive() ? "ON" : "OFF")
+                );
+            }
+            if (entry.action == TopicAction.OWNED_SUNSET_SS) {
+                return java.util.List.of(
+                        "Owned Sunset SS",
+                        "Sets sunset self-sufficiency for all bots you own that are currently active on this server.",
+                        "Current: " + ownedSunsetSelfSufficientStatusLabel()
+                );
+            }
             if (entry.action == TopicAction.SKIN_POLICY_EVERYONE) {
                 return java.util.List.of(
                         "Allow Skin Changes for Everyone",
@@ -3503,6 +3537,10 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case AUTO_RETURN_SUNSET -> java.util.List.of(
                 "Auto Home @ Sunset",
                 "At dusk, the bot heads back toward home instead of staying out overnight."
+            );
+            case AUTO_RETURN_SELF_SUFFICIENT -> java.util.List.of(
+                "Self-Sufficiency",
+                "If home is too far or unreachable at dusk, the bot falls back to nearby safe anchors like bases, beds, allied bots, remembered chests, or tactical shelter."
             );
             case AUTO_RETURN_SUNSET_GUARD_PATROL -> java.util.List.of(
                 "Guard/Patrol Eligible",
@@ -4203,6 +4241,8 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case OPEN_BOT_CONTROLS -> openBotControls();
             case OPEN_PLAYER_SETTINGS -> openAdminPlayerSettings();
             case ADMIN_PREVIEW_NON_ADMIN -> toggleAdminPreviewAsNonAdmin();
+            case AUTONOMOUS_RESCUES -> toggleAutonomousRescues();
+            case OWNED_SUNSET_SS -> toggleOwnedSunsetSelfSufficientBulk();
             case OPEN_SKIN_CHOOSER -> openSkinChooser();
             case SKIN_POLICY_EVERYONE -> toggleSkinPolicyEveryone();
             case SKIN_POLICY_CUSTOM -> toggleSkinPolicyCustom();
@@ -4214,6 +4254,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case RETURN_HOME -> runReturnHome();
             case SLEEP -> runSleep();
             case AUTO_RETURN_SUNSET -> toggleAutoReturnSunset();
+            case AUTO_RETURN_SELF_SUFFICIENT -> toggleAutoReturnSelfSufficient();
             case AUTO_RETURN_SUNSET_GUARD_PATROL -> toggleAutoReturnSunsetGuardPatrol();
             case AUTO_RETURN_SKIP_PERMISSION -> toggleAutoReturnSkipPermission();
             case IDLE_HOBBIES -> toggleIdleHobbies();
@@ -4661,6 +4702,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case PATROL -> isPatrolActive();
             case RETURN_HOME -> isReturningToBase();
             case AUTO_RETURN_SUNSET -> isAutoReturnAtSunsetActive();
+            case AUTO_RETURN_SELF_SUFFICIENT -> isAutoReturnSelfSufficientActive();
             case AUTO_RETURN_SUNSET_GUARD_PATROL -> isAutoReturnGuardPatrolEligibleActive();
             case AUTO_RETURN_SKIP_PERMISSION -> isAutoReturnSkipPermissionActive();
             case IDLE_HOBBIES -> isIdleHobbiesActive();
@@ -4669,6 +4711,8 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             case IDLE_HOBBIES_ANYWHERE -> isIdleHobbiesAnywhereActive();
             case BARITONE_PATHFINDER -> isBaritonePathfinderActive();
             case ADMIN_PREVIEW_NON_ADMIN -> adminPreviewAsNonAdmin;
+            case AUTONOMOUS_RESCUES -> isAutonomousRescuesActive();
+            case OWNED_SUNSET_SS -> ownedSunsetSelfSufficientAggregateState() == 1;
             case SKIN_POLICY_EVERYONE -> isSkinPolicyEveryoneActive();
             case SKIN_POLICY_CUSTOM -> isSkinPolicyCustomActive();
             case UNLEASH_TETHERED -> isUnleashTetheredActive();
@@ -4683,6 +4727,25 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
 
     private boolean isSkinPolicyCustomActive() {
         return FrensClient.isCustomSkinsEnabled();
+    }
+
+    private boolean isAutonomousRescuesActive() {
+        AdminPermissionsCache cache = currentAdminPermissions();
+        return cache != null && cache.autonomousRescuesEnabled;
+    }
+
+    private int ownedSunsetSelfSufficientAggregateState() {
+        AdminPermissionsCache cache = currentAdminPermissions();
+        return cache != null ? cache.ownedSunsetSelfSufficientState : -2;
+    }
+
+    private String ownedSunsetSelfSufficientStatusLabel() {
+        return switch (ownedSunsetSelfSufficientAggregateState()) {
+            case 1 -> "ON";
+            case 0 -> "OFF";
+            case -1 -> "MIX";
+            default -> "--";
+        };
     }
 
     private boolean isEntryEnabled(TopicAction action) {
@@ -4770,6 +4833,10 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
 
     private boolean isAutoReturnAtSunsetActive() {
         return this.handler != null && this.handler.isBotAutoReturnAtSunset();
+    }
+
+    private boolean isAutoReturnSelfSufficientActive() {
+        return this.handler != null && this.handler.isBotAutoReturnSelfSufficientFallback();
     }
 
     private boolean isIdleHobbiesActive() {
@@ -4911,6 +4978,7 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             Map.entry("wizard_tome", false),
             Map.entry("learning_manage", false),
             Map.entry("recruit_manage", false),
+            Map.entry("rescue_manage", false),
             Map.entry("recruit_reset", false),
             Map.entry("village_anchor", false),
             Map.entry("stage_debug", false)
@@ -4950,6 +5018,8 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
                 case GAMEPLAY_TIPS -> "gameplay_tips";
                 case IDLE_HOBBIES_ANYWHERE -> "idle_hobbies_anywhere";
                 case BARITONE_PATHFINDER -> "baritone_pathfinder";
+                case AUTONOMOUS_RESCUES -> "rescue_manage";
+                case OWNED_SUNSET_SS -> "recruit_manage";
                 case SKIN_POLICY_EVERYONE -> "skin_policy_everyone";
                 case SKIN_POLICY_CUSTOM -> "skin_policy_custom";
                 default -> null;
@@ -5020,7 +5090,9 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
             }
 
             boolean show;
-            if (entry.action == TopicAction.OPEN_PLAYER_SETTINGS || entry.action == TopicAction.ADMIN_PREVIEW_NON_ADMIN) {
+            if (entry.action == TopicAction.OPEN_PLAYER_SETTINGS
+                    || entry.action == TopicAction.ADMIN_PREVIEW_NON_ADMIN
+                    || entry.action == TopicAction.AUTONOMOUS_RESCUES) {
                 show = isAdmin;
             } else if (isAdmin && !preview) {
                 show = true;
@@ -5376,6 +5448,12 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
         sendChatCommand(command);
     }
 
+    private void toggleAutoReturnSelfSufficient() {
+        String botTarget = formatBotTarget();
+        String command = "bot auto_return_self_sufficient toggle " + botTarget;
+        sendChatCommand(command);
+    }
+
     private void toggleAutoReturnSunsetGuardPatrol() {
         String botTarget = formatBotTarget();
         String command = "bot auto_return_sunset_guard_patrol toggle " + botTarget;
@@ -5556,6 +5634,20 @@ public class BotPlayerInventoryScreen extends HandledScreen<BotPlayerInventorySc
                 botAlias,
             "Admin: Non-admin preview is now " + (adminPreviewAsNonAdmin ? "ON" : "OFF") + "."
         );
+    }
+
+    private void toggleAutonomousRescues() {
+        if (this.client == null || this.client.getNetworkHandler() == null || !isAdminUser()) {
+            return;
+        }
+        ClientPlayNetworking.send(new RecruitmentAdminActionPayload(botAlias, "autonomous_rescues_toggle", 0, false));
+    }
+
+    private void toggleOwnedSunsetSelfSufficientBulk() {
+        if (this.client == null || this.client.getNetworkHandler() == null || !isAdminUser()) {
+            return;
+        }
+        ClientPlayNetworking.send(new RecruitmentAdminActionPayload(botAlias, "owned_sunset_ss_toggle", 0, false));
     }
 
     private void openSkinChooser() {

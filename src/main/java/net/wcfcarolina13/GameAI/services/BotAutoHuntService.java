@@ -24,14 +24,16 @@ import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * Auto-start hunt tasks when starving (opt-in per bot).
+ * Auto-start hunt tasks when hunger is low (opt-in per bot).
  */
 public final class BotAutoHuntService {
 
     private static final Logger LOGGER = LoggerFactory.getLogger("auto-hunt");
     private static final Random RNG = new Random();
-    private static final int STARVING_THRESHOLD = 5;
+    private static final int AUTO_HUNT_HUNGER_THRESHOLD = 10;
     private static final long COOLDOWN_TICKS = 160L;
+    private static final long SURFACE_RECOVERY_RETRY_TICKS = 60L;
+    private static final long TELEPORT_ABORT_SNOOZE_TICKS = 20L * 10L;
     private static final Map<UUID, Long> NEXT_DECISION_TICK = new ConcurrentHashMap<>();
 
     private static final AtomicInteger THREAD_ID = new AtomicInteger(0);
@@ -54,11 +56,26 @@ public final class BotAutoHuntService {
         if (server == null) {
             return;
         }
+        if (BotFleeService.isSurfaceRecoveryActive(bot.getUuid())) {
+            NEXT_DECISION_TICK.put(bot.getUuid(), (long) server.getTicks() + SURFACE_RECOVERY_RETRY_TICKS);
+            return;
+        }
         NEXT_DECISION_TICK.put(bot.getUuid(), (long) server.getTicks());
     }
 
-    public static void onServerTick(MinecraftServer server) {
+    public static void snoozeAfterExternalTeleport(ServerPlayerEntity bot) {
+        if (bot == null) {
+            return;
+        }
+        MinecraftServer server = bot.getCommandSource() != null ? bot.getCommandSource().getServer() : null;
         if (server == null) {
+            return;
+        }
+        NEXT_DECISION_TICK.put(bot.getUuid(), (long) server.getTicks() + TELEPORT_ABORT_SNOOZE_TICKS);
+    }
+
+    public static void onServerTick(MinecraftServer server) {
+        if (server == null || TaskService.isServerStopping()) {
             return;
         }
         long nowTick = server.getTicks();
@@ -84,34 +101,41 @@ public final class BotAutoHuntService {
             if (BotEventHandler.getCurrentMode(bot) != BotEventHandler.Mode.IDLE) {
                 continue;
             }
+            if (BotFleeService.isBreakingFree(bot.getUuid())) {
+                continue;
+            }
+            if (BotFleeService.isSurfaceRecoveryActive(bot.getUuid())) {
+                NEXT_DECISION_TICK.put(bot.getUuid(), nowTick + SURFACE_RECOVERY_RETRY_TICKS);
+                continue;
+            }
             if (BotFleeService.isInShelter(bot.getUuid())) {
-                // Auto-clear stale shelter if daytime
+                // Auto-clear stale shelter if daytime — launch break-free to physically free the bot
                 if (world.isDay() && !world.isThundering()) {
-                    BotFleeService.clearShelter(bot.getUuid());
+                    // fire-and-forget: break-free runs on worker thread; isBreakingFree guards next tick
+                    BotFleeService.clearShelterAndBreakFree(bot);
+                    continue; // let break-free finish before considering auto-hunt
                 } else {
                     continue;
                 }
             }
-            if (bot.getHungerManager().getFoodLevel() > STARVING_THRESHOLD) {
+            if (bot.getHungerManager().getFoodLevel() > AUTO_HUNT_HUNGER_THRESHOLD) {
                 continue;
             }
-            if (!HuntHistoryService.hasAnyFoodKill(world)) {
-                continue;
-            }
-
             long next = NEXT_DECISION_TICK.getOrDefault(bot.getUuid(), 0L);
             if (nowTick < next) {
                 continue;
             }
             NEXT_DECISION_TICK.put(bot.getUuid(), nowTick + COOLDOWN_TICKS + RNG.nextInt(80));
 
-            LOGGER.info("Auto-hunt (starving) starting for {}", bot.getName().getString());
+            LOGGER.info("Auto-hunt (hungry) starting for {} at food={}",
+                    bot.getName().getString(),
+                    bot.getHungerManager().getFoodLevel());
             startAutoHunt(server, bot);
         }
     }
 
     private static void startAutoHunt(MinecraftServer server, ServerPlayerEntity bot) {
-        if (server == null || bot == null) {
+        if (server == null || bot == null || TaskService.isServerStopping()) {
             return;
         }
         ServerCommandSource botSource = bot.getCommandSource().withSilent();
@@ -122,6 +146,28 @@ public final class BotAutoHuntService {
 
         EXECUTOR.submit(() -> {
             try {
+                if (TaskService.isServerStopping()) {
+                    return;
+                }
+                // Reach surface before hunting — underground scans miss surface mobs
+                if (bot.getEntityWorld() instanceof ServerWorld sw
+                        && !BotFleeService.ensureAtSurface(bot, sw)) {
+                    if (BotFleeService.isSurfaceRecoveryActive(bot.getUuid())) {
+                        NEXT_DECISION_TICK.put(bot.getUuid(), (long) server.getTicks() + SURFACE_RECOVERY_RETRY_TICKS);
+                        LOGGER.info("Auto-hunt: {} surface recovery already active, deferring hunt",
+                                bot.getName().getString());
+                        return;
+                    }
+                    BotEmergencyRescueService.tryEmergencyRescue(bot, sw, "auto-hunt-surface-failure");
+                    LOGGER.info("Auto-hunt: {} could not reach surface, aborting",
+                            bot.getName().getString());
+                    return;
+                }
+                if (Thread.currentThread().isInterrupted()) {
+                    LOGGER.info("Auto-hunt: {} surface recovery was interrupted; skipping hunt restart on stale worker",
+                            bot.getName().getString());
+                    return;
+                }
                 SkillContext ctx = new SkillContext(botSource, SharedStateService.safeSharedState("auto-hunt"), params, botSource);
                 SkillExecutionResult result = SkillManager.runSkill("hunt", ctx);
                 LOGGER.info("Auto-hunt finished for {}: success={} msg='{}'",

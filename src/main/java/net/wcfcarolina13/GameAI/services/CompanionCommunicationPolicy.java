@@ -157,7 +157,7 @@ public final class CompanionCommunicationPolicy {
         return item == Items.ENDER_EYE || item == Items.GOAT_HORN;
     }
 
-    private static boolean hasWizardTome(ServerPlayerEntity player) {
+    public static boolean hasWizardTome(ServerPlayerEntity player) {
         if (player == null) {
             return false;
         }

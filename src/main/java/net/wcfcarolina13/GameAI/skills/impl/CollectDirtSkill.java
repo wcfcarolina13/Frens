@@ -33,6 +33,7 @@ import net.wcfcarolina13.GameAI.services.MovementService;
 import net.wcfcarolina13.GameAI.services.LavaHazardService;
 import net.wcfcarolina13.GameAI.services.TaskService;
 import net.wcfcarolina13.GameAI.services.ToolProvisionService;
+import net.wcfcarolina13.GameAI.services.SafePositionService;
 import net.wcfcarolina13.GameAI.skills.SkillManager;
 import net.wcfcarolina13.GameAI.services.SkillResumeService;
 import net.wcfcarolina13.GameAI.services.WorkDirectionService;
@@ -228,6 +229,8 @@ public class CollectDirtSkill implements Skill {
         boolean untilMode = optionTokens.contains("until") && !optionTokens.contains("exact");
         boolean squareMode = true;
         boolean spiralRequested = optionTokens.contains("spiral") || getBooleanParameter(context, "spiralMode", false);
+        boolean deferLootPickup = getBooleanParameter(context, "deferLootPickup", false);
+        boolean skipTorches = getBooleanParameter(context, "skipTorches", false);
         if (spiralRequested) {
             return SkillExecutionResult.failure("The 'spiral' staircase mode is temporarily disabled. Use 'ascent' or 'descent' commands.");
         }
@@ -250,7 +253,7 @@ public class CollectDirtSkill implements Skill {
                 LOGGER.info("Ascent mode: climbing from Y={} to Y={}", 
                            playerForAbortCheck.getBlockY(), targetY);
             }
-            return runAscent(context, source, commander, playerForAbortCheck, targetY, ascentToSurface, resumeRequested, allowChestStore);
+            return runAscent(context, source, commander, playerForAbortCheck, targetY, ascentToSurface, resumeRequested, allowChestStore, skipTorches);
         }
 
         // Handle descent mode
@@ -265,7 +268,7 @@ public class CollectDirtSkill implements Skill {
                 LOGGER.info("Descent mode: descending from Y={} to Y={}", 
                            playerForAbortCheck.getBlockY(), targetY);
             }
-            return runDescent(context, source, commander, playerForAbortCheck, targetY, resumeRequested, allowChestStore);
+            return runDescent(context, source, commander, playerForAbortCheck, targetY, resumeRequested, allowChestStore, skipTorches);
         }
 
         int collected = 0;
@@ -431,7 +434,9 @@ public class CollectDirtSkill implements Skill {
                     break;
                 }
 
-                moveTowardLoot(source, context.sharedState(), activeSquareCenter != null, activeSquareCenter, effectiveHorizontal);
+                if (!deferLootPickup) {
+                    moveTowardLoot(source, context.sharedState(), activeSquareCenter != null, activeSquareCenter, effectiveHorizontal);
+                }
                 if (loopPlayer != null) {
                     int updatedCount = countInventoryItems(loopPlayer, effectiveTrackedItems);
                     int updatedEffective = untilMode ? updatedCount : Math.max(0, updatedCount - baselineHarvestCount);
@@ -542,7 +547,12 @@ public class CollectDirtSkill implements Skill {
         } finally {
             ServerPlayerEntity cleanupPlayer = source.getPlayer();
             boolean inventoryFull = cleanupPlayer != null && isInventoryFull(cleanupPlayer);
-            if (cleanupRequested && cleanupPlayer != null && !SkillManager.shouldAbortSkill(cleanupPlayer) && !inventoryFull && !reachedTarget[0]) {
+            if (cleanupRequested
+                    && cleanupPlayer != null
+                    && !TaskService.isServerStopping()
+                    && !SkillManager.shouldAbortSkill(cleanupPlayer)
+                    && !inventoryFull
+                    && !reachedTarget[0]) {
                 runDropCleanup(source, cleanupPlayer, cleanupBaseRadius, squareMode, squareCenter);
             } else if (cleanupPlayer != null && inventoryFull) {
                 LOGGER.info("{} skipping drop cleanup because inventory is full.", skillName);
@@ -618,7 +628,7 @@ public class CollectDirtSkill implements Skill {
         }
 
         if (hasToolKeyword(player, keyword)) {
-            BotActions.selectBestTool(player, keyword, "sword");
+            BotActions.selectHarvestToolOrHands(player, keyword);
             return;
         }
 
@@ -1024,7 +1034,7 @@ public class CollectDirtSkill implements Skill {
         if (referencePos != null) {
             targetY = Math.max(targetY, referencePos.getY());
         }
-        SkillExecutionResult ascent = runAscent(new SkillContext(source, new HashMap<>(), new HashMap<>()), source, null, player, targetY, false, false, false);
+        SkillExecutionResult ascent = runAscent(new SkillContext(source, new HashMap<>(), new HashMap<>()), source, null, player, targetY, false, false, false, false);
         return ascent.success() || player.getBlockY() >= targetY;
     }
 
@@ -1299,7 +1309,8 @@ public class CollectDirtSkill implements Skill {
                                            ServerPlayerEntity player,
                                            int targetDepthY,
                                            boolean resumeRequested,
-                                           boolean allowChestStore) {
+                                           boolean allowChestStore,
+                                           boolean skipTorches) {
         if (player == null) {
             return SkillExecutionResult.failure("No bot available for descent.");
         }
@@ -1435,7 +1446,7 @@ public class CollectDirtSkill implements Skill {
             carvedSteps++;
             
             // Place torch every 6 steps
-            if (carvedSteps % 6 == 0 && TorchPlacer.shouldPlaceTorch(player)) {
+            if (!skipTorches && carvedSteps % 6 == 0 && TorchPlacer.shouldPlaceTorch(player)) {
                 TorchPlacer.PlacementResult torchResult = TorchPlacer.placeTorch(player, digDirection);
                 if (torchResult == TorchPlacer.PlacementResult.NO_TORCHES) {
                     if (ToolProvisionService.ensureTorches(player, source, commander, 8)) {
@@ -1556,7 +1567,8 @@ public class CollectDirtSkill implements Skill {
                                           int targetY,
                                           boolean stopAtSurface,
                                           boolean resumeRequested,
-                                          boolean allowChestStore) {
+                                          boolean allowChestStore,
+                                          boolean skipTorches) {
         if (player == null) {
             return SkillExecutionResult.failure("No bot available for ascent.");
         }
@@ -1619,18 +1631,23 @@ public class CollectDirtSkill implements Skill {
             }
             
             // Place torch every 6 steps
-            if (steps % 6 == 0 && TorchPlacer.shouldPlaceTorch(player)) {
+            if (!skipTorches && steps % 6 == 0 && TorchPlacer.shouldPlaceTorch(player)) {
                 TorchPlacer.PlacementResult torchResult = TorchPlacer.placeTorch(player, direction);
                 if (torchResult == TorchPlacer.PlacementResult.NO_TORCHES) {
                     if (ToolProvisionService.ensureTorches(player, source, commander, 8)) {
                         torchResult = TorchPlacer.placeTorch(player, direction);
                     }
                     if (torchResult == TorchPlacer.PlacementResult.NO_TORCHES) {
-                        SkillResumeService.flagManualResume(player);
-                        WorkDirectionService.setPausePosition(player.getUuid(), player.getBlockPos());
-                        ChatUtils.sendChatMessages(player.getCommandSource().withSilent().withPermissions(net.wcfcarolina13.Frens.OPERATOR_PERMISSIONS), 
-                                "Ran out of torches!");
-                        return SkillExecutionResult.failure("Ascent paused: out of torches.");
+                        if (stopAtSurface) {
+                            LOGGER.info("Ascent surface mode: {} out of torches, continuing unlit escape",
+                                    player.getName().getString());
+                        } else {
+                            SkillResumeService.flagManualResume(player);
+                            WorkDirectionService.setPausePosition(player.getUuid(), player.getBlockPos());
+                            ChatUtils.sendChatMessages(player.getCommandSource().withSilent().withPermissions(net.wcfcarolina13.Frens.OPERATOR_PERMISSIONS),
+                                    "Ran out of torches!");
+                            return SkillExecutionResult.failure("Ascent paused: out of torches.");
+                        }
                     }
                 }
             }
@@ -2394,9 +2411,22 @@ public class CollectDirtSkill implements Skill {
         if (player == null || !(player.getEntityWorld() instanceof ServerWorld world)) {
             return player != null ? player.getBlockY() + 16 : 64;
         }
-        int surfaceY = world.getTopY(Heightmap.Type.MOTION_BLOCKING_NO_LEAVES, player.getBlockX(), player.getBlockZ());
+        // Sample heightmap at a wide radius to resist false lows from accumulated
+        // mining in the bot's immediate column. Radius-4 ring is beyond break-free range.
+        int surfaceY = wideRadiusSurfaceY(world, player.getBlockX(), player.getBlockZ());
         int minTarget = player.getBlockY() + 1;
         return Math.max(minTarget, surfaceY + 1);
+    }
+
+    /** Max heightmap across 8 points at radius 3-4, resisting local mining corruption. */
+    private int wideRadiusSurfaceY(ServerWorld world, int cx, int cz) {
+        int max = world.getTopY(Heightmap.Type.MOTION_BLOCKING_NO_LEAVES, cx, cz);
+        int[][] offsets = {{4,0},{-4,0},{0,4},{0,-4},{3,3},{3,-3},{-3,3},{-3,-3}};
+        for (int[] off : offsets) {
+            max = Math.max(max, world.getTopY(Heightmap.Type.MOTION_BLOCKING_NO_LEAVES,
+                    cx + off[0], cz + off[1]));
+        }
+        return max;
     }
 
     private boolean isOnSurface(ServerPlayerEntity player) {
@@ -2406,32 +2436,7 @@ public class CollectDirtSkill implements Skill {
         if (!(player.getEntityWorld() instanceof ServerWorld world)) {
             return false;
         }
-        BlockPos botPos = player.getBlockPos();
-
-        // Use MOTION_BLOCKING_NO_LEAVES so tree canopy doesn't prevent surface detection.
-        int surfaceY = world.getTopY(Heightmap.Type.MOTION_BLOCKING_NO_LEAVES, botPos.getX(), botPos.getZ());
-        if (botPos.getY() < surfaceY - 1) {
-            return false;
-        }
-        // Must be standing on solid ground.
-        if (world.getBlockState(botPos.down()).getCollisionShape(world, botPos.down()).isEmpty()) {
-            return false;
-        }
-        // Conservative check: a 1x1 shaft opening is NOT surface. Require at least 2 of 4
-        // cardinal neighbors to also have sky visibility at the bot's Y level, proving the
-        // bot has emerged onto actual terrain rather than poking through a narrow hole.
-        int openCardinals = 0;
-        for (net.minecraft.util.math.Direction dir : new net.minecraft.util.math.Direction[]{
-                net.minecraft.util.math.Direction.NORTH, net.minecraft.util.math.Direction.SOUTH,
-                net.minecraft.util.math.Direction.EAST, net.minecraft.util.math.Direction.WEST}) {
-            BlockPos neighbor = botPos.offset(dir);
-            int neighborSurface = world.getTopY(Heightmap.Type.MOTION_BLOCKING_NO_LEAVES,
-                    neighbor.getX(), neighbor.getZ());
-            if (neighbor.getY() >= neighborSurface - 1) {
-                openCardinals++;
-            }
-        }
-        return openCardinals >= 2;
+        return SafePositionService.isOperationalSurface(world, player.getBlockPos());
     }
 
     @SuppressWarnings("unchecked")

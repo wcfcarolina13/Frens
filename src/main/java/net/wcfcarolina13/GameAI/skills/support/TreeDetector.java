@@ -3,12 +3,17 @@ package net.wcfcarolina13.GameAI.skills.support;
 import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
+import net.minecraft.entity.passive.VillagerEntity;
 import net.minecraft.registry.tag.BlockTags;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Direction;
+import net.wcfcarolina13.GameAI.services.BotHomeService;
 import net.wcfcarolina13.GameAI.services.CompanionSafeZoneService;
+import net.wcfcarolina13.GameAI.services.VillageStructureProtectionService;
+import net.wcfcarolina13.GameAI.services.construction.VillageFortificationLayoutService;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -26,6 +31,10 @@ public final class TreeDetector {
     private static final int MAX_TREE_HEIGHT = 18;
     private static final int HUMAN_SCAN_RADIUS = 2;
     private static final int LEAF_SCAN_RADIUS = 3;
+    private static final int VILLAGE_SCAN_RADIUS = 6;
+    private static final int VILLAGE_SCAN_Y = 4;
+    private static final int VILLAGER_SCAN_RADIUS_XZ = 12;
+    private static final int VILLAGER_SCAN_RADIUS_Y = 5;
 
     private static final Set<Block> SOIL_BLOCKS = Set.of(
             Blocks.DIRT,
@@ -49,6 +58,7 @@ public final class TreeDetector {
             Blocks.SOUL_TORCH,
             Blocks.REDSTONE_TORCH,
             Blocks.CAMPFIRE,
+            Blocks.BELL,
             Blocks.WHITE_BED,
             Blocks.RED_BED,
             Blocks.OAK_DOOR,
@@ -165,7 +175,7 @@ public final class TreeDetector {
             if (isNearHumanBlocks(world, candidate, 3)) {
                 continue;
             }
-            if (CompanionSafeZoneService.isProtected(world, candidate, null)) {
+            if (isProtected(world, candidate, 3)) {
                 continue;
             }
             double distSq = origin.getSquaredDistance(candidate);
@@ -199,7 +209,7 @@ public final class TreeDetector {
             if (!isLog(state)) {
                 continue;
             }
-            if (isNearHumanBlocks(world, candidate, 3) || CompanionSafeZoneService.isProtected(world, candidate, null)) {
+            if (isNearHumanBlocks(world, candidate, 3) || isProtected(world, candidate, 3)) {
                 continue;
             }
             boolean hasLogNeighbor = false;
@@ -246,10 +256,6 @@ public final class TreeDetector {
             }
         }
 
-        if (CompanionSafeZoneService.isProtected(world, base, null)) {
-            return Optional.empty();
-        }
-
         int height = 1;
         BlockPos cursor = base.up();
         while (height < MAX_TREE_HEIGHT && isLog(world.getBlockState(cursor))) {
@@ -258,6 +264,10 @@ public final class TreeDetector {
         }
         BlockPos top = cursor.down();
         if (height < 2 || height > MAX_TREE_HEIGHT) {
+            return Optional.empty();
+        }
+
+        if (isProtected(world, base, height)) {
             return Optional.empty();
         }
 
@@ -352,6 +362,7 @@ public final class TreeDetector {
             BlockState state = world.getBlockState(pos);
             Block block = state.getBlock();
             if (state.isIn(BlockTags.PLANKS)
+                    || state.isIn(BlockTags.BEDS)
                     || state.isIn(BlockTags.WOODEN_DOORS)
                     || state.isIn(BlockTags.WOODEN_PRESSURE_PLATES)
                     || state.isIn(BlockTags.FENCES)
@@ -363,7 +374,17 @@ public final class TreeDetector {
     }
 
     public static boolean isProtected(ServerWorld world, BlockPos pos) {
-        return CompanionSafeZoneService.isProtected(world, pos, null);
+        return isProtected(world, pos, 4);
+    }
+
+    public static boolean isProtected(ServerWorld world, BlockPos pos, int height) {
+        if (world == null || pos == null) {
+            return false;
+        }
+        return CompanionSafeZoneService.isProtected(world, pos, null)
+                || isInsideBaseProtectionRadius(world, pos)
+                || VillageStructureProtectionService.isVillageProtectedForGenericBreaking(world, pos)
+                || isVillageProtected(world, pos, height);
     }
 
     private static boolean isLog(BlockState state) {
@@ -382,5 +403,87 @@ public final class TreeDetector {
             return false;
         }
         return state.isIn(BlockTags.DIRT) || SOIL_BLOCKS.contains(state.getBlock());
+    }
+
+    private static boolean isInsideBaseProtectionRadius(ServerWorld world, BlockPos pos) {
+        if (world == null || pos == null || world.getServer() == null) {
+            return false;
+        }
+        for (BotHomeService.BaseEntry base : BotHomeService.listBases(world.getServer(), world)) {
+            if (base == null || base.pos() == null) {
+                continue;
+            }
+            int radius = Math.max(1, base.radius());
+            if (VecHelper.withinSquaredDistance(pos, base.pos(), radius * radius)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean isVillageProtected(ServerWorld world, BlockPos pos, int height) {
+        if (world == null || pos == null) {
+            return false;
+        }
+        int scanHeight = Math.max(3, Math.min(MAX_TREE_HEIGHT, height + 2));
+        int signalBlocks = 0;
+        boolean bellNearby = false;
+        boolean bedNearby = false;
+        BlockPos min = pos.add(-VILLAGE_SCAN_RADIUS, -1, -VILLAGE_SCAN_RADIUS);
+        BlockPos max = pos.add(VILLAGE_SCAN_RADIUS, Math.max(VILLAGE_SCAN_Y, scanHeight), VILLAGE_SCAN_RADIUS);
+        for (BlockPos sample : BlockPos.iterate(min, max)) {
+            BlockState state = world.getBlockState(sample);
+            if (state.isOf(Blocks.BELL)) {
+                bellNearby = true;
+                continue;
+            }
+            if (state.isIn(BlockTags.BEDS)) {
+                bedNearby = true;
+                continue;
+            }
+            if (isVillageSignalBlock(state)) {
+                signalBlocks++;
+                if (signalBlocks >= 3) {
+                    return true;
+                }
+            }
+        }
+
+        if (!bellNearby && !bedNearby && signalBlocks == 0) {
+            return false;
+        }
+
+        int villagers = countNearbyVillagers(world, pos);
+        if ((bellNearby || bedNearby) && villagers >= 1) {
+            return true;
+        }
+        return signalBlocks >= 2 && (bellNearby || bedNearby || villagers >= 2);
+    }
+
+    private static int countNearbyVillagers(ServerWorld world, BlockPos pos) {
+        if (world == null || pos == null) {
+            return 0;
+        }
+        Box box = new Box(pos).expand(VILLAGER_SCAN_RADIUS_XZ, VILLAGER_SCAN_RADIUS_Y, VILLAGER_SCAN_RADIUS_XZ);
+        return world.getEntitiesByClass(VillagerEntity.class, box, villager -> villager != null && villager.isAlive()).size();
+    }
+
+    private static boolean isVillageSignalBlock(BlockState state) {
+        if (state == null) {
+            return false;
+        }
+        if (state.isOf(Blocks.BELL) || state.isIn(BlockTags.BEDS)) {
+            return true;
+        }
+        if (state.isIn(BlockTags.LOGS) || state.isIn(BlockTags.LEAVES)) {
+            return false;
+        }
+        return VillageFortificationLayoutService.isVillageStructureBlock(state.getBlock());
+    }
+
+    private static final class VecHelper {
+        private static boolean withinSquaredDistance(BlockPos a, BlockPos b, double radiusSq) {
+            return a != null && b != null && a.getSquaredDistance(b) <= radiusSq;
+        }
     }
 }

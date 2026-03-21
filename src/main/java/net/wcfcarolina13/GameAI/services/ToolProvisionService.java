@@ -6,16 +6,21 @@ import net.minecraft.item.BedItem;
 import net.minecraft.item.BundleItem;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
+import net.minecraft.component.DataComponentTypes;
+import net.minecraft.component.type.EquippableComponent;
+import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.registry.tag.ItemTags;
 import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.math.BlockPos;
+import net.wcfcarolina13.PlayerUtils.CombatInventoryManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
@@ -120,6 +125,13 @@ public final class ToolProvisionService {
     public static boolean ensureAxe(ServerPlayerEntity bot,
                                     ServerCommandSource source,
                                     ServerPlayerEntity commander) {
+        return ensureAxe(bot, source, commander, false);
+    }
+
+    public static boolean ensureAxe(ServerPlayerEntity bot,
+                                    ServerCommandSource source,
+                                    ServerPlayerEntity commander,
+                                    boolean allowWoodenFallback) {
         if (bot == null || source == null) {
             return false;
         }
@@ -127,22 +139,20 @@ public final class ToolProvisionService {
             return true;
         }
         ServerPlayerEntity historyOwner = commander != null ? commander : bot;
-        if (!canCraftAxe(historyOwner)) {
-            return false;
-        }
         if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
             return false;
         }
-        if (hasStoneMaterials(bot, world)) {
+        boolean canCraft = canCraftAxe(historyOwner);
+        if (canCraft && hasStoneMaterials(bot, world)) {
             return CraftingHelper.craftGeneric(source, bot, historyOwner, "axe", 1, "stone") > 0;
         }
-        if (hasMaterial(bot, world, Items.IRON_INGOT)) {
+        if (canCraft && hasMaterial(bot, world, Items.IRON_INGOT)) {
             return CraftingHelper.craftGeneric(source, bot, historyOwner, "axe", 1, "iron") > 0;
         }
-        if (hasMaterial(bot, world, Items.DIAMOND)) {
+        if (canCraft && hasMaterial(bot, world, Items.DIAMOND)) {
             return CraftingHelper.craftGeneric(source, bot, historyOwner, "axe", 1, "diamond") > 0;
         }
-        if (hasPlanksOrLogs(bot, world)) {
+        if ((canCraft || allowWoodenFallback) && hasPlanksOrLogs(bot, world)) {
             return CraftingHelper.craftGeneric(source, bot, historyOwner, "axe", 1, "wood") > 0;
         }
         return false;
@@ -182,6 +192,13 @@ public final class ToolProvisionService {
     public static boolean ensureSword(ServerPlayerEntity bot,
                                       ServerCommandSource source,
                                       ServerPlayerEntity commander) {
+        return ensureSword(bot, source, commander, false);
+    }
+
+    public static boolean ensureSword(ServerPlayerEntity bot,
+                                      ServerCommandSource source,
+                                      ServerPlayerEntity commander,
+                                      boolean allowWoodenFallback) {
         if (bot == null || source == null) {
             return false;
         }
@@ -189,22 +206,20 @@ public final class ToolProvisionService {
             return true;
         }
         ServerPlayerEntity historyOwner = commander != null ? commander : bot;
-        if (!canCraftSword(historyOwner)) {
-            return false;
-        }
         if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
             return false;
         }
-        if (hasStoneMaterials(bot, world)) {
+        boolean canCraft = canCraftSword(historyOwner);
+        if (canCraft && hasStoneMaterials(bot, world)) {
             return CraftingHelper.craftGeneric(source, bot, historyOwner, "sword", 1, "stone") > 0;
         }
-        if (hasMaterial(bot, world, Items.IRON_INGOT)) {
+        if (canCraft && hasMaterial(bot, world, Items.IRON_INGOT)) {
             return CraftingHelper.craftGeneric(source, bot, historyOwner, "sword", 1, "iron") > 0;
         }
-        if (hasMaterial(bot, world, Items.DIAMOND)) {
+        if (canCraft && hasMaterial(bot, world, Items.DIAMOND)) {
             return CraftingHelper.craftGeneric(source, bot, historyOwner, "sword", 1, "diamond") > 0;
         }
-        if (hasPlanksOrLogs(bot, world)) {
+        if ((canCraft || allowWoodenFallback) && hasPlanksOrLogs(bot, world)) {
             return CraftingHelper.craftGeneric(source, bot, historyOwner, "sword", 1, "wood") > 0;
         }
         return false;
@@ -629,10 +644,10 @@ public final class ToolProvisionService {
         if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
             return false;
         }
-        if (!hasWool(bot, world) || !hasPlanksOrLogs(bot, world)) {
+        int needed = Math.max(1, minCount - have);
+        if (!hasBedFiberPotential(bot, world, needed) || !hasPlanksOrLogs(bot, world)) {
             return false;
         }
-        int needed = Math.max(1, minCount - have);
         int crafted = CraftingHelper.craftGeneric(source, bot, historyOwner, "bed", needed, null);
         return crafted > 0 && countBeds(bot) >= minCount;
     }
@@ -746,6 +761,117 @@ public final class ToolProvisionService {
             return ensureHoe(bot, source, commander);
         }
         return false;
+    }
+
+    public static boolean hasUsableAxe(ServerPlayerEntity bot) {
+        if (bot == null) {
+            return false;
+        }
+        for (int i = 0; i < bot.getInventory().size(); i++) {
+            if (axeScore(bot.getInventory().getStack(i)) > 0) {
+                return true;
+            }
+        }
+        return axeScore(bot.getMainHandStack()) > 0;
+    }
+
+    public static boolean hasServiceableMeleeWeapon(ServerPlayerEntity bot) {
+        if (bot == null) {
+            return false;
+        }
+        for (int i = 0; i < bot.getInventory().size(); i++) {
+            if (weaponScore(bot.getInventory().getStack(i)) > 0) {
+                return true;
+            }
+        }
+        return weaponScore(bot.getMainHandStack()) > 0;
+    }
+
+    public static boolean pullNearbyAccessibleIdleFallbackSupplies(ServerPlayerEntity bot,
+                                                                   ServerWorld world,
+                                                                   boolean needWeapon,
+                                                                   boolean needAxe) {
+        if (bot == null || world == null) {
+            return false;
+        }
+        boolean moved = false;
+
+        if (needWeapon && !hasServiceableMeleeWeapon(bot)) {
+            moved |= withdrawBestAccessibleSlot(bot, world, slot -> weaponScore(slot.stack) > 0,
+                    Comparator.comparingInt((ContainerSlot slot) -> weaponScore(slot.stack)).reversed());
+        }
+        if (needAxe && !hasUsableAxe(bot)) {
+            moved |= withdrawBestAccessibleSlot(bot, world, slot -> axeScore(slot.stack) > 0,
+                    Comparator.comparingInt((ContainerSlot slot) -> axeScore(slot.stack)).reversed());
+        }
+
+        moved |= withdrawMissingArmor(bot, world);
+
+        boolean stillNeedWeapon = needWeapon && !hasServiceableMeleeWeapon(bot);
+        boolean stillNeedAxe = needAxe && !hasUsableAxe(bot);
+        if (stillNeedWeapon || stillNeedAxe) {
+            int desiredSticks = requiredFallbackStickCount(stillNeedWeapon, stillNeedAxe);
+            int desiredPlanks = requiredFallbackPlankCount(stillNeedWeapon, stillNeedAxe);
+            int haveSticks = countInventoryItem(bot, Items.STICK);
+            int havePlanks = countTagged(bot, ItemTags.PLANKS);
+
+            if (haveSticks < desiredSticks) {
+                moved |= withdrawAccessibleItems(bot, world, slot -> slot.stack.isOf(Items.STICK), desiredSticks - haveSticks);
+                haveSticks = countInventoryItem(bot, Items.STICK);
+            }
+            if (havePlanks < desiredPlanks) {
+                moved |= withdrawAccessibleItems(bot, world, slot -> slot.stack.isIn(ItemTags.PLANKS), desiredPlanks - havePlanks);
+                havePlanks = countTagged(bot, ItemTags.PLANKS);
+            }
+            if (havePlanks < desiredPlanks) {
+                int logsNeeded = (int) Math.ceil((desiredPlanks - havePlanks) / 4.0D);
+                moved |= withdrawAccessibleItems(bot, world, slot -> slot.stack.isIn(ItemTags.LOGS), logsNeeded);
+            }
+        }
+
+        if (moved) {
+            bot.getInventory().markDirty();
+            CombatInventoryManager.ensureCombatLoadout(bot);
+        }
+        return moved;
+    }
+
+    public static boolean canCraftIdleWoodenFallback(ServerPlayerEntity bot,
+                                                     boolean needWeapon,
+                                                     boolean needAxe) {
+        if (bot == null) {
+            return false;
+        }
+        int requiredPlanks = requiredFallbackPlankCount(needWeapon, needAxe);
+        int requiredSticks = requiredFallbackStickCount(needWeapon, needAxe);
+        if (requiredPlanks <= 0 && requiredSticks <= 0) {
+            return false;
+        }
+
+        int sticksAvailable = countInventoryItem(bot, Items.STICK);
+        int planksAvailable = countTagged(bot, ItemTags.PLANKS);
+        int logCount = countTagged(bot, ItemTags.LOGS);
+        int plankEquivalent = planksAvailable + (logCount * 4);
+
+        int extraSticksNeeded = Math.max(0, requiredSticks - sticksAvailable);
+        int planksNeededForSticks = extraSticksNeeded <= 0 ? 0 : ((extraSticksNeeded + 3) / 4) * 2;
+        int totalPlanksNeeded = requiredPlanks + planksNeededForSticks;
+        return plankEquivalent >= totalPlanksNeeded;
+    }
+
+    public static int computeAccessibleIdleFallbackSignature(ServerPlayerEntity bot, ServerWorld world) {
+        if (bot == null || world == null) {
+            return 0;
+        }
+        int hash = 1;
+        for (int i = 0; i < bot.getInventory().size(); i++) {
+            hash = mixIdleFallbackSignature(hash, bot.getInventory().getStack(i), null, i);
+        }
+        List<ContainerSlot> slots = scanAccessibleContainers(bot, world, bot.getBlockPos());
+        for (ContainerSlot slot : slots) {
+            hash = mixIdleFallbackSignature(hash, slot.stack, slot.pos, slot.slot);
+        }
+        return hash;
     }
 
     private static boolean canCraftTorch(ServerPlayerEntity commander) {
@@ -907,11 +1033,25 @@ public final class ToolProvisionService {
                 continue;
             }
             String translation = stack.getItem().getTranslationKey().toLowerCase(Locale.ROOT);
-            if (translation.contains(key)) {
+            if (matchesToolKeyword(translation, key)) {
                 return true;
             }
         }
         return false;
+    }
+
+    private static boolean matchesToolKeyword(String translation, String keyword) {
+        if (translation == null || keyword == null || keyword.isBlank()) {
+            return false;
+        }
+        return switch (keyword) {
+            case "axe" -> isAxeKey(translation);
+            case "sword" -> translation.contains("sword");
+            case "pickaxe" -> translation.contains("pickaxe");
+            case "shovel" -> translation.contains("shovel");
+            case "hoe" -> translation.contains("hoe");
+            default -> translation.contains(keyword);
+        };
     }
 
     private static int countInventoryItem(ServerPlayerEntity bot, Item item) {
@@ -979,16 +1119,21 @@ public final class ToolProvisionService {
         return hasStoneMaterials(bot, world);
     }
 
-    private static boolean hasWool(ServerPlayerEntity bot, ServerWorld world) {
-        if (hasTaggedItem(bot, ItemTags.WOOL)) {
-            return true;
-        }
+    private static boolean hasBedFiberPotential(ServerPlayerEntity bot, ServerWorld world, int bedCount) {
+        return countBedFiberPotential(bot, world) >= Math.max(3, bedCount * 3);
+    }
+
+    private static int countBedFiberPotential(ServerPlayerEntity bot, ServerWorld world) {
+        int wool = countTagged(bot, ItemTags.WOOL);
+        int string = countInventoryItem(bot, Items.STRING);
         for (ContainerSlot slot : scanContainers(world, bot.getBlockPos())) {
             if (slot.stack.isIn(ItemTags.WOOL)) {
-                return true;
+                wool += slot.stack.getCount();
+            } else if (slot.stack.isOf(Items.STRING)) {
+                string += slot.stack.getCount();
             }
         }
-        return false;
+        return wool + (string / 4);
     }
 
     /** Quick bot-inventory-only check for planks or logs (no world scan). */
@@ -1089,6 +1234,205 @@ public final class ToolProvisionService {
             moved += inserted;
         }
         return moved;
+    }
+
+    private static boolean withdrawMissingArmor(ServerPlayerEntity bot, ServerWorld world) {
+        boolean moved = false;
+        for (EquipmentSlot slot : List.of(EquipmentSlot.HEAD, EquipmentSlot.CHEST, EquipmentSlot.LEGS, EquipmentSlot.FEET)) {
+            if (!bot.getEquippedStack(slot).isEmpty()) {
+                continue;
+            }
+            moved |= withdrawBestAccessibleSlot(bot, world,
+                    entry -> armorScore(entry.stack, slot) > 0,
+                    Comparator.comparingInt((ContainerSlot entry) -> armorScore(entry.stack, slot)).reversed());
+        }
+        return moved;
+    }
+
+    private static boolean withdrawBestAccessibleSlot(ServerPlayerEntity bot,
+                                                      ServerWorld world,
+                                                      java.util.function.Predicate<ContainerSlot> filter,
+                                                      Comparator<ContainerSlot> ordering) {
+        if (bot == null || world == null || filter == null || ordering == null) {
+            return false;
+        }
+        ContainerSlot best = scanAccessibleContainers(bot, world, bot.getBlockPos()).stream()
+                .filter(filter)
+                .max(ordering)
+                .orElse(null);
+        return best != null && withdrawFromContainerSlot(best, bot, 1) > 0;
+    }
+
+    private static boolean withdrawAccessibleItems(ServerPlayerEntity bot,
+                                                   ServerWorld world,
+                                                   java.util.function.Predicate<ContainerSlot> filter,
+                                                   int desired) {
+        if (bot == null || world == null || filter == null || desired <= 0) {
+            return false;
+        }
+        int moved = 0;
+        for (ContainerSlot slot : scanAccessibleContainers(bot, world, bot.getBlockPos())) {
+            if (moved >= desired) {
+                break;
+            }
+            if (!filter.test(slot)) {
+                continue;
+            }
+            moved += withdrawFromContainerSlot(slot, bot, desired - moved);
+        }
+        return moved > 0;
+    }
+
+    private static int withdrawFromContainerSlot(ContainerSlot slot, ServerPlayerEntity bot, int desired) {
+        if (slot == null || bot == null || desired <= 0) {
+            return 0;
+        }
+        ItemStack stack = slot.inv.getStack(slot.slot);
+        if (stack == null || stack.isEmpty()) {
+            return 0;
+        }
+        int take = Math.min(stack.getCount(), desired);
+        ItemStack extracted = stack.copy();
+        extracted.setCount(take);
+        boolean insertedAll = bot.getInventory().insertStack(extracted);
+        int inserted = take - extracted.getCount();
+        if (inserted <= 0) {
+            return 0;
+        }
+        stack.decrement(inserted);
+        slot.inv.setStack(slot.slot, stack.isEmpty() ? ItemStack.EMPTY : stack);
+        slot.inv.markDirty();
+        if (!insertedAll && !extracted.isEmpty()) {
+            LOGGER.debug("Idle fallback withdraw left {} behind for {}", extracted.getCount(), bot.getName().getString());
+        }
+        return inserted;
+    }
+
+    private static List<ContainerSlot> scanAccessibleContainers(ServerPlayerEntity bot, ServerWorld world, BlockPos origin) {
+        List<ContainerSlot> all = scanContainers(world, origin);
+        if (bot == null) {
+            return all;
+        }
+        return all.stream()
+                .filter(slot -> BlockInteractionService.canInteract(bot, slot.pos))
+                .toList();
+    }
+
+    private static int requiredFallbackStickCount(boolean needWeapon, boolean needAxe) {
+        int sticks = 0;
+        if (needWeapon) {
+            sticks += 1;
+        }
+        if (needAxe) {
+            sticks += 2;
+        }
+        return sticks;
+    }
+
+    private static int requiredFallbackPlankCount(boolean needWeapon, boolean needAxe) {
+        int planks = 0;
+        if (needWeapon) {
+            planks += 2;
+        }
+        if (needAxe) {
+            planks += 3;
+        }
+        planks += requiredFallbackStickCount(needWeapon, needAxe) > 0 ? 2 : 0;
+        return planks;
+    }
+
+    private static int mixIdleFallbackSignature(int hash, ItemStack stack, BlockPos pos, int slot) {
+        if (!isIdleFallbackRelevant(stack)) {
+            return hash;
+        }
+        Identifier id = Identifier.of("minecraft", "air");
+        try {
+            id = net.minecraft.registry.Registries.ITEM.getId(stack.getItem());
+        } catch (Exception ignored) {
+        }
+        hash = 31 * hash + (id != null ? id.hashCode() : 0);
+        hash = 31 * hash + stack.getCount();
+        hash = 31 * hash + slot;
+        if (pos != null) {
+            hash = 31 * hash + pos.hashCode();
+        }
+        return hash;
+    }
+
+    private static boolean isIdleFallbackRelevant(ItemStack stack) {
+        if (stack == null || stack.isEmpty()) {
+            return false;
+        }
+        return weaponScore(stack) > 0
+                || axeScore(stack) > 0
+                || stack.isOf(Items.STICK)
+                || stack.isIn(ItemTags.PLANKS)
+                || stack.isIn(ItemTags.LOGS)
+                || armorScore(stack, EquipmentSlot.HEAD) > 0
+                || armorScore(stack, EquipmentSlot.CHEST) > 0
+                || armorScore(stack, EquipmentSlot.LEGS) > 0
+                || armorScore(stack, EquipmentSlot.FEET) > 0;
+    }
+
+    private static int weaponScore(ItemStack stack) {
+        if (stack == null || stack.isEmpty()) {
+            return 0;
+        }
+        String key = stack.getItem().getTranslationKey().toLowerCase(Locale.ROOT);
+        boolean weapon = key.contains("sword")
+                || isAxeKey(key)
+                || key.contains("trident")
+                || key.contains("mace")
+                || key.contains("dagger");
+        if (!weapon) {
+            return 0;
+        }
+        if (key.contains("netherite")) return 50;
+        if (key.contains("diamond")) return 40;
+        if (key.contains("iron")) return 30;
+        if (key.contains("stone") || key.contains("cobble")) return 20;
+        if (key.contains("wood") || key.contains("wooden")) return 10;
+        if (key.contains("gold")) return 8;
+        return 5;
+    }
+
+    private static int axeScore(ItemStack stack) {
+        if (stack == null || stack.isEmpty()) {
+            return 0;
+        }
+        String key = stack.getItem().getTranslationKey().toLowerCase(Locale.ROOT);
+        if (!isAxeKey(key)) {
+            return 0;
+        }
+        if (key.contains("netherite")) return 50;
+        if (key.contains("diamond")) return 40;
+        if (key.contains("iron")) return 30;
+        if (key.contains("stone") || key.contains("cobble")) return 20;
+        if (key.contains("wood") || key.contains("wooden")) return 10;
+        if (key.contains("gold")) return 8;
+        return 5;
+    }
+
+    private static boolean isAxeKey(String key) {
+        return key != null && key.contains("_axe") && !key.contains("pickaxe");
+    }
+
+    private static int armorScore(ItemStack stack, EquipmentSlot expectedSlot) {
+        if (stack == null || stack.isEmpty() || expectedSlot == null) {
+            return 0;
+        }
+        EquippableComponent equippable = stack.get(DataComponentTypes.EQUIPPABLE);
+        if (equippable == null || equippable.slot() != expectedSlot) {
+            return 0;
+        }
+        String key = stack.getItem().getTranslationKey().toLowerCase(Locale.ROOT);
+        if (key.contains("netherite")) return 60;
+        if (key.contains("diamond")) return 50;
+        if (key.contains("iron")) return 40;
+        if (key.contains("chainmail")) return 30;
+        if (key.contains("gold")) return 20;
+        if (key.contains("leather")) return 10;
+        return 5;
     }
 
     private static boolean canCraftExact(ServerPlayerEntity commander, Identifier id) {

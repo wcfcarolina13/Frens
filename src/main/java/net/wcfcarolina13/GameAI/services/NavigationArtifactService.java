@@ -155,7 +155,8 @@ public final class NavigationArtifactService {
         // Tier 2+: Eye of Ender, Wizard's Tome, Enchanting Table, or both hold Ender Pearls.
         if (hasArtifact(bot, net.minecraft.item.Items.ENDER_EYE)
                 || hasArtifact(owner, net.minecraft.item.Items.ENDER_EYE)
-                || hasArtifact(bot, net.minecraft.item.Items.WRITTEN_BOOK)    // Wizard's Tome check
+                || CompanionCommunicationPolicy.hasWizardTome(bot)
+                || CompanionCommunicationPolicy.hasWizardTome(owner)
                 || isNearBlock(bot, net.minecraft.block.Blocks.ENCHANTING_TABLE, 6)
                 || isNearBlock(owner, net.minecraft.block.Blocks.ENCHANTING_TABLE, 6)
                 || (hasArtifact(bot, net.minecraft.item.Items.ENDER_PEARL)
@@ -248,20 +249,68 @@ public final class NavigationArtifactService {
      * @param delayTicks  how many ticks until arrival
      * @param ownerUuid   UUID of the player who owns this bot (for notifications)
      */
-    public static void beginDelayedTravel(MinecraftServer server, ServerPlayerEntity bot,
-                                          String botAlias, BlockPos destination,
-                                          RegistryKey<World> dimension, int delayTicks,
-                                          UUID ownerUuid) {
-        beginDelayedTravel(server, bot, botAlias, destination, dimension, delayTicks, ownerUuid, false);
+    public static boolean beginDelayedTravel(MinecraftServer server, ServerPlayerEntity bot,
+                                             String botAlias, BlockPos destination,
+                                             RegistryKey<World> dimension, int delayTicks,
+                                             UUID ownerUuid) {
+        return beginDelayedTravel(server, bot, botAlias, destination, dimension, delayTicks, ownerUuid, false, false);
     }
 
-    private static void beginDelayedTravel(MinecraftServer server, ServerPlayerEntity bot,
-                                           String botAlias, BlockPos destination,
-                                           RegistryKey<World> dimension, int delayTicks,
-                                           UUID ownerUuid, boolean skipGates) {
+    /**
+     * Emergency travel path used by autonomous rescue logic.
+     * Reuses the same delayed-travel pipeline but skips the normal underground gating.
+     */
+    public static boolean beginEmergencyTravel(MinecraftServer server, ServerPlayerEntity bot,
+                                               String botAlias, BlockPos destination,
+                                               RegistryKey<World> dimension, int delayTicks,
+                                               UUID ownerUuid) {
+        return beginDelayedTravel(server, bot, botAlias, destination, dimension, delayTicks, ownerUuid, true, true);
+    }
+
+    /**
+     * Coordinated emergency travel for two bots. Used by autonomous escort rescue so both
+     * bots enter traveling on the same tick and the rescue service can own HUD messaging.
+     */
+    public static boolean beginCoordinatedEmergencyTravel(MinecraftServer server,
+                                                          ServerPlayerEntity primaryBot,
+                                                          String primaryAlias,
+                                                          BlockPos primaryDestination,
+                                                          RegistryKey<World> primaryDimension,
+                                                          ServerPlayerEntity secondaryBot,
+                                                          String secondaryAlias,
+                                                          BlockPos secondaryDestination,
+                                                          RegistryKey<World> secondaryDimension,
+                                                          int delayTicks,
+                                                          UUID ownerUuid) {
+        if (server == null || primaryBot == null || secondaryBot == null
+                || primaryDestination == null || secondaryDestination == null
+                || primaryDimension == null || secondaryDimension == null) {
+            return false;
+        }
+        if (primaryBot.hasVehicle() || secondaryBot.hasVehicle()) {
+            return false;
+        }
+        if (!canBeginDelayedTravel(server, primaryBot, primaryDestination, primaryDimension, ownerUuid, true)
+                || !canBeginDelayedTravel(server, secondaryBot, secondaryDestination, secondaryDimension, ownerUuid, true)) {
+            return false;
+        }
+        boolean primaryStarted = beginDelayedTravel(server, primaryBot, primaryAlias, primaryDestination, primaryDimension,
+                delayTicks, ownerUuid, true, true);
+        if (!primaryStarted) {
+            return false;
+        }
+        boolean secondaryStarted = beginDelayedTravel(server, secondaryBot, secondaryAlias, secondaryDestination, secondaryDimension,
+                delayTicks, ownerUuid, true, true);
+        return secondaryStarted;
+    }
+
+    private static boolean beginDelayedTravel(MinecraftServer server, ServerPlayerEntity bot,
+                                              String botAlias, BlockPos destination,
+                                              RegistryKey<World> dimension, int delayTicks,
+                                              UUID ownerUuid, boolean skipGates, boolean suppressOwnerNotify) {
         if (server == null || bot == null || botAlias == null || destination == null || dimension == null) {
             LOGGER.warn("beginDelayedTravel called with null arguments; ignoring.");
-            return;
+            return false;
         }
 
         if (!skipGates) {
@@ -269,7 +318,7 @@ public final class NavigationArtifactService {
             if (BotCombatCalloutService.isInCombat(bot.getUuid())) {
                 notifyOwner(server, ownerUuid,
                         "\u00A7c" + botAlias + " cannot fast-travel while in combat.\u00A7r");
-                return;
+                return false;
             }
 
             // ── Underground gate (requires Map+Compass or Tier 2+) ──────
@@ -286,7 +335,7 @@ public final class NavigationArtifactService {
                 } else {
                     notifyOwner(server, ownerUuid,
                             "\u00A7c" + botAlias + " cannot fast-travel underground without a Map and Compass.\u00A7r");
-                    return;
+                    return false;
                 }
             }
         }
@@ -300,7 +349,7 @@ public final class NavigationArtifactService {
         switch (mountResult.decision()) {
             case REFUSE_FULL_INVENTORY, REFUSE_NO_ROOM_AT_DEST, REFUSE_CROSS_DIM_ANIMAL -> {
                 notifyOwner(server, ownerUuid, "\u00A7c" + mountResult.message() + "\u00A7r");
-                return; // Abort travel
+                return false; // Abort travel
             }
             case TETHERED_CROSS_DIM -> {
                 notifyOwner(server, ownerUuid, "\u00A7e" + mountResult.message() + "\u00A7r");
@@ -373,11 +422,47 @@ public final class NavigationArtifactService {
                 dimension.getValue(), delaySeconds, delayTicks);
 
         // Notify the owner that the bot has departed (queues if offline).
-        notifyOwner(server, ownerUuid,
-                "\u00A7e" + botAlias + " has departed and will arrive in ~"
-                + delaySeconds + " seconds.\u00A7r");
+        if (!suppressOwnerNotify) {
+            notifyOwner(server, ownerUuid,
+                    "\u00A7e" + botAlias + " has departed and will arrive in ~"
+                    + delaySeconds + " seconds.\u00A7r");
+        }
 
         flushPendingTravels();
+        return true;
+    }
+
+    private static boolean canBeginDelayedTravel(MinecraftServer server,
+                                                 ServerPlayerEntity bot,
+                                                 BlockPos destination,
+                                                 RegistryKey<World> dimension,
+                                                 UUID ownerUuid,
+                                                 boolean skipGates) {
+        if (server == null || bot == null || destination == null || dimension == null) {
+            return false;
+        }
+        if (!skipGates) {
+            if (BotCombatCalloutService.isInCombat(bot.getUuid())) {
+                return false;
+            }
+            ServerWorld currentWorld = (ServerWorld) bot.getEntityWorld();
+            if (!currentWorld.isSkyVisible(bot.getBlockPos().up())) {
+                ServerPlayerEntity owner = server.getPlayerManager().getPlayer(ownerUuid);
+                double mult = artifactDelayMultiplier(bot, owner);
+                if (mult > 1.0
+                        && !(hasArtifact(bot, net.minecraft.item.Items.FILLED_MAP)
+                        && hasArtifact(bot, net.minecraft.item.Items.COMPASS))) {
+                    return false;
+                }
+            }
+        }
+        ServerWorld destWorld = server.getWorld(dimension);
+        TravelMountHandler.MountTravelResult mountResult =
+                TravelMountHandler.evaluateTravel(bot, destination, dimension, destWorld);
+        return switch (mountResult.decision()) {
+            case REFUSE_FULL_INVENTORY, REFUSE_NO_ROOM_AT_DEST, REFUSE_CROSS_DIM_ANIMAL -> false;
+            default -> true;
+        };
     }
 
     /**
@@ -662,7 +747,7 @@ public final class NavigationArtifactService {
                     botAlias, returnDest.toShortString(), returnLabel, (int) dist, delayTicks / 20);
             beginDelayedTravel(server, bot, botAlias, returnDest,
                     ((ServerWorld) bot.getEntityWorld()).getRegistryKey(), delayTicks, action.ownerUuid(),
-                    true /* skipGates: return trip after collection */);
+                    true /* skipGates: return trip after collection */, false);
             notifyOwner(server, action.ownerUuid(),
                     "\u00A7e" + botAlias + " is returning to " + returnLabel + " (ETA ~" + Math.max(1, delayTicks / 20) + "s).\u00A7r");
         }

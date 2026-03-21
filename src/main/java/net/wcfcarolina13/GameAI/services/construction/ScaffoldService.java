@@ -9,6 +9,7 @@ import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 import net.wcfcarolina13.GameAI.BotActions;
+import net.wcfcarolina13.GameAI.services.BlockInteractionService;
 import net.wcfcarolina13.GameAI.services.BotTerritoryAuthorizationService;
 import net.wcfcarolina13.GameAI.skills.SkillManager;
 import org.slf4j.Logger;
@@ -428,6 +429,14 @@ public final class ScaffoldService {
                 try {
                     var state = world.getBlockState(pos);
                     if (state.isAir()) {
+                        future.complete(false);
+                        return;
+                    }
+                    boolean standingOnBlock = bot.getBlockPos().equals(pos.up());
+                    if (!standingOnBlock && !BlockInteractionService.canInteract(bot, pos)) {
+                        LOGGER.info("Skipping remote scaffold teardown at {} for {}",
+                                pos.toShortString(),
+                                bot.getName().getString());
                         future.complete(false);
                         return;
                     }

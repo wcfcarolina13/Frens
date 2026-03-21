@@ -69,6 +69,7 @@ public final class SmeltingService {
             ChatUtils.sendSystemMessage(source, "That furnace is unavailable.");
             return false;
         }
+        BotFurnaceRegistryService.registerFurnace(bot, pos, world, "smelt");
 
         Map<Item, List<ItemStack>> cookables = findCookables(bot, world, state, itemFilter);
         if (cookables.isEmpty()) {
@@ -254,6 +255,92 @@ public final class SmeltingService {
         return out;
     }
 
+    public static boolean hasCookableInventoryItems(ServerPlayerEntity bot, ServerWorld world) {
+        if (bot == null || world == null) {
+            return false;
+        }
+        return !listCookableIds(bot, world, Blocks.FURNACE.getDefaultState()).isEmpty();
+    }
+
+    public static boolean hasFuelForAutoCook(ServerPlayerEntity bot, ServerWorld world) {
+        return bot != null && world != null && hasFuel(bot, world);
+    }
+
+    public static boolean hasReadyFoodOutput(ServerPlayerEntity bot, ServerWorld world) {
+        return findReadyFoodFurnace(bot, world) != null;
+    }
+
+    public static boolean startCollectFinishedFood(ServerPlayerEntity bot, ServerCommandSource source) {
+        if (bot == null || source == null) {
+            return false;
+        }
+        if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
+            return false;
+        }
+        BlockPos furnacePos = findReadyFoodFurnace(bot, world);
+        if (furnacePos == null) {
+            return false;
+        }
+        BlockPos approach = chooseApproach(world, furnacePos);
+        if (approach == null) {
+            return false;
+        }
+
+        var server = source.getServer();
+        var worldKey = world.getRegistryKey();
+        UUID botId = bot.getUuid();
+        BlockPos targetPos = furnacePos.toImmutable();
+        BlockPos standPos = approach.toImmutable();
+        boolean allowTeleport = SkillPreferences.teleportDuringSkills(bot);
+
+        CompletableFuture.runAsync(() -> {
+            boolean moveSucceeded = false;
+            try {
+                MovementService.MovementPlan plan = new MovementService.MovementPlan(
+                        MovementService.Mode.DIRECT,
+                        standPos,
+                        standPos,
+                        null,
+                        null,
+                        bot.getHorizontalFacing());
+                MovementService.MovementResult moveRes = MovementService.execute(bot.getCommandSource(), bot, plan, allowTeleport, true);
+                moveSucceeded = moveRes.success() || bot.getBlockPos().getSquaredDistance(standPos) <= STATION_REACH_SQ;
+            } catch (Exception e) {
+                LOGGER.debug("Auto-collect movement failed: {}", e.getMessage());
+            }
+
+            final boolean reached = moveSucceeded;
+            server.execute(() -> {
+                ServerWorld liveWorld = server.getWorld(worldKey);
+                ServerPlayerEntity liveBot = server.getPlayerManager().getPlayer(botId);
+                if (liveWorld == null || liveBot == null || liveBot.isRemoved()) {
+                    return;
+                }
+                var be = liveWorld.getBlockEntity(targetPos);
+                if (!(be instanceof AbstractFurnaceBlockEntity furnace)) {
+                    BotFurnaceRegistryService.removeSharedFurnace(liveBot, liveWorld, targetPos);
+                    return;
+                }
+                BotFurnaceRegistryService.registerFurnace(liveBot, targetPos, liveWorld, "smelt");
+                if (!ensureStationInteractable(liveBot, targetPos, STATION_REACH_SQ)) {
+                    return;
+                }
+                ItemStack output = furnace.getStack(2);
+                if (output.isEmpty() || output.getComponents().get(net.minecraft.component.DataComponentTypes.FOOD) == null) {
+                    return;
+                }
+                ItemStack remaining = evacuateOutput(liveBot, source, output.copy(), STATION_REACH_SQ);
+                if (remaining.isEmpty()) {
+                    furnace.setStack(2, ItemStack.EMPTY);
+                } else if (remaining.getCount() < output.getCount()) {
+                    furnace.setStack(2, remaining);
+                }
+                furnace.markDirty();
+            });
+        });
+        return true;
+    }
+
     private static boolean ensureStationInteractable(ServerPlayerEntity bot, BlockPos stationPos, double reachSq) {
         if (bot == null || stationPos == null) {
             return false;
@@ -289,7 +376,15 @@ public final class SmeltingService {
             }
         }
 
-        // 2) Search nearby placed stations
+        // 2) Search shared tactical furnaces first (same-owner memory)
+        for (BlockPos shared : BotFurnaceRegistryService.listValidSharedFurnacePositions(bot, world, botPos, 64.0D * 64.0D)) {
+            BlockPos approach = chooseApproach(world, shared);
+            if (approach != null) {
+                return new StationTarget(shared, approach);
+            }
+        }
+
+        // 3) Search nearby placed stations
         BlockPos nearest = findNearestFurnace(world, botPos, 24, 4);
         if (nearest != null) {
             double distSq = botPos.getSquaredDistance(nearest);
@@ -303,31 +398,37 @@ public final class SmeltingService {
             }
         }
 
-        // 3) Place from inventory if available
+        // 4) Place from inventory if available
         ItemStack invFurnace = findInventoryFurnace(bot);
         if (invFurnace != null) {
-            BlockPos placeAt = botPos.offset(bot.getHorizontalFacing());
+            BlockPos placeAt = chooseTacticalPlacementTarget(bot, world);
             BotActions.placeBlockAt(bot, placeAt, java.util.List.of(invFurnace.getItem()));
             LOGGER.info("Placed furnace-like {} at {}", invFurnace.getItem().getName().getString(), placeAt.toShortString());
             try { Thread.sleep(150L); } catch (InterruptedException ignored) { Thread.currentThread().interrupt(); }
             // Re-scan to confirm block entity is ready (avoids race condition)
             BlockPos confirmed = findNearestFurnace(world, botPos, 4, 2);
             BlockPos target3 = confirmed != null ? confirmed : placeAt;
+            if (isFurnaceLike(world, target3)) {
+                BotFurnaceRegistryService.registerFurnace(bot, target3, world, "tactical");
+            }
             BlockPos approach3 = chooseApproach(world, target3);
             if (approach3 != null) return new StationTarget(target3.toImmutable(), approach3);
         }
 
-        // 4) Craft furnace if possible, then place
+        // 5) Craft furnace if possible, then place
         if (craftFurnace(bot, commander, world)) {
             ItemStack crafted = findInventoryFurnace(bot);
             if (crafted != null) {
-                BlockPos placeAt = botPos.offset(bot.getHorizontalFacing());
+                BlockPos placeAt = chooseTacticalPlacementTarget(bot, world);
                 BotActions.placeBlockAt(bot, placeAt, java.util.List.of(crafted.getItem()));
                 LOGGER.info("Crafted and placed furnace at {}", placeAt.toShortString());
                 try { Thread.sleep(150L); } catch (InterruptedException ignored) { Thread.currentThread().interrupt(); }
                 // Re-scan to confirm block entity is ready (avoids race condition)
                 BlockPos confirmed = findNearestFurnace(world, botPos, 4, 2);
                 BlockPos target4 = confirmed != null ? confirmed : placeAt;
+                if (isFurnaceLike(world, target4)) {
+                    BotFurnaceRegistryService.registerFurnace(bot, target4, world, "tactical");
+                }
                 BlockPos approach4 = chooseApproach(world, target4);
                 if (approach4 != null) return new StationTarget(target4.toImmutable(), approach4);
             }
@@ -338,6 +439,40 @@ public final class SmeltingService {
     private static boolean isFurnaceLike(ServerWorld world, BlockPos pos) {
         var state = world.getBlockState(pos);
         return state.isOf(Blocks.FURNACE) || state.isOf(Blocks.BLAST_FURNACE) || state.isOf(Blocks.SMOKER);
+    }
+
+    private static BlockPos findReadyFoodFurnace(ServerPlayerEntity bot, ServerWorld world) {
+        if (bot == null || world == null) {
+            return null;
+        }
+        BlockPos origin = bot.getBlockPos();
+        for (BlockPos pos : BotFurnaceRegistryService.listValidSharedFurnacePositions(bot, world, origin, 64.0D * 64.0D)) {
+            var be = world.getBlockEntity(pos);
+            if (!(be instanceof AbstractFurnaceBlockEntity furnace)) {
+                continue;
+            }
+            ItemStack output = furnace.getStack(2);
+            if (output.isEmpty()) {
+                continue;
+            }
+            if (output.getComponents().get(net.minecraft.component.DataComponentTypes.FOOD) == null) {
+                continue;
+            }
+            return pos.toImmutable();
+        }
+
+        BlockPos nearest = findNearestFurnace(world, origin, 16, 4);
+        if (nearest != null) {
+            var be = world.getBlockEntity(nearest);
+            if (be instanceof AbstractFurnaceBlockEntity furnace) {
+                ItemStack output = furnace.getStack(2);
+                if (!output.isEmpty() && output.getComponents().get(net.minecraft.component.DataComponentTypes.FOOD) != null) {
+                    BotFurnaceRegistryService.registerFurnace(bot, nearest, world, "smelt");
+                    return nearest.toImmutable();
+                }
+            }
+        }
+        return null;
     }
 
     private static BlockPos findNearestFurnace(ServerWorld world, BlockPos origin, int radius, int ySpan) {
@@ -362,6 +497,119 @@ public final class SmeltingService {
             return station.offset(net.minecraft.util.math.Direction.NORTH).up(); // fallback best effort
         }
         return options.get(0);
+    }
+
+    private static BlockPos chooseTacticalPlacementTarget(ServerPlayerEntity bot, ServerWorld world) {
+        if (bot == null || world == null) {
+            return BlockPos.ORIGIN;
+        }
+        BlockPos chestAnchor = findSharedChestAnchor(bot, world, 20.0D * 20.0D);
+        if (chestAnchor != null) {
+            BlockPos nearChest = findPlacementNearAnchor(bot, world, chestAnchor, 2, true);
+            if (nearChest != null) {
+                return nearChest;
+            }
+        }
+
+        Optional<BlockPos> bed = BotHomeService.getLastSleep(bot);
+        if (bed.isPresent() && bot.getBlockPos().getSquaredDistance(bed.get()) <= 24.0D * 24.0D) {
+            BlockPos nearBed = findPlacementNearAnchor(bot, world, bed.get(), 4, false);
+            if (nearBed != null) {
+                return nearBed;
+            }
+        }
+
+        Optional<BlockPos> base = BotHomeService.findNearestBase(bot);
+        if (base.isPresent() && bot.getBlockPos().getSquaredDistance(base.get()) <= 28.0D * 28.0D) {
+            BlockPos nearBase = findPlacementNearAnchor(bot, world, base.get(), 5, false);
+            if (nearBase != null) {
+                return nearBase;
+            }
+        }
+
+        BlockPos local = findPlacementNearAnchor(bot, world, bot.getBlockPos(), 3, false);
+        return local != null ? local : bot.getBlockPos().offset(bot.getHorizontalFacing());
+    }
+
+    private static BlockPos findSharedChestAnchor(ServerPlayerEntity bot, ServerWorld world, double maxDistanceSq) {
+        if (bot == null || world == null) {
+            return null;
+        }
+        BlockPos origin = bot.getBlockPos();
+        BlockPos best = null;
+        double bestSq = Double.POSITIVE_INFINITY;
+        for (BotChestRegistryService.ChestRecord record : BotChestRegistryService.listChestsForOwner(bot, world)) {
+            if (record == null || record.destroyed) {
+                continue;
+            }
+            BlockPos pos = record.toBlockPos();
+            if (!world.isChunkLoaded(pos)) {
+                continue;
+            }
+            if (!(world.getBlockState(pos).isOf(Blocks.CHEST)
+                    || world.getBlockState(pos).isOf(Blocks.TRAPPED_CHEST)
+                    || world.getBlockState(pos).isOf(Blocks.BARREL))) {
+                continue;
+            }
+            double distSq = origin.getSquaredDistance(pos);
+            if (maxDistanceSq > 0.0D && distSq > maxDistanceSq) {
+                continue;
+            }
+            if (distSq < bestSq) {
+                bestSq = distSq;
+                best = pos.toImmutable();
+            }
+        }
+        return best;
+    }
+
+    private static BlockPos findPlacementNearAnchor(ServerPlayerEntity bot,
+                                                    ServerWorld world,
+                                                    BlockPos anchor,
+                                                    int radius,
+                                                    boolean preferAdjacent) {
+        if (bot == null || world == null || anchor == null) {
+            return null;
+        }
+        List<BlockPos> candidates = new ArrayList<>();
+        for (int dx = -radius; dx <= radius; dx++) {
+            for (int dz = -radius; dz <= radius; dz++) {
+                if (dx == 0 && dz == 0) {
+                    continue;
+                }
+                candidates.add(anchor.add(dx, 0, dz).toImmutable());
+            }
+        }
+        candidates.sort(Comparator.comparingDouble(pos -> {
+            double anchorPenalty = anchor.getSquaredDistance(pos);
+            double botPenalty = bot.getBlockPos().getSquaredDistance(pos) * 0.10D;
+            return anchorPenalty + botPenalty;
+        }));
+        if (preferAdjacent) {
+            candidates.sort(Comparator.comparingDouble(anchor::getSquaredDistance));
+        }
+        for (BlockPos pos : candidates) {
+            if (!world.isChunkLoaded(pos) || !world.isChunkLoaded(pos.down())) {
+                continue;
+            }
+            if (!BotTerritoryAuthorizationService.authorizeBlockMutation(bot, world, pos).allowed()) {
+                continue;
+            }
+            if (!world.getFluidState(pos).isEmpty() || !world.getFluidState(pos.down()).isEmpty()) {
+                continue;
+            }
+            if (world.getBlockState(pos.down()).getCollisionShape(world, pos.down()).isEmpty()) {
+                continue;
+            }
+            if (!world.getBlockState(pos).isAir() && !world.getBlockState(pos).isReplaceable() && !world.getBlockState(pos).isOf(Blocks.SNOW)) {
+                continue;
+            }
+            if (chooseApproach(world, pos) == null) {
+                continue;
+            }
+            return pos.toImmutable();
+        }
+        return null;
     }
 
     private static ItemStack findInventoryFurnace(ServerPlayerEntity bot) {

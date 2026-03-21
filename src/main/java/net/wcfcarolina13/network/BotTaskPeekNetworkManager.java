@@ -110,6 +110,8 @@ public final class BotTaskPeekNetworkManager {
                 return "building";
             case "flowers":
                 return "collecting flowers";
+            case "grass seeds":
+                return "collecting seeds";
             case "leaf litter":
                 return "collecting leaf litter";
             case "mushrooms":

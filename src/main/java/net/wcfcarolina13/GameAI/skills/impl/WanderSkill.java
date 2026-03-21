@@ -5,8 +5,10 @@ import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
 import net.wcfcarolina13.GameAI.services.BotHomeService;
+import net.wcfcarolina13.GameAI.services.BotTerritoryAuthorizationService;
 import net.wcfcarolina13.GameAI.services.MovementService;
 import net.wcfcarolina13.GameAI.services.SafePositionService;
+import net.wcfcarolina13.GameAI.services.TaskService;
 import net.wcfcarolina13.GameAI.skills.Skill;
 import net.wcfcarolina13.GameAI.skills.SkillContext;
 import net.wcfcarolina13.GameAI.skills.SkillExecutionResult;
@@ -16,6 +18,7 @@ import org.slf4j.LoggerFactory;
 
 import java.util.Map;
 import java.util.Random;
+import java.util.UUID;
 
 /**
  * Lightweight local stroll used as an ambient fallback when no resource-based hobbies are available.
@@ -42,7 +45,13 @@ public final class WanderSkill implements Skill {
 
         int radius = clamp(getInt(context.parameters(), "radius", 12), 6, 20);
         int steps = clamp(getInt(context.parameters(), "steps", 3), 1, 5);
-        BlockPos anchor = BotHomeService.resolveHomeTarget(bot).orElse(bot.getBlockPos()).toImmutable();
+        boolean shadowCompanion = getBoolean(context.parameters(), "shadow_companion");
+        BlockPos anchorSeed = shadowCompanion
+                ? resolveShadowAnchor(bot, world)
+                : BotHomeService.resolveHomeTarget(bot).orElse(bot.getBlockPos()).toImmutable();
+        SafePositionService.SurfaceStagingCandidate initialStaging =
+                SafePositionService.findBestSurfaceStaging(world, anchorSeed, 8, true);
+        BlockPos anchor = initialStaging != null ? initialStaging.pos() : anchorSeed;
 
         boolean moved = false;
         for (int i = 0; i < steps; i++) {
@@ -55,8 +64,16 @@ public final class WanderSkill implements Skill {
                 continue;
             }
 
+            if (shadowCompanion) {
+                BlockPos refreshed = resolveShadowAnchor(bot, world);
+                if (refreshed != null) {
+                    anchor = refreshed;
+                }
+            }
             BlockPos rough = anchor.add(dx, 0, dz);
-            BlockPos target = SafePositionService.findSafeNear(world, rough, 5);
+            SafePositionService.SurfaceStagingCandidate staging =
+                    SafePositionService.findBestSurfaceStaging(world, rough, 5, true);
+            BlockPos target = staging != null ? staging.pos() : SafePositionService.findSafeNear(world, rough, 5);
             if (target == null) {
                 continue;
             }
@@ -97,6 +114,42 @@ public final class WanderSkill implements Skill {
         return SkillExecutionResult.success("Went for a short stroll.");
     }
 
+    private static BlockPos resolveShadowAnchor(ServerPlayerEntity bot, ServerWorld world) {
+        if (bot == null || world == null) {
+            return null;
+        }
+        UUID owner = BotTerritoryAuthorizationService.resolveBotOwnerUuid(bot);
+        if (owner == null) {
+            return bot.getBlockPos().toImmutable();
+        }
+        ServerPlayerEntity best = null;
+        double bestSq = Double.POSITIVE_INFINITY;
+        for (ServerPlayerEntity other : world.getPlayers()) {
+            if (other == null || other == bot || other.isRemoved() || !other.isAlive()) {
+                continue;
+            }
+            if (!net.wcfcarolina13.GameAI.BotEventHandler.isRegisteredBot(other)) {
+                continue;
+            }
+            if (!owner.equals(BotTerritoryAuthorizationService.resolveBotOwnerUuid(other))) {
+                continue;
+            }
+            TaskService.ActiveTaskInfo task = TaskService.getActiveTaskInfo(other.getUuid()).orElse(null);
+            if (task == null || task.origin() != TaskService.Origin.AMBIENT) {
+                continue;
+            }
+            double distSq = bot.squaredDistanceTo(other);
+            if (distSq < 9.0D || distSq > 20.0D * 20.0D) {
+                continue;
+            }
+            if (distSq < bestSq) {
+                bestSq = distSq;
+                best = other;
+            }
+        }
+        return best != null ? best.getBlockPos().toImmutable() : bot.getBlockPos().toImmutable();
+    }
+
     private static int getInt(Map<String, Object> params, String key, int fallback) {
         if (params == null || key == null) {
             return fallback;
@@ -112,6 +165,20 @@ public final class WanderSkill implements Skill {
             }
         }
         return fallback;
+    }
+
+    private static boolean getBoolean(Map<String, Object> params, String key) {
+        if (params == null || key == null) {
+            return false;
+        }
+        Object raw = params.get(key);
+        if (raw instanceof Boolean b) {
+            return b;
+        }
+        if (raw instanceof String s) {
+            return Boolean.parseBoolean(s.trim());
+        }
+        return false;
     }
 
     private static int clamp(int value, int min, int max) {

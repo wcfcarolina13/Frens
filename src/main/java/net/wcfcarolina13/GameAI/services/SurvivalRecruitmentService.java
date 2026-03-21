@@ -42,6 +42,21 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public final class SurvivalRecruitmentService {
 
+    public record VillageSignals(int villagers,
+                                 int golems,
+                                 boolean bellNearby,
+                                 boolean bedNearby) {
+        public boolean isVillageLike() {
+            if (villagers >= MIN_VILLAGERS) {
+                return true;
+            }
+            if (villagers >= 2 && golems >= MIN_GOLEMS) {
+                return true;
+            }
+            return villagers >= 1 && (bellNearby || bedNearby);
+        }
+    }
+
     private static final int CHECK_INTERVAL_TICKS = 20; // 1 second.
     private static final double VILLAGE_RADIUS_XZ = 48.0;
     private static final double VILLAGE_RADIUS_Y = 16.0;
@@ -94,6 +109,7 @@ public final class SurvivalRecruitmentService {
             Map.entry("wizard_tome", false),
             Map.entry("learning_manage", false),
             Map.entry("recruit_manage", false),
+            Map.entry("rescue_manage", false),
             Map.entry("recruit_reset", false),
             Map.entry("village_anchor", false),
             Map.entry("stage_debug", false)
@@ -219,6 +235,26 @@ public final class SurvivalRecruitmentService {
             return;
         }
         st.setAllowCustomSkins(allow);
+        Frens.CONFIG.save();
+    }
+
+    public static boolean isAutonomousRescuesEnabled(MinecraftServer server) {
+        if (server == null || Frens.CONFIG == null) {
+            return false;
+        }
+        ManualConfig.SurvivalRecruitmentState st = getState(server);
+        return st != null && st.isAutonomousRescuesEnabled();
+    }
+
+    public static void setAutonomousRescuesEnabled(MinecraftServer server, boolean enabled) {
+        if (server == null || Frens.CONFIG == null) {
+            return;
+        }
+        ManualConfig.SurvivalRecruitmentState st = getState(server);
+        if (st == null) {
+            return;
+        }
+        st.setAutonomousRescuesEnabled(enabled);
         Frens.CONFIG.save();
     }
 
@@ -754,6 +790,22 @@ public final class SurvivalRecruitmentService {
 
     private static boolean isBedNearby(ServerWorld world, BlockPos center) {
         return isBlockNearby(world, center, BED_RADIUS_XZ, BED_RADIUS_Y, state -> state != null && state.isIn(BlockTags.BEDS));
+    }
+
+    public static VillageSignals inspectVillageSignals(ServerWorld world, BlockPos center) {
+        if (world == null || center == null) {
+            return new VillageSignals(0, 0, false, false);
+        }
+        Box probe = Box.of(Vec3d.ofCenter(center), 1.0D, 2.0D, 1.0D);
+        return new VillageSignals(
+                countNearbyVillagers(world, probe),
+                countNearbyGolems(world, probe),
+                isBellNearby(world, center),
+                isBedNearby(world, center));
+    }
+
+    public static boolean isVillageSignalNearby(ServerWorld world, BlockPos center) {
+        return inspectVillageSignals(world, center).isVillageLike();
     }
 
     private static boolean isBlockNearby(ServerWorld world, BlockPos center, int radiusXZ, int radiusY, java.util.function.Predicate<BlockState> predicate) {

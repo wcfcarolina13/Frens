@@ -405,6 +405,7 @@ public class modCommandRegistry {
 	                            .then(BotUtilityCommands.buildChatCheck())
 	                            .then(BotUtilityCommands.buildIdentityCheck())
 	                            .then(BotHomeCommands.buildAutoReturnSunset())
+                                .then(BotHomeCommands.buildAutoReturnSelfSufficient())
 	                            .then(BotHomeCommands.buildAutoReturnSunsetGuardPatrolEligible())
                             .then(BotHomeCommands.buildAutoReturnSkipPermission())
                             .then(BotHomeCommands.buildAutoReturnSunsetPreferLastBed())
@@ -2994,9 +2995,10 @@ public class modCommandRegistry {
 
     private static int executeFollow(CommandContext<ServerCommandSource> context, ServerPlayerEntity bot, ServerPlayerEntity target) {
         interruptAmbientHobbyIfAny(bot, "§cInterrupted by /bot follow.");
+        TaskService.forceAbort(bot.getUuid(), "§cInterrupted by /bot follow.");
         // Commands already emit a system summary; avoid redundant bot-authored chat acks.
         BotEventHandler.setFollowMode(bot, target, false);
-        return 1;
+        return isFollowingTarget(bot, target) ? 1 : 0;
     }
 
     private static int executeFollowDistance(CommandContext<ServerCommandSource> context,
@@ -3007,8 +3009,9 @@ public class modCommandRegistry {
             return 0;
         }
         interruptAmbientHobbyIfAny(bot, "§cInterrupted by /bot follow distance.");
+        TaskService.forceAbort(bot.getUuid(), "§cInterrupted by /bot follow distance.");
         BotEventHandler.setFollowModeDistance(bot, target, distance);
-        return 1;
+        return isFollowingTarget(bot, target) ? 1 : 0;
     }
 
     static int executeFollowDistanceTargets(CommandContext<ServerCommandSource> context,
@@ -3032,8 +3035,14 @@ public class modCommandRegistry {
             String summary = formatBotList(bots, isAll);
             boolean plural = isAll || bots.size() > 1;
             String verb = plural ? "are" : "is";
-            ChatUtils.sendSystemMessage(context.getSource(), summary + " " + verb + " following "
-                    + followTarget.getName().getString() + " (distance " + String.format(Locale.ROOT, "%.1f", distance) + ").");
+            if (successes == bots.size()) {
+                ChatUtils.sendSystemMessage(context.getSource(), summary + " " + verb + " following "
+                        + followTarget.getName().getString() + " (distance " + String.format(Locale.ROOT, "%.1f", distance) + ").");
+            } else {
+                ChatUtils.sendSystemMessage(context.getSource(), summary + " started follow-distance for "
+                        + successes + "/" + bots.size() + " toward " + followTarget.getName().getString()
+                        + " (distance " + String.format(Locale.ROOT, "%.1f", distance) + ").");
+            }
         }
         return successes;
     }
@@ -5894,6 +5903,66 @@ public class modCommandRegistry {
         return successes;
     }
 
+    static int executeAutoReturnSelfSufficientSetTargets(CommandContext<ServerCommandSource> context,
+                                                         String targetArg,
+                                                         boolean enabled) throws CommandSyntaxException {
+        ServerCommandSource source = context.getSource();
+        List<ServerPlayerEntity> bots = resolveTargetBots(context, targetArg);
+        boolean isAll = targetArg != null && "all".equalsIgnoreCase(targetArg.trim());
+
+        int successes = 0;
+        for (ServerPlayerEntity bot : bots) {
+            if (bot == null) {
+                continue;
+            }
+            if (BotHomeService.setAutoReturnSelfSufficientFallback(bot, enabled)) {
+                successes++;
+            }
+        }
+
+        if (!bots.isEmpty()) {
+            String summary = formatBotList(bots, isAll);
+            ChatUtils.sendSystemMessage(source,
+                    summary + " sunset self-sufficiency is now " + (enabled ? "ON" : "OFF") + ".");
+        }
+        return successes;
+    }
+
+    static int executeAutoReturnSelfSufficientToggleTargets(CommandContext<ServerCommandSource> context,
+                                                            String targetArg) throws CommandSyntaxException {
+        ServerCommandSource source = context.getSource();
+        List<ServerPlayerEntity> bots = resolveTargetBots(context, targetArg);
+        boolean isAll = targetArg != null && "all".equalsIgnoreCase(targetArg.trim());
+
+        int successes = 0;
+        int enabledCount = 0;
+        for (ServerPlayerEntity bot : bots) {
+            if (bot == null) {
+                continue;
+            }
+            if (!BotHomeService.toggleAutoReturnSelfSufficientFallback(bot)) {
+                continue;
+            }
+            successes++;
+            if (BotHomeService.isAutoReturnSelfSufficientFallback(bot)) {
+                enabledCount++;
+            }
+        }
+
+        if (!bots.isEmpty()) {
+            String summary = formatBotList(bots, isAll);
+            if (isAll || bots.size() > 1) {
+                ChatUtils.sendSystemMessage(source,
+                        summary + " sunset self-sufficiency enabled for " + enabledCount + "/" + bots.size() + ".");
+            } else if (bots.size() == 1) {
+                boolean on = BotHomeService.isAutoReturnSelfSufficientFallback(bots.getFirst());
+                ChatUtils.sendSystemMessage(source,
+                        summary + " sunset self-sufficiency is now " + (on ? "ON" : "OFF") + ".");
+            }
+        }
+        return successes;
+    }
+
     static int executeAutoReturnSkipPermissionSetTargets(CommandContext<ServerCommandSource> context,
                                                         String targetArg,
                                                         boolean enabled) throws CommandSyntaxException {
@@ -6637,7 +6706,12 @@ public class modCommandRegistry {
             String summary = formatBotList(bots, isAll);
             boolean plural = isAll || bots.size() > 1;
             String verb = plural ? "are" : "is";
-            ChatUtils.sendSystemMessage(context.getSource(), summary + " " + verb + " following " + followTarget.getName().getString() + ".");
+            if (successes == bots.size()) {
+                ChatUtils.sendSystemMessage(context.getSource(), summary + " " + verb + " following " + followTarget.getName().getString() + ".");
+            } else {
+                ChatUtils.sendSystemMessage(context.getSource(), summary + " started following "
+                        + followTarget.getName().getString() + " for " + successes + "/" + bots.size() + ".");
+            }
         }
         return successes;
     }
@@ -6681,8 +6755,11 @@ public class modCommandRegistry {
             if (isFollowingTarget) {
                 BotEventHandler.stopFollowing(bot, false);
             } else {
+                TaskService.forceAbort(bot.getUuid(), "§cInterrupted by /bot follow toggle.");
                 BotEventHandler.setFollowMode(bot, followTarget, false);
-                turnedOn++;
+                if (isFollowingTarget(bot, followTarget)) {
+                    turnedOn++;
+                }
             }
             successes++;
         }
@@ -6693,7 +6770,7 @@ public class modCommandRegistry {
                 ChatUtils.sendSystemMessage(context.getSource(), summary + " now following " + followTarget.getName().getString()
                         + " for " + turnedOn + "/" + bots.size() + " (others stopped)." );
             } else {
-                boolean on = turnedOn > 0;
+                boolean on = isFollowingTarget(bots.get(0), followTarget);
                 ChatUtils.sendSystemMessage(context.getSource(), summary + " follow is now " + (on ? "ON" : "OFF") + ".");
             }
         }
@@ -7744,6 +7821,13 @@ public class modCommandRegistry {
                     // Best-effort; command execution should not fail if task system is unavailable.
                 }
             }
+
+    private static boolean isFollowingTarget(ServerPlayerEntity bot, ServerPlayerEntity followTarget) {
+        return bot != null
+                && followTarget != null
+                && BotEventHandler.getCurrentMode(bot) == BotEventHandler.Mode.FOLLOW
+                && followTarget.getUuid().equals(BotEventHandler.getFollowTargetUuid(bot));
+    }
 
     /**
      * Computes the primary horizontal direction from one position toward another.

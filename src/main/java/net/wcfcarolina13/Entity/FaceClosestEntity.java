@@ -44,6 +44,8 @@ public class FaceClosestEntity {
 
             // Set the bot's rotation
             bot.setYaw((float) yaw);
+            bot.setHeadYaw((float) yaw);
+            bot.setBodyYaw((float) yaw);
             bot.setPitch((float) Math.max(-90.0, Math.min(90.0, pitch)));
 
         }

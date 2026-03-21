@@ -57,6 +57,9 @@ import net.wcfcarolina13.GameAI.services.BotRLPersistenceThrottleService;
 import net.wcfcarolina13.GameAI.services.BotCombatCalloutService;
 import net.wcfcarolina13.GameAI.services.BotFleeService;
 import net.wcfcarolina13.GameAI.services.BotHomeService;
+import net.wcfcarolina13.GameAI.services.BotAutoHuntService;
+import net.wcfcarolina13.GameAI.services.BotAutoReturnSunsetService;
+import net.wcfcarolina13.GameAI.services.BotMutualAidService;
 import net.wcfcarolina13.GameAI.services.SafePositionService;
 import net.wcfcarolina13.Database.StateActionPair;
 import net.wcfcarolina13.Entity.AutoFaceEntity;
@@ -139,6 +142,10 @@ public class BotEventHandler {
     private static final int FOLLOW_TELEPORT_STUCK_TICKS = 60; // ~3 seconds @20tps
     private static final int FOLLOW_TELEPORT_COOLDOWN_TICKS = 40; // 2 seconds @20tps
     private static final long FOLLOW_POST_DOOR_AVOID_MS = 6_000L;
+    private static final double COME_REACHABILITY_PROBE_RANGE_SQ = 32.0D * 32.0D;
+    private static final long COME_REACHABILITY_PROBE_TIMEOUT_MS = 60L;
+    private static final long COME_REACHABILITY_PROBE_COOLDOWN_TICKS = 80L;
+    private static final long FOLLOW_BACKOFF_LOG_COOLDOWN_TICKS = 100L;
     private static final long FOLLOW_VERTICAL_ASSIST_COOLDOWN_MS = 350L;
     private static final long FOLLOW_VERTICAL_LOCK_TTL_MS = 8_000L;
     private static final int FOLLOW_VERTICAL_LOCK_NO_PROGRESS_TICKS = 30;
@@ -152,6 +159,7 @@ public class BotEventHandler {
     private static final long FOLLOW_COMMANDER_LADDER_HINT_TTL_MS = 8_000L;
     private static final long FOLLOW_COMMANDER_LADDER_OFF_GRACE_MS = 4_000L;
     private static final long COME_RECOVERY_STALE_TICKS = 200L; // 10s @20tps
+    private static final Map<UUID, Long> FOLLOW_BACKOFF_LOG_TICK = new ConcurrentHashMap<>();
     private static final AtomicInteger COME_RECOVERY_THREAD_ID = new AtomicInteger(0);
     private static final ExecutorService COME_RECOVERY_EXECUTOR = Executors.newCachedThreadPool(new ThreadFactory() {
         @Override
@@ -208,6 +216,7 @@ public class BotEventHandler {
     private static final Map<UUID, Long> FOLLOW_VERTICAL_LOCK_LAST_REPLAN_MS = new ConcurrentHashMap<>();
     private static final Map<UUID, Long> FOLLOW_VERTICAL_LOCK_FAIL_COOLDOWN_UNTIL_MS = new ConcurrentHashMap<>();
     private static final Map<UUID, CommanderLadderHint> FOLLOW_COMMANDER_LADDER_HINT = new ConcurrentHashMap<>();
+    private static final Map<UUID, Long> LAST_JOIN_ENCLOSURE_CHECK_TICK = new ConcurrentHashMap<>();
     /** Per-bot current combat target UUID for threat-scoring stickiness. */
     private static final Map<UUID, UUID> COMBAT_TARGET = new ConcurrentHashMap<>();
     // Stage-2 refactor: burial/suffocation rescue moved to BotRescueService.
@@ -632,16 +641,35 @@ public class BotEventHandler {
                 srv.send(new net.minecraft.server.ServerTask(srv.getTicks() + 40, () -> {
                     if (candidate.isRemoved()) return;
                     if (!(candidate.getEntityWorld() instanceof net.minecraft.server.world.ServerWorld sw)) return;
-                    // Skip if bot already left IDLE (e.g. auto-return set FOLLOW) — shelter flag would interfere
-                    if (getCurrentMode(candidate) != Mode.IDLE) return;
-                    if (sw.isSkyVisible(candidate.getBlockPos().up())) return;
+                    Long lastJoinCheck = LAST_JOIN_ENCLOSURE_CHECK_TICK.get(candidate.getUuid());
+                    if (lastJoinCheck != null && (srv.getTicks() - lastJoinCheck) < 200L) return;
+                    LAST_JOIN_ENCLOSURE_CHECK_TICK.put(candidate.getUuid(), (long) srv.getTicks());
+                    Mode liveMode = getCurrentMode(candidate);
+                    if (liveMode != Mode.IDLE) return;
+                    if (getFollowTargetUuid(candidate) != null || getBaseTarget(candidate) != null) return;
+                    if (net.wcfcarolina13.GameAI.services.TaskService.hasActiveTask(candidate.getUuid())) return;
+                    String rideSuppression = net.wcfcarolina13.GameAI.services.RideSyncService
+                            .getJoinEnclosureSuppressionReason(candidate, srv.getTicks());
+                    if (rideSuppression != null) {
+                        LOGGER.info("Bot {} join enclosure check suppressed: {}",
+                                candidate.getName().getString(),
+                                rideSuppression);
+                        return;
+                    }
+                    // Use isAtSurface (heightmap + wide sky check) instead of raw isSkyVisible —
+                    // previous mining sessions can create skylights that fool isSkyVisible.
+                    if (BotFleeService.isAtSurface(candidate, sw)) return;
                     double movedSq = candidate.squaredDistanceTo(spawnPos);
                     if (movedSq < 4.0) { // hasn't moved more than 2 blocks
                         // At night, stay sheltered — don't break free into danger
                         if (!sw.isDay() && !sw.isThundering()) {
                             LOGGER.info("Bot {} enclosed on join but nighttime — staying sheltered until dawn",
                                     candidate.getName().getString());
-                            BotFleeService.setShelterFromJoin(candidate);
+                            if (!BotFleeService.setShelterFromJoin(candidate)) {
+                                LOGGER.info("Bot {} join enclosure failed validation — launching local recovery instead",
+                                        candidate.getName().getString());
+                                BotFleeService.forceBreakFree(candidate);
+                            }
                         } else {
                             LOGGER.info("Bot {} trapped on join — hasn't moved ({} blocks) and no sky. Launching break-free.",
                                     candidate.getName().getString(), String.format("%.1f", Math.sqrt(movedSq)));
@@ -658,10 +686,12 @@ public class BotEventHandler {
             return;
         }
         UUID uuid = bot.getUuid();
+        net.wcfcarolina13.GameAI.services.RideSyncService.clearBotState(uuid);
         BotRegistry.unregister(uuid);
         BotPersistenceService.removeBot(bot);
         clearState(bot);
         LAST_RL_SAMPLE_TICK.remove(uuid);
+        LAST_JOIN_ENCLOSURE_CHECK_TICK.remove(uuid);
         UUID primaryUuid = BotLifecycleService.getPrimaryBotUuid();
         if (primaryUuid != null && primaryUuid.equals(uuid)) {
             BotLifecycleService.setPrimaryBotUuid(null);
@@ -1084,9 +1114,14 @@ public class BotEventHandler {
 
     public static void onBotRespawn(ServerPlayerEntity bot) {
         registerBot(bot);
+        net.wcfcarolina13.GameAI.services.RideSyncService.clearBotState(bot.getUuid());
         BotStuckService.resetBot(bot.getUuid());
         BotFleeService.reset(bot.getUuid());
         BotCombatCalloutService.resetCombatState(bot.getUuid());
+        // Clear stale directed-mode targets from previous life so hobbies aren't
+        // blocked by leftover follow-or-base-intent after respawn.
+        setBaseTarget(bot, null);
+        setFollowTarget(bot, null);
 
         MinecraftServer srv = bot.getCommandSource().getServer();
         ServerWorld botWorld = bot.getCommandSource().getWorld();
@@ -1440,6 +1475,9 @@ public class BotEventHandler {
         // Run shelter validation for ALL modes — clears stale shelter at dawn, launches break-free.
         // Previously only ran in IDLE (default case), so FOLLOW bots kept stale shelter indefinitely.
         BotFleeService.validateAndTickShelter(bot, server);
+        if (augmentedHostiles.isEmpty() && handleStarvationOverride(bot, server, mode)) {
+            return true;
+        }
 
         switch (mode) {
             case FOLLOW -> {
@@ -1558,7 +1596,7 @@ public class BotEventHandler {
      *                 that already emit a system summary to avoid redundant messages).
      */
     public static String setFollowMode(ServerPlayerEntity bot, ServerPlayerEntity target, boolean announce) {
-        if (isExternalOverrideActive()) {
+        if (bot != null && TaskService.hasActiveTask(bot.getUuid())) {
             sendBotMessage(bot, "Busy with another task right now.");
             return "Bot is busy executing another task. Try again after it finishes.";
         }
@@ -1738,7 +1776,7 @@ public class BotEventHandler {
      * If line-of-sight breaks (around corners/doors), normal pursuit + planning should resume.
      */
     public static String setFollowModeDistance(ServerPlayerEntity bot, ServerPlayerEntity target, double standoffRange) {
-        if (isExternalOverrideActive()) {
+        if (bot != null && TaskService.hasActiveTask(bot.getUuid())) {
             sendBotMessage(bot, "Busy with another task right now.");
             return "Bot is busy executing another task. Try again after it finishes.";
         }
@@ -1829,6 +1867,17 @@ public class BotEventHandler {
     private static final double BASE_NAV_TOOL_DISTANCE = 256.0D;
 
     public static String setReturnToBase(ServerPlayerEntity bot, Vec3d base) {
+        return setReturnToBaseInternal(bot, base, true, true);
+    }
+
+    public static String setReturnToBaseSegmented(ServerPlayerEntity bot, Vec3d base) {
+        return setReturnToBaseInternal(bot, base, true, false);
+    }
+
+    private static String setReturnToBaseInternal(ServerPlayerEntity bot,
+                                                  Vec3d base,
+                                                  boolean announce,
+                                                  boolean requestInitialPlan) {
         registerBot(bot);
         if (base == null) {
             return "No base location available.";
@@ -1891,9 +1940,13 @@ public class BotEventHandler {
         FollowStateService.clearPlanning(id);
         FollowDebugService.clear(id);
         // Note: ReturnBaseStuckService counter is NOT cleared here - it should keep counting
-        requestFollowPathPlanToGoal(bot, goal, true, "return-base-start");
+        if (requestInitialPlan) {
+            requestFollowPathPlanToGoal(bot, goal, true, "return-base-start");
+        }
 
-        sendBotMessage(bot, "Returning to base.");
+        if (announce) {
+            sendBotMessage(bot, "Returning to base.");
+        }
         return "Bot is returning to base.";
     }
 
@@ -2398,7 +2451,10 @@ public class BotEventHandler {
                 setMode(bot, Mode.IDLE);
                 setBaseTarget(bot, null);
                 net.wcfcarolina13.GameAI.services.ReturnBaseStuckService.clear(bot.getUuid());
-                sendBotMessage(bot, "Arrived at base.");
+                MinecraftServer arrivalServer = bot.getCommandSource() != null ? bot.getCommandSource().getServer() : null;
+                if (!net.wcfcarolina13.GameAI.services.BotAutoReturnSunsetService.handleArrival(bot, arrivalServer)) {
+                    sendBotMessage(bot, "Arrived at base.");
+                }
                 return true;
             }
             
@@ -2468,6 +2524,11 @@ public class BotEventHandler {
                 navGoalBlock = fixedGoal != null ? fixedGoal : target.getBlockPos();
                 navGoalPos = targetPos;
                 waypointCount = 0;
+                // When waypoints are exhausted but goal is still far, request fresh waypoints
+                // rather than falling through to followInputStep which can't navigate corners.
+                if (fixedGoal != null && bot.getBlockPos().getSquaredDistance(fixedGoal) > 36.0D) {
+                    requestFollowPathPlanToGoal(bot, fixedGoal, false, "waypoints-exhausted-far");
+                }
             }
         }
 	        // If the commander is far away, do not let stale local waypoints keep us orbiting a doorway.
@@ -3139,6 +3200,42 @@ public class BotEventHandler {
         return true;
     }
 
+    private static boolean handleStarvationOverride(ServerPlayerEntity bot, MinecraftServer server, Mode mode) {
+        if (bot == null || server == null || !HealingService.isStarving(bot)) {
+            return false;
+        }
+        if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
+            return false;
+        }
+        if (HealingService.autoEat(bot) || BotMutualAidService.tryImmediateChestFoodRecovery(bot, world)) {
+            return true;
+        }
+        if (net.wcfcarolina13.GameAI.services.BotEmergencyRescueService.tryEmergencyRescue(bot, world, "starvation-override")) {
+            return true;
+        }
+        if (mode == Mode.FOLLOW && isReturningToBase(bot)) {
+            if (BotMutualAidService.trySeekFoodFromNearbyBot(bot, world)) {
+                BotAutoReturnSunsetService.deferLocalReassess(bot.getUuid(), server.getTicks() + 120L);
+                stopFollowing(bot, false);
+                return true;
+            }
+            BotAutoReturnSunsetService.deferLocalReassess(bot.getUuid(), server.getTicks() + 120L);
+            stopFollowing(bot, false);
+            BotAutoHuntService.requestDecisionNow(bot);
+            return true;
+        }
+        if (BotFleeService.isInShelter(bot.getUuid())) {
+            if (BotMutualAidService.trySeekFoodFromNearbyBot(bot, world)) {
+                BotFleeService.clearShelterAndBreakFree(bot);
+                return true;
+            }
+            BotFleeService.clearShelterAndBreakFree(bot);
+            BotAutoHuntService.requestDecisionNow(bot);
+            return true;
+        }
+        return false;
+    }
+
     /**
      * Triggers the flare skill when bot is stuck during return-to-base.
      * Runs asynchronously to avoid blocking the tick thread.
@@ -3232,6 +3329,7 @@ public class BotEventHandler {
             COMBAT_TARGET.remove(bot.getUuid());
             return false;
         }
+        boolean botArmed = BotActions.hasMeleeWeapon(bot) || BotActions.hasRangedWeapon(bot);
         // Filter out non-actionable phantoms: circling too high to hit and not diving.
         // These aren't real threats and shouldn't influence target selection or trigger
         // the phantom handler (which would make the bot shield-face the sky).
@@ -3239,6 +3337,7 @@ public class BotEventHandler {
                 .filter(e -> e.getType() != EntityType.PHANTOM
                         || BotActions.isPhantomDiving(bot, e)
                         || (e.getY() - bot.getY()) <= 3.0)
+                .filter(e -> isActionableDrownedThreat(bot, e, botArmed))
                 .toList();
         if (actionable.isEmpty()) {
             COMBAT_TARGET.remove(bot.getUuid());
@@ -3277,6 +3376,14 @@ public class BotEventHandler {
         boolean multipleThreats = actionable.size() > 1;
         boolean lowHealth = bot.getHealth() <= bot.getMaxHealth() * 0.5F;
         boolean shouldBlock = (projectileThreat || creeperThreat || multipleThreats || lowHealth) && distance <= 4.5D;
+
+        if (shouldHoldShoreAgainstDrowned(bot, closest)) {
+            if (holdShoreAgainstDrowned(bot, closest, targetVisible && hasRanged)) {
+                return true;
+            }
+            COMBAT_TARGET.remove(bot.getUuid());
+            return false;
+        }
 
         if (combatStyle == CombatStyle.EVASIVE && distance <= 6.0D && verticalDiff > 1.0D) {
             BotActions.moveBackward(bot);
@@ -3518,6 +3625,73 @@ public class BotEventHandler {
             }
         }
         return true;
+    }
+
+    private static boolean isActionableDrownedThreat(ServerPlayerEntity bot, Entity hostile, boolean botArmed) {
+        if (bot == null || hostile == null || hostile.getType() != EntityType.DROWNED) {
+            return true;
+        }
+        if (!isEntityInWater(hostile)) {
+            return true;
+        }
+        if (net.wcfcarolina13.GameAI.services.BotWaterEscapeService.isInWater(bot)) {
+            return true;
+        }
+        if (!botArmed && !isDrownedLockedOntoBot(bot, hostile)) {
+            return false;
+        }
+        return true;
+    }
+
+    private static boolean shouldHoldShoreAgainstDrowned(ServerPlayerEntity bot, Entity hostile) {
+        return bot != null
+                && hostile != null
+                && hostile.getType() == EntityType.DROWNED
+                && isEntityInWater(hostile)
+                && !net.wcfcarolina13.GameAI.services.BotWaterEscapeService.isInWater(bot);
+    }
+
+    private static boolean holdShoreAgainstDrowned(ServerPlayerEntity bot, Entity hostile, boolean canUseRanged) {
+        if (bot == null || hostile == null) {
+            return false;
+        }
+        BlockPos shore = net.wcfcarolina13.GameAI.services.BotWaterEscapeService.findNearestShoreStand(bot, 8);
+        if (shore != null && bot.getBlockPos().getSquaredDistance(shore) > 2.25D) {
+            moveToward(bot, Vec3d.ofCenter(shore), 1.5D, true);
+            return true;
+        }
+        if (canUseRanged && hostile instanceof LivingEntity living) {
+            lowerShieldTracking(bot);
+            if (BotActions.tryRepositionForRanged(bot, living, bot.getCommandSource().getServer().getTicks())) {
+                return true;
+            }
+            if (BotActions.performRangedAttack(bot, living, bot.getCommandSource().getServer().getTicks())) {
+                return true;
+            }
+        }
+        if (isDrownedLockedOntoBot(bot, hostile) || hostile.squaredDistanceTo(bot) <= 25.0D) {
+            BotActions.raiseShieldFacing(bot, hostile);
+            return true;
+        }
+        return false;
+    }
+
+    private static boolean isDrownedLockedOntoBot(ServerPlayerEntity bot, Entity hostile) {
+        if (bot == null || !(hostile instanceof net.minecraft.entity.mob.MobEntity mob)) {
+            return false;
+        }
+        return mob.getTarget() == bot;
+    }
+
+    private static boolean isEntityInWater(Entity entity) {
+        if (entity == null) {
+            return false;
+        }
+        return entity.isTouchingWater()
+                || entity.isSubmergedInWater()
+                || entity.isSwimming()
+                || entity.getEntityWorld().getFluidState(entity.getBlockPos()).isIn(net.minecraft.registry.tag.FluidTags.WATER)
+                || entity.getEntityWorld().getFluidState(entity.getBlockPos().up()).isIn(net.minecraft.registry.tag.FluidTags.WATER);
     }
 
     private static void moveToward(ServerPlayerEntity bot, Vec3d target, double stopDistance, boolean sprint) {
@@ -4592,7 +4766,7 @@ public class BotEventHandler {
         }
         long nowTick = srv.getTicks();
         if (st.comeNextRerouteTick > nowTick) {
-            if ((nowTick % 40L) == 0L) {
+            if (shouldLogBackoff(bot.getUuid(), nowTick)) {
                 LOGGER.info("[FollowAssert] planner-backoff bot={} goal={} reason={} nowTick={} nextRerouteTick={} attempts={}",
                         bot.getName().getString(),
                         goal.toShortString(),
@@ -4605,12 +4779,26 @@ public class BotEventHandler {
         }
         st.comeRerouteAttempts = Math.max(0, st.comeRerouteAttempts) + 1;
         st.comeNextRerouteTick = nowTick + (force ? 30L : 20L);
-        LOGGER.info("[FollowAssert] planner-backoff bot={} goal={} reason={} attempts={} nextRerouteTick={}",
-                bot.getName().getString(),
-                goal.toShortString(),
-                reason == null ? "" : reason,
-                st.comeRerouteAttempts,
-                st.comeNextRerouteTick);
+        if (st.comeRerouteAttempts <= 2 || shouldLogBackoff(bot.getUuid(), nowTick)) {
+            LOGGER.info("[FollowAssert] planner-backoff bot={} goal={} reason={} attempts={} nextRerouteTick={}",
+                    bot.getName().getString(),
+                    goal.toShortString(),
+                    reason == null ? "" : reason,
+                    st.comeRerouteAttempts,
+                    st.comeNextRerouteTick);
+        }
+    }
+
+    private static boolean shouldLogBackoff(UUID botId, long nowTick) {
+        if (botId == null) {
+            return false;
+        }
+        long last = FOLLOW_BACKOFF_LOG_TICK.getOrDefault(botId, Long.MIN_VALUE);
+        if ((nowTick - last) < FOLLOW_BACKOFF_LOG_COOLDOWN_TICKS) {
+            return false;
+        }
+        FOLLOW_BACKOFF_LOG_TICK.put(botId, nowTick);
+        return true;
     }
 
     private static boolean isStuckDrivenPlanReason(String reason) {
@@ -4661,13 +4849,18 @@ public class BotEventHandler {
         int dyBlocks = (int) Math.round(deltaY);
         double horizDist = Math.sqrt(Math.max(0.0D, horizDistSq));
 
-        // Pre-check: if a walkable path to the goal exists, skip mining/pillar recovery entirely.
-        // This prevents unnecessary terrain destruction when the bot just surfaced on a hill.
-        if (bot.getEntityWorld() instanceof net.minecraft.server.world.ServerWorld probeWorld) {
-            if (net.wcfcarolina13.PathFinding.PathFinder.canReach(bot.getBlockPos(), goal, probeWorld, 200L)) {
-                LOGGER.info("[ComeRecovery] surface path exists to {} — skipping mining recovery",
+        // Pre-check: only probe short local goals. Long synchronous reachability probes on the server thread
+        // were causing severe lag during segmented sunset returns.
+        if (bot.getBlockPos().getSquaredDistance(goal) <= COME_REACHABILITY_PROBE_RANGE_SQ
+                && bot.getEntityWorld() instanceof net.minecraft.server.world.ServerWorld probeWorld) {
+            if (net.wcfcarolina13.PathFinding.PathFinder.canReach(bot.getBlockPos(), goal, probeWorld, COME_REACHABILITY_PROBE_TIMEOUT_MS)) {
+                LOGGER.info("[ComeRecovery] surface path exists to {} — forcing replan instead of mining",
                         goal.toShortString());
-                return false; // let normal follow-walk take over
+                requestFollowPathPlanToGoal(bot, goal, true, "come-reachable-replan");
+                // Reset counter so we don't spam canReach every tick — wait another cycle
+                state.comeTicksSinceBest = 0;
+                state.comeNextSkillTick = server.getTicks() + COME_REACHABILITY_PROBE_COOLDOWN_TICKS;
+                return false;
             }
         }
 

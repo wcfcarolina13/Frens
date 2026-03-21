@@ -12,6 +12,7 @@ import net.wcfcarolina13.Entity.LookController;
 import net.wcfcarolina13.GameAI.services.BotHomeService;
 import net.wcfcarolina13.GameAI.services.MovementService;
 import net.wcfcarolina13.GameAI.services.ProtectedZoneService;
+import net.wcfcarolina13.GameAI.services.SafePositionService;
 import net.wcfcarolina13.GameAI.skills.Skill;
 import net.wcfcarolina13.GameAI.skills.SkillContext;
 import net.wcfcarolina13.GameAI.skills.SkillExecutionResult;
@@ -54,7 +55,10 @@ public final class FlowerPickSkill implements Skill {
             return SkillExecutionResult.failure("Flower count must be positive.");
         }
 
-        BlockPos searchCenter = chooseSearchCenter(bot, world, radius);
+        SafePositionService.SurfaceStagingCandidate staging =
+                SafePositionService.findBestSurfaceStaging(world, bot.getBlockPos(), 8, true);
+        BlockPos startAnchor = staging != null ? staging.pos() : bot.getBlockPos();
+        BlockPos searchCenter = chooseSearchCenter(bot, world, startAnchor, radius);
         if (searchCenter != null && !bot.getBlockPos().equals(searchCenter)) {
             MovementService.MovementPlan plan = new MovementService.MovementPlan(
                     MovementService.Mode.DIRECT,
@@ -152,19 +156,23 @@ public final class FlowerPickSkill implements Skill {
         return out;
     }
 
-    private static BlockPos chooseSearchCenter(ServerPlayerEntity bot, ServerWorld world, int radius) {
-        BlockPos botPos = bot.getBlockPos();
+    private static BlockPos chooseSearchCenter(ServerPlayerEntity bot, ServerWorld world, BlockPos startAnchor, int radius) {
+        BlockPos botPos = startAnchor != null ? startAnchor : bot.getBlockPos();
         Optional<BlockPos> base = findNearbyHome(world, bot, BASE_AVOID_RADIUS);
         if (base.isEmpty()) {
-            return botPos;
+            SafePositionService.SurfaceStagingCandidate fallback =
+                    SafePositionService.findBestSurfaceStaging(world, botPos, 6, true);
+            return fallback != null ? fallback.pos() : botPos;
         }
         Vec3d away = new Vec3d(botPos.getX() - base.get().getX(), 0.0D, botPos.getZ() - base.get().getZ());
         if (away.lengthSquared() < 0.01D) {
             away = new Vec3d(1.0D, 0.0D, 0.0D);
         }
         Vec3d normalized = away.normalize().multiply(Math.max(8.0D, radius * 0.5));
-        BlockPos target = botPos.add((int) Math.round(normalized.x), 0, (int) Math.round(normalized.z));
-        return target.toImmutable();
+        BlockPos rough = botPos.add((int) Math.round(normalized.x), 0, (int) Math.round(normalized.z));
+        SafePositionService.SurfaceStagingCandidate staging =
+                SafePositionService.findBestSurfaceStaging(world, rough, 6, true);
+        return staging != null ? staging.pos() : botPos.toImmutable();
     }
 
     private static Optional<BlockPos> findNearbyHome(ServerWorld world, ServerPlayerEntity bot, int radius) {

@@ -18,6 +18,7 @@ import net.wcfcarolina13.ChatUtils.ChatUtils;
 import net.wcfcarolina13.Database.QTable;
 import net.wcfcarolina13.GameAI.BotActions;
 import net.wcfcarolina13.GameAI.BotEventHandler;
+import net.wcfcarolina13.GameAI.services.BotFleeService;
 import net.wcfcarolina13.GameAI.services.HealingService;
 import net.wcfcarolina13.GameAI.services.SneakLockService;
 import net.wcfcarolina13.GameAI.services.TaskService;
@@ -229,6 +230,17 @@ public class AutoFaceEntity {
             return;
         }
 
+        if (shouldInterruptCurrentTaskForActionablePhantom(bot, hostileEntities)) {
+            LOGGER.info("Bot {} pausing active digging/mining task for actionable phantom threat",
+                    bot.getName().getString());
+            isBotMoving = false;
+            setBotExecutingTask(false);
+            broadcastDangerAlert(bot);
+            BotFleeService.captureInterruptedSurvival(bot);
+            SkillManager.requestSkillPause(bot, "§cPausing current task for incoming phantom dive.");
+            SkillResumeService.requestAutoResume(bot);
+        }
+
         if (BotEventHandler.updateBehavior(bot, server, nearbyEntities, hostileEntities)) {
             return;
         }
@@ -393,6 +405,9 @@ public class AutoFaceEntity {
                 }
 
                 maybePerformAmbientEmote(bot, server, nearbyEntities);
+                if (BotFleeService.tryResumeInterruptedSurvival(bot, server)) {
+                    return;
+                }
                 SkillResumeService.tryAutoResume(bot);
             }
         }
@@ -637,6 +652,42 @@ public class AutoFaceEntity {
         lastDangerMessageMs = now;
         ChatUtils.sendChatMessages(bot.getCommandSource().withSilent(),
             "§cTerminating all current tasks due to threat detections");
+    }
+
+    private static boolean shouldInterruptCurrentTaskForActionablePhantom(ServerPlayerEntity bot, List<Entity> hostiles) {
+        if (bot == null || hostiles == null || hostiles.isEmpty()) {
+            return false;
+        }
+        if (!TaskService.hasActiveTask(bot.getUuid())) {
+            return false;
+        }
+        String activeTask = TaskService.getActiveTaskName(bot.getUuid()).orElse("").toLowerCase();
+        boolean miningSensitive = TaskService.isInAscentMode(bot.getUuid())
+                || blockDetectionUnit.getBlockDetectionStatus()
+                || activeTask.contains("collect_dirt")
+                || activeTask.contains("dirt_shovel")
+                || activeTask.contains("woodcut")
+                || activeTask.contains("stripmine")
+                || activeTask.contains("mine")
+                || activeTask.contains("dig")
+                || activeTask.contains("excavat")
+                || activeTask.contains("rescue")
+                || activeTask.contains("fortify");
+        if (!miningSensitive) {
+            return false;
+        }
+
+        for (Entity hostile : hostiles) {
+            if (hostile == null || hostile.isRemoved() || !hostile.isAlive() || hostile.getType() != EntityType.PHANTOM) {
+                continue;
+            }
+            boolean actionable = BotActions.isPhantomDiving(bot, hostile)
+                    || (hostile.getY() - bot.getY()) <= 3.0D;
+            if (actionable && hostile.squaredDistanceTo(bot) <= 100.0D) {
+                return true;
+            }
+        }
+        return false;
     }
 
 

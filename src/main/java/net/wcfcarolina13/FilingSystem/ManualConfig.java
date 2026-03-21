@@ -1391,6 +1391,7 @@ public class ManualConfig {
         // Skin policy controls (server-authoritative).
         private boolean allowEveryoneSkinChange;
         private boolean allowCustomSkins;
+        private boolean autonomousRescuesEnabled;
         // Granular admin-tab permissions (server-authoritative).
         // Global defaults applied to all non-operators.
         private Map<String, Boolean> adminPermissionDefaultsByKey;
@@ -1516,6 +1517,14 @@ public class ManualConfig {
 
         public void setAllowCustomSkins(boolean allowCustomSkins) {
             this.allowCustomSkins = allowCustomSkins;
+        }
+
+        public boolean isAutonomousRescuesEnabled() {
+            return autonomousRescuesEnabled;
+        }
+
+        public void setAutonomousRescuesEnabled(boolean autonomousRescuesEnabled) {
+            this.autonomousRescuesEnabled = autonomousRescuesEnabled;
         }
 
         public Map<String, Boolean> getAdminPermissionDefaultsByKey() {

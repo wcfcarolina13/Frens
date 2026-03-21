@@ -265,6 +265,64 @@ public final class BotHomeService {
     }
 
     /**
+     * If enabled, sunset auto-return may fail over from HOME to nearby survival anchors when HOME is
+     * too far, unreachable, or no progress is being made.
+     *
+     * <p>Default: false (strict HOME return).
+     */
+    public static boolean setAutoReturnSelfSufficientFallback(ServerPlayerEntity bot, boolean enabled) {
+        if (bot == null || !(bot.getEntityWorld() instanceof ServerWorld world)) {
+            return false;
+        }
+        MinecraftServer server = world.getServer();
+        if (server == null) {
+            return false;
+        }
+        String botId = botKey(bot);
+        if (botId.isBlank()) {
+            return false;
+        }
+
+        WorldData wd = worldData(server, world);
+        synchronized (LOCK) {
+            if (wd.autoReturnSelfSufficientFallbackByBot == null) {
+                wd.autoReturnSelfSufficientFallbackByBot = new HashMap<>();
+            }
+            wd.autoReturnSelfSufficientFallbackByBot.put(botId, enabled);
+        }
+        flush();
+        return true;
+    }
+
+    public static boolean toggleAutoReturnSelfSufficientFallback(ServerPlayerEntity bot) {
+        boolean next = !isAutoReturnSelfSufficientFallback(bot);
+        return setAutoReturnSelfSufficientFallback(bot, next);
+    }
+
+    public static boolean isAutoReturnSelfSufficientFallback(ServerPlayerEntity bot) {
+        if (bot == null || !(bot.getEntityWorld() instanceof ServerWorld world)) {
+            return false;
+        }
+        MinecraftServer server = world.getServer();
+        if (server == null) {
+            return false;
+        }
+        String botId = botKey(bot);
+        if (botId.isBlank()) {
+            return false;
+        }
+
+        WorldData wd = worldData(server, world);
+        synchronized (LOCK) {
+            if (wd.autoReturnSelfSufficientFallbackByBot == null) {
+                return false;
+            }
+            Boolean val = wd.autoReturnSelfSufficientFallbackByBot.get(botId);
+            return Boolean.TRUE.equals(val);
+        }
+    }
+
+    /**
      * If enabled, sunset auto-return will always prefer the bot's last slept bed (if known)
      * over the nearest saved base.
      *
@@ -876,6 +934,7 @@ public final class BotHomeService {
     private static final class WorldData {
         Map<String, SavedSleep> lastSleepByBot = new HashMap<>();
         Map<String, Boolean> autoReturnAtSunsetByBot = new HashMap<>();
+        Map<String, Boolean> autoReturnSelfSufficientFallbackByBot = new HashMap<>();
         Map<String, Boolean> autoReturnPreferLastBedAtSunsetByBot = new HashMap<>();
         Map<String, Boolean> autoReturnGuardPatrolEligibleByBot = new HashMap<>();
         Map<String, Boolean> autoReturnSkipPermissionByBot = new HashMap<>();

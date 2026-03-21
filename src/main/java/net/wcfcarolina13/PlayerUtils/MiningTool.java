@@ -14,6 +14,7 @@ import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.RaycastContext;
 import net.wcfcarolina13.Entity.LookController;
+import net.wcfcarolina13.GameAI.BotActions;
 import net.wcfcarolina13.GameAI.services.BotTerritoryAuthorizationService;
 import net.wcfcarolina13.GameAI.skills.SkillManager;
 import org.slf4j.Logger;
@@ -26,7 +27,6 @@ import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
-
 public class MiningTool {
 
     private static final long MINING_TICK_MS = 50;
@@ -75,8 +75,12 @@ public class MiningTool {
             return miningResult;
         }
 
-        // Line-of-sight check: bot must be able to see the target block (no mining through walls)
-        if (bot.getEntityWorld() instanceof ServerWorld losWorld) {
+        // Line-of-sight check: bot must be able to see the target block (no mining through walls).
+        // Skip for directly adjacent blocks — a block touching the bot cannot have a wall between them.
+        BlockPos botBlock = BlockPos.ofFloored(bot.getX(), bot.getY(), bot.getZ());
+        boolean adjacent = botBlock.getManhattanDistance(targetBlockPos) <= 1
+                        || botBlock.up().getManhattanDistance(targetBlockPos) <= 1;
+        if (!adjacent && bot.getEntityWorld() instanceof ServerWorld losWorld) {
             Vec3d eyePos = bot.getEyePos();
             Vec3d blockCenter = Vec3d.ofCenter(targetBlockPos);
             BlockHitResult hit = losWorld.raycast(new RaycastContext(
@@ -118,9 +122,18 @@ public class MiningTool {
                         targetBlockPos,
                         bestTool.isEmpty() ? "empty-hand" : bestTool.getItem().toString(),
                         bot.getAbilities().creativeMode);
-                switchToTool(bot, bestTool);
+                if (!switchToTool(bot, bestTool)) {
+                    switchToHarmlessFallback(bot);
+                }
             } else {
                 ItemStack held = bot.getMainHandStack();
+                if (isWeaponOnlyItem(held)) {
+                    LOGGER.info("Mining {} refusing to preserve held weapon {}; switching to harmless fallback",
+                            targetBlockPos,
+                            held.getItem());
+                    switchToHarmlessFallback(bot);
+                    held = bot.getMainHandStack();
+                }
                 LOGGER.debug("Preparing to mine {} with preserved held item={} (creative={})",
                         targetBlockPos,
                         held == null || held.isEmpty() ? "empty-hand" : held.getItem().toString(),
@@ -196,6 +209,9 @@ public class MiningTool {
                         return;
                     }
 
+                    // Re-face the target block every mining tick to maintain facing
+                    LookController.faceBlock(bot, targetBlockPos);
+
                     bot.swingHand(Hand.MAIN_HAND);
                     int tick = ticksElapsed.incrementAndGet();
                     int required = requiredTicksHolder.get();
@@ -266,18 +282,40 @@ public class MiningTool {
         return false;
     }
 
-    private static void switchToTool(ServerPlayerEntity bot, ItemStack tool) {
+    private static boolean switchToTool(ServerPlayerEntity bot, ItemStack tool) {
         if (tool == null || tool.isEmpty()) {
-            return;
+            return false;
         }
 
         for (int i = 0; i < 9; i++) {
             ItemStack stack = bot.getInventory().getStack(i);
             if (ItemStack.areItemsEqual(stack, tool)) {
                 bot.getInventory().setSelectedSlot(i);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static void switchToHarmlessFallback(ServerPlayerEntity bot) {
+        if (bot == null) {
+            return;
+        }
+        for (int i = 0; i < 9; i++) {
+            ItemStack stack = bot.getInventory().getStack(i);
+            if (stack.isEmpty()) {
+                bot.getInventory().setSelectedSlot(i);
+                return;
+            }
+            if (!isWeaponOnlyItem(stack) && stack.getMiningSpeedMultiplier(Blocks.STONE.getDefaultState()) <= 1.0f) {
+                bot.getInventory().setSelectedSlot(i);
                 return;
             }
         }
+    }
+
+    private static boolean isWeaponOnlyItem(ItemStack stack) {
+        return BotActions.isCombatClassItem(stack);
     }
 
 }

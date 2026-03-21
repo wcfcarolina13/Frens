@@ -560,6 +560,7 @@ public class Frens implements ModInitializer {
         }
 
         ServerLifecycleEvents.SERVER_STARTED.register(server -> {
+            net.wcfcarolina13.GameAI.services.TaskService.clearServerStopping();
             configNetworkManager.registerServerModelNameSaveReceiver(server);
             configNetworkManager.registerServerAPIKeySaveReceiver(server);
             configNetworkManager.registerServerCustomProviderSaveReceiver(server);
@@ -589,6 +590,7 @@ public class Frens implements ModInitializer {
         });
 
         ServerLifecycleEvents.SERVER_STOPPING.register(server -> {
+            net.wcfcarolina13.GameAI.services.TaskService.markServerStopping();
             LearningModeService.onServerStopping(server);
             net.wcfcarolina13.GameAI.services.CompanionOverheadHologramService.removeAll();
             net.wcfcarolina13.GameAI.services.TaskService.resetAll("§cServer stopping; aborting active tasks.");
@@ -812,9 +814,12 @@ public class Frens implements ModInitializer {
         ServerTickEvents.END_SERVER_TICK.register(BotCampfireAvoidanceService::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.BotFallSafetyService::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.BotAutoHuntService::onServerTick);
+        ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.BotAutoCookingService::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(BotAutoReturnSunsetService::onServerTick);
+        ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.BotEmergencyRescueService::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.network.HuntablesNetworkManager::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(BotIdleHobbiesService::onServerTick);
+        ServerTickEvents.END_SERVER_TICK.register(net.wcfcarolina13.GameAI.services.BotMutualAidService::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(BotInventoryFullDialogueService::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(BotAmbientSocialChatService::onServerTick);
         ServerTickEvents.END_SERVER_TICK.register(BotMoodManager::onServerTick);

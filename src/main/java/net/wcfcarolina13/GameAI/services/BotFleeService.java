@@ -2,6 +2,7 @@ package net.wcfcarolina13.GameAI.services;
 
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
+import net.minecraft.block.DoorBlock;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityType;
 import net.minecraft.item.ItemStack;
@@ -22,9 +23,15 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import net.minecraft.item.Item;
+import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Direction;
+import net.wcfcarolina13.GameAI.services.navigation.VoxelJunctionService;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -48,10 +55,45 @@ public final class BotFleeService {
     private static final int COOLDOWN_TICKS = 100;
 
     /** Type of tactical shelter the bot is occupying. */
-    public enum ShelterType { CLIFF, DIG_DOWN }
+    public enum ShelterType { CLIFF, DIG_DOWN, VILLAGE_HOUSE, JOIN_ENCLOSED }
+
+    public enum ShelterInvalidReason {
+        VALID,
+        NO_STANDABLE_INTERIOR,
+        OPEN_SKY,
+        NO_OVERHEAD_COVER,
+        ENTRANCE_UNSEALED,
+        WATER_INTRUSION,
+        HAZARD_EXPOSED,
+        HOSTILE_EXPOSED,
+        NO_VILLAGE_SIGNAL,
+        NO_DOORWAY
+    }
 
     /** Metadata for an active tactical shelter. */
-    public record ShelterInfo(long enteredTick, ShelterType type, BlockPos capPos, Direction entryDir) {}
+    public record ShelterInfo(long enteredTick,
+                              ShelterType type,
+                              BlockPos capPos,
+                              Direction entryDir,
+                              BlockPos interiorPos,
+                              long lastValidatedTick,
+                              ShelterInvalidReason lastValidationReason) {}
+
+    public record ShelterAssessment(boolean valid,
+                                    ShelterType type,
+                                    BlockPos standPos,
+                                    ShelterInvalidReason reason) {}
+
+    private record VillageHouseCandidate(BlockPos doorPos,
+                                         BlockPos interiorPos,
+                                         Direction interiorDir,
+                                         int score) {}
+
+    private enum InterruptedSurvivalAction {
+        PROACTIVE_SHELTER,
+        BREAK_FREE,
+        SURFACE_RECOVERY
+    }
 
     private static final ConcurrentHashMap<UUID, FleeState> FLEE_STATES = new ConcurrentHashMap<>();
     /** Per-bot cooldown to prevent spamming proactive shelter attempts. */
@@ -62,6 +104,12 @@ public final class BotFleeService {
     private static final ConcurrentHashMap<UUID, Long> SHELTER_GENERATION = new ConcurrentHashMap<>();
     /** Mutex to prevent duplicate shelter threads for the same bot. */
     private static final ConcurrentHashMap<UUID, AtomicBoolean> SHELTER_LOCK = new ConcurrentHashMap<>();
+    /** Single-flight guard for general surface recovery so hunt/idle/break-free don't dogpile the same bot. */
+    private static final ConcurrentHashMap<UUID, AtomicBoolean> SURFACE_RECOVERY_LOCK = new ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<UUID, Long> SURFACE_RECOVERY_FAILURE_TICK = new ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<UUID, String> SURFACE_RECOVERY_FAILURE_REASON = new ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<UUID, InterruptedSurvivalAction> CURRENT_SURVIVAL_ACTION = new ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<UUID, InterruptedSurvivalAction> PENDING_SURVIVAL_RESUME = new ConcurrentHashMap<>();
 
     /** Solid blocks suitable for sealing shelter entrances (mined from stone/dirt). */
     private static final List<Item> SEAL_BLOCKS = List.of(
@@ -95,12 +143,18 @@ public final class BotFleeService {
             for (int dz = -radius; dz <= radius; dz++) {
                 if (dx * dx + dz * dz > radius * radius) continue; // circular scan
                 BlockPos check = center.add(dx, 0, dz);
-                if (world.isSkyVisible(check.up())) {
-                    double distSq = center.getSquaredDistance(check);
-                    if (distSq < bestDistSq) {
-                        bestDistSq = distSq;
-                        best = check.toImmutable();
-                    }
+                if (!world.isSkyVisible(check.up())) continue;
+                // Reject underground skylights: only accept if the scan Y is near
+                // the heightmap surface (within 3 blocks). A skylight 5+ blocks below
+                // the surface is just a cave ceiling hole, not a real exit.
+                int surfaceY = world.getTopY(
+                        net.minecraft.world.Heightmap.Type.MOTION_BLOCKING,
+                        check.getX(), check.getZ());
+                if (check.getY() < surfaceY - 3) continue;
+                double distSq = center.getSquaredDistance(check);
+                if (distSq < bestDistSq) {
+                    bestDistSq = distSq;
+                    best = check.toImmutable();
                 }
             }
         }
@@ -108,16 +162,33 @@ public final class BotFleeService {
     }
 
     /**
-     * Mark a bot as sheltered on join (enclosed underground from a previous session).
-     * Uses best-guess metadata so validateAndTickShelter handles dawn break-free.
+     * Mark a bot as sheltered on join only if the current enclosure validates as survivable.
      */
-    public static void setShelterFromJoin(ServerPlayerEntity bot) {
+    public static boolean setShelterFromJoin(ServerPlayerEntity bot) {
+        if (bot == null || !(bot.getEntityWorld() instanceof ServerWorld world)) {
+            return false;
+        }
         long tick = bot.getCommandSource().getServer() != null
                 ? bot.getCommandSource().getServer().getTicks() : 0;
-        BlockPos capGuess = bot.getBlockPos().up(2); // best guess for overhead cap
-        SHELTER_ACTIVE.put(bot.getUuid(), new ShelterInfo(tick, ShelterType.DIG_DOWN, capGuess, null));
-        LOGGER.info("Bot {} marked as sheltered on join (capGuess={})",
-                bot.getName().getString(), capGuess.toShortString());
+        ShelterAssessment assessment = assessShelterAt(bot, world, bot.getBlockPos(), ShelterType.JOIN_ENCLOSED, null, null);
+        if (!assessment.valid()) {
+            LOGGER.info("Bot {} join shelter rejected reason={} at={}",
+                    bot.getName().getString(),
+                    assessment.reason().name().toLowerCase(),
+                    bot.getBlockPos().toShortString());
+            return false;
+        }
+        SHELTER_ACTIVE.put(bot.getUuid(), new ShelterInfo(
+                tick,
+                ShelterType.JOIN_ENCLOSED,
+                bot.getBlockPos().up(2).toImmutable(),
+                null,
+                assessment.standPos(),
+                tick,
+                ShelterInvalidReason.VALID));
+        LOGGER.info("Bot {} marked as sheltered on join (interior={})",
+                bot.getName().getString(), assessment.standPos().toShortString());
+        return true;
     }
 
     /**
@@ -132,6 +203,42 @@ public final class BotFleeService {
         ShelterInfo info = SHELTER_ACTIVE.get(bot.getUuid());
         if (info == null) return false;
         if (bot.getEntityWorld() instanceof ServerWorld world) {
+            ShelterAssessment assessment = assessShelterAt(
+                    bot,
+                    world,
+                    info.interiorPos() != null ? info.interiorPos() : bot.getBlockPos(),
+                    info.type(),
+                    info.capPos(),
+                    info.entryDir());
+            if (!assessment.valid()) {
+                SHELTER_ACTIVE.remove(bot.getUuid());
+                LOGGER.info("Bot {} shelter invalidated reason={} type={} pos={}",
+                        bot.getName().getString(),
+                        assessment.reason().name().toLowerCase(),
+                        info.type().name().toLowerCase(),
+                        bot.getBlockPos().toShortString());
+                return false;
+            }
+            long nowTick = server != null ? server.getTicks() : 0L;
+            SHELTER_ACTIVE.put(bot.getUuid(), new ShelterInfo(
+                    info.enteredTick(),
+                    info.type(),
+                    info.capPos(),
+                    info.entryDir(),
+                    assessment.standPos(),
+                    nowTick,
+                    ShelterInvalidReason.VALID));
+            if (shouldBreakShelterForStarvation(bot, world)) {
+                SHELTER_ACTIVE.remove(bot.getUuid());
+                LOGGER.info("Bot {} breaking tactical shelter for urgent food recovery (food={})",
+                        bot.getName().getString(),
+                        bot.getHungerManager().getFoodLevel());
+                Thread t = new Thread(() -> breakFreeFromShelter(bot, info),
+                        "shelter-breakfree-" + bot.getName().getString());
+                t.setDaemon(true);
+                t.start();
+                return false;
+            }
             long tod = world.getTimeOfDay() % 24000L;
             // Undead burn at ~23460. Clear shelter once it's safe outside.
             // Range: 23460 (sunrise burn) through 12000 (noon) — full daytime.
@@ -150,6 +257,125 @@ public final class BotFleeService {
             }
         }
         return true;
+    }
+
+    public static BlockPos getValidatedShelterStandPos(ServerPlayerEntity bot) {
+        if (bot == null || !(bot.getEntityWorld() instanceof ServerWorld world)) {
+            return null;
+        }
+        ShelterInfo info = SHELTER_ACTIVE.get(bot.getUuid());
+        if (info == null) {
+            return null;
+        }
+        ShelterAssessment assessment = assessShelterAt(
+                bot,
+                world,
+                info.interiorPos() != null ? info.interiorPos() : bot.getBlockPos(),
+                info.type(),
+                info.capPos(),
+                info.entryDir());
+        return assessment.valid() ? assessment.standPos() : null;
+    }
+
+    public static BlockPos findNearbyVillageHouseAnchor(ServerPlayerEntity bot, ServerWorld world, int radius) {
+        return findNearbyVillageHouseAnchor(bot, world, bot != null ? bot.getBlockPos() : null, radius);
+    }
+
+    public static BlockPos findNearbyVillageHouseAnchor(ServerPlayerEntity bot, ServerWorld world, BlockPos center, int radius) {
+        VillageHouseCandidate candidate = findNearbyVillageHouseCandidate(bot, world, center, radius);
+        return candidate != null ? candidate.interiorPos() : null;
+    }
+
+    public static boolean hadRecentSurfaceRecoveryFailure(UUID botId, long nowTick, long maxAgeTicks) {
+        if (botId == null) {
+            return false;
+        }
+        Long failedAt = SURFACE_RECOVERY_FAILURE_TICK.get(botId);
+        return failedAt != null && failedAt > 0 && (nowTick - failedAt) <= Math.max(1L, maxAgeTicks);
+    }
+
+    public static String getRecentSurfaceRecoveryFailureReason(UUID botId) {
+        return botId == null ? null : SURFACE_RECOVERY_FAILURE_REASON.get(botId);
+    }
+
+    public static boolean hasPendingInterruptedSurvival(UUID botId) {
+        return botId != null && PENDING_SURVIVAL_RESUME.containsKey(botId);
+    }
+
+    public static void clearInterruptedSurvival(UUID botId) {
+        if (botId == null) {
+            return;
+        }
+        PENDING_SURVIVAL_RESUME.remove(botId);
+        CURRENT_SURVIVAL_ACTION.remove(botId);
+    }
+
+    public static boolean isSurfaceRecoveryActive(UUID botId) {
+        if (botId == null) {
+            return false;
+        }
+        if (CURRENT_SURVIVAL_ACTION.get(botId) == InterruptedSurvivalAction.SURFACE_RECOVERY) {
+            return true;
+        }
+        AtomicBoolean lock = SURFACE_RECOVERY_LOCK.get(botId);
+        return lock != null && lock.get();
+    }
+
+    public static boolean captureInterruptedSurvival(ServerPlayerEntity bot) {
+        if (bot == null) {
+            return false;
+        }
+        InterruptedSurvivalAction action = CURRENT_SURVIVAL_ACTION.get(bot.getUuid());
+        if (action == null) {
+            return false;
+        }
+        PENDING_SURVIVAL_RESUME.put(bot.getUuid(), action);
+        LOGGER.info("Bot {} queued interrupted survival resume ({})",
+                bot.getName().getString(),
+                action.name().toLowerCase());
+        return true;
+    }
+
+    public static boolean tryResumeInterruptedSurvival(ServerPlayerEntity bot, MinecraftServer server) {
+        if (bot == null || server == null || bot.isRemoved() || !bot.isAlive()) {
+            return false;
+        }
+        UUID botId = bot.getUuid();
+        InterruptedSurvivalAction action = PENDING_SURVIVAL_RESUME.get(botId);
+        if (action == null) {
+            return false;
+        }
+        if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
+            return false;
+        }
+        if (TaskService.hasActiveTask(botId)) {
+            return false;
+        }
+        boolean resolved = switch (action) {
+            case PROACTIVE_SHELTER -> isInShelter(botId);
+            case BREAK_FREE -> !isInShelter(botId) && isAtSurface(bot, world);
+            case SURFACE_RECOVERY -> isAtSurface(bot, world);
+        };
+        if (resolved) {
+            PENDING_SURVIVAL_RESUME.remove(botId);
+            return false;
+        }
+
+        boolean resumed = switch (action) {
+            case PROACTIVE_SHELTER -> tryProactiveShelter(bot, server);
+            case BREAK_FREE -> {
+                Thread thread = isInShelter(botId) ? clearShelterAndBreakFree(bot) : forceBreakFree(bot);
+                yield thread != null;
+            }
+            case SURFACE_RECOVERY -> ensureAtSurface(bot, world);
+        };
+        if (resumed) {
+            PENDING_SURVIVAL_RESUME.remove(botId);
+            LOGGER.info("Bot {} resumed interrupted survival workflow ({})",
+                    bot.getName().getString(),
+                    action.name().toLowerCase());
+        }
+        return resumed;
     }
 
     private BotFleeService() {}
@@ -234,6 +460,10 @@ public final class BotFleeService {
      */
     public static boolean tryProactiveShelter(ServerPlayerEntity bot, net.minecraft.server.MinecraftServer server) {
         if (bot == null || server == null) return false;
+        if (BotAutoReturnSunsetService.isNightTravelSessionActive(bot.getUuid())
+                && !BotAutoReturnSunsetService.isTacticalShelterSession(bot.getUuid())) {
+            return false;
+        }
         // Already sheltered — don't dig another hole
         if (isInShelter(bot.getUuid())) return true;
         // Mutex: only one shelter thread per bot at a time
@@ -288,6 +518,7 @@ public final class BotFleeService {
         // Quick stabilize (1-2 bites) then shelter — don't sit eating in the open
         final long gen = getGeneration(bot.getUuid());
         Thread t = new Thread(() -> {
+            boolean owner = beginSurvivalAction(bot.getUuid(), InterruptedSurvivalAction.PROACTIVE_SHELTER);
             try {
                 if (isStaleShelter(bot, gen)) return;
                 if (bot.getHealth() < bot.getMaxHealth() * 0.5f) {
@@ -299,6 +530,7 @@ public final class BotFleeService {
                 if (isStaleShelter(bot, gen)) return;
                 runEmergencyTacticChain(bot, gen, false, true);
             } finally {
+                endSurvivalAction(bot.getUuid(), InterruptedSurvivalAction.PROACTIVE_SHELTER, owner);
                 lock.set(false);
             }
         }, "proactive-shelter-" + bot.getName().getString());
@@ -573,6 +805,17 @@ public final class BotFleeService {
 
         if (isStaleShelter(bot, gen)) return;
 
+        if (bot.getEntityWorld() instanceof ServerWorld dryWorld
+                && prioritizeDryLand(bot, dryWorld, "night-shelter-water", 12, gen)) {
+            if (isStaleShelter(bot, gen)) return;
+        }
+
+        if (bot.getEntityWorld() instanceof ServerWorld villageWorld) {
+            if (tryVillageHouseShelter(bot, villageWorld, gen)) {
+                return;
+            }
+        }
+
         // 2. Dig into cliff face — most reliable: mine in, seal entrance, fully enclosed.
         if (bot.getEntityWorld() instanceof ServerWorld world3) {
             net.minecraft.util.math.Direction cliffDir = findNearbyCliffFace(world3, bot.getBlockPos(), 6);
@@ -691,11 +934,30 @@ public final class BotFleeService {
             });
             Thread.sleep(300);
 
-            // Mark shelter active — only if cap was placed (actually enclosed)
+            // Mark shelter active only if the bunker validates as survivable.
             if (isStaleShelter(bot, gen)) return;
             if (capPlacedAt[0] != null) {
-                SHELTER_ACTIVE.put(bot.getUuid(), new ShelterInfo(
-                        server.getTicks(), ShelterType.DIG_DOWN, capPlacedAt[0], null));
+                ShelterAssessment assessment = assessShelterAt(
+                        bot,
+                        (ServerWorld) bot.getEntityWorld(),
+                        bot.getBlockPos(),
+                        ShelterType.DIG_DOWN,
+                        capPlacedAt[0],
+                        null);
+                if (assessment.valid()) {
+                    SHELTER_ACTIVE.put(bot.getUuid(), new ShelterInfo(
+                            server.getTicks(),
+                            ShelterType.DIG_DOWN,
+                            capPlacedAt[0],
+                            null,
+                            assessment.standPos(),
+                            server.getTicks(),
+                            ShelterInvalidReason.VALID));
+                } else {
+                    LOGGER.info("Bot {} dig-down bunker rejected reason={}",
+                            bot.getName().getString(),
+                            assessment.reason().name().toLowerCase());
+                }
             } else {
                 LOGGER.info("Bot {} dig-down bunker uncapped — not marking as shelter",
                         bot.getName().getString());
@@ -881,6 +1143,385 @@ public final class BotFleeService {
         } catch (Exception e) {
             LOGGER.warn("Emergency wall-off failed for {}: {}", bot.getName().getString(), e.getMessage());
         }
+    }
+
+    private static ShelterAssessment assessShelterAt(ServerPlayerEntity bot,
+                                                     ServerWorld world,
+                                                     BlockPos feet,
+                                                     ShelterType type,
+                                                     BlockPos capPos,
+                                                     Direction entryDir) {
+        if (bot == null || world == null || feet == null) {
+            return new ShelterAssessment(false, type, feet, ShelterInvalidReason.NO_STANDABLE_INTERIOR);
+        }
+
+        BlockPos stand = VoxelJunctionService.isStandable(world, feet) ? feet.toImmutable() : bot.getBlockPos().toImmutable();
+        if (!VoxelJunctionService.isStandable(world, stand)) {
+            return new ShelterAssessment(false, type, stand, ShelterInvalidReason.NO_STANDABLE_INTERIOR);
+        }
+        if (world.isSkyVisible(stand) || world.isSkyVisible(stand.up()) || world.isSkyVisible(stand.up(2))) {
+            return new ShelterAssessment(false, type, stand, ShelterInvalidReason.OPEN_SKY);
+        }
+        if (!hasOverheadCover(world, stand)) {
+            return new ShelterAssessment(false, type, stand, ShelterInvalidReason.NO_OVERHEAD_COVER);
+        }
+        if (hasImmediateShelterHazard(world, stand)) {
+            return new ShelterAssessment(false, type, stand, ShelterInvalidReason.WATER_INTRUSION);
+        }
+        if (isHostileExposed(bot, world, stand)) {
+            return new ShelterAssessment(false, type, stand, ShelterInvalidReason.HOSTILE_EXPOSED);
+        }
+        if (!isShelterEntranceSecured(world, stand, type, capPos, entryDir)) {
+            return new ShelterAssessment(false, type, stand, ShelterInvalidReason.ENTRANCE_UNSEALED);
+        }
+        if (type == ShelterType.VILLAGE_HOUSE && !SurvivalRecruitmentService.isVillageSignalNearby(world, stand)) {
+            return new ShelterAssessment(false, type, stand, ShelterInvalidReason.NO_VILLAGE_SIGNAL);
+        }
+        return new ShelterAssessment(true, type, stand, ShelterInvalidReason.VALID);
+    }
+
+    private static boolean hasOverheadCover(ServerWorld world, BlockPos stand) {
+        if (world == null || stand == null) {
+            return false;
+        }
+        BlockState above = world.getBlockState(stand.up(2));
+        return !above.getCollisionShape(world, stand.up(2)).isEmpty();
+    }
+
+    private static boolean hasImmediateShelterHazard(ServerWorld world, BlockPos stand) {
+        if (world == null || stand == null) {
+            return true;
+        }
+        if (!world.getFluidState(stand).isEmpty() || !world.getFluidState(stand.up()).isEmpty()) {
+            return true;
+        }
+        BlockState support = world.getBlockState(stand.down());
+        if (support.isOf(Blocks.MAGMA_BLOCK) || support.isOf(Blocks.CAMPFIRE) || support.isOf(Blocks.SOUL_CAMPFIRE)) {
+            return true;
+        }
+        for (Direction dir : Direction.Type.HORIZONTAL) {
+            BlockPos adjacent = stand.offset(dir);
+            BlockState state = world.getBlockState(adjacent);
+            if (state.isOf(Blocks.LAVA) || state.isOf(Blocks.FIRE) || state.isOf(Blocks.SOUL_FIRE) || state.isOf(Blocks.CACTUS)) {
+                return true;
+            }
+            if (!world.getFluidState(adjacent).isEmpty() && world.getFluidState(adjacent).isStill()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean isHostileExposed(ServerPlayerEntity bot, ServerWorld world, BlockPos stand) {
+        if (bot == null || world == null || stand == null) {
+            return false;
+        }
+        Box box = Box.of(Vec3d.ofCenter(stand), 6.0D, 4.0D, 6.0D);
+        return !world.getEntitiesByClass(
+                net.minecraft.entity.mob.HostileEntity.class,
+                box,
+                mob -> mob != null && mob.isAlive() && !mob.isRemoved() && mob.getBlockPos().getSquaredDistance(stand) <= 16.0D
+        ).isEmpty();
+    }
+
+    private static boolean isShelterEntranceSecured(ServerWorld world,
+                                                    BlockPos stand,
+                                                    ShelterType type,
+                                                    BlockPos capPos,
+                                                    Direction entryDir) {
+        if (world == null || stand == null) {
+            return false;
+        }
+        return switch (type) {
+            case CLIFF -> capPos != null
+                    && world.getBlockState(capPos).blocksMovement()
+                    && world.getBlockState(capPos.up()).blocksMovement();
+            case DIG_DOWN, JOIN_ENCLOSED -> {
+                if (capPos != null && world.getBlockState(capPos).blocksMovement()) {
+                    yield true;
+                }
+                yield VoxelJunctionService.countOpenFaces(world, stand) <= 1;
+            }
+            case VILLAGE_HOUSE -> {
+                if (capPos == null) {
+                    yield false;
+                }
+                BlockPos base = normalizeDoorBase(world, capPos);
+                if (base == null) {
+                    yield false;
+                }
+                BlockState state = world.getBlockState(base);
+                boolean open = state.contains(DoorBlock.OPEN) && Boolean.TRUE.equals(state.get(DoorBlock.OPEN));
+                yield state.getBlock() instanceof DoorBlock || open || (entryDir != null && VoxelJunctionService.countOpenFaces(world, stand) <= 2);
+            }
+        };
+    }
+
+    private static boolean tryVillageHouseShelter(ServerPlayerEntity bot, ServerWorld world, long gen) {
+        if (bot == null || world == null) {
+            return false;
+        }
+        BlockPos searchCenter = chooseWaterAwareShelterSearchCenter(bot, world);
+        ShelterAssessment current = assessShelterAt(bot, world, bot.getBlockPos(), ShelterType.VILLAGE_HOUSE, findAdjacentDoor(world, bot.getBlockPos(), 3), null);
+        if (current.valid() && SurvivalRecruitmentService.isVillageSignalNearby(world, bot.getBlockPos())) {
+            long tick = bot.getCommandSource().getServer() != null ? bot.getCommandSource().getServer().getTicks() : 0L;
+            SHELTER_ACTIVE.put(bot.getUuid(), new ShelterInfo(
+                    tick,
+                    ShelterType.VILLAGE_HOUSE,
+                    findAdjacentDoor(world, current.standPos(), 3),
+                    null,
+                    current.standPos(),
+                    tick,
+                    ShelterInvalidReason.VALID));
+            LOGGER.info("Bot {} already inside a validated village shelter at {}",
+                    bot.getName().getString(), current.standPos().toShortString());
+            return true;
+        }
+
+        VillageHouseCandidate candidate = findNearbyVillageHouseCandidate(bot, world, searchCenter, BotWaterEscapeService.isInWater(bot) ? 28 : 18);
+        if (candidate == null || isStaleShelter(bot, gen)) {
+            return false;
+        }
+
+        LOGGER.info("Bot {} trying village-house shelter door={} interior={}",
+                bot.getName().getString(),
+                candidate.doorPos().toShortString(),
+                candidate.interiorPos().toShortString());
+
+        boolean traversed = MovementService.tryTraverseOpenableToward(bot, candidate.doorPos(), candidate.interiorPos(), "village-shelter");
+        if (!traversed && bot.getBlockPos().getSquaredDistance(candidate.interiorPos()) > 4.0D) {
+            return false;
+        }
+        if (isStaleShelter(bot, gen)) {
+            return false;
+        }
+        ShelterAssessment assessment = assessShelterAt(
+                bot,
+                world,
+                bot.getBlockPos().getSquaredDistance(candidate.interiorPos()) <= 4.0D ? bot.getBlockPos() : candidate.interiorPos(),
+                ShelterType.VILLAGE_HOUSE,
+                candidate.doorPos(),
+                candidate.interiorDir());
+        if (!assessment.valid()) {
+            LOGGER.info("Bot {} village-house shelter rejected reason={}",
+                    bot.getName().getString(),
+                    assessment.reason().name().toLowerCase());
+            return false;
+        }
+        long tick = bot.getCommandSource().getServer() != null ? bot.getCommandSource().getServer().getTicks() : 0L;
+        SHELTER_ACTIVE.put(bot.getUuid(), new ShelterInfo(
+                tick,
+                ShelterType.VILLAGE_HOUSE,
+                candidate.doorPos(),
+                candidate.interiorDir(),
+                assessment.standPos(),
+                tick,
+                ShelterInvalidReason.VALID));
+        return true;
+    }
+
+    private static BlockPos chooseWaterAwareShelterSearchCenter(ServerPlayerEntity bot, ServerWorld world) {
+        if (bot == null || world == null) {
+            return null;
+        }
+        if (!BotWaterEscapeService.isInWater(bot)) {
+            return bot.getBlockPos();
+        }
+        BlockPos shore = BotWaterEscapeService.findNearestShoreStand(bot, 14);
+        return shore != null ? shore : bot.getBlockPos();
+    }
+
+    private static boolean prioritizeDryLand(ServerPlayerEntity bot,
+                                             ServerWorld world,
+                                             String label,
+                                             int radius,
+                                             long gen) {
+        if (bot == null || world == null || !BotWaterEscapeService.isInWater(bot)) {
+            return false;
+        }
+        BlockPos shore = BotWaterEscapeService.findNearestShoreStand(bot, radius);
+        if (shore == null) {
+            return false;
+        }
+        if (bot.getBlockPos().getSquaredDistance(shore) <= 2.25D) {
+            return true;
+        }
+        LOGGER.info("Bot {} water-phobic shelter reroute to dry land {}",
+                bot.getName().getString(), shore.toShortString());
+        boolean moved = moveTowardLocalShelterAnchor(bot, world, shore, label);
+        return moved || isStaleShelter(bot, gen);
+    }
+
+    private static VillageHouseCandidate findNearbyVillageHouseCandidate(ServerPlayerEntity bot,
+                                                                         ServerWorld world,
+                                                                         BlockPos center,
+                                                                         int radius) {
+        if (bot == null || world == null || center == null) {
+            return null;
+        }
+        VillageHouseCandidate best = null;
+        BlockPos.Mutable cursor = new BlockPos.Mutable();
+        for (int dy = -4; dy <= 4; dy++) {
+            for (int dx = -radius; dx <= radius; dx++) {
+                for (int dz = -radius; dz <= radius; dz++) {
+                    cursor.set(center.getX() + dx, center.getY() + dy, center.getZ() + dz);
+                    if (!world.isChunkLoaded(cursor)) {
+                        continue;
+                    }
+                    BlockPos doorBase = normalizeDoorBase(world, cursor);
+                    if (doorBase == null || !isVillageUsableDoor(world, doorBase)) {
+                        continue;
+                    }
+                    if (!SurvivalRecruitmentService.isVillageSignalNearby(world, doorBase)) {
+                        continue;
+                    }
+                    VillageHouseCandidate candidate = scoreVillageDoorCandidate(bot, world, doorBase);
+                    if (candidate == null) {
+                        continue;
+                    }
+                    if (best == null || candidate.score() > best.score()) {
+                        best = candidate;
+                    }
+                }
+            }
+        }
+        return best;
+    }
+
+    private static VillageHouseCandidate scoreVillageDoorCandidate(ServerPlayerEntity bot,
+                                                                   ServerWorld world,
+                                                                   BlockPos doorBase) {
+        BlockState state = world.getBlockState(doorBase);
+        if (!(state.getBlock() instanceof DoorBlock door) || !state.contains(DoorBlock.FACING)) {
+            return null;
+        }
+        if (door == Blocks.IRON_DOOR && !(state.contains(DoorBlock.OPEN) && Boolean.TRUE.equals(state.get(DoorBlock.OPEN)))) {
+            return null;
+        }
+        Direction facing = state.get(DoorBlock.FACING);
+        BlockPos sideA = doorBase.offset(facing);
+        BlockPos sideB = doorBase.offset(facing.getOpposite());
+        VillageHouseCandidate a = makeVillageCandidate(bot, world, doorBase, sideA);
+        VillageHouseCandidate b = makeVillageCandidate(bot, world, doorBase, sideB);
+        if (a == null) return b;
+        if (b == null) return a;
+        return a.score() >= b.score() ? a : b;
+    }
+
+    private static VillageHouseCandidate makeVillageCandidate(ServerPlayerEntity bot,
+                                                              ServerWorld world,
+                                                              BlockPos doorBase,
+                                                              BlockPos interiorSeed) {
+        BlockPos stand = findVillageInteriorStand(world, interiorSeed, 2);
+        if (stand == null) {
+            return null;
+        }
+        Direction interiorDir = directionFrom(doorBase, stand);
+        ShelterAssessment assessment = assessShelterAt(bot, world, stand, ShelterType.VILLAGE_HOUSE, doorBase, interiorDir);
+        if (!assessment.valid()) {
+            return null;
+        }
+        int roofBonus = world.isSkyVisible(doorBase) ? 0 : 8;
+        int score = roofBonus
+                + 16
+                - Math.min(12, (int) Math.round(Math.sqrt(bot.getBlockPos().getSquaredDistance(stand))))
+                + Math.max(0, 4 - VoxelJunctionService.countOpenFaces(world, stand));
+        return new VillageHouseCandidate(doorBase.toImmutable(), assessment.standPos(), interiorDir, score);
+    }
+
+    private static BlockPos findVillageInteriorStand(ServerWorld world, BlockPos seed, int radius) {
+        if (world == null || seed == null) {
+            return null;
+        }
+        BlockPos best = null;
+        double bestScore = Double.NEGATIVE_INFINITY;
+        for (int dy = -1; dy <= 1; dy++) {
+            for (int dx = -radius; dx <= radius; dx++) {
+                for (int dz = -radius; dz <= radius; dz++) {
+                    BlockPos candidate = seed.add(dx, dy, dz);
+                    if (!VoxelJunctionService.isStandable(world, candidate)) {
+                        continue;
+                    }
+                    if (world.isSkyVisible(candidate) || world.isSkyVisible(candidate.up())) {
+                        continue;
+                    }
+                    double score = 10.0D - candidate.getSquaredDistance(seed)
+                            + Math.max(0, 4 - VoxelJunctionService.countOpenFaces(world, candidate)) * 2.0D;
+                    if (score > bestScore) {
+                        bestScore = score;
+                        best = candidate.toImmutable();
+                    }
+                }
+            }
+        }
+        return best;
+    }
+
+    private static BlockPos normalizeDoorBase(ServerWorld world, BlockPos pos) {
+        if (world == null || pos == null) {
+            return null;
+        }
+        BlockState state = world.getBlockState(pos);
+        if (state.getBlock() instanceof DoorBlock && state.contains(DoorBlock.HALF)) {
+            return state.get(DoorBlock.HALF) == net.minecraft.block.enums.DoubleBlockHalf.UPPER
+                    ? pos.down().toImmutable()
+                    : pos.toImmutable();
+        }
+        BlockState above = world.getBlockState(pos.up());
+        if (above.getBlock() instanceof DoorBlock && above.contains(DoorBlock.HALF)
+                && above.get(DoorBlock.HALF) == net.minecraft.block.enums.DoubleBlockHalf.UPPER) {
+            return pos.toImmutable();
+        }
+        return null;
+    }
+
+    private static boolean isVillageUsableDoor(ServerWorld world, BlockPos doorBase) {
+        if (world == null || doorBase == null) {
+            return false;
+        }
+        BlockState state = world.getBlockState(doorBase);
+        if (!(state.getBlock() instanceof DoorBlock)) {
+            return false;
+        }
+        if (!state.contains(DoorBlock.FACING)) {
+            return false;
+        }
+        return !(state.getBlock() == Blocks.IRON_DOOR)
+                || (state.contains(DoorBlock.OPEN) && Boolean.TRUE.equals(state.get(DoorBlock.OPEN)));
+    }
+
+    private static BlockPos findAdjacentDoor(ServerWorld world, BlockPos center, int radius) {
+        if (world == null || center == null) {
+            return null;
+        }
+        BlockPos.Mutable cursor = new BlockPos.Mutable();
+        for (int dy = -1; dy <= 2; dy++) {
+            for (int dx = -radius; dx <= radius; dx++) {
+                for (int dz = -radius; dz <= radius; dz++) {
+                    cursor.set(center.getX() + dx, center.getY() + dy, center.getZ() + dz);
+                    BlockPos base = normalizeDoorBase(world, cursor);
+                    if (base != null && isVillageUsableDoor(world, base)) {
+                        return base;
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    private static Direction directionFrom(BlockPos origin, BlockPos target) {
+        if (origin == null || target == null) {
+            return null;
+        }
+        int dx = Integer.compare(target.getX(), origin.getX());
+        int dz = Integer.compare(target.getZ(), origin.getZ());
+        if (Math.abs(dx) >= Math.abs(dz)) {
+            if (dx > 0) return Direction.EAST;
+            if (dx < 0) return Direction.WEST;
+        }
+        if (dz > 0) return Direction.SOUTH;
+        if (dz < 0) return Direction.NORTH;
+        return null;
     }
 
     /**
@@ -1077,10 +1718,30 @@ public final class BotFleeService {
             });
             Thread.sleep(200);
 
-            // Mark shelter active — only if thread is still valid
+            // Mark shelter active only if the finished enclosure validates as survivable.
             if (isStaleShelter(bot, gen)) return;
-            SHELTER_ACTIVE.put(bot.getUuid(), new ShelterInfo(
-                    server.getTicks(), ShelterType.CLIFF, wallFeet.toImmutable(), digDir));
+            ShelterAssessment assessment = assessShelterAt(
+                    bot,
+                    (ServerWorld) bot.getEntityWorld(),
+                    bot.getBlockPos(),
+                    ShelterType.CLIFF,
+                    wallFeet.toImmutable(),
+                    digDir);
+            if (assessment.valid()) {
+                SHELTER_ACTIVE.put(bot.getUuid(), new ShelterInfo(
+                        server.getTicks(),
+                        ShelterType.CLIFF,
+                        wallFeet.toImmutable(),
+                        digDir,
+                        assessment.standPos(),
+                        server.getTicks(),
+                        ShelterInvalidReason.VALID));
+            } else {
+                LOGGER.info("Bot {} cliff shelter rejected reason={}",
+                        bot.getName().getString(),
+                        assessment.reason().name().toLowerCase());
+                return;
+            }
 
             LOGGER.info("Bot {} dug emergency cliff shelter {} (sealed={})",
                     bot.getName().getString(), digDir.asString(), sealed[0]);
@@ -1130,17 +1791,36 @@ public final class BotFleeService {
      * Clears shelter state and launches break-free mining on a worker thread.
      * Use when a command (follow, skill, etc.) needs the bot to leave shelter first.
      * The returned thread can be joined to wait for completion before executing the command.
+     * Guarded by SHELTER_LOCK to prevent duplicate break-free threads and allow
+     * callers to check {@link #isBreakingFree(UUID)}.
      */
     public static Thread clearShelterAndBreakFree(ServerPlayerEntity bot) {
         ShelterInfo info = SHELTER_ACTIVE.remove(bot.getUuid());
         if (info == null) return null;
+        AtomicBoolean lock = SHELTER_LOCK.computeIfAbsent(bot.getUuid(), k -> new AtomicBoolean(false));
+        if (!lock.compareAndSet(false, true)) {
+            LOGGER.debug("clearShelterAndBreakFree skipped for {} — another break-free already running",
+                    bot.getName().getString());
+            return null;
+        }
         LOGGER.info("Bot {} breaking free from {} shelter for command",
                 bot.getName().getString(), info.type());
-        Thread t = new Thread(() -> breakFreeFromShelter(bot, info),
-                "shelter-breakfree-" + bot.getName().getString());
+        Thread t = new Thread(() -> {
+            try {
+                breakFreeFromShelter(bot, info);
+            } finally {
+                lock.set(false);
+            }
+        }, "shelter-breakfree-" + bot.getName().getString());
         t.setDaemon(true);
         t.start();
         return t;
+    }
+
+    /** Returns true if a break-free thread is currently running for this bot. */
+    public static boolean isBreakingFree(UUID botId) {
+        AtomicBoolean lock = SHELTER_LOCK.get(botId);
+        return lock != null && lock.get();
     }
 
     /**
@@ -1173,6 +1853,7 @@ public final class BotFleeService {
      * then escapes to surface if still underground.
      */
     private static void breakFreeFromShelter(ServerPlayerEntity bot, ShelterInfo info) {
+        boolean owner = beginSurvivalAction(bot.getUuid(), InterruptedSurvivalAction.BREAK_FREE);
         try {
             BlockPos pos = bot.getBlockPos();
             ServerWorld world = (ServerWorld) bot.getEntityWorld();
@@ -1183,8 +1864,10 @@ public final class BotFleeService {
             // 2. Type-specific exit
             if (info != null && info.type() == ShelterType.CLIFF && info.capPos() != null) {
                 breakFreeCliff(bot, world, info);
-            } else if (info != null && info.type() == ShelterType.DIG_DOWN && info.capPos() != null) {
+            } else if (info != null && (info.type() == ShelterType.DIG_DOWN || info.type() == ShelterType.JOIN_ENCLOSED) && info.capPos() != null) {
                 breakFreeDugDown(bot, world, info);
+            } else if (info != null && info.type() == ShelterType.VILLAGE_HOUSE && info.capPos() != null) {
+                breakFreeVillageHouse(bot, world, info);
             } else {
                 breakFreeGeneric(bot, world, pos);
             }
@@ -1196,6 +1879,8 @@ public final class BotFleeService {
             Thread.currentThread().interrupt();
         } catch (Exception e) {
             LOGGER.warn("Break-free failed for {}: {}", bot.getName().getString(), e.getMessage());
+        } finally {
+            endSurvivalAction(bot.getUuid(), InterruptedSurvivalAction.BREAK_FREE, owner);
         }
     }
 
@@ -1256,6 +1941,20 @@ public final class BotFleeService {
         // Pillar up is handled by escapeToSurface()
     }
 
+    private static void breakFreeVillageHouse(ServerPlayerEntity bot, ServerWorld world, ShelterInfo info)
+            throws InterruptedException {
+        BlockPos doorPos = info.capPos();
+        Direction interiorDir = info.entryDir();
+        if (doorPos == null || interiorDir == null) {
+            return;
+        }
+        BlockPos outside = doorPos.offset(interiorDir.getOpposite());
+        MovementService.tryOpenDoorAt(bot, doorPos);
+        MovementService.tryTraverseOpenableToward(bot, doorPos, outside, "village-breakfree");
+        Thread.sleep(500L);
+        LOGGER.info("Bot {} stepped out of village shelter at {}", bot.getName().getString(), doorPos.toShortString());
+    }
+
     /** Generic break-free: try 4 horizontal directions, then mine up. */
     private static void breakFreeGeneric(ServerPlayerEntity bot, ServerWorld world, BlockPos pos)
             throws InterruptedException {
@@ -1295,77 +1994,481 @@ public final class BotFleeService {
     }
 
     /**
-     * Escape to surface by pillaring up until sky is visible.
-     * Mines the block above, jumps, places block below. Max 30 blocks.
+     * Returns true only when the bot is on an operational open-sky surface tile that is
+     * actually usable for pathing rather than merely poking out of a shaft.
      */
-    private static void escapeToSurface(ServerPlayerEntity bot, ServerWorld world)
-            throws InterruptedException {
-        if (world.isSkyVisible(bot.getBlockPos().up())) return; // already at surface
+    public static boolean isAtSurface(ServerPlayerEntity bot, ServerWorld world) {
+        if (bot == null || world == null) {
+            return false;
+        }
+        return SafePositionService.isRecoveryReadySurface(world, bot.getBlockPos());
+    }
 
-        // Try skylight scan first — pathfind to nearest sky-visible position instead of pillaring
-        BlockPos skyTarget = findNearestSkylight(world, bot.getBlockPos(), 16);
-        if (skyTarget != null) {
-            double distSq = bot.getBlockPos().getSquaredDistance(skyTarget);
-            LOGGER.info("Bot {} found skylight at {} ({}blocks away) — pathfinding to daylight",
-                    bot.getName().getString(), skyTarget.toShortString(),
-                    String.format("%.0f", Math.sqrt(distSq)));
-            MovementService.MovementPlan plan = new MovementService.MovementPlan(
-                    MovementService.Mode.DIRECT, skyTarget, skyTarget, null, null, null);
-            MovementService.execute(bot.getCommandSource(), bot, plan, Boolean.FALSE, true);
-            Thread.sleep(1000);
-            // Check if we made it
-            if (world.isSkyVisible(bot.getBlockPos().up())) {
-                LOGGER.info("Bot {} reached surface via skylight pathfinding", bot.getName().getString());
-                return;
-            }
-            // If pathfinding didn't get us there, fall through to pillar
+    /**
+     * Escape to surface using the collect_dirt skill's ascent-to-surface mode.
+     * This mines a proper staircase with tool selection and hazard detection,
+     * rather than the fragile pillar-up approach.
+     */
+    public static void escapeToSurface(ServerPlayerEntity bot, ServerWorld world)
+            throws InterruptedException {
+        if (isAtSurface(bot, world)) return; // already at surface
+
+        LOGGER.info("Bot {} underground — launching collect_dirt ascent to surface", bot.getName().getString());
+
+        java.util.Map<String, Object> params = new java.util.HashMap<>();
+        params.put("ascentToSurface", true);
+        params.put("skipTorches", true);
+
+        net.wcfcarolina13.GameAI.skills.SkillContext context =
+                new net.wcfcarolina13.GameAI.skills.SkillContext(
+                        bot.getCommandSource(),
+                        new java.util.HashMap<>(),
+                        params);
+
+        net.wcfcarolina13.GameAI.skills.SkillExecutionResult result =
+                net.wcfcarolina13.GameAI.skills.SkillManager.runSkill("collect_dirt", context);
+
+        if (result != null && result.success()) {
+            SURFACE_RECOVERY_FAILURE_TICK.remove(bot.getUuid());
+            SURFACE_RECOVERY_FAILURE_REASON.remove(bot.getUuid());
+            LOGGER.info("Bot {} reached surface via collect_dirt ascent", bot.getName().getString());
+        } else {
+            long nowTick = bot.getCommandSource().getServer() != null ? bot.getCommandSource().getServer().getTicks() : 0L;
+            SURFACE_RECOVERY_FAILURE_TICK.put(bot.getUuid(), nowTick);
+            SURFACE_RECOVERY_FAILURE_REASON.put(bot.getUuid(), result != null ? String.valueOf(result.message()) : "null result");
+            LOGGER.warn("Bot {} ascent failed: {}",
+                    bot.getName().getString(), result != null ? result.message() : "null result");
+        }
+    }
+
+    public static boolean descendFromSurfacePillar(ServerPlayerEntity bot,
+                                                   ServerWorld world,
+                                                   List<BlockPos> pillarBlocks,
+                                                   BlockPos stagingPos,
+                                                   String label) {
+        if (bot == null || world == null || pillarBlocks == null || pillarBlocks.isEmpty()) {
+            return false;
         }
 
-        LOGGER.info("Bot {} underground — pillar-escaping to surface", bot.getName().getString());
-        MinecraftServer server = bot.getCommandSource().getServer();
+        LOGGER.info("{}: descending pillar blocks={} staging={}",
+                label,
+                pillarBlocks.size(),
+                stagingPos != null ? stagingPos.toShortString() : "none");
 
-        // Enable sneaking to prevent falling off the pillar
-        server.execute(() -> bot.setSneaking(true));
-        Thread.sleep(100);
+        BotActions.stop(bot);
+        List<BlockPos> ordered = new ArrayList<>(pillarBlocks);
+        ordered.sort(Comparator.comparingInt(BlockPos::getY).reversed());
+
+        BlockPos preserve = chooseStepOffSupport(ordered, stagingPos);
+        LOGGER.info("{}: preserveSupport={}", label, preserve != null ? preserve.toShortString() : "none");
+
+        if (!teardownPillarGradually(bot, world, ordered, preserve, label)) {
+            return false;
+        }
+
+        boolean moved = false;
+        if (stagingPos != null) {
+            moved = moveToOperationalSurface(bot, world, stagingPos, label + "-stepoff");
+            if (!moved) {
+                SafePositionService.SurfaceStagingCandidate retry =
+                        SafePositionService.findBestSurfaceStaging(world, bot.getBlockPos(), 6, true);
+                if (retry != null && !retry.pos().equals(stagingPos)) {
+                    LOGGER.info("{}: retry staging {} score={} {}",
+                            label,
+                            retry.pos().toShortString(),
+                            retry.score(),
+                            SafePositionService.summarizeSurfaceAssessment(retry.assessment()));
+                    moved = moveToOperationalSurface(bot, world, retry.pos(), label + "-retry-stepoff");
+                }
+            }
+        }
+        if (moved && preserve != null) {
+            int cleaned = ScaffoldService.teardownScaffolds(bot, world, List.of(preserve), Collections.emptySet());
+            LOGGER.info("{}: cleanup support {} removed={}", label, preserve.toShortString(), cleaned);
+            waitForOnGround(bot, 800L);
+        }
+
+        boolean ready = isAtSurface(bot, world);
+        if (!ready) {
+            SafePositionService.SurfaceCandidateAssessment assessment =
+                    SafePositionService.analyzeSurfaceCandidate(world, bot.getBlockPos());
+            LOGGER.info("{}: post-descent surface check failed at {} {}",
+                    label,
+                    bot.getBlockPos().toShortString(),
+                    SafePositionService.summarizeSurfaceAssessment(assessment));
+        } else {
+            LOGGER.info("{}: ready after descent moved={}", label, moved);
+        }
+        return ready;
+    }
+
+    /**
+     * Ensures bot is on an operational open-sky surface tile. The recovery ladder is:
+     * nearby operational staging -> collect_dirt ascent -> scaffold pillar recovery.
+     *
+     * @return true if the bot is at the surface after this call
+     */
+    public static boolean ensureAtSurface(ServerPlayerEntity bot, ServerWorld world) {
+        if (bot == null || world == null) {
+            return false;
+        }
+        boolean owner = beginSurvivalAction(bot.getUuid(), InterruptedSurvivalAction.SURFACE_RECOVERY);
+        try {
+
+        if (BotWaterEscapeService.isInWater(bot)) {
+            BlockPos shore = BotWaterEscapeService.findNearestShoreStand(bot, 12);
+            if (shore != null) {
+                LOGGER.info("ensureAtSurface: {} seeking dry land first at {}",
+                        bot.getName().getString(), shore.toShortString());
+                if (moveTowardLocalShelterAnchor(bot, world, shore, "surface-dryland")) {
+                    SURFACE_RECOVERY_FAILURE_TICK.remove(bot.getUuid());
+                    SURFACE_RECOVERY_FAILURE_REASON.remove(bot.getUuid());
+                    if (isAtSurface(bot, world) || !BotWaterEscapeService.isInWater(bot)) {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        if (logOperationalSurfaceState(bot, world, "ensureAtSurface:current")) {
+            return true;
+        }
+
+        AtomicBoolean lock = SURFACE_RECOVERY_LOCK.computeIfAbsent(bot.getUuid(), ignored -> new AtomicBoolean(false));
+        if (!lock.compareAndSet(false, true)) {
+            LOGGER.info("ensureAtSurface: {} recovery already in progress, skipping duplicate request",
+                    bot.getName().getString());
+            return false;
+        }
 
         try {
-            for (int i = 0; i < 30; i++) {
-                if (world.isSkyVisible(bot.getBlockPos().up())) {
-                    LOGGER.info("Bot {} reached surface after {} pillar steps", bot.getName().getString(), i);
-                    return;
+            SafePositionService.SurfaceStagingCandidate nearby =
+                    SafePositionService.findBestSurfaceStaging(world, bot.getBlockPos(), 10, true);
+            if (nearby != null) {
+                LOGGER.info("ensureAtSurface: {} nearby staging {} score={} {}",
+                        bot.getName().getString(),
+                        nearby.pos().toShortString(),
+                        nearby.score(),
+                        SafePositionService.summarizeSurfaceAssessment(nearby.assessment()));
+                if (moveToOperationalSurface(bot, world, nearby.pos(), "surface-staging")) {
+                    LOGGER.info("ensureAtSurface: {} reached operational surface via nearby staging",
+                            bot.getName().getString());
+                    return true;
                 }
-
-                // Clear 2 blocks above head for jump clearance
-                BlockPos headAbove = bot.getBlockPos().up(2);
-                if (world.getBlockState(headAbove).isSolidBlock(world, headAbove)) {
-                    LookController.faceBlock(bot, headAbove);
-                    Thread.sleep(50);
-                    MiningTool.mineBlock(bot, headAbove, false).join();
-                    Thread.sleep(200);
-                }
-                BlockPos headAbove2 = headAbove.up();
-                if (world.getBlockState(headAbove2).isSolidBlock(world, headAbove2)) {
-                    LookController.faceBlock(bot, headAbove2);
-                    Thread.sleep(50);
-                    MiningTool.mineBlock(bot, headAbove2, false).join();
-                    Thread.sleep(200);
-                }
-
-                // Jump + place block below (pillar up one block)
-                BlockPos feet = bot.getBlockPos();
-                server.execute(() -> {
-                    bot.jump();
-                    bot.velocityDirty = true;
-                });
-                Thread.sleep(350); // wait for peak of jump
-                final BlockPos placeAt = feet;
-                server.execute(() -> BotActions.placeBlockAt(bot, placeAt));
-                Thread.sleep(350); // wait for landing on placed block
+            } else {
+                LOGGER.info("ensureAtSurface: {} found no nearby operational staging before ascent",
+                        bot.getName().getString());
             }
-            LOGGER.warn("Bot {} failed to reach surface after 30 pillar steps", bot.getName().getString());
+
+            // If the bot is starving or effectively unequipped but has scaffold blocks, prefer a quick pillar escape.
+            if (shouldPrioritizeEmergencyPillar(bot) && tryPillarOperationalSurfaceRecovery(bot, world)) {
+                LOGGER.info("ensureAtSurface: {} reached operational surface via nearby staging",
+                        bot.getName().getString());
+                return true;
+            }
+
+            try {
+                escapeToSurface(bot, world);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return false;
+            }
+            if (logOperationalSurfaceState(bot, world, "ensureAtSurface:post-ascent")) {
+                SURFACE_RECOVERY_FAILURE_TICK.remove(bot.getUuid());
+                SURFACE_RECOVERY_FAILURE_REASON.remove(bot.getUuid());
+                return true;
+            }
+
+            if (tryPillarOperationalSurfaceRecovery(bot, world)) {
+                SURFACE_RECOVERY_FAILURE_TICK.remove(bot.getUuid());
+                SURFACE_RECOVERY_FAILURE_REASON.remove(bot.getUuid());
+                LOGGER.info("ensureAtSurface: {} reached operational surface via pillar recovery",
+                        bot.getName().getString());
+                return true;
+            }
+
+            SafePositionService.SurfaceCandidateAssessment assessment =
+                    SafePositionService.analyzeSurfaceCandidate(world, bot.getBlockPos());
+            LOGGER.warn("ensureAtSurface: {} failed at {} {}",
+                    bot.getName().getString(),
+                    bot.getBlockPos().toShortString(),
+                    SafePositionService.summarizeSurfaceAssessment(assessment));
+            long nowTick = bot.getCommandSource().getServer() != null ? bot.getCommandSource().getServer().getTicks() : 0L;
+            SURFACE_RECOVERY_FAILURE_TICK.put(bot.getUuid(), nowTick);
+            SURFACE_RECOVERY_FAILURE_REASON.put(bot.getUuid(), "no_operational_surface");
+            BotEmergencyRescueService.tryEmergencyRescue(bot, world, "surface-failure");
+            return false;
         } finally {
-            // Always stop sneaking when done
-            server.execute(() -> bot.setSneaking(false));
+            lock.set(false);
+        }
+        } finally {
+            endSurvivalAction(bot.getUuid(), InterruptedSurvivalAction.SURFACE_RECOVERY, owner);
+        }
+    }
+
+    private static boolean shouldPrioritizeEmergencyPillar(ServerPlayerEntity bot) {
+        if (bot == null) {
+            return false;
+        }
+        boolean starving = bot.getHungerManager().getFoodLevel() <= 6;
+        boolean noTool = !hasMiningOrCombatTool(bot);
+        return countScaffoldBlocks(bot) >= 3 && (starving || noTool);
+    }
+
+    private static boolean shouldBreakShelterForStarvation(ServerPlayerEntity bot, ServerWorld world) {
+        if (bot == null || world == null || !HealingService.isStarving(bot)) {
+            return false;
+        }
+        if (HealingService.autoEat(bot)) {
+            return false;
+        }
+        return !BotMutualAidService.tryImmediateChestFoodRecovery(bot, world);
+    }
+
+    private static boolean beginSurvivalAction(UUID botId, InterruptedSurvivalAction action) {
+        if (botId == null || action == null) {
+            return false;
+        }
+        return CURRENT_SURVIVAL_ACTION.putIfAbsent(botId, action) == null;
+    }
+
+    private static void endSurvivalAction(UUID botId, InterruptedSurvivalAction action, boolean owner) {
+        if (!owner || botId == null || action == null) {
+            return;
+        }
+        CURRENT_SURVIVAL_ACTION.remove(botId, action);
+    }
+
+    private static boolean hasMiningOrCombatTool(ServerPlayerEntity bot) {
+        if (bot == null) {
+            return false;
+        }
+        for (int i = 0; i < bot.getInventory().size(); i++) {
+            ItemStack stack = bot.getInventory().getStack(i);
+            if (stack.isEmpty()) {
+                continue;
+            }
+            String key = stack.getItem().getTranslationKey();
+            if (key == null) {
+                continue;
+            }
+            String lower = key.toLowerCase(java.util.Locale.ROOT);
+            if (lower.contains("pickaxe")
+                    || lower.contains("shovel")
+                    || lower.contains("axe")
+                    || lower.contains("sword")
+                    || lower.contains("trident")
+                    || lower.contains("mace")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean tryPillarOperationalSurfaceRecovery(ServerPlayerEntity bot, ServerWorld world) {
+        int scaffoldCount = countScaffoldBlocks(bot);
+        if (scaffoldCount <= 0) {
+            LOGGER.info("ensureAtSurface: {} pillar recovery skipped (no scaffold blocks)",
+                    bot.getName().getString());
+            return false;
+        }
+
+        int pillarSteps = Math.min(6, scaffoldCount);
+        LOGGER.info("ensureAtSurface: {} pillar recovery steps={}",
+                bot.getName().getString(), pillarSteps);
+
+        List<BlockPos> placed = ScaffoldService.pillarUpWithPositions(bot, pillarSteps);
+        if (placed.isEmpty()) {
+            LOGGER.info("ensureAtSurface: {} pillar recovery placed no blocks",
+                    bot.getName().getString());
+            return false;
+        }
+
+        try {
+            SafePositionService.SurfaceStagingCandidate staging =
+                    SafePositionService.findBestSurfaceStaging(world, bot.getBlockPos(), 8, true);
+            if (staging == null) {
+                LOGGER.info("ensureAtSurface: {} found no operational staging from pillar top",
+                        bot.getName().getString());
+                descendFromSurfacePillar(bot, world, placed, null, "surface-pillar");
+                return false;
+            }
+            LOGGER.info("ensureAtSurface: {} pillar staging {} score={} {}",
+                    bot.getName().getString(),
+                    staging.pos().toShortString(),
+                    staging.score(),
+                    SafePositionService.summarizeSurfaceAssessment(staging.assessment()));
+            return descendFromSurfacePillar(bot, world, placed, staging.pos(), "surface-pillar");
+        } finally {
+            if (!bot.isOnGround()) {
+                waitForOnGround(bot, 1_200L);
+            }
+        }
+    }
+
+    private static boolean moveTowardLocalShelterAnchor(ServerPlayerEntity bot,
+                                                        ServerWorld world,
+                                                        BlockPos target,
+                                                        String label) {
+        if (bot == null || world == null || target == null) {
+            return false;
+        }
+        Optional<MovementService.MovementPlan> plan =
+                MovementService.planLootApproach(bot, target, MovementService.MovementOptions.skillLoot());
+        if (plan.isPresent()) {
+            MovementService.MovementResult result = MovementService.execute(
+                    bot.getCommandSource(),
+                    bot,
+                    plan.get(),
+                    Boolean.FALSE,
+                    true,
+                    true,
+                    false
+            );
+            if (result != null && (result.success() || bot.getBlockPos().getSquaredDistance(target) <= 4.0D)) {
+                return true;
+            }
+        }
+        return MovementService.nudgeTowardUntilClose(bot, target, 2.5D, 4_000L, 0.20D, label);
+    }
+
+    private static boolean moveToOperationalSurface(ServerPlayerEntity bot,
+                                                    ServerWorld world,
+                                                    BlockPos target,
+                                                    String label) {
+        if (bot == null || world == null || target == null) {
+            return false;
+        }
+        Optional<MovementService.MovementPlan> plan =
+                MovementService.planLootApproach(bot, target, MovementService.MovementOptions.skillLoot());
+        boolean moved = false;
+        if (plan.isPresent()) {
+            MovementService.MovementResult result = MovementService.execute(
+                    bot.getCommandSource(),
+                    bot,
+                    plan.get(),
+                    Boolean.FALSE,
+                    true,
+                    true,
+                    false
+            );
+            moved = result != null && (result.success() || bot.getBlockPos().getSquaredDistance(target) <= 4.0D);
+            LOGGER.info("{}: movement success={} detail={}",
+                    label,
+                    moved,
+                    result != null ? result.detail() : "null");
+        }
+        if (!moved) {
+            moved = MovementService.nudgeTowardUntilClose(bot, target, 2.5D, 4_000L, 0.20D, label);
+            LOGGER.info("{}: nudge success={}", label, moved);
+        }
+        return moved && isAtSurface(bot, world);
+    }
+
+    private static BlockPos chooseStepOffSupport(List<BlockPos> ordered, BlockPos stagingPos) {
+        if (ordered == null || ordered.isEmpty()) {
+            return null;
+        }
+        if (stagingPos == null) {
+            return null;
+        }
+        BlockPos best = null;
+        for (BlockPos pos : ordered) {
+            if (pos != null && pos.getY() < stagingPos.getY()) {
+                if (best == null || pos.getY() > best.getY()) {
+                    best = pos;
+                }
+            }
+        }
+        return best;
+    }
+
+    private static boolean teardownPillarGradually(ServerPlayerEntity bot,
+                                                   ServerWorld world,
+                                                   List<BlockPos> ordered,
+                                                   BlockPos preserve,
+                                                   String label) {
+        for (BlockPos pos : ordered) {
+            if (pos == null) {
+                continue;
+            }
+            if (TaskService.isAbortRequested(bot != null ? bot.getUuid() : null) || Thread.currentThread().isInterrupted()) {
+                BotActions.stop(bot);
+                return false;
+            }
+            if (preserve != null && preserve.equals(pos)) {
+                continue;
+            }
+            int removed = ScaffoldService.teardownScaffolds(bot, world, List.of(pos), Collections.emptySet());
+            LOGGER.info("{}: remove {} removed={}", label, pos.toShortString(), removed);
+            waitForGroundedDescent(bot, pos.getY(), 1_500L);
+        }
+        waitForGroundedDescent(bot, preserve != null ? preserve.getY() + 1 : Integer.MIN_VALUE, 2_000L);
+        return bot != null && !bot.isRemoved();
+    }
+
+    private static void waitForGroundedDescent(ServerPlayerEntity bot, int targetFeetY, long timeoutMs) {
+        long start = System.currentTimeMillis();
+        while (bot != null && !bot.isRemoved() && (System.currentTimeMillis() - start) < timeoutMs) {
+            if (TaskService.isAbortRequested(bot.getUuid()) || Thread.currentThread().isInterrupted()) {
+                BotActions.stop(bot);
+                return;
+            }
+            boolean atOrBelowTarget = targetFeetY == Integer.MIN_VALUE || bot.getBlockY() <= targetFeetY;
+            if (bot.isOnGround() && atOrBelowTarget) {
+                BotActions.stop(bot);
+                bot.fallDistance = 0.0F;
+                return;
+            }
+            try {
+                Thread.sleep(40L);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                BotActions.stop(bot);
+                return;
+            }
+        }
+        if (bot != null) {
+            BotActions.stop(bot);
+            bot.fallDistance = 0.0F;
+        }
+    }
+
+    private static boolean logOperationalSurfaceState(ServerPlayerEntity bot, ServerWorld world, String label) {
+        SafePositionService.SurfaceCandidateAssessment assessment =
+                SafePositionService.analyzeSurfaceCandidate(world, bot.getBlockPos());
+        boolean ready = SafePositionService.isRecoveryReadySurface(world, bot.getBlockPos());
+        LOGGER.info("{}: {} pos={} {}",
+                label,
+                ready ? "ready" : "not-ready",
+                bot.getBlockPos().toShortString(),
+                SafePositionService.summarizeSurfaceAssessment(assessment));
+        return ready;
+    }
+
+    private static int countScaffoldBlocks(ServerPlayerEntity bot) {
+        if (bot == null) {
+            return 0;
+        }
+        int total = 0;
+        for (int i = 0; i < bot.getInventory().size(); i++) {
+            ItemStack stack = bot.getInventory().getStack(i);
+            if (!stack.isEmpty() && ScaffoldService.SCAFFOLD_BLOCKS.contains(stack.getItem())) {
+                total += stack.getCount();
+            }
+        }
+        return total;
+    }
+
+    private static void waitForOnGround(ServerPlayerEntity bot, long timeoutMs) {
+        long start = System.currentTimeMillis();
+        while (bot != null && !bot.isOnGround() && (System.currentTimeMillis() - start) < timeoutMs) {
+            try {
+                Thread.sleep(40L);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
+            }
         }
     }
 

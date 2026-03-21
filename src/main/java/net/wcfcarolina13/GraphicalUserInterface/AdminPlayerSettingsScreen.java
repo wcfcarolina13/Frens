@@ -57,6 +57,8 @@ public class AdminPlayerSettingsScreen extends Screen {
                     "Lets this player use operator learning-mode controls that record demonstration traces for bot tuning and future ML/LLM roadmap work. See Guide > Learning Mode / Roadmap."),
             new PermissionDef("recruit_manage", "Manage Recruitment",
                 "Lets this player view and change recruitment / questing-mode state for this world and companion flow."),
+            new PermissionDef("rescue_manage", "Manage Autonomous Rescue Policy",
+                "Lets this player manage the server-wide autonomous rescue policy. Operators still control whether the toggle is visible and usable in the admin menu."),
             new PermissionDef("recruit_reset", "Reset Recruitment",
                 "Lets this player reset recruitment progress for testing. This affects world and companion progression, not just local UI state."),
             new PermissionDef("village_anchor", "Manage Village Anchor",

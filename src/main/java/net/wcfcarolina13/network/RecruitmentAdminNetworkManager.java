@@ -12,12 +12,16 @@ import net.wcfcarolina13.GameAI.services.SurvivalRecruitmentService;
 import net.wcfcarolina13.GameAI.services.WizardTomeGrantService;
 import net.wcfcarolina13.GameAI.services.LearningModeService;
 import net.wcfcarolina13.GameAI.services.BotSkinService;
+import net.wcfcarolina13.GameAI.services.BotHomeService;
+import net.wcfcarolina13.GameAI.services.BotTerritoryAuthorizationService;
+import net.wcfcarolina13.GameAI.BotEventHandler;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.UUID;
 
 /** Server-side operator-only actions for survival recruitment state. */
 public final class RecruitmentAdminNetworkManager {
@@ -30,7 +34,9 @@ public final class RecruitmentAdminNetworkManager {
     private record PermissionsSnapshotData(boolean requesterOperator,
                                            Map<String, Boolean> globalDefaults,
                                            Map<String, Map<String, Boolean>> userOverrides,
-                                           Map<String, String> knownUsers) {}
+                                           Map<String, String> knownUsers,
+                                           boolean autonomousRescuesEnabled,
+                                           int ownedSunsetSelfSufficientState) {}
 
     private RecruitmentAdminNetworkManager() {
     }
@@ -302,6 +308,76 @@ public final class RecruitmentAdminNetworkManager {
             case "learning_status", "learning_start", "learning_stop_success", "learning_stop_fail", "learning_stop_abort" -> {
                 out.addAll(LearningModeService.handleAdminAction(server, player, action, botAlias));
             }
+            case "autonomous_rescues_toggle" -> {
+                if (!Frens.isOperator(player)) {
+                    out.add("Only server admins can change autonomous rescue policy.");
+                    break;
+                }
+                boolean enabled = !SurvivalRecruitmentService.isAutonomousRescuesEnabled(server);
+                SurvivalRecruitmentService.setAutonomousRescuesEnabled(server, enabled);
+                broadcastPermissionsSnapshot(server, botAlias);
+                out.add("Autonomous rescues: " + (enabled ? "enabled" : "disabled") + ".");
+            }
+            case "owned_sunset_ss_on", "owned_sunset_ss_off" -> {
+                boolean enabled = "owned_sunset_ss_on".equals(action);
+                UUID playerUuid = player.getUuid();
+                int updated = 0;
+                int skipped = 0;
+                for (ServerPlayerEntity bot : BotEventHandler.getRegisteredBots(server)) {
+                    if (bot == null || bot.isRemoved()) {
+                        skipped++;
+                        continue;
+                    }
+                    UUID ownerUuid = BotTerritoryAuthorizationService.resolveBotOwnerUuid(bot);
+                    if (ownerUuid == null || !ownerUuid.equals(playerUuid)) {
+                        continue;
+                    }
+                    if (BotHomeService.setAutoReturnSelfSufficientFallback(bot, enabled)) {
+                        updated++;
+                    } else {
+                        skipped++;
+                    }
+                }
+                if (updated == 0) {
+                    out.add("No owned bots were updated.");
+                } else {
+                    out.add("Sunset self-sufficiency set to " + (enabled ? "ON" : "OFF") + " for " + updated + " owned bot(s).");
+                }
+                if (skipped > 0) {
+                    out.add("Skipped " + skipped + " bot(s).");
+                }
+            }
+            case "owned_sunset_ss_toggle" -> {
+                int aggregate = computeOwnedSunsetSelfSufficientState(server, player.getUuid());
+                boolean enabled = aggregate != 1;
+                UUID playerUuid = player.getUuid();
+                int updated = 0;
+                int skipped = 0;
+                for (ServerPlayerEntity bot : BotEventHandler.getRegisteredBots(server)) {
+                    if (bot == null || bot.isRemoved()) {
+                        skipped++;
+                        continue;
+                    }
+                    UUID ownerUuid = BotTerritoryAuthorizationService.resolveBotOwnerUuid(bot);
+                    if (ownerUuid == null || !ownerUuid.equals(playerUuid)) {
+                        continue;
+                    }
+                    if (BotHomeService.setAutoReturnSelfSufficientFallback(bot, enabled)) {
+                        updated++;
+                    } else {
+                        skipped++;
+                    }
+                }
+                broadcastPermissionsSnapshot(server, botAlias);
+                if (updated == 0) {
+                    out.add("No owned bots were updated.");
+                } else {
+                    out.add("Sunset self-sufficiency set to " + (enabled ? "ON" : "OFF") + " for " + updated + " owned bot(s).");
+                }
+                if (skipped > 0) {
+                    out.add("Skipped " + skipped + " bot(s).");
+                }
+            }
             default -> {
                 out.add("Unknown action: '" + action + "'.");
             }
@@ -326,6 +402,8 @@ public final class RecruitmentAdminNetworkManager {
             case "setstage" -> "stage_debug";
             case "skin_everyone_toggle" -> "skin_policy_everyone";
             case "skin_custom_toggle" -> "skin_policy_custom";
+            case "autonomous_rescues_toggle" -> "rescue_manage";
+            case "owned_sunset_ss_on", "owned_sunset_ss_off", "owned_sunset_ss_toggle" -> "recruit_manage";
             case "learning_status", "learning_start", "learning_stop_success", "learning_stop_fail", "learning_stop_abort" -> "learning_manage";
             default -> null;
         };
@@ -339,9 +417,42 @@ public final class RecruitmentAdminNetworkManager {
                 Frens.isOperator(player),
                 SurvivalRecruitmentService.getAdminPermissionGlobals(server),
                 SurvivalRecruitmentService.getAdminPermissionUserOverrides(server),
-                SurvivalRecruitmentService.collectKnownPermissionUsers(server)
+                SurvivalRecruitmentService.collectKnownPermissionUsers(server),
+                SurvivalRecruitmentService.isAutonomousRescuesEnabled(server),
+                computeOwnedSunsetSelfSufficientState(server, player.getUuid())
         );
         ServerPlayNetworking.send(player, new RecruitmentAdminPermissionsPayload(botAlias, GSON.toJson(data)));
+    }
+
+    private static int computeOwnedSunsetSelfSufficientState(MinecraftServer server, UUID playerUuid) {
+        if (server == null || playerUuid == null) {
+            return -2;
+        }
+        boolean sawOwned = false;
+        boolean sawOn = false;
+        boolean sawOff = false;
+        for (ServerPlayerEntity bot : BotEventHandler.getRegisteredBots(server)) {
+            if (bot == null || bot.isRemoved()) {
+                continue;
+            }
+            UUID ownerUuid = BotTerritoryAuthorizationService.resolveBotOwnerUuid(bot);
+            if (ownerUuid == null || !ownerUuid.equals(playerUuid)) {
+                continue;
+            }
+            sawOwned = true;
+            if (BotHomeService.isAutoReturnSelfSufficientFallback(bot)) {
+                sawOn = true;
+            } else {
+                sawOff = true;
+            }
+            if (sawOn && sawOff) {
+                return -1;
+            }
+        }
+        if (!sawOwned) {
+            return -2;
+        }
+        return sawOn ? 1 : 0;
     }
 
     private static void broadcastPermissionsSnapshot(MinecraftServer server, String botAlias) {
@@ -393,6 +504,7 @@ public final class RecruitmentAdminNetworkManager {
         out.add("Companion quest: stage=" + st.getCompanionQuestStage() + " permanent=" + st.isPermanentCompanion());
         out.add("Skin policy: allowEveryoneSkinChange=" + st.isAllowEveryoneSkinChange()
             + " allowCustomSkins=" + st.isAllowCustomSkins());
+        out.add("Autonomous rescues: " + st.isAutonomousRescuesEnabled());
         if (st.isCompanionAnchorSet()) {
             BlockPos anchor = BlockPos.fromLong(st.getCompanionAnchorPos());
             String dim = st.getCompanionAnchorDimension();

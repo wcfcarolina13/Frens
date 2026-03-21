@@ -17,6 +17,7 @@ import net.wcfcarolina13.GameAI.skills.impl.FishingSkill;
 import net.wcfcarolina13.GameAI.skills.impl.FortifyMoatSkill;
 import net.wcfcarolina13.GameAI.skills.impl.FortifyVillageSkill;
 import net.wcfcarolina13.GameAI.skills.impl.FlowerPickSkill;
+import net.wcfcarolina13.GameAI.skills.impl.GrassSeedSkill;
 import net.wcfcarolina13.GameAI.skills.impl.HuntSkill;
 import net.wcfcarolina13.GameAI.skills.impl.LeafLitterSkill;
 import net.wcfcarolina13.GameAI.skills.impl.MiningSkill;
@@ -66,6 +67,7 @@ public final class SkillManager {
         register(new net.wcfcarolina13.GameAI.skills.impl.LeashToFenceSkill());
         register(new FeedAnimalsSkill());
         register(new FlowerPickSkill());
+        register(new GrassSeedSkill());
         register(new HuntSkill());
         register(new WanderSkill());
         register(new LeafLitterSkill());

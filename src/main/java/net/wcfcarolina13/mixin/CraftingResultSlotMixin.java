@@ -32,7 +32,7 @@ public class CraftingResultSlotMixin {
         recordForPlayer(this.player, stack);
     }
 
-    @Inject(method = "onQuickCraft(Lnet/minecraft/item/ItemStack;I)V", at = @At("HEAD"), require = 0)
+    @Inject(method = "onCrafted(Lnet/minecraft/item/ItemStack;I)V", at = @At("HEAD"), require = 0)
     private void recordCraftingHistoryQuick(ItemStack stack, int amount, CallbackInfo ci) {
         recordForPlayer(this.player, stack);
     }

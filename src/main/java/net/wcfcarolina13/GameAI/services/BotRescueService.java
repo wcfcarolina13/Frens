@@ -260,7 +260,7 @@ public final class BotRescueService {
             }
             String keyword = preferredToolKeyword(headState);
             if (keyword != null) {
-                BotActions.selectBestTool(bot, keyword, "sword");
+                BotActions.selectHarvestToolOrHands(bot, keyword);
             }
 
             String blockName = headState.getBlock().getName().getString();
@@ -307,7 +307,7 @@ public final class BotRescueService {
                 }
                 String keyword = preferredToolKeyword(targetState);
                 if (keyword != null) {
-                    BotActions.selectBestTool(bot, keyword, "sword");
+                    BotActions.selectHarvestToolOrHands(bot, keyword);
                 }
 
                 String blockName = targetState.getBlock().getName().getString();
@@ -343,7 +343,7 @@ public final class BotRescueService {
             }
             String keyword = preferredToolKeyword(feetState);
             if (keyword != null) {
-                BotActions.selectBestTool(bot, keyword, "sword");
+                BotActions.selectHarvestToolOrHands(bot, keyword);
             }
 
             String blockName = feetState.getBlock().getName().getString();
@@ -451,7 +451,7 @@ public final class BotRescueService {
             // Select appropriate tool
             String keyword = preferredToolKeyword(blockedState);
             if (keyword != null) {
-                BotActions.selectBestTool(bot, keyword, "sword");
+                BotActions.selectHarvestToolOrHands(bot, keyword);
             }
 
             String blockName = blockedState.getBlock().getName().getString();
@@ -548,7 +548,7 @@ public final class BotRescueService {
             // Select appropriate tool
             String keyword = preferredToolKeyword(targetState);
             if (keyword != null) {
-                BotActions.selectBestTool(bot, keyword, "sword");
+                BotActions.selectHarvestToolOrHands(bot, keyword);
             }
 
             String toolName = bot.getMainHandStack().isEmpty() ? "bare hands" : bot.getMainHandStack().getName().getString();
@@ -629,13 +629,13 @@ public final class BotRescueService {
         for (BlockPos sample : samples) {
             BlockState state = world.getBlockState(sample);
             String keyword = preferredToolKeyword(state);
-            if (keyword != null && BotActions.selectBestTool(bot, keyword, "sword")) {
+            if (keyword != null && BotActions.selectHarvestToolOrHands(bot, keyword)) {
                 return true;
             }
         }
-        return BotActions.selectBestTool(bot, "pickaxe", "sword")
-                || BotActions.selectBestTool(bot, "shovel", "sword")
-                || BotActions.selectBestTool(bot, "axe", "sword");
+        return BotActions.selectHarvestToolOrHands(bot, "pickaxe")
+                || BotActions.selectHarvestToolOrHands(bot, "shovel")
+                || BotActions.selectHarvestToolOrHands(bot, "axe");
     }
 
     private static String preferredToolKeyword(BlockState state) {

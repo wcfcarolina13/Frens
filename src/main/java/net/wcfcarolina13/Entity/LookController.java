@@ -26,6 +26,8 @@ public class LookController {
         float pitch = (float) (-Math.atan2(dy, distanceXZ) * (180 / Math.PI));
 
         bot.setYaw(yaw);
+        bot.setHeadYaw(yaw);
+        bot.setBodyYaw(yaw);
         bot.setPitch(Math.max(-90.0F, Math.min(90.0F, pitch)));
 
         return "Facing block at " + targetPos + " with Yaw: " + yaw + " and Pitch: " + pitch;
@@ -46,6 +48,8 @@ public class LookController {
         double pitch = Math.toDegrees(-Math.atan2(direction.y, Math.sqrt(direction.x * direction.x + direction.z * direction.z)));
 
         bot.setYaw((float) yaw);
+        bot.setHeadYaw((float) yaw);
+        bot.setBodyYaw((float) yaw);
         bot.setPitch((float) Math.max(-90.0, Math.min(90.0, pitch)));
     }
 }

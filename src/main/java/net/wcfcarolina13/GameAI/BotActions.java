@@ -6,6 +6,7 @@ import net.minecraft.block.DoorBlock;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.mob.HostileEntity;
+import net.wcfcarolina13.Entity.LookController;
 import net.wcfcarolina13.EntityUtil;
 import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.item.BlockItem;
@@ -17,12 +18,14 @@ import net.minecraft.item.ItemUsageContext;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.registry.tag.BlockTags;
+import net.minecraft.registry.tag.FluidTags;
 import net.minecraft.util.Hand;
 import net.minecraft.util.ActionResult;
 import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.hit.HitResult;
 import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.RaycastContext;
@@ -36,6 +39,7 @@ import net.wcfcarolina13.GameAI.services.BotArrowRecoveryService;
 import net.wcfcarolina13.GameAI.services.BotTerritoryAuthorizationService;
 import net.wcfcarolina13.GameAI.services.FoodConsumptionConfirmationService;
 import net.wcfcarolina13.GameAI.services.HotbarLockService;
+import net.wcfcarolina13.GameAI.services.VillageStructureProtectionService;
 
 
 
@@ -89,6 +93,7 @@ public final class BotActions {
     private static final double SURVIVAL_REACH_SQ = 4.5D * 4.5D;
 
     private static final Map<UUID, RangedAttackState> RANGED_STATE = new HashMap<>();
+    private static final Map<UUID, String> LAST_COMBAT_PROFILE = new HashMap<>();
 
     private BotActions() {}
 
@@ -201,17 +206,27 @@ public final class BotActions {
         if (lenSq < 1e-6) {
             return;
         }
-        Vec3d impulse = delta.normalize().multiply(maxImpulse);
+        ServerWorld world = bot.getEntityWorld() instanceof ServerWorld sw ? sw : null;
+        boolean waterLike = isWaterLikeMovementContext(bot, world);
+        double tunedImpulse = maxImpulse;
+        if (waterLike) {
+            tunedImpulse = Math.min(tunedImpulse, bot.isSubmergedInWater() ? 0.055D : 0.038D);
+        }
+        Vec3d impulse = delta.normalize().multiply(tunedImpulse);
 
         // Clamp horizontal velocity so repeated inputs do not spike speed.
         Vec3d current = bot.getVelocity();
         Vec3d horiz = new Vec3d(current.x, 0, current.z);
         double horizMag = horiz.length();
-        double maxHoriz = 0.6;
+        double maxHoriz = waterLike ? (bot.isSubmergedInWater() ? 0.18D : 0.12D) : 0.45D;
         if (horizMag > maxHoriz) {
             double scale = maxHoriz / horizMag;
             current = new Vec3d(horiz.x * scale, current.y, horiz.z * scale);
             bot.setVelocity(current);
+        }
+
+        if (world != null && !canOccupyPosition(bot, world, pos.x + impulse.x, bot.getY(), pos.z + impulse.z)) {
+            return;
         }
 
         bot.addVelocity(impulse.x, 0, impulse.z);
@@ -395,6 +410,98 @@ public final class BotActions {
         return false;
     }
 
+    public static boolean selectHarvestToolOrHands(ServerPlayerEntity bot, String preferKeyword) {
+        if (bot == null) {
+            return false;
+        }
+        String normalizedPrefer = preferKeyword != null ? preferKeyword.toLowerCase(Locale.ROOT) : null;
+        PlayerInventory inventory = bot.getInventory();
+        int harmlessHotbarSlot = -1;
+        int emptyHotbarSlot = -1;
+
+        for (int slot = 0; slot < 9; slot++) {
+            ItemStack stack = inventory.getStack(slot);
+            if (stack.isEmpty()) {
+                if (emptyHotbarSlot == -1) {
+                    emptyHotbarSlot = slot;
+                }
+                continue;
+            }
+            String key = stack.getItem().getTranslationKey().toLowerCase(Locale.ROOT);
+            if (normalizedPrefer != null && key.contains(normalizedPrefer) && !isCombatClassItem(stack)) {
+                selectHotbarSlot(bot, slot);
+                return true;
+            }
+            if (harmlessHotbarSlot == -1 && isHarmlessHarvestFallback(stack)) {
+                harmlessHotbarSlot = slot;
+            }
+        }
+
+        int preferredMainSlot = -1;
+        int harmlessMainSlot = -1;
+        for (int slot = 9; slot < PlayerInventory.MAIN_SIZE; slot++) {
+            ItemStack stack = inventory.getStack(slot);
+            if (stack.isEmpty()) {
+                continue;
+            }
+            String key = stack.getItem().getTranslationKey().toLowerCase(Locale.ROOT);
+            if (normalizedPrefer != null && key.contains(normalizedPrefer) && !isCombatClassItem(stack)) {
+                preferredMainSlot = slot;
+                break;
+            }
+            if (harmlessMainSlot == -1 && isHarmlessHarvestFallback(stack)) {
+                harmlessMainSlot = slot;
+            }
+        }
+
+        if (preferredMainSlot != -1) {
+            int hotbarTarget = emptyHotbarSlot != -1 ? emptyHotbarSlot : (harmlessHotbarSlot != -1 ? harmlessHotbarSlot : 0);
+            swapInventoryStacks(inventory, preferredMainSlot, hotbarTarget);
+            selectHotbarSlot(bot, hotbarTarget);
+            return true;
+        }
+        if (emptyHotbarSlot != -1) {
+            selectHotbarSlot(bot, emptyHotbarSlot);
+            return true;
+        }
+        if (harmlessHotbarSlot != -1) {
+            selectHotbarSlot(bot, harmlessHotbarSlot);
+            return true;
+        }
+        if (harmlessMainSlot != -1) {
+            swapInventoryStacks(inventory, harmlessMainSlot, 0);
+            selectHotbarSlot(bot, 0);
+            return true;
+        }
+        return false;
+    }
+
+    public static boolean isCombatClassItem(ItemStack stack) {
+        if (stack == null || stack.isEmpty()) {
+            return false;
+        }
+        String key = stack.getItem().getTranslationKey();
+        if (key == null || key.isBlank()) {
+            return false;
+        }
+        String lower = key.toLowerCase(Locale.ROOT);
+        return lower.contains("sword")
+                || lower.contains("trident")
+                || lower.contains("mace")
+                || lower.contains("spear")
+                || lower.contains("dagger")
+                || lower.contains("bow")
+                || lower.contains("crossbow")
+                || lower.contains("shield");
+    }
+
+    private static boolean isHarmlessHarvestFallback(ItemStack stack) {
+        return stack != null
+                && !stack.isEmpty()
+                && !isCombatClassItem(stack)
+                && stack.getMiningSpeedMultiplier(Blocks.STONE.getDefaultState()) <= 1.0f;
+    }
+
     public static void jumpForward(ServerPlayerEntity bot) {
         jump(bot);
         moveRelative(bot, STEP_DISTANCE * 0.6, false, 0, 0);
@@ -418,6 +525,7 @@ public final class BotActions {
         double distanceSq = target.squaredDistanceTo(bot);
         if (distanceSq > 9.0 || !bot.canSee(target)) return;
 
+        maybeLogCombatProfile(bot, describeMeleeProfile(bot.getMainHandStack()));
         float cooldown = bot.getAttackCooldownProgress(0.5f);
 
         // Crit jump: initiate jump mid-cooldown so we're falling when we swing.
@@ -1150,6 +1258,16 @@ public final class BotActions {
         if (state.isOf(Blocks.DIRT_PATH)) {
             return false;
         }
+        // Generic movement/unstuck breaking must stay conservative around player structures and villages.
+        if (state.isIn(BlockTags.LOGS) || state.isIn(BlockTags.PLANKS) || state.isIn(BlockTags.WOOL)) {
+            return false;
+        }
+        if (VillageStructureProtectionService.isVillageProtectedForGenericBreaking(world, pos)) {
+            LOGGER.info("Generic break rejected for {} at {} due to village protection",
+                    bot != null ? bot.getName().getString() : "unknown-bot",
+                    pos.toShortString());
+            return false;
+        }
 
         float hardness = state.getHardness(world, pos);
         if (hardness < 0) {
@@ -1190,6 +1308,8 @@ public final class BotActions {
         if (!canBreak(world, pos, bot, forceBreak)) {
             return false;
         }
+        // Face the block before breaking (vanilla parity)
+        LookController.faceBlock(bot, pos);
         // Attempt a physical break using the interaction manager (no instant removal)
         boolean success = bot.interactionManager.tryBreakBlock(pos);
         if (success) {
@@ -1338,6 +1458,10 @@ public final class BotActions {
             }
         }
 
+        if (world != null && !canOccupyPosition(bot, world, newX, newY, newZ)) {
+            return;
+        }
+
         bot.refreshPositionAndAngles(newX, newY, newZ, bot.getYaw(), bot.getPitch());
     }
     
@@ -1354,6 +1478,37 @@ public final class BotActions {
         // Air, water, lava (bot can handle), and other non-solid blocks
         return (feet.isAir() || !feet.blocksMovement()) && 
                (head.isAir() || !head.blocksMovement());
+    }
+
+    private static boolean canOccupyPosition(ServerPlayerEntity bot,
+                                             ServerWorld world,
+                                             double x,
+                                             double y,
+                                             double z) {
+        if (bot == null || world == null) {
+            return false;
+        }
+        BlockPos feet = BlockPos.ofFloored(x, y, z);
+        if (!hasMovementClearance(world, feet)) {
+            return false;
+        }
+        Box targetBox = bot.getBoundingBox().offset(x - bot.getX(), y - bot.getY(), z - bot.getZ());
+        return world.isSpaceEmpty(bot, targetBox);
+    }
+
+    private static boolean isWaterLikeMovementContext(ServerPlayerEntity bot, ServerWorld world) {
+        if (bot == null) {
+            return false;
+        }
+        if (bot.isTouchingWater() || bot.isSwimming()) {
+            return true;
+        }
+        if (world == null) {
+            return false;
+        }
+        BlockPos feet = bot.getBlockPos();
+        return world.getFluidState(feet).isIn(FluidTags.WATER)
+                || world.getFluidState(feet.up()).isIn(FluidTags.WATER);
     }
 
     private static int findEmptyHotbarSlot(PlayerInventory inventory) {
@@ -1622,6 +1777,7 @@ public final class BotActions {
                 return false;
             }
             state.ensureTarget(target);
+            maybeLogCombatProfile(bot, "trident-throw");
             return handleChargeWeapon(bot, target, selection.hand, stack, state, serverTick, 10);
         }
 
@@ -1707,6 +1863,9 @@ public final class BotActions {
     }
 
     private static boolean canFire(ServerPlayerEntity bot, ItemStack weapon) {
+        if (weapon.getItem() instanceof net.minecraft.item.TridentItem) {
+            return true;
+        }
         ItemStack projectile = bot.getProjectileType(weapon);
         return !projectile.isEmpty() || bot.getAbilities().creativeMode;
     }
@@ -1753,10 +1912,41 @@ public final class BotActions {
         if (stack.isEmpty()) {
             return false;
         }
-        // Trident excluded: canFire() fails because tridents don't use getProjectileType().
-        // Treating them as ranged causes the bot to waste ticks on failed ranged attacks.
         return stack.getItem() instanceof net.minecraft.item.BowItem ||
-                stack.getItem() instanceof net.minecraft.item.CrossbowItem;
+                stack.getItem() instanceof net.minecraft.item.CrossbowItem ||
+                stack.getItem() instanceof net.minecraft.item.TridentItem;
+    }
+
+    private static String describeMeleeProfile(ItemStack stack) {
+        if (stack == null || stack.isEmpty()) {
+            return null;
+        }
+        if (isSword(stack)) {
+            return "sword-sweep";
+        }
+        if (isSpear(stack)) {
+            return "spear-charge";
+        }
+        String key = stack.getItem().getTranslationKey().toLowerCase(Locale.ROOT);
+        if (key.contains("mace")) {
+            return "mace-standard";
+        }
+        return null;
+    }
+
+    private static void maybeLogCombatProfile(ServerPlayerEntity bot, String profile) {
+        if (bot == null || profile == null || profile.isBlank()) {
+            return;
+        }
+        String previous = LAST_COMBAT_PROFILE.get(bot.getUuid());
+        if (profile.equals(previous)) {
+            return;
+        }
+        LAST_COMBAT_PROFILE.put(bot.getUuid(), profile);
+        LOGGER.info("Combat profile: bot={} profile={} weapon={}",
+                bot.getName().getString(),
+                profile,
+                bot.getMainHandStack().isEmpty() ? "empty" : bot.getMainHandStack().getName().getString());
     }
 
     public static void resetRangedState(ServerPlayerEntity bot) {

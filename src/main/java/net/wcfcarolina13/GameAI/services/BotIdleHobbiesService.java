@@ -6,6 +6,7 @@ import net.minecraft.entity.Entity;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.passive.PassiveEntity;
 import net.minecraft.registry.tag.BlockTags;
+import net.minecraft.registry.tag.ItemTags;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.network.ServerPlayerEntity;
@@ -20,11 +21,14 @@ import net.wcfcarolina13.GameAI.skills.impl.HuntSkill;
 import net.wcfcarolina13.GameAI.skills.SkillContext;
 import net.wcfcarolina13.GameAI.skills.SkillExecutionResult;
 import net.wcfcarolina13.GameAI.skills.SkillManager;
+import net.wcfcarolina13.GameAI.skills.support.TreeDetector;
+import net.wcfcarolina13.PlayerUtils.CombatInventoryManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.HashMap;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Map;
 import java.util.Locale;
 import java.util.Random;
@@ -61,6 +65,14 @@ public final class BotIdleHobbiesService {
     // (e.g., hangout starts before the bot is restored near the campfire).
     private static final long JOIN_GRACE_TICKS = 60L; // ~3 seconds
     private static final Map<UUID, Long> FIRST_SEEN_TICK = new ConcurrentHashMap<>();
+    private static final long LONG_IDLE_PROMOTION_TICKS = 24_000L;
+    private static final Map<UUID, Long> IDLE_SINCE_TICK = new ConcurrentHashMap<>();
+    private static final long WOODEN_FALLBACK_COOLDOWN_TICKS = 20L * 12L;
+    private static final long WOODEN_FALLBACK_CRAFT_RETRY_TICKS = 20L * 20L;
+    private static final int WOODEN_FALLBACK_STARVING_HUNGER = 10;
+    private static final long FOOD_RECHECK_TICKS = 40L;
+    private static final Map<UUID, Long> NEXT_WOODEN_FALLBACK_TICK = new ConcurrentHashMap<>();
+    private static final Map<UUID, Integer> LAST_WOODEN_FALLBACK_SIGNATURE = new ConcurrentHashMap<>();
 
     private static final Map<UUID, String> LAST_HOBBY = new ConcurrentHashMap<>();
     private static final Map<UUID, Long> LAST_HOBBY_END_MS = new ConcurrentHashMap<>();
@@ -77,6 +89,9 @@ public final class BotIdleHobbiesService {
         LAST_HOBBY.clear();
         LAST_HOBBY_END_MS.clear();
         FIRST_SEEN_TICK.clear();
+        IDLE_SINCE_TICK.clear();
+        NEXT_WOODEN_FALLBACK_TICK.clear();
+        LAST_WOODEN_FALLBACK_SIGNATURE.clear();
         LAST_BLOCKED_REASON_KEY.clear();
         LAST_BLOCKED_REASON_LOG_TICK.clear();
     }
@@ -157,7 +172,7 @@ public final class BotIdleHobbiesService {
     }
 
     public static void onServerTick(MinecraftServer server) {
-        if (server == null) {
+        if (server == null || TaskService.isServerStopping()) {
             return;
         }
 
@@ -167,23 +182,34 @@ public final class BotIdleHobbiesService {
             if (bot == null || bot.isRemoved()) {
                 continue;
             }
+            UUID botUuid = bot.getUuid();
             if (!BotHomeService.isIdleHobbiesEnabled(bot)) {
+                IDLE_SINCE_TICK.remove(botUuid);
+                clearWoodenFallbackState(botUuid);
                 continue;
             }
             if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
+                IDLE_SINCE_TICK.remove(botUuid);
+                clearWoodenFallbackState(botUuid);
                 continue;
             }
             if (world.getRegistryKey() != World.OVERWORLD) {
+                IDLE_SINCE_TICK.remove(botUuid);
+                clearWoodenFallbackState(botUuid);
                 noteBlocked(bot, nowTick, "not-overworld");
                 continue;
             }
             if (bot.isSleeping()) {
+                IDLE_SINCE_TICK.remove(botUuid);
+                clearWoodenFallbackState(botUuid);
                 noteBlocked(bot, nowTick, "sleeping");
                 continue;
             }
 
             // Only start hobbies when truly idle (not following, not guard/patrol, not returning).
             if (BotEventHandler.getCurrentMode(bot) != BotEventHandler.Mode.IDLE) {
+                IDLE_SINCE_TICK.remove(botUuid);
+                clearWoodenFallbackState(botUuid);
                 noteBlocked(bot, nowTick, "mode-not-idle", String.valueOf(BotEventHandler.getCurrentMode(bot)));
                 continue;
             }
@@ -191,34 +217,68 @@ public final class BotIdleHobbiesService {
             // Extra safety: if follow/base intent is set but mode is momentarily IDLE, don't start a hobby.
             // This prevents hobbies from stealing control while a follow is active.
             if (BotEventHandler.getFollowTargetUuid(bot) != null || BotEventHandler.getBaseTarget(bot) != null) {
+                IDLE_SINCE_TICK.remove(botUuid);
+                clearWoodenFallbackState(botUuid);
                 noteBlocked(bot, nowTick, "follow-or-base-intent");
                 continue;
             }
 
-            // Never compete with a task.
-            if (TaskService.hasActiveTask(bot.getUuid())) {
+            // Never compete with a task, but let starvation preempt low-priority ambient work.
+            var activeTask = TaskService.getActiveTaskInfo(bot.getUuid());
+            if (activeTask.isPresent()) {
+                if (tryInterruptLowPriorityAmbientForFood(bot, world, activeTask.get(), nowTick)) {
+                    IDLE_SINCE_TICK.remove(botUuid);
+                    clearWoodenFallbackState(botUuid);
+                    noteBlocked(bot, nowTick, "food-preempt");
+                    continue;
+                }
+                IDLE_SINCE_TICK.remove(botUuid);
+                clearWoodenFallbackState(botUuid);
                 noteBlocked(bot, nowTick, "active-task");
+                continue;
+            }
+            if (BotFleeService.isBreakingFree(bot.getUuid())) {
+                IDLE_SINCE_TICK.remove(botUuid);
+                clearWoodenFallbackState(botUuid);
+                noteBlocked(bot, nowTick, "break-free");
                 continue;
             }
             if (BotFleeService.isInShelter(bot.getUuid())) {
                 // Auto-clear stale shelter if it's daytime — validateAndTickShelter may not have run yet
                 if (world.isDay() && !world.isThundering()) {
-                    BotFleeService.clearShelter(bot.getUuid());
-                    LOGGER.info("Cleared stale shelter for {} (daytime) — hobbies unblocked",
+                    // fire-and-forget: break-free runs on worker thread; isBreakingFree guards next tick
+                    BotFleeService.clearShelterAndBreakFree(bot);
+                    LOGGER.info("Cleared stale shelter for {} (daytime) — break-free launched, skipping hobby tick",
                             bot.getName().getString());
+                    continue; // let break-free finish before starting hobbies
                 } else {
+                    IDLE_SINCE_TICK.remove(botUuid);
+                    clearWoodenFallbackState(botUuid);
                     noteBlocked(bot, nowTick, "sheltered");
                     continue;
                 }
             }
+
+            if (BotFleeService.tryResumeInterruptedSurvival(bot, server)) {
+                IDLE_SINCE_TICK.remove(botUuid);
+                clearWoodenFallbackState(botUuid);
+                noteBlocked(bot, nowTick, "resume-survival");
+                continue;
+            }
+            if (BotFleeService.hasPendingInterruptedSurvival(botUuid)) {
+                IDLE_SINCE_TICK.remove(botUuid);
+                clearWoodenFallbackState(botUuid);
+                noteBlocked(bot, nowTick, "pending-survival-resume");
+                continue;
+            }
+
+            IDLE_SINCE_TICK.putIfAbsent(botUuid, nowTick);
 
             int tod = (int) (world.getTimeOfDay() % 24_000L);
             if (tod >= DONT_START_AFTER_TOD) {
                 noteBlocked(bot, nowTick, "late-day");
                 continue;
             }
-
-            UUID botUuid = bot.getUuid();
 
             // First-seen grace window: let persistence restoration and chunk ticketing settle.
             Long firstSeen = FIRST_SEEN_TICK.putIfAbsent(botUuid, nowTick);
@@ -228,6 +288,33 @@ public final class BotIdleHobbiesService {
             }
             if (nowTick - firstSeen < JOIN_GRACE_TICKS) {
                 noteBlocked(bot, nowTick, "join-grace");
+                continue;
+            }
+
+            if (HealingService.isHungry(bot)) {
+                if (BotMutualAidService.tryUrgentFoodRecovery(bot, world)) {
+                    NEXT_DECISION_TICK.put(botUuid, nowTick + FOOD_RECHECK_TICKS);
+                    noteBlocked(bot, nowTick, "food-urgent");
+                    continue;
+                }
+                if (BotFleeService.isSurfaceRecoveryActive(botUuid)) {
+                    NEXT_DECISION_TICK.put(botUuid, nowTick + FOOD_RECHECK_TICKS);
+                    noteBlocked(bot, nowTick, "surface-recovery");
+                    continue;
+                }
+                if (HealingService.isStarving(bot)
+                        && BotEmergencyRescueService.tryEmergencyRescue(bot, world, "idle-hungry")) {
+                    NEXT_DECISION_TICK.put(botUuid, nowTick + FOOD_RECHECK_TICKS);
+                    noteBlocked(bot, nowTick, "food-rescue");
+                    continue;
+                }
+                BotAutoHuntService.requestDecisionNow(bot);
+                NEXT_DECISION_TICK.put(botUuid, nowTick + FOOD_RECHECK_TICKS);
+                noteBlocked(bot, nowTick, "hungry-block");
+                continue;
+            }
+
+            if (maybeHandleIdleWoodenFallback(server, bot, world, nowTick)) {
                 continue;
             }
 
@@ -263,9 +350,10 @@ public final class BotIdleHobbiesService {
                 }
             }
 
-            String hobby = pickHobby(bot, world);
+            boolean preferFood = hasBeenIdleLong(botUuid, nowTick);
+            String hobby = pickHobby(bot, world, preferFood);
             if (hobby == null) {
-                hobby = pickFallbackHobby(bot, world);
+                hobby = pickFallbackHobby(bot, world, preferFood);
                 if (hobby == null) {
                     // No suitable hobby for current inventory/terrain; try again later.
                     NEXT_DECISION_TICK.put(bot.getUuid(), nowTick + 400L + RNG.nextInt(400));
@@ -309,7 +397,7 @@ public final class BotIdleHobbiesService {
         return BlockPos.ORIGIN;
     }
 
-    private static String pickHobby(ServerPlayerEntity bot, ServerWorld world) {
+    private static String pickHobby(ServerPlayerEntity bot, ServerWorld world, boolean preferFood) {
         if (bot == null || world == null) {
             return null;
         }
@@ -320,17 +408,28 @@ public final class BotIdleHobbiesService {
         boolean hasCampfireNearby = hasNearbyBlock(world, bot.getBlockPos(), campfireRadius, net.minecraft.block.Blocks.CAMPFIRE)
             || hasNearbyBlock(world, bot.getBlockPos(), campfireRadius, net.minecraft.block.Blocks.SOUL_CAMPFIRE);
 
-        boolean huntUnlocked = HuntHistoryService.hasAnyFoodKill(world);
         boolean healthy = bot.getHealth() >= 18.0F && bot.getHungerManager().getFoodLevel() >= 16;
-        boolean canHunt = huntUnlocked
-                && healthy
+        boolean canHunt = healthy
                 && !world.isThundering()
                 && HuntSkill.hasAmbientHuntCandidate(bot, world);
         boolean canFeedAnimals = hasFeedTargets(bot, world);
         boolean canPickFlowers = hasNearbyFlowers(world, bot.getBlockPos(), 18);
+        boolean canGatherSeeds = hasNearbyGrass(world, bot.getBlockPos(), 16);
+        boolean canShadowCompanion = hasNearbyAmbientCompanion(bot, world);
 
         // Build weighted options so available hobbies actually trigger instead of idling on random misses.
         ArrayList<String> weighted = new ArrayList<>();
+        if (preferFood) {
+            if (canHunt) {
+                weighted.add("hunt");
+                weighted.add("hunt");
+                weighted.add("hunt");
+            }
+            if (hasWaterNearby) {
+                weighted.add("fish");
+                weighted.add("fish");
+            }
+        }
         if (hasWaterNearby) {
             weighted.add("fish");
             weighted.add("fish");
@@ -344,8 +443,15 @@ public final class BotIdleHobbiesService {
             weighted.add("flowers");
             weighted.add("flowers");
         }
+        if (canGatherSeeds) {
+            weighted.add("grass_seeds");
+            weighted.add("grass_seeds");
+        }
         if (canHunt) {
             weighted.add("hunt");
+        }
+        if (canShadowCompanion) {
+            weighted.add("shadow_companion");
         }
         // Hangout is only valid when a campfire is actually nearby.
         if (hasCampfireNearby) {
@@ -357,7 +463,7 @@ public final class BotIdleHobbiesService {
         return weighted.get(RNG.nextInt(weighted.size()));
     }
 
-    private static String pickFallbackHobby(ServerPlayerEntity bot, ServerWorld world) {
+    private static String pickFallbackHobby(ServerPlayerEntity bot, ServerWorld world, boolean preferFood) {
         if (bot == null || world == null) {
             return null;
         }
@@ -367,13 +473,23 @@ public final class BotIdleHobbiesService {
                 || hasNearbyBlock(world, bot.getBlockPos(), 24, net.minecraft.block.Blocks.SOUL_CAMPFIRE);
         boolean canFeedAnimals = hasFeedTargets(bot, world);
         boolean canPickFlowers = hasNearbyFlowers(world, bot.getBlockPos(), 18);
-        boolean canHunt = HuntHistoryService.hasAnyFoodKill(world)
-                && bot.getHealth() >= 18.0F
+        boolean canHunt = bot.getHealth() >= 18.0F
                 && bot.getHungerManager().getFoodLevel() >= 16
                 && !world.isThundering()
                 && HuntSkill.hasAmbientHuntCandidate(bot, world);
         boolean canCollectLeafLitter = hasNearbyLeafLitter(world, bot.getBlockPos(), 14);
         boolean canForageMushrooms = hasNearbyMushrooms(world, bot.getBlockPos(), 16);
+        boolean canGatherSeeds = hasNearbyGrass(world, bot.getBlockPos(), 16);
+        boolean canShadowCompanion = hasNearbyAmbientCompanion(bot, world);
+
+        if (preferFood) {
+            if (canHunt) {
+                return "hunt";
+            }
+            if (hasWaterNearby) {
+                return "fish";
+            }
+        }
 
         if (canFeedAnimals) {
             return "feed_animals";
@@ -384,8 +500,14 @@ public final class BotIdleHobbiesService {
         if (canPickFlowers) {
             return "flowers";
         }
+        if (canGatherSeeds) {
+            return "grass_seeds";
+        }
         if (canHunt) {
             return "hunt";
+        }
+        if (canShadowCompanion) {
+            return "shadow_companion";
         }
         // Never force hangout unless a campfire exists nearby.
         if (hasCampfireNearby) {
@@ -482,6 +604,56 @@ public final class BotIdleHobbiesService {
         return false;
     }
 
+    private static boolean hasNearbyGrass(ServerWorld world, BlockPos origin, int radius) {
+        if (world == null || origin == null) {
+            return false;
+        }
+        int r = Math.max(6, radius);
+        for (BlockPos pos : BlockPos.iterate(origin.add(-r, -2, -r), origin.add(r, 2, r))) {
+            if (!world.isChunkLoaded(pos)) {
+                continue;
+            }
+            var state = world.getBlockState(pos);
+            if (state.isOf(net.minecraft.block.Blocks.SHORT_GRASS)
+                    || state.isOf(net.minecraft.block.Blocks.TALL_GRASS)
+                    || state.isOf(net.minecraft.block.Blocks.FERN)
+                    || state.isOf(net.minecraft.block.Blocks.LARGE_FERN)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean hasNearbyAmbientCompanion(ServerPlayerEntity bot, ServerWorld world) {
+        if (bot == null || world == null) {
+            return false;
+        }
+        UUID owner = BotTerritoryAuthorizationService.resolveBotOwnerUuid(bot);
+        if (owner == null) {
+            return false;
+        }
+        for (ServerPlayerEntity other : BotEventHandler.getRegisteredBots(world.getServer())) {
+            if (other == null || other == bot || other.isRemoved() || !other.isAlive()) {
+                continue;
+            }
+            if (other.getEntityWorld() != world) {
+                continue;
+            }
+            if (bot.squaredDistanceTo(other) > 18.0D * 18.0D) {
+                continue;
+            }
+            if (!owner.equals(BotTerritoryAuthorizationService.resolveBotOwnerUuid(other))) {
+                continue;
+            }
+            TaskService.ActiveTaskInfo active = TaskService.getActiveTaskInfo(other.getUuid()).orElse(null);
+            if (active == null || active.origin() != TaskService.Origin.AMBIENT) {
+                continue;
+            }
+            return true;
+        }
+        return false;
+    }
+
     private static boolean hasFeedTargets(ServerPlayerEntity bot, ServerWorld world) {
         if (bot == null || world == null) {
             return false;
@@ -504,7 +676,7 @@ public final class BotIdleHobbiesService {
     }
 
     private static void startAmbientSkill(MinecraftServer server, ServerPlayerEntity bot, String skillName) {
-        if (server == null || bot == null || skillName == null || skillName.isBlank()) {
+        if (server == null || bot == null || skillName == null || skillName.isBlank() || TaskService.isServerStopping()) {
             return;
         }
         UUID botUuid = bot.getUuid();
@@ -540,42 +712,93 @@ public final class BotIdleHobbiesService {
             params.put("radius", 18);
         }
 
-        if ("wander".equalsIgnoreCase(skillName)) {
+        String runSkillName = skillName;
+
+        if ("wander".equalsIgnoreCase(runSkillName)) {
             params.put("radius", 10 + RNG.nextInt(6)); // 10-15
             params.put("steps", 3 + RNG.nextInt(2));   // 3-4
         }
 
-        if ("leaf_litter".equalsIgnoreCase(skillName)) {
+        if ("shadow_companion".equalsIgnoreCase(runSkillName)) {
+            params.put("shadow_companion", true);
+            params.put("radius", 6);
+            params.put("steps", 2 + RNG.nextInt(2));
+            runSkillName = "wander";
+        }
+
+        if ("leaf_litter".equalsIgnoreCase(runSkillName)) {
             params.put("count", 3 + RNG.nextInt(3));   // 3-5
             params.put("radius", 10 + RNG.nextInt(5)); // 10-14
         }
 
-        if ("mushrooms".equalsIgnoreCase(skillName)) {
+        if ("mushrooms".equalsIgnoreCase(runSkillName)) {
             params.put("count", 2 + RNG.nextInt(2));   // 2-3
             params.put("radius", 10 + RNG.nextInt(5)); // 10-14
+        }
+
+        if ("grass_seeds".equalsIgnoreCase(runSkillName)) {
+            params.put("count", 3 + RNG.nextInt(3));
+            params.put("radius", 10 + RNG.nextInt(5));
+        }
+
+        if ("woodcut".equalsIgnoreCase(runSkillName)) {
+            params.put("count", 1);
+            params.put("searchRadius", 10);
+            params.put("verticalRange", 6);
+            params.put("replantSaplings", false);
+            params.put("wooden_fallback", true);
         }
 
 
         // Ambient hangouts should be short so they don't starve other hobbies (like fishing) after failures.
         // If a user explicitly runs /bot ... hangout they can still pass duration_sec.
-        if ("hangout".equalsIgnoreCase(skillName)) {
+        if ("hangout".equalsIgnoreCase(runSkillName)) {
             params.put("duration_sec", 25 + RNG.nextInt(26)); // 25–50s
             params.put("until_sunset", true);
         }
 
+        final String skillToRun = runSkillName;
+        final boolean woodenFallback = Boolean.TRUE.equals(params.get("wooden_fallback"));
+
         AMBIENT_EXECUTOR.submit(() -> {
             try {
+                if (TaskService.isServerStopping()) {
+                    return;
+                }
+                if (requiresOperationalSurface(skillToRun)
+                        && bot.getEntityWorld() instanceof ServerWorld sw
+                        && !BotFleeService.isAtSurface(bot, sw)) {
+                    LOGGER.info("Idle hobby: {} not at surface — escaping before '{}'",
+                            bot.getName().getString(), skillToRun);
+                    if (!BotFleeService.ensureAtSurface(bot, sw)) {
+                        LOGGER.warn("Idle hobby: {} could not reach surface, skipping '{}'",
+                                bot.getName().getString(), skillToRun);
+                        server.execute(() -> {
+                            if (!bot.isRemoved() && bot.isAlive()) {
+                                NEXT_DECISION_TICK.put(botUuid, server.getTicks() + 600L);
+                                if (woodenFallback) {
+                                    NEXT_WOODEN_FALLBACK_TICK.put(botUuid, server.getTicks() + 600L);
+                                }
+                            }
+                        });
+                        LAST_HOBBY_END_MS.put(botUuid, System.currentTimeMillis());
+                        return;
+                    }
+                }
                 SkillContext skillContext = new SkillContext(botSource, SharedStateService.safeSharedState("idle-hobbies"), params, botSource);
-                SkillExecutionResult result = SkillManager.runSkill(skillName, skillContext);
+                SkillExecutionResult result = SkillManager.runSkill(skillToRun, skillContext);
                 // We intentionally do not echo result here; many skills already speak during execution.
                 LOGGER.info("Idle hobby '{}' finished for {}: success={} msg='{}'",
-                        skillName, bot.getName().getString(), result != null && result.success(), result != null ? result.message() : "null");
+                        skillToRun, bot.getName().getString(), result != null && result.success(), result != null ? result.message() : "null");
                 LAST_HOBBY_END_MS.put(botUuid, System.currentTimeMillis());
 
                 // Schedule the next decision relative to completion time.
                 // - Success: wait a bit so hobbies feel “occasional”, not spammy.
                 // - Failure: retry sooner so the bot can pick a different hobby or re-attempt after moving.
                 server.execute(() -> {
+                    if (TaskService.isServerStopping()) {
+                        return;
+                    }
                     if (bot.isRemoved() || !bot.isAlive()) {
                         return;
                     }
@@ -587,20 +810,253 @@ public final class BotIdleHobbiesService {
                     }
                     long now = server.getTicks();
                     boolean ok = result != null && result.success();
-                    long delay = ok
-                            ? (300L + RNG.nextInt(300))   // 15–30s
-                            : 200L;                       // 10s
+                    long delay;
+                    if (woodenFallback) {
+                        delay = ok ? 20L : WOODEN_FALLBACK_COOLDOWN_TICKS;
+                    } else {
+                        delay = ok
+                                ? (300L + RNG.nextInt(300))   // 15–30s
+                                : 200L;                       // 10s
+                    }
                     NEXT_DECISION_TICK.put(botUuid, now + delay);
                 });
             } catch (Throwable t) {
                 LOGGER.warn("Idle hobby '{}' crashed for {}: {}",
-                        skillName,
+                        skillToRun,
                         bot.getName().getString(),
                         t.getClass().getSimpleName(),
                         t);
                 LAST_HOBBY_END_MS.put(botUuid, System.currentTimeMillis());
             }
         });
+    }
+
+    private static boolean requiresOperationalSurface(String skillName) {
+        if (skillName == null) {
+            return false;
+        }
+        String normalized = skillName.trim().toLowerCase(Locale.ROOT);
+        return switch (normalized) {
+            case "hunt", "flowers", "wander", "leaf_litter", "mushrooms", "feed_animals", "hangout", "grass_seeds", "woodcut" -> true;
+            default -> false;
+        };
+    }
+
+    private static boolean maybeHandleIdleWoodenFallback(MinecraftServer server,
+                                                         ServerPlayerEntity bot,
+                                                         ServerWorld world,
+                                                         long nowTick) {
+        if (server == null || bot == null || world == null || bot.getCommandSource() == null) {
+            return false;
+        }
+        UUID botUuid = bot.getUuid();
+        if (bot.getHungerManager().getFoodLevel() <= WOODEN_FALLBACK_STARVING_HUNGER) {
+            return false;
+        }
+        boolean needWeapon = !ToolProvisionService.hasServiceableMeleeWeapon(bot);
+        boolean needAxe = !ToolProvisionService.hasUsableAxe(bot);
+        if (!needWeapon && !needAxe) {
+            clearWoodenFallbackState(botUuid);
+            return false;
+        }
+
+        int signature = ToolProvisionService.computeAccessibleIdleFallbackSignature(bot, world);
+        Integer lastSignature = LAST_WOODEN_FALLBACK_SIGNATURE.get(botUuid);
+        if (lastSignature == null || lastSignature.intValue() != signature) {
+            LAST_WOODEN_FALLBACK_SIGNATURE.put(botUuid, signature);
+            NEXT_WOODEN_FALLBACK_TICK.remove(botUuid);
+        }
+
+        long nextAllowed = NEXT_WOODEN_FALLBACK_TICK.getOrDefault(botUuid, 0L);
+        if (nowTick < nextAllowed) {
+            return true;
+        }
+
+        boolean moved = ToolProvisionService.pullNearbyAccessibleIdleFallbackSupplies(bot, world, needWeapon, needAxe);
+        boolean craftReady = ToolProvisionService.canCraftIdleWoodenFallback(bot, needWeapon, needAxe);
+        boolean crafted = craftReady && tryCraftIdleWoodenFallback(bot);
+        CombatInventoryManager.ensureCombatLoadout(bot);
+        if (!ToolProvisionService.hasServiceableMeleeWeapon(bot) || !ToolProvisionService.hasUsableAxe(bot)) {
+            if (!BotFleeService.isAtSurface(bot, world)) {
+                NEXT_WOODEN_FALLBACK_TICK.put(botUuid, nowTick + 600L);
+                LAST_WOODEN_FALLBACK_SIGNATURE.put(botUuid, ToolProvisionService.computeAccessibleIdleFallbackSignature(bot, world));
+                return true;
+            }
+            if (craftReady && !crafted) {
+                long retryAt = nowTick + WOODEN_FALLBACK_CRAFT_RETRY_TICKS;
+                NEXT_WOODEN_FALLBACK_TICK.put(botUuid, retryAt);
+                LAST_WOODEN_FALLBACK_SIGNATURE.put(botUuid, ToolProvisionService.computeAccessibleIdleFallbackSignature(bot, world));
+                LOGGER.warn("Idle wooden fallback: {} craft attempt failed; backing off for {} ticks",
+                        bot.getName().getString(),
+                        WOODEN_FALLBACK_CRAFT_RETRY_TICKS);
+                return true;
+            }
+            if (canStartFallbackWoodcut(world, bot)) {
+                NEXT_WOODEN_FALLBACK_TICK.put(botUuid, nowTick + WOODEN_FALLBACK_COOLDOWN_TICKS);
+                LAST_WOODEN_FALLBACK_SIGNATURE.put(botUuid, ToolProvisionService.computeAccessibleIdleFallbackSignature(bot, world));
+                startAmbientSkill(server, bot, "woodcut");
+                LOGGER.info("Idle wooden fallback: starting one-tree woodcut for {}", bot.getName().getString());
+                return true;
+            }
+            if (moved || crafted) {
+                NEXT_WOODEN_FALLBACK_TICK.put(botUuid, nowTick + 40L);
+                LAST_WOODEN_FALLBACK_SIGNATURE.put(botUuid, ToolProvisionService.computeAccessibleIdleFallbackSignature(bot, world));
+                return true;
+            }
+            long retryAt = isTooLateForWoodcut(world)
+                    ? nowTick + ticksUntilMorning(world)
+                    : nowTick + WOODEN_FALLBACK_COOLDOWN_TICKS;
+            NEXT_WOODEN_FALLBACK_TICK.put(botUuid, retryAt);
+            LAST_WOODEN_FALLBACK_SIGNATURE.put(botUuid, signature);
+            return true;
+        }
+
+        clearWoodenFallbackState(botUuid);
+        if (moved || crafted) {
+            NEXT_DECISION_TICK.put(botUuid, nowTick + 20L);
+            LOGGER.info("Idle wooden fallback: {} restored minimal gear (weapon={}, axe={})",
+                    bot.getName().getString(),
+                    ToolProvisionService.hasServiceableMeleeWeapon(bot),
+                    ToolProvisionService.hasUsableAxe(bot));
+            return true;
+        }
+        return false;
+    }
+
+    private static boolean tryCraftIdleWoodenFallback(ServerPlayerEntity bot) {
+        if (bot == null || bot.getCommandSource() == null) {
+            return false;
+        }
+        ServerCommandSource source = bot.getCommandSource().withSilent();
+        ServerPlayerEntity commander = resolveWoodenFallbackHistoryOwner(bot);
+        boolean crafted = false;
+        if (!ToolProvisionService.hasServiceableMeleeWeapon(bot)) {
+            crafted |= ToolProvisionService.ensureSword(bot, source, commander, true);
+        }
+        if (!ToolProvisionService.hasUsableAxe(bot)) {
+            crafted |= ToolProvisionService.ensureAxe(bot, source, commander, true);
+        }
+        if (crafted) {
+            CombatInventoryManager.ensureCombatLoadout(bot);
+        }
+        return crafted;
+    }
+
+    private static boolean tryInterruptLowPriorityAmbientForFood(ServerPlayerEntity bot,
+                                                                 ServerWorld world,
+                                                                 TaskService.ActiveTaskInfo activeTask,
+                                                                 long nowTick) {
+        if (bot == null || world == null || activeTask == null || !HealingService.isStarving(bot)) {
+            return false;
+        }
+        if (activeTask.origin() != TaskService.Origin.AMBIENT) {
+            return false;
+        }
+        if (!isLowPriorityAmbientTask(activeTask.name())) {
+            return false;
+        }
+        if (!TaskService.interruptAmbientTask(bot.getUuid(), "§cStopping low-priority hobby to deal with starvation.")) {
+            return false;
+        }
+        LOGGER.info("Idle hobby: interrupting '{}' for {} due to starvation (food={})",
+                activeTask.name(),
+                bot.getName().getString(),
+                bot.getHungerManager().getFoodLevel());
+        if (!BotMutualAidService.tryUrgentFoodRecovery(bot, world)) {
+            BotAutoHuntService.requestDecisionNow(bot);
+        }
+        NEXT_DECISION_TICK.put(bot.getUuid(), nowTick + FOOD_RECHECK_TICKS);
+        return true;
+    }
+
+    private static boolean isLowPriorityAmbientTask(String taskName) {
+        if (taskName == null || taskName.isBlank()) {
+            return false;
+        }
+        String normalized = taskName.trim().toLowerCase(Locale.ROOT);
+        if (normalized.startsWith("skill:")) {
+            normalized = normalized.substring("skill:".length());
+        }
+        return switch (normalized) {
+            case "grass_seeds", "flowers", "wander", "leaf_litter", "mushrooms",
+                 "hangout", "shadow_companion", "feed_animals" -> true;
+            default -> false;
+        };
+    }
+
+    private static ServerPlayerEntity resolveWoodenFallbackHistoryOwner(ServerPlayerEntity bot) {
+        if (bot == null || bot.getCommandSource() == null) {
+            return null;
+        }
+        UUID ownerUuid = BotTerritoryAuthorizationService.resolveBotOwnerUuid(bot);
+        if (ownerUuid == null) {
+            return bot;
+        }
+        ServerPlayerEntity owner = bot.getCommandSource().getServer().getPlayerManager().getPlayer(ownerUuid);
+        return owner != null ? owner : bot;
+    }
+
+    private static boolean canStartFallbackWoodcut(ServerWorld world, ServerPlayerEntity bot) {
+        if (world == null || bot == null) {
+            return false;
+        }
+        if (isTooLateForWoodcut(world)) {
+            return false;
+        }
+        if (TaskService.hasActiveTask(bot.getUuid())) {
+            return false;
+        }
+        if (TreeDetector.isProtected(world, bot.getBlockPos(), 4)) {
+            LOGGER.info("Idle wooden fallback: {} blocked inside protected village/base area at {}",
+                    bot.getName().getString(),
+                    bot.getBlockPos().toShortString());
+            return false;
+        }
+        if (TreeDetector.findNearestTree(bot, 12, 6, Collections.emptySet()).isPresent()) {
+            return true;
+        }
+        if (TreeDetector.findNearestLooseLog(bot, 12, 6, Collections.emptySet()).isPresent()) {
+            return true;
+        }
+        if (TreeDetector.findNearestAnyLog(bot, 12, 6, Collections.emptySet()).isPresent()) {
+            return true;
+        }
+        LOGGER.info("Idle wooden fallback: {} blocked — no safe woodcut target near {}",
+                bot.getName().getString(),
+                bot.getBlockPos().toShortString());
+        return false;
+    }
+
+    private static boolean isTooLateForWoodcut(ServerWorld world) {
+        if (world == null) {
+            return true;
+        }
+        int tod = (int) (world.getTimeOfDay() % 24_000L);
+        return tod >= DONT_START_AFTER_TOD;
+    }
+
+    private static long ticksUntilMorning(ServerWorld world) {
+        if (world == null) {
+            return WOODEN_FALLBACK_COOLDOWN_TICKS;
+        }
+        long tod = world.getTimeOfDay() % 24_000L;
+        return Math.max(40L, (24_000L - tod) + 40L);
+    }
+
+    private static void clearWoodenFallbackState(UUID botUuid) {
+        if (botUuid == null) {
+            return;
+        }
+        NEXT_WOODEN_FALLBACK_TICK.remove(botUuid);
+        LAST_WOODEN_FALLBACK_SIGNATURE.remove(botUuid);
+    }
+
+    private static boolean hasBeenIdleLong(UUID botUuid, long nowTick) {
+        if (botUuid == null) {
+            return false;
+        }
+        long idleSince = IDLE_SINCE_TICK.getOrDefault(botUuid, nowTick);
+        return nowTick - idleSince >= LONG_IDLE_PROMOTION_TICKS;
     }
 
     private static void noteBlocked(ServerPlayerEntity bot, long nowTick, String reasonKey) {

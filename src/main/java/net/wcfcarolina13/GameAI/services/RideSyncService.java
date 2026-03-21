@@ -3,6 +3,7 @@ package net.wcfcarolina13.GameAI.services;
 import net.minecraft.block.BlockState;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityType;
+import net.minecraft.entity.ItemEntity;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.mob.MobEntity;
 import net.minecraft.entity.decoration.LeashKnotEntity;
@@ -93,9 +94,15 @@ public final class RideSyncService {
     private static final Map<UUID, UUID> LAST_BOT_BOAT = new HashMap<>();
     private static final Map<UUID, UUID> PENDING_BOAT_BREAK = new HashMap<>();
     private static final Map<UUID, Long> PENDING_BOAT_BREAK_START = new HashMap<>();
+    private static final Map<UUID, Vec3d> PENDING_BOAT_BREAK_LAST_POS = new HashMap<>();
+    private static final Map<UUID, Long> PENDING_BOAT_BREAK_REMOVED_TICK = new HashMap<>();
     private static final Map<UUID, Long> LAST_BOAT_BREAK_TICK = new HashMap<>();
     private static final long BOAT_BREAK_TIMEOUT_TICKS = 80L;
     private static final long BOAT_BREAK_COOLDOWN_TICKS = 5L;
+    private static final Map<UUID, Long> LAST_BOAT_BREAK_COLLECT_TICK = new HashMap<>();
+    private static final long BOAT_BREAK_COLLECT_COOLDOWN_TICKS = 5L;
+    private static final long BOAT_BREAK_COLLECT_WINDOW_TICKS = 30L;
+    private static final long BOAT_REMOUNT_SUPPRESS_TICKS = 80L;
     private static final Map<UUID, BlockPos> PENDING_BOAT_PLACE_POS = new HashMap<>();
     private static final Map<UUID, Long> PENDING_BOAT_PLACE_TICK = new HashMap<>();
     private static final long BOAT_PLACE_TIMEOUT_TICKS = 60L;
@@ -119,6 +126,10 @@ public final class RideSyncService {
     private static final Map<UUID, Vec3d> LAST_RIDE_VEHICLE_POS = new HashMap<>();
     private static final Map<UUID, Integer> RIDE_STAGNANT_TICKS = new HashMap<>();
     private static final Map<UUID, Long> LAST_RIDE_ESCAPE_LOG_TICK = new HashMap<>();
+    private static final Map<UUID, Long> LAST_RIDE_MOUNT_TICK = new HashMap<>();
+    private static final Map<UUID, Long> LAST_RIDE_DISMOUNT_TICK = new HashMap<>();
+    private static final Map<UUID, Long> BOAT_REMOUNT_SUPPRESS_UNTIL_TICK = new HashMap<>();
+    private static final long JOIN_ENCLOSURE_RIDE_GRACE_TICKS = 160L;
 
     private enum RideCategory {
         HORSE_LIKE,
@@ -187,6 +198,59 @@ public final class RideSyncService {
         return FOLLOW_OVERRIDE_TARGET.get(id);
     }
 
+    public static String getJoinEnclosureSuppressionReason(ServerPlayerEntity bot, long nowTick) {
+        if (bot == null) {
+            return null;
+        }
+        UUID botId = bot.getUuid();
+        if (bot.hasVehicle()) {
+            Entity vehicle = bot.getVehicle();
+            RideCategory category = vehicle != null ? categorize(vehicle) : null;
+            if (category == RideCategory.BOAT || category == RideCategory.MINECART) {
+                return "currently-mounted";
+            }
+        }
+        Long lastDismount = LAST_RIDE_DISMOUNT_TICK.get(botId);
+        if (lastDismount != null && nowTick - lastDismount <= JOIN_ENCLOSURE_RIDE_GRACE_TICKS) {
+            return "recent-dismount";
+        }
+        Long lastMount = LAST_RIDE_MOUNT_TICK.get(botId);
+        if (lastMount != null && nowTick - lastMount <= JOIN_ENCLOSURE_RIDE_GRACE_TICKS) {
+            return "recent-mount";
+        }
+        if (PENDING_BOAT_BREAK.containsKey(botId)) {
+            return "boat-break-pending";
+        }
+        return null;
+    }
+
+    public static void clearBotState(UUID botId) {
+        if (botId == null) {
+            return;
+        }
+        SYNC_COMMANDER.remove(botId);
+        SYNC_VEHICLE.remove(botId);
+        LAST_SYNC_TICK.remove(botId);
+        LAST_BOT_BOAT.remove(botId);
+        LAST_BOT_MINECART.remove(botId);
+        LAST_RIDE_VEHICLE_POS.remove(botId);
+        RIDE_STAGNANT_TICKS.remove(botId);
+        LAST_RIDE_ESCAPE_LOG_TICK.remove(botId);
+        LAST_RIDE_MOUNT_TICK.remove(botId);
+        LAST_RIDE_DISMOUNT_TICK.remove(botId);
+        BOAT_REMOUNT_SUPPRESS_UNTIL_TICK.remove(botId);
+        PENDING_MINECART_BREAK.remove(botId);
+        PENDING_MINECART_BREAK_START.remove(botId);
+        LAST_MINECART_BREAK_TICK.remove(botId);
+        PENDING_MINECART_PLACE_POS.remove(botId);
+        PENDING_MINECART_PLACE_TICK.remove(botId);
+        PENDING_BOAT_PLACE_POS.remove(botId);
+        PENDING_BOAT_PLACE_TICK.remove(botId);
+        LAST_BOAT_BREAK_TICK.remove(botId);
+        clearPendingBoatBreak(botId);
+        clearFollowOverride(botId);
+    }
+
     private static void setFollowOverride(ServerPlayerEntity bot, MinecraftServer server, Vec3d targetPos) {
         if (bot == null || server == null || targetPos == null) {
             return;
@@ -202,6 +266,126 @@ public final class RideSyncService {
         }
         FOLLOW_OVERRIDE_TARGET.remove(botId);
         FOLLOW_OVERRIDE_UNTIL_TICK.remove(botId);
+    }
+
+    private static void noteRideMounted(ServerPlayerEntity bot, MinecraftServer server, Entity vehicle) {
+        if (bot == null || server == null || vehicle == null) {
+            return;
+        }
+        RideCategory category = categorize(vehicle);
+        if (category != RideCategory.BOAT && category != RideCategory.MINECART) {
+            return;
+        }
+        UUID botId = bot.getUuid();
+        LAST_RIDE_MOUNT_TICK.put(botId, (long) server.getTicks());
+        BOAT_REMOUNT_SUPPRESS_UNTIL_TICK.remove(botId);
+    }
+
+    private static void noteRideDismounted(ServerPlayerEntity bot, MinecraftServer server, Entity vehicle) {
+        if (bot == null || server == null || vehicle == null) {
+            return;
+        }
+        RideCategory category = categorize(vehicle);
+        if (category != RideCategory.BOAT && category != RideCategory.MINECART) {
+            return;
+        }
+        LAST_RIDE_DISMOUNT_TICK.put(bot.getUuid(), (long) server.getTicks());
+    }
+
+    private static boolean isBoatRemountSuppressed(ServerPlayerEntity bot, MinecraftServer server) {
+        if (bot == null || server == null) {
+            return false;
+        }
+        Long until = BOAT_REMOUNT_SUPPRESS_UNTIL_TICK.get(bot.getUuid());
+        return until != null && until > server.getTicks();
+    }
+
+    private static void suppressBoatRemount(ServerPlayerEntity bot, MinecraftServer server) {
+        if (bot == null || server == null) {
+            return;
+        }
+        BOAT_REMOUNT_SUPPRESS_UNTIL_TICK.put(bot.getUuid(), (long) server.getTicks() + BOAT_REMOUNT_SUPPRESS_TICKS);
+    }
+
+    private static void queueBoatBreak(ServerPlayerEntity bot,
+                                       Entity vehicle,
+                                       long now,
+                                       String reason) {
+        if (bot == null || vehicle == null) {
+            return;
+        }
+        UUID botId = bot.getUuid();
+        PENDING_BOAT_BREAK.put(botId, vehicle.getUuid());
+        PENDING_BOAT_BREAK_START.put(botId, now);
+        PENDING_BOAT_BREAK_LAST_POS.put(botId, new Vec3d(vehicle.getX(), vehicle.getY(), vehicle.getZ()));
+        PENDING_BOAT_BREAK_REMOVED_TICK.remove(botId);
+        LOGGER.info("RideSyncBoatBreak: bot={} phase=queued boat={} reason={}",
+                bot.getName().getString(),
+                vehicle.getUuid(),
+                reason == null ? "unknown" : reason);
+    }
+
+    private static void clearPendingBoatBreak(UUID botId) {
+        if (botId == null) {
+            return;
+        }
+        PENDING_BOAT_BREAK.remove(botId);
+        PENDING_BOAT_BREAK_START.remove(botId);
+        PENDING_BOAT_BREAK_LAST_POS.remove(botId);
+        PENDING_BOAT_BREAK_REMOVED_TICK.remove(botId);
+        LAST_BOAT_BREAK_COLLECT_TICK.remove(botId);
+    }
+
+    private static void finishBoatBreak(ServerPlayerEntity bot,
+                                        MinecraftServer server,
+                                        String reason,
+                                        boolean suppressRemount) {
+        if (bot == null) {
+            return;
+        }
+        LOGGER.info("RideSyncBoatBreak: bot={} phase=finish reason={}",
+                bot.getName().getString(),
+                reason == null ? "unknown" : reason);
+        clearPendingBoatBreak(bot.getUuid());
+        LAST_BOT_BOAT.remove(bot.getUuid());
+        if (suppressRemount) {
+            suppressBoatRemount(bot, server);
+        }
+    }
+
+    private static void maybeApproachPosition(ServerPlayerEntity bot,
+                                              MinecraftServer server,
+                                              Vec3d target,
+                                              String phase) {
+        if (bot == null || server == null || target == null) {
+            return;
+        }
+        BotActions.sprint(bot, bot.squaredDistanceTo(target) > 16.0D);
+        BotActions.applyMovementInput(bot, target, bot.squaredDistanceTo(target) > 16.0D ? 0.16D : 0.12D);
+        setFollowOverride(bot, server, target);
+        LOGGER.info("RideSyncBoatBreak: bot={} phase={} target={}, {}, {}",
+                bot.getName().getString(),
+                phase,
+                String.format(Locale.ROOT, "%.2f", target.x),
+                String.format(Locale.ROOT, "%.2f", target.y),
+                String.format(Locale.ROOT, "%.2f", target.z));
+    }
+
+    private static boolean hasNearbyBoatDrop(ServerWorld world, Vec3d center) {
+        if (world == null || center == null) {
+            return false;
+        }
+        Box box = new Box(center.x - 3.5D, center.y - 2.0D, center.z - 3.5D,
+                center.x + 3.5D, center.y + 2.5D, center.z + 3.5D);
+        List<ItemEntity> drops = world.getEntitiesByClass(
+                ItemEntity.class,
+                box,
+                item -> item != null
+                        && item.isAlive()
+                        && !item.isRemoved()
+                        && isBoatItemStack(item.getStack())
+        );
+        return !drops.isEmpty();
     }
 
     public static void onServerTick(MinecraftServer server) {
@@ -305,12 +489,12 @@ public final class RideSyncService {
             // Tying leads to fences is an explicit skill (/bot leash or keybind), not an always-on behavior.
         }
 
+        maybeQueueBoatBreaksFromCommanderLoss(server, commander, bots);
+        maybeQueueMinecartBreaksFromCommanderLoss(server, commander, bots);
+
         if (commanderVehicle == null || commanderCategory == null) {
             return;
         }
-
-        maybeQueueBoatBreaksFromCommanderLoss(server, commander, bots);
-        maybeQueueMinecartBreaksFromCommanderLoss(server, commander, bots);
 
         if (!(commander.getEntityWorld() instanceof ServerWorld world)) {
             return;
@@ -332,12 +516,16 @@ public final class RideSyncService {
                 continue;
             }
             maybeLogRideStatus(server, bot, commander, commanderVehicle, false, "scan");
-        if (bot.hasVehicle()) {
-            recordBotBoat(bot);
-            recordBotMinecart(bot);
-            maybeSyncMovement(bot, commander);
-            continue;
-        }
+            if (bot.hasVehicle()) {
+                recordBotBoat(bot);
+                recordBotMinecart(bot);
+                maybeSyncMovement(bot, commander);
+                continue;
+            }
+            if (commanderCategory == RideCategory.BOAT && isBoatRemountSuppressed(bot, server)) {
+                maybeLogRideStatus(server, bot, commander, commanderVehicle, false, "boat-remount:suppressed");
+                continue;
+            }
             if (!cooldownReady(server, bot, commanderCategory)) {
                 continue;
             }
@@ -388,6 +576,7 @@ public final class RideSyncService {
                     LAST_SYNC_TICK.put(bot.getUuid(), (long) server.getTicks());
                     claimed.add(preferred.getId());
                     MountPersistenceService.recordMount(bot, preferred);
+                    noteRideMounted(bot, server, preferred);
                     BotEventHandler.collectNearbyDrops(bot, 4.0D);
                     maybeLogRideStatus(server, bot, commander, commanderVehicle, true, "preferred-mounted");
                 }
@@ -413,6 +602,7 @@ public final class RideSyncService {
                 LAST_SYNC_TICK.put(bot.getUuid(), (long) server.getTicks());
                 claimed.add(best.getId());
                 MountPersistenceService.recordMount(bot, best);
+                noteRideMounted(bot, server, best);
                 BotEventHandler.collectNearbyDrops(bot, 4.0D);
                 maybeLogRideStatus(server, bot, commander, commanderVehicle, true, "mounted");
             }
@@ -519,6 +709,7 @@ public final class RideSyncService {
                 claimed.add(candidate.getId());
             }
             MountPersistenceService.recordMount(bot, candidate);
+            noteRideMounted(bot, server, candidate);
             BotEventHandler.collectNearbyDrops(bot, 4.0D);
             maybeLogRideStatus(server, bot, commander, commanderVehicle, true, "nearby-boat:mounted");
             return true;
@@ -595,6 +786,7 @@ public final class RideSyncService {
                 claimed.add(candidate.getId());
             }
             MountPersistenceService.recordMount(bot, candidate);
+            noteRideMounted(bot, server, candidate);
             BotEventHandler.collectNearbyDrops(bot, 4.0D);
             maybeLogRideStatus(server, bot, commander, commanderVehicle, true, "nearby-minecart:mounted");
             return true;
@@ -684,6 +876,7 @@ public final class RideSyncService {
             claimed.add(commanderVehicle.getId());
         }
         MountPersistenceService.recordMount(bot, commanderVehicle);
+        noteRideMounted(bot, server, commanderVehicle);
         BotEventHandler.collectNearbyDrops(bot, 4.0D);
 
         // Force a log line even if we already logged "scan" this tick.
@@ -902,6 +1095,7 @@ public final class RideSyncService {
                     claimed.add(nearbyEmptyBoat.getId());
                 }
                 MountPersistenceService.recordMount(bot, nearbyEmptyBoat);
+                noteRideMounted(bot, server, nearbyEmptyBoat);
                 BotEventHandler.collectNearbyDrops(bot, 4.0D);
                 maybeLogRideStatus(server, bot, commander, commanderVehicle, true, "nearby-mounted");
                 return true;
@@ -1028,6 +1222,7 @@ public final class RideSyncService {
                     claimed.add(boatAfterUse.getId());
                 }
                 MountPersistenceService.recordMount(bot, boatAfterUse);
+                noteRideMounted(bot, server, boatAfterUse);
                 BotEventHandler.collectNearbyDrops(bot, 4.0D);
                 maybeLogRideStatus(server, bot, commander, commanderVehicle, true, "placed-mounted");
                 HotbarLockService.clear(bot);
@@ -1057,6 +1252,7 @@ public final class RideSyncService {
                     claimed.add(boatAfterBlock.getId());
                 }
                 MountPersistenceService.recordMount(bot, boatAfterBlock);
+                noteRideMounted(bot, server, boatAfterBlock);
                 BotEventHandler.collectNearbyDrops(bot, 4.0D);
                 maybeLogRideStatus(server, bot, commander, commanderVehicle, true, "placed-mounted");
                 HotbarLockService.clear(bot);
@@ -1471,6 +1667,7 @@ public final class RideSyncService {
                 if (vehicle != null) {
                     handleDismountCare(bot, vehicle);
                     MountPersistenceService.recordMount(bot, vehicle);
+                    noteRideDismounted(bot, bot.getCommandSource().getServer(), vehicle);
                 }
             }
             SYNC_COMMANDER.remove(bot.getUuid());
@@ -1498,6 +1695,7 @@ public final class RideSyncService {
                     maybeQueueBoatBreak(bot, botVehicle, commander);
                     handleDismountCare(bot, botVehicle);
                     MountPersistenceService.recordMount(bot, botVehicle);
+                    noteRideDismounted(bot, bot.getCommandSource().getServer(), botVehicle);
                     SYNC_COMMANDER.remove(bot.getUuid());
                     SYNC_VEHICLE.remove(bot.getUuid());
                     clearRideStuck(bot);
@@ -1511,6 +1709,7 @@ public final class RideSyncService {
                     maybeQueueMinecartBreak(bot, botVehicle, commander);
                     handleDismountCare(bot, botVehicle);
                     MountPersistenceService.recordMount(bot, botVehicle);
+                    noteRideDismounted(bot, bot.getCommandSource().getServer(), botVehicle);
                     SYNC_COMMANDER.remove(bot.getUuid());
                     SYNC_VEHICLE.remove(bot.getUuid());
                     clearRideStuck(bot);
@@ -1544,6 +1743,7 @@ public final class RideSyncService {
                 maybeQueueMinecartBreak(bot, vehicle, commander);
                 handleDismountCare(bot, vehicle);
                 MountPersistenceService.recordMount(bot, vehicle);
+                noteRideDismounted(bot, bot.getCommandSource().getServer(), vehicle);
             }
             SYNC_COMMANDER.remove(bot.getUuid());
             SYNC_VEHICLE.remove(bot.getUuid());
@@ -1560,6 +1760,7 @@ public final class RideSyncService {
             maybeQueueMinecartBreak(bot, vehicle, commander);
             handleDismountCare(bot, vehicle);
             MountPersistenceService.recordMount(bot, vehicle);
+            noteRideDismounted(bot, bot.getCommandSource().getServer(), vehicle);
         }
         SYNC_COMMANDER.remove(bot.getUuid());
         SYNC_VEHICLE.remove(bot.getUuid());
@@ -1599,6 +1800,10 @@ public final class RideSyncService {
         if (lastBoat == null || lastBoat.isRemoved()) {
             if (!LAST_COMMANDER_BOAT_LOST_TICK.containsKey(commanderId)) {
                 LAST_COMMANDER_BOAT_LOST_TICK.put(commanderId, (long) server.getTicks());
+                LOGGER.info("RideSyncBoatBreak: commander={} phase=commander-boat-lost boat={} tick={}",
+                        commander.getName().getString(),
+                        lastBoatId,
+                        server.getTicks());
             }
         }
     }
@@ -1628,8 +1833,7 @@ public final class RideSyncService {
         if (vehicle.hasPassengers()) {
             return;
         }
-        PENDING_BOAT_BREAK.put(bot.getUuid(), vehicle.getUuid());
-        PENDING_BOAT_BREAK_START.put(bot.getUuid(), now);
+        queueBoatBreak(bot, vehicle, now, "commander-boat-lost:dismount");
     }
 
     private static void maybeQueueBoatBreaksFromCommanderLoss(MinecraftServer server,
@@ -1667,8 +1871,7 @@ public final class RideSyncService {
             if (bot.squaredDistanceTo(boat) > (SEARCH_RADIUS_SQ * 4.0D)) {
                 continue;
             }
-            PENDING_BOAT_BREAK.put(bot.getUuid(), boat.getUuid());
-            PENDING_BOAT_BREAK_START.put(bot.getUuid(), now);
+            queueBoatBreak(bot, boat, now, "commander-boat-lost:nearby");
         }
     }
 
@@ -1905,6 +2108,8 @@ public final class RideSyncService {
                 continue;
             }
             if (tryMount(bot, nearest)) {
+                MountPersistenceService.recordMount(bot, nearest);
+                noteRideMounted(bot, server, nearest);
                 PENDING_MINECART_PLACE_TICK.remove(bot.getUuid());
                 PENDING_MINECART_PLACE_POS.remove(bot.getUuid());
             }
@@ -2092,6 +2297,7 @@ public final class RideSyncService {
                     claimed.add(nearest.getId());
                 }
                 MountPersistenceService.recordMount(bot, nearest);
+                noteRideMounted(bot, server, nearest);
                 BotEventHandler.collectNearbyDrops(bot, 4.0D);
                 maybeLogRideStatus(server, bot, commander, commanderVehicle, true, "minecart-placed-mounted");
                 HotbarLockService.clear(bot);
@@ -2175,6 +2381,8 @@ public final class RideSyncService {
                 continue;
             }
             if (tryMount(bot, nearest)) {
+                MountPersistenceService.recordMount(bot, nearest);
+                noteRideMounted(bot, server, nearest);
                 PENDING_BOAT_PLACE_TICK.remove(bot.getUuid());
                 PENDING_BOAT_PLACE_POS.remove(bot.getUuid());
             }
@@ -2187,14 +2395,17 @@ public final class RideSyncService {
         }
         long now = server.getTicks();
         for (ServerPlayerEntity bot : bots) {
-            UUID boatId = PENDING_BOAT_BREAK.get(bot.getUuid());
+            UUID botId = bot.getUuid();
+            UUID boatId = PENDING_BOAT_BREAK.get(botId);
             if (boatId == null) {
                 continue;
             }
-            Long startTick = PENDING_BOAT_BREAK_START.get(bot.getUuid());
+            Long startTick = PENDING_BOAT_BREAK_START.get(botId);
             if (startTick == null || now - startTick > BOAT_BREAK_TIMEOUT_TICKS) {
-                PENDING_BOAT_BREAK.remove(bot.getUuid());
-                PENDING_BOAT_BREAK_START.remove(bot.getUuid());
+                LOGGER.info("RideSyncBoatBreak: bot={} phase=timeout boat={}",
+                        bot.getName().getString(),
+                        boatId);
+                finishBoatBreak(bot, server, "timeout", true);
                 continue;
             }
             if (!(bot.getEntityWorld() instanceof ServerWorld world)) {
@@ -2202,19 +2413,64 @@ public final class RideSyncService {
             }
             Entity boat = world.getEntity(boatId);
             if (boat == null || boat.isRemoved()) {
-                PENDING_BOAT_BREAK.remove(bot.getUuid());
-                PENDING_BOAT_BREAK_START.remove(bot.getUuid());
+                Long removedTick = PENDING_BOAT_BREAK_REMOVED_TICK.get(botId);
+                if (removedTick == null) {
+                    PENDING_BOAT_BREAK_REMOVED_TICK.put(botId, now);
+                    removedTick = now;
+                    LOGGER.info("RideSyncBoatBreak: bot={} phase=broken boat={}",
+                            bot.getName().getString(),
+                            boatId);
+                }
+                Vec3d lastPos = PENDING_BOAT_BREAK_LAST_POS.get(botId);
+                if (lastPos != null && bot.squaredDistanceTo(lastPos) > MOUNT_REACH_SQ) {
+                    maybeApproachPosition(bot, server, lastPos, "collect-approach");
+                    continue;
+                }
+                long lastCollect = LAST_BOAT_BREAK_COLLECT_TICK.getOrDefault(botId, -BOAT_BREAK_COLLECT_COOLDOWN_TICKS);
+                if (now - lastCollect >= BOAT_BREAK_COLLECT_COOLDOWN_TICKS) {
+                    LAST_BOAT_BREAK_COLLECT_TICK.put(botId, now);
+                    BotEventHandler.collectNearbyDrops(bot, 4.0D);
+                }
+                boolean dropNearby = hasNearbyBoatDrop(world, lastPos != null ? lastPos : new Vec3d(bot.getX(), bot.getY(), bot.getZ()));
+                if (!dropNearby && now - removedTick < 2L) {
+                    continue;
+                }
+                if (dropNearby && now - removedTick < BOAT_BREAK_COLLECT_WINDOW_TICKS) {
+                    continue;
+                }
+                LOGGER.info("RideSyncBoatBreak: bot={} phase={} boat={} ticksSinceBreak={}",
+                        bot.getName().getString(),
+                        dropNearby ? "drop-not-collected" : "drop-cleared",
+                        boatId,
+                        now - removedTick);
+                finishBoatBreak(bot, server, dropNearby ? "drop-not-collected" : "drop-cleared", true);
+                continue;
+            }
+            PENDING_BOAT_BREAK_LAST_POS.put(botId, new Vec3d(boat.getX(), boat.getY(), boat.getZ()));
+            PENDING_BOAT_BREAK_REMOVED_TICK.remove(botId);
+            if (bot.hasVehicle() && bot.getVehicle() == boat) {
+                bot.stopRiding();
+                noteRideDismounted(bot, server, boat);
+                LOGGER.info("RideSyncBoatBreak: bot={} phase=dismount-own-boat boat={}",
+                        bot.getName().getString(),
+                        boatId);
+                continue;
+            }
+            if (boat.hasPassengers()) {
                 continue;
             }
             if (bot.squaredDistanceTo(boat) > MOUNT_REACH_SQ) {
                 maybeApproachMount(bot, boat, bot);
                 continue;
             }
-            long lastSwing = LAST_BOAT_BREAK_TICK.getOrDefault(bot.getUuid(), 0L);
+            long lastSwing = LAST_BOAT_BREAK_TICK.getOrDefault(botId, 0L);
             if (now - lastSwing < BOAT_BREAK_COOLDOWN_TICKS) {
                 continue;
             }
-            LAST_BOAT_BREAK_TICK.put(bot.getUuid(), now);
+            LAST_BOAT_BREAK_TICK.put(botId, now);
+            LOGGER.info("RideSyncBoatBreak: bot={} phase=attack boat={}",
+                    bot.getName().getString(),
+                    boatId);
             bot.attack(boat);
             bot.swingHand(Hand.MAIN_HAND, true);
         }

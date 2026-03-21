@@ -60,6 +60,30 @@ final class BotHomeCommands {
                                         StringArgumentType.getString(context, "target")))));
     }
 
+    static ArgumentBuilder<ServerCommandSource, ?> buildAutoReturnSelfSufficient() {
+        return CommandManager.literal("auto_return_self_sufficient")
+                .then(CommandManager.literal("on")
+                        .executes(context -> modCommandRegistry.executeAutoReturnSelfSufficientSetTargets(context, null, true))
+                        .then(CommandManager.argument("target", StringArgumentType.string())
+                                .executes(context -> modCommandRegistry.executeAutoReturnSelfSufficientSetTargets(
+                                        context,
+                                        StringArgumentType.getString(context, "target"),
+                                        true))))
+                .then(CommandManager.literal("off")
+                        .executes(context -> modCommandRegistry.executeAutoReturnSelfSufficientSetTargets(context, null, false))
+                        .then(CommandManager.argument("target", StringArgumentType.string())
+                                .executes(context -> modCommandRegistry.executeAutoReturnSelfSufficientSetTargets(
+                                        context,
+                                        StringArgumentType.getString(context, "target"),
+                                        false))))
+                .then(CommandManager.literal("toggle")
+                        .executes(context -> modCommandRegistry.executeAutoReturnSelfSufficientToggleTargets(context, null))
+                        .then(CommandManager.argument("target", StringArgumentType.string())
+                                .executes(context -> modCommandRegistry.executeAutoReturnSelfSufficientToggleTargets(
+                                        context,
+                                        StringArgumentType.getString(context, "target")))));
+    }
+
     static ArgumentBuilder<ServerCommandSource, ?> buildAutoReturnSunsetPreferLastBed() {
         return CommandManager.literal("auto_return_sunset_prefer_last_bed")
                 .then(CommandManager.literal("on")

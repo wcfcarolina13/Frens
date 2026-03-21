@@ -59,7 +59,7 @@ public class BotPlayerInventoryScreenHandler extends ScreenHandler {
         this.botInventory = botInventory;
         this.botRef = botRef;
         // Keep this in sync with refreshStats() + getters below.
-        this.botStats = new ArrayPropertyDelegate(20);
+        this.botStats = new ArrayPropertyDelegate(21);
         this.addProperties(this.botStats);
         refreshStats();
 
@@ -198,11 +198,11 @@ public class BotPlayerInventoryScreenHandler extends ScreenHandler {
     }
 
     private int armorSlotIndexFor(EquipmentSlot slot, int sectionStart) {
-        // Slot order in this handler is FEET, LEGS, CHEST, HEAD.
-        if (slot == EquipmentSlot.FEET) return sectionStart;
-        if (slot == EquipmentSlot.LEGS) return sectionStart + 1;
-        if (slot == EquipmentSlot.CHEST) return sectionStart + 2;
-        if (slot == EquipmentSlot.HEAD) return sectionStart + 3;
+        // Slot order in this handler is HEAD, CHEST, LEGS, FEET.
+        if (slot == EquipmentSlot.HEAD) return sectionStart;
+        if (slot == EquipmentSlot.CHEST) return sectionStart + 1;
+        if (slot == EquipmentSlot.LEGS) return sectionStart + 2;
+        if (slot == EquipmentSlot.FEET) return sectionStart + 3;
         return -1;
     }
 
@@ -246,6 +246,7 @@ public class BotPlayerInventoryScreenHandler extends ScreenHandler {
         botStats.set(17, state != null && state.unleashTetheredMounts ? 1 : 0);
         botStats.set(18, state != null && state.leashMountsOnDismount ? 1 : 0);
         botStats.set(19, BotHomeService.isAutoReturnSkipPermission(botRef) ? 1 : 0);
+        botStats.set(20, BotHomeService.isAutoReturnSelfSufficientFallback(botRef) ? 1 : 0);
     }
 
     public float getBotHealth() {
@@ -298,6 +299,10 @@ public class BotPlayerInventoryScreenHandler extends ScreenHandler {
 
     public boolean isBotAutoReturnSkipPermission() {
         return botStats.get(19) != 0;
+    }
+
+    public boolean isBotAutoReturnSelfSufficientFallback() {
+        return botStats.get(20) != 0;
     }
 
     public boolean isBotReturningToBase() {

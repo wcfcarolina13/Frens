@@ -1025,7 +1025,7 @@ public final class DirtShovelSkill implements Skill {
             return;
         }
         if (hasToolKeyword(player, preferredTool)) {
-            BotActions.selectBestTool(player, preferredTool, "sword");
+            BotActions.selectHarvestToolOrHands(player, preferredTool);
             return;
         }
         selectHandsOrHarmlessItem(player);

@@ -22,6 +22,7 @@ import java.util.concurrent.atomic.AtomicReference;
 public final class TaskService {
 
     private static final Logger LOGGER = LoggerFactory.getLogger("task-service");
+    private static volatile boolean SERVER_STOPPING = false;
 
     private TaskService() {
     }
@@ -206,6 +207,10 @@ public final class TaskService {
     public static Optional<TaskTicket> beginSkill(String skillName,
                                                   ServerCommandSource source,
                                                   UUID botUuid) {
+        if (SERVER_STOPPING) {
+            LOGGER.info("Rejecting task '{}' for bot {} because server is stopping", skillName, botUuid);
+            return Optional.empty();
+        }
         TaskTicket ticket = new TaskTicket("skill:" + skillName, source, botUuid);
         UUID slot = key(botUuid);
         // Starting a new skill explicitly clears any prior stop/abort latch for this bot.
@@ -317,6 +322,9 @@ public final class TaskService {
     }
 
     public static boolean isAbortRequested(UUID botUuid) {
+        if (SERVER_STOPPING) {
+            return true;
+        }
         if (ABORT_LATCH.containsKey(key(botUuid))) {
             return true;
         }
@@ -350,6 +358,9 @@ public final class TaskService {
         // This prevents stale/hung skill threads from accidentally clearing a newer task.
         ACTIVE.remove(key(ticket.botUuid()), ticket);
         LOGGER.info("Task '{}' finished with state {}", ticket.name(), finalState);
+        if (SERVER_STOPPING) {
+            return;
+        }
         
         // After task completion, check if bot is stuck in blocks and needs rescue.
         // IMPORTANT: keep this conservative to avoid fighting legitimate movement around doors/bed wakeups.
@@ -448,7 +459,7 @@ public final class TaskService {
 
     private static void dispatchMessage(TaskTicket ticket, String message) {
         ServerCommandSource source = ticket.source();
-        if (source == null || message == null || message.isBlank()) {
+        if (SERVER_STOPPING || source == null || message == null || message.isBlank()) {
             return;
         }
         MinecraftServer server = source.getServer();
@@ -501,5 +512,17 @@ public final class TaskService {
         ACTIVE.clear();
         IN_ASCENT_MODE.clear();
         ABORT_LATCH.clear();
+    }
+
+    public static void markServerStopping() {
+        SERVER_STOPPING = true;
+    }
+
+    public static void clearServerStopping() {
+        SERVER_STOPPING = false;
+    }
+
+    public static boolean isServerStopping() {
+        return SERVER_STOPPING;
     }
 }

@@ -1,11 +1,13 @@
 package net.wcfcarolina13.PlayerUtils;
 
 import net.minecraft.block.BlockState;
+import net.minecraft.block.Blocks;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
 import net.minecraft.registry.tag.BlockTags;
 import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.server.network.ServerPlayerEntity;
+import net.wcfcarolina13.GameAI.BotActions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -32,7 +34,7 @@ public class ToolSelector {
         // First, search hotbar (slots 0-8)
         for (int i = 0; i < hotbarItems.size(); i++) {
             ItemStack item = hotbarItems.get(i);
-            if (item.isEmpty()) continue;
+            if (item.isEmpty() || isWeaponOnlyItem(item)) continue;
 
             float speed = item.getMiningSpeedMultiplier(blockState);
             if (speed > highestSpeed) {
@@ -46,7 +48,7 @@ public class ToolSelector {
         int bestMainSlot = -1;
         for (int i = 9; i < 36; i++) {
             ItemStack item = bot.getInventory().getStack(i);
-            if (item.isEmpty()) continue;
+            if (item.isEmpty() || isWeaponOnlyItem(item)) continue;
 
             float speed = item.getMiningSpeedMultiplier(blockState);
             if (speed > highestSpeed) {
@@ -80,10 +82,34 @@ public class ToolSelector {
 
         // If no tool with speed > 1.0 was found, use current selection
         if (highestSpeed <= 1.0f) {
-            return hotBarUtils.getSelectedHotbarItemStack(bot);
+            ItemStack selected = hotBarUtils.getSelectedHotbarItemStack(bot);
+            if (!selected.isEmpty() && !isWeaponOnlyItem(selected)) {
+                return selected;
+            }
+            return findHarmlessHotbarFallback(bot);
         }
 
         return bestTool;
+    }
+
+    private static boolean isWeaponOnlyItem(ItemStack stack) {
+        return BotActions.isCombatClassItem(stack);
+    }
+
+    private static ItemStack findHarmlessHotbarFallback(ServerPlayerEntity bot) {
+        if (bot == null) {
+            return ItemStack.EMPTY;
+        }
+        for (int i = 0; i < 9; i++) {
+            ItemStack stack = bot.getInventory().getStack(i);
+            if (stack.isEmpty()) {
+                return ItemStack.EMPTY;
+            }
+            if (!isWeaponOnlyItem(stack) && stack.getMiningSpeedMultiplier(Blocks.STONE.getDefaultState()) <= 1.0f) {
+                return stack;
+            }
+        }
+        return ItemStack.EMPTY;
     }
 
     private static ItemStack findShears(ServerPlayerEntity bot) {

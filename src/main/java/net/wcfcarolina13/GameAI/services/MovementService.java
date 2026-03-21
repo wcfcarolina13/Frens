@@ -737,6 +737,9 @@ public final class MovementService {
             if (walkResult.success()) {
                 return new MovementResult(true, mode, walkResult.arrivedAt(), label + ": walked");
             }
+            if (abortRequested(player) || isAbortedWalk(walkResult)) {
+                return new MovementResult(false, mode, walkResult.arrivedAt(), walkResult.detail());
+            }
             LOGGER.info("Walk failed near {} ({}), trying teleport fallback", destination, walkResult.detail());
         }
         if (distanceSq <= 900) {
@@ -744,7 +747,13 @@ public final class MovementService {
             if (walkResult.success()) {
                 return new MovementResult(true, mode, walkResult.arrivedAt(), label + ": walked");
             }
+            if (abortRequested(player) || isAbortedWalk(walkResult)) {
+                return new MovementResult(false, mode, walkResult.arrivedAt(), walkResult.detail());
+            }
             LOGGER.info("Walk failed mid-range near {} ({}), trying teleport fallback", destination, walkResult.detail());
+        }
+        if (abortRequested(player)) {
+            return new MovementResult(false, mode, player.getBlockPos(), label + ": aborted");
         }
 
         String rawResult = GoTo.goTo(source, destination.getX(), destination.getY(), destination.getZ(), false);
@@ -763,6 +772,13 @@ public final class MovementService {
         }
         LOGGER.info("Movement result: mode={} dest={} success={} detail={}", mode, destination, success, rawResult);
         return new MovementResult(success, mode, destination, label + ": " + rawResult);
+    }
+
+    private static boolean isAbortedWalk(WalkResult walkResult) {
+        if (walkResult == null || walkResult.detail() == null) {
+            return false;
+        }
+        return walkResult.detail().toLowerCase(Locale.ROOT).contains("aborted");
     }
 
     private static WalkResult walkTo(ServerCommandSource source,
@@ -2109,6 +2125,18 @@ public final class MovementService {
                     BotActions.stop(bot);
                     return false;
                 }
+                if (bot.isInsideWall()) {
+                    LOGGER.warn("nudgeToward detected {} inside a wall during [{}] at {}",
+                            bot.getName().getString(),
+                            label,
+                            bot.getBlockPos().toShortString());
+                    BotActions.stop(bot);
+                    BotRescueService.rescueFromBurial(bot);
+                    sleep(100L);
+                    if (bot.isInsideWall()) {
+                        return false;
+                    }
+                }
                 double distSq = bot.squaredDistanceTo(targetCenter);
                 if (distSq <= reachSq && (start - distSq > 0.25D || distSq <= reachSq * 0.6D)) {
                     BotActions.stop(bot);
@@ -2706,11 +2734,11 @@ public final class MovementService {
 
             // Pick a reasonable tool for this block type.
             if (state.isIn(BlockTags.PICKAXE_MINEABLE)) {
-                BotActions.selectBestTool(bot, "pickaxe", "sword");
+                BotActions.selectHarvestToolOrHands(bot, "pickaxe");
             } else if (state.isIn(BlockTags.SHOVEL_MINEABLE)) {
-                BotActions.selectBestTool(bot, "shovel", "sword");
+                BotActions.selectHarvestToolOrHands(bot, "shovel");
             } else if (state.isIn(BlockTags.AXE_MINEABLE)) {
-                BotActions.selectBestTool(bot, "axe", "sword");
+                BotActions.selectHarvestToolOrHands(bot, "axe");
             }
 
             LOGGER.info("movement obstruction mine [{}]: bot={} pos={} state={}",

@@ -24,9 +24,12 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.text.Normalizer;
 import java.util.Locale;
 import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Pattern;
 
@@ -37,6 +40,7 @@ public final class BotInventoryStorageService {
     private static final String LEGACY_MOD_DIR = "ai-player";
     private static final AtomicBoolean MIGRATION_DONE = new AtomicBoolean(false);
     private static final long SNAPSHOT_STALE_GRACE_MS = 2_000L;
+    private static final long SAVE_LOG_COOLDOWN_MS = 60_000L;
 
     private static final String KEY_ALIAS = "Alias";
     private static final String KEY_UUID = "Uuid";
@@ -52,6 +56,8 @@ public final class BotInventoryStorageService {
     private static final String KEY_TOTAL_XP = "XpTotal";
 
     private static final Pattern SAFE_NAME = Pattern.compile("[^a-z0-9-_]+");
+    private static final Map<UUID, String> LAST_SAVE_STATS = new ConcurrentHashMap<>();
+    private static final Map<UUID, Long> LAST_SAVE_LOG_MS = new ConcurrentHashMap<>();
 
     private BotInventoryStorageService() {}
 
@@ -114,10 +120,7 @@ public final class BotInventoryStorageService {
 
         try {
             net.minecraft.nbt.NbtIo.writeCompressed(root, path);
-            LOGGER.info("Saved inventory for fakeplayer '{}' to {} stats={}",
-                    bot.getName().getString(),
-                    path.getFileName(),
-                    statsSnapshot(bot));
+            maybeLogSave(bot, path);
             return true;
         } catch (IOException e) {
             LOGGER.error("Failed to save inventory for fakeplayer '{}': {}", bot.getName().getString(), e.getMessage());
@@ -427,5 +430,26 @@ public final class BotInventoryStorageService {
                 bot.experienceLevel,
                 bot.experienceProgress,
                 bot.totalExperience);
+    }
+
+    private static void maybeLogSave(ServerPlayerEntity bot, Path path) {
+        if (bot == null || path == null) {
+            return;
+        }
+        UUID botId = bot.getUuid();
+        String stats = statsSnapshot(bot);
+        long now = System.currentTimeMillis();
+        String lastStats = LAST_SAVE_STATS.get(botId);
+        long lastLog = LAST_SAVE_LOG_MS.getOrDefault(botId, 0L);
+        boolean changed = !stats.equals(lastStats);
+        if (!changed && (now - lastLog) < SAVE_LOG_COOLDOWN_MS) {
+            return;
+        }
+        LAST_SAVE_STATS.put(botId, stats);
+        LAST_SAVE_LOG_MS.put(botId, now);
+        LOGGER.info("Saved inventory for fakeplayer '{}' to {} stats={}",
+                bot.getName().getString(),
+                path.getFileName(),
+                stats);
     }
 }

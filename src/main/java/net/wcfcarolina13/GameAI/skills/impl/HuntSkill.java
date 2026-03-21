@@ -29,6 +29,8 @@ import net.wcfcarolina13.ChatUtils.ChatUtils;
 import net.wcfcarolina13.GameAI.BotActions;
 import net.wcfcarolina13.GameAI.DropSweeper;
 import net.wcfcarolina13.GameAI.services.BotHomeService;
+import net.wcfcarolina13.GameAI.services.BotEmergencyRescueService;
+import net.wcfcarolina13.GameAI.services.BotMutualAidService;
 import net.wcfcarolina13.GameAI.services.ChestStoreService;
 import net.wcfcarolina13.GameAI.services.CraftingHelper;
 import net.wcfcarolina13.GameAI.services.ToolProvisionService;
@@ -41,8 +43,11 @@ import net.wcfcarolina13.GameAI.services.MovementService;
 import net.wcfcarolina13.GameAI.services.CompanionSafeZoneService;
 import net.minecraft.entity.mob.ZombieEntity;
 import net.wcfcarolina13.GameAI.services.CompanionOverheadDialogueService;
+import net.wcfcarolina13.GameAI.services.BotFleeService;
 import net.wcfcarolina13.GameAI.services.ReturnBaseStuckService;
+import net.wcfcarolina13.GameAI.services.SafePositionService;
 import net.wcfcarolina13.GameAI.services.SmeltingService;
+import net.wcfcarolina13.GameAI.services.construction.ScaffoldService;
 import net.wcfcarolina13.GameAI.services.DebugFileLogger;
 import net.wcfcarolina13.network.HuntablesNetworkManager;
 import net.wcfcarolina13.GameAI.skills.Skill;
@@ -55,8 +60,10 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -69,12 +76,15 @@ public final class HuntSkill implements Skill {
     private static final Logger LOGGER = LoggerFactory.getLogger("skill-hunt");
     private static final int DEFAULT_HUNT_RADIUS = 48;
     private static final int DEFAULT_HUNT_Y_SPAN = 8;
+    private static final int MAX_RELOCATION_SEGMENTS_PER_SEARCH = 3;
     private static final int FOOD_CONTAINER_RADIUS = 12;
     private static final int FOOD_CONTAINER_YSPAN = 4;
     private static final int MIN_PEACEFUL_COUNT = 3;
     private static final double ATTACK_RANGE_SQ = 9.0D;
     private static final long ATTACK_TIMEOUT_MS = 12_000L;
     private static final long SWEEP_INTERVAL_MS = 12_000L;
+    private static final long HUNT_NO_PROGRESS_TIMEOUT_MS = 60_000L;
+    private static final int APPROACH_FAIL_BLACKLIST_THRESHOLD = 3;
     private static final double FINAL_SWEEP_RADIUS = 14.0D;
     private static final double FINAL_SWEEP_VERTICAL = 6.0D;
     private static final float ZOMBIE_MIN_HEALTH = 16.0F; // 8 hearts
@@ -127,18 +137,10 @@ public final class HuntSkill implements Skill {
                 Thread.currentThread().getName());
 
         ServerPlayerEntity commander = context.requestSource() != null ? context.requestSource().getPlayer() : null;
-        Set<Identifier> unlocked = commander != null
+        Set<Identifier> discoveredTargets = commander != null
                 ? HuntHistoryService.getHistory(commander)
                 : HuntHistoryService.getWorldHistory(world);
-        boolean huntUnlocked = commander != null
-                ? HuntHistoryService.hasFoodKill(commander)
-                : HuntHistoryService.hasAnyFoodKill(world);
-        if (!huntUnlocked) {
-            LOGGER.info("Hunt locked: commander={} unlockedCount={}",
-                    commander != null ? commander.getName().getString() : "none",
-                    unlocked.size());
-            return SkillExecutionResult.failure("Hunting is locked until you've killed a food mob at least once.");
-        }
+        boolean systemOrigin = "system".equals(context.parameters().get("_origin"));
 
         HuntRequest request = parseRequest(context.parameters());
         LOGGER.info("Hunt request: target='{}' count={} sunset={} autoStop={}",
@@ -155,9 +157,14 @@ public final class HuntSkill implements Skill {
                 LOGGER.info("Hunt target '{}' not found in catalog", request.targetName);
                 return SkillExecutionResult.failure("Unknown hunt target '" + request.targetName + "'. Use 'list' to see available mobs.");
             }
-            if (explicitTarget.foodMob() && !unlocked.contains(explicitTarget.id())) {
-                LOGGER.info("Hunt target '{}' locked for {}", explicitTarget.label(), commander != null ? commander.getName().getString() : "unknown");
-                return SkillExecutionResult.failure("I haven't hunted " + explicitTarget.label() + " yet.");
+            if (!systemOrigin
+                    && commander != null
+                    && explicitTarget.foodMob()
+                    && !discoveredTargets.contains(explicitTarget.id())) {
+                LOGGER.info("Hunt target '{}' not yet discovered by commander {}",
+                        explicitTarget.label(),
+                        commander.getName().getString());
+                return SkillExecutionResult.failure("I haven't discovered " + explicitTarget.label() + " yet.");
             }
         }
 
@@ -195,8 +202,7 @@ public final class HuntSkill implements Skill {
                 Optional<MovementService.MovementPlan> plan =
                         MovementService.planLootApproach(bot, huntOriginPos, MovementService.MovementOptions.skillLoot());
                 if (plan.isPresent()) {
-                    MovementService.execute(source, bot, plan.get(),
-                            SkillPreferences.teleportDuringSkills(bot), true);
+                    MovementService.execute(source, bot, plan.get(), Boolean.FALSE, true);
                 }
             }
         }
@@ -214,15 +220,66 @@ public final class HuntSkill implements Skill {
         // Snapshot inventory AFTER prerequisites so woodcut logs aren't counted as hunt loot
         Map<Item, Integer> preHuntInventory = snapshotInventory(bot);
 
+        // Ensure at surface — underground scans miss surface food mobs entirely
+        if (!BotFleeService.isAtSurface(bot, world)) {
+            LOGGER.info("Hunt: {} underground — escaping to surface before scan",
+                    bot.getName().getString());
+            if (!BotFleeService.ensureAtSurface(bot, world)) {
+                return SkillExecutionResult.failure("Could not reach the surface for hunting.");
+            }
+        }
+
         List<BlockPos> anchors = buildHuntAnchors(bot, world, huntRadius);
         LOGGER.info("Hunt anchors: {}", anchors.size());
+        List<BlockPos> searchSegments = buildHuntSearchSegments(huntOriginPos, huntRadius);
+        int nextSearchSegmentIndex = searchSegments.size() > 1 ? 1 : 0;
+
+        HuntCandidate prefoundCandidate = findCandidate(world, bot, anchors, discoveredTargets,
+                explicitTarget, request.hobby(), depopulationEnabled, selectedTargets,
+                huntRadius, huntYSpan);
+        if (prefoundCandidate == null) {
+            SearchRelocationResult relocation = relocateAndScanForCandidate(
+                    source,
+                    bot,
+                    world,
+                    discoveredTargets,
+                    explicitTarget,
+                    request,
+                    depopulationEnabled,
+                    selectedTargets,
+                    huntRadius,
+                    huntYSpan,
+                    searchSegments,
+                    nextSearchSegmentIndex,
+                    MAX_RELOCATION_SEGMENTS_PER_SEARCH
+            );
+            prefoundCandidate = relocation.candidate();
+            nextSearchSegmentIndex = relocation.nextSegmentIndex();
+            anchors = buildHuntAnchors(bot, world, huntRadius);
+            if (prefoundCandidate == null) {
+                anchors = buildHuntAnchors(bot, world, huntRadius);
+                prefoundCandidate = performVantageScan(bot, world, anchors, discoveredTargets,
+                        explicitTarget, request, depopulationEnabled, selectedTargets,
+                        huntRadius, huntYSpan);
+            }
+        }
+
         long lastSweep = System.currentTimeMillis();
         int kills = resumedKills;
+
+        // Blacklist tracking: skip targets the bot can't reach to avoid infinite retry loops
+        Set<UUID> blacklistedTargets = new HashSet<>();
+        int consecutiveApproachFails = 0;
+        UUID lastFailedTargetId = null;
+        UUID lockedTargetId = null;
+        HuntCatalog.HuntTarget lockedTargetType = null;
+        long huntLoopStartMs = System.currentTimeMillis();
 
         while (kills < request.targetCount) {
             if (SkillManager.shouldAbortSkill(bot)) {
                 return SkillExecutionResult.failure("Hunt paused by another task.");
             }
+            anchors = buildHuntAnchors(bot, world, huntRadius);
 
             if (request.checkSunset && isSunset(world)) {
                 // Multi-day hunt: save session for sunrise resume
@@ -243,18 +300,25 @@ public final class HuntSkill implements Skill {
                 break;
             }
 
+            if (isLateEveningBeforeSunset(world)) {
+                BotMutualAidService.tryRegroupWithLastInteraction(bot, world);
+            }
+
             if (maybeEatEmergencyFood(bot, world)) {
                 // Give the eat animation a moment to settle.
                 sleep(400L);
             }
 
-            if (request.autoStopOnHunger && bot.getHungerManager().getFoodLevel() >= 16) {
-                break;
+            if (bot.getHungerManager().getFoodLevel() <= STARVING_HUNGER
+                    && BotMutualAidService.trySeekFoodFromNearbyBot(bot, world)) {
+                sleep(900L);
+                if (maybeEatEmergencyFood(bot, world)) {
+                    sleep(400L);
+                }
             }
 
-            if (!ensureMeleeWeapon(bot, world, source, commander)) {
-                LOGGER.info("Hunt blocked: no melee weapon available for {}", bot.getName().getString());
-                return SkillExecutionResult.failure("I need a weapon to hunt.");
+            if (request.autoStopOnHunger && bot.getHungerManager().getFoodLevel() >= 16) {
+                break;
             }
 
             // Opportunistic sweep: pick up nearby drops before finding next target
@@ -267,14 +331,64 @@ public final class HuntSkill implements Skill {
                 }
             }
 
+            // No-progress timeout: if no kill in 60s (resets after each kill), give up.
+            if (System.currentTimeMillis() - huntLoopStartMs > HUNT_NO_PROGRESS_TIMEOUT_MS) {
+                LOGGER.info("Hunt no-progress timeout for {} after {}ms",
+                        bot.getName().getString(), System.currentTimeMillis() - huntLoopStartMs);
+                runDropSweep(source, bot);
+                return SkillExecutionResult.failure("Can't reach any prey. Giving up.");
+            }
+
             // Check for targeted entity (from TARGET button in UI)
             HuntCandidate candidate = findTargetedEntity(world, bot);
+            boolean playerTargeted = candidate != null;
+            if (candidate == null && lockedTargetId != null && lockedTargetType != null) {
+                candidate = resolveLockedCandidate(world, bot, anchors, lockedTargetId, lockedTargetType,
+                        request.hobby(), huntRadius, huntYSpan, blacklistedTargets);
+                if (candidate == null) {
+                    lockedTargetId = null;
+                    lockedTargetType = null;
+                }
+            }
+            // Consume pre-found vantage scan result on first iteration
+            if (candidate == null && prefoundCandidate != null) {
+                candidate = prefoundCandidate;
+                prefoundCandidate = null;
+            }
             if (candidate == null) {
-                candidate = findCandidate(world, bot, anchors, unlocked, explicitTarget, request.hobby(),
+                candidate = findCandidate(world, bot, anchors, discoveredTargets, explicitTarget, request.hobby(),
                         depopulationEnabled, selectedTargets, huntRadius, huntYSpan);
+                if (candidate == null) {
+                    SearchRelocationResult relocation = relocateAndScanForCandidate(
+                            source,
+                            bot,
+                            world,
+                            discoveredTargets,
+                            explicitTarget,
+                            request,
+                            depopulationEnabled,
+                            selectedTargets,
+                            huntRadius,
+                            huntYSpan,
+                            searchSegments,
+                            nextSearchSegmentIndex,
+                            MAX_RELOCATION_SEGMENTS_PER_SEARCH
+                    );
+                    candidate = relocation.candidate();
+                    nextSearchSegmentIndex = relocation.nextSegmentIndex();
+                    anchors = buildHuntAnchors(bot, world, huntRadius);
+                }
+            }
+            // Skip blacklisted targets (unreachable after repeated approach failures)
+            // but never blacklist a player-targeted entity — player made a deliberate choice
+            if (!playerTargeted && candidate != null && candidate.entity != null
+                    && blacklistedTargets.contains(candidate.entity.getUuid())) {
+                candidate = null;
             }
             if (candidate == null || candidate.entity == null) {
                 LOGGER.info("Hunt candidate not found (explicitTarget={})", explicitTarget != null);
+                lockedTargetId = null;
+                lockedTargetType = null;
                 if (explicitTarget != null) {
                     return SkillExecutionResult.failure("No " + explicitTarget.label() + " found in the hunting grounds.");
                 }
@@ -284,8 +398,21 @@ public final class HuntSkill implements Skill {
                 return SkillExecutionResult.failure("No huntable mobs found nearby.");
             }
 
+            LOGGER.info("Hunt candidate selected: {} at {} dist={}",
+                    candidate.target.label(),
+                    candidate.entity.getBlockPos().toShortString(),
+                    String.format(Locale.ROOT, "%.1f", Math.sqrt(candidate.entity.squaredDistanceTo(bot))));
+            if (candidate.entity != null) {
+                lockedTargetId = candidate.entity.getUuid();
+                lockedTargetType = candidate.target;
+            }
+
             if (candidate.target.zombie() && !canHuntZombie(bot)) {
                 return SkillExecutionResult.failure("I'm not geared enough to fight zombies.");
+            }
+            if (candidate.target.zombie() && !ensureMeleeWeapon(bot, world, source, commander)) {
+                LOGGER.info("Hunt blocked: no melee weapon available for {}", bot.getName().getString());
+                return SkillExecutionResult.failure("I need a weapon to hunt.");
             }
 
             if (depopulationEnabled && candidate.target.peaceful()) {
@@ -309,26 +436,50 @@ public final class HuntSkill implements Skill {
             }
 
             if (!approachTarget(source, bot, candidate.entity)) {
+                UUID cid = candidate.entity.getUuid();
+                consecutiveApproachFails = cid.equals(lastFailedTargetId)
+                        ? consecutiveApproachFails + 1 : 1;
+                lastFailedTargetId = cid;
+                if (consecutiveApproachFails >= APPROACH_FAIL_BLACKLIST_THRESHOLD) {
+                    blacklistedTargets.add(cid);
+                    LOGGER.info("Hunt: blacklisting unreachable target {} after {} failures",
+                            candidate.entity.getName().getString(), consecutiveApproachFails);
+                    consecutiveApproachFails = 0;
+                    lastFailedTargetId = null;
+                    if (cid.equals(lockedTargetId)) {
+                        lockedTargetId = null;
+                        lockedTargetType = null;
+                    }
+                }
                 ReturnBaseStuckService.tickAndCheckStuck(bot, new Vec3d(
                         candidate.entity.getX(), candidate.entity.getY(), candidate.entity.getZ()));
                 sleep(600L);
                 continue;
             }
+            // Successful approach — reset failure tracking
+            consecutiveApproachFails = 0;
+            lastFailedTargetId = null;
 
             if (!attackTarget(bot, candidate.entity)) {
                 LOGGER.info("Hunt target escaped: {}", candidate.entity.getName().getString());
+                if (candidate.entity.isRemoved() || !candidate.entity.isAlive()) {
+                    lockedTargetId = null;
+                    lockedTargetType = null;
+                }
                 sleep(400L);
                 continue;
             }
 
             BlockPos killPos = candidate.entity.getBlockPos();
             kills++;
+            huntLoopStartMs = System.currentTimeMillis(); // reset no-progress timeout after each kill
             // Walk toward kill location before sweeping — mob may have fled far before dying
             if (bot.getBlockPos().getSquaredDistance(killPos) > 25) {
                 MovementService.planLootApproach(bot, killPos, MovementService.MovementOptions.skillLoot())
-                        .ifPresent(plan -> MovementService.execute(source, bot, plan,
-                                SkillPreferences.teleportDuringSkills(bot), true));
+                        .ifPresent(plan -> MovementService.execute(source, bot, plan, Boolean.FALSE, true));
             }
+            lockedTargetId = null;
+            lockedTargetType = null;
             runDropSweep(source, bot);
             if (System.currentTimeMillis() - lastSweep > SWEEP_INTERVAL_MS) {
                 runDropSweep(source, bot);
@@ -422,6 +573,7 @@ public final class HuntSkill implements Skill {
                 }
                 if (opt.contains("auto")) {
                     autoStopOnHunger = true;
+                    continue;
                 }
                 if (opt.contains("hobby")) {
                     hobby = true;
@@ -502,6 +654,122 @@ public final class HuntSkill implements Skill {
         return anchors;
     }
 
+    private static List<BlockPos> buildHuntSearchSegments(BlockPos center, int huntRadius) {
+        List<BlockPos> segments = new ArrayList<>();
+        if (center == null) {
+            return segments;
+        }
+        segments.add(center.toImmutable());
+        int step = Math.max(10, Math.min(24, (int) Math.round(huntRadius * 0.6D)));
+        int diag = Math.max(7, (int) Math.round(step * 0.7D));
+        segments.add(center.add(step, 0, 0).toImmutable());
+        segments.add(center.add(-step, 0, 0).toImmutable());
+        segments.add(center.add(0, 0, step).toImmutable());
+        segments.add(center.add(0, 0, -step).toImmutable());
+        segments.add(center.add(diag, 0, diag).toImmutable());
+        segments.add(center.add(diag, 0, -diag).toImmutable());
+        segments.add(center.add(-diag, 0, diag).toImmutable());
+        segments.add(center.add(-diag, 0, -diag).toImmutable());
+        return segments;
+    }
+
+    private static SearchRelocationResult relocateAndScanForCandidate(ServerCommandSource source,
+                                                                      ServerPlayerEntity bot,
+                                                                      ServerWorld world,
+                                                                      Set<Identifier> unlocked,
+                                                                      HuntCatalog.HuntTarget explicit,
+                                                                      HuntRequest request,
+                                                                      boolean depopulationEnabled,
+                                                                      List<String> selectedTargets,
+                                                                      int huntRadius,
+                                                                      int huntYSpan,
+                                                                      List<BlockPos> searchSegments,
+                                                                      int startIndex,
+                                                                      int maxSegments) {
+        if (bot == null || world == null || searchSegments == null || searchSegments.size() <= 1) {
+            return new SearchRelocationResult(null, startIndex);
+        }
+
+        int index = normalizeSegmentIndex(startIndex, searchSegments.size());
+        int attempts = Math.max(1, Math.min(maxSegments, searchSegments.size() - 1));
+        for (int i = 0; i < attempts; i++) {
+            BlockPos rough = searchSegments.get(index);
+            index = (index + 1) % searchSegments.size();
+            if (rough == null || bot.getBlockPos().getSquaredDistance(rough) <= 36.0D) {
+                continue;
+            }
+            if (!moveToHuntSegment(source, bot, world, rough, huntRadius)) {
+                LOGGER.info("Hunt relocate: failed to move toward segment {}", rough.toShortString());
+                continue;
+            }
+
+            List<BlockPos> anchors = buildHuntAnchors(bot, world, huntRadius);
+            HuntCandidate candidate = findCandidate(world, bot, anchors, unlocked, explicit,
+                    request.hobby(), depopulationEnabled, selectedTargets,
+                    huntRadius, huntYSpan);
+            if (candidate != null) {
+                LOGGER.info("Hunt relocate: found {} after moving to segment {}",
+                        candidate.entity.getName().getString(),
+                        rough.toShortString());
+                return new SearchRelocationResult(candidate, index);
+            }
+
+            LOGGER.info("Hunt relocate: no prey at segment {}, trying vantage there", rough.toShortString());
+            candidate = performVantageScan(bot, world, anchors, unlocked,
+                    explicit, request, depopulationEnabled, selectedTargets,
+                    huntRadius, huntYSpan);
+            if (candidate != null) {
+                LOGGER.info("Hunt relocate: found {} after vantage at segment {}",
+                        candidate.entity.getName().getString(),
+                        rough.toShortString());
+                return new SearchRelocationResult(candidate, index);
+            }
+        }
+
+        return new SearchRelocationResult(null, index);
+    }
+
+    private static boolean moveToHuntSegment(ServerCommandSource source,
+                                             ServerPlayerEntity bot,
+                                             ServerWorld world,
+                                             BlockPos rough,
+                                             int huntRadius) {
+        BlockPos target = rough;
+        SafePositionService.SurfaceStagingCandidate staging =
+                SafePositionService.findBestSurfaceStaging(world, rough, Math.max(6, Math.min(10, huntRadius / 4)), true);
+        if (staging != null) {
+            target = staging.pos();
+        }
+        Optional<MovementService.MovementPlan> plan =
+                MovementService.planLootApproach(bot, target, MovementService.MovementOptions.skillLoot());
+        if (plan.isEmpty()) {
+            return false;
+        }
+        MovementService.MovementResult result = MovementService.execute(
+                source,
+                bot,
+                plan.get(),
+                Boolean.FALSE,
+                true,
+                true,
+                false
+        );
+        boolean success = result != null && (result.success() || bot.getBlockPos().getSquaredDistance(target) <= 16.0D);
+        LOGGER.info("Hunt relocate: segmentTarget={} success={} detail={}",
+                target.toShortString(),
+                success,
+                result != null ? result.detail() : "null");
+        return success;
+    }
+
+    private static int normalizeSegmentIndex(int index, int size) {
+        if (size <= 0) {
+            return 0;
+        }
+        int normalized = index % size;
+        return normalized < 0 ? normalized + size : normalized;
+    }
+
     public static boolean hasAmbientHuntCandidate(ServerPlayerEntity bot, ServerWorld world) {
         if (bot == null || world == null) {
             return false;
@@ -543,6 +811,37 @@ public final class HuntSkill implements Skill {
         return new HuntCandidate(catalogTarget, living);
     }
 
+    private static HuntCandidate resolveLockedCandidate(ServerWorld world,
+                                                        ServerPlayerEntity bot,
+                                                        List<BlockPos> anchors,
+                                                        UUID targetUuid,
+                                                        HuntCatalog.HuntTarget targetType,
+                                                        boolean hobbyMode,
+                                                        int huntRadius,
+                                                        int huntYSpan,
+                                                        Set<UUID> blacklistedTargets) {
+        if (world == null || bot == null || targetUuid == null || targetType == null) {
+            return null;
+        }
+        if (blacklistedTargets != null && blacklistedTargets.contains(targetUuid)) {
+            return null;
+        }
+        Entity entity = world.getEntity(targetUuid);
+        if (!(entity instanceof LivingEntity living) || living.isRemoved() || !living.isAlive()) {
+            return null;
+        }
+        if (!withinAnchors(anchors, new Vec3d(living.getX(), living.getY(), living.getZ()), huntRadius)) {
+            return null;
+        }
+        if (!isEligibleHuntTarget(world, bot, living, hobbyMode)) {
+            return null;
+        }
+        if (living.squaredDistanceTo(bot) > Math.max(256.0D, huntRadius * (double) huntRadius * 2.25D)) {
+            return null;
+        }
+        return new HuntCandidate(targetType, living);
+    }
+
     private static HuntCandidate findCandidate(ServerWorld world,
                                                ServerPlayerEntity bot,
                                                List<BlockPos> anchors,
@@ -562,9 +861,6 @@ public final class HuntSkill implements Skill {
 
         HuntCandidate best = null;
         for (HuntCatalog.HuntTarget target : HuntCatalog.listAll()) {
-            if (target.foodMob() && !unlocked.contains(target.id())) {
-                continue;
-            }
             // Multi-select filter: if targets specified, only hunt those
             if (selectedTargets != null && !selectedTargets.isEmpty()) {
                 if (!selectedTargets.contains(target.id().toString())) {
@@ -606,7 +902,8 @@ public final class HuntSkill implements Skill {
         world.getEntitiesByType(target.type(), box, Entity::isAlive).forEach(entity -> {
             if (entity instanceof LivingEntity living && withinAnchors(anchors, new Vec3d(
                     living.getX(), living.getY(), living.getZ()), huntRadius)
-                    && isEligibleHuntTarget(world, bot, living, hobbyMode)) {
+                    && isEligibleHuntTarget(world, bot, living, hobbyMode)
+                    && !BotEmergencyRescueService.shouldAvoidRiskyDescent(bot, world, living.getBlockPos())) {
                 out.add(living);
             }
         });
@@ -765,8 +1062,90 @@ public final class HuntSkill implements Skill {
         if (planOpt.isEmpty()) {
             return false;
         }
-        MovementService.MovementResult result = MovementService.execute(source, bot, planOpt.get(), SkillPreferences.teleportDuringSkills(bot), true);
+        MovementService.MovementResult result = MovementService.execute(source, bot, planOpt.get(), Boolean.FALSE, true);
         return result.success() || bot.getBlockPos().getSquaredDistance(targetPos) <= ATTACK_RANGE_SQ;
+    }
+
+    /**
+     * Pillar up 4-6 blocks to scan a wider Y-span for prey, then descend via the
+     * shared surface-pillar descent path before resuming the hunt.
+     */
+    private static HuntCandidate performVantageScan(
+            ServerPlayerEntity bot, ServerWorld world,
+            List<BlockPos> anchors, Set<Identifier> unlocked,
+            HuntCatalog.HuntTarget explicit, HuntRequest request,
+            boolean depopulationEnabled, List<String> selectedTargets,
+            int huntRadius, int huntYSpan) {
+
+        int scaffoldCount = countScaffoldBlocks(bot);
+        if (scaffoldCount < 4) {
+            LOGGER.info("Hunt vantage: skipped (only {} scaffold blocks)", scaffoldCount);
+            return null;
+        }
+
+        int pillarSteps = Math.min(6, scaffoldCount);
+        LOGGER.info("Hunt vantage: pillaring up {} blocks to scan for prey", pillarSteps);
+
+        List<BlockPos> placed = ScaffoldService.pillarUpWithPositions(bot, pillarSteps);
+        if (placed.isEmpty()) {
+            LOGGER.info("Hunt vantage: pillar-up failed, no blocks placed");
+            return null;
+        }
+
+        HuntCandidate found = null;
+        SafePositionService.SurfaceStagingCandidate staging = null;
+        boolean descendedReady = false;
+        try {
+            // Scan with expanded Y-span from elevated position
+            int elevatedYSpan = huntYSpan + placed.size() + 8;
+            List<BlockPos> elevatedAnchors = buildHuntAnchors(bot, world, huntRadius);
+            found = findCandidate(world, bot, elevatedAnchors, unlocked, explicit,
+                    request.hobby(), depopulationEnabled, selectedTargets,
+                    huntRadius, elevatedYSpan);
+            if (found != null) {
+                LOGGER.info("Hunt vantage: spotted {} at {} from elevation",
+                        found.entity.getName().getString(), found.entity.getBlockPos().toShortString());
+            } else {
+                LOGGER.info("Hunt vantage: no targets visible from elevation either");
+            }
+
+            BlockPos targetBias = found != null && found.entity != null ? found.entity.getBlockPos() : null;
+            staging = SafePositionService.findBestSurfaceStaging(world, bot.getBlockPos(), 8, true, targetBias);
+            if (staging != null) {
+                LOGGER.info("Hunt vantage: selected staging {} score={} targetBias={} {}",
+                        staging.pos().toShortString(),
+                        staging.score(),
+                        targetBias != null ? targetBias.toShortString() : "none",
+                        SafePositionService.summarizeSurfaceAssessment(staging.assessment()));
+            } else {
+                LOGGER.info("Hunt vantage: no operational staging candidate from pillar top");
+            }
+        } finally {
+            descendedReady = BotFleeService.descendFromSurfacePillar(
+                    bot,
+                    world,
+                    placed,
+                    staging != null ? staging.pos() : null,
+                    "hunt-vantage");
+            if (!descendedReady) {
+                LOGGER.info("Hunt vantage: descent ended without operational surface readiness");
+            }
+        }
+        if (!descendedReady) {
+            return null;
+        }
+        return found;
+    }
+
+    private static int countScaffoldBlocks(ServerPlayerEntity bot) {
+        int total = 0;
+        for (int i = 0; i < bot.getInventory().size(); i++) {
+            ItemStack stack = bot.getInventory().getStack(i);
+            if (!stack.isEmpty() && ScaffoldService.SCAFFOLD_BLOCKS.contains(stack.getItem())) {
+                total += stack.getCount();
+            }
+        }
+        return total;
     }
 
     private static boolean attackTarget(ServerPlayerEntity bot, LivingEntity target) {
@@ -1155,6 +1534,11 @@ public final class HuntSkill implements Skill {
         return timeOfDay >= 13000 && timeOfDay < 23000;
     }
 
+    private static boolean isLateEveningBeforeSunset(ServerWorld world) {
+        long timeOfDay = world.getTimeOfDay() % 24000L;
+        return timeOfDay >= 11_200L && timeOfDay < 13_000L;
+    }
+
     private static void sleep(long millis) {
         try {
             Thread.sleep(millis);
@@ -1327,8 +1711,7 @@ public final class HuntSkill implements Skill {
                         Optional<MovementService.MovementPlan> plan =
                                 MovementService.planLootApproach(bot, target, MovementService.MovementOptions.skillLoot());
                         if (plan.isPresent()) {
-                            MovementService.execute(source, bot, plan.get(),
-                                    SkillPreferences.teleportDuringSkills(bot), true);
+                            MovementService.execute(source, bot, plan.get(), Boolean.FALSE, true);
                         }
                     }
                     return;
@@ -1345,6 +1728,8 @@ public final class HuntSkill implements Skill {
     }
 
     private record HuntCandidate(HuntCatalog.HuntTarget target, LivingEntity entity) {}
+
+    private record SearchRelocationResult(HuntCandidate candidate, int nextSegmentIndex) {}
 
     private record HuntRequest(String targetName,
                                int targetCount,

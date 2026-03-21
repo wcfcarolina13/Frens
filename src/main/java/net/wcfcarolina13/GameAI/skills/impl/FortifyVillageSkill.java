@@ -27,6 +27,7 @@ import net.wcfcarolina13.GameAI.services.CompanionOverheadDialogueService;
 import net.wcfcarolina13.GameAI.services.MovementService;
 import net.wcfcarolina13.GameAI.services.SafePositionService;
 import net.wcfcarolina13.GameAI.services.SneakLockService;
+import net.wcfcarolina13.GameAI.services.VillageStructureProtectionService;
 import net.wcfcarolina13.GameAI.services.navigation.VoxelJunctionService;
 import net.wcfcarolina13.PlayerUtils.MiningTool;
 import net.wcfcarolina13.GameAI.services.construction.FortifyExecutionPolicyUtil;
@@ -3825,7 +3826,7 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
 
         // Neighbor-based village structure protection: if 2+ adjacent blocks are village
         // structure blocks, this block is likely part of a building and should be preserved.
-        if (isAdjacentToVillageStructure(world, pos, 2)) return false;
+        if (VillageStructureProtectionService.isAdjacentToVillageStructure(world, pos, 2)) return false;
 
         try {
             CompletableFuture<String> result = MiningTool.mineBlock(bot, pos);
@@ -3976,18 +3977,6 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
      * Used to protect blocks that are part of village buildings even if the block itself
      * isn't on the explicit blacklist.
      */
-    private boolean isAdjacentToVillageStructure(ServerWorld world, BlockPos pos, int threshold) {
-        int count = 0;
-        for (Direction dir : Direction.values()) {
-            BlockState neighbor = world.getBlockState(pos.offset(dir));
-            if (!neighbor.isAir() && VillageFortificationLayoutService.isVillageStructureBlock(neighbor.getBlock())) {
-                count++;
-                if (count >= threshold) return true;
-            }
-        }
-        return false;
-    }
-
     // ── Break-through stuck recovery ─────────────────────────────
 
     /**
@@ -4012,7 +4001,9 @@ public final class FortifyVillageSkill implements Skill, FortifySkillOps.Fortify
         if (state.getHardness(world, pos) < 0) return new NavBreakCandidateEval(false, NavBreakRejectReason.UNBREAKABLE);
         if (world.getBlockEntity(pos) != null) return new NavBreakCandidateEval(false, NavBreakRejectReason.BLOCK_ENTITY);
         if (!state.getFluidState().isEmpty()) return new NavBreakCandidateEval(false, NavBreakRejectReason.FLUID);
-        if (isAdjacentToVillageStructure(world, pos, 2)) return new NavBreakCandidateEval(false, NavBreakRejectReason.VILLAGE_ADJACENT);
+        if (VillageStructureProtectionService.isAdjacentToVillageStructure(world, pos, 2)) {
+            return new NavBreakCandidateEval(false, NavBreakRejectReason.VILLAGE_ADJACENT);
+        }
         if (state.getCollisionShape(world, pos).isEmpty()) return new NavBreakCandidateEval(false, NavBreakRejectReason.NO_COLLISION);
         return new NavBreakCandidateEval(true, null);
     }

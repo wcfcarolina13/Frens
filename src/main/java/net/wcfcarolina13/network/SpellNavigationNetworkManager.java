@@ -66,8 +66,12 @@ public final class SpellNavigationNetworkManager {
         }
 
         // resolveHomeTarget returns Optional<BlockPos>
-        BotHomeService.resolveHomeTarget(bot).ifPresent(homePos ->
-                BotEventHandler.setReturnToBase(bot, Vec3d.ofCenter(homePos)));
+        if (BotHomeService.isAutoReturnAtSunset(bot)) {
+            net.wcfcarolina13.GameAI.services.BotAutoReturnSunsetService.beginAcceptedSunsetReturn(server, bot);
+        } else {
+            BotHomeService.resolveHomeTarget(bot).ifPresent(homePos ->
+                    BotEventHandler.setReturnToBase(bot, Vec3d.ofCenter(homePos)));
+        }
     }
 
     // ── SpellGuidance (Remote Guidance / Chorus Recall) ──────────────────

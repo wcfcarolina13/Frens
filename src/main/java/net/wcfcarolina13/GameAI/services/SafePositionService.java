@@ -22,6 +22,24 @@ import java.util.List;
  */
 public final class SafePositionService {
 
+    public record SurfaceCandidateAssessment(
+            boolean openSky,
+            boolean standable,
+            boolean nearSurface,
+            int cardinalStandableNeighbors,
+            int totalStandableNeighbors,
+            int steepDropNeighbors,
+            int blockedCardinals,
+            int localHeightVariance,
+            double horizontalDistanceSq) {
+    }
+
+    public record SurfaceStagingCandidate(
+            BlockPos pos,
+            SurfaceCandidateAssessment assessment,
+            int score) {
+    }
+
     private SafePositionService() {
     }
 
@@ -82,6 +100,221 @@ public final class SafePositionService {
             }
         }
         return null;
+    }
+
+    public static SurfaceCandidateAssessment analyzeSurfaceCandidate(ServerWorld world, BlockPos feet) {
+        return analyzeSurfaceCandidate(world, feet, feet);
+    }
+
+    public static SurfaceCandidateAssessment analyzeSurfaceCandidate(ServerWorld world, BlockPos feet, BlockPos reference) {
+        if (world == null || feet == null) {
+            return new SurfaceCandidateAssessment(false, false, false, 0, 0, 4, 4, Integer.MAX_VALUE, Double.MAX_VALUE);
+        }
+
+        boolean standable = isSpawnable(world, feet);
+        boolean openSky = world.isSkyVisible(feet.up(2));
+        boolean nearSurface = feet.getY() >= wideSurfaceFeetY(world, feet.getX(), feet.getZ()) - 2;
+
+        int cardinalStandableNeighbors = 0;
+        int totalStandableNeighbors = 0;
+        int steepDropNeighbors = 0;
+        int blockedCardinals = 0;
+
+        int minSurfaceY = columnSurfaceFeetY(world, feet.getX(), feet.getZ());
+        int maxSurfaceY = minSurfaceY;
+
+        for (int dx = -1; dx <= 1; dx++) {
+            for (int dz = -1; dz <= 1; dz++) {
+                if (dx == 0 && dz == 0) {
+                    continue;
+                }
+                int x = feet.getX() + dx;
+                int z = feet.getZ() + dz;
+                int surfaceFeetY = columnSurfaceFeetY(world, x, z);
+                minSurfaceY = Math.min(minSurfaceY, surfaceFeetY);
+                maxSurfaceY = Math.max(maxSurfaceY, surfaceFeetY);
+
+                BlockPos neighbor = findSafeColumn(world, new BlockPos(x, feet.getY(), z), -1, 1);
+                boolean standableNeighbor = neighbor != null && Math.abs(neighbor.getY() - feet.getY()) <= 1;
+                if (standableNeighbor) {
+                    totalStandableNeighbors++;
+                }
+
+                boolean cardinal = dx == 0 || dz == 0;
+                if (cardinal) {
+                    if (standableNeighbor) {
+                        cardinalStandableNeighbors++;
+                    } else {
+                        blockedCardinals++;
+                    }
+                    if (surfaceFeetY < feet.getY() - 2) {
+                        steepDropNeighbors++;
+                    }
+                }
+            }
+        }
+
+        double horizontalDistanceSq = reference == null
+                ? 0.0D
+                : horizontalDistanceSq(feet, reference);
+
+        return new SurfaceCandidateAssessment(
+                openSky,
+                standable,
+                nearSurface,
+                cardinalStandableNeighbors,
+                totalStandableNeighbors,
+                steepDropNeighbors,
+                blockedCardinals,
+                maxSurfaceY - minSurfaceY,
+                horizontalDistanceSq
+        );
+    }
+
+    static boolean isOperationalSurfaceAssessment(SurfaceCandidateAssessment assessment) {
+        if (assessment == null) {
+            return false;
+        }
+        return assessment.openSky()
+                && assessment.standable()
+                && assessment.nearSurface()
+                && assessment.cardinalStandableNeighbors() >= 2
+                && assessment.totalStandableNeighbors() >= 4
+                && assessment.steepDropNeighbors() <= 1
+                && assessment.blockedCardinals() <= 2;
+    }
+
+    public static boolean isRecoveryReadySurface(ServerWorld world, BlockPos feet) {
+        if (world == null || feet == null) {
+            return false;
+        }
+        SurfaceCandidateAssessment assessment = analyzeSurfaceCandidate(world, feet);
+        if (isOperationalSurfaceAssessment(assessment)) {
+            return true;
+        }
+        if (!assessment.standable()) {
+            return false;
+        }
+        int columnGap = Math.max(0, columnSurfaceFeetY(world, feet.getX(), feet.getZ()) - feet.getY());
+        return hasLowRoofCover(world, feet, 4)
+                && columnGap <= 4
+                && assessment.cardinalStandableNeighbors() >= 2
+                && assessment.totalStandableNeighbors() >= 3
+                && assessment.steepDropNeighbors() <= 1
+                && assessment.blockedCardinals() <= 2
+                && assessment.localHeightVariance() <= 6;
+    }
+
+    static int scoreSurfaceAssessment(SurfaceCandidateAssessment assessment) {
+        return scoreSurfaceAssessment(assessment, null, null, null);
+    }
+
+    static int scoreSurfaceAssessment(SurfaceCandidateAssessment assessment,
+                                      BlockPos candidate,
+                                      BlockPos origin,
+                                      BlockPos focus) {
+        if (assessment == null) {
+            return Integer.MIN_VALUE / 4;
+        }
+
+        int score = 0;
+        score += assessment.openSky() ? 140 : -220;
+        score += assessment.standable() ? 120 : -240;
+        score += assessment.nearSurface() ? 110 : -180;
+        score += assessment.cardinalStandableNeighbors() * 28;
+        score += assessment.totalStandableNeighbors() * 16;
+        score -= assessment.steepDropNeighbors() * 70;
+        score -= assessment.blockedCardinals() * 45;
+        score -= assessment.localHeightVariance() * 10;
+        score -= (int) Math.round(Math.sqrt(Math.max(0.0D, assessment.horizontalDistanceSq())) * 6.0D);
+        if (candidate != null && origin != null && focus != null) {
+            double originToFocus = Math.sqrt(horizontalDistanceSq(origin, focus));
+            double candidateToFocus = Math.sqrt(horizontalDistanceSq(candidate, focus));
+            double improvement = originToFocus - candidateToFocus;
+            if (improvement > 0.0D) {
+                score += (int) Math.round(Math.min(120.0D, improvement * 10.0D));
+            } else if (improvement < 0.0D) {
+                score += (int) Math.round(Math.max(-60.0D, improvement * 4.0D));
+            }
+        }
+        return score;
+    }
+
+    public static boolean isOperationalSurface(ServerWorld world, BlockPos feet) {
+        return isOperationalSurfaceAssessment(analyzeSurfaceCandidate(world, feet));
+    }
+
+    public static SurfaceStagingCandidate findBestSurfaceStaging(ServerWorld world, BlockPos origin, int searchRadius) {
+        return findBestSurfaceStaging(world, origin, searchRadius, true);
+    }
+
+    public static SurfaceStagingCandidate findBestSurfaceStaging(ServerWorld world,
+                                                                 BlockPos origin,
+                                                                 int searchRadius,
+                                                                 boolean requireOperational,
+                                                                 BlockPos focus) {
+        return findBestSurfaceStagingInternal(world, origin, searchRadius, requireOperational, focus);
+    }
+
+    public static SurfaceStagingCandidate findBestSurfaceStaging(ServerWorld world,
+                                                                 BlockPos origin,
+                                                                 int searchRadius,
+                                                                 boolean requireOperational) {
+        return findBestSurfaceStagingInternal(world, origin, searchRadius, requireOperational, null);
+    }
+
+    private static SurfaceStagingCandidate findBestSurfaceStagingInternal(ServerWorld world,
+                                                                          BlockPos origin,
+                                                                          int searchRadius,
+                                                                          boolean requireOperational,
+                                                                          BlockPos focus) {
+        if (world == null || origin == null) {
+            return null;
+        }
+
+        SurfaceStagingCandidate best = null;
+        int radius = Math.max(0, searchRadius);
+        for (int r = 0; r <= radius; r++) {
+            for (int dx = -r; dx <= r; dx++) {
+                for (int dz = -r; dz <= r; dz++) {
+                    if (r > 0 && Math.abs(dx) != r && Math.abs(dz) != r) {
+                        continue;
+                    }
+                    int x = origin.getX() + dx;
+                    int z = origin.getZ() + dz;
+                    BlockPos candidatePos = resolveSurfaceCandidate(world, origin, x, z);
+                    if (candidatePos == null) {
+                        continue;
+                    }
+
+                    SurfaceCandidateAssessment assessment = analyzeSurfaceCandidate(world, candidatePos, origin);
+                    if (requireOperational && !isOperationalSurfaceAssessment(assessment)) {
+                        continue;
+                    }
+                    int score = scoreSurfaceAssessment(assessment, candidatePos, origin, focus);
+                    if (best == null || score > best.score()) {
+                        best = new SurfaceStagingCandidate(candidatePos.toImmutable(), assessment, score);
+                    }
+                }
+            }
+        }
+        return best;
+    }
+
+    public static String summarizeSurfaceAssessment(SurfaceCandidateAssessment assessment) {
+        if (assessment == null) {
+            return "null";
+        }
+        return "openSky=" + assessment.openSky()
+                + " standable=" + assessment.standable()
+                + " nearSurface=" + assessment.nearSurface()
+                + " cardinal=" + assessment.cardinalStandableNeighbors()
+                + " total=" + assessment.totalStandableNeighbors()
+                + " steepDrops=" + assessment.steepDropNeighbors()
+                + " blocked=" + assessment.blockedCardinals()
+                + " variance=" + assessment.localHeightVariance()
+                + " dist=" + String.format(java.util.Locale.ROOT, "%.1f",
+                Math.sqrt(Math.max(0.0D, assessment.horizontalDistanceSq())));
     }
 
     public static BlockPos findSafeColumn(ServerWorld world, BlockPos base) {
@@ -193,5 +426,54 @@ public final class SafePositionService {
             }
         }
         return null;
+    }
+
+    private static BlockPos resolveSurfaceCandidate(ServerWorld world, BlockPos origin, int x, int z) {
+        int surfaceFeetY = columnSurfaceFeetY(world, x, z);
+        if (surfaceFeetY <= world.getBottomY()) {
+            return null;
+        }
+
+        BlockPos surfaceBase = new BlockPos(x, surfaceFeetY, z);
+        BlockPos surfaceSafe = findSafeColumn(world, surfaceBase, -2, 2);
+        if (surfaceSafe != null) {
+            return surfaceSafe;
+        }
+
+        return findSafeColumn(world, new BlockPos(x, origin.getY(), z), -4, 4);
+    }
+
+    private static int columnSurfaceFeetY(ServerWorld world, int x, int z) {
+        return world.getTopY(Heightmap.Type.MOTION_BLOCKING_NO_LEAVES, x, z);
+    }
+
+    private static int wideSurfaceFeetY(ServerWorld world, int x, int z) {
+        int max = columnSurfaceFeetY(world, x, z);
+        int[][] offsets = {{4, 0}, {-4, 0}, {0, 4}, {0, -4}, {3, 3}, {3, -3}, {-3, 3}, {-3, -3}};
+        for (int[] off : offsets) {
+            max = Math.max(max, columnSurfaceFeetY(world, x + off[0], z + off[1]));
+        }
+        return max;
+    }
+
+    private static boolean hasLowRoofCover(ServerWorld world, BlockPos feet, int maxBlocksAboveHead) {
+        if (world == null || feet == null) {
+            return false;
+        }
+        int max = Math.max(2, maxBlocksAboveHead);
+        for (int dy = 2; dy <= max; dy++) {
+            BlockPos pos = feet.up(dy);
+            BlockState state = world.getBlockState(pos);
+            if (state != null && !state.getCollisionShape(world, pos).isEmpty()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static double horizontalDistanceSq(BlockPos a, BlockPos b) {
+        double dx = a.getX() - b.getX();
+        double dz = a.getZ() - b.getZ();
+        return dx * dx + dz * dz;
     }
 }

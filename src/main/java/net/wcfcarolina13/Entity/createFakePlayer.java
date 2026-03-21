@@ -30,6 +30,8 @@ import net.minecraft.world.GameMode;
 import net.minecraft.world.TeleportTarget;
 import net.minecraft.world.World;
 import net.wcfcarolina13.network.FakeClientConnection;
+import net.wcfcarolina13.GameAI.services.BotAutoHuntService;
+import net.wcfcarolina13.GameAI.services.TaskService;
 
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
@@ -250,8 +252,7 @@ public class createFakePlayer extends ServerPlayerEntity {
     @Override
     public ServerPlayerEntity teleportTo(TeleportTarget target)
     {
-        // Clear shelter state on teleport — bot should be fully responsive at new location
-        net.wcfcarolina13.GameAI.services.BotFleeService.clearShelter(this.getUuid());
+        handleRealTeleportSideEffects();
 
         ServerPlayerEntity entity = super.teleportTo(target);
         if (notInAnyWorld) {
@@ -265,6 +266,20 @@ public class createFakePlayer extends ServerPlayerEntity {
             networkHandler.player.onTeleportationDone();
         }
         return networkHandler.player;
+    }
+
+    private void handleRealTeleportSideEffects() {
+        // Clear shelter state on teleport — bot should be fully responsive at new location.
+        net.wcfcarolina13.GameAI.services.BotFleeService.clearShelter(this.getUuid());
+
+        TaskService.getActiveTaskInfo(this.getUuid())
+                .filter(info -> info.name() != null
+                        && "skill:hunt".equalsIgnoreCase(info.name())
+                        && info.openEnded())
+                .ifPresent(info -> {
+                    TaskService.forceAbort(this.getUuid(), "§cHunt stopped due to external teleport.");
+                    BotAutoHuntService.snoozeAfterExternalTeleport(this);
+                });
     }
 
 

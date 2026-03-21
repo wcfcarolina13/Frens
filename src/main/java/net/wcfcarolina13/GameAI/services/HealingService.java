@@ -58,6 +58,18 @@ public final class HealingService {
     
     private HealingService() {
     }
+
+    public static boolean isHungry(ServerPlayerEntity bot) {
+        return bot != null && bot.getHungerManager().getFoodLevel() <= HUNGER_WARNING;
+    }
+
+    public static boolean isStarving(ServerPlayerEntity bot) {
+        return bot != null && bot.getHungerManager().getFoodLevel() <= HUNGER_CRITICAL;
+    }
+
+    public static boolean isEmergencyHungry(ServerPlayerEntity bot) {
+        return bot != null && bot.getHungerManager().getFoodLevel() <= HUNGER_EMERGENCY;
+    }
     
     /**
      * Automatic hunger/health monitoring. Call from tick loops.

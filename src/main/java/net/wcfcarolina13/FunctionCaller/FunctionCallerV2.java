@@ -472,6 +472,10 @@ public class FunctionCallerV2 {
                 return;
             }
             ServerPlayerEntity target = server.getPlayerManager().getPlayer(targetName);
+            if (target != null) {
+                SkillResumeService.clearAndNotify(bot.getUuid());
+                TaskService.forceAbort(bot.getUuid(), "§cInterrupted by follow request.");
+            }
             String result = BotEventHandler.setFollowMode(bot, target);
             getFunctionOutput(result);
         }

@@ -243,7 +243,10 @@ public final class WoodcutCleanupSkill implements Skill {
                 }
 
                 // 2) Heuristic scan for remaining scaffold/pillar blocks.
-                if (scaffoldMined < maxScaffold && System.currentTimeMillis() < deadline && !SkillManager.shouldAbortSkill(bot)) {
+                if (scaffoldMined < maxScaffold
+                        && (scaffoldMemory == null || scaffoldMemory.isEmpty())
+                        && System.currentTimeMillis() < deadline
+                        && !SkillManager.shouldAbortSkill(bot)) {
                     List<BlockPos> scaffoldTargets = findSuspiciousScaffold(world, origin, scanMin, scanMax, bot, deadline);
                     scaffoldTargets.sort(
                             Comparator.<BlockPos>comparingDouble(p -> p.getSquaredDistance(bot.getBlockPos()))

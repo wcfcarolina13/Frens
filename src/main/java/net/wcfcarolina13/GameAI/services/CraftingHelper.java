@@ -42,6 +42,7 @@ public final class CraftingHelper {
 
     private static final Logger LOGGER = LoggerFactory.getLogger("crafting-helper");
     private static final Identifier CRAFTING_TABLE_ID = Identifier.of("minecraft", "crafting_table");
+    private static final Identifier WHITE_WOOL_RECIPE_ID = Identifier.of("minecraft", "white_wool");
     private static final double STATION_REACH_SQ = 4.5D * 4.5D; // mimic player interact range
     private static final double COMMANDER_LOOK_RANGE = 24.0D;
     private static final int CHEST_SEARCH_RADIUS = 10;
@@ -270,7 +271,21 @@ public final class CraftingHelper {
             }
         }
         if (chosen == null) {
-            ChatUtils.sendSystemMessage(source, "Beds need 3 matching wool and 3 planks per bed.");
+            craftWhiteWoolFromString(bot, source, commander, 3 * amount);
+            totals = countItemsInInventoryAndNearbyChests(
+                    bot,
+                    source,
+                    recipes.stream().map(BedRecipe::wool).toList());
+            for (BedRecipe recipe : recipes) {
+                int count = totals.getOrDefault(recipe.wool(), 0);
+                if (count >= 3) {
+                    chosen = recipe;
+                    break;
+                }
+            }
+        }
+        if (chosen == null) {
+            ChatUtils.sendSystemMessage(source, "Beds need 3 matching wool or enough string to make it, plus 3 planks per bed.");
             return 0;
         }
         if (!hasRecipePermission(commander, source.getServer(), chosen.recipeId())) {
@@ -309,6 +324,42 @@ public final class CraftingHelper {
         consumeItem(bot, chosen.wool(), crafts * 3);
         distributeOutput(bot, chosen.bed(), crafts);
         recordCraftHistory(commander, chosen.recipeId());
+        return crafts;
+    }
+
+    private static int craftWhiteWoolFromString(ServerPlayerEntity bot,
+                                                ServerCommandSource source,
+                                                ServerPlayerEntity commander,
+                                                int desiredWool) {
+        if (bot == null || source == null || desiredWool <= 0) {
+            return 0;
+        }
+        if (!hasRecipePermission(commander, source.getServer(), WHITE_WOOL_RECIPE_ID)) {
+            return 0;
+        }
+
+        int whiteWool = countItem(bot, Items.WHITE_WOOL);
+        int missingWool = Math.max(0, desiredWool - whiteWool);
+        if (missingWool <= 0) {
+            return 0;
+        }
+
+        ensureItemAvailable(bot, source, Items.STRING, missingWool * 4);
+        int availableString = countItem(bot, Items.STRING);
+        int crafts = Math.min(missingWool, availableString / 4);
+        if (crafts <= 0) {
+            return 0;
+        }
+
+        Map<Item, Integer> reserveItems = new HashMap<>();
+        reserveItems.put(Items.STRING, crafts * 4);
+        ensureInventorySpaceForOutput(bot, source, Items.WHITE_WOOL, crafts, 0, 0, reserveItems);
+        consumeItem(bot, Items.STRING, crafts * 4);
+        distributeOutput(bot, Items.WHITE_WOOL, crafts);
+        recordCraftHistory(commander, WHITE_WOOL_RECIPE_ID);
+        LOGGER.info("Crafted {} white wool from string for {} while preparing bed materials.",
+                crafts,
+                bot.getName().getString());
         return crafts;
     }
 

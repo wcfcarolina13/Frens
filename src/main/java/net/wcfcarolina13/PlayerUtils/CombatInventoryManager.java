@@ -98,7 +98,7 @@ public final class CombatInventoryManager {
             return;
         }
         boolean missingPiece = Arrays.stream(new EquipmentSlot[]{EquipmentSlot.HEAD, EquipmentSlot.CHEST, EquipmentSlot.LEGS, EquipmentSlot.FEET})
-                .anyMatch(slot -> bot.getEquippedStack(slot).isEmpty());
+                .anyMatch(slot -> !armorUtils.isValidArmorForSlot(bot.getEquippedStack(slot), slot));
 
         if (missingPiece) {
             armorUtils.autoEquipArmor(bot);
@@ -196,6 +196,9 @@ public final class CombatInventoryManager {
         }
         if (key.contains("trident")) {
             return 95;
+        }
+        if (key.contains("spear")) {
+            return 93 + materialWeight(key);
         }
         if (key.contains("mace")) {
             return 92;

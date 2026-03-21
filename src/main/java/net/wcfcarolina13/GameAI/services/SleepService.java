@@ -107,7 +107,7 @@ public final class SleepService {
             ensureCraftingTableNearby(source, bot, world);
             boolean crafted = ToolProvisionService.ensureBed(bot, source, commander, 1);
             if (!crafted && !hasAnyBed(bot)) {
-                ChatUtils.sendSystemMessage(source, "I couldn't craft a bed (need 3 wool + 3 planks).");
+                ChatUtils.sendSystemMessage(source, "I couldn't craft a bed (need 3 matching wool or enough string to make it, plus 3 planks).");
                 return false;
             }
         }
