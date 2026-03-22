@@ -1,5 +1,6 @@
 package net.wcfcarolina13.GameAI.services;
 
+import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
 import net.minecraft.entity.Entity;
@@ -74,6 +75,8 @@ public final class BotIdleHobbiesService {
     private static final Map<UUID, Long> NEXT_WOODEN_FALLBACK_TICK = new ConcurrentHashMap<>();
     private static final Map<UUID, Integer> LAST_WOODEN_FALLBACK_SIGNATURE = new ConcurrentHashMap<>();
 
+    private static final Map<UUID, Long> NEXT_LEATHER_ARMOR_TICK = new ConcurrentHashMap<>();
+
     private static final Map<UUID, String> LAST_HOBBY = new ConcurrentHashMap<>();
     private static final Map<UUID, Long> LAST_HOBBY_END_MS = new ConcurrentHashMap<>();
 
@@ -92,6 +95,7 @@ public final class BotIdleHobbiesService {
         IDLE_SINCE_TICK.clear();
         NEXT_WOODEN_FALLBACK_TICK.clear();
         LAST_WOODEN_FALLBACK_SIGNATURE.clear();
+        NEXT_LEATHER_ARMOR_TICK.clear();
         LAST_BLOCKED_REASON_KEY.clear();
         LAST_BLOCKED_REASON_LOG_TICK.clear();
     }
@@ -315,6 +319,9 @@ public final class BotIdleHobbiesService {
             }
 
             if (maybeHandleIdleWoodenFallback(server, bot, world, nowTick)) {
+                continue;
+            }
+            if (maybeHandleIdleLeatherArmorFallback(server, bot, world, nowTick)) {
                 continue;
             }
 
@@ -939,6 +946,43 @@ public final class BotIdleHobbiesService {
         if (crafted) {
             CombatInventoryManager.ensureCombatLoadout(bot);
         }
+        return crafted;
+    }
+
+    private static boolean maybeHandleIdleLeatherArmorFallback(MinecraftServer server,
+                                                                ServerPlayerEntity bot,
+                                                                ServerWorld world,
+                                                                long nowTick) {
+        if (server == null || bot == null || world == null || bot.getCommandSource() == null) {
+            return false;
+        }
+        if (!ToolProvisionService.hasAnyEmptyArmorSlot(bot)) {
+            return false;
+        }
+        // At least 4 leather needed (boots, the cheapest piece)
+        if (ToolProvisionService.countLeatherAvailable(bot, world) < 4) {
+            return false;
+        }
+        long nextAllowed = NEXT_LEATHER_ARMOR_TICK.getOrDefault(bot.getUuid(), 0L);
+        if (nowTick < nextAllowed) {
+            return false;
+        }
+
+        ServerCommandSource source = bot.getCommandSource().withSilent();
+        ServerPlayerEntity commander = resolveWoodenFallbackHistoryOwner(bot);
+        boolean crafted = false;
+        // Cheapest first: boots(4) → helmet(5) → leggings(7) → chestplate(8)
+        for (EquipmentSlot slot : java.util.List.of(EquipmentSlot.FEET, EquipmentSlot.HEAD,
+                EquipmentSlot.LEGS, EquipmentSlot.CHEST)) {
+            crafted |= ToolProvisionService.ensureLeatherArmorForSlot(bot, source, commander, slot);
+        }
+        if (crafted) {
+            net.wcfcarolina13.PlayerUtils.armorUtils.autoEquipArmor(bot);
+            CombatInventoryManager.ensureCombatLoadout(bot);
+            LOGGER.info("Idle leather armor: {} crafted leather armor", bot.getName().getString());
+        }
+        // Retry sooner if succeeded (might have more leather for next piece), longer backoff if no craft
+        NEXT_LEATHER_ARMOR_TICK.put(bot.getUuid(), nowTick + (crafted ? 200L : 2400L));
         return crafted;
     }
 

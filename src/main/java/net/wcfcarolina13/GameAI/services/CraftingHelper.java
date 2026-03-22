@@ -123,6 +123,10 @@ public final class CraftingHelper {
             case "lead", "leads" -> craftLead(bot, source, commander, amount);
             case "bundle", "bundles" -> craftBundle(bot, source, commander, amount);
             case "leather" -> craftLeather(bot, source, commander, amount);
+            case "leather_helmet" -> craftLeatherArmor(bot, source, commander, amount, Items.LEATHER_HELMET, 5);
+            case "leather_chestplate" -> craftLeatherArmor(bot, source, commander, amount, Items.LEATHER_CHESTPLATE, 8);
+            case "leather_leggings" -> craftLeatherArmor(bot, source, commander, amount, Items.LEATHER_LEGGINGS, 7);
+            case "leather_boots" -> craftLeatherArmor(bot, source, commander, amount, Items.LEATHER_BOOTS, 4);
             case "carrot_on_a_stick" -> craftCarrotOnStick(bot, source, commander, amount);
             case "warped_fungus_on_a_stick" -> craftWarpedFungusOnStick(bot, source, commander, amount);
             case "axe" -> craftToolMaterialAware(bot, source, commander, amount, ToolKind.AXE, materialPreference);
@@ -1394,6 +1398,30 @@ public final class CraftingHelper {
         reserveItems.put(input, crafts * per);
         ensureInventorySpaceForOutput(bot, source, output, crafts, 0, 0, reserveItems);
         consumeItem(bot, input, crafts * per);
+        distributeOutput(bot, output, crafts);
+        recordCraftHistory(commander, output);
+        return crafts;
+    }
+
+    private static int craftLeatherArmor(ServerPlayerEntity bot,
+                                          ServerCommandSource source,
+                                          ServerPlayerEntity commander,
+                                          int amount,
+                                          net.minecraft.item.Item output,
+                                          int leatherPer) {
+        if (!ensureCraftingStation(bot, source)) {
+            return 0;
+        }
+        ensureItemAvailable(bot, source, Items.LEATHER, leatherPer * amount);
+        int have = countItem(bot, Items.LEATHER);
+        int crafts = Math.min(amount, have / leatherPer);
+        if (crafts <= 0) {
+            return 0;
+        }
+        Map<Item, Integer> reserveItems = new HashMap<>();
+        reserveItems.put(Items.LEATHER, crafts * leatherPer);
+        ensureInventorySpaceForOutput(bot, source, output, crafts, 0, 0, reserveItems);
+        consumeItem(bot, Items.LEATHER, crafts * leatherPer);
         distributeOutput(bot, output, crafts);
         recordCraftHistory(commander, output);
         return crafts;

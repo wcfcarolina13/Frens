@@ -1478,4 +1478,64 @@ public final class ToolProvisionService {
     }
 
     private record ContainerSlot(Inventory inv, BlockPos pos, int slot, ItemStack stack) {}
+
+    // ── Leather armor crafting ──────────────────────────────────────────
+
+    public static boolean hasAnyEmptyArmorSlot(ServerPlayerEntity bot) {
+        if (bot == null) return false;
+        return bot.getEquippedStack(EquipmentSlot.HEAD).isEmpty()
+                || bot.getEquippedStack(EquipmentSlot.CHEST).isEmpty()
+                || bot.getEquippedStack(EquipmentSlot.LEGS).isEmpty()
+                || bot.getEquippedStack(EquipmentSlot.FEET).isEmpty();
+    }
+
+    public static int countLeatherAvailable(ServerPlayerEntity bot, ServerWorld world) {
+        if (bot == null) return 0;
+        int have = countInventoryItem(bot, Items.LEATHER);
+        if (world != null) {
+            have += scanAccessibleContainers(bot, world, bot.getBlockPos()).stream()
+                    .filter(s -> s.stack.isOf(Items.LEATHER))
+                    .mapToInt(s -> s.stack.getCount())
+                    .sum();
+        }
+        return have;
+    }
+
+    public static boolean ensureLeatherArmorForSlot(ServerPlayerEntity bot,
+                                                     ServerCommandSource source,
+                                                     ServerPlayerEntity commander,
+                                                     EquipmentSlot slot) {
+        if (bot == null || source == null) return false;
+        if (!bot.getEquippedStack(slot).isEmpty()) return false;
+        String craftName = switch (slot) {
+            case HEAD -> "leather_helmet";
+            case CHEST -> "leather_chestplate";
+            case LEGS -> "leather_leggings";
+            case FEET -> "leather_boots";
+            default -> null;
+        };
+        if (craftName == null) return false;
+        int needed = switch (slot) {
+            case FEET -> 4;
+            case HEAD -> 5;
+            case LEGS -> 7;
+            case CHEST -> 8;
+            default -> 0;
+        };
+        if (needed == 0) return false;
+        // Pull leather from chests if inventory doesn't have enough
+        if (bot.getEntityWorld() instanceof ServerWorld world) {
+            int have = countInventoryItem(bot, Items.LEATHER);
+            if (have < needed) {
+                withdrawAccessibleItems(bot, world,
+                        entry -> entry.stack.isOf(Items.LEATHER), needed - have);
+            }
+        }
+        if (countInventoryItem(bot, Items.LEATHER) < needed) return false;
+        boolean crafted = CraftingHelper.craftGeneric(source, bot, commander, craftName, 1, null) > 0;
+        if (crafted) {
+            LOGGER.info("Crafted {} for {}", craftName, bot.getName().getString());
+        }
+        return crafted;
+    }
 }

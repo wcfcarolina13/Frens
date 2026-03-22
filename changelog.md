@@ -4,6 +4,8 @@ Historical record and reasoning. `TODO.md` is the source of truth for what’s n
 
 ## 2026-03-21
 
+- **Idle leather armor crafting:** When idle with empty armor slots and leather available (inventory or nearby chests), bots now craft leather armor as a self-sufficiency fallback. Cheapest piece first: boots (4 leather) → helmet (5) → leggings (7) → chestplate (8). `CraftingHelper` gains 4 leather armor recipes; `ToolProvisionService.ensureLeatherArmorForSlot()` follows the existing ensure pattern (inventory → chests → craft); `BotIdleHobbiesService.maybeHandleIdleLeatherArmorFallback()` triggers this in the idle tick loop alongside the existing wooden weapon fallback.
+
 - **Nighttime zombie hunting when hungry + armed:** `BotAutoHuntService` now allows a sheltered, hungry bot to exit shelter at night if it has ≥ 8 hearts, at least one armor piece, and a melee weapon (`isZombieHuntGearReady`). `startAutoHunt` omits `until_sunset` from HuntSkill options when starting at night so the hunt loop isn’t aborted on its first iteration. `HuntSkill` now captures `startedAtDay` before the main loop and gates the sunset-break on it — preventing a nighttime hunt from treating the current time as "sunset already passed." Rotten flesh eating was already handled by the existing `findDesperateFood` fallback (fires at food ≤ 5 when no safe food remains).
 
 ## 2026-03-18
