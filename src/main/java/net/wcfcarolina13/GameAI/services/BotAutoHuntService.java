@@ -1,10 +1,12 @@
 package net.wcfcarolina13.GameAI.services;
 
+import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.world.World;
+import net.wcfcarolina13.GameAI.BotActions;
 import net.wcfcarolina13.GameAI.BotEventHandler;
 import net.wcfcarolina13.GameAI.skills.SkillContext;
 import net.wcfcarolina13.GameAI.skills.SkillExecutionResult;
@@ -114,6 +116,12 @@ public final class BotAutoHuntService {
                     // fire-and-forget: break-free runs on worker thread; isBreakingFree guards next tick
                     BotFleeService.clearShelterAndBreakFree(bot);
                     continue; // let break-free finish before considering auto-hunt
+                } else if (!world.isDay()
+                        && bot.getHungerManager().getFoodLevel() <= AUTO_HUNT_HUNGER_THRESHOLD
+                        && isZombieHuntGearReady(bot)) {
+                    // Hungry and geared at night — exit shelter to hunt zombies
+                    BotFleeService.clearShelterAndBreakFree(bot);
+                    continue; // let break-free finish; next tick hunger+gear passes
                 } else {
                     continue;
                 }
@@ -139,10 +147,12 @@ public final class BotAutoHuntService {
             return;
         }
         ServerCommandSource botSource = bot.getCommandSource().withSilent();
+        boolean isNight = bot.getEntityWorld() instanceof ServerWorld sw && !sw.isDay();
         Map<String, Object> params = new HashMap<>();
         params.put("_origin", "system");
         params.put("open_ended", true);
-        params.put("options", List.of("auto", "until_sunset"));
+        // At night, omit until_sunset so the hunt doesn't abort on the first loop iteration
+        params.put("options", isNight ? List.of("auto") : List.of("auto", "until_sunset"));
 
         EXECUTOR.submit(() -> {
             try {
@@ -181,5 +191,15 @@ public final class BotAutoHuntService {
                         t);
             }
         });
+    }
+
+    /** True if the bot has enough health, armor, and a melee weapon to fight zombies. */
+    private static boolean isZombieHuntGearReady(ServerPlayerEntity bot) {
+        return bot.getHealth() >= 16.0f
+                && (!bot.getEquippedStack(EquipmentSlot.HEAD).isEmpty()
+                        || !bot.getEquippedStack(EquipmentSlot.CHEST).isEmpty()
+                        || !bot.getEquippedStack(EquipmentSlot.LEGS).isEmpty()
+                        || !bot.getEquippedStack(EquipmentSlot.FEET).isEmpty())
+                && BotActions.hasMeleeWeapon(bot);
     }
 }

@@ -274,6 +274,8 @@ public final class HuntSkill implements Skill {
         UUID lockedTargetId = null;
         HuntCatalog.HuntTarget lockedTargetType = null;
         long huntLoopStartMs = System.currentTimeMillis();
+        // Capture day/night at hunt start so a nighttime zombie hunt isn't aborted immediately
+        boolean startedAtDay = world.isDay();
 
         while (kills < request.targetCount) {
             if (SkillManager.shouldAbortSkill(bot)) {
@@ -281,7 +283,7 @@ public final class HuntSkill implements Skill {
             }
             anchors = buildHuntAnchors(bot, world, huntRadius);
 
-            if (request.checkSunset && isSunset(world)) {
+            if (request.checkSunset && startedAtDay && isSunset(world)) {
                 // Multi-day hunt: save session for sunrise resume
                 if (kills < request.targetCount && BotHomeService.isAutoReturnAtSunset(bot)) {
                     HuntSessionService.saveSession(bot, huntOriginPos, null,
